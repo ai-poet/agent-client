@@ -160,6 +160,8 @@ export type WorktreeSource =
       githubPrNumber: number;
       headRef: string;
       baseRefName: string;
+      localBranchName?: string;
+      pushRemoteUrl?: string;
     };
 
 export interface CreateWorktreeOptions {
@@ -1227,6 +1229,14 @@ export const createWorktree = async ({
   });
   worktreePath = normalizePathForOwnership(finalWorktreePath);
 
+  if (sourcePlan.pushRemote) {
+    await configureWorktreePushRemote({
+      cwd,
+      branchName: sourcePlan.branchName,
+      remote: sourcePlan.pushRemote,
+    });
+  }
+
   writePaseoWorktreeMetadata(worktreePath, { baseRefName: sourcePlan.metadataBaseRefName });
 
   if (runSetup) {
@@ -1253,6 +1263,11 @@ interface WorktreeSourcePlan {
   branchName: string;
   metadataBaseRefName: string;
   addArguments: string[];
+  pushRemote?: {
+    name: string;
+    url: string;
+    headRef: string;
+  };
 }
 
 async function resolveWorktreeSourcePlan({
@@ -1300,13 +1315,15 @@ async function resolveWorktreeSourcePlan({
       };
     }
     case "checkout-github-pr": {
-      validateWorktreeBranchName(source.headRef);
+      const localBranchCandidate = source.localBranchName ?? source.headRef;
+      validateWorktreeBranchName(localBranchCandidate);
+      const localBranchName = await resolveUniqueLocalBranchName(cwd, localBranchCandidate);
       const normalizedBaseRefName = normalizeRequiredBaseBranch(source.baseRefName);
       await runGitCommand(
         [
           "fetch",
           "origin",
-          `refs/pull/${source.githubPrNumber}/head:refs/heads/${source.headRef}`,
+          `refs/pull/${source.githubPrNumber}/head:refs/heads/${localBranchName}`,
           "--force",
         ],
         {
@@ -1316,12 +1333,46 @@ async function resolveWorktreeSourcePlan({
       );
 
       return {
-        branchName: source.headRef,
+        branchName: localBranchName,
         metadataBaseRefName: normalizedBaseRefName,
-        addArguments: [source.headRef],
+        addArguments: [localBranchName],
+        ...(source.pushRemoteUrl
+          ? {
+              pushRemote: {
+                name: `paseo-pr-${source.githubPrNumber}`,
+                url: source.pushRemoteUrl,
+                headRef: source.headRef,
+              },
+            }
+          : {}),
       };
     }
   }
+}
+
+async function configureWorktreePushRemote(options: {
+  cwd: string;
+  branchName: string;
+  remote: {
+    name: string;
+    url: string;
+    headRef: string;
+  };
+}): Promise<void> {
+  await runGitCommand(["config", `remote.${options.remote.name}.url`, options.remote.url], {
+    cwd: options.cwd,
+  });
+  await runGitCommand(
+    ["config", `remote.${options.remote.name}.push`, `HEAD:refs/heads/${options.remote.headRef}`],
+    { cwd: options.cwd },
+  );
+  await runGitCommand(["config", `branch.${options.branchName}.remote`, options.remote.name], {
+    cwd: options.cwd,
+  });
+  await runGitCommand(
+    ["config", `branch.${options.branchName}.merge`, `refs/heads/${options.remote.headRef}`],
+    { cwd: options.cwd },
+  );
 }
 
 function validateWorktreeBranchName(branchName: string): void {

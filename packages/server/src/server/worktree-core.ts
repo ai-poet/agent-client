@@ -62,7 +62,9 @@ export async function createWorktreeCore(
       break;
     }
     case "checkout-github-pr": {
-      normalizedSlug = validateWorktreeSlug(requestedSlug ?? slugify(intent.headRef));
+      normalizedSlug = validateWorktreeSlug(
+        requestedSlug ?? slugify(intent.localBranchName ?? intent.headRef),
+      );
       break;
     }
   }

@@ -161,6 +161,34 @@ function pullRequestJson(title: string): string {
   ]);
 }
 
+function pullRequestCheckoutTargetJson(): string {
+  return JSON.stringify({
+    data: {
+      repository: {
+        pullRequest: {
+          number: 526,
+          baseRefName: "main",
+          headRefName: "main",
+          isCrossRepository: true,
+          headRepositoryOwner: { login: "therainisme" },
+          headRepository: {
+            sshUrl: "git@github.com:therainisme/paseo.git",
+            url: "https://github.com/therainisme/paseo",
+          },
+        },
+      },
+    },
+  });
+}
+
+function repoViewJson(): string {
+  return JSON.stringify({
+    owner: { login: "getpaseo" },
+    name: "paseo",
+    parent: null,
+  });
+}
+
 function issueJson(title: string): string {
   return JSON.stringify([
     {
@@ -273,6 +301,38 @@ describe("GitHubService", () => {
     expect(computeGithubNextInterval(stableStatus, 2)).toBe(240_000);
     expect(computeGithubNextInterval(stableStatus, 3)).toBe(EXPECTED_GITHUB_ERROR_BACKOFF_CAP_MS);
     expect(computeGithubNextInterval(stableStatus, 4)).toBe(EXPECTED_GITHUB_ERROR_BACKOFF_CAP_MS);
+  });
+
+  it("loads pull request checkout target details through GraphQL", async () => {
+    const runner = createRunner([repoViewJson(), pullRequestCheckoutTargetJson()]);
+    const service = createGitHubService({
+      runner: runner.runner,
+      resolveGhPath: async () => "/usr/bin/gh",
+      now: () => 100,
+    });
+
+    await expect(
+      service.getPullRequestCheckoutTarget?.({ cwd: "/repo", number: 526 }),
+    ).resolves.toEqual({
+      number: 526,
+      baseRefName: "main",
+      headRefName: "main",
+      headOwnerLogin: "therainisme",
+      headRepositorySshUrl: "git@github.com:therainisme/paseo.git",
+      headRepositoryUrl: "https://github.com/therainisme/paseo",
+      isCrossRepository: true,
+    });
+
+    expect(runner.calls).toHaveLength(2);
+    expect(runner.calls[0]).toEqual({
+      cwd: "/repo",
+      args: ["repo", "view", "--json", "owner,name,parent"],
+    });
+    expect(runner.calls[1]?.cwd).toBe("/repo");
+    expect(runner.calls[1]?.args.slice(0, 3)).toEqual(["api", "graphql", "-f"]);
+    expect(runner.calls[1]?.args).toContain("owner=getpaseo");
+    expect(runner.calls[1]?.args).toContain("name=paseo");
+    expect(runner.calls[1]?.args).toContain("number=526");
   });
 
   it("polls PR status at fast cadence while checks are pending", async () => {

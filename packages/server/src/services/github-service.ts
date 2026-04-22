@@ -185,6 +185,53 @@ const GitHubRepoViewSchema = z.object({
     .optional(),
 });
 
+const PullRequestCheckoutTargetSchema = z.object({
+  data: z.object({
+    repository: z.object({
+      pullRequest: z
+        .object({
+          number: z.number(),
+          baseRefName: z.string().catch(""),
+          headRefName: z.string().catch(""),
+          isCrossRepository: z.boolean().catch(false),
+          headRepositoryOwner: z
+            .object({
+              login: z.string().catch(""),
+            })
+            .nullable()
+            .optional(),
+          headRepository: z
+            .object({
+              sshUrl: z.string().nullable().optional(),
+              url: z.string().nullable().optional(),
+            })
+            .nullable()
+            .optional(),
+        })
+        .nullable(),
+    }),
+  }),
+});
+
+const PULL_REQUEST_CHECKOUT_TARGET_QUERY = `
+query PullRequestCheckoutTarget($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number
+      baseRefName
+      headRefName
+      isCrossRepository
+      headRepositoryOwner {
+        login
+      }
+      headRepository {
+        sshUrl
+        url
+      }
+    }
+  }
+}`;
+
 const CURRENT_PR_STATUS_FIELDS =
   "number,url,title,state,isDraft,baseRefName,headRefName,mergedAt,statusCheckRollup,reviewDecision,headRepositoryOwner";
 
@@ -264,6 +311,16 @@ export interface GitHubPullRequestSummary {
   headRefName: string;
   labels: string[];
   updatedAt: string;
+}
+
+export interface GitHubPullRequestCheckoutTarget {
+  number: number;
+  baseRefName: string;
+  headRefName: string;
+  headOwnerLogin: string | null;
+  headRepositorySshUrl: string | null;
+  headRepositoryUrl: string | null;
+  isCrossRepository: boolean;
 }
 
 export interface GitHubIssueSummary {
@@ -417,6 +474,9 @@ export interface GitHubService {
   listIssues(options: ListGitHubIssuesOptions): Promise<GitHubIssueSummary[]>;
   getPullRequest(options: GetGitHubPullRequestOptions): Promise<GitHubPullRequestSummary>;
   getPullRequestHeadRef(options: GetGitHubPullRequestOptions): Promise<string>;
+  getPullRequestCheckoutTarget?(
+    options: GetGitHubPullRequestOptions,
+  ): Promise<GitHubPullRequestCheckoutTarget>;
   getCurrentPullRequestStatus(
     options: {
       cwd: string;
@@ -754,6 +814,40 @@ export function createGitHubService(options: CreateGitHubServiceOptions = {}): G
     async getPullRequestHeadRef(options) {
       const pullRequest = await this.getPullRequest(options);
       return pullRequest.headRefName;
+    },
+
+    getPullRequestCheckoutTarget(options) {
+      return cached({
+        cwd: options.cwd,
+        method: "getPullRequestCheckoutTarget",
+        args: { number: options.number },
+        readOptions: options,
+        load: async () => {
+          const repo = await getGitHubRepoView({ cwd: options.cwd, run });
+          const owner = repo?.owner?.login;
+          const name = repo?.name;
+          if (!owner || !name) {
+            throw new Error("Unable to resolve GitHub repository for pull request checkout");
+          }
+
+          const stdout = await run(
+            [
+              "api",
+              "graphql",
+              "-f",
+              `query=${PULL_REQUEST_CHECKOUT_TARGET_QUERY}`,
+              "-F",
+              `owner=${owner}`,
+              "-F",
+              `name=${name}`,
+              "-F",
+              `number=${options.number}`,
+            ],
+            { cwd: options.cwd },
+          );
+          return parsePullRequestCheckoutTarget(stdout);
+        },
+      });
     },
 
     getCurrentPullRequestStatus(options) {
@@ -1362,6 +1456,23 @@ function parsePullRequestSummaries(stdout: string): GitHubPullRequestSummary[] {
 
 function parsePullRequestSummary(stdout: string): GitHubPullRequestSummary {
   return toPullRequestSummary(GitHubPullRequestSummarySchema.parse(JSON.parse(stdout || "{}")));
+}
+
+function parsePullRequestCheckoutTarget(stdout: string): GitHubPullRequestCheckoutTarget {
+  const parsed = PullRequestCheckoutTargetSchema.parse(JSON.parse(stdout || "{}"));
+  const pullRequest = parsed.data.repository.pullRequest;
+  if (!pullRequest) {
+    throw new Error("Pull request not found");
+  }
+  return {
+    number: pullRequest.number,
+    baseRefName: pullRequest.baseRefName,
+    headRefName: pullRequest.headRefName,
+    headOwnerLogin: pullRequest.headRepositoryOwner?.login || null,
+    headRepositorySshUrl: pullRequest.headRepository?.sshUrl || null,
+    headRepositoryUrl: pullRequest.headRepository?.url || null,
+    isCrossRepository: pullRequest.isCrossRepository,
+  };
 }
 
 function toPullRequestSummary(
