@@ -111,13 +111,29 @@ describe("useHoverSafeZone", () => {
     });
 
     act(() => pointerMove(110, 40));
+    expect(onEnterSafeZone).toHaveBeenCalledTimes(1);
     expect(onLeaveSafeZone).not.toHaveBeenCalled();
 
     act(() => pointerMove(300, 40));
     expect(onLeaveSafeZone).toHaveBeenCalledTimes(1);
 
     act(() => pointerMove(130, 40));
-    expect(onEnterSafeZone).toHaveBeenCalledTimes(1);
+    expect(onEnterSafeZone).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes the safe-zone enter callback while moving inside", () => {
+    const onEnterSafeZone = vi.fn();
+    const onLeaveSafeZone = vi.fn();
+
+    act(() => {
+      root?.render(<Harness onEnterSafeZone={onEnterSafeZone} onLeaveSafeZone={onLeaveSafeZone} />);
+    });
+
+    act(() => pointerMove(110, 40));
+    act(() => pointerMove(130, 40));
+
+    expect(onEnterSafeZone).toHaveBeenCalledTimes(2);
+    expect(onLeaveSafeZone).not.toHaveBeenCalled();
   });
 
   it("treats leaving the browser window as leaving the safe zone", () => {
