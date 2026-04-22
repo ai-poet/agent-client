@@ -945,8 +945,14 @@ export class WorkspaceGitServiceImpl implements WorkspaceGitService {
       return;
     }
 
-    const headRef = target.latestSnapshot?.git.currentBranch ?? null;
-    if (!headRef || !this.deps.github.retainCurrentPullRequestStatusPoll) {
+    const snapshot = target.latestSnapshot;
+    if (!snapshot || !this.deps.github.retainCurrentPullRequestStatusPoll) {
+      this.stopGitHubPollForTarget(target);
+      return;
+    }
+
+    const headRef = snapshot.git.currentBranch;
+    if (!headRef || !hasGitHubRemoteUrl(snapshot.git.remoteUrl)) {
       this.stopGitHubPollForTarget(target);
       return;
     }

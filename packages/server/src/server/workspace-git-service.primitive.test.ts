@@ -631,6 +631,30 @@ describe("WorkspaceGitServiceImpl primitive refresh entrypoint", () => {
     github.dispose?.();
   });
 
+  test("subscription skips GitHub self-heal polling when the checkout has no GitHub remote", async () => {
+    const retainCurrentPullRequestStatusPoll = vi.fn(() => ({ unsubscribe: vi.fn() }));
+    const github = {
+      ...createGitHubServiceStub(),
+      retainCurrentPullRequestStatusPoll,
+    };
+    const getCheckoutStatus = vi.fn(async (cwd: string) =>
+      createCheckoutStatus(cwd, {
+        hasRemote: false,
+        remoteUrl: null,
+      }),
+    );
+    const service = createService({
+      getCheckoutStatus,
+      github,
+    });
+    const subscription = await service.subscribe({ cwd: "/tmp/repo" }, vi.fn());
+
+    expect(retainCurrentPullRequestStatusPoll).not.toHaveBeenCalled();
+
+    subscription.unsubscribe();
+    service.dispose();
+  });
+
   test("multiple subscribers on the same target share one self-heal timer", async () => {
     let nowMs = 0;
     const getCheckoutStatus = vi.fn(async (cwd: string) => createCheckoutStatus(cwd));
