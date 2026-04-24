@@ -166,6 +166,21 @@ export function parseAssistantFileLink(
     return null;
   }
 
+  const inlinePathTarget = parseInlinePathToken(trimmed);
+  if (inlinePathTarget) {
+    const normalizedPath = normalizePathToken(inlinePathTarget.path);
+    if (
+      normalizedPath &&
+      isAbsolutePath(normalizedPath) &&
+      isAllowedAbsolutePath(normalizedPath, options.workspaceRoot)
+    ) {
+      return {
+        ...inlinePathTarget,
+        path: normalizedPath,
+      };
+    }
+  }
+
   const windowsPathMatch = trimmed.match(/^([A-Za-z]:[\\/][^?#]*)(#[^?]+)?$/);
   if (windowsPathMatch) {
     const normalizedPath = normalizePathToken(windowsPathMatch[1] ?? "");
