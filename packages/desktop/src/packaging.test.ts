@@ -3,9 +3,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
+const workspaceRoot = path.resolve(__dirname, "../../..");
 const desktopPackageRoot = path.resolve(__dirname, "..");
 const builderConfigPath = path.join(desktopPackageRoot, "electron-builder.config.cjs");
 const brandingConfigPath = path.join(desktopPackageRoot, "branding.cjs");
+const rootPackageJsonPath = path.join(workspaceRoot, "package.json");
 
 const BRAND_ENV_KEYS = [
   "PASEO_APP_NAME",
@@ -85,5 +87,15 @@ describe("desktop packaging", () => {
     expect(config.win.icon).toBe("assets/cybercode-icon.ico");
     expect(config.mac.artifactName).toBe("CyberAICoding-${version}-${arch}.${ext}");
     expect(config.win.artifactName).toBe("CyberAICoding-${version}-${arch}.${ext}");
+  });
+
+  it("forwards root build:desktop flags to the desktop workspace builder", () => {
+    const packageJson = require(rootPackageJsonPath) as {
+      scripts: Record<string, string>;
+    };
+
+    expect(packageJson.scripts["build:desktop"]).toContain(
+      "npm run build --workspace=@getpaseo/desktop --",
+    );
   });
 });
