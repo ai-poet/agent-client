@@ -4,9 +4,10 @@ import {
   buildWindowsGitBashDirectInstallCommand,
   buildWindowsGitBashInstallCommand,
   buildWindowsGitBashScoopInstallCommand,
-  CLAUDE_CODE_PACKAGE_NAME,
-  CODEX_PACKAGE_NAME,
   REQUIRED_NODE_MAJOR,
+  buildWindowsCliExecutableCandidates,
+  buildWindowsCliSearchPath,
+  isWindowsGitBashPath,
   parseMajorVersion,
   parseSemanticVersion,
   resolvePackageInstallShellOptions,
@@ -44,7 +45,6 @@ describe("model-cli-manager", () => {
 
   it("uses cmd shell for Codex install on Windows shell manager", () => {
     const options = resolvePackageInstallShellOptions(
-      CODEX_PACKAGE_NAME,
       "shell",
       { gitBashPath: "C:/Program Files/Git/bin/bash.exe" },
       "win32",
@@ -52,16 +52,50 @@ describe("model-cli-manager", () => {
     expect(options?.forceWindowsCmd).toBe(true);
   });
 
-  it("uses Git Bash for Claude Code install when available on Windows", () => {
+  it("uses cmd shell for Claude Code install on Windows shell manager", () => {
     const gitBashPath = "C:/Program Files/Git/bin/bash.exe";
-    const options = resolvePackageInstallShellOptions(
-      CLAUDE_CODE_PACKAGE_NAME,
-      "shell",
-      { gitBashPath },
-      "win32",
-    );
+    const options = resolvePackageInstallShellOptions("shell", { gitBashPath }, "win32");
     expect(options?.gitBashPath).toBe(gitBashPath);
-    expect(options?.forceWindowsCmd).toBeUndefined();
+    expect(options?.forceWindowsCmd).toBe(true);
+  });
+
+  it("rejects WSL bash launchers when detecting Git Bash on Windows", () => {
+    expect(isWindowsGitBashPath("C:/Windows/System32/bash.exe")).toBe(false);
+    expect(isWindowsGitBashPath("C:\\Windows\\SysWOW64\\bash.exe")).toBe(false);
+    expect(isWindowsGitBashPath("C:/Windows/System32/wsl.exe")).toBe(false);
+  });
+
+  it("accepts Git for Windows and Scoop Git Bash paths", () => {
+    expect(isWindowsGitBashPath("C:/Program Files/Git/bin/bash.exe")).toBe(true);
+    expect(isWindowsGitBashPath("C:/Program Files/Git/usr/bin/bash.exe")).toBe(true);
+    expect(isWindowsGitBashPath("C:/Users/alice/scoop/apps/git/current/bin/bash.exe")).toBe(true);
+  });
+
+  it("builds Windows CLI executable candidates with cmd and exe suffixes", () => {
+    expect(buildWindowsCliExecutableCandidates("claude")).toEqual([
+      "claude.cmd",
+      "claude.exe",
+      "claude",
+    ]);
+    expect(buildWindowsCliExecutableCandidates("codex")).toEqual([
+      "codex.cmd",
+      "codex.exe",
+      "codex",
+    ]);
+  });
+
+  it("extends Windows CLI search path with npm and node install directories", () => {
+    const searchPath = buildWindowsCliSearchPath({
+      PATH: "C:\\Windows\\System32",
+      APPDATA: "C:\\Users\\alice\\AppData\\Roaming",
+      ProgramFiles: "C:\\Program Files",
+    });
+
+    expect(searchPath.split(";")).toEqual([
+      "C:\\Users\\alice\\AppData\\Roaming\\npm",
+      "C:\\Program Files\\nodejs",
+      "C:\\Windows\\System32",
+    ]);
   });
 
   it("builds the expected WinGet command for Git Bash auto-install", () => {

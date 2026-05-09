@@ -50,6 +50,7 @@ interface CommandResult {
 interface ShellOptions {
   gitBashPath?: string | null;
   forceWindowsCmd?: boolean;
+  env?: NodeJS.ProcessEnv;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -106,7 +107,7 @@ async function runShell(command: string, options?: ShellOptions): Promise<Comman
       ? buildGitBashCommand(command, options.gitBashPath)
       : buildShellCommand(command);
   return await execCommand(shell.command, shell.args, {
-    env: process.env,
+    env: options?.env ?? process.env,
     timeout: 10 * 60 * 1000,
     maxBuffer: 16 * 1024 * 1024,
   });
@@ -121,9 +122,16 @@ async function tryRunShell(command: string, options?: ShellOptions): Promise<Com
 }
 
 async function commandExists(command: string): Promise<boolean> {
-  const probe =
-    process.platform === "win32" ? `where ${command}` : `command -v ${command} >/dev/null 2>&1`;
-  return (await tryRunShell(probe)) !== null;
+  if (process.platform === "win32") {
+    return (
+      (await tryRunShell(`where ${command}`, {
+        forceWindowsCmd: true,
+        env: buildWindowsCliSearchEnv(),
+      })) !== null
+    );
+  }
+
+  return (await tryRunShell(`command -v ${command} >/dev/null 2>&1`)) !== null;
 }
 
 async function resolveRuntimeManager(): Promise<RuntimeManagerId> {
@@ -141,12 +149,12 @@ async function resolveWindowsGitBashPath(): Promise<string | null> {
     return null;
   }
 
-  const whereResult = await tryRunShell("where bash");
+  const whereResult = await tryRunShell("where bash", { forceWindowsCmd: true });
   const detected =
     whereResult?.stdout
       .split(/\r?\n/)
       .map((entry) => entry.trim())
-      .find((entry) => entry.toLowerCase().endsWith("bash.exe")) ?? null;
+      .find((entry) => isWindowsGitBashPath(entry)) ?? null;
   if (detected) {
     return detected;
   }
@@ -173,7 +181,69 @@ async function resolveWindowsGitBashPath(): Promise<string | null> {
     ),
   ];
 
-  return fallbackCandidates.find((entry) => existsSync(entry)) ?? null;
+  return (
+    fallbackCandidates.find((entry) => existsSync(entry) && isWindowsGitBashPath(entry)) ?? null
+  );
+}
+
+function normalizeWindowsPath(value: string): string {
+  return value.trim().replace(/\\/g, "/").toLowerCase();
+}
+
+export function isWindowsGitBashPath(value: string | null | undefined): boolean {
+  const normalized = value ? normalizeWindowsPath(value) : "";
+  if (!normalized.endsWith("/bash.exe")) {
+    return false;
+  }
+  if (
+    normalized.endsWith("/windows/system32/bash.exe") ||
+    normalized.endsWith("/windows/syswow64/bash.exe") ||
+    normalized.includes("/windows/system32/wsl") ||
+    normalized.includes("/windows/syswow64/wsl")
+  ) {
+    return false;
+  }
+
+  return (
+    normalized.endsWith("/git/bin/bash.exe") ||
+    normalized.endsWith("/git/usr/bin/bash.exe") ||
+    normalized.endsWith("/scoop/apps/git/current/bin/bash.exe") ||
+    normalized.endsWith("/scoop/apps/git/current/usr/bin/bash.exe")
+  );
+}
+
+export function buildWindowsCliExecutableCandidates(command: "codex" | "claude"): string[] {
+  return [`${command}.cmd`, `${command}.exe`, command];
+}
+
+function appendUniquePath(paths: string[], value: string | null | undefined): void {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return;
+  }
+  const normalized = normalizeWindowsPath(trimmed);
+  if (paths.some((entry) => normalizeWindowsPath(entry) === normalized)) {
+    return;
+  }
+  paths.push(trimmed);
+}
+
+export function buildWindowsCliSearchPath(env: NodeJS.ProcessEnv = process.env): string {
+  const paths: string[] = [];
+  appendUniquePath(paths, env.APPDATA ? path.win32.join(env.APPDATA, "npm") : null);
+  appendUniquePath(paths, env.ProgramFiles ? path.win32.join(env.ProgramFiles, "nodejs") : null);
+  const currentPath = env.PATH ?? env.Path ?? env.path ?? "";
+  for (const entry of currentPath.split(";")) {
+    appendUniquePath(paths, entry);
+  }
+  return paths.join(";");
+}
+
+function buildWindowsCliSearchEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    PATH: buildWindowsCliSearchPath(env),
+  };
 }
 
 export function wrapWithRuntimeManager(command: string, manager: RuntimeManagerId): string {
@@ -219,9 +289,10 @@ async function readNodeStatus(
   options?: ShellOptions,
 ): Promise<NodeRuntimeStatus> {
   if (process.platform === "win32" && manager === "shell") {
+    const env = buildWindowsCliSearchEnv();
     const [nodeProbe, npmProbe] = await Promise.all([
-      tryRunShell("node -v", { ...options, forceWindowsCmd: true }),
-      tryRunShell("npm -v", { ...options, forceWindowsCmd: true }),
+      tryRunShell("node -v", { ...options, forceWindowsCmd: true, env }),
+      tryRunShell("npm -v", { ...options, forceWindowsCmd: true, env }),
     ]);
     const nodeVersion = parseSemanticVersion(nodeProbe?.stdout ?? nodeProbe?.stderr ?? null);
     const npmVersion = parseSemanticVersion(npmProbe?.stdout ?? npmProbe?.stderr ?? null);
@@ -234,11 +305,12 @@ async function readNodeStatus(
       npmVersion,
       satisfies: major !== null && major >= REQUIRED_NODE_MAJOR,
       manager,
-      error: nodeVersion
-        ? null
-        : (trimToNull(nodeProbe?.stderr) ??
-          trimToNull(npmProbe?.stderr) ??
-          "Node.js was not found."),
+      error:
+        nodeVersion && npmVersion
+          ? null
+          : (trimToNull(nodeProbe?.stderr) ??
+            trimToNull(npmProbe?.stderr) ??
+            "Node.js and npm were not found in the Windows PATH. Install Node.js 22+ or add Node's install directory and %APPDATA%\\npm to PATH."),
     };
   }
 
@@ -287,32 +359,25 @@ async function readCliStatus(
   manager: RuntimeManagerId,
   options?: ShellOptions,
 ): Promise<ModelCliStatus> {
-  if (process.platform === "win32" && command === "claude" && !options?.gitBashPath) {
-    return {
-      command,
-      packageName,
-      installed: false,
-      version: null,
-      error: "Git Bash is required on Windows before Claude Code can run normally.",
-    };
-  }
-
   try {
-    const commandOptions =
-      process.platform === "win32" && manager === "shell" && command === "codex"
-        ? { ...options, forceWindowsCmd: true }
-        : options;
-    const result = await runShell(
-      wrapWithRuntimeManager(`${command} --version`, manager),
-      commandOptions,
-    );
+    const isWindowsShell = process.platform === "win32" && manager === "shell";
+    const commandOptions = isWindowsShell
+      ? { ...options, forceWindowsCmd: true, env: buildWindowsCliSearchEnv() }
+      : options;
+    const versionCommand = isWindowsShell
+      ? buildWindowsCliVersionCommand(command)
+      : `${command} --version`;
+    const result = await runShell(wrapWithRuntimeManager(versionCommand, manager), commandOptions);
     const version = parseSemanticVersion(result.stdout) ?? parseSemanticVersion(result.stderr);
     return {
       command,
       packageName,
       installed: Boolean(version),
       version,
-      error: version ? null : (trimToNull(result.stderr) ?? `${command} did not report a version.`),
+      error: version
+        ? null
+        : (trimToNull(result.stderr) ??
+          `${command} did not report a version. Ensure %APPDATA%\\npm is available in PATH.`),
     };
   } catch (error) {
     return {
@@ -320,9 +385,18 @@ async function readCliStatus(
       packageName,
       installed: false,
       version: null,
-      error: getErrorMessage(error),
+      error:
+        process.platform === "win32" && manager === "shell"
+          ? `${getErrorMessage(error)} Ensure %APPDATA%\\npm is available in PATH.`
+          : getErrorMessage(error),
     };
   }
+}
+
+function buildWindowsCliVersionCommand(command: "codex" | "claude"): string {
+  return buildWindowsCliExecutableCandidates(command)
+    .map((candidate) => `${candidate} --version`)
+    .join(" || ");
 }
 
 export async function getModelCliRuntimeStatus(): Promise<ModelCliRuntimeStatus> {
@@ -368,7 +442,11 @@ async function installNode22IntoManager(
       );
     }
 
-    const verifyResult = await runShell("node -v && npm -v", { ...options, forceWindowsCmd: true });
+    const verifyResult = await runShell("node -v && npm -v", {
+      ...options,
+      forceWindowsCmd: true,
+      env: buildWindowsCliSearchEnv(),
+    });
     return [installResult.stdout, installResult.stderr, verifyResult.stdout, verifyResult.stderr]
       .filter(Boolean)
       .join("\n")
@@ -377,85 +455,6 @@ async function installNode22IntoManager(
 
   throw new Error(
     "Automatic Node.js 22 installation currently requires nvm or Homebrew in this environment.",
-  );
-}
-
-async function ensureWindowsGitBash(options?: ShellOptions): Promise<{
-  gitBashPath: string;
-  output: string;
-}> {
-  if (process.platform !== "win32") {
-    throw new Error("Git Bash auto-install is only supported on Windows.");
-  }
-
-  const detected = options?.gitBashPath ?? (await resolveWindowsGitBashPath());
-  if (detected) {
-    return { gitBashPath: detected, output: "" };
-  }
-
-  const attempts: Array<{
-    name: string;
-    command: string;
-  }> = [];
-
-  if (await commandExists("winget")) {
-    attempts.push({ name: "winget", command: buildWindowsGitBashInstallCommand() });
-  }
-  if (await commandExists("choco")) {
-    attempts.push({ name: "choco", command: buildWindowsGitBashChocolateyInstallCommand() });
-  }
-  if (await commandExists("scoop")) {
-    attempts.push({ name: "scoop", command: buildWindowsGitBashScoopInstallCommand() });
-  }
-  if (await commandExists("powershell")) {
-    attempts.push({
-      name: "powershell-direct",
-      command: buildWindowsGitBashDirectInstallCommand(),
-    });
-  }
-
-  if (attempts.length === 0) {
-    throw new Error(
-      "No supported Windows installer was found for Git Bash. Install WinGet, Chocolatey, or Scoop; or install Git for Windows manually.",
-    );
-  }
-
-  const outputs: string[] = [];
-  const errors: string[] = [];
-
-  for (const attempt of attempts) {
-    try {
-      const result = await runShell(attempt.command, {
-        ...options,
-        forceWindowsCmd: true,
-      });
-      const combined = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
-      if (combined) {
-        outputs.push(`[${attempt.name}]\n${combined}`);
-      } else {
-        outputs.push(`[${attempt.name}] installer command completed.`);
-      }
-    } catch (error) {
-      errors.push(`[${attempt.name}] ${getErrorMessage(error)}`);
-      continue;
-    }
-
-    const installedPath = await resolveWindowsGitBashPath();
-    if (installedPath) {
-      return {
-        gitBashPath: installedPath,
-        output: outputs.join("\n\n").trim(),
-      };
-    }
-  }
-
-  throw new Error(
-    [
-      "Git Bash installation commands completed but bash.exe was not detected.",
-      errors.length > 0 ? `attempt errors: ${errors.join(" | ")}` : "",
-    ]
-      .filter(Boolean)
-      .join(" "),
   );
 }
 
@@ -476,7 +475,6 @@ export async function installNode22Runtime(): Promise<ModelCliInstallResult> {
 }
 
 export function resolvePackageInstallShellOptions(
-  packageName: string,
   manager: RuntimeManagerId,
   options?: ShellOptions,
   platform: NodeJS.Platform = process.platform,
@@ -484,10 +482,7 @@ export function resolvePackageInstallShellOptions(
   if (platform !== "win32" || manager !== "shell") {
     return options;
   }
-  if (packageName === CLAUDE_CODE_PACKAGE_NAME && options?.gitBashPath) {
-    return options;
-  }
-  return { ...options, forceWindowsCmd: true };
+  return { ...options, forceWindowsCmd: true, env: buildWindowsCliSearchEnv() };
 }
 
 async function installPackageIntoRuntime(
@@ -495,7 +490,7 @@ async function installPackageIntoRuntime(
   manager: RuntimeManagerId,
   options?: ShellOptions,
 ): Promise<string> {
-  const runtimeOptions = resolvePackageInstallShellOptions(packageName, manager, options);
+  const runtimeOptions = resolvePackageInstallShellOptions(manager, options);
   const result = await runShell(
     wrapWithNode22Runtime(`npm install -g ${packageName}@latest`, manager),
     runtimeOptions,
@@ -523,14 +518,7 @@ export async function installCodexCli(): Promise<ModelCliInstallResult> {
 export async function installClaudeCodeCli(): Promise<ModelCliInstallResult> {
   const manager = await resolveRuntimeManager();
   const outputs: string[] = [];
-  let gitBashPath = await resolveWindowsGitBashPath();
-  if (process.platform === "win32" && !gitBashPath) {
-    const gitBashInstall = await ensureWindowsGitBash();
-    gitBashPath = gitBashInstall.gitBashPath;
-    if (gitBashInstall.output) {
-      outputs.push(gitBashInstall.output);
-    }
-  }
+  const gitBashPath = await resolveWindowsGitBashPath();
   const nodeStatus = await readNodeStatus(manager, { gitBashPath });
 
   if (!nodeStatus.satisfies) {
@@ -547,14 +535,7 @@ export async function installClaudeCodeCli(): Promise<ModelCliInstallResult> {
 export async function installAllModelClis(): Promise<ModelCliInstallResult> {
   const manager = await resolveRuntimeManager();
   const outputs: string[] = [];
-  let gitBashPath = await resolveWindowsGitBashPath();
-  if (process.platform === "win32" && !gitBashPath) {
-    const gitBashInstall = await ensureWindowsGitBash();
-    gitBashPath = gitBashInstall.gitBashPath;
-    if (gitBashInstall.output) {
-      outputs.push(gitBashInstall.output);
-    }
-  }
+  const gitBashPath = await resolveWindowsGitBashPath();
   const nodeStatus = await readNodeStatus(manager, { gitBashPath });
 
   if (!nodeStatus.satisfies) {
