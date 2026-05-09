@@ -107,5 +107,6 @@ describe("desktop packaging", () => {
 
     expect(packageJson.scripts["build:main"]).toContain("node scripts/clean-dist.mjs");
     expect(packageJson.scripts["build:main"]).toContain("tsc -p tsconfig.json");
+    expect(packageJson.scripts["build:main"]).toContain("--incremental false");
   });
 });

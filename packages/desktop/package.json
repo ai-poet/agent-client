@@ -6,7 +6,7 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "npm --prefix ../.. run build:daemon && npm run build:main && electron-builder --config electron-builder.config.cjs",
-    "build:main": "node scripts/clean-dist.mjs && tsc -p tsconfig.json",
+    "build:main": "node scripts/clean-dist.mjs && tsc -p tsconfig.json --incremental false",
     "dev": "./scripts/dev.sh",
     "dev:win": "powershell ./scripts/dev.ps1",
     "test": "vitest run",
