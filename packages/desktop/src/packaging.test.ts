@@ -8,6 +8,7 @@ const desktopPackageRoot = path.resolve(__dirname, "..");
 const builderConfigPath = path.join(desktopPackageRoot, "electron-builder.config.cjs");
 const brandingConfigPath = path.join(desktopPackageRoot, "branding.cjs");
 const rootPackageJsonPath = path.join(workspaceRoot, "package.json");
+const desktopPackageJsonPath = path.join(desktopPackageRoot, "package.json");
 
 const BRAND_ENV_KEYS = [
   "PASEO_APP_NAME",
@@ -97,5 +98,14 @@ describe("desktop packaging", () => {
     expect(packageJson.scripts["build:desktop"]).toContain(
       "npm run build --workspace=@getpaseo/desktop --",
     );
+  });
+
+  it("cleans the desktop main-process dist before compiling", () => {
+    const packageJson = require(desktopPackageJsonPath) as {
+      scripts: Record<string, string>;
+    };
+
+    expect(packageJson.scripts["build:main"]).toContain("node scripts/clean-dist.mjs");
+    expect(packageJson.scripts["build:main"]).toContain("tsc -p tsconfig.json");
   });
 });

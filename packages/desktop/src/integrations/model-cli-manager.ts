@@ -101,11 +101,19 @@ function buildGitBashCommand(
   return { command: gitBashPath, args: ["-lc", command] };
 }
 
+export function shouldUseWindowsGitBash(
+  options?: ShellOptions,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return (
+    platform === "win32" && !options?.forceWindowsCmd && isWindowsGitBashPath(options?.gitBashPath)
+  );
+}
+
 async function runShell(command: string, options?: ShellOptions): Promise<CommandResult> {
-  const shell =
-    process.platform === "win32" && !options?.forceWindowsCmd && options?.gitBashPath
-      ? buildGitBashCommand(command, options.gitBashPath)
-      : buildShellCommand(command);
+  const shell = shouldUseWindowsGitBash(options)
+    ? buildGitBashCommand(command, options?.gitBashPath ?? "")
+    : buildShellCommand(command);
   return await execCommand(shell.command, shell.args, {
     env: options?.env ?? process.env,
     timeout: 10 * 60 * 1000,
@@ -240,9 +248,11 @@ export function buildWindowsCliSearchPath(env: NodeJS.ProcessEnv = process.env):
 }
 
 function buildWindowsCliSearchEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const searchPath = buildWindowsCliSearchPath(env);
   return {
     ...env,
-    PATH: buildWindowsCliSearchPath(env),
+    PATH: searchPath,
+    Path: searchPath,
   };
 }
 
@@ -360,13 +370,11 @@ async function readCliStatus(
   options?: ShellOptions,
 ): Promise<ModelCliStatus> {
   try {
-    const isWindowsShell = process.platform === "win32" && manager === "shell";
-    const commandOptions = isWindowsShell
-      ? { ...options, forceWindowsCmd: true, env: buildWindowsCliSearchEnv() }
-      : options;
-    const versionCommand = isWindowsShell
-      ? buildWindowsCliVersionCommand(command)
-      : `${command} --version`;
+    const commandOptions = resolveCliStatusShellOptions(manager, options);
+    const versionCommand =
+      process.platform === "win32" && manager === "shell"
+        ? buildWindowsCliVersionCommand(command)
+        : `${command} --version`;
     const result = await runShell(wrapWithRuntimeManager(versionCommand, manager), commandOptions);
     const version = parseSemanticVersion(result.stdout) ?? parseSemanticVersion(result.stderr);
     return {
@@ -393,7 +401,18 @@ async function readCliStatus(
   }
 }
 
-function buildWindowsCliVersionCommand(command: "codex" | "claude"): string {
+export function resolveCliStatusShellOptions(
+  manager: RuntimeManagerId,
+  options?: ShellOptions,
+  platform: NodeJS.Platform = process.platform,
+): ShellOptions | undefined {
+  if (platform !== "win32" || manager !== "shell") {
+    return options;
+  }
+  return { ...options, forceWindowsCmd: true, env: buildWindowsCliSearchEnv() };
+}
+
+export function buildWindowsCliVersionCommand(command: "codex" | "claude"): string {
   return buildWindowsCliExecutableCandidates(command)
     .map((candidate) => `${candidate} --version`)
     .join(" || ");

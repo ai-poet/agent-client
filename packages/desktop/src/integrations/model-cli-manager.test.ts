@@ -7,10 +7,13 @@ import {
   REQUIRED_NODE_MAJOR,
   buildWindowsCliExecutableCandidates,
   buildWindowsCliSearchPath,
+  buildWindowsCliVersionCommand,
   isWindowsGitBashPath,
   parseMajorVersion,
   parseSemanticVersion,
+  resolveCliStatusShellOptions,
   resolvePackageInstallShellOptions,
+  shouldUseWindowsGitBash,
   wrapWithNode22Runtime,
   wrapWithRuntimeManager,
 } from "./model-cli-manager";
@@ -59,6 +62,19 @@ describe("model-cli-manager", () => {
     expect(options?.forceWindowsCmd).toBe(true);
   });
 
+  it("uses cmd shell for Claude Code status checks on Windows shell manager", () => {
+    const options = resolveCliStatusShellOptions(
+      "shell",
+      { gitBashPath: "C:/Windows/System32/bash.exe" },
+      "win32",
+    );
+
+    expect(options?.forceWindowsCmd).toBe(true);
+    expect(buildWindowsCliVersionCommand("claude")).toBe(
+      "claude.cmd --version || claude.exe --version || claude --version",
+    );
+  });
+
   it("rejects WSL bash launchers when detecting Git Bash on Windows", () => {
     expect(isWindowsGitBashPath("C:/Windows/System32/bash.exe")).toBe(false);
     expect(isWindowsGitBashPath("C:\\Windows\\SysWOW64\\bash.exe")).toBe(false);
@@ -69,6 +85,30 @@ describe("model-cli-manager", () => {
     expect(isWindowsGitBashPath("C:/Program Files/Git/bin/bash.exe")).toBe(true);
     expect(isWindowsGitBashPath("C:/Program Files/Git/usr/bin/bash.exe")).toBe(true);
     expect(isWindowsGitBashPath("C:/Users/alice/scoop/apps/git/current/bin/bash.exe")).toBe(true);
+  });
+
+  it("only allows real Git Bash paths to opt into Windows bash execution", () => {
+    expect(shouldUseWindowsGitBash({ gitBashPath: "C:/Windows/System32/bash.exe" }, "win32")).toBe(
+      false,
+    );
+    expect(
+      shouldUseWindowsGitBash({ gitBashPath: "C:/Program Files/Git/bin/bash.exe" }, "win32"),
+    ).toBe(true);
+    expect(
+      shouldUseWindowsGitBash(
+        { gitBashPath: "C:/Program Files/Git/bin/bash.exe", forceWindowsCmd: true },
+        "win32",
+      ),
+    ).toBe(false);
+  });
+
+  it("builds Windows CLI version probes with cmd and exe suffixes first", () => {
+    expect(buildWindowsCliVersionCommand("claude")).toBe(
+      "claude.cmd --version || claude.exe --version || claude --version",
+    );
+    expect(buildWindowsCliVersionCommand("codex")).toBe(
+      "codex.cmd --version || codex.exe --version || codex --version",
+    );
   });
 
   it("builds Windows CLI executable candidates with cmd and exe suffixes", () => {
