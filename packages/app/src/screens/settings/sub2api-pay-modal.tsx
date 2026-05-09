@@ -12,6 +12,7 @@ import {
   buildPayCenterStripePopupUrl,
   buildPayCenterUrl,
 } from "@/screens/settings/sub2api-pay-url";
+import { resolveSub2APIPaymentOrderFlow } from "@/screens/settings/sub2api-pay-flow";
 import { openExternalUrl } from "@/utils/open-external-url";
 import {
   filterSub2APIPaymentTypesByLocale,
@@ -76,8 +77,6 @@ interface PaymentCenterOrderStatus {
 
 type ModalStage = "loading-config" | "form" | "paying" | "result" | "error";
 
-type OrderFlowKind = "redirect" | "qr" | "stripe";
-
 type StageDescriptor = {
   title: string;
   message: string;
@@ -134,16 +133,6 @@ function formatCny(value: number | null | undefined): string {
 
 function isStripePaymentType(paymentType: string): boolean {
   return paymentType === "stripe";
-}
-
-function resolveOrderFlow(order: PaymentCenterCreateOrderResponse): OrderFlowKind {
-  if (order.clientSecret) {
-    return "stripe";
-  }
-  if (order.qrCode) {
-    return "qr";
-  }
-  return "redirect";
 }
 
 function formatTimeRemaining(expiresAt: string, expiredLabel: string): string {
@@ -392,7 +381,7 @@ export function Sub2APIPayModal({
   const canUseStripePopup = useMemo(() => canUseEmbeddedStripePopup(endpoint), [endpoint]);
 
   const activeFlow = useMemo(
-    () => (activeOrder ? resolveOrderFlow(activeOrder) : null),
+    () => (activeOrder ? resolveSub2APIPaymentOrderFlow(activeOrder) : null),
     [activeOrder],
   );
 
@@ -700,9 +689,13 @@ export function Sub2APIPayModal({
       pollingStartedAtRef.current = Date.now();
       paymentCompletionHandledRef.current = false;
 
-      const flow = resolveOrderFlow(createdOrder);
+      const flow = resolveSub2APIPaymentOrderFlow(createdOrder);
       if (flow === "redirect") {
-        await openPaymentTarget(createdOrder.payUrl);
+        if (createdOrder.payUrl) {
+          await openPaymentTarget(createdOrder.payUrl);
+        } else {
+          setErrorMessage(text.redirectPayUrlMissing);
+        }
       } else if (flow === "stripe") {
         const opened = openStripePopup(createdOrder);
         if (!opened) {

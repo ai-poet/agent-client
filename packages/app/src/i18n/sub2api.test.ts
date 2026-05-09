@@ -34,22 +34,21 @@ describe("sub2api i18n helpers", () => {
   it("localizes payment labels", () => {
     expect(getSub2APIPaymentLabel("alipay", "zh")).toBe("支付宝");
     expect(getSub2APIPaymentLabel("wxpay_direct", "zh")).toBe("微信支付");
+    expect(getSub2APIPaymentLabel("bank", "zh")).toBe("银行卡支付");
     expect(getSub2APIPaymentLabel("alipay", "en")).toBe("Alipay");
     expect(getSub2APIPaymentLabel("wxpay_direct", "en")).toBe("WeChat Pay");
-    expect(getSub2APIPaymentLabel("usdt.polygon", "en")).toBe("USDT (Polygon)");
+    expect(getSub2APIPaymentLabel("bank", "en")).toBe("Bank card payment");
   });
 
   it("filters payment methods by locale like the Sub2API pay center", () => {
-    const allTypes = ["alipay", "wxpay_direct", "stripe", "usdt.plasma", "usdc.solana"];
+    const allTypes = ["alipay", "wxpay_direct", "bank", "stripe", "usdt.plasma", "usdc.solana"];
 
     expect(filterSub2APIPaymentTypesByLocale(allTypes, "zh")).toEqual([
       "alipay",
       "wxpay_direct",
+      "bank",
     ]);
-    expect(filterSub2APIPaymentTypesByLocale(allTypes, "en")).toEqual([
-      "usdt.plasma",
-      "usdc.solana",
-    ]);
+    expect(filterSub2APIPaymentTypesByLocale(allTypes, "en")).toEqual(["bank"]);
   });
 
   it("exposes Chinese and English UI copy", () => {

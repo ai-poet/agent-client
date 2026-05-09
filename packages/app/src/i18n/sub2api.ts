@@ -10,7 +10,7 @@ type LocaleResolutionInput = {
 
 const DEFAULT_LOCALE: Sub2APILocale = "zh";
 const FIAT_PAYMENT_PREFIXES = ["alipay", "wxpay"] as const;
-const CRYPTO_PAYMENT_PREFIXES = ["usdt", "usdc"] as const;
+const BANK_PAYMENT_PREFIXES = ["bank"] as const;
 
 export function normalizeSub2APILocale(value: string | null | undefined): Sub2APILocale {
   const normalized = value?.trim().toLowerCase();
@@ -98,8 +98,16 @@ export function filterSub2APIPaymentTypesByLocale(
   locale: string | null | undefined,
 ): string[] {
   const normalizedLocale = normalizeSub2APILocale(locale);
-  const prefixes = normalizedLocale === "en" ? CRYPTO_PAYMENT_PREFIXES : FIAT_PAYMENT_PREFIXES;
-  return types.filter((type) => startsWithAny(type.trim().toLowerCase(), prefixes));
+  return types.filter((type) => {
+    const normalizedType = type.trim().toLowerCase();
+    if (startsWithAny(normalizedType, BANK_PAYMENT_PREFIXES)) {
+      return true;
+    }
+    if (startsWithAny(normalizedType, FIAT_PAYMENT_PREFIXES)) {
+      return normalizedLocale === "zh";
+    }
+    return false;
+  });
 }
 
 function stablecoinLabel(type: string, base: "USDT" | "USDC"): string {
@@ -121,6 +129,9 @@ export function getSub2APIPaymentLabel(
   }
   if (type.startsWith("wxpay")) {
     return normalizedLocale === "zh" ? "微信支付" : "WeChat Pay";
+  }
+  if (type.startsWith("bank")) {
+    return normalizedLocale === "zh" ? "银行卡支付" : "Bank card payment";
   }
   if (type.startsWith("usdt")) {
     return stablecoinLabel(type, "USDT");
@@ -189,6 +200,7 @@ export const sub2apiMessages = {
       openPaymentPage: "打开支付页面",
       redirectTitle: "支付将在浏览器中继续",
       redirectHint: "如果支付页面没有自动打开，请点击下方按钮重新打开。",
+      redirectPayUrlMissing: "支付订单缺少浏览器支付链接，请返回后重新创建订单。",
       stripeCheckout: "Stripe 结账",
       stripeCheckoutHint: "此订单需要安全的 Stripe 窗口；窗口打开时这里会继续轮询订单状态。",
       opening: "正在打开…",
@@ -718,6 +730,7 @@ export const sub2apiMessages = {
       openPaymentPage: "Open payment page",
       redirectTitle: "Payment continues in your browser",
       redirectHint: "If the payment page did not open automatically, use the button below to reopen it.",
+      redirectPayUrlMissing: "Payment order is missing a browser payment link. Go back and create a new order.",
       stripeCheckout: "Stripe checkout",
       stripeCheckoutHint: "A secure Stripe window is required for this order. We keep polling the order here while that window is open.",
       opening: "Opening…",
