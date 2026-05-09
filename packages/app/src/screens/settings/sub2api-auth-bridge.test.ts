@@ -28,6 +28,22 @@ describe("auth-bridge", () => {
     });
   });
 
+  it("accepts an account-only callback without an api key", () => {
+    expect(
+      parseSub2APIAuthCallback(
+        "paseo://auth/callback#access_token=access&refresh_token=refresh&expires_in=300&endpoint=https%3A%2F%2Fapi.example.com%2F",
+      ),
+    ).toEqual({
+      accessToken: "access",
+      refreshToken: "refresh",
+      expiresIn: 300,
+      apiKey: null,
+      claudeApiKey: null,
+      codexApiKey: null,
+      endpoint: "https://api.example.com",
+    });
+  });
+
   it("rejects invalid endpoint formats", () => {
     expect(isValidSub2APIEndpoint("")).toBe(false);
     expect(isValidSub2APIEndpoint("api.example.com")).toBe(false);

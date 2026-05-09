@@ -2,7 +2,7 @@ export interface Sub2APIAuthCallback {
   accessToken: string;
   refreshToken: string;
   expiresIn: number;
-  apiKey: string;
+  apiKey: string | null;
   claudeApiKey: string | null;
   codexApiKey: string | null;
   endpoint: string;
@@ -61,7 +61,6 @@ export function parseSub2APIAuthCallback(url: string): Sub2APIAuthCallback {
   if (
     !accessToken ||
     !refreshToken ||
-    !apiKey ||
     !endpoint ||
     !Number.isFinite(expiresIn) ||
     expiresIn <= 0
@@ -73,7 +72,7 @@ export function parseSub2APIAuthCallback(url: string): Sub2APIAuthCallback {
     accessToken,
     refreshToken,
     expiresIn,
-    apiKey,
+    apiKey: apiKey || null,
     claudeApiKey: claudeApiKey || null,
     codexApiKey: codexApiKey || null,
     endpoint,

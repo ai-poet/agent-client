@@ -11,9 +11,19 @@ import { invokeDesktopCommand } from "@/desktop/electron/invoke";
 import { getDesktopHost } from "@/desktop/host";
 import { useSub2APIAuth } from "@/hooks/use-sub2api-auth";
 import { cloudServiceQueryKeys } from "@/hooks/use-sub2api-api";
+import { createSub2APIClient, type Sub2APIGroup, type Sub2APIKey } from "@/lib/sub2api-client";
 import { parseSub2APIAuthCallback } from "@/screens/settings/sub2api-auth-bridge";
 import { resolveScopedActiveProviderIds } from "@/screens/settings/desktop-providers-context";
-import type { ProviderStore } from "@/screens/settings/sub2api-provider-types";
+import {
+  resolveManagedCloudRouteForGroup,
+  resolveManagedCloudRouteForKey,
+  type ManagedCloudDesktopScope,
+} from "@/screens/settings/managed-cloud-scope";
+import { findReusableKey } from "@/screens/settings/managed-provider-settings-shared";
+import type {
+  DesktopProviderPayload,
+  ProviderStore,
+} from "@/screens/settings/sub2api-provider-types";
 import { CLOUD_NAME } from "@/config/branding";
 
 let lastHandledCallbackUrl: string | null = null;
@@ -21,6 +31,13 @@ let lastHandledCallbackUrl: string | null = null;
 interface AuthCallbackPayload {
   url: string;
 }
+
+type SetupDefaultProviderPayload = {
+  endpoint: string;
+  apiKey: string;
+  scope: ManagedCloudDesktopScope | "both";
+  name: string;
+};
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -34,47 +51,204 @@ function extractAuthCallbackUrl(payload: unknown): string | null {
   return typeof url === "string" && url.length > 0 ? url : null;
 }
 
-async function configureMissingManagedRoutes(session: ReturnType<typeof parseSub2APIAuthCallback>) {
+function normalizeProviderEndpoint(value: string | null | undefined): string {
+  const trimmed = value?.trim().replace(/\/+$/, "") ?? "";
+  return trimmed.toLowerCase().endsWith("/v1") ? trimmed.slice(0, -3) : trimmed;
+}
+
+function providerUsesSignedInCloudKey(input: {
+  provider: DesktopProviderPayload | null | undefined;
+  scope: ManagedCloudDesktopScope;
+  endpoint: string;
+  keys: Sub2APIKey[];
+  groups: Sub2APIGroup[];
+}): boolean {
+  const provider = input.provider;
+  if (!provider || (provider.target && provider.target !== input.scope)) {
+    return false;
+  }
+
+  const providerEndpoint = normalizeProviderEndpoint(provider.endpoint);
+  const signedInEndpoint = normalizeProviderEndpoint(input.endpoint);
+  const providerKey = provider.apiKey.trim();
+  if (
+    !providerEndpoint ||
+    !signedInEndpoint ||
+    providerEndpoint !== signedInEndpoint ||
+    !providerKey
+  ) {
+    return false;
+  }
+
+  const cloudKey = input.keys.find((key) => key.key.trim() === providerKey);
+  if (!cloudKey) {
+    return false;
+  }
+
+  const route = resolveManagedCloudRouteForKey(cloudKey, input.groups);
+  return route.ok && route.scope === input.scope;
+}
+
+function getActiveProviderForScope(
+  store: ProviderStore,
+  scope: ManagedCloudDesktopScope,
+): DesktopProviderPayload | null {
+  const active = resolveScopedActiveProviderIds(store);
+  const id = active[scope];
+  return id ? (store.providers.find((provider) => provider.id === id) ?? null) : null;
+}
+
+function chooseGroupForScope(input: {
+  scope: ManagedCloudDesktopScope;
+  groups: Sub2APIGroup[];
+  keys: Sub2APIKey[];
+}): Sub2APIGroup | null {
+  const candidates = input.groups.filter((group) => {
+    const route = resolveManagedCloudRouteForGroup(group);
+    return route.ok && route.scope === input.scope;
+  });
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  return candidates.sort((a, b) => {
+    const aHasKey = findReusableKey(input.keys, a.id) ? 1 : 0;
+    const bHasKey = findReusableKey(input.keys, b.id) ? 1 : 0;
+    if (aHasKey !== bHasKey) {
+      return bHasKey - aHasKey;
+    }
+
+    const aActive = a.status === "active" ? 1 : 0;
+    const bActive = b.status === "active" ? 1 : 0;
+    if (aActive !== bActive) {
+      return bActive - aActive;
+    }
+
+    const priceDelta = a.rate_multiplier - b.rate_multiplier;
+    if (priceDelta !== 0) {
+      return priceDelta;
+    }
+
+    return a.name.localeCompare(b.name) || a.id - b.id;
+  })[0];
+}
+
+async function resolveCloudKeyForScope(input: {
+  scope: ManagedCloudDesktopScope;
+  groups: Sub2APIGroup[];
+  keys: Sub2APIKey[];
+  createKey: (group: Sub2APIGroup) => Promise<Sub2APIKey>;
+}): Promise<{ key: Sub2APIKey; group: Sub2APIGroup } | null> {
+  const group = chooseGroupForScope({
+    scope: input.scope,
+    groups: input.groups,
+    keys: input.keys,
+  });
+  if (!group) {
+    return null;
+  }
+
+  const reusable = findReusableKey(input.keys, group.id);
+  return {
+    group,
+    key: reusable ?? (await input.createKey(group)),
+  };
+}
+
+async function configureMissingManagedRoutes(
+  session: ReturnType<typeof parseSub2APIAuthCallback>,
+  getAccessToken: () => Promise<string | null>,
+) {
   const store = await invokeDesktopCommand<ProviderStore>("get_providers");
   const active = resolveScopedActiveProviderIds(store);
 
-  const commands: Array<Promise<unknown>> = [];
-  if (!active.claude && session.claudeApiKey) {
+  const commands: SetupDefaultProviderPayload[] = [];
+  const pendingScopes = new Set<ManagedCloudDesktopScope>(["claude", "codex"]);
+
+  if (session.claudeApiKey) {
     commands.push(
-      invokeDesktopCommand("setup_default_provider", {
+      {
         endpoint: session.endpoint,
         apiKey: session.claudeApiKey,
         scope: "claude",
         name: CLOUD_NAME,
-      }),
+      },
     );
+    pendingScopes.delete("claude");
   }
-  if (!active.codex && session.codexApiKey) {
+  if (session.codexApiKey) {
     commands.push(
-      invokeDesktopCommand("setup_default_provider", {
+      {
         endpoint: session.endpoint,
         apiKey: session.codexApiKey,
         scope: "codex",
         name: CLOUD_NAME,
-      }),
+      },
     );
+    pendingScopes.delete("codex");
   }
 
-  if (
-    commands.length === 0 &&
-    !active.claude &&
-    !active.codex &&
-    !session.claudeApiKey &&
-    !session.codexApiKey &&
-    session.apiKey
-  ) {
+  if (pendingScopes.size > 0) {
+    const client = createSub2APIClient({ endpoint: session.endpoint, getAccessToken });
+    const [keyResult, groups] = await Promise.all([
+      client.listKeys(1, 200),
+      client.getAvailableGroups(),
+    ]);
+    const keys = [...keyResult.items];
+
+    for (const scope of [...pendingScopes]) {
+      const provider = getActiveProviderForScope(store, scope);
+      if (
+        active[scope] &&
+        providerUsesSignedInCloudKey({
+          provider,
+          scope,
+          endpoint: session.endpoint,
+          keys,
+          groups,
+        })
+      ) {
+        pendingScopes.delete(scope);
+        continue;
+      }
+
+      const resolved = await resolveCloudKeyForScope({
+        scope,
+        groups,
+        keys,
+        createKey: async (group) => {
+          const created = await client.createKey({
+            name: `${group.name} Key`,
+            group_id: group.id,
+          });
+          keys.push(created);
+          return created;
+        },
+      });
+      if (!resolved) {
+        continue;
+      }
+
+      commands.push(
+        {
+          endpoint: session.endpoint,
+          apiKey: resolved.key.key,
+          scope,
+          name: resolved.group.name,
+        },
+      );
+      pendingScopes.delete(scope);
+    }
+  }
+
+  if (commands.length === 0 && !active.claude && !active.codex && session.apiKey) {
     commands.push(
-      invokeDesktopCommand("setup_default_provider", {
+      {
         endpoint: session.endpoint,
         apiKey: session.apiKey,
         scope: "both",
         name: CLOUD_NAME,
-      }),
+      },
     );
   }
 
@@ -82,14 +256,18 @@ async function configureMissingManagedRoutes(session: ReturnType<typeof parseSub
     return;
   }
 
-  await Promise.all(commands);
+  for (const command of commands) {
+    await invokeDesktopCommand("setup_default_provider", command);
+  }
 }
 
 export function Sub2apiDesktopAuthBridge(): null {
   const queryClient = useQueryClient();
-  const { login } = useSub2APIAuth();
+  const { login, getAccessToken } = useSub2APIAuth();
   const loginRef = useRef(login);
   loginRef.current = login;
+  const getAccessTokenRef = useRef(getAccessToken);
+  getAccessTokenRef.current = getAccessToken;
   const queryClientRef = useRef(queryClient);
   queryClientRef.current = queryClient;
 
@@ -112,7 +290,7 @@ export function Sub2apiDesktopAuthBridge(): null {
         endpoint: session.endpoint,
       });
       try {
-        await configureMissingManagedRoutes(session);
+        await configureMissingManagedRoutes(session, () => getAccessTokenRef.current());
       } catch (error) {
         console.error("[sub2api-desktop-auth-bridge] auto-route setup failed:", error);
         Alert.alert(
