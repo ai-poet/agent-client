@@ -4,15 +4,15 @@ import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { getSessionInfo } from "@anthropic-ai/claude-agent-sdk";
+import { listSessions } from "@anthropic-ai/claude-agent-sdk";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { claudeProjectDir } from "./project-dir.js";
 
-// Parity oracle: the Claude SDK's getSessionInfo({ dir }) canonicalizes the
-// given dir with the SDK's own encoder and looks for `<sessionId>.jsonl` under
-// that path. If we write a session file at the path our function computes and
-// the SDK finds it, our encoding matches theirs for that input.
+// Parity oracle: the Claude SDK's listSessions({ dir }) uses the same project
+// directory resolution as getSessionMessages/session loading. If we write a
+// session file at the path our function computes and listSessions can find it
+// for that directory, our encoding matches theirs for that input.
 
 const workspaceRoot = join(homedir(), ".paseo-claude-parity-tests");
 const tmpWorkspaceRoot = join(tmpdir(), "paseo-claude-parity");
@@ -97,8 +97,8 @@ describe("claudeProjectDir parity with Claude Agent SDK", () => {
       await writeFile(sessionFile, '{"type":"summary","summary":"parity"}\n');
       createdSessionFiles.push(sessionFile);
 
-      const info = await getSessionInfo(sessionId, { dir: cwd });
-      expect(info?.sessionId).toBe(sessionId);
+      const sessions = await listSessions({ dir: cwd });
+      expect(sessions.some((session) => session.sessionId === sessionId)).toBe(true);
     });
   }
 });

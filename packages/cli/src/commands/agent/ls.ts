@@ -150,9 +150,6 @@ export function buildAgentLsFetchOptions(
   }
 
   const fetchOptions: FetchAgentsOptions = {};
-  if (!options.all) {
-    fetchOptions.scope = "active";
-  }
   if (Object.keys(daemonFilter).length > 0) {
     fetchOptions.filter = daemonFilter;
   }
