@@ -15,6 +15,8 @@ function resolveDesktopBrandingFromEnv(env = process.env) {
     desktopIconMac: trimToNull(env.PASEO_DESKTOP_ICON_MAC) ?? "assets/icon.icns",
     desktopIconWin: trimToNull(env.PASEO_DESKTOP_ICON_WIN) ?? "assets/icon.ico",
     desktopIconLinux: trimToNull(env.PASEO_DESKTOP_ICON_LINUX) ?? "assets",
+    desktopUpdateOwner: trimToNull(env.PASEO_DESKTOP_UPDATE_OWNER) ?? "ai-poet",
+    desktopUpdateRepo: trimToNull(env.PASEO_DESKTOP_UPDATE_REPO) ?? "paseo",
   };
 }
 

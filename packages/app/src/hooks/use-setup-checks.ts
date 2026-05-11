@@ -199,6 +199,38 @@ export function getMissingCliDependencyNames(status: ModelCliRuntimeStatus): str
   return missing;
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function stripDesktopIpcPrefix(message: string): string {
+  return message
+    .replace(/^Error invoking remote method 'paseo:invoke':\s*/i, "")
+    .replace(/^Error:\s*/i, "")
+    .trim();
+}
+
+export function formatCliInstallFailureMessage(
+  error: unknown,
+  status: ModelCliRuntimeStatus | null,
+): string {
+  const missing = status ? getMissingCliDependencyNames(status) : [];
+  const cleanedMessage = stripDesktopIpcPrefix(getErrorMessage(error));
+  const baseMessage = cleanedMessage.startsWith("Install failed")
+    ? cleanedMessage
+    : "Install failed. Please retry or install manually.";
+
+  if (missing.length === 0) {
+    return baseMessage;
+  }
+
+  if (/\bMissing:/i.test(baseMessage)) {
+    return baseMessage;
+  }
+
+  return `${baseMessage.replace(/\.$/, "")}. Missing: ${missing.join(", ")}`;
+}
+
 export function useSetupChecks(): UseSetupChecksReturn {
   const router = useRouter();
   const { settings } = useAppSettings();
@@ -418,8 +450,7 @@ export function useSetupChecks(): UseSetupChecksReturn {
             } catch (err) {
               updateCheck("cliConfig", {
                 status: "failed",
-                error:
-                  "Install failed. Please check your network connection or install the missing tools manually.",
+                error: formatCliInstallFailureMessage(err, cliStatusRef.current),
                 fixLabel: "Retry",
               });
             }

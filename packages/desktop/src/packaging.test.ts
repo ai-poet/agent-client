@@ -17,6 +17,8 @@ const BRAND_ENV_KEYS = [
   "PASEO_DESKTOP_ICON_MAC",
   "PASEO_DESKTOP_ICON_WIN",
   "PASEO_DESKTOP_ICON_LINUX",
+  "PASEO_DESKTOP_UPDATE_OWNER",
+  "PASEO_DESKTOP_UPDATE_REPO",
 ];
 
 function loadBuilderConfig(env: NodeJS.ProcessEnv = {}) {
@@ -42,6 +44,11 @@ function loadBuilderConfig(env: NodeJS.ProcessEnv = {}) {
       mac: {
         artifactName?: string;
         icon: string;
+      };
+      publish: {
+        provider: string;
+        owner: string;
+        repo: string;
       };
     };
   } finally {
@@ -71,6 +78,11 @@ describe("desktop packaging", () => {
     expect(config.executableName).toBe("Paseo");
     expect(config.mac.artifactName).toBe("Paseo-${version}-${arch}.${ext}");
     expect(config.win.artifactName).toBe("Paseo-${version}-${arch}.${ext}");
+    expect(config.publish).toMatchObject({
+      provider: "github",
+      owner: "ai-poet",
+      repo: "paseo",
+    });
   });
 
   it("uses CyberAICoding package identity and icons from env", () => {
@@ -79,6 +91,8 @@ describe("desktop packaging", () => {
       PASEO_DESKTOP_APP_ID: "com.cyberaicoding.desktop",
       PASEO_DESKTOP_ICON_MAC: "assets/cybercode-icon.icns",
       PASEO_DESKTOP_ICON_WIN: "assets/cybercode-icon.ico",
+      PASEO_DESKTOP_UPDATE_OWNER: "ai-poet",
+      PASEO_DESKTOP_UPDATE_REPO: "paseo",
     });
 
     expect(config.appId).toBe("com.cyberaicoding.desktop");
@@ -88,6 +102,8 @@ describe("desktop packaging", () => {
     expect(config.win.icon).toBe("assets/cybercode-icon.ico");
     expect(config.mac.artifactName).toBe("CyberAICoding-${version}-${arch}.${ext}");
     expect(config.win.artifactName).toBe("CyberAICoding-${version}-${arch}.${ext}");
+    expect(config.publish.owner).toBe("ai-poet");
+    expect(config.publish.repo).toBe("paseo");
   });
 
   it("uses CheapRouter package identity and icons from env", () => {

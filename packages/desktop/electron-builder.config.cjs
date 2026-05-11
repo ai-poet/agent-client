@@ -20,8 +20,8 @@ module.exports = {
   ],
   publish: {
     provider: "github",
-    owner: "getpaseo",
-    repo: "paseo",
+    owner: brand.desktopUpdateOwner,
+    repo: brand.desktopUpdateRepo,
   },
   mac: {
     artifactName,

@@ -9,6 +9,7 @@ export const CODEX_PACKAGE_NAME = "@openai/codex";
 export const CLAUDE_CODE_PACKAGE_NAME = "@anthropic-ai/claude-code";
 const WINDOWS_NODE_MIRROR_URL = "https://registry.npmmirror.com/-/binary/node/latest-v22.x/";
 const WINDOWS_GIT_MIRROR_URL = "https://registry.npmmirror.com/-/binary/git-for-windows/";
+const NPMMIRROR_REGISTRY_URL = "https://registry.npmmirror.com";
 const WINDOWS_GIT_WINGET_PACKAGE_ID = "Git.Git";
 const WINDOWS_GIT_DIRECT_DOWNLOAD_URL =
   "https://github.com/git-for-windows/git/releases/latest/download/Git-64-bit.exe";
@@ -72,6 +73,31 @@ export interface MirrorDirectoryEntry {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function simplifyInstallErrorMessage(message: string): string {
+  const normalized = message.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 180) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 177).trimEnd()}...`;
+}
+
+function getMissingRuntimeDependencyNames(status: ModelCliRuntimeStatus): string[] {
+  const missing: string[] = [];
+  if (!status.git.installed) missing.push("Git Bash");
+  if (!status.node.installed || !status.node.satisfies) missing.push("Node.js 22");
+  if (!status.claude.installed) missing.push("Claude Code");
+  if (!status.codex.installed) missing.push("Codex");
+  return missing;
+}
+
+async function buildInstallFailureError(error: unknown): Promise<Error> {
+  const status = await getModelCliRuntimeStatus().catch(() => null);
+  const missing = status ? getMissingRuntimeDependencyNames(status) : [];
+  const message = simplifyInstallErrorMessage(getErrorMessage(error));
+  const missingText = missing.length > 0 ? ` Missing: ${missing.join(", ")}` : "";
+  return new Error(`Install failed: ${message}${missingText}`);
 }
 
 function trimToNull(value: string | null | undefined): string | null {
@@ -367,16 +393,27 @@ function quotePowerShellString(value: string): string {
 
 export function buildWindowsNodeDirectInstallCommand(installerUrl: string): string {
   const quotedUrl = quotePowerShellString(installerUrl);
-  return `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $installerUrl=${quotedUrl}; $installerPath=Join-Path $env:TEMP ('paseo-node-installer-' + [Guid]::NewGuid().ToString('N') + '.msi'); Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing; $process=Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i',$installerPath,'/qn','/norestart' -Wait -PassThru; if ($process.ExitCode -ne 0) { throw ('Node.js installer failed with exit code ' + $process.ExitCode) }; Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue;"`;
+  return `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $installerUrl=${quotedUrl}; $installerPath=Join-Path $env:TEMP ('paseo-node-installer-' + [Guid]::NewGuid().ToString('N') + '.msi'); try { Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 60; $process=Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i',$installerPath,'/qn','/norestart' -Wait -PassThru; if ($process.ExitCode -ne 0) { throw ('Node.js installer failed with exit code ' + $process.ExitCode) } } catch { throw ('Node.js mirror installer failed: ' + $_.Exception.Message) } finally { Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue }"`;
 }
 
 export function buildWindowsGitBashMirrorInstallCommand(installerUrl: string): string {
   const quotedUrl = quotePowerShellString(installerUrl);
-  return `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $installerUrl=${quotedUrl}; $installerPath=Join-Path $env:TEMP ('paseo-git-installer-' + [Guid]::NewGuid().ToString('N') + '.exe'); Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing; $process=Start-Process -FilePath $installerPath -ArgumentList '/VERYSILENT','/NORESTART','/SP-','/NOCANCEL' -Wait -PassThru; if ($process.ExitCode -ne 0) { throw ('Git for Windows installer failed with exit code ' + $process.ExitCode) }; Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue;"`;
+  return `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $installerUrl=${quotedUrl}; $installerPath=Join-Path $env:TEMP ('paseo-git-installer-' + [Guid]::NewGuid().ToString('N') + '.exe'); try { Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 60; $process=Start-Process -FilePath $installerPath -ArgumentList '/VERYSILENT','/NORESTART','/SP-','/NOCANCEL' -Wait -PassThru; if ($process.ExitCode -ne 0) { throw ('Git for Windows installer failed with exit code ' + $process.ExitCode) } } catch { throw ('Git mirror installer failed: ' + $_.Exception.Message) } finally { Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue }"`;
 }
 
 export function buildWindowsGitBashDirectInstallCommand(): string {
   return buildWindowsGitBashMirrorInstallCommand(WINDOWS_GIT_DIRECT_DOWNLOAD_URL);
+}
+
+export function buildWindowsNpmPackageInstallCommand(
+  packageName: string,
+  registry: "npmmirror" | "official",
+): string {
+  const baseCommand = `npm install -g ${packageName}@latest`;
+  if (registry === "official") {
+    return baseCommand;
+  }
+  return `${baseCommand} --registry=${NPMMIRROR_REGISTRY_URL} --fetch-retries=2 --fetch-timeout=60000`;
 }
 
 function parseVersionParts(value: string): number[] {
@@ -843,6 +880,30 @@ async function installPackageIntoRuntime(
   options?: ShellOptions,
 ): Promise<string> {
   const runtimeOptions = resolvePackageInstallShellOptions(manager, options);
+  if (process.platform === "win32" && manager === "shell") {
+    const outputs: string[] = [];
+    const errors: string[] = [];
+    for (const registry of ["npmmirror", "official"] as const) {
+      try {
+        const result = await runShell(
+          buildWindowsNpmPackageInstallCommand(packageName, registry),
+          runtimeOptions,
+        );
+        outputs.push([result.stdout, result.stderr].filter(Boolean).join("\n").trim());
+        return outputs.filter(Boolean).join("\n").trim();
+      } catch (error) {
+        const label = registry === "npmmirror" ? "npmmirror npm registry" : "npm official registry";
+        errors.push(`${label}: ${getErrorMessage(error)}`);
+        log.warn("[model-cli-manager] npm package install failed", {
+          packageName,
+          registry,
+          error: getErrorMessage(error),
+        });
+      }
+    }
+    throw new Error(`Failed to install ${packageName}. ${errors.join(" ")}`);
+  }
+
   const result = await runShell(
     wrapWithNode22Runtime(`npm install -g ${packageName}@latest`, manager),
     runtimeOptions,
@@ -888,30 +949,36 @@ export async function installAllModelClis(): Promise<ModelCliInstallResult> {
   const manager = await resolveRuntimeManager();
   const outputs: string[] = [];
 
-  if (process.platform === "win32") {
-    outputs.push(await installWindowsGitBash());
+  try {
+    if (process.platform === "win32") {
+      outputs.push(await installWindowsGitBash());
+    }
+
+    const gitBashPath = await resolveWindowsGitBashPath();
+    const nodeStatus = await readNodeStatus(manager, { gitBashPath });
+
+    if (!nodeStatus.satisfies) {
+      outputs.push(await installNode22IntoManager(manager, { gitBashPath }));
+    }
+    outputs.push(await installPackageIntoRuntime(CODEX_PACKAGE_NAME, manager, { gitBashPath }));
+    outputs.push(
+      await installPackageIntoRuntime(CLAUDE_CODE_PACKAGE_NAME, manager, { gitBashPath }),
+    );
+
+    const status = await getModelCliRuntimeStatus();
+    log.info("[model-cli-manager] installed runtime stack", {
+      gitVersion: status.git.version,
+      gitBashPath: status.git.bashPath,
+      nodeVersion: status.node.version,
+      codexVersion: status.codex.version,
+      claudeVersion: status.claude.version,
+    });
+
+    return {
+      status,
+      output: outputs.filter(Boolean).join("\n").trim(),
+    };
+  } catch (error) {
+    throw await buildInstallFailureError(error);
   }
-
-  const gitBashPath = await resolveWindowsGitBashPath();
-  const nodeStatus = await readNodeStatus(manager, { gitBashPath });
-
-  if (!nodeStatus.satisfies) {
-    outputs.push(await installNode22IntoManager(manager, { gitBashPath }));
-  }
-  outputs.push(await installPackageIntoRuntime(CODEX_PACKAGE_NAME, manager, { gitBashPath }));
-  outputs.push(await installPackageIntoRuntime(CLAUDE_CODE_PACKAGE_NAME, manager, { gitBashPath }));
-
-  const status = await getModelCliRuntimeStatus();
-  log.info("[model-cli-manager] installed runtime stack", {
-    gitVersion: status.git.version,
-    gitBashPath: status.git.bashPath,
-    nodeVersion: status.node.version,
-    codexVersion: status.codex.version,
-    claudeVersion: status.claude.version,
-  });
-
-  return {
-    status,
-    output: outputs.filter(Boolean).join("\n").trim(),
-  };
 }
