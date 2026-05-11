@@ -6,6 +6,7 @@ import {
   buildWindowsGitBashMirrorInstallCommand,
   buildWindowsNodeDirectInstallCommand,
   buildWindowsGitBashScoopInstallCommand,
+  buildWindowsNpmPackageInstallCommand,
   REQUIRED_NODE_MAJOR,
   buildWindowsCliExecutableCandidates,
   buildWindowsCliSearchPath,
@@ -249,5 +250,18 @@ describe("model-cli-manager", () => {
     expect(command).toContain("/VERYSILENT");
     expect(command).toContain("Invoke-WebRequest");
     expect(command).toContain("Start-Process");
+  });
+
+  it("builds Windows npm package install commands with npmmirror first", () => {
+    const mirrorCommand = buildWindowsNpmPackageInstallCommand("@openai/codex", "npmmirror");
+    expect(mirrorCommand).toBe(
+      "npm install -g @openai/codex@latest --registry=https://registry.npmmirror.com --fetch-retries=2 --fetch-timeout=60000",
+    );
+
+    const officialCommand = buildWindowsNpmPackageInstallCommand(
+      "@anthropic-ai/claude-code",
+      "official",
+    );
+    expect(officialCommand).toBe("npm install -g @anthropic-ai/claude-code@latest");
   });
 });

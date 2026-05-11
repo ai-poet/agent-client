@@ -7,6 +7,7 @@ vi.mock("expo-router", () => ({
 }));
 import {
   describeManagedCloudAvailability,
+  formatCliInstallFailureMessage,
   getMissingCliDependencyNames,
   summarizeManagedCloudAvailability,
 } from "@/hooks/use-setup-checks";
@@ -129,5 +130,91 @@ describe("use-setup-checks availability helpers", () => {
       "Claude Code",
       "Codex",
     ]);
+  });
+
+  it("formats install failures with missing tools and a concise error", () => {
+    const status: ModelCliRuntimeStatus = {
+      git: {
+        installed: true,
+        version: "2.54.0",
+        bashPath: "C:/Program Files/Git/bin/bash.exe",
+        error: null,
+      },
+      node: {
+        installed: true,
+        version: "22.20.0",
+        major: 22,
+        npmVersion: "10.9.0",
+        satisfies: true,
+        manager: "shell",
+        error: null,
+      },
+      claude: {
+        command: "claude",
+        packageName: "@anthropic-ai/claude-code",
+        installed: false,
+        version: null,
+        error: "Claude Code was not found.",
+      },
+      codex: {
+        command: "codex",
+        packageName: "@openai/codex",
+        installed: true,
+        version: "0.130.0",
+        error: null,
+      },
+    };
+
+    expect(
+      formatCliInstallFailureMessage(
+        new Error(
+          "Error invoking remote method 'paseo:invoke': Error: Install failed: npmmirror npm registry timed out while installing Claude Code.",
+        ),
+        status,
+      ),
+    ).toBe(
+      "Install failed: npmmirror npm registry timed out while installing Claude Code. Missing: Claude Code",
+    );
+  });
+
+  it("does not append stale missing tools when the desktop error already includes them", () => {
+    const staleStatus: ModelCliRuntimeStatus = {
+      git: {
+        installed: false,
+        version: null,
+        bashPath: null,
+        error: "Git Bash was not found.",
+      },
+      node: {
+        installed: false,
+        version: null,
+        major: null,
+        npmVersion: null,
+        satisfies: false,
+        manager: "shell",
+        error: "Node.js was not found.",
+      },
+      claude: {
+        command: "claude",
+        packageName: "@anthropic-ai/claude-code",
+        installed: false,
+        version: null,
+        error: "Claude Code was not found.",
+      },
+      codex: {
+        command: "codex",
+        packageName: "@openai/codex",
+        installed: false,
+        version: null,
+        error: "Codex was not found.",
+      },
+    };
+
+    expect(
+      formatCliInstallFailureMessage(
+        new Error("Install failed: npm official registry timed out. Missing: Claude Code"),
+        staleStatus,
+      ),
+    ).toBe("Install failed: npm official registry timed out. Missing: Claude Code");
   });
 });

@@ -5,6 +5,8 @@ export interface DesktopBranding {
   desktopIconMac: string;
   desktopIconWin: string;
   desktopIconLinux: string;
+  desktopUpdateOwner: string;
+  desktopUpdateRepo: string;
 }
 
 function trimToNull(value: string | undefined): string | null {
@@ -24,5 +26,7 @@ export function getDesktopBranding(): DesktopBranding {
     desktopIconMac: trimToNull(process.env.PASEO_DESKTOP_ICON_MAC) ?? "assets/icon.icns",
     desktopIconWin: trimToNull(process.env.PASEO_DESKTOP_ICON_WIN) ?? "assets/icon.ico",
     desktopIconLinux: trimToNull(process.env.PASEO_DESKTOP_ICON_LINUX) ?? "assets",
+    desktopUpdateOwner: trimToNull(process.env.PASEO_DESKTOP_UPDATE_OWNER) ?? "ai-poet",
+    desktopUpdateRepo: trimToNull(process.env.PASEO_DESKTOP_UPDATE_REPO) ?? "paseo",
   };
 }
