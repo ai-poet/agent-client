@@ -675,6 +675,19 @@ export function buildWindowsNodeDirectInstallCommand(installerUrl: string): stri
   return `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $installerUrl=${quotedUrl}; $installerPath=Join-Path $env:TEMP ('paseo-node-installer-' + [Guid]::NewGuid().ToString('N') + '.msi'); $logPath=Join-Path $env:TEMP ('paseo-node-installer-' + [Guid]::NewGuid().ToString('N') + '.log'); try { Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 60; $process=Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i',$installerPath,'/qn','/norestart','/L*v',$logPath -Wait -PassThru; if ($process.ExitCode -ne 0) { throw ('Node.js installer failed with exit code ' + $process.ExitCode + '. Log: ' + $logPath) }; $nodePath='C:\\\\Program Files\\\\nodejs\\\\node.exe'; $npmPath='C:\\\\Program Files\\\\nodejs\\\\npm.cmd'; if (Test-Path $nodePath) { & $nodePath --version } else { node --version }; if (Test-Path $npmPath) { & $npmPath --version } else { npm --version } } catch { throw ('Node.js mirror installer failed: ' + $_.Exception.Message) } finally { Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue }"`;
 }
 
+export function buildWindowsNodeZipExtractPowerShellArgs(
+  zipPath: string,
+  destinationPath: string,
+): string[] {
+  return [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    `$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath ${quotePowerShellString(zipPath)} -DestinationPath ${quotePowerShellString(destinationPath)} -Force`,
+  ];
+}
+
 export function buildMacOSNodeDirectInstallCommand(tarballUrl: string, installDir: string): string {
   const quotedUrl = quoteShellString(tarballUrl);
   const quotedInstallDir = quoteShellString(installDir);
@@ -834,15 +847,7 @@ async function installWindowsNodeZipFromUrl(zipUrl: string): Promise<string> {
     try {
       await execFileForInstall(
         "powershell.exe",
-        [
-          "-NoProfile",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-Command",
-          "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force",
-          zipPath,
-          stagingDir,
-        ],
+        buildWindowsNodeZipExtractPowerShellArgs(zipPath, stagingDir),
         buildWindowsCliSearchEnv(),
       );
     } catch (error) {

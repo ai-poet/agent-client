@@ -8,6 +8,7 @@ import {
   buildWindowsGitInstallFailureMessage,
   buildMacOSNodeDirectInstallCommand,
   buildWindowsNodeDirectInstallCommand,
+  buildWindowsNodeZipExtractPowerShellArgs,
   buildWindowsGitBashScoopInstallCommand,
   buildWindowsNpmPackageInstallCommand,
   buildWindowsUserPathValue,
@@ -259,6 +260,23 @@ describe("model-cli-manager", () => {
     expect(url).toBe(
       "https://registry.npmmirror.com/-/binary/node/latest-v22.x/node-v22.12.0-win-x64.zip",
     );
+  });
+
+  it("builds Node zip extraction command with literal paths embedded", () => {
+    const args = buildWindowsNodeZipExtractPowerShellArgs(
+      "C:\\Users\\alice\\AppData\\Local\\Temp\\paseo node\\node22.zip",
+      "C:\\Users\\alice\\AppData\\Local\\Temp\\paseo node",
+    );
+
+    expect(args).toEqual([
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath 'C:\\Users\\alice\\AppData\\Local\\Temp\\paseo node\\node22.zip' -DestinationPath 'C:\\Users\\alice\\AppData\\Local\\Temp\\paseo node' -Force",
+    ]);
+    expect(args.join(" ")).not.toContain("$args[0]");
+    expect(args.join(" ")).not.toContain("$args[1]");
   });
 
   it("resolves the app-managed Windows Node directory under Paseo home", () => {
