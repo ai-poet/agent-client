@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import log from "electron-log/main";
-import { execCommand } from "@getpaseo/server";
+import { execCommand, resolvePaseoHome } from "@getpaseo/server";
+import { patchClaudeCodeGitBashPathForWindows } from "../features/provider-switch.js";
 
 export const REQUIRED_NODE_MAJOR = 22;
 export const CODEX_PACKAGE_NAME = "@openai/codex";
@@ -214,6 +215,15 @@ async function resolveWindowsGitBashPath(): Promise<string | null> {
   }
 
   const fallbackCandidates = [
+    path.join(resolveWindowsPaseoHome(process.env), "toolchains", "PortableGit", "bin", "bash.exe"),
+    path.join(
+      resolveWindowsPaseoHome(process.env),
+      "toolchains",
+      "PortableGit",
+      "usr",
+      "bin",
+      "bash.exe",
+    ),
     path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "bin", "bash.exe"),
     path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "usr", "bin", "bash.exe"),
     path.join(
@@ -260,7 +270,8 @@ export function isWindowsGitBashPath(value: string | null | undefined): boolean 
     normalized.endsWith("/windows/system32/bash.exe") ||
     normalized.endsWith("/windows/syswow64/bash.exe") ||
     normalized.includes("/windows/system32/wsl") ||
-    normalized.includes("/windows/syswow64/wsl")
+    normalized.includes("/windows/syswow64/wsl") ||
+    normalized.includes("/mingit-")
   ) {
     return false;
   }
@@ -268,6 +279,8 @@ export function isWindowsGitBashPath(value: string | null | undefined): boolean 
   return (
     normalized.endsWith("/git/bin/bash.exe") ||
     normalized.endsWith("/git/usr/bin/bash.exe") ||
+    normalized.endsWith("/portablegit/bin/bash.exe") ||
+    normalized.endsWith("/portablegit/usr/bin/bash.exe") ||
     normalized.endsWith("/scoop/apps/git/current/bin/bash.exe") ||
     normalized.endsWith("/scoop/apps/git/current/usr/bin/bash.exe")
   );
@@ -289,10 +302,24 @@ function appendUniquePath(paths: string[], value: string | null | undefined): vo
   paths.push(trimmed);
 }
 
+function resolveWindowsPaseoHome(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.PASEO_HOME?.trim();
+  if (configured) {
+    return configured;
+  }
+  return resolvePaseoHome(env);
+}
+
 export function buildWindowsCliSearchPath(env: NodeJS.ProcessEnv = process.env): string {
   const paths: string[] = [];
   appendUniquePath(paths, env.APPDATA ? path.win32.join(env.APPDATA, "npm") : null);
   appendUniquePath(paths, env.ProgramFiles ? path.win32.join(env.ProgramFiles, "nodejs") : null);
+  appendUniquePath(paths, path.win32.join(resolveWindowsPaseoHome(env), "toolchains", "PortableGit", "cmd"));
+  appendUniquePath(paths, path.win32.join(resolveWindowsPaseoHome(env), "toolchains", "PortableGit", "bin"));
+  appendUniquePath(
+    paths,
+    path.win32.join(resolveWindowsPaseoHome(env), "toolchains", "PortableGit", "usr", "bin"),
+  );
   appendUniquePath(
     paths,
     env.ProgramFiles ? path.win32.join(env.ProgramFiles, "Git", "cmd") : null,
@@ -401,6 +428,15 @@ export function buildWindowsGitBashMirrorInstallCommand(installerUrl: string): s
   return `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $installerUrl=${quotedUrl}; $installerPath=Join-Path $env:TEMP ('paseo-git-installer-' + [Guid]::NewGuid().ToString('N') + '.exe'); try { Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 60; $process=Start-Process -FilePath $installerPath -ArgumentList '/VERYSILENT','/NORESTART','/SP-','/NOCANCEL' -Wait -PassThru; if ($process.ExitCode -ne 0) { throw ('Git for Windows installer failed with exit code ' + $process.ExitCode) } } catch { throw ('Git mirror installer failed: ' + $_.Exception.Message) } finally { Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue }"`;
 }
 
+export function buildWindowsGitBashPortableInstallCommand(
+  installerUrl: string,
+  installDir: string,
+): string {
+  const quotedUrl = quotePowerShellString(installerUrl);
+  const quotedInstallDir = quotePowerShellString(installDir);
+  return `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $installerUrl=${quotedUrl}; $installDir=${quotedInstallDir}; $installerPath=Join-Path $env:TEMP ('paseo-portable-git-' + [Guid]::NewGuid().ToString('N') + '.7z.exe'); try { if (Test-Path $installDir) { Remove-Item -Path $installDir -Recurse -Force }; New-Item -ItemType Directory -Path $installDir -Force | Out-Null; Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 60; $process=Start-Process -FilePath $installerPath -ArgumentList '-y',('-o' + $installDir) -Wait -PassThru; if ($process.ExitCode -ne 0) { throw ('PortableGit extractor failed with exit code ' + $process.ExitCode) }; $gitBash=Join-Path $installDir 'git-bash.exe'; $bash=Join-Path $installDir 'bin\\\\bash.exe'; if ((-not (Test-Path $gitBash)) -and (-not (Test-Path $bash))) { throw 'PortableGit extracted but Git Bash was not found' } } catch { throw ('PortableGit mirror install failed: ' + $_.Exception.Message) } finally { Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue }"`;
+}
+
 export function buildWindowsGitBashDirectInstallCommand(): string {
   return buildWindowsGitBashMirrorInstallCommand(WINDOWS_GIT_DIRECT_DOWNLOAD_URL);
 }
@@ -489,6 +525,40 @@ export function resolveLatestGitForWindowsInstallerUrlFromMirror(
   return installerCandidates[0] ?? null;
 }
 
+export function resolveLatestGitForWindowsPortableUrlFromMirror(
+  releaseDirs: MirrorDirectoryEntry[],
+  releaseEntries: MirrorDirectoryEntry[],
+): string | null {
+  const latestRelease = releaseDirs
+    .map((entry) => {
+      const name = entry.name ?? "";
+      const version = parseGitForWindowsReleaseVersion(name);
+      if (!version || entry.type !== "dir") {
+        return null;
+      }
+      return { version, url: entry.url ?? "" };
+    })
+    .filter((entry): entry is { version: string; url: string } => entry !== null)
+    .sort((left, right) => compareVersionStrings(right.version, left.version))[0];
+
+  const portableCandidates = releaseEntries
+    .filter((entry) => {
+      const name = entry.name ?? "";
+      if (
+        entry.type === "dir" ||
+        !entry.url ||
+        !/^PortableGit-\d+\.\d+\.\d+-64-bit\.7z\.exe$/i.test(name)
+      ) {
+        return false;
+      }
+      return !latestRelease?.url || entry.url.startsWith(latestRelease.url);
+    })
+    .map((entry) => entry.url!)
+    .sort();
+
+  return portableCandidates[0] ?? null;
+}
+
 async function fetchMirrorEntries(url: string): Promise<MirrorDirectoryEntry[]> {
   const response = await fetch(url);
   if (!response.ok) {
@@ -534,6 +604,40 @@ async function resolveLatestGitForWindowsInstallerUrl(): Promise<string | null> 
       }
     } catch (error) {
       log.warn("[model-cli-manager] failed to read Git mirror release", {
+        url: candidate.entry.url,
+        error: getErrorMessage(error),
+      });
+    }
+  }
+
+  return null;
+}
+
+async function resolveLatestGitForWindowsPortableUrl(): Promise<string | null> {
+  const releaseDirs = await fetchMirrorEntries(WINDOWS_GIT_MIRROR_URL);
+  const sortedDirs = releaseDirs
+    .map((entry) => {
+      const version = parseGitForWindowsReleaseVersion(entry.name ?? "");
+      if (!version || entry.type !== "dir" || !entry.url) {
+        return null;
+      }
+      return { entry, version };
+    })
+    .filter((entry): entry is { entry: MirrorDirectoryEntry; version: string } => entry !== null)
+    .sort((left, right) => compareVersionStrings(right.version, left.version));
+
+  for (const candidate of sortedDirs) {
+    try {
+      const releaseEntries = await fetchMirrorEntries(candidate.entry.url!);
+      const portableUrl = resolveLatestGitForWindowsPortableUrlFromMirror(
+        [candidate.entry],
+        releaseEntries,
+      );
+      if (portableUrl) {
+        return portableUrl;
+      }
+    } catch (error) {
+      log.warn("[model-cli-manager] failed to read PortableGit mirror release", {
         url: candidate.entry.url,
         error: getErrorMessage(error),
       });
@@ -623,12 +727,19 @@ async function readGitStatus(): Promise<GitRuntimeStatus> {
   }
 
   const env = buildWindowsCliSearchEnv();
-  const [gitProbe, bashPath] = await Promise.all([
+  const bashPath = await resolveWindowsGitBashPath();
+  const [gitProbe, bashProbe] = await Promise.all([
     tryRunShell("git --version", { forceWindowsCmd: true, env }),
-    resolveWindowsGitBashPath(),
+    bashPath
+      ? tryRunShell("echo ok && git --version", {
+          gitBashPath: bashPath,
+          env,
+        })
+      : Promise.resolve(null),
   ]);
   const version = parseSemanticVersion(gitProbe?.stdout ?? gitProbe?.stderr ?? null);
-  const installed = Boolean(version && bashPath);
+  const bashVersion = parseSemanticVersion(bashProbe?.stdout ?? bashProbe?.stderr ?? null);
+  const installed = Boolean(version && bashPath && bashVersion);
 
   return {
     installed,
@@ -639,6 +750,9 @@ async function readGitStatus(): Promise<GitRuntimeStatus> {
       : [
           version ? null : "Git was not found in the Windows PATH.",
           bashPath ? null : "Git Bash was not found.",
+          bashPath && !bashVersion
+            ? "Git Bash was found but could not execute git --version."
+            : null,
         ]
           .filter((entry): entry is string => entry !== null)
           .join(" "),
@@ -795,6 +909,33 @@ async function installWindowsGitBash(): Promise<string> {
   const errors: string[] = [];
 
   try {
+    const portableUrl = await resolveLatestGitForWindowsPortableUrl();
+    if (!portableUrl) {
+      throw new Error("No PortableGit 64-bit full distribution was found on npmmirror.");
+    }
+    const installDir = path.join(resolveWindowsPaseoHome(process.env), "toolchains", "PortableGit");
+    const portableResult = await runShell(
+      buildWindowsGitBashPortableInstallCommand(portableUrl, installDir),
+      {
+        forceWindowsCmd: true,
+        env: buildWindowsCliSearchEnv(),
+      },
+    );
+    outputs.push([portableResult.stdout, portableResult.stderr].filter(Boolean).join("\n").trim());
+  } catch (error) {
+    errors.push(`PortableGit npmmirror: ${getErrorMessage(error)}`);
+    log.warn("[model-cli-manager] mirrored PortableGit install failed", {
+      error: getErrorMessage(error),
+    });
+  }
+
+  let status = await readGitStatus();
+  if (status.installed) {
+    await patchClaudeCodeGitBashPathForWindows(status.bashPath);
+    return outputs.filter(Boolean).join("\n").trim();
+  }
+
+  try {
     const installerUrl = await resolveLatestGitForWindowsInstallerUrl();
     if (!installerUrl) {
       throw new Error("No Git for Windows 64-bit installer was found on npmmirror.");
@@ -811,7 +952,7 @@ async function installWindowsGitBash(): Promise<string> {
     });
   }
 
-  let status = await readGitStatus();
+  status = await readGitStatus();
   if (!status.installed && (await commandExists("winget"))) {
     try {
       const wingetResult = await runShell(buildWindowsGitBashInstallCommand(), {
@@ -843,6 +984,8 @@ async function installWindowsGitBash(): Promise<string> {
       `Git for Windows installation did not complete. ${errors.filter(Boolean).join(" ") || status.error || "Git Bash was not detected after installation."}`,
     );
   }
+
+  await patchClaudeCodeGitBashPathForWindows(status.bashPath);
 
   return outputs.filter(Boolean).join("\n").trim();
 }
@@ -955,6 +1098,7 @@ export async function installAllModelClis(): Promise<ModelCliInstallResult> {
     }
 
     const gitBashPath = await resolveWindowsGitBashPath();
+    await patchClaudeCodeGitBashPathForWindows(gitBashPath);
     const nodeStatus = await readNodeStatus(manager, { gitBashPath });
 
     if (!nodeStatus.satisfies) {

@@ -4,6 +4,7 @@ import {
   buildWindowsGitBashDirectInstallCommand,
   buildWindowsGitBashInstallCommand,
   buildWindowsGitBashMirrorInstallCommand,
+  buildWindowsGitBashPortableInstallCommand,
   buildWindowsNodeDirectInstallCommand,
   buildWindowsGitBashScoopInstallCommand,
   buildWindowsNpmPackageInstallCommand,
@@ -15,6 +16,7 @@ import {
   parseMajorVersion,
   parseSemanticVersion,
   resolveLatestGitForWindowsInstallerUrlFromMirror,
+  resolveLatestGitForWindowsPortableUrlFromMirror,
   resolveLatestNode22WindowsMsiUrlFromMirror,
   resolveCliStatusShellOptions,
   resolvePackageInstallShellOptions,
@@ -84,11 +86,17 @@ describe("model-cli-manager", () => {
     expect(isWindowsGitBashPath("C:/Windows/System32/bash.exe")).toBe(false);
     expect(isWindowsGitBashPath("C:\\Windows\\SysWOW64\\bash.exe")).toBe(false);
     expect(isWindowsGitBashPath("C:/Windows/System32/wsl.exe")).toBe(false);
+    expect(isWindowsGitBashPath("C:/Users/alice/.paseo/toolchains/mingit-2.54.0/bin/bash.exe")).toBe(
+      false,
+    );
   });
 
   it("accepts Git for Windows and Scoop Git Bash paths", () => {
     expect(isWindowsGitBashPath("C:/Program Files/Git/bin/bash.exe")).toBe(true);
     expect(isWindowsGitBashPath("C:/Program Files/Git/usr/bin/bash.exe")).toBe(true);
+    expect(isWindowsGitBashPath("C:/Users/alice/.paseo/toolchains/PortableGit/bin/bash.exe")).toBe(
+      true,
+    );
     expect(isWindowsGitBashPath("C:/Users/alice/scoop/apps/git/current/bin/bash.exe")).toBe(true);
   });
 
@@ -135,12 +143,16 @@ describe("model-cli-manager", () => {
       APPDATA: "C:\\Users\\alice\\AppData\\Roaming",
       ProgramFiles: "C:\\Program Files",
       "ProgramFiles(x86)": "C:\\Program Files (x86)",
+      PASEO_HOME: "C:\\Users\\alice\\.paseo",
       USERPROFILE: "C:\\Users\\alice",
     });
 
     expect(searchPath.split(";")).toEqual([
       "C:\\Users\\alice\\AppData\\Roaming\\npm",
       "C:\\Program Files\\nodejs",
+      "C:\\Users\\alice\\.paseo\\toolchains\\PortableGit\\cmd",
+      "C:\\Users\\alice\\.paseo\\toolchains\\PortableGit\\bin",
+      "C:\\Users\\alice\\.paseo\\toolchains\\PortableGit\\usr\\bin",
       "C:\\Program Files\\Git\\cmd",
       "C:\\Program Files\\Git\\bin",
       "C:\\Program Files\\Git\\usr\\bin",
@@ -211,6 +223,34 @@ describe("model-cli-manager", () => {
     );
   });
 
+  it("picks PortableGit full distribution and ignores MinGit from npmmirror release entries", () => {
+    const url = resolveLatestGitForWindowsPortableUrlFromMirror(
+      [
+        {
+          type: "dir",
+          name: "v2.54.0.windows.1/",
+          url: "https://registry.npmmirror.com/-/binary/git-for-windows/v2.54.0.windows.1/",
+        },
+      ],
+      [
+        {
+          type: "file",
+          name: "MinGit-2.54.0-64-bit.zip",
+          url: "https://registry.npmmirror.com/-/binary/git-for-windows/v2.54.0.windows.1/MinGit-2.54.0-64-bit.zip",
+        },
+        {
+          type: "file",
+          name: "PortableGit-2.54.0-64-bit.7z.exe",
+          url: "https://registry.npmmirror.com/-/binary/git-for-windows/v2.54.0.windows.1/PortableGit-2.54.0-64-bit.7z.exe",
+        },
+      ],
+    );
+
+    expect(url).toBe(
+      "https://registry.npmmirror.com/-/binary/git-for-windows/v2.54.0.windows.1/PortableGit-2.54.0-64-bit.7z.exe",
+    );
+  });
+
   it("builds silent direct installer commands for mirrored Node and Git installers", () => {
     const nodeCommand = buildWindowsNodeDirectInstallCommand(
       "https://registry.npmmirror.com/-/binary/node/latest-v22.x/node-v22.11.0-x64.msi",
@@ -228,6 +268,15 @@ describe("model-cli-manager", () => {
     expect(gitCommand).toContain("Invoke-WebRequest");
     expect(gitCommand).toContain("/VERYSILENT");
     expect(gitCommand).toContain("/NORESTART");
+
+    const portableGitCommand = buildWindowsGitBashPortableInstallCommand(
+      "https://registry.npmmirror.com/-/binary/git-for-windows/v2.54.0.windows.1/PortableGit-2.54.0-64-bit.7z.exe",
+      "C:\\Users\\alice\\.paseo\\toolchains\\PortableGit",
+    );
+    expect(portableGitCommand).toContain("PortableGit");
+    expect(portableGitCommand).toContain("-y");
+    expect(portableGitCommand).toContain("git-bash.exe");
+    expect(portableGitCommand).toContain("bin\\\\bash.exe");
   });
 
   it("builds the expected WinGet command for Git Bash auto-install", () => {

@@ -32,6 +32,7 @@ export type CodexWireApi = "responses";
 const PASEO_UPSTREAM_FORMAT_KEY = "PASEO_ANTHROPIC_UPSTREAM_FORMAT";
 const CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_KEY = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";
 const CLAUDE_CODE_ATTRIBUTION_HEADER_KEY = "CLAUDE_CODE_ATTRIBUTION_HEADER";
+const CLAUDE_CODE_GIT_BASH_PATH_KEY = "CLAUDE_CODE_GIT_BASH_PATH";
 const DEFAULT_CODEX_MODEL = "gpt-5.4";
 
 export interface StoredProvider {
@@ -665,10 +666,18 @@ function readString(value: unknown): string | null {
 export function buildClaudeSettings(
   provider: StoredProvider,
   existing: Record<string, unknown>,
+  options: { platform?: NodeJS.Platform; gitBashPath?: string | null } = {},
 ): Record<string, unknown> {
   const shouldUseMinimalClaudeEnv =
     provider.id === PASEO_MANAGED_CLAUDE_PROVIDER_ID ||
     (provider.isDefault && (provider.target === undefined || provider.target === "claude"));
+  const existingEnv = isRecord(existing.env) ? existing.env : {};
+  const windowsGitBashPath =
+    options.platform === "win32"
+      ? (readString(options.gitBashPath) ?? readString(existingEnv[CLAUDE_CODE_GIT_BASH_PATH_KEY]))
+      : null;
+  const windowsGitBashEnv =
+    windowsGitBashPath !== null ? { [CLAUDE_CODE_GIT_BASH_PATH_KEY]: windowsGitBashPath } : {};
 
   if (shouldUseMinimalClaudeEnv) {
     return {
@@ -677,12 +686,12 @@ export function buildClaudeSettings(
         ANTHROPIC_AUTH_TOKEN: provider.apiKey,
         [CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_KEY]: "1",
         [CLAUDE_CODE_ATTRIBUTION_HEADER_KEY]: "0",
+        ...windowsGitBashEnv,
       },
     };
   }
 
   const providerConfig = isRecord(provider.claudeConfig) ? provider.claudeConfig : {};
-  const existingEnv = isRecord(existing.env) ? existing.env : {};
   const providerEnv = isRecord(providerConfig.env) ? providerConfig.env : {};
   const defaultClaudeModel = readString(providerEnv.ANTHROPIC_MODEL) ?? DEFAULT_CLAUDE_MODEL;
   const defaultOpusModel =
@@ -697,6 +706,7 @@ export function buildClaudeSettings(
     ANTHROPIC_DEFAULT_OPUS_MODEL: defaultOpusModel,
     [CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_KEY]: "1",
     [CLAUDE_CODE_ATTRIBUTION_HEADER_KEY]: "0",
+    ...windowsGitBashEnv,
   };
   delete env[PASEO_UPSTREAM_FORMAT_KEY];
 
@@ -734,10 +744,41 @@ requires_openai_auth = true
 `;
 }
 
-async function writeClaudeSettings(provider: StoredProvider): Promise<void> {
-  const merged = buildClaudeSettings(provider, await readJsonObject(claudeSettingsPath()));
+async function writeClaudeSettings(
+  provider: StoredProvider,
+  options: { platform?: NodeJS.Platform; gitBashPath?: string | null } = {},
+): Promise<void> {
+  const merged = buildClaudeSettings(provider, await readJsonObject(claudeSettingsPath()), {
+    platform: options.platform ?? process.platform,
+    gitBashPath: options.gitBashPath,
+  });
   await atomicWriteText(claudeSettingsPath(), JSON.stringify(merged, null, 2));
   log.info("[provider-switch] wrote claude settings for provider:", provider.name);
+}
+
+export async function patchClaudeCodeGitBashPathForWindows(
+  gitBashPath: string | null,
+  options: { platform?: NodeJS.Platform } = {},
+): Promise<void> {
+  const platform = options.platform ?? process.platform;
+  if (platform !== "win32") {
+    return;
+  }
+  const trimmed = readString(gitBashPath);
+  if (!trimmed) {
+    return;
+  }
+  const existing = await readJsonObject(claudeSettingsPath());
+  const existingEnv = isRecord(existing.env) ? existing.env : {};
+  const next = {
+    ...existing,
+    env: {
+      ...existingEnv,
+      [CLAUDE_CODE_GIT_BASH_PATH_KEY]: trimmed,
+    },
+  };
+  await atomicWriteText(claudeSettingsPath(), JSON.stringify(next, null, 2));
+  log.info("[provider-switch] patched Claude Code Git Bash path");
 }
 
 async function writeCodexSettings(provider: StoredProvider): Promise<void> {
@@ -938,6 +979,8 @@ export async function setupDefaultProvider(params: {
   apiKey: string;
   name?: string;
   scope?: SetupManagedCloudScope;
+  platform?: NodeJS.Platform;
+  gitBashPath?: string | null;
 }): Promise<StoredProvider> {
   const scope: SetupManagedCloudScope = params.scope ?? "both";
   const baseName = params.name ?? DEFAULT_PROVIDER_NAME;
@@ -963,7 +1006,10 @@ export async function setupDefaultProvider(params: {
       });
       upsertProviderRow(store, claudeP);
       upsertProviderRow(store, codexP);
-      await writeClaudeSettings(claudeP);
+      await writeClaudeSettings(claudeP, {
+        platform: params.platform,
+        gitBashPath: params.gitBashPath,
+      });
       await writeCodexSettings(codexP);
       store.activeClaudeProviderId = PASEO_MANAGED_CLAUDE_PROVIDER_ID;
       store.activeCodexProviderId = PASEO_MANAGED_CODEX_PROVIDER_ID;
@@ -974,7 +1020,10 @@ export async function setupDefaultProvider(params: {
         name: claudeDisplayName,
       });
       upsertProviderRow(store, claudeP);
-      await writeClaudeSettings(claudeP);
+      await writeClaudeSettings(claudeP, {
+        platform: params.platform,
+        gitBashPath: params.gitBashPath,
+      });
       store.activeClaudeProviderId = PASEO_MANAGED_CLAUDE_PROVIDER_ID;
     } else {
       const codexP = buildPaseoManagedCodexProvider({

@@ -69,6 +69,82 @@ describe("setupDefaultProvider scoped writes", () => {
     expect(store.activeCodexProviderId).toBeNull();
   });
 
+  it("keeps Claude Code Git Bash path after Windows Claude key switches", async () => {
+    const mod = await import("./provider-switch");
+    const claudePath = join(mockedHome.dir, ".claude", "settings.json");
+    await mkdir(join(mockedHome.dir, ".claude"), { recursive: true });
+    await writeFile(
+      claudePath,
+      JSON.stringify({
+        env: {
+          CLAUDE_CODE_GIT_BASH_PATH: "C:\\Program Files\\Git\\bin\\bash.exe",
+        },
+      }),
+    );
+
+    await mod.setupDefaultProvider({
+      endpoint: "https://api.example.com",
+      apiKey: "sk-new-claude",
+      name: "Claude switch",
+      scope: "claude",
+      platform: "win32",
+    });
+
+    const claudeSettings = JSON.parse(await readFile(claudePath, "utf8")) as {
+      env?: Record<string, unknown>;
+    };
+    expect(claudeSettings.env?.ANTHROPIC_AUTH_TOKEN).toBe("sk-new-claude");
+    expect(claudeSettings.env?.CLAUDE_CODE_GIT_BASH_PATH).toBe(
+      "C:\\Program Files\\Git\\bin\\bash.exe",
+    );
+  });
+
+  it("safely patches Claude Code Git Bash path without touching Claude auth env", async () => {
+    const mod = await import("./provider-switch");
+    const claudePath = join(mockedHome.dir, ".claude", "settings.json");
+    await mkdir(join(mockedHome.dir, ".claude"), { recursive: true });
+    await writeFile(
+      claudePath,
+      JSON.stringify({
+        env: {
+          ANTHROPIC_AUTH_TOKEN: "sk-existing",
+          ANTHROPIC_BASE_URL: "https://api.example.com",
+        },
+        permissions: {
+          allow: ["Bash(git status)"],
+        },
+      }),
+    );
+
+    await mod.patchClaudeCodeGitBashPathForWindows("C:\\Program Files\\Git\\bin\\bash.exe", {
+      platform: "win32",
+    });
+
+    const claudeSettings = JSON.parse(await readFile(claudePath, "utf8")) as {
+      env?: Record<string, unknown>;
+      permissions?: Record<string, unknown>;
+    };
+    expect(claudeSettings.env).toEqual({
+      ANTHROPIC_AUTH_TOKEN: "sk-existing",
+      ANTHROPIC_BASE_URL: "https://api.example.com",
+      CLAUDE_CODE_GIT_BASH_PATH: "C:\\Program Files\\Git\\bin\\bash.exe",
+    });
+    expect(claudeSettings.permissions).toEqual({
+      allow: ["Bash(git status)"],
+    });
+  });
+
+  it("does not patch Claude Code Git Bash path on non-Windows platforms", async () => {
+    const mod = await import("./provider-switch");
+    const claudePath = join(mockedHome.dir, ".claude", "settings.json");
+
+    await mod.patchClaudeCodeGitBashPathForWindows("C:\\Program Files\\Git\\bin\\bash.exe", {
+      platform: "darwin",
+    });
+
+    expect(existsSync(claudePath)).toBe(false);
+  });
+
   it("writes only Codex config when scope is codex", async () => {
     const mod = await import("./provider-switch");
 
