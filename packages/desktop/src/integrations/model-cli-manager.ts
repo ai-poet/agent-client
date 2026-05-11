@@ -245,6 +245,23 @@ async function resolveWindowsGitBashPath(): Promise<string | null> {
       "bin",
       "bash.exe",
     ),
+    path.win32.join(
+      process.env.LOCALAPPDATA ??
+        path.win32.join(process.env.USERPROFILE ?? "", "AppData", "Local"),
+      "Programs",
+      "Git",
+      "bin",
+      "bash.exe",
+    ),
+    path.win32.join(
+      process.env.LOCALAPPDATA ??
+        path.win32.join(process.env.USERPROFILE ?? "", "AppData", "Local"),
+      "Programs",
+      "Git",
+      "usr",
+      "bin",
+      "bash.exe",
+    ),
     path.join(process.env.USERPROFILE ?? "", "scoop", "apps", "git", "current", "bin", "bash.exe"),
     path.join(
       process.env.USERPROFILE ?? "",
@@ -306,6 +323,22 @@ async function resolveWindowsGitExecutablePath(): Promise<string | null> {
     ),
     path.win32.join(
       process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)",
+      "Git",
+      "bin",
+      "git.exe",
+    ),
+    path.win32.join(
+      process.env.LOCALAPPDATA ??
+        path.win32.join(process.env.USERPROFILE ?? "", "AppData", "Local"),
+      "Programs",
+      "Git",
+      "cmd",
+      "git.exe",
+    ),
+    path.win32.join(
+      process.env.LOCALAPPDATA ??
+        path.win32.join(process.env.USERPROFILE ?? "", "AppData", "Local"),
+      "Programs",
       "Git",
       "bin",
       "git.exe",
@@ -427,6 +460,18 @@ export function buildWindowsCliSearchPath(env: NodeJS.ProcessEnv = process.env):
     env["ProgramFiles(x86)"]
       ? path.win32.join(env["ProgramFiles(x86)"], "Git", "usr", "bin")
       : null,
+  );
+  appendUniquePath(
+    paths,
+    env.LOCALAPPDATA ? path.win32.join(env.LOCALAPPDATA, "Programs", "Git", "cmd") : null,
+  );
+  appendUniquePath(
+    paths,
+    env.LOCALAPPDATA ? path.win32.join(env.LOCALAPPDATA, "Programs", "Git", "bin") : null,
+  );
+  appendUniquePath(
+    paths,
+    env.LOCALAPPDATA ? path.win32.join(env.LOCALAPPDATA, "Programs", "Git", "usr", "bin") : null,
   );
   appendUniquePath(
     paths,

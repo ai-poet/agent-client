@@ -144,6 +144,7 @@ describe("model-cli-manager", () => {
       ProgramFiles: "C:\\Program Files",
       "ProgramFiles(x86)": "C:\\Program Files (x86)",
       PASEO_HOME: "C:\\Users\\alice\\.paseo",
+      LOCALAPPDATA: "C:\\Users\\alice\\AppData\\Local",
       USERPROFILE: "C:\\Users\\alice",
     });
 
@@ -159,6 +160,9 @@ describe("model-cli-manager", () => {
       "C:\\Program Files (x86)\\Git\\cmd",
       "C:\\Program Files (x86)\\Git\\bin",
       "C:\\Program Files (x86)\\Git\\usr\\bin",
+      "C:\\Users\\alice\\AppData\\Local\\Programs\\Git\\cmd",
+      "C:\\Users\\alice\\AppData\\Local\\Programs\\Git\\bin",
+      "C:\\Users\\alice\\AppData\\Local\\Programs\\Git\\usr\\bin",
       "C:\\Users\\alice\\scoop\\apps\\git\\current\\cmd",
       "C:\\Users\\alice\\scoop\\apps\\git\\current\\bin",
       "C:\\Users\\alice\\scoop\\apps\\git\\current\\usr\\bin",
