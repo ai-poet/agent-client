@@ -1,3 +1,5 @@
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { JSDOM } from "jsdom";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("expo-router", () => ({
@@ -5,11 +7,74 @@ vi.mock("expo-router", () => ({
     push: vi.fn(),
   }),
 }));
+
+const { modelCliMocks } = vi.hoisted(() => ({
+  modelCliMocks: {
+    getModelCliRuntimeStatus: vi.fn(),
+    installGitBashRuntime: vi.fn(),
+    installNode22Runtime: vi.fn(),
+    installCodexCli: vi.fn(),
+    installClaudeCodeCli: vi.fn(),
+  },
+}));
+
+vi.mock("@/desktop/daemon/desktop-daemon", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/desktop/daemon/desktop-daemon")>();
+  return {
+    ...actual,
+    getModelCliRuntimeStatus: modelCliMocks.getModelCliRuntimeStatus,
+    installGitBashRuntime: modelCliMocks.installGitBashRuntime,
+    installNode22Runtime: modelCliMocks.installNode22Runtime,
+    installCodexCli: modelCliMocks.installCodexCli,
+    installClaudeCodeCli: modelCliMocks.installClaudeCodeCli,
+  };
+});
+
+vi.mock("@/desktop/electron/invoke", () => ({
+  invokeDesktopCommand: vi.fn(async () => ({
+    providers: [
+      {
+        id: "claude-key",
+        name: "Claude",
+        type: "custom",
+        endpoint: "https://example.com",
+        apiKey: "claude",
+        isDefault: false,
+        target: "claude",
+      },
+      {
+        id: "codex-key",
+        name: "Codex",
+        type: "custom",
+        endpoint: "https://example.com",
+        apiKey: "codex",
+        isDefault: false,
+        target: "codex",
+      },
+    ],
+    activeProviderId: null,
+    activeClaudeProviderId: "claude-key",
+    activeCodexProviderId: "codex-key",
+  })),
+}));
+
+vi.mock("@/hooks/use-settings", () => ({
+  useAppSettings: () => ({ settings: { accessMode: "byok" } }),
+}));
+
+vi.mock("@/hooks/use-sub2api-auth", () => ({
+  useSub2APIAuth: () => ({
+    auth: null,
+    getAccessToken: vi.fn(),
+  }),
+}));
+
 import {
   describeManagedCloudAvailability,
   formatCliInstallFailureMessage,
   getMissingCliDependencyNames,
   summarizeManagedCloudAvailability,
+  useSetupChecks,
 } from "@/hooks/use-setup-checks";
 import type { Sub2APIGroup, Sub2APIKey } from "@/lib/sub2api-client";
 import type { ModelCliRuntimeStatus } from "@/desktop/daemon/desktop-daemon";
@@ -50,6 +115,41 @@ function makeKey(
     created_at: "",
     updated_at: "",
     group,
+  };
+}
+
+function makeRuntimeStatus(overrides?: Partial<ModelCliRuntimeStatus>): ModelCliRuntimeStatus {
+  return {
+    git: {
+      installed: true,
+      version: "2.54.0",
+      bashPath: "C:\\Users\\alice\\.paseo\\toolchains\\PortableGit\\bin\\bash.exe",
+      error: null,
+    },
+    node: {
+      installed: true,
+      version: "22.20.0",
+      major: 22,
+      npmVersion: "10.9.0",
+      satisfies: true,
+      manager: "shell",
+      error: null,
+    },
+    claude: {
+      command: "claude",
+      packageName: "@anthropic-ai/claude-code",
+      installed: true,
+      version: "2.1.138",
+      error: null,
+    },
+    codex: {
+      command: "codex",
+      packageName: "@openai/codex",
+      installed: true,
+      version: "0.130.0",
+      error: null,
+    },
+    ...overrides,
   };
 }
 
@@ -216,5 +316,118 @@ describe("use-setup-checks availability helpers", () => {
         staleStatus,
       ),
     ).toBe("Install failed: npm official registry timed out. Missing: Claude Code");
+  });
+
+  it("runs CLI installation as visible ordered steps", async () => {
+    const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+      url: "http://localhost",
+    });
+    Object.defineProperty(globalThis, "document", {
+      value: dom.window.document,
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "window", {
+      value: dom.window,
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "navigator", {
+      value: dom.window.navigator,
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
+      value: true,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(dom.window, "paseoDesktop", {
+      value: {
+        invoke: vi.fn(),
+      },
+      configurable: true,
+    });
+
+    const missingStatus = makeRuntimeStatus({
+      git: { installed: false, version: null, bashPath: null, error: "Git Bash missing" },
+      node: {
+        installed: false,
+        version: null,
+        major: null,
+        npmVersion: null,
+        satisfies: false,
+        manager: "shell",
+        error: "Node missing",
+      },
+      claude: {
+        command: "claude",
+        packageName: "@anthropic-ai/claude-code",
+        installed: false,
+        version: null,
+        error: "Claude missing",
+      },
+      codex: {
+        command: "codex",
+        packageName: "@openai/codex",
+        installed: false,
+        version: null,
+        error: "Codex missing",
+      },
+    });
+    const readyStatus = makeRuntimeStatus();
+    const descriptions: string[] = [];
+    modelCliMocks.installGitBashRuntime.mockResolvedValue({ status: readyStatus, output: "" });
+    modelCliMocks.installNode22Runtime.mockResolvedValue({ status: readyStatus, output: "" });
+    modelCliMocks.installCodexCli.mockResolvedValue({ status: readyStatus, output: "" });
+    modelCliMocks.installClaudeCodeCli.mockResolvedValue({ status: readyStatus, output: "" });
+    modelCliMocks.getModelCliRuntimeStatus.mockResolvedValue(missingStatus);
+
+    const { result } = renderHook(() => useSetupChecks());
+
+    await act(async () => {
+      try {
+        await result.current.runAllChecks();
+      } catch {
+        // runAllChecks swallows CLI install readiness failures internally.
+      }
+    });
+    await waitFor(() => {
+      expect(result.current.checks.find((check) => check.id === "cliConfig")?.status).toBe(
+        "failed",
+      );
+    });
+
+    await act(async () => {
+      const promise = result.current.fixCheck("cliConfig");
+      await waitFor(() => {
+        expect(modelCliMocks.installGitBashRuntime).toHaveBeenCalled();
+      });
+      descriptions.push(result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "");
+      await waitFor(() => {
+        expect(modelCliMocks.installNode22Runtime).toHaveBeenCalled();
+      });
+      descriptions.push(result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "");
+      await waitFor(() => {
+        expect(modelCliMocks.installCodexCli).toHaveBeenCalled();
+      });
+      descriptions.push(result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "");
+      await waitFor(() => {
+        expect(modelCliMocks.installClaudeCodeCli).toHaveBeenCalled();
+      });
+      descriptions.push(result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "");
+      await promise;
+    });
+
+    expect(descriptions.join("\n")).toContain("Git Bash");
+    expect(descriptions.join("\n")).toContain("Node.js 22");
+    expect(descriptions.join("\n")).toContain("Codex");
+    expect(descriptions.join("\n")).toContain("Claude Code");
+    expect(modelCliMocks.installGitBashRuntime).toHaveBeenCalledBefore(
+      modelCliMocks.installNode22Runtime,
+    );
+    expect(modelCliMocks.installNode22Runtime).toHaveBeenCalledBefore(
+      modelCliMocks.installCodexCli,
+    );
+    expect(modelCliMocks.installCodexCli).toHaveBeenCalledBefore(
+      modelCliMocks.installClaudeCodeCli,
+    );
   });
 });
