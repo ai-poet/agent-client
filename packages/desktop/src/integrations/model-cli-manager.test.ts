@@ -11,6 +11,7 @@ import {
   buildWindowsNodeZipExtractPowerShellArgs,
   buildWindowsGitBashScoopInstallCommand,
   buildWindowsNpmPackageInstallCommand,
+  buildWindowsNotifyEnvironmentChangePowerShellCommand,
   buildWindowsUserPathValue,
   REQUIRED_NODE_MAJOR,
   buildWindowsCliExecutableCandidates,
@@ -196,6 +197,15 @@ describe("model-cli-manager", () => {
       "C:\\Users\\alice\\.paseo\\toolchains\\node22-win-x64",
       "C:\\Users\\alice\\.paseo\\toolchains\\PortableGit\\bin",
     ]);
+  });
+
+  it("builds a Windows environment-change broadcast command", () => {
+    const command = buildWindowsNotifyEnvironmentChangePowerShellCommand();
+
+    expect(command).toContain("SendMessageTimeout");
+    expect(command).toContain("WM_SETTINGCHANGE");
+    expect(command).toContain("Environment");
+    expect(command).toContain("0xffff");
   });
 
   it("resolves Windows npm global bin directories from prefix output", () => {

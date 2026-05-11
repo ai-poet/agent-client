@@ -579,6 +579,20 @@ export function buildWindowsUserPathValue(currentPath: string, entriesToAdd: str
   return entries.join(";");
 }
 
+export function buildWindowsNotifyEnvironmentChangePowerShellCommand(): string {
+  return [
+    "Add-Type -Namespace Win32 -Name NativeMethods -MemberDefinition @'",
+    '[System.Runtime.InteropServices.DllImport("user32.dll", SetLastError=true, CharSet=System.Runtime.InteropServices.CharSet.Auto)]',
+    "public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint Msg, System.UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out System.UIntPtr lpdwResult);",
+    "'@;",
+    "$HWND_BROADCAST=[IntPtr]0xffff;",
+    "$WM_SETTINGCHANGE=0x001A;",
+    "$SMTO_ABORTIFHUNG=0x0002;",
+    "$result=[UIntPtr]::Zero;",
+    "[void][Win32.NativeMethods]::SendMessageTimeout($HWND_BROADCAST, $WM_SETTINGCHANGE, [UIntPtr]::Zero, 'Environment', $SMTO_ABORTIFHUNG, 5000, [ref]$result)",
+  ].join(" ");
+}
+
 export function resolveWindowsNpmGlobalBinPathFromPrefix(prefixOutput: string): string | null {
   const prefix = trimToNull(prefixOutput);
   if (!prefix) {
@@ -760,6 +774,13 @@ async function ensureWindowsUserPathEntries(entriesToAdd: string[]): Promise<voi
     `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; [Environment]::SetEnvironmentVariable('Path', ${quotePowerShellString(after)}, 'User')"`,
     { forceWindowsCmd: true, env: buildWindowsCliSearchEnv() },
   );
+  const notifyResult = await tryRunShell(
+    `powershell -NoProfile -ExecutionPolicy Bypass -Command ${quotePowerShellString(buildWindowsNotifyEnvironmentChangePowerShellCommand())}`,
+    { forceWindowsCmd: true, env: buildWindowsCliSearchEnv() },
+  );
+  if (!notifyResult) {
+    log.warn("[model-cli-manager] failed to broadcast Windows environment change");
+  }
   const mergedPath = buildWindowsUserPathValue(
     process.env.PATH ?? process.env.Path ?? "",
     filtered,
