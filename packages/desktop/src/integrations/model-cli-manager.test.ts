@@ -10,8 +10,11 @@ import {
   buildWindowsNodeDirectInstallCommand,
   buildWindowsNodeZipExtractPowerShellArgs,
   buildWindowsGitBashScoopInstallCommand,
+  buildWindowsGetUserPathPowerShellArgs,
   buildWindowsNpmPackageInstallCommand,
   buildWindowsNotifyEnvironmentChangePowerShellCommand,
+  buildWindowsNotifyEnvironmentChangePowerShellArgs,
+  buildWindowsSetUserPathPowerShellArgs,
   buildWindowsUserPathValue,
   REQUIRED_NODE_MAJOR,
   buildWindowsCliExecutableCandidates,
@@ -206,6 +209,35 @@ describe("model-cli-manager", () => {
     expect(command).toContain("WM_SETTINGCHANGE");
     expect(command).toContain("Environment");
     expect(command).toContain("0xffff");
+  });
+
+  it("builds Windows user PATH PowerShell arguments for direct execFile calls", () => {
+    expect(buildWindowsGetUserPathPowerShellArgs()).toEqual([
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      "[Environment]::GetEnvironmentVariable('Path', 'User')",
+    ]);
+
+    const setArgs = buildWindowsSetUserPathPowerShellArgs(
+      "C:\\Tools\\node;C:\\Users\\alice\\AppData\\Roaming\\npm",
+    );
+    expect(setArgs.slice(0, 4)).toEqual(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]);
+    expect(setArgs[4]).toContain("[Environment]::SetEnvironmentVariable('Path'");
+    expect(setArgs[4]).toContain("'C:\\Tools\\node;C:\\Users\\alice\\AppData\\Roaming\\npm'");
+    expect(setArgs[4]).toContain("'User'");
+    expect(setArgs.join(" ")).not.toContain("cmd /c");
+
+    const notifyArgs = buildWindowsNotifyEnvironmentChangePowerShellArgs();
+    expect(notifyArgs.slice(0, 4)).toEqual([
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+    ]);
+    expect(notifyArgs[4]).toContain("SendMessageTimeout");
+    expect(notifyArgs[4]).toContain("Environment");
   });
 
   it("resolves Windows npm global bin directories from prefix output", () => {

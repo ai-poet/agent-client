@@ -593,6 +593,38 @@ export function buildWindowsNotifyEnvironmentChangePowerShellCommand(): string {
   ].join(" ");
 }
 
+function buildWindowsPowerShellCommandArgs(command: string): string[] {
+  return ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command];
+}
+
+export function buildWindowsGetUserPathPowerShellArgs(): string[] {
+  return buildWindowsPowerShellCommandArgs("[Environment]::GetEnvironmentVariable('Path', 'User')");
+}
+
+export function buildWindowsSetUserPathPowerShellArgs(pathValue: string): string[] {
+  return buildWindowsPowerShellCommandArgs(
+    `$ErrorActionPreference='Stop'; [Environment]::SetEnvironmentVariable('Path', ${quotePowerShellString(pathValue)}, 'User')`,
+  );
+}
+
+export function buildWindowsNotifyEnvironmentChangePowerShellArgs(): string[] {
+  return buildWindowsPowerShellCommandArgs(buildWindowsNotifyEnvironmentChangePowerShellCommand());
+}
+
+export function findMissingWindowsUserPathEntries(
+  pathValue: string,
+  entriesToFind: string[],
+): string[] {
+  const normalizedEntries = pathValue
+    .split(";")
+    .map((entry) => normalizeWindowsPath(entry))
+    .filter(Boolean);
+  return entriesToFind.filter((entry) => {
+    const normalized = normalizeWindowsPath(entry);
+    return normalized.length > 0 && !normalizedEntries.includes(normalized);
+  });
+}
+
 export function resolveWindowsNpmGlobalBinPathFromPrefix(prefixOutput: string): string | null {
   const prefix = trimToNull(prefixOutput);
   if (!prefix) {
@@ -760,26 +792,77 @@ async function ensureWindowsUserPathEntries(entriesToAdd: string[]): Promise<voi
     return;
   }
 
-  const readResult = await tryRunShell(
-    "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Environment]::GetEnvironmentVariable('Path', 'User')\"",
-    { forceWindowsCmd: true, env: buildWindowsCliSearchEnv() },
-  );
-  const before = readResult?.stdout ?? "";
+  const env = buildWindowsCliSearchEnv();
+  const readResult = await execFileForInstall(
+    "powershell.exe",
+    buildWindowsGetUserPathPowerShellArgs(),
+    env,
+  ).catch((error) => {
+    log.warn("[model-cli-manager] failed to read Windows user PATH", {
+      added: filtered,
+      error: getErrorMessage(error),
+    });
+    throw new Error(`Windows user PATH read failed: ${getErrorMessage(error)}`);
+  });
+  const before = readResult.stdout ?? "";
   const after = buildWindowsUserPathValue(before, filtered);
   if (normalizeWindowsPath(before) === normalizeWindowsPath(after)) {
+    const mergedPath = buildWindowsUserPathValue(
+      process.env.PATH ?? process.env.Path ?? "",
+      filtered,
+    );
+    process.env.PATH = mergedPath;
+    process.env.Path = mergedPath;
     return;
   }
 
-  await runShell(
-    `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; [Environment]::SetEnvironmentVariable('Path', ${quotePowerShellString(after)}, 'User')"`,
-    { forceWindowsCmd: true, env: buildWindowsCliSearchEnv() },
+  await execFileForInstall("powershell.exe", buildWindowsSetUserPathPowerShellArgs(after), env).catch(
+    (error) => {
+      log.warn("[model-cli-manager] failed to write Windows user PATH", {
+        added: filtered,
+        beforeLength: before.length,
+        afterLength: after.length,
+        error: getErrorMessage(error),
+      });
+      throw new Error(`Windows user PATH write failed: ${getErrorMessage(error)}`);
+    },
   );
-  const notifyResult = await tryRunShell(
-    `powershell -NoProfile -ExecutionPolicy Bypass -Command ${quotePowerShellString(buildWindowsNotifyEnvironmentChangePowerShellCommand())}`,
-    { forceWindowsCmd: true, env: buildWindowsCliSearchEnv() },
-  );
-  if (!notifyResult) {
-    log.warn("[model-cli-manager] failed to broadcast Windows environment change");
+  const verifyResult = await execFileForInstall(
+    "powershell.exe",
+    buildWindowsGetUserPathPowerShellArgs(),
+    env,
+  ).catch((error) => {
+    log.warn("[model-cli-manager] failed to verify Windows user PATH", {
+      added: filtered,
+      beforeLength: before.length,
+      afterLength: after.length,
+      error: getErrorMessage(error),
+    });
+    throw new Error(`Windows user PATH verification failed: ${getErrorMessage(error)}`);
+  });
+  const missingAfterWrite = findMissingWindowsUserPathEntries(verifyResult.stdout ?? "", filtered);
+  if (missingAfterWrite.length > 0) {
+    log.warn("[model-cli-manager] Windows user PATH verification missed entries", {
+      added: filtered,
+      missing: missingAfterWrite,
+      beforeLength: before.length,
+      afterLength: after.length,
+      persistedLength: verifyResult.stdout?.length ?? 0,
+    });
+    throw new Error(
+      `Windows user PATH verification failed. Missing persisted entries: ${missingAfterWrite.join(", ")}`,
+    );
+  }
+  try {
+    await execFileForInstall(
+      "powershell.exe",
+      buildWindowsNotifyEnvironmentChangePowerShellArgs(),
+      env,
+    );
+  } catch (error) {
+    log.warn("[model-cli-manager] failed to broadcast Windows environment change", {
+      error: getErrorMessage(error),
+    });
   }
   const mergedPath = buildWindowsUserPathValue(
     process.env.PATH ?? process.env.Path ?? "",
@@ -791,7 +874,15 @@ async function ensureWindowsUserPathEntries(entriesToAdd: string[]): Promise<voi
     added: filtered,
     beforeLength: before.length,
     afterLength: after.length,
+    persistedLength: verifyResult.stdout?.length ?? 0,
   });
+}
+
+async function ensureWindowsExternalCliPathReady(): Promise<void> {
+  if (process.platform !== "win32") {
+    return;
+  }
+  await ensureWindowsUserPathEntries(getWindowsExternalCliPathEntries(process.env));
 }
 
 async function resolveWindowsNpmGlobalBinPath(options?: ShellOptions): Promise<string | null> {
@@ -1697,6 +1788,8 @@ async function installWindowsGitBash(): Promise<string> {
 
   const before = await readGitStatus();
   if (before.installed) {
+    await patchClaudeCodeGitBashPathForWindows(before.bashPath);
+    await ensureWindowsExternalCliPathReady();
     return "";
   }
 
@@ -1800,8 +1893,18 @@ export async function installNode22Runtime(): Promise<ModelCliInstallResult> {
 
   if (!status.satisfies) {
     output = await installNode22IntoManager(manager, { gitBashPath });
+  } else {
+    await ensureWindowsExternalCliPathReady();
   }
 
+  return {
+    status: await getModelCliRuntimeStatus(),
+    output,
+  };
+}
+
+export async function installGitBashRuntime(): Promise<ModelCliInstallResult> {
+  const output = process.platform === "win32" ? await installWindowsGitBash() : "";
   return {
     status: await getModelCliRuntimeStatus(),
     output,
@@ -1869,6 +1972,8 @@ export async function installCodexCli(): Promise<ModelCliInstallResult> {
 
   if (!nodeStatus.satisfies) {
     outputs.push(await installNode22IntoManager(manager, { gitBashPath }));
+  } else {
+    await ensureWindowsExternalCliPathReady();
   }
   outputs.push(await installPackageIntoRuntime(CODEX_PACKAGE_NAME, manager, { gitBashPath }));
 
@@ -1886,6 +1991,8 @@ export async function installClaudeCodeCli(): Promise<ModelCliInstallResult> {
 
   if (!nodeStatus.satisfies) {
     outputs.push(await installNode22IntoManager(manager, { gitBashPath }));
+  } else {
+    await ensureWindowsExternalCliPathReady();
   }
   outputs.push(await installPackageIntoRuntime(CLAUDE_CODE_PACKAGE_NAME, manager, { gitBashPath }));
 
@@ -1910,6 +2017,8 @@ export async function installAllModelClis(): Promise<ModelCliInstallResult> {
 
     if (!nodeStatus.satisfies) {
       outputs.push(await installNode22IntoManager(manager, { gitBashPath }));
+    } else {
+      await ensureWindowsExternalCliPathReady();
     }
     outputs.push(await installPackageIntoRuntime(CODEX_PACKAGE_NAME, manager, { gitBashPath }));
     outputs.push(

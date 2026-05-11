@@ -27,6 +27,7 @@ import {
   installAllModelClis,
   installClaudeCodeCli,
   installCodexCli,
+  installGitBashRuntime,
   installNode22Runtime,
 } from "../integrations/model-cli-manager.js";
 import {
@@ -531,6 +532,7 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     install_skills: () => installSkills(),
     get_skills_install_status: () => getSkillsInstallStatus(),
     get_model_cli_runtime_status: () => getModelCliRuntimeStatus(),
+    install_git_bash_runtime: () => installGitBashRuntime(),
     install_node22_runtime: () => installNode22Runtime(),
     install_codex_cli: () => installCodexCli(),
     install_claude_code_cli: () => installClaudeCodeCli(),

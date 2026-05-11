@@ -7,7 +7,11 @@ import { getManagedServiceUrlFromEnv } from "@/config/managed-service-env";
 import { createSub2APIClient, type Sub2APIGroup, type Sub2APIKey } from "@/lib/sub2api-client";
 import {
   getModelCliRuntimeStatus,
+  installClaudeCodeCli,
   installAllModelClis,
+  installCodexCli,
+  installGitBashRuntime,
+  installNode22Runtime,
   type ModelCliRuntimeStatus,
 } from "@/desktop/daemon/desktop-daemon";
 import { invokeDesktopCommand } from "@/desktop/electron/invoke";
@@ -231,6 +235,13 @@ export function formatCliInstallFailureMessage(
   return `${baseMessage.replace(/\.$/, "")}. Missing: ${missing.join(", ")}`;
 }
 
+interface CliInstallStep {
+  id: "git" | "node" | "codex" | "claude";
+  label: string;
+  installingDescription: string;
+  run: () => Promise<{ status: ModelCliRuntimeStatus }>;
+}
+
 export function useSetupChecks(): UseSetupChecksReturn {
   const router = useRouter();
   const { settings } = useAppSettings();
@@ -431,10 +442,51 @@ export function useSetupChecks(): UseSetupChecksReturn {
             updateCheck("cliConfig", {
               status: "checking",
               error: null,
-              description: "Installing CLI tools...",
+              description: "Preparing CLI installation...",
             });
             try {
-              const result = await installAllModelClis();
+              const installSteps: CliInstallStep[] = [
+                {
+                  id: "git",
+                  label: "Git Bash",
+                  installingDescription: "Installing Git Bash...",
+                  run: installGitBashRuntime,
+                },
+                {
+                  id: "node",
+                  label: "Node.js 22",
+                  installingDescription: "Installing Node.js 22...",
+                  run: installNode22Runtime,
+                },
+                {
+                  id: "codex",
+                  label: "Codex",
+                  installingDescription: "Installing Codex CLI...",
+                  run: installCodexCli,
+                },
+                {
+                  id: "claude",
+                  label: "Claude Code",
+                  installingDescription: "Installing Claude Code CLI...",
+                  run: installClaudeCodeCli,
+                },
+              ];
+              let result: { status: ModelCliRuntimeStatus } | null = null;
+              for (const step of installSteps) {
+                updateCheck("cliConfig", {
+                  status: "checking",
+                  error: null,
+                  description: step.installingDescription,
+                });
+                result = await step.run();
+                cliStatusRef.current = result.status;
+                updateCheck("cliConfig", {
+                  status: "checking",
+                  error: null,
+                  description: `${step.label} ready. Continuing...`,
+                });
+              }
+              result = result ?? (await installAllModelClis());
               cliStatusRef.current = result.status;
               const allInstalled = getMissingCliDependencyNames(result.status).length === 0;
               if (allInstalled) {

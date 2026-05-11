@@ -343,6 +343,10 @@ export async function getModelCliRuntimeStatus(): Promise<ModelCliRuntimeStatus>
   return parseModelCliRuntimeStatus(await invokeDesktopCommand("get_model_cli_runtime_status"));
 }
 
+export async function installGitBashRuntime(): Promise<ModelCliInstallResult> {
+  return parseModelCliInstallResult(await invokeDesktopCommand("install_git_bash_runtime"));
+}
+
 export async function installNode22Runtime(): Promise<ModelCliInstallResult> {
   return parseModelCliInstallResult(await invokeDesktopCommand("install_node22_runtime"));
 }
