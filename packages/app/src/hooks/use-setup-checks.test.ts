@@ -400,19 +400,27 @@ describe("use-setup-checks availability helpers", () => {
       await waitFor(() => {
         expect(modelCliMocks.installGitBashRuntime).toHaveBeenCalled();
       });
-      descriptions.push(result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "");
+      descriptions.push(
+        result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "",
+      );
       await waitFor(() => {
         expect(modelCliMocks.installNode22Runtime).toHaveBeenCalled();
       });
-      descriptions.push(result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "");
+      descriptions.push(
+        result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "",
+      );
       await waitFor(() => {
         expect(modelCliMocks.installCodexCli).toHaveBeenCalled();
       });
-      descriptions.push(result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "");
+      descriptions.push(
+        result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "",
+      );
       await waitFor(() => {
         expect(modelCliMocks.installClaudeCodeCli).toHaveBeenCalled();
       });
-      descriptions.push(result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "");
+      descriptions.push(
+        result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "",
+      );
       await promise;
     });
 
