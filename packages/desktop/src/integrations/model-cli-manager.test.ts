@@ -3,6 +3,8 @@ import {
   buildWindowsGitBashChocolateyInstallCommand,
   buildWindowsGitBashDirectInstallCommand,
   buildWindowsGitBashInstallCommand,
+  buildWindowsGitBashMirrorInstallCommand,
+  buildWindowsNodeDirectInstallCommand,
   buildWindowsGitBashScoopInstallCommand,
   REQUIRED_NODE_MAJOR,
   buildWindowsCliExecutableCandidates,
@@ -11,6 +13,8 @@ import {
   isWindowsGitBashPath,
   parseMajorVersion,
   parseSemanticVersion,
+  resolveLatestGitForWindowsInstallerUrlFromMirror,
+  resolveLatestNode22WindowsMsiUrlFromMirror,
   resolveCliStatusShellOptions,
   resolvePackageInstallShellOptions,
   shouldUseWindowsGitBash,
@@ -129,13 +133,100 @@ describe("model-cli-manager", () => {
       PATH: "C:\\Windows\\System32",
       APPDATA: "C:\\Users\\alice\\AppData\\Roaming",
       ProgramFiles: "C:\\Program Files",
+      "ProgramFiles(x86)": "C:\\Program Files (x86)",
+      USERPROFILE: "C:\\Users\\alice",
     });
 
     expect(searchPath.split(";")).toEqual([
       "C:\\Users\\alice\\AppData\\Roaming\\npm",
       "C:\\Program Files\\nodejs",
+      "C:\\Program Files\\Git\\cmd",
+      "C:\\Program Files\\Git\\bin",
+      "C:\\Program Files\\Git\\usr\\bin",
+      "C:\\Program Files (x86)\\Git\\cmd",
+      "C:\\Program Files (x86)\\Git\\bin",
+      "C:\\Program Files (x86)\\Git\\usr\\bin",
+      "C:\\Users\\alice\\scoop\\apps\\git\\current\\cmd",
+      "C:\\Users\\alice\\scoop\\apps\\git\\current\\bin",
+      "C:\\Users\\alice\\scoop\\apps\\git\\current\\usr\\bin",
       "C:\\Windows\\System32",
     ]);
+  });
+
+  it("picks the newest Node 22 x64 MSI from npmmirror directory entries", () => {
+    const url = resolveLatestNode22WindowsMsiUrlFromMirror([
+      {
+        type: "file",
+        name: "node-v22.10.0-x64.msi",
+        url: "https://registry.npmmirror.com/-/binary/node/latest-v22.x/node-v22.10.0-x64.msi",
+      },
+      {
+        type: "file",
+        name: "node-v22.11.0-arm64.msi",
+        url: "https://registry.npmmirror.com/-/binary/node/latest-v22.x/node-v22.11.0-arm64.msi",
+      },
+      {
+        type: "file",
+        name: "node-v22.11.0-x64.msi",
+        url: "https://registry.npmmirror.com/-/binary/node/latest-v22.x/node-v22.11.0-x64.msi",
+      },
+    ]);
+
+    expect(url).toBe(
+      "https://registry.npmmirror.com/-/binary/node/latest-v22.x/node-v22.11.0-x64.msi",
+    );
+  });
+
+  it("picks the newest Git for Windows 64-bit installer from npmmirror release entries", () => {
+    const url = resolveLatestGitForWindowsInstallerUrlFromMirror(
+      [
+        {
+          type: "dir",
+          name: "v2.53.0.windows.3/",
+          url: "https://registry.npmmirror.com/-/binary/git-for-windows/v2.53.0.windows.3/",
+        },
+        {
+          type: "dir",
+          name: "v2.54.0.windows.1/",
+          url: "https://registry.npmmirror.com/-/binary/git-for-windows/v2.54.0.windows.1/",
+        },
+      ],
+      [
+        {
+          type: "file",
+          name: "Git-2.54.0-64-bit.exe",
+          url: "https://registry.npmmirror.com/-/binary/git-for-windows/v2.54.0.windows.1/Git-2.54.0-64-bit.exe",
+        },
+        {
+          type: "file",
+          name: "PortableGit-2.54.0-64-bit.7z.exe",
+          url: "https://registry.npmmirror.com/-/binary/git-for-windows/v2.54.0.windows.1/PortableGit-2.54.0-64-bit.7z.exe",
+        },
+      ],
+    );
+
+    expect(url).toBe(
+      "https://registry.npmmirror.com/-/binary/git-for-windows/v2.54.0.windows.1/Git-2.54.0-64-bit.exe",
+    );
+  });
+
+  it("builds silent direct installer commands for mirrored Node and Git installers", () => {
+    const nodeCommand = buildWindowsNodeDirectInstallCommand(
+      "https://registry.npmmirror.com/-/binary/node/latest-v22.x/node-v22.11.0-x64.msi",
+    );
+    expect(nodeCommand).toContain("powershell -NoProfile");
+    expect(nodeCommand).toContain("Invoke-WebRequest");
+    expect(nodeCommand).toContain("msiexec.exe");
+    expect(nodeCommand).toContain("/qn");
+    expect(nodeCommand).toContain("/norestart");
+
+    const gitCommand = buildWindowsGitBashMirrorInstallCommand(
+      "https://registry.npmmirror.com/-/binary/git-for-windows/v2.54.0.windows.1/Git-2.54.0-64-bit.exe",
+    );
+    expect(gitCommand).toContain("powershell -NoProfile");
+    expect(gitCommand).toContain("Invoke-WebRequest");
+    expect(gitCommand).toContain("/VERYSILENT");
+    expect(gitCommand).toContain("/NORESTART");
   });
 
   it("builds the expected WinGet command for Git Bash auto-install", () => {

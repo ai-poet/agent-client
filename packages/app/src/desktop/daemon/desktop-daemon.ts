@@ -222,7 +222,15 @@ export interface NodeRuntimeStatus {
   error: string | null;
 }
 
+export interface GitRuntimeStatus {
+  installed: boolean;
+  version: string | null;
+  bashPath: string | null;
+  error: string | null;
+}
+
 export interface ModelCliRuntimeStatus {
+  git: GitRuntimeStatus;
   node: NodeRuntimeStatus;
   codex: ModelCliRuntimeToolStatus;
   claude: ModelCliRuntimeToolStatus;
@@ -259,6 +267,23 @@ function parseNodeRuntimeStatus(raw: unknown): NodeRuntimeStatus {
   };
 }
 
+function parseGitRuntimeStatus(raw: unknown): GitRuntimeStatus {
+  if (!isRecord(raw)) {
+    return {
+      installed: true,
+      version: null,
+      bashPath: null,
+      error: null,
+    };
+  }
+  return {
+    installed: raw.installed === true,
+    version: toStringOrNull(raw.version),
+    bashPath: toStringOrNull(raw.bashPath),
+    error: toStringOrNull(raw.error),
+  };
+}
+
 function parseModelCliRuntimeToolStatus(raw: unknown): ModelCliRuntimeToolStatus {
   if (!isRecord(raw)) {
     throw new Error("Unexpected CLI runtime tool status response.");
@@ -281,6 +306,7 @@ function parseModelCliRuntimeStatus(raw: unknown): ModelCliRuntimeStatus {
     throw new Error("Unexpected CLI runtime status response.");
   }
   return {
+    git: parseGitRuntimeStatus(raw.git),
     node: parseNodeRuntimeStatus(raw.node),
     codex: parseModelCliRuntimeToolStatus(raw.codex),
     claude: parseModelCliRuntimeToolStatus(raw.claude),

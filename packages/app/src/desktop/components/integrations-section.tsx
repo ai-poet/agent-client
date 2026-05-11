@@ -383,7 +383,7 @@ export function IntegrationsSection() {
               <Text style={settingsStyles.rowTitle}>External agent stack</Text>
             </View>
             <Text style={settingsStyles.rowHint}>
-              Install Node.js 22, Codex, and Claude Code in one pass.
+              Install Git Bash, Node.js 22, Codex, and Claude Code in one pass.
             </Text>
           </View>
           <Button

@@ -190,6 +190,15 @@ export function describeManagedCloudAvailability(
   };
 }
 
+export function getMissingCliDependencyNames(status: ModelCliRuntimeStatus): string[] {
+  const missing: string[] = [];
+  if (!status.git.installed) missing.push("Git Bash");
+  if (!status.node.installed || !status.node.satisfies) missing.push("Node.js 22");
+  if (!status.claude.installed) missing.push("Claude Code");
+  if (!status.codex.installed) missing.push("Codex");
+  return missing;
+}
+
 export function useSetupChecks(): UseSetupChecksReturn {
   const router = useRouter();
   const { settings } = useAppSettings();
@@ -270,15 +279,9 @@ export function useSetupChecks(): UseSetupChecksReturn {
     try {
       const status = await getModelCliRuntimeStatus();
       cliStatusRef.current = status;
-      const nodeOk = status.node.installed && status.node.satisfies;
-      const claudeOk = status.claude.installed;
-      const codexOk = status.codex.installed;
+      const missing = getMissingCliDependencyNames(status);
 
-      if (!nodeOk || !claudeOk || !codexOk) {
-        const missing: string[] = [];
-        if (!nodeOk) missing.push("Node.js 22");
-        if (!claudeOk) missing.push("Claude Code");
-        if (!codexOk) missing.push("Codex");
+      if (missing.length > 0) {
         updateCheck("cliConfig", {
           status: "failed",
           error: `Missing: ${missing.join(", ")}`,
@@ -391,9 +394,7 @@ export function useSetupChecks(): UseSetupChecksReturn {
 
         case "cliConfig": {
           const status = cliStatusRef.current;
-          const needsInstall =
-            status &&
-            (!status.node.satisfies || !status.claude.installed || !status.codex.installed);
+          const needsInstall = status && getMissingCliDependencyNames(status).length > 0;
           if (needsInstall) {
             updateCheck("cliConfig", {
               status: "checking",
@@ -403,16 +404,13 @@ export function useSetupChecks(): UseSetupChecksReturn {
             try {
               const result = await installAllModelClis();
               cliStatusRef.current = result.status;
-              const allInstalled =
-                result.status.node.satisfies &&
-                result.status.claude.installed &&
-                result.status.codex.installed;
+              const allInstalled = getMissingCliDependencyNames(result.status).length === 0;
               if (allInstalled) {
                 await runCliConfigCheck();
               } else {
                 updateCheck("cliConfig", {
                   status: "failed",
-                  error: "Installation incomplete",
+                  error: `Installation incomplete: ${getMissingCliDependencyNames(result.status).join(", ")}`,
                   description: "Some tools failed to install",
                   fixLabel: "Retry",
                 });
@@ -420,7 +418,8 @@ export function useSetupChecks(): UseSetupChecksReturn {
             } catch (err) {
               updateCheck("cliConfig", {
                 status: "failed",
-                error: err instanceof Error ? err.message : "Install failed",
+                error:
+                  "Install failed. Please check your network connection or install the missing tools manually.",
                 fixLabel: "Retry",
               });
             }

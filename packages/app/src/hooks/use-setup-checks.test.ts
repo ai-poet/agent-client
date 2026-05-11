@@ -7,9 +7,11 @@ vi.mock("expo-router", () => ({
 }));
 import {
   describeManagedCloudAvailability,
+  getMissingCliDependencyNames,
   summarizeManagedCloudAvailability,
 } from "@/hooks/use-setup-checks";
 import type { Sub2APIGroup, Sub2APIKey } from "@/lib/sub2api-client";
+import type { ModelCliRuntimeStatus } from "@/desktop/daemon/desktop-daemon";
 
 function makeGroup(id: number, platform: Sub2APIGroup["platform"]): Sub2APIGroup {
   return {
@@ -86,5 +88,46 @@ describe("use-setup-checks availability helpers", () => {
       error: "Assign an anthropic or openai group in Paseo Cloud before continuing.",
       fixLabel: "Manage Routes",
     });
+  });
+
+  it("lists Git Bash separately when the Windows bootstrap stack is incomplete", () => {
+    const status: ModelCliRuntimeStatus = {
+      git: {
+        installed: false,
+        version: null,
+        bashPath: null,
+        error: "Git Bash was not found.",
+      },
+      node: {
+        installed: false,
+        version: null,
+        major: null,
+        npmVersion: null,
+        satisfies: false,
+        manager: "shell",
+        error: "Node.js was not found.",
+      },
+      claude: {
+        command: "claude",
+        packageName: "@anthropic-ai/claude-code",
+        installed: false,
+        version: null,
+        error: "Claude Code was not found.",
+      },
+      codex: {
+        command: "codex",
+        packageName: "@openai/codex",
+        installed: false,
+        version: null,
+        error: "Codex was not found.",
+      },
+    };
+
+    expect(getMissingCliDependencyNames(status)).toEqual([
+      "Git Bash",
+      "Node.js 22",
+      "Claude Code",
+      "Codex",
+    ]);
   });
 });

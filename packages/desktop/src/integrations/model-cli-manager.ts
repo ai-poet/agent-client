@@ -7,6 +7,8 @@ import { execCommand } from "@getpaseo/server";
 export const REQUIRED_NODE_MAJOR = 22;
 export const CODEX_PACKAGE_NAME = "@openai/codex";
 export const CLAUDE_CODE_PACKAGE_NAME = "@anthropic-ai/claude-code";
+const WINDOWS_NODE_MIRROR_URL = "https://registry.npmmirror.com/-/binary/node/latest-v22.x/";
+const WINDOWS_GIT_MIRROR_URL = "https://registry.npmmirror.com/-/binary/git-for-windows/";
 const WINDOWS_GIT_WINGET_PACKAGE_ID = "Git.Git";
 const WINDOWS_GIT_DIRECT_DOWNLOAD_URL =
   "https://github.com/git-for-windows/git/releases/latest/download/Git-64-bit.exe";
@@ -31,7 +33,15 @@ export interface ModelCliStatus {
   error: string | null;
 }
 
+export interface GitRuntimeStatus {
+  installed: boolean;
+  version: string | null;
+  bashPath: string | null;
+  error: string | null;
+}
+
 export interface ModelCliRuntimeStatus {
+  git: GitRuntimeStatus;
   node: NodeRuntimeStatus;
   codex: ModelCliStatus;
   claude: ModelCliStatus;
@@ -51,6 +61,13 @@ interface ShellOptions {
   gitBashPath?: string | null;
   forceWindowsCmd?: boolean;
   env?: NodeJS.ProcessEnv;
+}
+
+export interface MirrorDirectoryEntry {
+  type?: string;
+  name?: string;
+  url?: string;
+  modified?: string;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -157,7 +174,10 @@ async function resolveWindowsGitBashPath(): Promise<string | null> {
     return null;
   }
 
-  const whereResult = await tryRunShell("where bash", { forceWindowsCmd: true });
+  const whereResult = await tryRunShell("where bash", {
+    forceWindowsCmd: true,
+    env: buildWindowsCliSearchEnv(),
+  });
   const detected =
     whereResult?.stdout
       .split(/\r?\n/)
@@ -170,6 +190,19 @@ async function resolveWindowsGitBashPath(): Promise<string | null> {
   const fallbackCandidates = [
     path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "bin", "bash.exe"),
     path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "usr", "bin", "bash.exe"),
+    path.join(
+      process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)",
+      "Git",
+      "bin",
+      "bash.exe",
+    ),
+    path.join(
+      process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)",
+      "Git",
+      "usr",
+      "bin",
+      "bash.exe",
+    ),
     path.join(process.env.USERPROFILE ?? "", "scoop", "apps", "git", "current", "bin", "bash.exe"),
     path.join(
       process.env.USERPROFILE ?? "",
@@ -178,12 +211,6 @@ async function resolveWindowsGitBashPath(): Promise<string | null> {
       "git",
       "current",
       "usr",
-      "bin",
-      "bash.exe",
-    ),
-    path.join(
-      process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)",
-      "Git",
       "bin",
       "bash.exe",
     ),
@@ -240,6 +267,50 @@ export function buildWindowsCliSearchPath(env: NodeJS.ProcessEnv = process.env):
   const paths: string[] = [];
   appendUniquePath(paths, env.APPDATA ? path.win32.join(env.APPDATA, "npm") : null);
   appendUniquePath(paths, env.ProgramFiles ? path.win32.join(env.ProgramFiles, "nodejs") : null);
+  appendUniquePath(
+    paths,
+    env.ProgramFiles ? path.win32.join(env.ProgramFiles, "Git", "cmd") : null,
+  );
+  appendUniquePath(
+    paths,
+    env.ProgramFiles ? path.win32.join(env.ProgramFiles, "Git", "bin") : null,
+  );
+  appendUniquePath(
+    paths,
+    env.ProgramFiles ? path.win32.join(env.ProgramFiles, "Git", "usr", "bin") : null,
+  );
+  appendUniquePath(
+    paths,
+    env["ProgramFiles(x86)"] ? path.win32.join(env["ProgramFiles(x86)"], "Git", "cmd") : null,
+  );
+  appendUniquePath(
+    paths,
+    env["ProgramFiles(x86)"] ? path.win32.join(env["ProgramFiles(x86)"], "Git", "bin") : null,
+  );
+  appendUniquePath(
+    paths,
+    env["ProgramFiles(x86)"]
+      ? path.win32.join(env["ProgramFiles(x86)"], "Git", "usr", "bin")
+      : null,
+  );
+  appendUniquePath(
+    paths,
+    env.USERPROFILE
+      ? path.win32.join(env.USERPROFILE, "scoop", "apps", "git", "current", "cmd")
+      : null,
+  );
+  appendUniquePath(
+    paths,
+    env.USERPROFILE
+      ? path.win32.join(env.USERPROFILE, "scoop", "apps", "git", "current", "bin")
+      : null,
+  );
+  appendUniquePath(
+    paths,
+    env.USERPROFILE
+      ? path.win32.join(env.USERPROFILE, "scoop", "apps", "git", "current", "usr", "bin")
+      : null,
+  );
   const currentPath = env.PATH ?? env.Path ?? env.path ?? "";
   for (const entry of currentPath.split(";")) {
     appendUniquePath(paths, entry);
@@ -290,8 +361,149 @@ export function buildWindowsGitBashScoopInstallCommand(): string {
   return "scoop install git";
 }
 
+function quotePowerShellString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+export function buildWindowsNodeDirectInstallCommand(installerUrl: string): string {
+  const quotedUrl = quotePowerShellString(installerUrl);
+  return `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $installerUrl=${quotedUrl}; $installerPath=Join-Path $env:TEMP ('paseo-node-installer-' + [Guid]::NewGuid().ToString('N') + '.msi'); Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing; $process=Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i',$installerPath,'/qn','/norestart' -Wait -PassThru; if ($process.ExitCode -ne 0) { throw ('Node.js installer failed with exit code ' + $process.ExitCode) }; Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue;"`;
+}
+
+export function buildWindowsGitBashMirrorInstallCommand(installerUrl: string): string {
+  const quotedUrl = quotePowerShellString(installerUrl);
+  return `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $installerUrl=${quotedUrl}; $installerPath=Join-Path $env:TEMP ('paseo-git-installer-' + [Guid]::NewGuid().ToString('N') + '.exe'); Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing; $process=Start-Process -FilePath $installerPath -ArgumentList '/VERYSILENT','/NORESTART','/SP-','/NOCANCEL' -Wait -PassThru; if ($process.ExitCode -ne 0) { throw ('Git for Windows installer failed with exit code ' + $process.ExitCode) }; Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue;"`;
+}
+
 export function buildWindowsGitBashDirectInstallCommand(): string {
-  return `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $installerUrl='${WINDOWS_GIT_DIRECT_DOWNLOAD_URL}'; $installerPath=Join-Path $env:TEMP ('paseo-git-installer-' + [Guid]::NewGuid().ToString('N') + '.exe'); Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing; Start-Process -FilePath $installerPath -ArgumentList '/VERYSILENT','/NORESTART','/SP-','/NOCANCEL' -Wait; Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue;"`;
+  return buildWindowsGitBashMirrorInstallCommand(WINDOWS_GIT_DIRECT_DOWNLOAD_URL);
+}
+
+function parseVersionParts(value: string): number[] {
+  return value.split(".").map((part) => Number.parseInt(part, 10) || 0);
+}
+
+function compareVersionStrings(left: string, right: string): number {
+  const leftParts = parseVersionParts(left);
+  const rightParts = parseVersionParts(right);
+  const max = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < max; index += 1) {
+    const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (diff !== 0) {
+      return diff;
+    }
+  }
+  return 0;
+}
+
+export function resolveLatestNode22WindowsMsiUrlFromMirror(
+  entries: MirrorDirectoryEntry[],
+): string | null {
+  const candidates = entries
+    .map((entry) => {
+      const name = entry.name ?? "";
+      const match = name.match(/^node-v(22\.\d+\.\d+)-x64\.msi$/i);
+      if (!match || entry.type === "dir" || !entry.url) {
+        return null;
+      }
+      return { version: match[1]!, url: entry.url };
+    })
+    .filter((entry): entry is { version: string; url: string } => entry !== null)
+    .sort((left, right) => compareVersionStrings(right.version, left.version));
+
+  return candidates[0]?.url ?? null;
+}
+
+function parseGitForWindowsReleaseVersion(name: string): string | null {
+  const match = name.match(/^v(\d+\.\d+\.\d+)\.windows\.(\d+)\/?$/i);
+  if (!match) {
+    return null;
+  }
+  return `${match[1]}.${match[2]}`;
+}
+
+export function resolveLatestGitForWindowsInstallerUrlFromMirror(
+  releaseDirs: MirrorDirectoryEntry[],
+  releaseEntries: MirrorDirectoryEntry[],
+): string | null {
+  const latestRelease = releaseDirs
+    .map((entry) => {
+      const name = entry.name ?? "";
+      const version = parseGitForWindowsReleaseVersion(name);
+      if (!version || entry.type !== "dir") {
+        return null;
+      }
+      return { version, url: entry.url ?? "" };
+    })
+    .filter((entry): entry is { version: string; url: string } => entry !== null)
+    .sort((left, right) => compareVersionStrings(right.version, left.version))[0];
+
+  const installerCandidates = releaseEntries
+    .filter((entry) => {
+      const name = entry.name ?? "";
+      if (entry.type === "dir" || !entry.url || !/^Git-\d+\.\d+\.\d+-64-bit\.exe$/i.test(name)) {
+        return false;
+      }
+      return !latestRelease?.url || entry.url.startsWith(latestRelease.url);
+    })
+    .map((entry) => entry.url!)
+    .sort();
+
+  return installerCandidates[0] ?? null;
+}
+
+async function fetchMirrorEntries(url: string): Promise<MirrorDirectoryEntry[]> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Mirror request failed with HTTP ${response.status}: ${url}`);
+  }
+  const json = (await response.json()) as unknown;
+  if (!Array.isArray(json)) {
+    throw new Error(`Mirror response was not a directory listing: ${url}`);
+  }
+  return json.filter((entry): entry is MirrorDirectoryEntry => {
+    return typeof entry === "object" && entry !== null;
+  });
+}
+
+async function resolveLatestNode22WindowsMsiUrl(): Promise<string | null> {
+  return resolveLatestNode22WindowsMsiUrlFromMirror(
+    await fetchMirrorEntries(WINDOWS_NODE_MIRROR_URL),
+  );
+}
+
+async function resolveLatestGitForWindowsInstallerUrl(): Promise<string | null> {
+  const releaseDirs = await fetchMirrorEntries(WINDOWS_GIT_MIRROR_URL);
+  const sortedDirs = releaseDirs
+    .map((entry) => {
+      const version = parseGitForWindowsReleaseVersion(entry.name ?? "");
+      if (!version || entry.type !== "dir" || !entry.url) {
+        return null;
+      }
+      return { entry, version };
+    })
+    .filter((entry): entry is { entry: MirrorDirectoryEntry; version: string } => entry !== null)
+    .sort((left, right) => compareVersionStrings(right.version, left.version));
+
+  for (const candidate of sortedDirs) {
+    try {
+      const releaseEntries = await fetchMirrorEntries(candidate.entry.url!);
+      const installerUrl = resolveLatestGitForWindowsInstallerUrlFromMirror(
+        [candidate.entry],
+        releaseEntries,
+      );
+      if (installerUrl) {
+        return installerUrl;
+      }
+    } catch (error) {
+      log.warn("[model-cli-manager] failed to read Git mirror release", {
+        url: candidate.entry.url,
+        error: getErrorMessage(error),
+      });
+    }
+  }
+
+  return null;
 }
 
 async function readNodeStatus(
@@ -363,6 +575,39 @@ async function readNodeStatus(
   }
 }
 
+async function readGitStatus(): Promise<GitRuntimeStatus> {
+  if (process.platform !== "win32") {
+    return {
+      installed: true,
+      version: null,
+      bashPath: null,
+      error: null,
+    };
+  }
+
+  const env = buildWindowsCliSearchEnv();
+  const [gitProbe, bashPath] = await Promise.all([
+    tryRunShell("git --version", { forceWindowsCmd: true, env }),
+    resolveWindowsGitBashPath(),
+  ]);
+  const version = parseSemanticVersion(gitProbe?.stdout ?? gitProbe?.stderr ?? null);
+  const installed = Boolean(version && bashPath);
+
+  return {
+    installed,
+    version,
+    bashPath,
+    error: installed
+      ? null
+      : [
+          version ? null : "Git was not found in the Windows PATH.",
+          bashPath ? null : "Git Bash was not found.",
+        ]
+          .filter((entry): entry is string => entry !== null)
+          .join(" "),
+  };
+}
+
 async function readCliStatus(
   command: "codex" | "claude",
   packageName: string,
@@ -421,13 +666,14 @@ export function buildWindowsCliVersionCommand(command: "codex" | "claude"): stri
 export async function getModelCliRuntimeStatus(): Promise<ModelCliRuntimeStatus> {
   const manager = await resolveRuntimeManager();
   const gitBashPath = await resolveWindowsGitBashPath();
-  const [node, codex, claude] = await Promise.all([
+  const [git, node, codex, claude] = await Promise.all([
+    readGitStatus(),
     readNodeStatus(manager, { gitBashPath }),
     readCliStatus("codex", CODEX_PACKAGE_NAME, manager, { gitBashPath }),
     readCliStatus("claude", CLAUDE_CODE_PACKAGE_NAME, manager, { gitBashPath }),
   ]);
 
-  return { node, codex, claude };
+  return { git, node, codex, claude };
 }
 
 async function installNode22IntoManager(
@@ -443,18 +689,41 @@ async function installNode22IntoManager(
     return [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
   }
   if (manager === "shell" && process.platform === "win32") {
-    if (!(await commandExists("winget"))) {
-      throw new Error(
-        "Automatic Node.js 22 installation on Windows requires WinGet. Install WinGet first, then retry.",
-      );
+    const outputs: string[] = [];
+    let mirrorError: string | null = null;
+
+    try {
+      const installerUrl = await resolveLatestNode22WindowsMsiUrl();
+      if (!installerUrl) {
+        throw new Error("No Node.js 22 x64 MSI was found on npmmirror.");
+      }
+      const mirrorResult = await runShell(buildWindowsNodeDirectInstallCommand(installerUrl), {
+        ...options,
+        forceWindowsCmd: true,
+        env: buildWindowsCliSearchEnv(),
+      });
+      outputs.push([mirrorResult.stdout, mirrorResult.stderr].filter(Boolean).join("\n").trim());
+    } catch (error) {
+      mirrorError = getErrorMessage(error);
+      log.warn("[model-cli-manager] mirrored Node.js install failed", { error: mirrorError });
     }
 
-    const installResult = await runShell(
-      "winget install --id OpenJS.NodeJS.LTS -e --accept-package-agreements --accept-source-agreements",
-      { ...options, forceWindowsCmd: true },
-    );
+    let status = await readNodeStatus(manager, { ...options, forceWindowsCmd: true });
+    if (!status.satisfies) {
+      if (!(await commandExists("winget"))) {
+        throw new Error(
+          `Automatic Node.js 22 installation failed via npmmirror${mirrorError ? `: ${mirrorError}` : ""}. WinGet is not available for fallback.`,
+        );
+      }
 
-    const status = await readNodeStatus(manager, { ...options, forceWindowsCmd: true });
+      const installResult = await runShell(
+        "winget install --id OpenJS.NodeJS.LTS -e --accept-package-agreements --accept-source-agreements",
+        { ...options, forceWindowsCmd: true },
+      );
+      outputs.push([installResult.stdout, installResult.stderr].filter(Boolean).join("\n").trim());
+      status = await readNodeStatus(manager, { ...options, forceWindowsCmd: true });
+    }
+
     if (!status.satisfies) {
       throw new Error(
         `Node.js installation finished but the detected runtime is ${status.version ?? "unknown"}. Please ensure Node.js ${REQUIRED_NODE_MAJOR}+ is available in PATH.`,
@@ -466,15 +735,79 @@ async function installNode22IntoManager(
       forceWindowsCmd: true,
       env: buildWindowsCliSearchEnv(),
     });
-    return [installResult.stdout, installResult.stderr, verifyResult.stdout, verifyResult.stderr]
-      .filter(Boolean)
-      .join("\n")
-      .trim();
+    outputs.push([verifyResult.stdout, verifyResult.stderr].filter(Boolean).join("\n").trim());
+    return outputs.filter(Boolean).join("\n").trim();
   }
 
   throw new Error(
     "Automatic Node.js 22 installation currently requires nvm or Homebrew in this environment.",
   );
+}
+
+async function installWindowsGitBash(): Promise<string> {
+  if (process.platform !== "win32") {
+    return "";
+  }
+
+  const before = await readGitStatus();
+  if (before.installed) {
+    return "";
+  }
+
+  const outputs: string[] = [];
+  const errors: string[] = [];
+
+  try {
+    const installerUrl = await resolveLatestGitForWindowsInstallerUrl();
+    if (!installerUrl) {
+      throw new Error("No Git for Windows 64-bit installer was found on npmmirror.");
+    }
+    const mirrorResult = await runShell(buildWindowsGitBashMirrorInstallCommand(installerUrl), {
+      forceWindowsCmd: true,
+      env: buildWindowsCliSearchEnv(),
+    });
+    outputs.push([mirrorResult.stdout, mirrorResult.stderr].filter(Boolean).join("\n").trim());
+  } catch (error) {
+    errors.push(`npmmirror: ${getErrorMessage(error)}`);
+    log.warn("[model-cli-manager] mirrored Git install failed", {
+      error: getErrorMessage(error),
+    });
+  }
+
+  let status = await readGitStatus();
+  if (!status.installed && (await commandExists("winget"))) {
+    try {
+      const wingetResult = await runShell(buildWindowsGitBashInstallCommand(), {
+        forceWindowsCmd: true,
+        env: buildWindowsCliSearchEnv(),
+      });
+      outputs.push([wingetResult.stdout, wingetResult.stderr].filter(Boolean).join("\n").trim());
+    } catch (error) {
+      errors.push(`WinGet: ${getErrorMessage(error)}`);
+    }
+    status = await readGitStatus();
+  }
+
+  if (!status.installed) {
+    try {
+      const directResult = await runShell(buildWindowsGitBashDirectInstallCommand(), {
+        forceWindowsCmd: true,
+        env: buildWindowsCliSearchEnv(),
+      });
+      outputs.push([directResult.stdout, directResult.stderr].filter(Boolean).join("\n").trim());
+    } catch (error) {
+      errors.push(`GitHub: ${getErrorMessage(error)}`);
+    }
+    status = await readGitStatus();
+  }
+
+  if (!status.installed) {
+    throw new Error(
+      `Git for Windows installation did not complete. ${errors.filter(Boolean).join(" ") || status.error || "Git Bash was not detected after installation."}`,
+    );
+  }
+
+  return outputs.filter(Boolean).join("\n").trim();
 }
 
 export async function installNode22Runtime(): Promise<ModelCliInstallResult> {
@@ -554,6 +887,11 @@ export async function installClaudeCodeCli(): Promise<ModelCliInstallResult> {
 export async function installAllModelClis(): Promise<ModelCliInstallResult> {
   const manager = await resolveRuntimeManager();
   const outputs: string[] = [];
+
+  if (process.platform === "win32") {
+    outputs.push(await installWindowsGitBash());
+  }
+
   const gitBashPath = await resolveWindowsGitBashPath();
   const nodeStatus = await readNodeStatus(manager, { gitBashPath });
 
@@ -565,6 +903,8 @@ export async function installAllModelClis(): Promise<ModelCliInstallResult> {
 
   const status = await getModelCliRuntimeStatus();
   log.info("[model-cli-manager] installed runtime stack", {
+    gitVersion: status.git.version,
+    gitBashPath: status.git.bashPath,
     nodeVersion: status.node.version,
     codexVersion: status.codex.version,
     claudeVersion: status.claude.version,
