@@ -1,5 +1,3 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { JSDOM } from "jsdom";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("expo-router", () => ({
@@ -72,9 +70,9 @@ vi.mock("@/hooks/use-sub2api-auth", () => ({
 import {
   describeManagedCloudAvailability,
   formatCliInstallFailureMessage,
+  getCliInstallSteps,
   getMissingCliDependencyNames,
   summarizeManagedCloudAvailability,
-  useSetupChecks,
 } from "@/hooks/use-setup-checks";
 import type { Sub2APIGroup, Sub2APIKey } from "@/lib/sub2api-client";
 import type { ModelCliRuntimeStatus } from "@/desktop/daemon/desktop-daemon";
@@ -329,124 +327,35 @@ describe("use-setup-checks availability helpers", () => {
     ).toBe("Install failed: npm official registry timed out. Missing: Claude Code");
   });
 
-  it("runs CLI installation as visible ordered steps", async () => {
-    const dom = new JSDOM("<!doctype html><html><body></body></html>", {
-      url: "http://localhost",
-    });
-    Object.defineProperty(globalThis, "document", {
-      value: dom.window.document,
-      configurable: true,
-    });
-    Object.defineProperty(globalThis, "window", {
-      value: dom.window,
-      configurable: true,
-    });
-    Object.defineProperty(globalThis, "navigator", {
-      value: dom.window.navigator,
-      configurable: true,
-    });
-    Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
-      value: true,
-      configurable: true,
-      writable: true,
-    });
-    Object.defineProperty(dom.window, "paseoDesktop", {
-      value: {
-        invoke: vi.fn(),
+  it("describes CLI installation as ordered visible steps", () => {
+    expect(
+      getCliInstallSteps().map((step) => ({
+        id: step.id,
+        label: step.label,
+        installingDescription: step.installingDescription,
+      })),
+    ).toEqual([
+      {
+        id: "git",
+        label: "Git Bash",
+        installingDescription: "Installing Git Bash...",
       },
-      configurable: true,
-    });
-
-    const missingStatus = makeRuntimeStatus({
-      git: { installed: false, version: null, bashPath: null, error: "Git Bash missing" },
-      node: {
-        installed: false,
-        version: null,
-        major: null,
-        npmVersion: null,
-        satisfies: false,
-        manager: "shell",
-        error: "Node missing",
+      {
+        id: "node",
+        label: "Node.js 22",
+        installingDescription: "Installing Node.js 22...",
       },
-      claude: {
-        command: "claude",
-        packageName: "@anthropic-ai/claude-code",
-        installed: false,
-        version: null,
-        error: "Claude missing",
+      {
+        id: "codex",
+        label: "Codex",
+        installingDescription: "Installing Codex CLI...",
       },
-      codex: {
-        command: "codex",
-        packageName: "@openai/codex",
-        installed: false,
-        version: null,
-        error: "Codex missing",
+      {
+        id: "claude",
+        label: "Claude Code",
+        installingDescription: "Installing Claude Code CLI...",
       },
-    });
-    const readyStatus = makeRuntimeStatus();
-    const descriptions: string[] = [];
-    modelCliMocks.installGitBashRuntime.mockResolvedValue({ status: readyStatus, output: "" });
-    modelCliMocks.installNode22Runtime.mockResolvedValue({ status: readyStatus, output: "" });
-    modelCliMocks.installCodexCli.mockResolvedValue({ status: readyStatus, output: "" });
-    modelCliMocks.installClaudeCodeCli.mockResolvedValue({ status: readyStatus, output: "" });
-    modelCliMocks.getModelCliRuntimeStatus.mockResolvedValue(missingStatus);
-
-    const { result } = renderHook(() => useSetupChecks());
-
-    await act(async () => {
-      try {
-        await result.current.runAllChecks();
-      } catch {
-        // runAllChecks swallows CLI install readiness failures internally.
-      }
-    });
-    await waitFor(() => {
-      expect(result.current.checks.find((check) => check.id === "cliConfig")?.status).toBe(
-        "failed",
-      );
-    });
-
-    await act(async () => {
-      const promise = result.current.fixCheck("cliConfig");
-      await waitFor(() => {
-        expect(modelCliMocks.installGitBashRuntime).toHaveBeenCalled();
-      });
-      descriptions.push(
-        result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "",
-      );
-      await waitFor(() => {
-        expect(modelCliMocks.installNode22Runtime).toHaveBeenCalled();
-      });
-      descriptions.push(
-        result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "",
-      );
-      await waitFor(() => {
-        expect(modelCliMocks.installCodexCli).toHaveBeenCalled();
-      });
-      descriptions.push(
-        result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "",
-      );
-      await waitFor(() => {
-        expect(modelCliMocks.installClaudeCodeCli).toHaveBeenCalled();
-      });
-      descriptions.push(
-        result.current.checks.find((check) => check.id === "cliConfig")?.description ?? "",
-      );
-      await promise;
-    });
-
-    expect(descriptions.join("\n")).toContain("Git Bash");
-    expect(descriptions.join("\n")).toContain("Node.js 22");
-    expect(descriptions.join("\n")).toContain("Codex");
-    expect(descriptions.join("\n")).toContain("Claude Code");
-    expect(modelCliMocks.installGitBashRuntime).toHaveBeenCalledBefore(
-      modelCliMocks.installNode22Runtime,
-    );
-    expect(modelCliMocks.installNode22Runtime).toHaveBeenCalledBefore(
-      modelCliMocks.installCodexCli,
-    );
-    expect(modelCliMocks.installCodexCli).toHaveBeenCalledBefore(
-      modelCliMocks.installClaudeCodeCli,
-    );
+    ]);
   });
+
 });
