@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -6,6 +6,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowRight, Cloud, KeyRound } from "lucide-react-native";
 import { PaseoLogo } from "@/components/icons/paseo-logo";
 import { useAppSettings, type AccessMode } from "@/hooks/use-settings";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 import { CLOUD_NAME } from "@/config/branding";
 
 const styles = StyleSheet.create((theme) => ({
@@ -120,6 +122,8 @@ export function ModeSelectScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { updateSettings } = useAppSettings();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).modeSelect, [locale]);
   const [pending, setPending] = useState<AccessMode | null>(null);
 
   const pickMode = useCallback(
@@ -158,18 +162,17 @@ export function ModeSelectScreen() {
         <View style={styles.content}>
           <PaseoLogo size={96} />
           <View style={styles.copyBlock}>
-            <Text style={styles.title}>How do you want to connect?</Text>
-            <Text style={styles.subtitle}>
-              Use {CLOUD_NAME}, or bring your own API keys (BYOK) for model access.
-            </Text>
+            <Text style={styles.title}>{text.title}</Text>
+            <Text style={styles.subtitle}>{text.subtitle(CLOUD_NAME)}</Text>
           </View>
 
           <View style={styles.cards}>
             <ModeCard
               icon={<Cloud size={20} color={theme.colors.accent} />}
               title={CLOUD_NAME}
-              description="Sign in for managed Claude Code / Codex routing, usage-based billing, and quick setup."
-              metaText="Sign in · Recommended"
+              description={text.cloudDescription}
+              metaText={text.signInMeta}
+              recommendedLabel={text.recommended}
               metaAccent
               recommended
               disabled={pending !== null && pending !== "builtin"}
@@ -180,8 +183,8 @@ export function ModeSelectScreen() {
             <ModeCard
               icon={<KeyRound size={20} color={theme.colors.foreground} />}
               title="BYOK"
-              description="Use your own Anthropic / OpenAI keys and add providers in Settings. No cloud sign-in."
-              metaText="No sign-in"
+              description={text.byokDescription}
+              metaText={text.noSignInMeta}
               disabled={pending !== null && pending !== "byok"}
               loading={pending === "byok"}
               testID="mode-select-byok"
@@ -201,6 +204,7 @@ interface ModeCardProps {
   metaText: string;
   metaAccent?: boolean;
   recommended?: boolean;
+  recommendedLabel?: string;
   disabled?: boolean;
   loading?: boolean;
   testID?: string;
@@ -214,6 +218,7 @@ function ModeCard({
   metaText,
   metaAccent,
   recommended,
+  recommendedLabel,
   disabled,
   loading,
   testID,
@@ -237,7 +242,7 @@ function ModeCard({
         <Text style={styles.cardTitle}>{title}</Text>
         {recommended ? (
           <View style={styles.cardBadge}>
-            <Text style={styles.cardBadgeText}>Recommended</Text>
+            <Text style={styles.cardBadgeText}>{recommendedLabel}</Text>
           </View>
         ) : null}
       </View>

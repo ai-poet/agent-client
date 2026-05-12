@@ -4,13 +4,15 @@
  * useSub2APILoginFlow would never register the listeners otherwise.
  */
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Alert } from "react-native";
 import { getIsElectron } from "@/constants/platform";
 import { invokeDesktopCommand } from "@/desktop/electron/invoke";
 import { getDesktopHost } from "@/desktop/host";
 import { useSub2APIAuth } from "@/hooks/use-sub2api-auth";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 import { cloudServiceQueryKeys } from "@/hooks/use-sub2api-api";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 import { createSub2APIClient, type Sub2APIGroup, type Sub2APIKey } from "@/lib/sub2api-client";
 import { parseSub2APIAuthCallback } from "@/screens/settings/sub2api-auth-bridge";
 import { resolveScopedActiveProviderIds } from "@/screens/settings/desktop-providers-context";
@@ -166,25 +168,21 @@ async function configureMissingManagedRoutes(
   const pendingScopes = new Set<ManagedCloudDesktopScope>(["claude", "codex"]);
 
   if (session.claudeApiKey) {
-    commands.push(
-      {
-        endpoint: session.endpoint,
-        apiKey: session.claudeApiKey,
-        scope: "claude",
-        name: CLOUD_NAME,
-      },
-    );
+    commands.push({
+      endpoint: session.endpoint,
+      apiKey: session.claudeApiKey,
+      scope: "claude",
+      name: CLOUD_NAME,
+    });
     pendingScopes.delete("claude");
   }
   if (session.codexApiKey) {
-    commands.push(
-      {
-        endpoint: session.endpoint,
-        apiKey: session.codexApiKey,
-        scope: "codex",
-        name: CLOUD_NAME,
-      },
-    );
+    commands.push({
+      endpoint: session.endpoint,
+      apiKey: session.codexApiKey,
+      scope: "codex",
+      name: CLOUD_NAME,
+    });
     pendingScopes.delete("codex");
   }
 
@@ -229,27 +227,23 @@ async function configureMissingManagedRoutes(
         continue;
       }
 
-      commands.push(
-        {
-          endpoint: session.endpoint,
-          apiKey: resolved.key.key,
-          scope,
-          name: resolved.group.name,
-        },
-      );
+      commands.push({
+        endpoint: session.endpoint,
+        apiKey: resolved.key.key,
+        scope,
+        name: resolved.group.name,
+      });
       pendingScopes.delete(scope);
     }
   }
 
   if (commands.length === 0 && !active.claude && !active.codex && session.apiKey) {
-    commands.push(
-      {
-        endpoint: session.endpoint,
-        apiKey: session.apiKey,
-        scope: "both",
-        name: CLOUD_NAME,
-      },
-    );
+    commands.push({
+      endpoint: session.endpoint,
+      apiKey: session.apiKey,
+      scope: "both",
+      name: CLOUD_NAME,
+    });
   }
 
   if (commands.length === 0) {
@@ -263,6 +257,8 @@ async function configureMissingManagedRoutes(
 
 export function Sub2apiDesktopAuthBridge(): null {
   const queryClient = useQueryClient();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).authAlerts, [locale]);
   const { login, getAccessToken } = useSub2APIAuth();
   const loginRef = useRef(login);
   loginRef.current = login;
@@ -271,40 +267,40 @@ export function Sub2apiDesktopAuthBridge(): null {
   const queryClientRef = useRef(queryClient);
   queryClientRef.current = queryClient;
 
-  const applyCallback = useCallback(async (payload: unknown) => {
-    const url = extractAuthCallbackUrl(payload);
-    if (!url) {
-      return;
-    }
-    if (lastHandledCallbackUrl === url) {
-      return;
-    }
-    lastHandledCallbackUrl = url;
-
-    try {
-      const session = parseSub2APIAuthCallback(url);
-      await loginRef.current({
-        accessToken: session.accessToken,
-        refreshToken: session.refreshToken,
-        expiresIn: session.expiresIn,
-        endpoint: session.endpoint,
-      });
-      try {
-        await configureMissingManagedRoutes(session, () => getAccessTokenRef.current());
-      } catch (error) {
-        console.error("[sub2api-desktop-auth-bridge] auto-route setup failed:", error);
-        Alert.alert(
-          "Signed in",
-          `Your account is connected, but automatic Claude/Codex setup did not finish. ${getErrorMessage(error)}`,
-        );
+  const applyCallback = useCallback(
+    async (payload: unknown) => {
+      const url = extractAuthCallbackUrl(payload);
+      if (!url) {
+        return;
       }
-      void queryClientRef.current.invalidateQueries({ queryKey: cloudServiceQueryKeys.root });
-    } catch (error) {
-      lastHandledCallbackUrl = null;
-      console.error("[sub2api-desktop-auth-bridge] callback failed:", error);
-      Alert.alert("Login failed", getErrorMessage(error));
-    }
-  }, []);
+      if (lastHandledCallbackUrl === url) {
+        return;
+      }
+      lastHandledCallbackUrl = url;
+
+      try {
+        const session = parseSub2APIAuthCallback(url);
+        await loginRef.current({
+          accessToken: session.accessToken,
+          refreshToken: session.refreshToken,
+          expiresIn: session.expiresIn,
+          endpoint: session.endpoint,
+        });
+        try {
+          await configureMissingManagedRoutes(session, () => getAccessTokenRef.current());
+        } catch (error) {
+          console.error("[sub2api-desktop-auth-bridge] auto-route setup failed:", error);
+          Alert.alert(text.signedIn, text.autoRouteSetupFailed(getErrorMessage(error)));
+        }
+        void queryClientRef.current.invalidateQueries({ queryKey: cloudServiceQueryKeys.root });
+      } catch (error) {
+        lastHandledCallbackUrl = null;
+        console.error("[sub2api-desktop-auth-bridge] callback failed:", error);
+        Alert.alert(text.loginFailed, getErrorMessage(error));
+      }
+    },
+    [text],
+  );
 
   const applyCallbackRef = useRef(applyCallback);
   applyCallbackRef.current = applyCallback;

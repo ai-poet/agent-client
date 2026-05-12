@@ -74,6 +74,7 @@ import {
   getMissingCliDependencyNames,
   summarizeManagedCloudAvailability,
 } from "@/hooks/use-setup-checks";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 import type { Sub2APIGroup, Sub2APIKey } from "@/lib/sub2api-client";
 import type { ModelCliRuntimeStatus } from "@/desktop/daemon/desktop-daemon";
 
@@ -280,10 +281,33 @@ describe("use-setup-checks availability helpers", () => {
           "Error invoking remote method 'paseo:invoke': Error: Install failed: npmmirror npm registry timed out while installing Claude Code.",
         ),
         status,
+        getSub2APIMessages("en").setupCheck,
       ),
     ).toBe(
       "Install failed: npmmirror npm registry timed out while installing Claude Code. Missing: Claude Code",
     );
+  });
+
+  it("formats install failures with localized missing tool prefix", () => {
+    const status = makeRuntimeStatus({
+      node: {
+        installed: false,
+        version: null,
+        major: null,
+        npmVersion: null,
+        satisfies: false,
+        manager: "shell",
+        error: "Node.js was not found.",
+      },
+    });
+
+    expect(
+      formatCliInstallFailureMessage(
+        new Error("Automatic Node.js 22 installation failed."),
+        status,
+        getSub2APIMessages("zh").setupCheck,
+      ),
+    ).toBe("安装失败。请重试或手动安装。缺少：Node.js 22");
   });
 
   it("does not append stale missing tools when the desktop error already includes them", () => {
@@ -323,13 +347,14 @@ describe("use-setup-checks availability helpers", () => {
       formatCliInstallFailureMessage(
         new Error("Install failed: npm official registry timed out. Missing: Claude Code"),
         staleStatus,
+        getSub2APIMessages("en").setupCheck,
       ),
     ).toBe("Install failed: npm official registry timed out. Missing: Claude Code");
   });
 
   it("describes CLI installation as ordered visible steps", () => {
     expect(
-      getCliInstallSteps().map((step) => ({
+      getCliInstallSteps(getSub2APIMessages("en").setupCheck).map((step) => ({
         id: step.id,
         label: step.label,
         installingDescription: step.installingDescription,
@@ -354,6 +379,37 @@ describe("use-setup-checks availability helpers", () => {
         id: "claude",
         label: "Claude Code",
         installingDescription: "Installing Claude Code CLI...",
+      },
+    ]);
+  });
+
+  it("describes CLI installation steps in Chinese", () => {
+    expect(
+      getCliInstallSteps(getSub2APIMessages("zh").setupCheck).map((step) => ({
+        id: step.id,
+        label: step.label,
+        installingDescription: step.installingDescription,
+      })),
+    ).toEqual([
+      {
+        id: "git",
+        label: "Git Bash",
+        installingDescription: "正在安装 Git Bash...",
+      },
+      {
+        id: "node",
+        label: "Node.js 22",
+        installingDescription: "正在安装 Node.js 22...",
+      },
+      {
+        id: "codex",
+        label: "Codex",
+        installingDescription: "正在安装 Codex CLI...",
+      },
+      {
+        id: "claude",
+        label: "Claude Code",
+        installingDescription: "正在安装 Claude Code CLI...",
       },
     ]);
   });

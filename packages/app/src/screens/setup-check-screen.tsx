@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -7,6 +7,8 @@ import { CheckCircle2, CircleAlert, MinusCircle } from "lucide-react-native";
 import { PaseoLogo } from "@/components/icons/paseo-logo";
 import { useAppSettings } from "@/hooks/use-settings";
 import { useSetupChecks, type CheckItem } from "@/hooks/use-setup-checks";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 
 const styles = StyleSheet.create((theme) => ({
   root: {
@@ -165,6 +167,8 @@ export function SetupCheckScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { updateSettings } = useAppSettings();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).setupCheck, [locale]);
   const { checks, allPassed, isRunning, runAllChecks, fixCheck } = useSetupChecks();
   const autoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -207,10 +211,8 @@ export function SetupCheckScreen() {
         <View style={styles.content}>
           <PaseoLogo size={48} />
           <View style={styles.copyBlock}>
-            <Text style={styles.title}>Environment Check</Text>
-            <Text style={styles.subtitle}>
-              {isRunning ? "Verifying your configuration..." : "Review the results below"}
-            </Text>
+            <Text style={styles.title}>{text.title}</Text>
+            <Text style={styles.subtitle}>{isRunning ? text.verifying : text.review}</Text>
           </View>
 
           <View style={styles.checkList}>
@@ -225,10 +227,10 @@ export function SetupCheckScreen() {
               onPress={handleContinue}
               disabled={!allPassed}
             >
-              <Text style={styles.continueBtnText}>{allPassed ? "Continue" : "Continue"}</Text>
+              <Text style={styles.continueBtnText}>{text.continue}</Text>
             </Pressable>
             <Pressable style={styles.skipBtn} onPress={handleSkip}>
-              <Text style={styles.skipBtnText}>Skip</Text>
+              <Text style={styles.skipBtnText}>{text.skip}</Text>
             </Pressable>
           </View>
         </View>

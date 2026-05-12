@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { Alert, Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Wallet } from "lucide-react-native";
@@ -6,6 +6,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useAppSettings } from "@/hooks/use-settings";
 import { useSub2APIAuth } from "@/hooks/use-sub2api-auth";
 import { useSub2APIMe, useSub2APIUsageStats } from "@/hooks/use-sub2api-api";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 import { Sub2APIPayModal } from "@/screens/settings/sub2api-pay-modal";
 import { formatUsd, getErrorMessage } from "@/screens/settings/managed-provider-settings-shared";
 
@@ -24,6 +26,9 @@ function getBalanceColor(
 export const HeaderBalanceBadge = memo(function HeaderBalanceBadge() {
   const { theme } = useUnistyles();
   const { settings } = useAppSettings();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).authAlerts, [locale]);
+  const sidebarText = useMemo(() => getSub2APIMessages(locale).sidebarUser, [locale]);
   const { isLoggedIn, auth, getAccessToken } = useSub2APIAuth();
   const meQuery = useSub2APIMe();
   const usageTodayQuery = useSub2APIUsageStats("today");
@@ -37,15 +42,15 @@ export const HeaderBalanceBadge = memo(function HeaderBalanceBadge() {
     try {
       const token = await getAccessToken();
       if (!token) {
-        Alert.alert("Session expired", "Please log in again.");
+        Alert.alert(text.sessionExpired, text.loginAgain);
         return;
       }
       setPayToken(token);
       setIsPayModalOpen(true);
     } catch (error) {
-      Alert.alert("Unable to open payment", getErrorMessage(error));
+      Alert.alert(text.unableOpenPayment, getErrorMessage(error));
     }
-  }, [getAccessToken]);
+  }, [getAccessToken, text]);
 
   const handlePayCompleted = useCallback(() => {
     void meQuery.refetch();
@@ -78,7 +83,7 @@ export const HeaderBalanceBadge = memo(function HeaderBalanceBadge() {
               pressed && styles.badgePressed,
             ]}
             accessibilityRole="button"
-            accessibilityLabel={`Balance ${formatUsd(balance)}`}
+            accessibilityLabel={`${sidebarText.balance} ${formatUsd(balance)}`}
             testID="header-balance-badge"
           >
             <Wallet size={14} color={balanceColor} />
@@ -89,7 +94,7 @@ export const HeaderBalanceBadge = memo(function HeaderBalanceBadge() {
         </TooltipTrigger>
         <TooltipContent side="bottom" align="center" offset={8}>
           <Text style={styles.tooltipText}>
-            Today: {formatUsd(todayCost)} ({todayReqs} req) — click to recharge
+            {sidebarText.todayUsage(formatUsd(todayCost), todayReqs)}
           </Text>
         </TooltipContent>
       </Tooltip>

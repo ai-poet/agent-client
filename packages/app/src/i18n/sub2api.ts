@@ -313,6 +313,107 @@ export const sub2apiMessages = {
       loginAgainBeforePayment: "请重新登录后再打开支付。",
       unableOpenPayment: "无法打开支付",
     },
+    setupCheck: {
+      title: "环境检查",
+      verifying: "正在验证配置...",
+      review: "查看检查结果",
+      continue: "继续",
+      skip: "跳过",
+      actions: {
+        retry: "重试",
+        manageRoutes: "管理路由",
+        install: "安装",
+        installAll: "全部安装",
+        configure: "配置",
+      },
+      health: {
+        label: "后端服务",
+        checking: "正在检查服务连接...",
+        reachable: "服务可访问",
+        unreachable: "无法连接后端服务",
+        unexpectedStatus: "服务返回了异常状态",
+        connectionFailed: "连接失败",
+      },
+      routes: {
+        apiKeyLabel: "API 密钥",
+        cloudRoutesLabel: "云端路由",
+        byokSkipped: "BYOK 模式，已跳过",
+        checking: "正在检查 Claude/Codex 路由...",
+        readyBoth: "当前云账户可创建 Claude Code 和 Codex 路由",
+        claudeOnly: "Claude Code 路由可用。如需 Codex，请添加 OpenAI 分组或密钥。",
+        codexOnly: "Codex 路由可用。如需 Claude Code，请添加 Anthropic 分组或密钥。",
+        keysNotBound: "当前 API 密钥未绑定到 Claude Code 或 Codex 兼容路由",
+        assignGroup: (cloudName: string) =>
+          `继续前请先在 ${cloudName} 分配 anthropic 或 openai 分组。`,
+        noCompatibleGroups: "此账户暂无 Claude Code 或 Codex 兼容分组",
+        askGroupOrByok: "请申请 anthropic/openai 分组，或切换到 BYOK。",
+        noManagedRoutes: "暂无可用的托管 Claude Code 或 Codex 路由",
+        createRouteOrByok: "请创建兼容的云端路由，或改用 BYOK。",
+        failedCheck: "检查 Claude/Codex 路由失败",
+        notAuthenticated: "尚未登录",
+        checkFailed: "检查失败",
+      },
+      cli: {
+        label: "Claude Code & Codex",
+        checking: "正在检查 CLI 工具...",
+        desktopOnlySkipped: "仅桌面端需要，已跳过",
+        toolsNotFullyInstalled: "CLI 工具尚未完整安装",
+        missing: (items: string) => `缺少：${items}`,
+        notInstalledError: "CLI 未安装",
+        providersNotConfigured: "未配置 Claude Code 或 Codex 的提供商",
+        providersNotConfiguredError: "提供商未配置",
+        toolsInstalledButNotConfigured: "CLI 工具已安装但尚未配置",
+        onlyConfigured: (configured: string) => `仅已配置 ${configured}`,
+        providerNotConfigured: (unconfigured: string) => `${unconfigured} 提供商未配置`,
+        partialConfigError: "部分配置缺失",
+        installedAndConfigured: "Claude Code & Codex 已安装并配置",
+        failedCheckConfiguration: "检查 CLI 配置失败",
+        checkFailed: "检查失败",
+        preparingInstall: "正在准备 CLI 安装...",
+        stepReadyContinuing: (label: string) => `${label} 已就绪，继续...`,
+        installationIncomplete: (items: string) => `安装未完成：${items}`,
+        someToolsFailed: "部分工具安装失败",
+        installFailedFallback: "安装失败。请重试或手动安装。",
+        installFailureWithMissing: (base: string, items: string) =>
+          `${base.replace(/[.。]$/, "")}。缺少：${items}`,
+        installing: {
+          git: "正在安装 Git Bash...",
+          node: "正在安装 Node.js 22...",
+          codex: "正在安装 Codex CLI...",
+          claude: "正在安装 Claude Code CLI...",
+        },
+      },
+    },
+    loginScreen: {
+      title: (appName: string) => `登录 ${appName}`,
+      subtitle: (cloudName: string, appName: string) =>
+        `请在浏览器中完成 ${cloudName} 登录。首次登录时，${appName} 会尝试为你补齐缺失的 Claude Code 和 Codex 路由，且不会覆盖此设备上已有的路由。`,
+      envUrlInvalid:
+        "EXPO_PUBLIC_MANAGED_SERVICE_URL 不是有效的 http(s) URL。请修正后重新构建或重启。",
+      waitingForBrowser: "正在等待浏览器...",
+      requestAuthenticationAgain: "重新发起认证",
+      primaryLogin: "登录",
+      byokCaption: "已经有自己的 API 密钥？",
+      useByokInstead: "改用 BYOK →",
+    },
+    modeSelect: {
+      title: "你想如何连接？",
+      subtitle: (cloudName: string) => `使用 ${cloudName}，或自带 API 密钥（BYOK）访问模型。`,
+      cloudDescription: "登录后使用托管 Claude Code / Codex 路由、按量计费和快速配置。",
+      signInMeta: "登录 · 推荐",
+      byokDescription: "使用你自己的 Anthropic / OpenAI 密钥，并在设置中添加提供商。无需云端登录。",
+      noSignInMeta: "无需登录",
+      recommended: "推荐",
+    },
+    authAlerts: {
+      sessionExpired: "会话已过期",
+      loginAgain: "请重新登录。",
+      unableOpenPayment: "无法打开支付",
+      signedIn: "已登录",
+      autoRouteSetupFailed: (message: string) =>
+        `账户已连接，但自动配置 Claude/Codex 未完成。${message}`,
+      loginFailed: "登录失败",
+    },
     sidebar: {
       projects: "项目",
       chat: "聊天",
@@ -353,8 +454,7 @@ export const sub2apiMessages = {
       addProject: "添加项目",
       renamePrompt: "重命名项目",
       removeProjectTitle: "移除项目？",
-      removeProjectMessage: (name: string) =>
-        `从侧边栏移除 "${name}"？\n\n磁盘文件不会被修改。`,
+      removeProjectMessage: (name: string) => `从侧边栏移除 "${name}"？\n\n磁盘文件不会被修改。`,
       remove: "移除",
       cancel: "取消",
       hostNotConnected: "主机未连接",
@@ -375,8 +475,7 @@ export const sub2apiMessages = {
       workspacePathUnavailable: "工作区路径不可用",
       failedArchiveWorktree: "归档 worktree 失败",
       hideWorkspaceTitle: "隐藏工作区？",
-      hideWorkspaceMessage: (name: string) =>
-        `从侧边栏隐藏 "${name}"？\n\n磁盘文件不会被修改。`,
+      hideWorkspaceMessage: (name: string) => `从侧边栏隐藏 "${name}"？\n\n磁盘文件不会被修改。`,
       hide: "隐藏",
       failedHideWorkspace: "隐藏工作区失败",
       pathCopied: "路径已复制",
@@ -446,8 +545,7 @@ export const sub2apiMessages = {
         keyName: string,
         cliLabel: string,
         configTarget: string,
-      ) =>
-        `${cloudName} 密钥 "${keyName}" 现在仅配置 ${cliLabel}。已更新 ${configTarget}。`,
+      ) => `${cloudName} 密钥 "${keyName}" 现在仅配置 ${cliLabel}。已更新 ${configTarget}。`,
       switchFailed: "切换失败",
       deleteFailed: "删除失败",
     },
@@ -656,10 +754,12 @@ export const sub2apiMessages = {
       error: "错误",
       unableOpenUpdateConfirmation: "无法打开更新确认对话框。",
       managedProviderTitle: "此设备",
-      managedProviderBody: "此电脑上 Claude Code 和 Codex 的活跃 API 路由，以及已保存和自定义的端点。你可以让每个 CLI 使用不同的已保存条目。",
+      managedProviderBody:
+        "此电脑上 Claude Code 和 Codex 的活跃 API 路由，以及已保存和自定义的端点。你可以让每个 CLI 使用不同的已保存条目。",
       managedProviderCloudHint: (cloudName: string) =>
         `${cloudName}（账户、密钥、账单）位于侧边栏的 ${cloudName} 下。`,
-      paseoCloudBody: "托管服务的账户登录、余额、路由分组、API 密钥和模型广场。它与 Provider 下的本机 Claude/Codex 路由分开管理。",
+      paseoCloudBody:
+        "托管服务的账户登录、余额、路由分组、API 密钥和模型广场。它与 Provider 下的本机 Claude/Codex 路由分开管理。",
     },
   },
   en: {
@@ -685,7 +785,8 @@ export const sub2apiMessages = {
       paymentMethod: "Payment method",
       methodUnavailable: "This payment method is currently unavailable.",
       remainingDailyQuota: (amount: string) => `Remaining daily quota: ${amount}`,
-      stripeRuntimeHint: "Stripe checkout is only available in the full payment center in this runtime.",
+      stripeRuntimeHint:
+        "Stripe checkout is only available in the full payment center in this runtime.",
       loadingCta: "Loading…",
       creatingOrder: "Creating order…",
       continueToPayment: "Continue to payment",
@@ -703,9 +804,12 @@ export const sub2apiMessages = {
       failedCreateOrder: "Failed to create payment order.",
       missingOrderId: "Payment order is missing an order id.",
       missingStatusAccessToken: "Payment order is missing a status access token.",
-      stripeWindowBlocked: "Stripe payment window was blocked. Use the button below to try opening it again.",
-      stripeCouldNotOpen: "Stripe checkout could not open here. Please use the full payment center.",
-      paymentPollingTimedOut: "Payment status polling timed out. You can go back to recharge and try again if needed.",
+      stripeWindowBlocked:
+        "Stripe payment window was blocked. Use the button below to try opening it again.",
+      stripeCouldNotOpen:
+        "Stripe checkout could not open here. Please use the full payment center.",
+      paymentPollingTimedOut:
+        "Payment status polling timed out. You can go back to recharge and try again if needed.",
       failedRefreshStatus: "Failed to refresh order status.",
       failedCancelOrder: "Failed to cancel this order.",
       paymentSuccessfulToast: "Payment successful. Balance updated.",
@@ -717,9 +821,11 @@ export const sub2apiMessages = {
       qrInstruction: (method: string) => `Open ${method} and scan to complete payment`,
       openPaymentPage: "Open payment page",
       redirectTitle: "Payment continues in your browser",
-      redirectHint: "If the payment page did not open automatically, use the button below to reopen it.",
+      redirectHint:
+        "If the payment page did not open automatically, use the button below to reopen it.",
       stripeCheckout: "Stripe checkout",
-      stripeCheckoutHint: "A secure Stripe window is required for this order. We keep polling the order here while that window is open.",
+      stripeCheckoutHint:
+        "A secure Stripe window is required for this order. We keep polling the order here while that window is open.",
       opening: "Opening…",
       openSecurePaymentWindow: "Open secure payment window",
       cancelling: "Cancelling…",
@@ -729,19 +835,25 @@ export const sub2apiMessages = {
         rechargeCompleteTitle: "Recharge complete",
         rechargeCompleteMessage: "Your balance has been credited. Closing this dialog…",
         paymentReceivedTitle: "Payment received",
-        paymentReceivedMessage: "Your payment was received and the balance top-up is still being processed.",
+        paymentReceivedMessage:
+          "Your payment was received and the balance top-up is still being processed.",
         rechargeUnfinishedTitle: "Payment received, recharge not finished",
-        rechargeUnfinishedMessage: "Payment completed, but the recharge has not finished yet. Please try again later or contact support.",
+        rechargeUnfinishedMessage:
+          "Payment completed, but the recharge has not finished yet. Please try again later or contact support.",
         awaitingPaymentTitle: "Awaiting payment",
-        awaitingPaymentMessage: "Complete payment using the method below. We will refresh this order automatically.",
+        awaitingPaymentMessage:
+          "Complete payment using the method below. We will refresh this order automatically.",
         paymentFailedTitle: "Payment failed",
-        paymentFailedMessage: "This payment did not complete successfully. You can go back and create a new order.",
+        paymentFailedMessage:
+          "This payment did not complete successfully. You can go back and create a new order.",
         orderCancelledTitle: "Order cancelled",
         orderCancelledMessage: "This order was cancelled before payment completed.",
         orderExpiredTitle: "Order expired",
-        orderExpiredMessage: "This order expired before payment completed. Create a new order to try again.",
+        orderExpiredMessage:
+          "This order expired before payment completed. Create a new order to try again.",
         statusUpdatedTitle: "Payment status updated",
-        statusUpdatedMessage: "The payment status changed. You can go back and create a new order if needed.",
+        statusUpdatedMessage:
+          "The payment status changed. You can go back and create a new order if needed.",
       },
     },
     modelCatalog: {
@@ -842,6 +954,114 @@ export const sub2apiMessages = {
       loginAgainBeforePayment: "Please log in again before opening payment.",
       unableOpenPayment: "Unable to open payment",
     },
+    setupCheck: {
+      title: "Environment Check",
+      verifying: "Verifying your configuration...",
+      review: "Review the results below",
+      continue: "Continue",
+      skip: "Skip",
+      actions: {
+        retry: "Retry",
+        manageRoutes: "Manage Routes",
+        install: "Install",
+        installAll: "Install All",
+        configure: "Configure",
+      },
+      health: {
+        label: "Backend Service",
+        checking: "Checking service reachability...",
+        reachable: "Service is reachable",
+        unreachable: "Cannot reach backend service",
+        unexpectedStatus: "Service returned unexpected status",
+        connectionFailed: "Connection failed",
+      },
+      routes: {
+        apiKeyLabel: "API Key",
+        cloudRoutesLabel: "Cloud routes",
+        byokSkipped: "BYOK mode — skipped",
+        checking: "Checking Claude/Codex routes...",
+        readyBoth: "Claude Code and Codex routes can be created from your current cloud account",
+        claudeOnly:
+          "Claude Code routing is available. Add an OpenAI group or key if you also want Codex.",
+        codexOnly:
+          "Codex routing is available. Add an Anthropic group or key if you also want Claude Code.",
+        keysNotBound:
+          "Your current API keys are not bound to Claude Code or Codex compatible routes",
+        assignGroup: (cloudName: string) =>
+          `Assign an anthropic or openai group in ${cloudName} before continuing.`,
+        noCompatibleGroups:
+          "No Claude Code or Codex compatible groups are available for this account",
+        askGroupOrByok: "Ask for an anthropic/openai group or switch to BYOK.",
+        noManagedRoutes: "No managed Claude Code or Codex routes are available yet",
+        createRouteOrByok: "Create a compatible cloud route or use BYOK instead.",
+        failedCheck: "Failed to check Claude/Codex routes",
+        notAuthenticated: "Not authenticated",
+        checkFailed: "Check failed",
+      },
+      cli: {
+        label: "Claude Code & Codex",
+        checking: "Checking CLI tools...",
+        desktopOnlySkipped: "Desktop only — skipped",
+        toolsNotFullyInstalled: "CLI tools not fully installed",
+        missing: (items: string) => `Missing: ${items}`,
+        notInstalledError: "CLI not installed",
+        providersNotConfigured: "No providers configured for Claude Code or Codex",
+        providersNotConfiguredError: "Providers not configured",
+        toolsInstalledButNotConfigured: "CLI tools installed but not configured",
+        onlyConfigured: (configured: string) => `Only ${configured} configured`,
+        providerNotConfigured: (unconfigured: string) => `${unconfigured} provider not configured`,
+        partialConfigError: "Partial config",
+        installedAndConfigured: "Claude Code & Codex installed and configured",
+        failedCheckConfiguration: "Failed to check CLI configuration",
+        checkFailed: "Check failed",
+        preparingInstall: "Preparing CLI installation...",
+        stepReadyContinuing: (label: string) => `${label} ready. Continuing...`,
+        installationIncomplete: (items: string) => `Installation incomplete: ${items}`,
+        someToolsFailed: "Some tools failed to install",
+        installFailedFallback: "Install failed. Please retry or install manually.",
+        installFailureWithMissing: (base: string, items: string) =>
+          `${base.replace(/\.$/, "")}. Missing: ${items}`,
+        installing: {
+          git: "Installing Git Bash...",
+          node: "Installing Node.js 22...",
+          codex: "Installing Codex CLI...",
+          claude: "Installing Claude Code CLI...",
+        },
+      },
+    },
+    loginScreen: {
+      title: (appName: string) => `Sign in to ${appName}`,
+      subtitle: (cloudName: string, appName: string) =>
+        `Complete sign-in in your browser for ${cloudName}. On first sign-in, ${appName} tries to configure any missing Claude Code and Codex routes for you without replacing routes that already exist on this device.`,
+      envUrlInvalid:
+        "EXPO_PUBLIC_MANAGED_SERVICE_URL is not a valid http(s) URL. Fix it and rebuild or restart.",
+      waitingForBrowser: "Waiting for browser...",
+      requestAuthenticationAgain: "Request authentication again",
+      primaryLogin: "Sign in",
+      byokCaption: "Already have your own API keys?",
+      useByokInstead: "Use BYOK instead →",
+    },
+    modeSelect: {
+      title: "How do you want to connect?",
+      subtitle: (cloudName: string) =>
+        `Use ${cloudName}, or bring your own API keys (BYOK) for model access.`,
+      cloudDescription:
+        "Sign in for managed Claude Code / Codex routing, usage-based billing, and quick setup.",
+      signInMeta: "Sign in · Recommended",
+      byokDescription:
+        "Use your own Anthropic / OpenAI keys and add providers in Settings. No cloud sign-in.",
+      noSignInMeta: "No sign-in",
+      recommended: "Recommended",
+    },
+    authAlerts: {
+      sessionExpired: "Session expired",
+      loginAgain: "Please log in again.",
+      unableOpenPayment: "Unable to open payment",
+      signedIn: "Signed in",
+      autoRouteSetupFailed: (message: string) =>
+        `Your account is connected, but automatic Claude/Codex setup did not finish. ${message}`,
+      loginFailed: "Login failed",
+    },
     sidebar: {
       projects: "Projects",
       chat: "Chat",
@@ -916,7 +1136,8 @@ export const sub2apiMessages = {
       sectionHint: (platform: string, cliLabel: string) =>
         `Advanced key management for ${platform} routes. In the normal flow, choosing a Cloud group automatically creates or reuses a key for ${cliLabel}.`,
       createApiKey: "Create API key",
-      pageHint: "This page only filters and manages keys. It does not change CLI routing until you press Set as global CLI default.",
+      pageHint:
+        "This page only filters and manages keys. It does not change CLI routing until you press Set as global CLI default.",
       setGlobalDefault: "Set as global CLI default",
       noCompatibleGroupsTitle: "No compatible groups yet",
       noCompatibleGroupsBody: (platform: string, cliLabel: string, cloudName: string) =>
@@ -1000,7 +1221,8 @@ export const sub2apiMessages = {
       noExistingKey: "No existing key yet. Applying this group will create one automatically.",
       recommendedInsight: (cliLabel: string) =>
         `Best available option right now for ${cliLabel} based on health, latency, and price.`,
-      downWarning: "Recent probes look unhealthy. Prefer another group unless you specifically need this route.",
+      downWarning:
+        "Recent probes look unhealthy. Prefer another group unless you specifically need this route.",
       advancedAction: "Advanced action: writes",
       applying: "Applying…",
       activeCta: (cliLabel: string) => `Active · ${cliLabel}`,
@@ -1182,10 +1404,12 @@ export const sub2apiMessages = {
       error: "Error",
       unableOpenUpdateConfirmation: "Unable to open the update confirmation dialog.",
       managedProviderTitle: "This device",
-      managedProviderBody: "Active Claude Code and Codex API routes on this computer, plus saved and custom endpoints. You can point each CLI at a different saved entry.",
+      managedProviderBody:
+        "Active Claude Code and Codex API routes on this computer, plus saved and custom endpoints. You can point each CLI at a different saved entry.",
       managedProviderCloudHint: (cloudName: string) =>
         `${cloudName} (account, keys, billing) lives in the sidebar under ${cloudName}.`,
-      paseoCloudBody: "Account sign-in, balance, routing groups, API keys, and the model catalog for the managed service. This is separate from the on-device Claude/Codex routes under Provider.",
+      paseoCloudBody:
+        "Account sign-in, balance, routing groups, API keys, and the model catalog for the managed service. This is separate from the on-device Claude/Codex routes under Provider.",
     },
   },
 } as const;

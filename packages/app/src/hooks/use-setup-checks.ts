@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "expo-router";
 import { getIsElectron } from "@/constants/platform";
 import { useSub2APIAuth } from "@/hooks/use-sub2api-auth";
@@ -15,6 +15,8 @@ import {
   type ModelCliRuntimeStatus,
 } from "@/desktop/daemon/desktop-daemon";
 import { invokeDesktopCommand } from "@/desktop/electron/invoke";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 import type { ProviderStore } from "@/screens/settings/sub2api-provider-types";
 import { resolveScopedActiveProviderIds } from "@/screens/settings/desktop-providers-context";
 import {
@@ -44,6 +46,7 @@ export interface UseSetupChecksReturn {
 
 const HEALTH_TIMEOUT_MS = 5000;
 const MANAGED_CLOUD_ROUTES_UNAVAILABLE = "Managed cloud routes unavailable";
+type SetupCheckText = ReturnType<typeof getSub2APIMessages>["setupCheck"];
 
 export interface ManagedCloudScopeAvailability {
   groups: number;
@@ -55,47 +58,46 @@ export interface ManagedCloudAvailabilitySummary {
   codex: ManagedCloudScopeAvailability;
 }
 
-async function checkHealth(endpoint: string): Promise<void> {
+async function checkHealth(endpoint: string, text: SetupCheckText): Promise<void> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
   try {
     const resp = await fetch(`${endpoint}/health`, { signal: controller.signal });
     const data = (await resp.json()) as { status?: string };
     if (data?.status !== "ok") {
-      throw new Error("Service returned unexpected status");
+      throw new Error(text.health.unexpectedStatus);
     }
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function makeInitialChecks(accessMode: AccessMode | null): CheckItem[] {
+function makeInitialChecks(accessMode: AccessMode | null, text: SetupCheckText): CheckItem[] {
   const isElectron = getIsElectron();
   return [
     {
       id: "health",
-      label: "Backend Service",
-      description: "Checking service reachability...",
+      label: text.health.label,
+      description: text.health.checking,
       status: "pending",
       error: null,
-      fixLabel: "Retry",
+      fixLabel: text.actions.retry,
     },
     {
       id: "apiKeys",
-      label: accessMode === "byok" ? "API Key" : "Cloud routes",
-      description:
-        accessMode === "byok" ? "BYOK mode — skipped" : "Checking Claude/Codex routes...",
+      label: accessMode === "byok" ? text.routes.apiKeyLabel : text.routes.cloudRoutesLabel,
+      description: accessMode === "byok" ? text.routes.byokSkipped : text.routes.checking,
       status: accessMode === "byok" ? "skipped" : "pending",
       error: null,
-      fixLabel: "Manage Routes",
+      fixLabel: text.actions.manageRoutes,
     },
     {
       id: "cliConfig",
-      label: "Claude Code & Codex",
-      description: isElectron ? "Checking CLI tools..." : "Desktop only — skipped",
+      label: text.cli.label,
+      description: isElectron ? text.cli.checking : text.cli.desktopOnlySkipped,
       status: isElectron ? "pending" : "skipped",
       error: null,
-      fixLabel: "Install",
+      fixLabel: text.actions.install,
     },
   ];
 }
@@ -135,6 +137,7 @@ export function describeManagedCloudAvailability(
   summary: ManagedCloudAvailabilitySummary,
   totalKeys: number,
   totalGroups: number,
+  text: SetupCheckText = getSub2APIMessages("en").setupCheck,
 ): Pick<CheckItem, "status" | "description" | "error" | "fixLabel"> {
   const claudeReady = summary.claude.activeKeys > 0 || summary.claude.groups > 0;
   const codexReady = summary.codex.activeKeys > 0 || summary.codex.groups > 0;
@@ -142,55 +145,53 @@ export function describeManagedCloudAvailability(
   if (claudeReady && codexReady) {
     return {
       status: "passed",
-      description: "Claude Code and Codex routes can be created from your current cloud account",
+      description: text.routes.readyBoth,
       error: null,
-      fixLabel: "Manage Routes",
+      fixLabel: text.actions.manageRoutes,
     };
   }
 
   if (claudeReady) {
     return {
       status: "passed",
-      description:
-        "Claude Code routing is available. Add an OpenAI group or key if you also want Codex.",
+      description: text.routes.claudeOnly,
       error: null,
-      fixLabel: "Manage Routes",
+      fixLabel: text.actions.manageRoutes,
     };
   }
 
   if (codexReady) {
     return {
       status: "passed",
-      description:
-        "Codex routing is available. Add an Anthropic group or key if you also want Claude Code.",
+      description: text.routes.codexOnly,
       error: null,
-      fixLabel: "Manage Routes",
+      fixLabel: text.actions.manageRoutes,
     };
   }
 
   if (totalKeys > 0) {
     return {
       status: "failed",
-      description: "Your current API keys are not bound to Claude Code or Codex compatible routes",
-      error: `Assign an anthropic or openai group in ${CLOUD_NAME} before continuing.`,
-      fixLabel: "Manage Routes",
+      description: text.routes.keysNotBound,
+      error: text.routes.assignGroup(CLOUD_NAME),
+      fixLabel: text.actions.manageRoutes,
     };
   }
 
   if (totalGroups > 0) {
     return {
       status: "failed",
-      description: "No Claude Code or Codex compatible groups are available for this account",
-      error: "Ask for an anthropic/openai group or switch to BYOK.",
-      fixLabel: "Manage Routes",
+      description: text.routes.noCompatibleGroups,
+      error: text.routes.askGroupOrByok,
+      fixLabel: text.actions.manageRoutes,
     };
   }
 
   return {
     status: "failed",
-    description: "No managed Claude Code or Codex routes are available yet",
-    error: "Create a compatible cloud route or use BYOK instead.",
-    fixLabel: "Manage Routes",
+    description: text.routes.noManagedRoutes,
+    error: text.routes.createRouteOrByok,
+    fixLabel: text.actions.manageRoutes,
   };
 }
 
@@ -217,22 +218,23 @@ function stripDesktopIpcPrefix(message: string): string {
 export function formatCliInstallFailureMessage(
   error: unknown,
   status: ModelCliRuntimeStatus | null,
+  text: SetupCheckText = getSub2APIMessages("en").setupCheck,
 ): string {
   const missing = status ? getMissingCliDependencyNames(status) : [];
   const cleanedMessage = stripDesktopIpcPrefix(getErrorMessage(error));
   const baseMessage = cleanedMessage.startsWith("Install failed")
     ? cleanedMessage
-    : "Install failed. Please retry or install manually.";
+    : text.cli.installFailedFallback;
 
   if (missing.length === 0) {
     return baseMessage;
   }
 
-  if (/\bMissing:/i.test(baseMessage)) {
+  if (/\bMissing:/i.test(baseMessage) || baseMessage.includes("缺少：")) {
     return baseMessage;
   }
 
-  return `${baseMessage.replace(/\.$/, "")}. Missing: ${missing.join(", ")}`;
+  return text.cli.installFailureWithMissing(baseMessage, missing.join(", "));
 }
 
 interface CliInstallStep {
@@ -242,30 +244,32 @@ interface CliInstallStep {
   run: () => Promise<{ status: ModelCliRuntimeStatus }>;
 }
 
-export function getCliInstallSteps(): CliInstallStep[] {
+export function getCliInstallSteps(
+  text: SetupCheckText = getSub2APIMessages("en").setupCheck,
+): CliInstallStep[] {
   return [
     {
       id: "git",
       label: "Git Bash",
-      installingDescription: "Installing Git Bash...",
+      installingDescription: text.cli.installing.git,
       run: installGitBashRuntime,
     },
     {
       id: "node",
       label: "Node.js 22",
-      installingDescription: "Installing Node.js 22...",
+      installingDescription: text.cli.installing.node,
       run: installNode22Runtime,
     },
     {
       id: "codex",
       label: "Codex",
-      installingDescription: "Installing Codex CLI...",
+      installingDescription: text.cli.installing.codex,
       run: installCodexCli,
     },
     {
       id: "claude",
       label: "Claude Code",
-      installingDescription: "Installing Claude Code CLI...",
+      installingDescription: text.cli.installing.claude,
       run: installClaudeCodeCli,
     },
   ];
@@ -274,6 +278,8 @@ export function getCliInstallSteps(): CliInstallStep[] {
 export function useSetupChecks(): UseSetupChecksReturn {
   const router = useRouter();
   const { settings } = useAppSettings();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).setupCheck, [locale]);
   const { auth, getAccessToken } = useSub2APIAuth();
   const isElectron = getIsElectron();
 
@@ -283,7 +289,9 @@ export function useSetupChecks(): UseSetupChecksReturn {
       : null,
   );
 
-  const [checks, setChecks] = useState<CheckItem[]>(() => makeInitialChecks(settings.accessMode));
+  const [checks, setChecks] = useState<CheckItem[]>(() =>
+    makeInitialChecks(settings.accessMode, text),
+  );
   const [isRunning, setIsRunning] = useState(false);
   const cliStatusRef = useRef<ModelCliRuntimeStatus | null>(null);
 
@@ -300,31 +308,36 @@ export function useSetupChecks(): UseSetupChecksReturn {
   const runHealthCheck = useCallback(async () => {
     updateCheck("health", { status: "checking", error: null });
     try {
-      await checkHealth(getEndpoint());
-      updateCheck("health", { status: "passed", description: "Service is reachable" });
+      await checkHealth(getEndpoint(), text);
+      updateCheck("health", { status: "passed", description: text.health.reachable });
     } catch (err) {
       updateCheck("health", {
         status: "failed",
-        error: err instanceof Error ? err.message : "Connection failed",
-        description: "Cannot reach backend service",
-        fixLabel: "Retry",
+        error: err instanceof Error ? err.message : text.health.connectionFailed,
+        description: text.health.unreachable,
+        fixLabel: text.actions.retry,
       });
       throw err;
     }
-  }, [getEndpoint, updateCheck]);
+  }, [getEndpoint, text, updateCheck]);
 
   const runApiKeyCheck = useCallback(async () => {
     if (settings.accessMode === "byok") {
-      updateCheck("apiKeys", { status: "skipped", description: "BYOK mode — skipped" });
+      updateCheck("apiKeys", { status: "skipped", description: text.routes.byokSkipped });
       return;
     }
     updateCheck("apiKeys", { status: "checking", error: null });
     try {
       const c = clientRef.current;
-      if (!c) throw new Error("Not authenticated");
+      if (!c) throw new Error(text.routes.notAuthenticated);
       const [keyResult, groups] = await Promise.all([c.listKeys(1, 200), c.getAvailableGroups()]);
       const availability = summarizeManagedCloudAvailability(keyResult.items, groups);
-      const next = describeManagedCloudAvailability(availability, keyResult.total, groups.length);
+      const next = describeManagedCloudAvailability(
+        availability,
+        keyResult.total,
+        groups.length,
+        text,
+      );
       updateCheck("apiKeys", next);
       if (next.status === "failed") {
         throw new Error(MANAGED_CLOUD_ROUTES_UNAVAILABLE);
@@ -333,18 +346,18 @@ export function useSetupChecks(): UseSetupChecksReturn {
       if ((err as Error).message !== MANAGED_CLOUD_ROUTES_UNAVAILABLE) {
         updateCheck("apiKeys", {
           status: "failed",
-          error: err instanceof Error ? err.message : "Check failed",
-          description: "Failed to check Claude/Codex routes",
-          fixLabel: "Manage Routes",
+          error: err instanceof Error ? err.message : text.routes.checkFailed,
+          description: text.routes.failedCheck,
+          fixLabel: text.actions.manageRoutes,
         });
       }
       throw err;
     }
-  }, [settings.accessMode, updateCheck]);
+  }, [settings.accessMode, text, updateCheck]);
 
   const runCliConfigCheck = useCallback(async () => {
     if (!isElectron) {
-      updateCheck("cliConfig", { status: "skipped", description: "Desktop only — skipped" });
+      updateCheck("cliConfig", { status: "skipped", description: text.cli.desktopOnlySkipped });
       return;
     }
     updateCheck("cliConfig", { status: "checking", error: null });
@@ -356,11 +369,11 @@ export function useSetupChecks(): UseSetupChecksReturn {
       if (missing.length > 0) {
         updateCheck("cliConfig", {
           status: "failed",
-          error: `Missing: ${missing.join(", ")}`,
-          description: "CLI tools not fully installed",
-          fixLabel: "Install All",
+          error: text.cli.missing(missing.join(", ")),
+          description: text.cli.toolsNotFullyInstalled,
+          fixLabel: text.actions.installAll,
         });
-        throw new Error("CLI not installed");
+        throw new Error(text.cli.notInstalledError);
       }
 
       // Check provider configuration
@@ -369,11 +382,11 @@ export function useSetupChecks(): UseSetupChecksReturn {
       if (!claude && !codex) {
         updateCheck("cliConfig", {
           status: "failed",
-          error: "No providers configured for Claude Code or Codex",
-          description: "CLI tools installed but not configured",
-          fixLabel: "Configure",
+          error: text.cli.providersNotConfigured,
+          description: text.cli.toolsInstalledButNotConfigured,
+          fixLabel: text.actions.configure,
         });
-        throw new Error("Providers not configured");
+        throw new Error(text.cli.providersNotConfiguredError);
       }
       const partial = !claude || !codex;
       if (partial) {
@@ -381,37 +394,37 @@ export function useSetupChecks(): UseSetupChecksReturn {
         const unconfigured = !claude ? "Claude Code" : "Codex";
         updateCheck("cliConfig", {
           status: "failed",
-          description: `Only ${configured} configured`,
-          error: `${unconfigured} provider not configured`,
-          fixLabel: "Configure",
+          description: text.cli.onlyConfigured(configured),
+          error: text.cli.providerNotConfigured(unconfigured),
+          fixLabel: text.actions.configure,
         });
-        throw new Error("Partial config");
+        throw new Error(text.cli.partialConfigError);
       }
       updateCheck("cliConfig", {
         status: "passed",
-        description: "Claude Code & Codex installed and configured",
+        description: text.cli.installedAndConfigured,
       });
     } catch (err) {
       const msg = (err as Error).message;
       if (
-        msg !== "CLI not installed" &&
-        msg !== "Providers not configured" &&
-        msg !== "Partial config"
+        msg !== text.cli.notInstalledError &&
+        msg !== text.cli.providersNotConfiguredError &&
+        msg !== text.cli.partialConfigError
       ) {
         updateCheck("cliConfig", {
           status: "failed",
-          error: err instanceof Error ? err.message : "Check failed",
-          description: "Failed to check CLI configuration",
-          fixLabel: "Retry",
+          error: err instanceof Error ? err.message : text.cli.checkFailed,
+          description: text.cli.failedCheckConfiguration,
+          fixLabel: text.actions.retry,
         });
       }
       throw err;
     }
-  }, [isElectron, updateCheck]);
+  }, [isElectron, text, updateCheck]);
 
   const runAllChecks = useCallback(async () => {
     setIsRunning(true);
-    setChecks(makeInitialChecks(settings.accessMode));
+    setChecks(makeInitialChecks(settings.accessMode, text));
 
     // Rebuild client ref in case auth changed
     if (settings.accessMode === "builtin" && auth?.endpoint) {
@@ -442,6 +455,7 @@ export function useSetupChecks(): UseSetupChecksReturn {
     runCliConfigCheck,
     runHealthCheck,
     settings.accessMode,
+    text,
   ]);
 
   const fixCheck = useCallback(
@@ -450,12 +464,12 @@ export function useSetupChecks(): UseSetupChecksReturn {
         case "health":
           updateCheck("health", { status: "checking", error: null });
           try {
-            await checkHealth(getEndpoint());
-            updateCheck("health", { status: "passed", description: "Service is reachable" });
+            await checkHealth(getEndpoint(), text);
+            updateCheck("health", { status: "passed", description: text.health.reachable });
           } catch (err) {
             updateCheck("health", {
               status: "failed",
-              error: err instanceof Error ? err.message : "Connection failed",
+              error: err instanceof Error ? err.message : text.health.connectionFailed,
             });
           }
           break;
@@ -471,10 +485,10 @@ export function useSetupChecks(): UseSetupChecksReturn {
             updateCheck("cliConfig", {
               status: "checking",
               error: null,
-              description: "Preparing CLI installation...",
+              description: text.cli.preparingInstall,
             });
             try {
-              const installSteps = getCliInstallSteps();
+              const installSteps = getCliInstallSteps(text);
               let result: { status: ModelCliRuntimeStatus } | null = null;
               for (const step of installSteps) {
                 updateCheck("cliConfig", {
@@ -487,7 +501,7 @@ export function useSetupChecks(): UseSetupChecksReturn {
                 updateCheck("cliConfig", {
                   status: "checking",
                   error: null,
-                  description: `${step.label} ready. Continuing...`,
+                  description: text.cli.stepReadyContinuing(step.label),
                 });
               }
               result = result ?? (await installAllModelClis());
@@ -498,16 +512,18 @@ export function useSetupChecks(): UseSetupChecksReturn {
               } else {
                 updateCheck("cliConfig", {
                   status: "failed",
-                  error: `Installation incomplete: ${getMissingCliDependencyNames(result.status).join(", ")}`,
-                  description: "Some tools failed to install",
-                  fixLabel: "Retry",
+                  error: text.cli.installationIncomplete(
+                    getMissingCliDependencyNames(result.status).join(", "),
+                  ),
+                  description: text.cli.someToolsFailed,
+                  fixLabel: text.actions.retry,
                 });
               }
             } catch (err) {
               updateCheck("cliConfig", {
                 status: "failed",
-                error: formatCliInstallFailureMessage(err, cliStatusRef.current),
-                fixLabel: "Retry",
+                error: formatCliInstallFailureMessage(err, cliStatusRef.current, text),
+                fixLabel: text.actions.retry,
               });
             }
           } else {
@@ -517,7 +533,7 @@ export function useSetupChecks(): UseSetupChecksReturn {
         }
       }
     },
-    [getEndpoint, router, runCliConfigCheck, updateCheck],
+    [getEndpoint, router, runCliConfigCheck, text, updateCheck],
   );
 
   const allPassed = checks.every((c) => c.status === "passed" || c.status === "skipped");

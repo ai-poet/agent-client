@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -7,6 +7,8 @@ import { LogIn } from "lucide-react-native";
 import { PaseoLogo } from "@/components/icons/paseo-logo";
 import { useSub2APILoginFlow } from "@/hooks/use-sub2api-login-flow";
 import { useAppSettings } from "@/hooks/use-settings";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 import {
   getManagedServiceUrlFromEnv,
   hasExplicitManagedServiceUrlEnv,
@@ -138,6 +140,8 @@ export function LoginScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { updateSettings } = useAppSettings();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).loginScreen, [locale]);
   const injectedServiceUrl = getManagedServiceUrlFromEnv();
   const explicitServiceUrlEnv = hasExplicitManagedServiceUrlEnv();
 
@@ -180,27 +184,18 @@ export function LoginScreen() {
         <View style={styles.content}>
           <PaseoLogo size={96} />
           <View style={styles.copyBlock}>
-            <Text style={styles.title}>Sign in to {APP_NAME}</Text>
-            <Text style={styles.subtitle}>
-              Complete sign-in in your browser for {CLOUD_NAME}. On first sign-in, {APP_NAME} tries
-              to configure any missing Claude Code and Codex routes for you without replacing routes
-              that already exist on this device.
-            </Text>
+            <Text style={styles.title}>{text.title(APP_NAME)}</Text>
+            <Text style={styles.subtitle}>{text.subtitle(CLOUD_NAME, APP_NAME)}</Text>
           </View>
 
           <View style={styles.form}>
-            {envUrlInvalid ? (
-              <Text style={styles.errorHint}>
-                EXPO_PUBLIC_MANAGED_SERVICE_URL is not a valid http(s) URL. Fix it and rebuild or
-                restart.
-              </Text>
-            ) : null}
+            {envUrlInvalid ? <Text style={styles.errorHint}>{text.envUrlInvalid}</Text> : null}
 
             {isInFlight ? (
               <View style={styles.waitingBlock} testID="login-waiting-browser">
                 <View style={styles.waitingRow}>
                   <ActivityIndicator size="small" color={theme.colors.accent} />
-                  <Text style={styles.waitingText}>Waiting for browser…</Text>
+                  <Text style={styles.waitingText}>{text.waitingForBrowser}</Text>
                 </View>
                 <Pressable
                   onPress={() => void handleGitHubLogin()}
@@ -212,7 +207,7 @@ export function LoginScreen() {
                   ]}
                   testID="login-retry-auth"
                 >
-                  <Text style={styles.retryAuthLinkText}>Request authentication again</Text>
+                  <Text style={styles.retryAuthLinkText}>{text.requestAuthenticationAgain}</Text>
                 </Pressable>
               </View>
             ) : (
@@ -227,7 +222,7 @@ export function LoginScreen() {
                 testID="login-managed-service-button"
               >
                 <LogIn size={18} color={theme.colors.accentForeground} />
-                <Text style={styles.primaryButtonText}>登录</Text>
+                <Text style={styles.primaryButtonText}>{text.primaryLogin}</Text>
               </Pressable>
             )}
           </View>
@@ -235,13 +230,13 @@ export function LoginScreen() {
           <View style={styles.divider} />
 
           <View style={styles.byokRow}>
-            <Text style={styles.byokCaption}>Already have your own API keys?</Text>
+            <Text style={styles.byokCaption}>{text.byokCaption}</Text>
             <Pressable
               onPress={() => void onSwitchToByok()}
               style={styles.byokLink}
               testID="login-switch-byok"
             >
-              <Text style={styles.byokLinkText}>Use BYOK instead →</Text>
+              <Text style={styles.byokLinkText}>{text.useByokInstead}</Text>
             </Pressable>
           </View>
         </View>

@@ -42,10 +42,7 @@ describe("sub2api i18n helpers", () => {
   it("filters payment methods by locale like the Sub2API pay center", () => {
     const allTypes = ["alipay", "wxpay_direct", "stripe", "usdt.plasma", "usdc.solana"];
 
-    expect(filterSub2APIPaymentTypesByLocale(allTypes, "zh")).toEqual([
-      "alipay",
-      "wxpay_direct",
-    ]);
+    expect(filterSub2APIPaymentTypesByLocale(allTypes, "zh")).toEqual(["alipay", "wxpay_direct"]);
     expect(filterSub2APIPaymentTypesByLocale(allTypes, "en")).toEqual([
       "usdt.plasma",
       "usdc.solana",
@@ -67,5 +64,13 @@ describe("sub2api i18n helpers", () => {
     expect(getSub2APIMessages("en").paseoCloudApiKeys.title).toBe("API Keys (advanced)");
     expect(getSub2APIMessages("zh").paseoCloudUsage.title).toBe("用量");
     expect(getSub2APIMessages("en").paseoCloudUsage.title).toBe("Usage");
+    expect(getSub2APIMessages("zh").setupCheck.title).toBe("环境检查");
+    expect(getSub2APIMessages("en").setupCheck.title).toBe("Environment Check");
+    expect(getSub2APIMessages("zh").loginScreen.primaryLogin).toBe("登录");
+    expect(getSub2APIMessages("en").loginScreen.primaryLogin).toBe("Sign in");
+    expect(getSub2APIMessages("zh").modeSelect.signInMeta).toBe("登录 · 推荐");
+    expect(getSub2APIMessages("en").modeSelect.signInMeta).toBe("Sign in · Recommended");
+    expect(getSub2APIMessages("zh").authAlerts.loginFailed).toBe("登录失败");
+    expect(getSub2APIMessages("en").authAlerts.loginFailed).toBe("Login failed");
   });
 });
