@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AgentProvider, ProviderSnapshotEntry } from "@server/server/agent/agent-sdk-types";
 import type { DaemonClient } from "@server/client/daemon-client";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
 import { queryClient as singletonQueryClient } from "@/query/query-client";
+
+export const PROVIDERS_SNAPSHOT_LOADING_REFETCH_DELAY_MS = 750;
 
 export function normalizeProvidersSnapshotCwdKey(cwd?: string | null): string | null {
   const trimmed = cwd?.trim();
@@ -88,6 +90,8 @@ export function useProvidersSnapshot(
       return client.getProvidersSnapshot(providersSnapshotRequest(normalizedCwd));
     },
   });
+  const snapshotEntriesRef = useRef<ProviderSnapshotEntry[] | undefined>(undefined);
+  snapshotEntriesRef.current = snapshotQuery.data?.entries;
 
   const refreshMutation = useMutation({
     mutationFn: async (providers?: AgentProvider[]) => {
@@ -139,6 +143,41 @@ export function useProvidersSnapshot(
     supportsSnapshot,
   ]);
 
+  useEffect(() => {
+    if (!enabled || !supportsSnapshot || !client || !isConnected || !serverId) {
+      return;
+    }
+    if (snapshotQuery.isFetching) {
+      return;
+    }
+
+    const hasLoadingEntry =
+      snapshotQuery.data?.entries.some((entry) => entry.status === "loading") ?? false;
+    if (!hasLoadingEntry) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      void queryClient.refetchQueries({
+        queryKey,
+        exact: true,
+        type: "active",
+      });
+    }, PROVIDERS_SNAPSHOT_LOADING_REFETCH_DELAY_MS);
+
+    return () => clearTimeout(timeout);
+  }, [
+    client,
+    enabled,
+    isConnected,
+    queryClient,
+    queryKey,
+    serverId,
+    snapshotQuery.data?.entries,
+    snapshotQuery.isFetching,
+    supportsSnapshot,
+  ]);
+
   const refresh = useCallback(
     async (providers?: AgentProvider[]) => {
       if (!client) {
@@ -158,7 +197,7 @@ export function useProvidersSnapshot(
         return;
       }
 
-      const selectedEntry = snapshotQuery.data?.entries.find(
+      const selectedEntry = snapshotEntriesRef.current?.find(
         (entry) => entry.provider === selectedProvider,
       );
 
@@ -169,7 +208,7 @@ export function useProvidersSnapshot(
 
       void queryClient.refetchQueries({ queryKey, type: "active", stale: true });
     },
-    [queryClient, queryKey, snapshotQuery.data?.entries],
+    [queryClient, queryKey],
   );
 
   return {

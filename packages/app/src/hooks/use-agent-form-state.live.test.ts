@@ -45,6 +45,73 @@ vi.mock("./use-providers-snapshot", () => ({
   }),
 }));
 
+function codexReadyEntry(): ProviderSnapshotEntry {
+  return {
+    provider: "codex",
+    status: "ready",
+    label: "Codex",
+    description: "Codex test provider",
+    defaultModeId: "auto",
+    modes: [
+      { id: "auto", label: "Auto", icon: "ShieldAlert", colorTier: "moderate" },
+      {
+        id: "full-access",
+        label: "Full Access",
+        icon: "ShieldAlert",
+        colorTier: "dangerous",
+      },
+    ],
+    models: [
+      {
+        provider: "codex",
+        id: "gpt-5.4",
+        label: "gpt-5.4",
+        isDefault: true,
+        defaultThinkingOptionId: "low",
+        thinkingOptions: [
+          { id: "low", label: "Low" },
+          { id: "xhigh", label: "XHigh" },
+        ],
+      },
+    ],
+  };
+}
+
+function claudeLoadingEntry(): ProviderSnapshotEntry {
+  return {
+    provider: "claude",
+    status: "loading",
+    label: "Claude",
+    description: "Claude test provider",
+    defaultModeId: "default",
+    modes: [{ id: "default", label: "Default", icon: "ShieldCheck", colorTier: "safe" }],
+  };
+}
+
+function claudeReadyEntry(): ProviderSnapshotEntry {
+  return {
+    provider: "claude",
+    status: "ready",
+    label: "Claude",
+    description: "Claude test provider",
+    defaultModeId: "default",
+    modes: [{ id: "default", label: "Default", icon: "ShieldCheck", colorTier: "safe" }],
+    models: [
+      {
+        provider: "claude",
+        id: "claude-opus-4-7[1m]",
+        label: "Opus 4.7 1M",
+      },
+      {
+        provider: "claude",
+        id: "claude-sonnet-4-6",
+        label: "Sonnet 4.6",
+        isDefault: true,
+      },
+    ],
+  };
+}
+
 beforeAll(() => {
   Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
     value: true,
@@ -74,53 +141,7 @@ describe("useAgentFormState live preference hydration", () => {
 
     mocks.preferences = {};
     mocks.isPreferencesLoading = false;
-    mocks.snapshotEntries = [
-      {
-        provider: "codex",
-        status: "ready",
-        label: "Codex",
-        description: "Codex test provider",
-        defaultModeId: "auto",
-        modes: [
-          { id: "auto", label: "Auto", icon: "ShieldAlert", colorTier: "moderate" },
-          {
-            id: "full-access",
-            label: "Full Access",
-            icon: "ShieldAlert",
-            colorTier: "dangerous",
-          },
-        ],
-        models: [
-          {
-            provider: "codex",
-            id: "gpt-5.4",
-            label: "gpt-5.4",
-            isDefault: true,
-            defaultThinkingOptionId: "low",
-            thinkingOptions: [
-              { id: "low", label: "Low" },
-              { id: "xhigh", label: "XHigh" },
-            ],
-          },
-        ],
-      },
-      {
-        provider: "claude",
-        status: "ready",
-        label: "Claude",
-        description: "Claude test provider",
-        defaultModeId: "default",
-        modes: [{ id: "default", label: "Default", icon: "ShieldCheck", colorTier: "safe" }],
-        models: [
-          {
-            provider: "claude",
-            id: "claude-sonnet-4-6",
-            label: "Sonnet 4.6",
-            isDefault: true,
-          },
-        ],
-      },
-    ];
+    mocks.snapshotEntries = [codexReadyEntry(), claudeReadyEntry()];
     mocks.updatePreferences.mockReset();
     mocks.refreshSnapshot.mockReset();
     mocks.refetchSnapshotIfStale.mockReset();
@@ -204,6 +225,68 @@ describe("useAgentFormState live preference hydration", () => {
       expect(result.current.selectedProvider).toBe("claude" as AgentProvider);
       expect(result.current.selectedModel).toBe("claude-sonnet-4-6");
       expect(result.current.selectedMode).toBe("default");
+    });
+  });
+
+  it("selects Claude while loading and fills the first listed model when the snapshot becomes ready", async () => {
+    mocks.snapshotEntries = [codexReadyEntry(), claudeLoadingEntry()];
+
+    const { result, rerender } = renderHook(() =>
+      useAgentFormState({
+        initialServerId: "host-1",
+        isVisible: true,
+        onlineServerIds: ["host-1"],
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.selectedProvider).toBe("claude" as AgentProvider);
+      expect(result.current.selectedModel).toBe("");
+    });
+    expect(mocks.refetchSnapshotIfStale).toHaveBeenCalledWith("claude");
+
+    mocks.snapshotEntries = [codexReadyEntry(), claudeReadyEntry()];
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.selectedProvider).toBe("claude" as AgentProvider);
+      expect(result.current.selectedModel).toBe("claude-opus-4-7[1m]");
+    });
+  });
+
+  it("actively ensures the selected provider for visible create-flow composers", async () => {
+    renderHook(() =>
+      useAgentFormState({
+        initialServerId: "host-1",
+        initialValues: { workingDir: "/opened-project" },
+        isVisible: true,
+        onlineServerIds: ["host-1"],
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.refetchSnapshotIfStale).toHaveBeenCalledWith("claude");
+    });
+  });
+
+  it("does not actively ensure hidden or non-create-flow composers", async () => {
+    const { rerender } = renderHook(
+      ({ isVisible, isCreateFlow }) =>
+        useAgentFormState({
+          initialServerId: "host-1",
+          isVisible,
+          isCreateFlow,
+          onlineServerIds: ["host-1"],
+        }),
+      {
+        initialProps: { isVisible: false, isCreateFlow: true },
+      },
+    );
+
+    rerender({ isVisible: true, isCreateFlow: false });
+
+    await waitFor(() => {
+      expect(mocks.refetchSnapshotIfStale).not.toHaveBeenCalled();
     });
   });
 });

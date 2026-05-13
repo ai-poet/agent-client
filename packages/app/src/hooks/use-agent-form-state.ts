@@ -840,6 +840,25 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
     refetchSnapshotIfStale(formStateRef.current.provider);
   }, [refetchSnapshotIfStale]);
 
+  useEffect(() => {
+    if (!isVisible || !isCreateFlow || !isTargetDaemonReady) {
+      return;
+    }
+    if (!formState.serverId || !formState.provider) {
+      return;
+    }
+
+    refetchSnapshotIfStale(formState.provider);
+  }, [
+    formState.provider,
+    formState.serverId,
+    formState.workingDir,
+    isCreateFlow,
+    isTargetDaemonReady,
+    isVisible,
+    refetchSnapshotIfStale,
+  ]);
+
   const persistFormPreferences = useCallback(async () => {
     if (!formState.provider) {
       return;

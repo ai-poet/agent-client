@@ -10,6 +10,7 @@ import type { DaemonClient } from "@server/client/daemon-client";
 import type { ProviderSnapshotEntry } from "@server/server/agent/agent-sdk-types";
 import { useSessionStore } from "@/stores/session-store";
 import {
+  PROVIDERS_SNAPSHOT_LOADING_REFETCH_DELAY_MS,
   providersSnapshotQueryKey,
   shouldApplyProvidersSnapshotUpdate,
   useProvidersSnapshot,
@@ -124,6 +125,15 @@ async function waitForSnapshotEntries(
   });
 }
 
+async function waitForSnapshotEntriesWithFakeTimers(
+  result: HookResult,
+  entries: ProviderSnapshotEntry[],
+): Promise<void> {
+  await vi.waitFor(() => {
+    expect(result.current.entries).toEqual(entries);
+  });
+}
+
 async function emitProvidersSnapshotUpdate(entries: ProviderSnapshotEntry[]): Promise<void> {
   const listener = snapshotUpdateListeners.at(-1);
   expect(listener).toBeDefined();
@@ -147,6 +157,7 @@ async function openSelectorForSelectedProvider(result: HookResult): Promise<void
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   act(() => {
     useSessionStore.getState().clearSession(serverId);
   });
@@ -238,6 +249,52 @@ describe("providers snapshot hook cache scope", () => {
     await waitForSnapshotReads(2);
 
     expect(mockClient.getProvidersSnapshot).toHaveBeenLastCalledWith({ cwd: "/repo" });
+    expect(mockClient.refreshProvidersSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("automatically refetches loading snapshot entries without opening the selector", async () => {
+    vi.useFakeTimers();
+    enableProvidersSnapshot();
+    mockClient.getProvidersSnapshot
+      .mockResolvedValueOnce(providersSnapshot([codexEntry("loading")]))
+      .mockResolvedValueOnce(providersSnapshot([codexEntry("ready", [readyCodexModel])]));
+
+    const { result } = renderProvidersSnapshotHook("/repo");
+
+    await waitForSnapshotEntriesWithFakeTimers(result, [codexEntry("loading")]);
+    expect(mockClient.getProvidersSnapshot).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PROVIDERS_SNAPSHOT_LOADING_REFETCH_DELAY_MS);
+    });
+
+    await vi.waitFor(() => {
+      expect(mockClient.getProvidersSnapshot).toHaveBeenCalledTimes(2);
+      expect(result.current.entries).toEqual([codexEntry("ready", [readyCodexModel])]);
+    });
+
+    expect(mockClient.getProvidersSnapshot).toHaveBeenLastCalledWith({ cwd: "/repo" });
+    expect(mockClient.refreshProvidersSnapshot).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "ready", entries: [codexEntry("ready", [readyCodexModel])] },
+    { name: "unavailable", entries: [codexEntry("unavailable")] },
+    { name: "error", entries: [codexEntry("error")] },
+  ])("does not keep polling when snapshot entries are $name", async ({ entries }) => {
+    vi.useFakeTimers();
+    enableProvidersSnapshot();
+    mockClient.getProvidersSnapshot.mockResolvedValue(providersSnapshot(entries));
+
+    const { result } = renderProvidersSnapshotHook("/repo");
+
+    await waitForSnapshotEntriesWithFakeTimers(result, entries);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PROVIDERS_SNAPSHOT_LOADING_REFETCH_DELAY_MS * 2);
+    });
+
+    expect(mockClient.getProvidersSnapshot).toHaveBeenCalledTimes(1);
     expect(mockClient.refreshProvidersSnapshot).not.toHaveBeenCalled();
   });
 
