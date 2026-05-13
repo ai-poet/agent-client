@@ -1,9 +1,11 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useUnistyles } from "react-native-unistyles";
 import { getIsElectron } from "@/constants/platform";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 import { useAppSettings } from "@/hooks/use-settings";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 import { settingsStyles } from "@/styles/settings";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { Button } from "@/components/ui/button";
@@ -13,6 +15,8 @@ export function AccessModeSection() {
   const router = useRouter();
   const { theme } = useUnistyles();
   const { settings, updateSettings } = useAppSettings();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).settings.accessMode, [locale]);
   const isElectron = getIsElectron();
 
   const modeLabel =
@@ -20,7 +24,7 @@ export function AccessModeSection() {
       ? CLOUD_NAME
       : settings.accessMode === "byok"
         ? "BYOK"
-        : "Not selected";
+        : text.notSelected;
 
   const handleSwitchMode = useCallback(async () => {
     await updateSettings({ accessMode: null, setupCheckCompleted: false });
@@ -32,16 +36,16 @@ export function AccessModeSection() {
   }
 
   return (
-    <SettingsSection title="Access mode">
+    <SettingsSection title={text.title}>
       <View style={[settingsStyles.card, { gap: theme.spacing[3], padding: theme.spacing[4] }]}>
         <Text style={{ color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm }}>
-          Current: {modeLabel}
+          {text.current(modeLabel)}
         </Text>
         <Text style={{ color: theme.colors.foregroundMuted, fontSize: theme.fontSize.xs }}>
-          Switch between {CLOUD_NAME} and BYOK. Choosing Cloud requires signing in again.
+          {text.hint(CLOUD_NAME)}
         </Text>
         <Button variant="secondary" size="sm" onPress={() => void handleSwitchMode()}>
-          Change access mode
+          {text.change}
         </Button>
       </View>
     </SettingsSection>

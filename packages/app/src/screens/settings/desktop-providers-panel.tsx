@@ -7,13 +7,14 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { settingsStyles } from "@/styles/settings";
 import { useAppSettings } from "@/hooks/use-settings";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 import { AccessModeSection } from "@/screens/settings/access-mode-section";
 import { useDesktopProvidersStore } from "@/screens/settings/desktop-providers-context";
 import { managedProviderSettingsStyles as styles } from "@/screens/settings/managed-provider-settings-styles";
 import {
-  CUSTOM_TARGET_SEGMENT_OPTIONS,
-  ENDPOINT_PLACEHOLDER,
   getErrorMessage,
+  getCustomTargetSegmentOptions,
   providerTargetHint,
   maskApiKey,
   providerWritesClaude,
@@ -32,9 +33,11 @@ type ConfigSnapshot = {
 function RouteHeroCard({
   label,
   provider,
+  text,
 }: {
   label: string;
   provider: DesktopProviderPayload | null;
+  text: ReturnType<typeof getSub2APIMessages>["settings"]["desktopProviders"];
 }) {
   return (
     <View style={[settingsStyles.card, styles.cardBody, provider ? styles.heroCardActive : null]}>
@@ -43,22 +46,20 @@ function RouteHeroCard({
           <View style={styles.heroTitleRow}>
             <View
               style={[styles.providerDotHero, styles.providerDotActive]}
-              accessibilityLabel="Active"
+              accessibilityLabel={text.active}
             />
             <Text style={styles.heroLabel}>{label}</Text>
           </View>
           <Text style={styles.heroName}>{provider.name}</Text>
           <Text style={styles.heroEndpoint}>{provider.endpoint}</Text>
-          <Text style={styles.heroKeyHint}>Key {maskApiKey(provider.apiKey)}</Text>
-          <Text style={styles.heroMetaHint}>{providerTargetHint(provider)}</Text>
+          <Text style={styles.heroKeyHint}>{text.keyPrefix(maskApiKey(provider.apiKey))}</Text>
+          <Text style={styles.heroMetaHint}>{providerTargetHint(provider, text)}</Text>
         </>
       ) : (
         <>
           <Text style={styles.heroLabel}>{label}</Text>
-          <Text style={styles.heroName}>Not configured</Text>
-          <Text style={styles.sectionHint}>
-            Choose a saved endpoint below for this CLI, or add a custom one.
-          </Text>
+          <Text style={styles.heroName}>{text.notConfigured}</Text>
+          <Text style={styles.sectionHint}>{text.chooseSavedEndpoint}</Text>
         </>
       )}
     </View>
@@ -68,6 +69,10 @@ function RouteHeroCard({
 export function DesktopProvidersPanel() {
   const { theme } = useUnistyles();
   const { settings } = useAppSettings();
+  const locale = useSub2APILocale();
+  const messages = useMemo(() => getSub2APIMessages(locale).settings, [locale]);
+  const text = messages.desktopProviders;
+  const providerTargetText = messages.accessProviderTargets;
   const isByok = settings.accessMode === "byok";
   const [previewTarget, setPreviewTarget] = useState<ConfigPreviewTarget>(null);
   const [configSnapshot, setConfigSnapshot] = useState<ConfigSnapshot | null>(null);
@@ -101,25 +106,25 @@ export function DesktopProvidersPanel() {
       setConfigSnapshot(snapshot);
       setPreviewTarget(target);
     } catch (error) {
-      Alert.alert("Unable to preview config", getErrorMessage(error));
+      Alert.alert(text.unablePreviewConfig, getErrorMessage(error));
     } finally {
       setIsPreviewLoading(false);
     }
-  }, []);
+  }, [text.unablePreviewConfig]);
 
   const openConfigFile = useCallback(
     async (target: "claude-settings" | "codex-auth" | "codex-config") => {
       try {
         await invokeDesktopCommand("open_provider_config_file", { target });
       } catch (error) {
-        Alert.alert("Unable to open config", getErrorMessage(error));
+        Alert.alert(text.unableOpenConfig, getErrorMessage(error));
       }
     },
-    [],
+    [text.unableOpenConfig],
   );
 
   const previewTitle =
-    previewTarget === "codex" ? "Codex config preview" : "Claude Code config preview";
+    previewTarget === "codex" ? text.previewTitleCodex : text.previewTitleClaude;
   const previewBlocks = useMemo(() => {
     if (!configSnapshot || !previewTarget) {
       return [];
@@ -148,24 +153,27 @@ export function DesktopProvidersPanel() {
     <>
       <AccessModeSection />
 
-      <SettingsSection title="Active routes">
+      <SettingsSection title={text.activeRoutesTitle}>
         <Text style={[styles.sectionHint, { marginBottom: theme.spacing[2] }]}>
-          Claude Code and Codex are switched independently. Each saved endpoint targets one CLI. On
-          each load we reconcile rows with your on-disk CLI config (~/.claude/settings.json and
-          ~/.codex/) so the highlighted entry matches what Codex and Claude would actually use.
+          {text.activeRoutesHint}
         </Text>
         <View style={styles.routeHeroStack}>
-          <RouteHeroCard label="Claude Code" provider={activeClaudeProvider} />
-          <RouteHeroCard label="Codex" provider={activeCodexProvider} />
+          <RouteHeroCard
+            label={providerTargetText.claude}
+            provider={activeClaudeProvider}
+            text={text}
+          />
+          <RouteHeroCard
+            label={providerTargetText.codex}
+            provider={activeCodexProvider}
+            text={text}
+          />
         </View>
       </SettingsSection>
 
-      <SettingsSection title="Config files">
+      <SettingsSection title={text.configFilesTitle}>
         <View style={[settingsStyles.card, styles.cardBody]}>
-          <Text style={styles.sectionHint}>
-            Preview the actual Claude Code and Codex files on disk, or open them directly when you
-            want to verify or manually fix a route.
-          </Text>
+          <Text style={styles.sectionHint}>{text.configFilesHint}</Text>
           <View style={styles.scopeActionsRow}>
             <Pressable
               onPress={() => void openConfigPreview("claude")}
@@ -176,13 +184,13 @@ export function DesktopProvidersPanel() {
               ]}
               disabled={isPreviewLoading}
             >
-              <Text style={styles.secondaryButtonText}>Preview Claude</Text>
+              <Text style={styles.secondaryButtonText}>{text.previewClaude}</Text>
             </Pressable>
             <Pressable
               onPress={() => void openConfigFile("claude-settings")}
               style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}
             >
-              <Text style={styles.secondaryButtonText}>Open Claude file</Text>
+              <Text style={styles.secondaryButtonText}>{text.openClaudeFile}</Text>
             </Pressable>
           </View>
           <View style={styles.scopeActionsRow}>
@@ -195,33 +203,29 @@ export function DesktopProvidersPanel() {
               ]}
               disabled={isPreviewLoading}
             >
-              <Text style={styles.secondaryButtonText}>Preview Codex</Text>
+              <Text style={styles.secondaryButtonText}>{text.previewCodex}</Text>
             </Pressable>
             <Pressable
               onPress={() => void openConfigFile("codex-auth")}
               style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}
             >
-              <Text style={styles.secondaryButtonText}>Open auth.json</Text>
+              <Text style={styles.secondaryButtonText}>{text.openAuthJson}</Text>
             </Pressable>
             <Pressable
               onPress={() => void openConfigFile("codex-config")}
               style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}
             >
-              <Text style={styles.secondaryButtonText}>Open config.toml</Text>
+              <Text style={styles.secondaryButtonText}>{text.openConfigToml}</Text>
             </Pressable>
           </View>
         </View>
       </SettingsSection>
 
-      <SettingsSection title="Saved endpoints">
+      <SettingsSection title={text.savedEndpointsTitle}>
         {providers.length === 0 ? (
           <View style={styles.dashedCard}>
-            <Text style={styles.emptyTitle}>No saved endpoints</Text>
-            <Text style={styles.emptyBody}>
-              {isByok
-                ? "Add a custom provider below. Each entry targets Claude Code only or Codex only."
-                : "After you apply a cloud key, your default route appears here. Add custom endpoints below when you use another base URL or wire format."}
-            </Text>
+            <Text style={styles.emptyTitle}>{text.noSavedEndpoints}</Text>
+            <Text style={styles.emptyBody}>{isByok ? text.noSavedByok : text.noSavedCloud}</Text>
           </View>
         ) : (
           <View style={settingsStyles.card}>
@@ -238,10 +242,10 @@ export function DesktopProvidersPanel() {
                   <View style={settingsStyles.rowContent}>
                     <Text style={settingsStyles.rowTitle}>{provider.name}</Text>
                     <Text style={settingsStyles.rowHint}>{provider.endpoint}</Text>
-                    <Text style={styles.providerMetaHint}>{providerTargetHint(provider)}</Text>
+                    <Text style={styles.providerMetaHint}>{providerTargetHint(provider, text)}</Text>
                     <View style={[styles.scopeActionsRow, { marginTop: theme.spacing[1] }]}>
-                      {claudeActive ? <Text style={styles.scopeBadge}>Claude active</Text> : null}
-                      {codexActive ? <Text style={styles.scopeBadge}>Codex active</Text> : null}
+                      {claudeActive ? <Text style={styles.scopeBadge}>{text.claudeActive}</Text> : null}
+                      {codexActive ? <Text style={styles.scopeBadge}>{text.codexActive}</Text> : null}
                     </View>
                   </View>
                   <View style={[styles.providerActions, { flexWrap: "wrap", maxWidth: 200 }]}>
@@ -256,7 +260,7 @@ export function DesktopProvidersPanel() {
                         ]}
                         disabled={claudeActive}
                       >
-                        <Text style={styles.primaryButtonText}>Use · Claude</Text>
+                        <Text style={styles.primaryButtonText}>{text.useClaude}</Text>
                       </Pressable>
                     ) : null}
                     {forCodex ? (
@@ -270,7 +274,7 @@ export function DesktopProvidersPanel() {
                         ]}
                         disabled={codexActive}
                       >
-                        <Text style={styles.primaryButtonText}>Use · Codex</Text>
+                        <Text style={styles.primaryButtonText}>{text.useCodex}</Text>
                       </Pressable>
                     ) : null}
                     {!provider.isDefault ? (
@@ -281,7 +285,7 @@ export function DesktopProvidersPanel() {
                           pressed && styles.buttonPressed,
                         ]}
                       >
-                        <Text style={styles.removeButtonText}>Remove</Text>
+                        <Text style={styles.removeButtonText}>{text.remove}</Text>
                       </Pressable>
                     ) : null}
                   </View>
@@ -292,62 +296,51 @@ export function DesktopProvidersPanel() {
         )}
       </SettingsSection>
 
-      <SettingsSection title="Custom endpoint">
+      <SettingsSection title={text.customEndpointTitle}>
         <View style={[settingsStyles.card, styles.cardBody]}>
           {showAddProviderForm ? (
             <View style={styles.formBody}>
-              <Text style={styles.fieldLabel}>Target</Text>
+              <Text style={styles.fieldLabel}>{text.target}</Text>
               <SegmentedControl
-                options={CUSTOM_TARGET_SEGMENT_OPTIONS}
+                options={getCustomTargetSegmentOptions(providerTargetText)}
                 value={customTarget}
                 onValueChange={setCustomTarget}
                 size="sm"
               />
               {customTarget === "claude" ? (
-                <Text style={styles.usageHint}>
-                  Claude Code is configured as native Anthropic Messages only (ANTHROPIC_BASE_URL).
-                  OpenAI-compatible upstreams will be supported via a separate gateway later.
-                </Text>
+                <Text style={styles.usageHint}>{text.claudeUsageHint}</Text>
               ) : (
-                <Text style={styles.usageHint}>
-                  Codex is configured for the OpenAI Responses wire only (not Chat Completions).
-                </Text>
+                <Text style={styles.usageHint}>{text.codexUsageHint}</Text>
               )}
-              <Text style={styles.fieldLabel}>Name</Text>
+              <Text style={styles.fieldLabel}>{text.name}</Text>
               <TextInput
                 value={editProviderName}
                 onChangeText={setEditProviderName}
-                placeholder="Provider name"
+                placeholder={text.providerNamePlaceholder}
                 placeholderTextColor={theme.colors.foregroundMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
                 style={styles.textInput}
               />
-              <Text style={styles.fieldLabel}>Endpoint</Text>
-              <Text style={styles.usageHint}>
-                Enter the API gateway origin (scheme + host) only. Do not include /v1; if you do, we
-                strip a trailing /v1 on save. Claude uses a base without /v1; Codex config adds /v1
-                automatically.
-              </Text>
+              <Text style={styles.fieldLabel}>{text.endpoint}</Text>
+              <Text style={styles.usageHint}>{text.endpointHint}</Text>
               <TextInput
                 value={editProviderEndpoint}
                 onChangeText={setEditProviderEndpoint}
-                placeholder={ENDPOINT_PLACEHOLDER}
+                placeholder={text.endpointPlaceholder}
                 placeholderTextColor={theme.colors.foregroundMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
                 style={styles.textInput}
               />
-              <Text style={styles.fieldLabel}>API key</Text>
+              <Text style={styles.fieldLabel}>{text.apiKey}</Text>
               <Text style={styles.usageHint}>
-                {customTarget === "claude"
-                  ? "Anthropic-style credential for Claude Code; the desktop app maps it into the right env vars."
-                  : "OpenAI-style credential (Codex / OPENAI_API_KEY semantics)."}
+                {customTarget === "claude" ? text.claudeCredentialHint : text.codexCredentialHint}
               </Text>
               <TextInput
                 value={editProviderApiKey}
                 onChangeText={setEditProviderApiKey}
-                placeholder="API key"
+                placeholder={text.apiKey}
                 placeholderTextColor={theme.colors.foregroundMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -359,13 +352,13 @@ export function DesktopProvidersPanel() {
                   onPress={() => void handleAddProvider()}
                   style={({ pressed }) => [styles.primaryButton, pressed && styles.buttonPressed]}
                 >
-                  <Text style={styles.primaryButtonText}>Add</Text>
+                  <Text style={styles.primaryButtonText}>{text.add}</Text>
                 </Pressable>
                 <Pressable
                   onPress={closeCustomProviderForm}
                   style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}
                 >
-                  <Text style={styles.secondaryButtonText}>Cancel</Text>
+                  <Text style={styles.secondaryButtonText}>{text.cancel}</Text>
                 </Pressable>
               </View>
             </View>
@@ -374,7 +367,7 @@ export function DesktopProvidersPanel() {
               onPress={openCustomProviderForm}
               style={({ pressed }) => [styles.addProviderButton, pressed && styles.buttonPressed]}
             >
-              <Text style={styles.addProviderButtonText}>+ Add custom provider</Text>
+              <Text style={styles.addProviderButtonText}>{text.addCustomProvider}</Text>
             </Pressable>
           )}
         </View>
@@ -394,8 +387,8 @@ export function DesktopProvidersPanel() {
                 <Text style={styles.formTitle}>{block.title}</Text>
                 <Text style={styles.usageHint}>
                   {block.contents
-                    ? "Current on-disk contents"
-                    : "This file has not been created yet."}
+                    ? text.currentOnDiskContents
+                    : text.fileNotCreatedYet}
                 </Text>
                 <View style={styles.configPreviewBlock}>
                   <Text
@@ -406,7 +399,7 @@ export function DesktopProvidersPanel() {
                       fontFamily: "monospace",
                     }}
                   >
-                    {block.contents ?? "(empty)"}
+                    {block.contents ?? text.emptyFile}
                   </Text>
                 </View>
               </View>
