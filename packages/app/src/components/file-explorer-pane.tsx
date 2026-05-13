@@ -25,6 +25,7 @@ import {
 } from "lucide-react-native";
 import { getFileIconSvg } from "@/components/material-file-icons";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { useAppLocale } from "@/hooks/use-app-locale";
 import type { AgentFileExplorerState, ExplorerEntry } from "@/stores/session-store";
 import { useHosts } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
@@ -43,12 +44,9 @@ import { formatTimeAgo } from "@/utils/time";
 import { buildAbsoluteExplorerPath } from "@/utils/explorer-paths";
 import { useWebScrollViewScrollbar } from "@/components/use-web-scrollbar";
 import { isWeb } from "@/constants/platform";
+import { getAppMessages } from "@/i18n/sub2api";
 
-const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: "name", label: "Name" },
-  { value: "modified", label: "Modified" },
-  { value: "size", label: "Size" },
-];
+const SORT_OPTIONS: SortOption[] = ["name", "modified", "size"];
 
 const INDENT_PER_LEVEL = 16;
 
@@ -83,6 +81,8 @@ export function FileExplorerPane({
   const { theme } = useUnistyles();
   const isMobile = useIsCompactFormFactor();
   const showDesktopWebScrollbar = isWeb && !isMobile;
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).files, [locale]);
 
   const daemons = useHosts();
   const daemonProfile = useMemo(
@@ -270,9 +270,9 @@ export function FileExplorerPane({
   );
 
   const handleSortCycle = useCallback(() => {
-    const currentIndex = SORT_OPTIONS.findIndex((opt) => opt.value === sortOption);
+    const currentIndex = SORT_OPTIONS.findIndex((option) => option === sortOption);
     const nextIndex = (currentIndex + 1) % SORT_OPTIONS.length;
-    setSortOption(SORT_OPTIONS[nextIndex].value);
+    setSortOption(SORT_OPTIONS[nextIndex]);
   }, [sortOption, setSortOption]);
 
   const { refetch: refetchExplorer, isFetching: isRefreshFetching } = useQuery({
@@ -304,7 +304,7 @@ export function FileExplorerPane({
     void refetchExplorer();
   }, [refetchExplorer]);
 
-  const currentSortLabel = SORT_OPTIONS.find((opt) => opt.value === sortOption)?.label ?? "Name";
+  const currentSortLabel = text.sort[sortOption] ?? text.sort.name;
 
   const treeRows = useMemo(() => {
     const rootDirectory = directories.get(".");
@@ -389,7 +389,7 @@ export function FileExplorerPane({
               <View style={styles.contextMetaBlock}>
                 <View style={styles.contextMetaRow}>
                   <Text style={styles.contextMetaLabel} numberOfLines={1}>
-                    Size
+                    {text.meta.size}
                   </Text>
                   <Text style={styles.contextMetaValue} numberOfLines={1} ellipsizeMode="tail">
                     {formatFileSize({ size: entry.size })}
@@ -397,7 +397,7 @@ export function FileExplorerPane({
                 </View>
                 <View style={styles.contextMetaRow}>
                   <Text style={styles.contextMetaLabel} numberOfLines={1}>
-                    Modified
+                    {text.meta.modified}
                   </Text>
                   <Text style={styles.contextMetaValue} numberOfLines={1} ellipsizeMode="tail">
                     {formatTimeAgo(new Date(entry.modifiedAt))}
@@ -411,14 +411,14 @@ export function FileExplorerPane({
                   void handleCopyPath(entry.path);
                 }}
               >
-                Copy path
+                {text.copyPath}
               </DropdownMenuItem>
               {entry.kind === "file" ? (
                 <DropdownMenuItem
                   leading={<Download size={14} color={theme.colors.foregroundMuted} />}
                   onSelect={() => handleDownloadEntry(entry)}
                 >
-                  Download
+                  {text.download}
                 </DropdownMenuItem>
               ) : null}
             </DropdownMenuContent>
@@ -435,6 +435,7 @@ export function FileExplorerPane({
       selectedEntryPath,
       theme.colors,
       theme.spacing,
+      text,
     ],
   );
 
@@ -452,7 +453,7 @@ export function FileExplorerPane({
   if (!hasWorkspaceScope) {
     return (
       <View style={styles.centerState}>
-        <Text style={styles.errorText}>Workspace is unavailable</Text>
+        <Text style={styles.errorText}>{text.workspaceUnavailable}</Text>
       </View>
     );
   }
@@ -465,7 +466,7 @@ export function FileExplorerPane({
           <View style={styles.errorActions}>
             {showBackFromError ? (
               <Pressable style={styles.retryButton} onPress={handleBackFromError}>
-                <Text style={styles.retryButtonText}>Back</Text>
+                <Text style={styles.retryButtonText}>{text.back}</Text>
               </Pressable>
             ) : null}
             <Pressable
@@ -477,18 +478,18 @@ export function FileExplorerPane({
                 });
               }}
             >
-              <Text style={styles.retryButtonText}>Retry</Text>
+              <Text style={styles.retryButtonText}>{text.retry}</Text>
             </Pressable>
           </View>
         </View>
       ) : showInitialLoading ? (
         <View style={styles.centerState}>
           <ActivityIndicator size="small" />
-          <Text style={styles.loadingText}>Loading files…</Text>
+          <Text style={styles.loadingText}>{text.loadingFiles}</Text>
         </View>
       ) : treeRows.length === 0 ? (
         <View style={styles.centerState}>
-          <Text style={styles.emptyText}>No files</Text>
+          <Text style={styles.emptyText}>{text.noFiles}</Text>
         </View>
       ) : (
         <View style={[styles.treePane, styles.treePaneFill]}>
@@ -512,7 +513,7 @@ export function FileExplorerPane({
                 (hovered || pressed) && styles.iconButtonHovered,
               ]}
               accessibilityRole="button"
-              accessibilityLabel={isRefreshFetching ? "Refreshing files" : "Refresh files"}
+              accessibilityLabel={isRefreshFetching ? text.refreshingFiles : text.refreshFiles}
             >
               <View style={styles.refreshIcon}>
                 {isRefreshFetching ? (

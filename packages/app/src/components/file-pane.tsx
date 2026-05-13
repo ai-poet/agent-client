@@ -11,6 +11,7 @@ import {
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { Fonts } from "@/constants/theme";
+import { useAppLocale } from "@/hooks/use-app-locale";
 import { useSessionStore, type ExplorerFile } from "@/stores/session-store";
 import { useWebScrollViewScrollbar } from "@/components/use-web-scrollbar";
 import { useWebScrollbarStyle } from "@/hooks/use-web-scrollbar-style";
@@ -24,6 +25,7 @@ import {
 import { lineNumberGutterWidth } from "@/components/code-insets";
 import { isRenderedMarkdownFile } from "@/components/file-pane-render-mode";
 import { isWeb } from "@/constants/platform";
+import { getAppMessages } from "@/i18n/sub2api";
 import { createMarkdownStyles } from "@/styles/markdown-styles";
 
 interface CodeLineProps {
@@ -40,6 +42,7 @@ interface FilePreviewBodyProps {
   showDesktopWebScrollbar: boolean;
   isMobile: boolean;
   filePath: string;
+  text: ReturnType<typeof getAppMessages>["files"];
 }
 
 function trimNonEmpty(value: string | null | undefined): string | null {
@@ -116,6 +119,7 @@ function FilePreviewBody({
   showDesktopWebScrollbar,
   isMobile,
   filePath,
+  text,
 }: FilePreviewBodyProps) {
   const { theme } = useUnistyles();
   const isDark = theme.colorScheme === "dark";
@@ -148,7 +152,7 @@ function FilePreviewBody({
     return (
       <View style={styles.centerState}>
         <ActivityIndicator size="small" />
-        <Text style={styles.loadingText}>Loading file…</Text>
+        <Text style={styles.loadingText}>{text.loadingFile}</Text>
       </View>
     );
   }
@@ -156,7 +160,7 @@ function FilePreviewBody({
   if (!preview) {
     return (
       <View style={styles.centerState}>
-        <Text style={styles.emptyText}>No preview available</Text>
+        <Text style={styles.emptyText}>{text.noPreview}</Text>
       </View>
     );
   }
@@ -258,7 +262,7 @@ function FilePreviewBody({
 
   return (
     <View style={styles.centerState}>
-      <Text style={styles.emptyText}>Binary preview unavailable</Text>
+      <Text style={styles.emptyText}>{text.binaryPreviewUnavailable}</Text>
       <Text style={styles.binaryMetaText}>{formatFileSize({ size: preview.size })}</Text>
     </View>
   );
@@ -275,6 +279,8 @@ export function FilePane({
 }) {
   const isMobile = useIsCompactFormFactor();
   const showDesktopWebScrollbar = isWeb && !isMobile;
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).files, [locale]);
 
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
   const normalizedWorkspaceRoot = useMemo(() => workspaceRoot.trim(), [workspaceRoot]);
@@ -285,7 +291,7 @@ export function FilePane({
     enabled: Boolean(client && normalizedWorkspaceRoot && normalizedFilePath),
     queryFn: async () => {
       if (!client || !normalizedWorkspaceRoot || !normalizedFilePath) {
-        return { file: null as ExplorerFile | null, error: "Host is not connected" };
+        return { file: null as ExplorerFile | null, error: text.hostNotConnected };
       }
       const payload = await client.exploreFileSystem(
         normalizedWorkspaceRoot,
@@ -312,6 +318,7 @@ export function FilePane({
         showDesktopWebScrollbar={showDesktopWebScrollbar}
         isMobile={isMobile}
         filePath={filePath}
+        text={text}
       />
     </View>
   );

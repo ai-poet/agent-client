@@ -60,7 +60,9 @@ import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
 import { submitAgentInput } from "@/components/agent-input-submit";
 import { useAppSettings } from "@/hooks/use-settings";
+import { useAppLocale } from "@/hooks/use-app-locale";
 import { isWeb, isNative } from "@/constants/platform";
+import { getAppMessages } from "@/i18n/sub2api";
 import type { GitHubSearchItem } from "@server/shared/messages";
 import type { AttachmentMetadata, ComposerAttachment } from "@/attachments/types";
 import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-url";
@@ -133,8 +135,6 @@ interface ComposerProps {
 }
 
 const EMPTY_ARRAY: readonly QueuedMessage[] = [];
-const DESKTOP_MESSAGE_PLACEHOLDER = "Message the agent, tag @files, or use /commands and /skills";
-const MOBILE_MESSAGE_PLACEHOLDER = "Message, @files, /commands";
 const StableMessageInput = memo(MessageInput);
 const EMPTY_AGENT_MODES: AgentMode[] = [];
 
@@ -191,6 +191,8 @@ export function Composer({
   const voice = useVoiceOptional();
   const voiceToggleKeys = useShortcutKeys("voice-toggle");
   const dictationCancelKeys = useShortcutKeys("dictation-cancel");
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).composer, [locale]);
   const isDictationReady = useIsDictationReady({
     serverId,
     isConnected,
@@ -224,8 +226,8 @@ export function Composer({
   const isMobile = useIsCompactFormFactor();
   const isDesktopWebBreakpoint = isWeb && !isMobile;
   const messagePlaceholder = isDesktopWebBreakpoint
-    ? DESKTOP_MESSAGE_PLACEHOLDER
-    : MOBILE_MESSAGE_PLACEHOLDER;
+    ? text.desktopPlaceholder
+    : text.mobilePlaceholder;
   const userInput = value;
   const setUserInput = onChangeText;
   const selectedAttachments = attachments;
@@ -308,18 +310,18 @@ export function Composer({
   }, [focusInput, onFocusInput]);
 
   const submitMessage = useCallback(
-    async (text: string, attachments: ComposerAttachment[]) => {
+    async (messageText: string, attachments: ComposerAttachment[]) => {
       onMessageSent?.();
       if (onSubmitMessageRef.current) {
-        await onSubmitMessageRef.current({ text, attachments, cwd });
+        await onSubmitMessageRef.current({ text: messageText, attachments, cwd });
         return;
       }
       if (!sendAgentMessageRef.current) {
-        throw new Error("Host is not connected");
+        throw new Error(text.hostNotConnected);
       }
-      await sendAgentMessageRef.current(agentIdRef.current, text, attachments);
+      await sendAgentMessageRef.current(agentIdRef.current, messageText, attachments);
     },
-    [cwd, onMessageSent],
+    [cwd, onMessageSent, text.hostNotConnected],
   );
 
   useEffect(() => {
@@ -329,11 +331,11 @@ export function Composer({
   useEffect(() => {
     sendAgentMessageRef.current = async (
       agentId: string,
-      text: string,
+      messageText: string,
       attachments: ComposerAttachment[],
     ) => {
       if (!client) {
-        throw new Error("Host is not connected");
+        throw new Error(text.hostNotConnected);
       }
 
       const wirePayload = splitComposerAttachmentsForSubmit(attachments);
@@ -341,7 +343,7 @@ export function Composer({
       const userMessage: StreamItem = {
         kind: "user_message",
         id: clientMessageId,
-        text,
+        text: messageText,
         timestamp: new Date(),
         ...(wirePayload.images.length > 0 ? { images: wirePayload.images } : {}),
       };
@@ -368,14 +370,21 @@ export function Composer({
         });
       }
       const imagesData = await encodeImages(wirePayload.images);
-      await client.sendAgentMessage(agentId, text, {
+      await client.sendAgentMessage(agentId, messageText, {
         messageId: clientMessageId,
         images: imagesData ?? [],
         attachments: wirePayload.attachments,
       });
       onAttentionPromptSend?.();
     };
-  }, [client, onAttentionPromptSend, serverId, setAgentStreamTail, setAgentStreamHead]);
+  }, [
+    client,
+    onAttentionPromptSend,
+    serverId,
+    setAgentStreamTail,
+    setAgentStreamHead,
+    text.hostNotConnected,
+  ]);
 
   useEffect(() => {
     onSubmitMessageRef.current = onSubmitMessage;
@@ -676,7 +685,7 @@ export function Composer({
       await submitMessage(item.text, item.attachments);
     } catch (error) {
       updateQueue((current) => [item, ...current]);
-      setSendError(error instanceof Error ? error.message : "Failed to send message");
+      setSendError(error instanceof Error ? error.message : text.failedSendMessage);
     }
   }
 
@@ -716,7 +725,7 @@ export function Composer({
           <TooltipTrigger
             onPress={handleCancelAgent}
             disabled={!isConnected || isCancellingAgent}
-            accessibilityLabel={isCancellingAgent ? "Canceling agent" : "Stop agent"}
+            accessibilityLabel={isCancellingAgent ? text.cancelingAgent : text.stopAgent}
             accessibilityRole="button"
             style={[
               styles.cancelButton as any,
@@ -731,7 +740,7 @@ export function Composer({
           </TooltipTrigger>
           <TooltipContent side="top" align="center" offset={8}>
             <View style={styles.tooltipRow}>
-              <Text style={styles.tooltipText}>Interrupt</Text>
+              <Text style={styles.tooltipText}>{text.interrupt}</Text>
               {dictationCancelKeys ? (
                 <Shortcut chord={dictationCancelKeys} style={styles.tooltipShortcut} />
               ) : null}
@@ -748,6 +757,9 @@ export function Composer({
       isCancellingAgent,
       isConnected,
       isProcessing,
+      text.cancelingAgent,
+      text.interrupt,
+      text.stopAgent,
     ],
   );
 
@@ -761,7 +773,7 @@ export function Composer({
               <TooltipTrigger
                 onPress={handleToggleRealtimeVoice}
                 disabled={!isConnected || voice?.isVoiceSwitching}
-                accessibilityLabel="Enable Voice mode"
+                accessibilityLabel={text.enableVoiceMode}
                 accessibilityRole="button"
                 style={({ hovered }) => [
                   styles.realtimeVoiceButton as any,
@@ -784,7 +796,7 @@ export function Composer({
               </TooltipTrigger>
               <TooltipContent side="top" align="center" offset={8}>
                 <View style={styles.tooltipRow}>
-                  <Text style={styles.tooltipText}>Voice mode</Text>
+                  <Text style={styles.tooltipText}>{text.voiceMode}</Text>
                   {voiceToggleKeys ? (
                     <Shortcut chord={voiceToggleKeys} style={styles.tooltipShortcut} />
                   ) : null}
@@ -803,6 +815,8 @@ export function Composer({
       showVoiceModeButton,
       theme.colors.foreground,
       theme.colors.foregroundMuted,
+      text.enableVoiceMode,
+      text.voiceMode,
       voice,
       voiceToggleKeys,
     ],
@@ -833,7 +847,7 @@ export function Composer({
     queryKey: ["composer-github-search", serverId, cwd, githubSearchQueryTrimmed],
     queryFn: async () => {
       if (!client) {
-        throw new Error("Host is not connected");
+        throw new Error(text.hostNotConnected);
       }
       return client.searchGitHub({
         cwd,
@@ -860,7 +874,7 @@ export function Composer({
     () => [
       {
         id: "image",
-        label: "Add image",
+        label: text.addImage,
         icon: <Paperclip size={theme.iconSize.md} color={theme.colors.foregroundMuted} />,
         onSelect: () => {
           void handlePickImage();
@@ -868,14 +882,20 @@ export function Composer({
       },
       {
         id: "github",
-        label: "Add issue or PR",
+        label: text.addIssueOrPr,
         icon: <Github size={theme.iconSize.md} color={theme.colors.foregroundMuted} />,
         onSelect: () => {
           setIsGithubPickerOpen(true);
         },
       },
     ],
-    [handlePickImage, theme.colors.foregroundMuted, theme.iconSize.md],
+    [
+      handlePickImage,
+      text.addImage,
+      text.addIssueOrPr,
+      theme.colors.foregroundMuted,
+      theme.iconSize.md,
+    ],
   );
 
   const handleToggleGithubItem = useCallback(
@@ -989,8 +1009,8 @@ export function Composer({
                         testID="composer-image-attachment-pill"
                         onOpen={() => handleOpenAttachment(attachment)}
                         onRemove={() => handleRemoveAttachment(index)}
-                        openAccessibilityLabel="Open image attachment"
-                        removeAccessibilityLabel="Remove image attachment"
+                        openAccessibilityLabel={text.openImageAttachment}
+                        removeAccessibilityLabel={text.removeImageAttachment}
                         disabled={isComposerLocked}
                       >
                         <ImageAttachmentThumbnail image={attachment.metadata} />
@@ -1072,6 +1092,7 @@ export function Composer({
               onFocusChange={handleFocusChange}
               onHeightChange={onComposerHeightChange}
               inputWrapperStyle={inputWrapperStyle}
+              text={text}
             />
             <Combobox
               options={githubSearchOptions}
@@ -1079,8 +1100,8 @@ export function Composer({
               onSelect={() => {}}
               keepOpenOnSelect
               searchable
-              searchPlaceholder="Search issues and PRs..."
-              title="Attach issue or PR"
+              searchPlaceholder={text.searchIssuesAndPrs}
+              title={text.attachIssueOrPr}
               open={isGithubPickerOpen}
               onOpenChange={(open) => {
                 setIsGithubPickerOpen(open);
@@ -1091,7 +1112,7 @@ export function Composer({
               onSearchQueryChange={setGithubSearchQuery}
               desktopPlacement="top-start"
               anchorRef={attachButtonRef}
-              emptyText={githubSearchResultsQuery.isFetching ? "Searching..." : "No results found."}
+              emptyText={githubSearchResultsQuery.isFetching ? text.searching : text.noResultsFound}
               renderOption={({ option, active }) => {
                 const item = githubSearchItems.find((candidate) => {
                   return `${candidate.kind}:${candidate.number}` === option.id;

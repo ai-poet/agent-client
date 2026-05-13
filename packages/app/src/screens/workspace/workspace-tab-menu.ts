@@ -1,4 +1,5 @@
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
+import type { getAppMessages } from "@/i18n/sub2api";
 import { encodeFilePathForPathSegment } from "@/utils/host-routes";
 
 export type WorkspaceTabMenuSurface = "desktop" | "mobile";
@@ -22,6 +23,7 @@ export type WorkspaceTabMenuEntry =
     };
 
 interface BuildWorkspaceTabMenuEntriesInput {
+  text: ReturnType<typeof getAppMessages>["workspace"];
   surface: WorkspaceTabMenuSurface;
   tab: WorkspaceTabDescriptor;
   index: number;
@@ -37,6 +39,7 @@ interface BuildWorkspaceTabMenuEntriesInput {
 }
 
 interface BuildWorkspaceDesktopTabActionsInput {
+  text: ReturnType<typeof getAppMessages>["workspace"];
   tab: WorkspaceTabDescriptor;
   index: number;
   tabCount: number;
@@ -55,12 +58,18 @@ export interface WorkspaceDesktopTabActions {
   closeButtonTestId: string;
 }
 
-function buildCloseBeforeLabel(surface: WorkspaceTabMenuSurface): string {
-  return surface === "mobile" ? "Close tabs above" : "Close to the left";
+function buildCloseBeforeLabel(
+  surface: WorkspaceTabMenuSurface,
+  text: ReturnType<typeof getAppMessages>["workspace"],
+): string {
+  return surface === "mobile" ? text.closeTabsAbove : text.closeToLeft;
 }
 
-function buildCloseAfterLabel(surface: WorkspaceTabMenuSurface): string {
-  return surface === "mobile" ? "Close tabs below" : "Close to the right";
+function buildCloseAfterLabel(
+  surface: WorkspaceTabMenuSurface,
+  text: ReturnType<typeof getAppMessages>["workspace"],
+): string {
+  return surface === "mobile" ? text.closeTabsBelow : text.closeToRight;
 }
 
 function buildCloseBeforeTestIDSuffix(surface: WorkspaceTabMenuSurface): string {
@@ -92,6 +101,7 @@ export function buildWorkspaceTabMenuEntries(
 ): WorkspaceTabMenuEntry[] {
   const {
     surface,
+    text,
     tab,
     index,
     tabCount,
@@ -114,7 +124,7 @@ export function buildWorkspaceTabMenuEntries(
     entries.push({
       kind: "item",
       key: "copy-resume-command",
-      label: "Copy resume command",
+      label: text.copyResumeCommand,
       icon: "copy",
       testID: `${menuTestIDBase}-copy-resume-command`,
       onSelect: () => {
@@ -124,7 +134,7 @@ export function buildWorkspaceTabMenuEntries(
     entries.push({
       kind: "item",
       key: "copy-agent-id",
-      label: "Copy agent id",
+      label: text.copyAgentId,
       icon: "copy",
       hint: agentId.slice(0, 7),
       testID: `${menuTestIDBase}-copy-agent-id`,
@@ -141,7 +151,7 @@ export function buildWorkspaceTabMenuEntries(
   entries.push({
     kind: "item",
     key: "close-before",
-    label: buildCloseBeforeLabel(surface),
+    label: buildCloseBeforeLabel(surface, text),
     icon: "arrow-left-to-line",
     disabled: isFirstTab,
     testID: `${menuTestIDBase}-${buildCloseBeforeTestIDSuffix(surface)}`,
@@ -152,7 +162,7 @@ export function buildWorkspaceTabMenuEntries(
   entries.push({
     kind: "item",
     key: "close-after",
-    label: buildCloseAfterLabel(surface),
+    label: buildCloseAfterLabel(surface, text),
     icon: "arrow-right-to-line",
     disabled: isLastTab,
     testID: `${menuTestIDBase}-${buildCloseAfterTestIDSuffix(surface)}`,
@@ -163,7 +173,7 @@ export function buildWorkspaceTabMenuEntries(
   entries.push({
     kind: "item",
     key: "close-others",
-    label: "Close other tabs",
+    label: text.closeOtherTabs,
     icon: "copy-x",
     disabled: isOnlyTab,
     testID: `${menuTestIDBase}-close-others`,
@@ -176,9 +186,9 @@ export function buildWorkspaceTabMenuEntries(
     entries.push({
       kind: "item",
       key: "reload-agent",
-      label: "Reload agent",
+      label: text.reloadAgent,
       icon: "rotate-cw",
-      tooltip: "Reload agent to update skills, MCPs or login status.",
+      tooltip: text.reloadAgentTooltip,
       testID: `${menuTestIDBase}-reload-agent`,
       onSelect: () => {
         void onReloadAgent(agentId);
@@ -188,7 +198,7 @@ export function buildWorkspaceTabMenuEntries(
   entries.push({
     kind: "item",
     key: "close",
-    label: "Close",
+    label: text.close,
     icon: "x",
     testID: `${menuTestIDBase}-close`,
     onSelect: () => {
@@ -206,6 +216,7 @@ export function buildWorkspaceDesktopTabActions(
   return {
     contextMenuTestId,
     menuEntries: buildWorkspaceTabMenuEntries({
+      text: input.text,
       surface: "desktop",
       tab: input.tab,
       index: input.index,

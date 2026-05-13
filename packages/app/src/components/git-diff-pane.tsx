@@ -74,6 +74,8 @@ import { GitActionsSplitButton } from "@/components/git-actions-split-button";
 import { usePanelStore } from "@/stores/panel-store";
 import { buildWorkspaceExplorerStateKey } from "@/hooks/use-file-explorer-actions";
 import { useToast } from "@/contexts/toast-context";
+import { useAppLocale } from "@/hooks/use-app-locale";
+import { getAppMessages } from "@/i18n/sub2api";
 import {
   formatDiffContentText,
   formatDiffGutterText,
@@ -502,12 +504,14 @@ function DiffFileBody({
   wrapLines,
   onBodyHeightChange,
   testID,
+  text,
 }: {
   file: ParsedDiffFile;
   layout: "unified" | "split";
   wrapLines: boolean;
   onBodyHeightChange?: (path: string, height: number) => void;
   testID?: string;
+  text: ReturnType<typeof getAppMessages>["gitDiff"];
 }) {
   const [scrollViewWidth, setScrollViewWidth] = useState(0);
   const [bodyWidth, setBodyWidth] = useState(0);
@@ -526,7 +530,7 @@ function DiffFileBody({
           return (
             <View style={styles.statusMessageContainer}>
               <Text style={styles.statusMessageText}>
-                {file.status === "binary" ? "Binary file" : "Diff too large to display"}
+                {file.status === "binary" ? text.binaryFile : text.tooLarge}
               </Text>
             </View>
           );
@@ -631,6 +635,8 @@ type DiffFlatItem =
 export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDiffPaneProps) {
   const { theme } = useUnistyles();
   const toast = useToast();
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).gitDiff, [locale]);
   const isMobile = useIsCompactFormFactor();
   const showDesktopWebScrollbar = isWeb && !isMobile;
   const canUseSplitLayout = isWeb && !isMobile;
@@ -938,57 +944,90 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
   const handleCommit = useCallback(() => {
     void runCommit({ serverId, cwd })
       .then(() => {
-        toastActionSuccess("Committed");
+        toastActionSuccess(text.committedToast);
       })
       .catch((err) => {
-        toastActionError(err, "Failed to commit");
+        toastActionError(err, text.failedCommit);
       });
-  }, [cwd, runCommit, serverId, toastActionError, toastActionSuccess]);
+  }, [
+    cwd,
+    runCommit,
+    serverId,
+    text.committedToast,
+    text.failedCommit,
+    toastActionError,
+    toastActionSuccess,
+  ]);
 
   const handlePull = useCallback(() => {
     void runPull({ serverId, cwd })
       .then(() => {
-        toastActionSuccess("Pulled");
+        toastActionSuccess(text.pulledToast);
       })
       .catch((err) => {
-        toastActionError(err, "Failed to pull");
+        toastActionError(err, text.failedPull);
       });
-  }, [cwd, runPull, serverId, toastActionError, toastActionSuccess]);
+  }, [
+    cwd,
+    runPull,
+    serverId,
+    text.failedPull,
+    text.pulledToast,
+    toastActionError,
+    toastActionSuccess,
+  ]);
 
   const handlePush = useCallback(() => {
     void runPush({ serverId, cwd })
       .then(() => {
-        toastActionSuccess("Pushed");
+        toastActionSuccess(text.pushedToast);
       })
       .catch((err) => {
-        toastActionError(err, "Failed to push");
+        toastActionError(err, text.failedPush);
       });
-  }, [cwd, runPush, serverId, toastActionError, toastActionSuccess]);
+  }, [
+    cwd,
+    runPush,
+    serverId,
+    text.failedPush,
+    text.pushedToast,
+    toastActionError,
+    toastActionSuccess,
+  ]);
 
   const handleCreatePr = useCallback(() => {
     void persistShipDefault("pr");
     void runCreatePr({ serverId, cwd })
       .then(() => {
-        toastActionSuccess("PR created");
+        toastActionSuccess(text.prCreatedToast);
       })
       .catch((err) => {
-        toastActionError(err, "Failed to create PR");
+        toastActionError(err, text.failedCreatePr);
       });
-  }, [cwd, persistShipDefault, runCreatePr, serverId, toastActionError, toastActionSuccess]);
+  }, [
+    cwd,
+    persistShipDefault,
+    runCreatePr,
+    serverId,
+    text.failedCreatePr,
+    text.prCreatedToast,
+    toastActionError,
+    toastActionSuccess,
+  ]);
 
   const handleMergeBranch = useCallback(() => {
     if (!baseRef) {
-      toast.error("Base ref unavailable");
+      toast.error(text.baseRefUnavailable);
       return;
     }
     void persistShipDefault("merge");
     void runMergeBranch({ serverId, cwd, baseRef })
       .then(() => {
         setPostShipArchiveSuggested(true);
-        toastActionSuccess("Merged");
+        toastActionSuccess(text.mergedToast);
       })
       .catch((err) => {
-        toastActionError(err, "Failed to merge");
+        toastActionError(err, text.failedMerge);
       });
   }, [
     baseRef,
@@ -996,6 +1035,9 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     persistShipDefault,
     runMergeBranch,
     serverId,
+    text.baseRefUnavailable,
+    text.failedMerge,
+    text.mergedToast,
     toast,
     toastActionError,
     toastActionSuccess,
@@ -1003,22 +1045,33 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
 
   const handleMergeFromBase = useCallback(() => {
     if (!baseRef) {
-      toast.error("Base ref unavailable");
+      toast.error(text.baseRefUnavailable);
       return;
     }
     void runMergeFromBase({ serverId, cwd, baseRef })
       .then(() => {
-        toastActionSuccess("Updated");
+        toastActionSuccess(text.updatedToast);
       })
       .catch((err) => {
-        toastActionError(err, "Failed to merge from base");
+        toastActionError(err, text.failedMergeFromBase);
       });
-  }, [baseRef, cwd, runMergeFromBase, serverId, toast, toastActionError, toastActionSuccess]);
+  }, [
+    baseRef,
+    cwd,
+    runMergeFromBase,
+    serverId,
+    text.baseRefUnavailable,
+    text.failedMergeFromBase,
+    text.updatedToast,
+    toast,
+    toastActionError,
+    toastActionSuccess,
+  ]);
 
   const handleArchiveWorktree = useCallback(() => {
     const worktreePath = status?.cwd;
     if (!worktreePath) {
-      toast.error("Worktree path unavailable");
+      toast.error(text.worktreePathUnavailable);
       return;
     }
     const targetWorkingDir = resolveNewAgentWorkingDir(cwd, status ?? null);
@@ -1027,9 +1080,19 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
         router.replace(buildNewAgentRoute(serverId, targetWorkingDir));
       })
       .catch((err) => {
-        toastActionError(err, "Failed to archive worktree");
+        toastActionError(err, text.failedArchiveWorktree);
       });
-  }, [cwd, router, runArchiveWorktree, serverId, status, toast, toastActionError]);
+  }, [
+    cwd,
+    router,
+    runArchiveWorktree,
+    serverId,
+    status,
+    text.failedArchiveWorktree,
+    text.worktreePathUnavailable,
+    toast,
+    toastActionError,
+  ]);
 
   const renderFlatItem = useCallback(
     ({ item }: { item: DiffFlatItem }) => {
@@ -1051,6 +1114,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
           wrapLines={wrapLines}
           onBodyHeightChange={handleBodyHeightChange}
           testID={`diff-file-${item.fileIndex}-body`}
+          text={text}
         />
       );
     },
@@ -1059,6 +1123,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       handleBodyHeightChange,
       handleHeaderHeightChange,
       handleToggleExpanded,
+      text,
       wrapLines,
     ],
   );
@@ -1075,18 +1140,18 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     gitStatus?.currentBranch && gitStatus.currentBranch !== "HEAD"
       ? gitStatus.currentBranch
       : notGit
-        ? "Not a git repository"
-        : "Unknown";
+        ? text.notGitRepository
+        : text.unknownBranch;
   const actionsDisabled = !isGit || Boolean(status?.error) || isStatusLoading;
   const aheadCount = gitStatus?.aheadBehind?.ahead ?? 0;
   const behindBaseCount = gitStatus?.aheadBehind?.behind ?? 0;
   const aheadOfOrigin = gitStatus?.aheadOfOrigin ?? 0;
   const behindOfOrigin = gitStatus?.behindOfOrigin ?? 0;
   const baseRefLabel = useMemo(() => {
-    if (!baseRef) return "base";
+    if (!baseRef) return text.baseFallback;
     const trimmed = baseRef.replace(/^refs\/(heads|remotes)\//, "").trim();
     return trimmed.startsWith("origin/") ? trimmed.slice("origin/".length) : trimmed;
-  }, [baseRef]);
+  }, [baseRef, text.baseFallback]);
   const committedDiffDescription = useMemo(() => {
     if (!branchLabel || !baseRefLabel) {
       return undefined;
@@ -1118,7 +1183,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     bodyContent = (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={theme.colors.foregroundMuted} />
-        <Text style={styles.loadingText}>Checking repository...</Text>
+        <Text style={styles.loadingText}>{text.checkingRepository}</Text>
       </View>
     );
   } else if (statusErrorMessage) {
@@ -1130,7 +1195,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
   } else if (notGit) {
     bodyContent = (
       <View style={styles.emptyContainer} testID="changes-not-git">
-        <Text style={styles.emptyText}>Not a git repository</Text>
+        <Text style={styles.emptyText}>{text.notGitRepository}</Text>
       </View>
     );
   } else if (isDiffLoading) {
@@ -1150,10 +1215,10 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       <View style={styles.emptyContainer}>
         <Text style={styles.emptyText}>
           {changesPreferences.hideWhitespace
-            ? "No visible changes after hiding whitespace"
+            ? text.hiddenWhitespaceEmpty
             : diffMode === "uncommitted"
-              ? "No uncommitted changes"
-              : `No changes vs ${baseRefLabel}`}
+              ? text.noUncommittedChanges
+              : text.noChangesVs(baseRefLabel)}
         </Text>
       </View>
     );
@@ -1215,6 +1280,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       behindOfOrigin,
       shouldPromoteArchive,
       shipDefault,
+      text,
       runtime: {
         commit: {
           disabled: commitDisabled,
@@ -1304,6 +1370,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     handleMergeFromBase,
     handleArchiveWorktree,
     theme.colors.foregroundMuted,
+    text,
   ]);
 
   // Helper to get display label based on status
@@ -1334,10 +1401,10 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
                 ]}
                 testID="changes-diff-status"
                 accessibilityRole="button"
-                accessibilityLabel="Diff mode"
+                accessibilityLabel={text.diffMode}
               >
                 <Text style={styles.diffStatusText} numberOfLines={1}>
-                  {diffMode === "uncommitted" ? "Uncommitted" : "Committed"}
+                  {diffMode === "uncommitted" ? text.uncommitted : text.committed}
                 </Text>
                 <ChevronDown size={12} color={theme.colors.foregroundMuted} />
               </DropdownMenuTrigger>
@@ -1347,7 +1414,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
                   selected={diffMode === "uncommitted"}
                   onSelect={() => setDiffModeOverride("uncommitted")}
                 >
-                  Uncommitted
+                  {text.uncommitted}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -1356,7 +1423,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
                   description={committedDiffDescription}
                   onSelect={() => setDiffModeOverride("base")}
                 >
-                  Committed
+                  {text.committed}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -1367,7 +1434,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
                     <TooltipTrigger asChild>
                       <Pressable
                         accessibilityRole="button"
-                        accessibilityLabel="Unified diff"
+                        accessibilityLabel={text.unifiedDiff}
                         testID="changes-layout-unified"
                         onPress={() => handleLayoutChange("unified")}
                         style={({ hovered, pressed }) => [
@@ -1388,14 +1455,14 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
                       </Pressable>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
-                      <Text style={styles.tooltipText}>Unified diff</Text>
+                      <Text style={styles.tooltipText}>{text.unifiedDiff}</Text>
                     </TooltipContent>
                   </Tooltip>
                   <Tooltip delayDuration={300}>
                     <TooltipTrigger asChild>
                       <Pressable
                         accessibilityRole="button"
-                        accessibilityLabel="Side-by-side diff"
+                        accessibilityLabel={text.sideBySideDiff}
                         testID="changes-layout-split"
                         onPress={() => handleLayoutChange("split")}
                         style={({ hovered, pressed }) => [
@@ -1416,7 +1483,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
                       </Pressable>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
-                      <Text style={styles.tooltipText}>Side-by-side diff</Text>
+                      <Text style={styles.tooltipText}>{text.sideBySideDiff}</Text>
                     </TooltipContent>
                   </Tooltip>
                 </View>
@@ -1425,7 +1492,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
                 <TooltipTrigger asChild>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="Hide whitespace"
+                    accessibilityLabel={text.hideWhitespace}
                     testID="changes-toggle-whitespace"
                     style={({ hovered, pressed }) => [
                       styles.expandAllButton,
@@ -1445,7 +1512,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
                   </Pressable>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  <Text style={styles.tooltipText}>Hide whitespace</Text>
+                  <Text style={styles.tooltipText}>{text.hideWhitespace}</Text>
                 </TooltipContent>
               </Tooltip>
               {files.length > 0 ? (
@@ -1468,7 +1535,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
                       <Text style={styles.tooltipText}>
-                        {wrapLines ? "Scroll long lines" : "Wrap long lines"}
+                        {wrapLines ? text.scrollLongLines : text.wrapLongLines}
                       </Text>
                     </TooltipContent>
                   </Tooltip>
@@ -1496,7 +1563,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
                       <Text style={styles.tooltipText}>
-                        {allExpanded ? "Collapse all files" : "Expand all files"}
+                        {allExpanded ? text.collapseAllFiles : text.expandAllFiles}
                       </Text>
                     </TooltipContent>
                   </Tooltip>

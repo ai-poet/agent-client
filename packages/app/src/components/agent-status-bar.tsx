@@ -27,6 +27,7 @@ import {
   toggleFavoriteModel,
   useFormPreferences,
 } from "@/hooks/use-form-preferences";
+import { useAppLocale } from "@/hooks/use-app-locale";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -58,6 +59,7 @@ import {
 import { isWeb as platformIsWeb } from "@/constants/platform";
 import { useToast } from "@/contexts/toast-context";
 import { toErrorMessage } from "@/utils/error-messages";
+import { getAppMessages } from "@/i18n/sub2api";
 
 type StatusOption = {
   id: string;
@@ -229,6 +231,9 @@ function ControlledStatusBar({
   cloudGroups = [],
 }: ControlledAgentStatusBarProps) {
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const appText = useMemo(() => getAppMessages(locale), [locale]);
+  const text = appText.workspace;
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [openSelector, setOpenSelector] = useState<StatusSelector | null>(null);
 
@@ -246,17 +251,21 @@ function ControlledStatusBar({
     onSelectThinkingOption && thinkingOptions && thinkingOptions.length > 0,
   );
 
-  const displayProvider = findOptionLabel(providerOptions, selectedProviderId, "Provider");
+  const displayProvider = findOptionLabel(
+    providerOptions,
+    selectedProviderId,
+    text.providerFallback,
+  );
   const displayCloudGroup = resolveCloudGroupDisplayLabel(cloudGroups, provider);
-  const displayMode = findOptionLabel(modeOptions, selectedModeId, "Default");
+  const displayMode = findOptionLabel(modeOptions, selectedModeId, text.defaultMode);
   const displayModel =
     isModelLoading && (!modelOptions || modelOptions.length === 0)
-      ? "Loading models..."
-      : findOptionLabel(modelOptions, selectedModelId, "Select model");
+      ? text.loadingModels
+      : findOptionLabel(modelOptions, selectedModelId, appText.modelSelector.selectModel);
   const displayThinking = findOptionLabel(
     thinkingOptions,
     selectedThinkingOptionId,
-    thinkingOptions?.[0]?.label ?? "Unknown",
+    thinkingOptions?.[0]?.label ?? text.unknown,
   );
 
   const modeVisuals = selectedModeId
@@ -381,7 +390,7 @@ function ControlledStatusBar({
                   (disabled || !canSelectProvider) && styles.disabledBadge,
                 ]}
                 accessibilityRole="button"
-                accessibilityLabel="Select agent provider"
+                accessibilityLabel={text.selectAgentProvider}
                 testID="agent-provider-selector"
               >
                 <Text style={styles.modeBadgeText} numberOfLines={1} ellipsizeMode="tail">
@@ -478,7 +487,7 @@ function ControlledStatusBar({
                       (disabled || !canSelectThinking) && styles.disabledBadge,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel={`Select thinking option (${displayThinking})`}
+                    accessibilityLabel={text.selectThinkingOption(displayThinking)}
                     testID="agent-thinking-selector"
                   >
                     <Brain size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
@@ -521,7 +530,7 @@ function ControlledStatusBar({
                       (disabled || !canSelectMode) && styles.disabledBadge,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel={`Select agent mode (${displayMode})`}
+                    accessibilityLabel={text.selectAgentMode(displayMode)}
                     testID="agent-mode-selector"
                   >
                     {ModeIconComponent ? (
@@ -661,7 +670,7 @@ function ControlledStatusBar({
             }}
             style={({ pressed }) => [styles.prefsButton, pressed && styles.prefsButtonPressed]}
             accessibilityRole="button"
-            accessibilityLabel="Agent preferences"
+            accessibilityLabel={text.agentPreferences}
             testID="agent-preferences-button"
           >
             {ProviderIcon ? (
@@ -673,7 +682,7 @@ function ControlledStatusBar({
           </Pressable>
 
           <AdaptiveModalSheet
-            title="Preferences"
+            title={text.preferences}
             visible={prefsOpen}
             onClose={() => setPrefsOpen(false)}
             testID="agent-preferences-sheet"
@@ -682,7 +691,7 @@ function ControlledStatusBar({
               <View style={styles.sheetSection}>
                 <View
                   style={styles.sheetSelect}
-                  accessibilityLabel="Current Cloud group"
+                  accessibilityLabel={text.currentCloudGroup}
                   testID="agent-preferences-cloud-group"
                 >
                   <Cloud size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
@@ -749,7 +758,7 @@ function ControlledStatusBar({
                       (disabled || !canSelectThinking) && styles.disabledSheetSelect,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel="Select thinking option"
+                    accessibilityLabel={text.selectThinkingOption(displayThinking)}
                     testID="agent-preferences-thinking"
                   >
                     <Brain size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
@@ -785,7 +794,7 @@ function ControlledStatusBar({
                       (disabled || !canSelectMode) && styles.disabledSheetSelect,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel="Select agent mode"
+                    accessibilityLabel={text.selectAgentMode(displayMode)}
                     testID="agent-preferences-mode"
                   >
                     {ModeIconComponent ? (
@@ -841,7 +850,7 @@ function ControlledStatusBar({
                         )}
                       />
                       <Text style={styles.sheetSelectText}>{feature.label}</Text>
-                      <Text style={styles.modeBadgeText}>{feature.value ? "On" : "Off"}</Text>
+                      <Text style={styles.modeBadgeText}>{feature.value ? text.on : text.off}</Text>
                     </Pressable>
                   </View>
                 );
@@ -1151,6 +1160,8 @@ export function DraftAgentStatusBar({
   onModelSelectorOpen,
   disabled = false,
 }: DraftAgentStatusBarProps) {
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).workspace, [locale]);
   const { preferences, updatePreferences } = useFormPreferences();
   const { cloudGroups } = useCloudModelRouting({
     serverId,
@@ -1160,13 +1171,13 @@ export function DraftAgentStatusBar({
 
   const mappedModeOptions = useMemo<StatusOption[]>(() => {
     if (modeOptions.length === 0) {
-      return [{ id: "", label: "Default" }];
+      return [{ id: "", label: text.defaultMode }];
     }
     return modeOptions.map((mode) => ({
       id: mode.id,
       label: mode.label,
     }));
-  }, [modeOptions]);
+  }, [modeOptions, text.defaultMode]);
 
   const mappedThinkingOptions = useMemo<StatusOption[]>(() => {
     return thinkingOptions.map((option) => ({

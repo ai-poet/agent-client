@@ -40,6 +40,7 @@ import {
 import { Shortcut } from "@/components/ui/shortcut";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
+import { useAppLocale } from "@/hooks/use-app-locale";
 import { WORKSPACE_SECONDARY_HEADER_HEIGHT } from "@/constants/layout";
 import { useWorkspaceTabLayout } from "@/screens/workspace/use-workspace-tab-layout";
 import {
@@ -52,6 +53,7 @@ import {
   type WorkspaceDesktopTabActions,
 } from "@/screens/workspace/workspace-tab-menu";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
+import { getAppMessages } from "@/i18n/sub2api";
 
 const DROPDOWN_WIDTH = 220;
 const LOADING_TAB_LABEL_SKELETON_WIDTH = 80;
@@ -92,20 +94,23 @@ type WorkspaceDesktopTabsRowProps = {
   showPaneSplitActions?: boolean;
 };
 
-function getFallbackTabLabel(tab: WorkspaceTabDescriptor): string {
+function getFallbackTabLabel(
+  tab: WorkspaceTabDescriptor,
+  text: ReturnType<typeof getAppMessages>["workspace"],
+): string {
   if (tab.target.kind === "draft") {
-    return "New Agent";
+    return text.tabLabels.newAgent;
   }
   if (tab.target.kind === "setup") {
-    return "Setup";
+    return text.tabLabels.setup;
   }
   if (tab.target.kind === "terminal") {
-    return "Terminal";
+    return text.tabLabels.terminal;
   }
   if (tab.target.kind === "file") {
     return tab.target.path.split("/").filter(Boolean).pop() ?? tab.target.path;
   }
-  return "Agent";
+  return text.tabLabels.agent;
 }
 
 function useMiddleClickClose(onClose: () => void) {
@@ -395,6 +400,8 @@ export function WorkspaceDesktopTabsRow({
   showPaneSplitActions = true,
 }: WorkspaceDesktopTabsRowProps) {
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).workspace, [locale]);
   const newTabKeys = useShortcutKeys("workspace-tab-new");
   const newTerminalKeys = useShortcutKeys("workspace-terminal-new");
   const splitRightKeys = useShortcutKeys("workspace-pane-split-right");
@@ -430,10 +437,10 @@ export function WorkspaceDesktopTabsRow({
   const tabLabelLengths = useMemo(
     () =>
       tabs.map((tab) => {
-        const label = getFallbackTabLabel(tab.tab);
+        const label = getFallbackTabLabel(tab.tab, text);
         return label.length;
       }),
-    [tabs],
+    [tabs, text],
   );
 
   const { layout } = useWorkspaceTabLayout({
@@ -506,6 +513,7 @@ export function WorkspaceDesktopTabsRow({
                 onCloseTabsToLeft={onCloseTabsToLeft}
                 onCloseTabsToRight={onCloseTabsToRight}
                 onCloseOtherTabs={onCloseOtherTabs}
+                text={text}
                 resolvedTabWidth={resolvedTabWidth}
                 showLabel={showLabel}
                 showCloseButton={shouldShowCloseButton}
@@ -527,7 +535,7 @@ export function WorkspaceDesktopTabsRow({
             testID="workspace-new-agent-tab"
             onPress={() => onCreateDraftTab({ paneId })}
             accessibilityRole="button"
-            accessibilityLabel="New agent tab"
+            accessibilityLabel={text.newAgentTab}
             style={({ hovered, pressed }) => [
               styles.newTabActionButton,
               (hovered || pressed) && styles.newTabActionButtonHovered,
@@ -537,7 +545,7 @@ export function WorkspaceDesktopTabsRow({
           </TooltipTrigger>
           <TooltipContent side="bottom" align="center" offset={8}>
             <View style={styles.newTabTooltipRow}>
-              <Text style={styles.newTabTooltipText}>New agent tab</Text>
+              <Text style={styles.newTabTooltipText}>{text.newAgentTab}</Text>
               {newTabKeys ? (
                 <Shortcut chord={newTabKeys} style={styles.newTabTooltipShortcut} />
               ) : null}
@@ -551,7 +559,7 @@ export function WorkspaceDesktopTabsRow({
             disabled={disableCreateTerminal || isWaitingOnTerminalReadiness}
             accessibilityRole="button"
             accessibilityLabel={
-              isWaitingOnTerminalReadiness ? "Preparing terminal tab" : "New terminal tab"
+              isWaitingOnTerminalReadiness ? text.preparingTerminalTab : text.newTerminalTab
             }
             style={({ hovered, pressed }) => [
               styles.newTabActionButton,
@@ -565,7 +573,7 @@ export function WorkspaceDesktopTabsRow({
           <TooltipContent side="bottom" align="center" offset={8}>
             <View style={styles.newTabTooltipRow}>
               <Text style={styles.newTabTooltipText}>
-                {isWaitingOnTerminalReadiness ? "Preparing terminal..." : "New terminal tab"}
+                {isWaitingOnTerminalReadiness ? text.preparingTerminal : text.newTerminalTab}
               </Text>
               {newTerminalKeys ? (
                 <Shortcut chord={newTerminalKeys} style={styles.newTabTooltipShortcut} />
@@ -579,7 +587,7 @@ export function WorkspaceDesktopTabsRow({
               <TooltipTrigger
                 onPress={onSplitRight}
                 accessibilityRole="button"
-                accessibilityLabel="Split pane right"
+                accessibilityLabel={text.splitPaneRight}
                 style={({ hovered, pressed }) => [
                   styles.newTabActionButton,
                   (hovered || pressed) && styles.newTabActionButtonHovered,
@@ -589,7 +597,7 @@ export function WorkspaceDesktopTabsRow({
               </TooltipTrigger>
               <TooltipContent side="bottom" align="center" offset={8}>
                 <View style={styles.newTabTooltipRow}>
-                  <Text style={styles.newTabTooltipText}>Split pane right</Text>
+                  <Text style={styles.newTabTooltipText}>{text.splitPaneRight}</Text>
                   {splitRightKeys ? (
                     <Shortcut chord={splitRightKeys} style={styles.newTabTooltipShortcut} />
                   ) : null}
@@ -600,7 +608,7 @@ export function WorkspaceDesktopTabsRow({
               <TooltipTrigger
                 onPress={onSplitDown}
                 accessibilityRole="button"
-                accessibilityLabel="Split pane down"
+                accessibilityLabel={text.splitPaneDown}
                 style={({ hovered, pressed }) => [
                   styles.newTabActionButton,
                   (hovered || pressed) && styles.newTabActionButtonHovered,
@@ -610,7 +618,7 @@ export function WorkspaceDesktopTabsRow({
               </TooltipTrigger>
               <TooltipContent side="bottom" align="center" offset={8}>
                 <View style={styles.newTabTooltipRow}>
-                  <Text style={styles.newTabTooltipText}>Split pane down</Text>
+                  <Text style={styles.newTabTooltipText}>{text.splitPaneDown}</Text>
                   {splitDownKeys ? (
                     <Shortcut chord={splitDownKeys} style={styles.newTabTooltipShortcut} />
                   ) : null}
@@ -648,6 +656,7 @@ function ResolvedDesktopTabChip({
   dragHandleProps,
   showDropIndicatorBefore,
   showDropIndicatorAfter,
+  text,
 }: {
   item: WorkspaceDesktopTabRowItem;
   isFocused: boolean;
@@ -672,10 +681,12 @@ function ResolvedDesktopTabChip({
   dragHandleProps: any;
   showDropIndicatorBefore: boolean;
   showDropIndicatorAfter: boolean;
+  text: ReturnType<typeof getAppMessages>["workspace"];
 }) {
   const resolvedTab = useMemo(
     () =>
       buildWorkspaceDesktopTabActions({
+        text,
         tab: item.tab,
         index,
         tabCount,
@@ -698,6 +709,7 @@ function ResolvedDesktopTabChip({
       onCopyResumeCommand,
       onReloadAgent,
       tabCount,
+      text,
     ],
   );
 
@@ -709,7 +721,7 @@ function ResolvedDesktopTabChip({
     >
       {(presentation) => {
         const tooltipLabel =
-          presentation.titleState === "loading" ? "Loading agent title" : presentation.label;
+          presentation.titleState === "loading" ? text.loadingAgentTitle : presentation.label;
 
         return (
           <View style={styles.tabSlot}>

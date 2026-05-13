@@ -11,6 +11,8 @@ import {
   findActiveFileMention,
   type FileMentionRange,
 } from "@/utils/file-mention-autocomplete";
+import { getAppMessages } from "@/i18n/sub2api";
+import { useAppLocale } from "./use-app-locale";
 
 interface UseAgentAutocompleteInput {
   userInput: string;
@@ -106,6 +108,9 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
     draftConfig,
     onAutocompleteApplied,
   } = input;
+
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).composer, [locale]);
 
   const showCommandAutocomplete = userInput.startsWith("/") && !userInput.includes(" ");
   const commandFilterQuery = showCommandAutocomplete ? userInput.slice(1) : "";
@@ -267,7 +272,7 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
   const errorMessage =
     mode === "command"
       ? isError
-        ? (error?.message ?? "Failed to load")
+        ? (error?.message ?? text.failedLoad)
         : undefined
       : mode === "file"
         ? fileSuggestionsQuery.error instanceof Error
@@ -275,8 +280,8 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
           : undefined
         : undefined;
 
-  const loadingText = mode === "file" ? "Searching workspace..." : "Loading commands...";
-  const emptyText = mode === "file" ? "No files or directories found" : "No commands found";
+  const loadingText = mode === "file" ? text.searchingWorkspace : text.loadingCommands;
+  const emptyText = mode === "file" ? text.noFilesOrDirectories : text.noCommands;
 
   return {
     isVisible,

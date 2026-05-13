@@ -12,10 +12,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/contexts/toast-context";
+import { useAppLocale } from "@/hooks/use-app-locale";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { resolvePreferredEditorId, usePreferredEditor } from "@/hooks/use-preferred-editor";
 import { isAbsolutePath } from "@/utils/path";
 import { isWeb } from "@/constants/platform";
+import { getAppMessages } from "@/i18n/sub2api";
 
 interface WorkspaceOpenInEditorButtonProps {
   serverId: string;
@@ -30,6 +32,9 @@ export function WorkspaceOpenInEditorButton({
 }: WorkspaceOpenInEditorButtonProps) {
   const { theme } = useUnistyles();
   const toast = useToast();
+  const locale = useAppLocale();
+  const appText = useMemo(() => getAppMessages(locale), [locale]);
+  const text = appText.workspace;
   const client = useHostRuntimeClient(serverId);
   const isConnected = useHostRuntimeIsConnected(serverId);
   const { preferredEditorId, updatePreferredEditor } = usePreferredEditor();
@@ -79,7 +84,7 @@ export function WorkspaceOpenInEditorButton({
   const openMutation = useMutation({
     mutationFn: async (editorId: EditorTargetId) => {
       if (!client) {
-        throw new Error("Host is not connected");
+        throw new Error(appText.common.hostNotConnected);
       }
       const payload = await client.openInEditor(cwd, editorId);
       if (payload.error) {
@@ -88,7 +93,7 @@ export function WorkspaceOpenInEditorButton({
       return editorId;
     },
     onError: (error: unknown) => {
-      toast.error(error instanceof Error ? error.message : "Failed to open in editor");
+      toast.error(error instanceof Error ? error.message : text.failedOpenInEditor);
     },
   });
 
@@ -117,7 +122,7 @@ export function WorkspaceOpenInEditorButton({
           onPress={() => handleOpenEditor(primaryOption.id)}
           disabled={openMutation.isPending}
           accessibilityRole="button"
-          accessibilityLabel={`Open workspace in ${primaryOption.label}`}
+          accessibilityLabel={text.openWorkspaceInEditor(primaryOption.label)}
         >
           {openMutation.isPending ? (
             <ActivityIndicator
@@ -132,7 +137,7 @@ export function WorkspaceOpenInEditorButton({
                 size={16}
                 color={theme.colors.foregroundMuted}
               />
-              {!hideLabels && <Text style={styles.splitButtonText}>Open</Text>}
+              {!hideLabels && <Text style={styles.splitButtonText}>{text.open}</Text>}
             </View>
           )}
         </Pressable>
@@ -145,7 +150,7 @@ export function WorkspaceOpenInEditorButton({
                 (hovered || pressed || open) && styles.splitButtonCaretHovered,
               ]}
               accessibilityRole="button"
-              accessibilityLabel="Choose editor"
+              accessibilityLabel={text.chooseEditor}
             >
               <ChevronDown size={16} color={theme.colors.foregroundMuted} />
             </DropdownMenuTrigger>

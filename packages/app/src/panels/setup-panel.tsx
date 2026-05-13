@@ -4,6 +4,8 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-nati
 import invariant from "tiny-invariant";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Fonts } from "@/constants/theme";
+import { useAppLocale } from "@/hooks/use-app-locale";
+import { getAppMessages } from "@/i18n/sub2api";
 import { usePaneContext } from "@/panels/pane-context";
 import type { PanelDescriptor, PanelRegistration } from "@/panels/panel-registry";
 import { buildWorkspaceTabPersistenceKey } from "@/stores/workspace-tabs-store";
@@ -14,6 +16,8 @@ function useSetupPanelDescriptor(
   target: { kind: "setup"; workspaceId: string },
   context: { serverId: string; workspaceId: string },
 ): PanelDescriptor {
+  const locale = useAppLocale();
+  const text = getAppMessages(locale).workspaceSetup;
   const key = buildWorkspaceTabPersistenceKey({
     serverId: context.serverId,
     workspaceId: target.workspaceId,
@@ -22,8 +26,8 @@ function useSetupPanelDescriptor(
 
   if (snapshot?.status === "completed") {
     return {
-      label: "Setup",
-      subtitle: "Setup completed",
+      label: text.label,
+      subtitle: text.completed,
       titleState: "ready",
       icon: CheckCircle2,
       statusBucket: null,
@@ -32,8 +36,8 @@ function useSetupPanelDescriptor(
 
   if (snapshot?.status === "failed") {
     return {
-      label: "Setup",
-      subtitle: "Setup failed",
+      label: text.label,
+      subtitle: text.failed,
       titleState: "ready",
       icon: CircleAlert,
       statusBucket: null,
@@ -41,8 +45,8 @@ function useSetupPanelDescriptor(
   }
 
   return {
-    label: "Setup",
-    subtitle: "Workspace setup",
+    label: text.label,
+    subtitle: text.subtitle,
     titleState: "ready",
     icon: SquareTerminal,
     statusBucket: snapshot?.status === "running" ? "running" : null,
@@ -91,6 +95,8 @@ function processCarriageReturns(text: string): string {
 function SetupPanel() {
   const { theme } = useUnistyles();
   const { serverId, target } = usePaneContext();
+  const locale = useAppLocale();
+  const text = getAppMessages(locale).workspaceSetup;
   invariant(target.kind === "setup", "SetupPanel requires setup target");
 
   const client = useHostRuntimeClient(serverId);
@@ -162,12 +168,12 @@ function SetupPanel() {
 
   const statusLabel =
     snapshot?.status === "running"
-      ? "Running"
+      ? text.statuses.running
       : snapshot?.status === "completed"
-        ? "Completed"
+        ? text.statuses.completed
         : snapshot?.status === "failed"
-          ? "Failed"
-          : "Waiting for setup output";
+          ? text.statuses.failed
+          : text.statuses.waiting;
 
   return (
     <ScrollView
@@ -183,16 +189,12 @@ function SetupPanel() {
       {isWaiting ? (
         <View style={styles.waitingContainer}>
           <ActivityIndicator size="large" color={theme.colors.foregroundMuted} />
-          <Text style={styles.waitingText}>Setting up workspace...</Text>
+          <Text style={styles.waitingText}>{text.settingUp}</Text>
         </View>
       ) : hasNoSetupCommands ? (
         <View style={styles.emptyContainer}>
-          <Text
-            style={styles.emptyText}
-            accessible
-            accessibilityLabel="No setup commands ran for this workspace"
-          >
-            No setup commands ran for this workspace.
+          <Text style={styles.emptyText} accessible accessibilityLabel={text.noCommands}>
+            {text.noCommands}
           </Text>
         </View>
       ) : (
@@ -259,7 +261,7 @@ function SetupPanel() {
                         showsVerticalScrollIndicator
                         testID="workspace-setup-log"
                         accessible
-                        accessibilityLabel="Workspace setup log"
+                        accessibilityLabel={text.setupLog}
                       >
                         <Text selectable style={styles.logText}>
                           {processedLog}
@@ -270,9 +272,9 @@ function SetupPanel() {
                         style={styles.logScrollContent}
                         testID="workspace-setup-log"
                         accessible
-                        accessibilityLabel="Workspace setup log"
+                        accessibilityLabel={text.setupLog}
                       >
-                        <Text style={styles.emptyLogText}>No output</Text>
+                        <Text style={styles.emptyLogText}>{text.noOutput}</Text>
                       </View>
                     )}
                     {hasError ? (
@@ -296,7 +298,7 @@ function SetupPanel() {
               showsVerticalScrollIndicator
               testID="workspace-setup-log"
               accessible
-              accessibilityLabel="Workspace setup log"
+              accessibilityLabel={text.setupLog}
             >
               <Text selectable style={styles.logText}>
                 {log}

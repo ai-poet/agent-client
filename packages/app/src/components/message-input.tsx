@@ -16,6 +16,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useImperativeHandle,
   forwardRef,
 } from "react";
@@ -47,6 +48,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useWebElementScrollbar } from "@/components/use-web-scrollbar";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
+import { useAppLocale } from "@/hooks/use-app-locale";
 import { formatShortcut } from "@/utils/format-shortcut";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
@@ -56,6 +58,7 @@ import {
   markScrollInvestigationRender,
 } from "@/utils/scroll-jank-investigation";
 import { isWeb } from "@/constants/platform";
+import { getAppMessages } from "@/i18n/sub2api";
 import { useComposerHeightMirror } from "./composer-height-mirror";
 
 export type ImageAttachment = AttachmentMetadata;
@@ -128,6 +131,7 @@ export interface MessageInputProps {
   onHeightChange?: (height: number) => void;
   /** Extra styles merged onto the input wrapper (e.g. elevated background). */
   inputWrapperStyle?: import("react-native").ViewStyle;
+  text?: ReturnType<typeof getAppMessages>["composer"];
 }
 
 export interface MessageInputRef {
@@ -229,7 +233,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(funct
     onAddImages,
     client,
     isReadyForDictation,
-    placeholder = "Message...",
+    placeholder,
     autoFocus = false,
     autoFocusKey,
     disabled = false,
@@ -248,10 +252,13 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(funct
     onFocusChange,
     onHeightChange,
     inputWrapperStyle,
+    text: textProp,
   },
   ref,
 ) {
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const text = useMemo(() => textProp ?? getAppMessages(locale).composer, [locale, textProp]);
   const buttonIconSize = isWeb ? theme.iconSize.md : theme.iconSize.lg;
   const investigationComponentId = `MessageInput:${voiceServerId ?? "unknown-server"}:${voiceAgentId ?? "unknown-agent"}`;
   markScrollInvestigationRender(investigationComponentId);
@@ -920,12 +927,12 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(funct
     disabled || (!canPressLoadingButton && (isSubmitDisabled || isSubmitLoading));
   const defaultActionQueues = defaultSendBehavior === "queue" && isAgentRunning;
   const defaultSubmitAccessibilityLabel = canPressLoadingButton
-    ? "Interrupt agent"
+    ? text.interruptAgent
     : defaultActionQueues
-      ? "Queue message"
+      ? text.queueMessage
       : isAgentRunning
-        ? "Send and interrupt"
-        : "Send message";
+        ? text.sendAndInterrupt
+        : text.sendMessage;
   const submitAccessibilityLabel =
     submitButtonAccessibilityLabel ?? defaultSubmitAccessibilityLabel;
 
@@ -956,9 +963,9 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(funct
             ref={textInputRef}
             value={value}
             onChangeText={handleInputChange}
-            placeholder={placeholder}
+            placeholder={placeholder ?? text.defaultPlaceholder}
             placeholderTextColor={theme.colors.surface4}
-            accessibilityLabel="Message agent..."
+            accessibilityLabel={text.messageAgent}
             onFocus={() => {
               isInputFocusedRef.current = true;
               setIsInputFocused(true);
@@ -1007,7 +1014,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(funct
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger
                     disabled={!isConnected || disabled}
-                    accessibilityLabel="Add attachment"
+                    accessibilityLabel={text.addAttachment}
                     accessibilityRole="button"
                     testID="message-input-attach-button"
                     style={({ hovered }) => [
@@ -1031,7 +1038,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(funct
                   </DropdownMenuTrigger>
                 </TooltipTrigger>
                 <TooltipContent side="top" align="center" offset={8}>
-                  <Text style={styles.tooltipText}>Add attachment</Text>
+                  <Text style={styles.tooltipText}>{text.addAttachment}</Text>
                 </TooltipContent>
               </Tooltip>
               <DropdownMenuContent
@@ -1068,11 +1075,11 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(funct
                 accessibilityLabel={
                   isRealtimeVoiceForCurrentAgent
                     ? voice?.isMuted
-                      ? "Unmute Voice mode"
-                      : "Mute Voice mode"
+                      ? text.unmuteVoiceMode
+                      : text.muteVoiceMode
                     : isDictating
-                      ? "Stop dictation"
-                      : "Start dictation"
+                      ? text.stopDictation
+                      : text.startDictation
                 }
                 style={({ hovered }) => [
                   styles.voiceButton,
@@ -1102,9 +1109,9 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(funct
                   <Text style={styles.tooltipText}>
                     {isRealtimeVoiceForCurrentAgent
                       ? voice?.isMuted
-                        ? "Unmute voice"
-                        : "Mute voice"
-                      : "Dictation"}
+                        ? text.unmuteVoice
+                        : text.muteVoice
+                      : text.dictation}
                   </Text>
                   {(isRealtimeVoiceForCurrentAgent ? voiceMuteToggleKeys : dictationToggleKeys) ? (
                     <Shortcut
@@ -1140,7 +1147,8 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(funct
                 <TooltipContent side="top" align="center" offset={8}>
                   <View style={styles.tooltipRow}>
                     <Text style={styles.tooltipText}>
-                      {submitButtonAccessibilityLabel ?? (defaultActionQueues ? "Queue" : "Send")}
+                      {submitButtonAccessibilityLabel ??
+                        (defaultActionQueues ? text.queue : text.send)}
                     </Text>
                     {sendKeys ? <Shortcut chord={sendKeys} style={styles.tooltipShortcut} /> : null}
                   </View>

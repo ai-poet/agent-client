@@ -5,6 +5,7 @@ import type { ComboboxOption } from "@/components/ui/combobox";
 import type { ToastApi } from "@/components/toast-host";
 import { invalidateCheckoutGitQueriesForClient } from "@/stores/checkout-git-actions-store";
 import { confirmDialog } from "@/utils/confirm-dialog";
+import type { getAppMessages } from "@/i18n/sub2api";
 
 interface UseBranchSwitcherInput {
   client: DaemonClient | null;
@@ -15,6 +16,7 @@ interface UseBranchSwitcherInput {
   isConnected: boolean;
   toast: ToastApi;
   queryClient: QueryClient;
+  text: ReturnType<typeof getAppMessages>["workspace"];
 }
 
 interface UseBranchSwitcherResult {
@@ -34,6 +36,7 @@ export function useBranchSwitcher({
   isConnected,
   toast,
   queryClient,
+  text,
 }: UseBranchSwitcherInput): UseBranchSwitcherResult {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -81,10 +84,10 @@ export function useBranchSwitcher({
     async (branchId: string) => {
       if (!client) return;
       const shouldStash = await confirmDialog({
-        title: "Uncommitted changes",
-        message: "You have uncommitted changes. Stash them before switching branches?",
-        confirmLabel: "Stash & Switch",
-        cancelLabel: "Cancel",
+        title: text.uncommittedChangesTitle,
+        message: text.stashBeforeSwitchMessage,
+        confirmLabel: text.stashAndSwitch,
+        cancelLabel: text.close,
       });
       if (!shouldStash) return;
 
@@ -104,10 +107,21 @@ export function useBranchSwitcher({
         }
         await invalidateStashAndCheckout();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to stash changes");
+        toast.error(err instanceof Error ? err.message : text.failedStashChanges);
       }
     },
-    [client, currentBranchName, invalidateStashAndCheckout, normalizedWorkspaceId, toast],
+    [
+      client,
+      currentBranchName,
+      invalidateStashAndCheckout,
+      normalizedWorkspaceId,
+      text.close,
+      text.failedStashChanges,
+      text.stashAndSwitch,
+      text.stashBeforeSwitchMessage,
+      text.uncommittedChangesTitle,
+      toast,
+    ],
   );
 
   const handleBranchSelect = useCallback(
@@ -134,18 +148,17 @@ export function useBranchSwitcher({
             const targetStash = stashPayload.entries.find((e) => e.branch === branchId);
             if (targetStash) {
               const shouldRestore = await confirmDialog({
-                title: "Restore stashed changes?",
-                message:
-                  "This branch has stashed changes from a previous session. Would you like to restore them?",
-                confirmLabel: "Restore",
-                cancelLabel: "Later",
+                title: text.restoreStashedChangesTitle,
+                message: text.restoreStashedChangesMessage,
+                confirmLabel: text.restore,
+                cancelLabel: text.later,
               });
               if (shouldRestore) {
                 const popPayload = await client.stashPop(normalizedWorkspaceId, targetStash.index);
                 if (popPayload.error) {
                   toast.error(popPayload.error.message);
                 } else {
-                  toast.show("Stashed changes restored");
+                  toast.show(text.stashedChangesRestored);
                 }
                 await invalidateStashAndCheckout();
               }
@@ -154,7 +167,7 @@ export function useBranchSwitcher({
             // Non-critical — user can still restore on next branch switch
           }
         } catch (err) {
-          toast.error(err instanceof Error ? err.message : "Failed to switch branch");
+          toast.error(err instanceof Error ? err.message : text.failedSwitchBranch);
         }
       })();
     },
@@ -164,6 +177,12 @@ export function useBranchSwitcher({
       invalidateStashAndCheckout,
       normalizedWorkspaceId,
       stashAndSwitch,
+      text.failedSwitchBranch,
+      text.later,
+      text.restore,
+      text.restoreStashedChangesMessage,
+      text.restoreStashedChangesTitle,
+      text.stashedChangesRestored,
       toast,
     ],
   );

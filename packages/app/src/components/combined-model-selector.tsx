@@ -19,6 +19,8 @@ const IS_WEB = platformIsWeb;
 import { Combobox, ComboboxItem } from "@/components/ui/combobox";
 import { getProviderIcon } from "@/components/provider-icons";
 import type { FavoriteModelRow } from "@/hooks/use-form-preferences";
+import { useAppLocale } from "@/hooks/use-app-locale";
+import { getAppMessages } from "@/i18n/sub2api";
 import {
   buildModelRows,
   buildCloudGroupModelRows,
@@ -95,11 +97,14 @@ interface SelectorContentProps {
   ) => void;
 }
 
-function resolveDefaultModelLabel(models: AgentModelDefinition[] | undefined): string {
+function resolveDefaultModelLabel(
+  models: AgentModelDefinition[] | undefined,
+  fallbackLabel: string,
+): string {
   if (!models || models.length === 0) {
-    return "Select model";
+    return fallbackLabel;
   }
-  return (models.find((model) => model.isDefault) ?? models[0])?.label ?? "Select model";
+  return (models.find((model) => model.isDefault) ?? models[0])?.label ?? fallbackLabel;
 }
 
 function normalizeSearchQuery(value: string): string {
@@ -175,6 +180,7 @@ function ModelRow({
   elevated = false,
   onPress,
   onToggleFavorite,
+  text,
 }: {
   row: SelectorModelRow;
   isSelected: boolean;
@@ -183,6 +189,7 @@ function ModelRow({
   elevated?: boolean;
   onPress: () => void;
   onToggleFavorite?: (provider: string, modelId: string) => void;
+  text: ReturnType<typeof getAppMessages>["modelSelector"];
 }) {
   const { theme } = useUnistyles();
   const ProviderIcon = getProviderIcon(row.provider);
@@ -217,7 +224,7 @@ function ModelRow({
               pressed && styles.favoriteButtonPressed,
             ]}
             accessibilityRole="button"
-            accessibilityLabel={isFavorite ? "Unfavorite model" : "Favorite model"}
+            accessibilityLabel={isFavorite ? text.unfavoriteModel : text.favoriteModel}
             testID={`favorite-model-${row.provider}-${row.modelId}`}
           >
             {({ hovered }) => (
@@ -248,6 +255,7 @@ function FavoritesSection({
   onSelect,
   canSelectProvider,
   onToggleFavorite,
+  text,
 }: {
   favoriteRows: SelectorModelRow[];
   selectedProvider: string;
@@ -256,6 +264,7 @@ function FavoritesSection({
   onSelect: (provider: string, modelId: string) => void;
   canSelectProvider: (provider: string) => boolean;
   onToggleFavorite?: (provider: string, modelId: string) => void;
+  text: ReturnType<typeof getAppMessages>["modelSelector"];
 }) {
   const { theme } = useUnistyles();
 
@@ -266,7 +275,7 @@ function FavoritesSection({
   return (
     <View style={styles.favoritesContainer}>
       <View style={styles.sectionHeading}>
-        <Text style={styles.sectionHeadingText}>Favorites</Text>
+        <Text style={styles.sectionHeadingText}>{text.favorites}</Text>
       </View>
       {favoriteRows.map((row) => (
         <ModelRow
@@ -278,6 +287,7 @@ function FavoritesSection({
           elevated
           onPress={() => onSelect(row.provider, row.modelId)}
           onToggleFavorite={onToggleFavorite}
+          text={text}
         />
       ))}
     </View>
@@ -297,6 +307,7 @@ function GroupedProviderRows({
   onDrillDown,
   onDrillDownCloudGroup,
   viewKind,
+  text,
 }: {
   providerDefinitions: AgentProviderDefinition[];
   groupedRows: Array<{
@@ -319,6 +330,7 @@ function GroupedProviderRows({
     groupLabel: string,
   ) => void;
   viewKind: SelectorView["kind"];
+  text: ReturnType<typeof getAppMessages>["modelSelector"];
 }) {
   const { theme } = useUnistyles();
 
@@ -340,7 +352,7 @@ function GroupedProviderRows({
             {isInline && providerCloudGroups.length > 0 ? (
               <>
                 <View style={styles.sectionHeading}>
-                  <Text style={styles.sectionHeadingText}>Cloud groups</Text>
+                  <Text style={styles.sectionHeadingText}>{text.cloudGroups}</Text>
                 </View>
                 {providerCloudGroups.map((cloudGroup) => (
                   <Pressable
@@ -372,8 +384,7 @@ function GroupedProviderRows({
                     </View>
                     <View style={styles.drillDownTrailing}>
                       <Text style={styles.drillDownCount}>
-                        {cloudGroup.models.length}{" "}
-                        {cloudGroup.models.length === 1 ? "model" : "models"}
+                        {text.modelCount(cloudGroup.models.length)}
                       </Text>
                       <ChevronRight size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
                     </View>
@@ -382,7 +393,7 @@ function GroupedProviderRows({
                 {otherRows.length > 0 ? (
                   <>
                     <View style={styles.sectionHeading}>
-                      <Text style={styles.sectionHeadingText}>Other available models</Text>
+                      <Text style={styles.sectionHeadingText}>{text.otherAvailableModels}</Text>
                     </View>
                     {sortFavoritesFirst(otherRows, favoriteKeys).map((row) => (
                       <ModelRow
@@ -395,6 +406,7 @@ function GroupedProviderRows({
                         disabled={!canSelectProvider(row.provider)}
                         onPress={() => onSelect(row.provider, row.modelId)}
                         onToggleFavorite={onToggleFavorite}
+                        text={text}
                       />
                     ))}
                   </>
@@ -411,6 +423,7 @@ function GroupedProviderRows({
                     disabled={!canSelectProvider(row.provider)}
                     onPress={() => onSelect(row.provider, row.modelId)}
                     onToggleFavorite={onToggleFavorite}
+                    text={text}
                   />
                 ))}
               </>
@@ -426,9 +439,7 @@ function GroupedProviderRows({
                 <ProvIcon size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
                 <Text style={styles.drillDownText}>{group.providerLabel}</Text>
                 <View style={styles.drillDownTrailing}>
-                  <Text style={styles.drillDownCount}>
-                    {group.rows.length} {group.rows.length === 1 ? "model" : "models"}
-                  </Text>
+                  <Text style={styles.drillDownCount}>{text.modelCount(group.rows.length)}</Text>
                   <ChevronRight size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
                 </View>
               </Pressable>
@@ -444,10 +455,12 @@ function ProviderSearchInput({
   value,
   onChangeText,
   autoFocus = false,
+  text,
 }: {
   value: string;
   onChangeText: (text: string) => void;
   autoFocus?: boolean;
+  text: ReturnType<typeof getAppMessages>["modelSelector"];
 }) {
   const { theme } = useUnistyles();
   const inputRef = useRef<TextInput>(null);
@@ -470,7 +483,7 @@ function ProviderSearchInput({
       <InputComponent
         ref={inputRef as any}
         style={[styles.providerSearchInput, webOutlineStyle]}
-        placeholder="Search models..."
+        placeholder={text.searchPlaceholder}
         placeholderTextColor={theme.colors.foregroundMuted}
         value={value}
         onChangeText={onChangeText}
@@ -499,6 +512,8 @@ function SelectorContent({
   onDrillDownCloudGroup,
 }: SelectorContentProps) {
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).modelSelector, [locale]);
   const allRows = useMemo(
     () => buildModelRows(providerDefinitions, allProviderModels),
     [allProviderModels, providerDefinitions],
@@ -580,6 +595,7 @@ function SelectorContent({
                   onSelect(row.provider, row.modelId);
                 }}
                 onToggleFavorite={onToggleFavorite}
+                text={text}
               />
             ))}
           </>
@@ -588,7 +604,7 @@ function SelectorContent({
         {visibleRows.length === 0 ? (
           <View style={styles.emptyState}>
             <Search size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
-            <Text style={styles.emptyStateText}>No models match your search</Text>
+            <Text style={styles.emptyStateText}>{text.noSearchMatches}</Text>
           </View>
         ) : null}
       </View>
@@ -606,6 +622,7 @@ function SelectorContent({
           onSelect={onSelect}
           canSelectProvider={canSelectProvider}
           onToggleFavorite={onToggleFavorite}
+          text={text}
         />
       ) : null}
 
@@ -623,13 +640,14 @@ function SelectorContent({
           onDrillDown={onDrillDown}
           onDrillDownCloudGroup={onDrillDownCloudGroup}
           viewKind={view.kind}
+          text={text}
         />
       ) : null}
 
       {!hasResults ? (
         <View style={styles.emptyState}>
           <Search size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
-          <Text style={styles.emptyStateText}>No models match your search</Text>
+          <Text style={styles.emptyStateText}>{text.noSearchMatches}</Text>
         </View>
       ) : null}
     </View>
@@ -686,6 +704,8 @@ export function CombinedModelSelector({
   disabled = false,
 }: CombinedModelSelectorProps) {
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).modelSelector, [locale]);
   const anchorRef = useRef<View>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [isContentReady, setIsContentReady] = useState(platformIsWeb);
@@ -759,9 +779,9 @@ export function CombinedModelSelector({
   const selectedModelLabel = useMemo(() => {
     if (!selectedModel) {
       if (!hasSelectedProvider) {
-        return "Select model";
+        return text.selectModel;
       }
-      return isLoading ? "Loading..." : "Select model";
+      return isLoading ? text.loading : text.selectModel;
     }
     const models = allProviderModels.get(selectedProvider);
     if (!models) {
@@ -772,7 +792,7 @@ export function CombinedModelSelector({
       if (cloudModel) {
         return cloudModel.label;
       }
-      return isLoading ? "Loading..." : "Select model";
+      return isLoading ? text.loading : text.selectModel;
     }
     const model = models.find((entry) => entry.id === selectedModel);
     if (model) {
@@ -782,7 +802,7 @@ export function CombinedModelSelector({
       .filter((group) => group.provider === selectedProvider)
       .flatMap((group) => group.models)
       .find((entry) => entry.id === selectedModel);
-    return cloudModel?.label ?? resolveDefaultModelLabel(models);
+    return cloudModel?.label ?? resolveDefaultModelLabel(models, text.selectModel);
   }, [
     allProviderModels,
     cloudGroups,
@@ -790,6 +810,7 @@ export function CombinedModelSelector({
     isLoading,
     selectedModel,
     selectedProvider,
+    text,
   ]);
 
   const desktopFixedHeight = useMemo(() => {
@@ -809,12 +830,12 @@ export function CombinedModelSelector({
   }, [allProviderModels, cloudGroups, view]);
 
   const triggerLabel = useMemo(() => {
-    if (selectedModelLabel === "Loading..." || selectedModelLabel === "Select model") {
+    if (selectedModelLabel === text.loading || selectedModelLabel === text.selectModel) {
       return selectedModelLabel;
     }
 
     return buildSelectedTriggerLabel(selectedModelLabel);
-  }, [selectedModelLabel]);
+  }, [selectedModelLabel, text.loading, text.selectModel]);
 
   useEffect(() => {
     if (platformIsWeb) {
@@ -848,7 +869,7 @@ export function CombinedModelSelector({
           renderTrigger ? styles.customTriggerWrapper : null,
         ]}
         accessibilityRole="button"
-        accessibilityLabel={`Select model (${selectedModelLabel})`}
+        accessibilityLabel={`${text.selectModel} (${selectedModelLabel})`}
         testID="combined-model-selector"
       >
         {renderTrigger ? (
@@ -880,7 +901,7 @@ export function CombinedModelSelector({
         desktopPlacement="top-start"
         desktopMinWidth={360}
         desktopFixedHeight={desktopFixedHeight}
-        title="Select model"
+        title={text.title}
         stickyHeader={
           view.kind !== "all" ? (
             <View style={styles.level2Header}>
@@ -906,6 +927,7 @@ export function CombinedModelSelector({
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 autoFocus={platformIsWeb}
+                text={text}
               />
             </View>
           ) : undefined
@@ -943,7 +965,7 @@ export function CombinedModelSelector({
         ) : (
           <View style={styles.sheetLoadingState}>
             <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
-            <Text style={styles.sheetLoadingText}>Loading model selector…</Text>
+            <Text style={styles.sheetLoadingText}>{text.loadingSelector}</Text>
           </View>
         )}
       </Combobox>

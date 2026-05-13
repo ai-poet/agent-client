@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { View, Text } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { FolderOpen, Smartphone } from "lucide-react-native";
@@ -18,6 +18,8 @@ import {
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { useIsLocalDaemon } from "@/hooks/use-is-local-daemon";
 import { PairDeviceModal } from "@/desktop/components/pair-device-modal";
+import { useAppLocale } from "@/hooks/use-app-locale";
+import { getAppMessages } from "@/i18n/sub2api";
 
 export function OpenProjectScreen({ serverId }: { serverId: string }) {
   const openDesktopAgentList = usePanelStore((s) => s.openDesktopAgentList);
@@ -26,6 +28,8 @@ export function OpenProjectScreen({ serverId }: { serverId: string }) {
   const hasProjects = useHasWorkspaces(serverId);
   const isLocalDaemon = useIsLocalDaemon(serverId);
   const [isPairDeviceOpen, setIsPairDeviceOpen] = useState(false);
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).openProject, [locale]);
 
   const isCompactLayout = useIsCompactFormFactor();
 
@@ -44,11 +48,9 @@ export function OpenProjectScreen({ serverId }: { serverId: string }) {
           <PaseoLogo size={56} />
         </View>
         <View style={styles.headingGroup}>
-          <Text style={styles.heading}>What shall we build today?</Text>
+          <Text style={styles.heading}>{text.heading}</Text>
           {hasHydrated && !hasProjects ? (
-            <Text style={styles.subtitle}>
-              Add a project folder to start running agents on your codebase
-            </Text>
+            <Text style={styles.subtitle}>{text.emptySubtitle}</Text>
           ) : null}
         </View>
         <View style={styles.cta}>
@@ -58,7 +60,7 @@ export function OpenProjectScreen({ serverId }: { serverId: string }) {
             onPress={() => void openProjectPicker()}
             testID="open-project-submit"
           >
-            Add a project
+            {text.addProject}
           </Button>
           {isLocalDaemon ? (
             <Button
@@ -67,7 +69,7 @@ export function OpenProjectScreen({ serverId }: { serverId: string }) {
               onPress={() => setIsPairDeviceOpen(true)}
               testID="open-project-pair-device"
             >
-              Pair device
+              {text.pairDevice}
             </Button>
           ) : null}
         </View>

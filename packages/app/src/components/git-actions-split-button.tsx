@@ -110,11 +110,7 @@ export function GitActionsSplitButton({ gitActions, hideLabels }: GitActionsSpli
                         status={action.status}
                         pendingLabel={action.pendingLabel}
                         successLabel={action.successLabel}
-                        closeOnSelect={
-                          action.status === "idle" &&
-                          action.id === "pr" &&
-                          action.label === "View PR"
-                        }
+                        closeOnSelect={action.status === "idle" && action.id === "pr"}
                         onSelect={() => handleActionSelect(action)}
                       >
                         {action.label}

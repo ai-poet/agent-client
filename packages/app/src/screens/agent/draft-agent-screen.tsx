@@ -59,6 +59,8 @@ import { useAgentInputDraft } from "@/hooks/use-agent-input-draft";
 import { useDraftAgentCreateFlow } from "@/hooks/use-draft-agent-create-flow";
 import { useDraftAgentFeatures } from "@/hooks/use-draft-agent-features";
 import { isWeb } from "@/constants/platform";
+import { useAppLocale } from "@/hooks/use-app-locale";
+import { getAppMessages } from "@/i18n/sub2api";
 
 const EMPTY_PENDING_PERMISSIONS = new Map();
 const DRAFT_CAPABILITIES: AgentCapabilityFlags = {
@@ -138,6 +140,10 @@ function DraftAgentScreenContent({
 }: DraftAgentScreenProps = {}) {
   const isFocused = useIsFocused();
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const messages = useMemo(() => getAppMessages(locale), [locale]);
+  const draftText = messages.draftAgent;
+  const workspaceText = messages.workspace;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const daemons = useHosts();
@@ -218,7 +224,7 @@ function DraftAgentScreenContent({
   });
   const composerState = draftInput.composerState;
   if (!composerState) {
-    throw new Error("Draft agent composer state is required");
+    throw new Error(draftText.errors.composerStateRequired);
   }
 
   const {
@@ -438,7 +444,7 @@ function DraftAgentScreenContent({
     worktreeOptionsStatus === "ready" &&
     worktreeOptions.length > 0 &&
     !selectedWorktreePath
-      ? "Select a worktree to attach"
+      ? draftText.errors.selectWorktreeToAttach
       : null;
 
   const branchSuggestionsQuery = useQuery({
@@ -501,30 +507,38 @@ function DraftAgentScreenContent({
     staleTime: 15_000,
   });
 
-  const validateWorktreeName = useCallback((name: string): { valid: boolean; error?: string } => {
-    if (!name) {
+  const validateWorktreeName = useCallback(
+    (name: string): { valid: boolean; error?: string } => {
+      if (!name) {
+        return { valid: true };
+      }
+      if (name.length > 100) {
+        return {
+          valid: false,
+          error: draftText.errors.worktreeNameTooLong,
+        };
+      }
+      if (!/^[a-z0-9-/]+$/.test(name)) {
+        return {
+          valid: false,
+          error: draftText.errors.worktreeNameInvalidChars,
+        };
+      }
+      if (name.startsWith("-") || name.endsWith("-")) {
+        return { valid: false, error: draftText.errors.worktreeNameCannotStartOrEndHyphen };
+      }
+      if (name.includes("--")) {
+        return { valid: false, error: draftText.errors.worktreeNameNoConsecutiveHyphens };
+      }
       return { valid: true };
-    }
-    if (name.length > 100) {
-      return {
-        valid: false,
-        error: "Worktree name too long (max 100 characters)",
-      };
-    }
-    if (!/^[a-z0-9-/]+$/.test(name)) {
-      return {
-        valid: false,
-        error: "Must contain only lowercase letters, numbers, hyphens, and forward slashes",
-      };
-    }
-    if (name.startsWith("-") || name.endsWith("-")) {
-      return { valid: false, error: "Cannot start or end with a hyphen" };
-    }
-    if (name.includes("--")) {
-      return { valid: false, error: "Cannot have consecutive hyphens" };
-    }
-    return { valid: true };
-  }, []);
+    },
+    [
+      draftText.errors.worktreeNameCannotStartOrEndHyphen,
+      draftText.errors.worktreeNameInvalidChars,
+      draftText.errors.worktreeNameNoConsecutiveHyphens,
+      draftText.errors.worktreeNameTooLong,
+    ],
+  );
 
   const gitBlockingError = useMemo(() => {
     if (!isCreateWorktree || isNonGitDirectory) {
@@ -535,12 +549,12 @@ function DraftAgentScreenContent({
     }
     const validation = validateWorktreeName(worktreeSlug);
     if (!validation.valid) {
-      return `Invalid worktree name: ${
-        validation.error ?? "Must use lowercase letters, numbers, or hyphens"
-      }`;
+      return draftText.errors.invalidWorktreeName(
+        validation.error ?? draftText.errors.worktreeNameAllowedChars,
+      );
     }
     return null;
-  }, [isCreateWorktree, isNonGitDirectory, worktreeSlug, validateWorktreeName]);
+  }, [draftText.errors, isCreateWorktree, isNonGitDirectory, worktreeSlug, validateWorktreeName]);
 
   // Validate branch exists (checks local first, then remote)
   const branchValidationQuery = useQuery({
@@ -572,7 +586,7 @@ function DraftAgentScreenContent({
       return null;
     }
     if (!baseBranch) {
-      return "Base branch is required";
+      return draftText.errors.baseBranchRequired;
     }
     // While validating, don't show error
     if (branchValidationQuery.isPending || branchValidationQuery.isFetching) {
@@ -580,15 +594,15 @@ function DraftAgentScreenContent({
     }
     // If validation query errored, show generic error
     if (branchValidationQuery.isError) {
-      return "Failed to validate branch";
+      return draftText.errors.failedValidateBranch;
     }
     // If validation completed and branch doesn't exist
     const validationResult = branchValidationQuery.data;
     if (validationResult && !validationResult.exists) {
-      return `Branch "${baseBranch}" not found in repository`;
+      return draftText.errors.branchNotFound(baseBranch);
     }
     return null;
-  }, [isCreateWorktree, isNonGitDirectory, baseBranch, branchValidationQuery]);
+  }, [baseBranch, branchValidationQuery, draftText.errors, isCreateWorktree, isNonGitDirectory]);
 
   const handleBaseBranchChange = useCallback((value: string) => {
     setBaseBranch(value);
@@ -721,27 +735,33 @@ function DraftAgentScreenContent({
   const workingDirEmptyText = useMemo(() => {
     if (hasWorkingDirectorySearch) {
       if (workingDirSearchError) {
-        return "Failed to search directories on this host.";
+        return draftText.errors.failedSearchDirectories;
       }
-      return "No directories match your search.";
+      return draftText.noDirectoriesMatch;
     }
 
-    return agentWorkingDirSuggestions.length > 0
-      ? "No agent directories match your search."
-      : "No agent directories match your search.";
-  }, [agentWorkingDirSuggestions.length, hasWorkingDirectorySearch, workingDirSearchError]);
+    return draftText.noAgentDirectoriesMatch;
+  }, [
+    draftText.errors.failedSearchDirectories,
+    draftText.noAgentDirectoriesMatch,
+    draftText.noDirectoriesMatch,
+    hasWorkingDirectorySearch,
+    workingDirSearchError,
+  ]);
   const displayWorkingDir = shortenPath(workingDir);
   const worktreeTriggerValue =
-    worktreeMode === "create" ? "Create new worktree" : selectedWorktreeLabel || "Select worktree";
+    worktreeMode === "create"
+      ? draftText.createNewWorktree
+      : selectedWorktreeLabel || draftText.selectWorktree;
   const worktreeComboOptions = useMemo(
     () => [
       {
         id: "__none__",
-        label: "None",
+        label: draftText.none,
       },
       {
         id: "__create_new__",
-        label: "Create new worktree",
+        label: draftText.createNewWorktree,
       },
       ...worktreeOptions.map((option) => ({
         id: option.path,
@@ -749,7 +769,7 @@ function DraftAgentScreenContent({
         description: shortenPath(option.path),
       })),
     ],
-    [worktreeOptions],
+    [draftText.createNewWorktree, draftText.none, worktreeOptions],
   );
 
   const branchComboOptions = useMemo(() => {
@@ -792,40 +812,40 @@ function DraftAgentScreenContent({
     validateBeforeSubmit: ({ text }) => {
       const trimmedPath = workingDir.trim();
       if (!trimmedPath) {
-        return "Working directory is required";
+        return draftText.errors.workingDirectoryRequired;
       }
       if (isDirectoryNotExists) {
-        return "Working directory does not exist on the selected host";
+        return draftText.errors.workingDirectoryMissingSelectedHost;
       }
       if (!text.trim()) {
-        return "Initial prompt is required";
+        return draftText.errors.initialPromptRequired;
       }
       if (!selectedServerId) {
-        return "No host selected";
+        return draftText.errors.noHostSelected;
       }
       if (providerDefinitions.length === 0) {
-        return "No available providers on the selected host";
+        return draftText.errors.noProviders;
       }
       if (!composerState.selectedProvider) {
-        return "Select a model";
+        return draftText.errors.selectModel;
       }
       if (gitBlockingError) {
         return gitBlockingError;
       }
       if (isModelLoading) {
-        return "Model defaults are still loading";
+        return draftText.errors.modelLoading;
       }
       if (!effectiveModelId) {
-        return "No model is available for the selected provider";
+        return draftText.errors.noModel;
       }
       if (isAttachWorktree && !selectedWorktreePath) {
-        return "Select a worktree to attach";
+        return draftText.errors.selectWorktreeToAttach;
       }
       if (baseBranchError) {
         return baseBranchError;
       }
       if (!createAgentClient) {
-        return "Host is not connected";
+        return draftText.errors.hostNotConnected;
       }
       return null;
     },
@@ -850,7 +870,7 @@ function DraftAgentScreenContent({
         ".";
       const provider = composerState.selectedProvider;
       if (!provider) {
-        throw new Error("Select a model");
+        throw new Error(draftText.errors.selectModel);
       }
       const model = effectiveModelId || null;
       const thinkingOptionId = effectiveThinkingOptionId || null;
@@ -879,7 +899,7 @@ function DraftAgentScreenContent({
           model,
           modeId,
         },
-        title: "New agent",
+        title: draftText.newAgentTitle,
         cwd,
         model,
         thinkingOptionId,
@@ -897,7 +917,7 @@ function DraftAgentScreenContent({
           : undefined;
       const provider = composerState.selectedProvider;
       if (!provider) {
-        throw new Error("Select a model");
+        throw new Error(draftText.errors.selectModel);
       }
       const config: AgentSessionConfig = {
         provider,
@@ -927,7 +947,7 @@ function DraftAgentScreenContent({
 
       const client = createAgentClient;
       if (!client) {
-        throw new Error("Host is not connected");
+        throw new Error(draftText.errors.hostNotConnected);
       }
 
       const imagesData = await encodeImages(images);
@@ -941,7 +961,7 @@ function DraftAgentScreenContent({
       });
 
       if (!result.id || !selectedServerId) {
-        throw new Error("Failed to create agent");
+        throw new Error(draftText.errors.failedCreateAgent);
       }
 
       useSessionStore.getState().setAgents(selectedServerId, (prev) => {
@@ -1029,13 +1049,15 @@ function DraftAgentScreenContent({
               {!isMobile && canOpenExplorer ? (
                 <HeaderToggleButton
                   onPress={handleToggleExplorer}
-                  tooltipLabel="Toggle explorer"
+                  tooltipLabel={workspaceText.toggleExplorer}
                   tooltipKeys={["mod", "E"]}
                   tooltipSide="left"
                   style={styles.menuButton}
                   accessible
                   accessibilityRole="button"
-                  accessibilityLabel={isExplorerOpen ? "Close explorer" : "Open explorer"}
+                  accessibilityLabel={
+                    isExplorerOpen ? workspaceText.closeExplorer : workspaceText.openExplorer
+                  }
                   accessibilityState={{ expanded: isExplorerOpen }}
                 >
                   <PanelRight
@@ -1068,9 +1090,9 @@ function DraftAgentScreenContent({
                     <FormSelectTrigger
                       controlRef={workingDirAnchorRef}
                       containerStyle={styles.fullSelector}
-                      label="Working directory"
+                      label={draftText.workingDirectory}
                       value={displayWorkingDir}
-                      placeholder="Choose a working directory"
+                      placeholder={draftText.chooseWorkingDirectory}
                       onPress={() => setIsWorkingDirOpen(true)}
                       icon={
                         <Folder size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
@@ -1083,7 +1105,7 @@ function DraftAgentScreenContent({
                   {isDirectoryNotExists && (
                     <View style={styles.warningContainer}>
                       <Text style={styles.warningText}>
-                        Directory does not exist on the selected host
+                        {draftText.directoryDoesNotExistSelectedHost}
                       </Text>
                     </View>
                   )}
@@ -1101,9 +1123,9 @@ function DraftAgentScreenContent({
                               ? styles.halfSelector
                               : styles.topSelectorPrimary
                         }
-                        label="Worktree"
+                        label={draftText.worktree}
                         value={worktreeTriggerValue}
-                        placeholder="Select worktree"
+                        placeholder={draftText.selectWorktree}
                         onPress={() => setIsWorktreePickerOpen(true)}
                         icon={
                           <GitBranch
@@ -1119,9 +1141,9 @@ function DraftAgentScreenContent({
                         <FormSelectTrigger
                           controlRef={branchAnchorRef}
                           containerStyle={isMobile ? styles.fullSelector : styles.halfSelector}
-                          label="Base branch"
+                          label={draftText.baseBranch}
                           value={baseBranch}
-                          placeholder="From branch"
+                          placeholder={draftText.fromBranch}
                           onPress={() => setIsBranchOpen(true)}
                           disabled={repoInfoStatus === "loading"}
                           icon={
@@ -1178,11 +1200,11 @@ function DraftAgentScreenContent({
                     handleSelectWorktreePath(id);
                     setWorktreeMode("attach");
                   }}
-                  title="Select worktree"
-                  searchPlaceholder="Search worktrees..."
+                  title={draftText.selectWorktree}
+                  searchPlaceholder={draftText.searchWorktrees}
                   open={isWorktreePickerOpen}
                   onOpenChange={setIsWorktreePickerOpen}
-                  emptyText="No worktrees found"
+                  emptyText={draftText.noWorktreesFound}
                   anchorRef={worktreeAnchorRef}
                 />
 
@@ -1191,13 +1213,13 @@ function DraftAgentScreenContent({
                   value={workingDir}
                   onSelect={setWorkingDirFromUser}
                   onSearchQueryChange={setWorkingDirSearchQuery}
-                  searchPlaceholder="Search directories..."
+                  searchPlaceholder={messages.agentForm.searchDirectories}
                   emptyText={workingDirEmptyText}
                   allowCustomValue
                   customValuePrefix=""
                   customValueKind="directory"
                   optionsPosition="above-search"
-                  title="Working directory"
+                  title={draftText.workingDirectory}
                   open={isWorkingDirOpen}
                   onOpenChange={setIsWorkingDirOpen}
                   anchorRef={workingDirAnchorRef}
@@ -1208,11 +1230,11 @@ function DraftAgentScreenContent({
                   value={baseBranch}
                   onSelect={handleBaseBranchChange}
                   onSearchQueryChange={setBranchSearchQuery}
-                  searchPlaceholder="Choose a base branch..."
+                  searchPlaceholder={draftText.chooseBaseBranch}
                   allowCustomValue
-                  customValuePrefix="Use"
-                  customValueDescription="Use this branch name"
-                  title="Select base branch"
+                  customValuePrefix={draftText.useCustom}
+                  customValueDescription={draftText.useBranchNameDescription}
+                  title={draftText.selectBaseBranch}
                   open={isBranchOpen}
                   onOpenChange={(nextOpen) => {
                     setIsBranchOpen(nextOpen);

@@ -20,6 +20,8 @@ import type { PrHint } from "@/hooks/use-checkout-pr-status-query";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { PrBadge } from "@/components/sidebar-workspace-list";
 import { useHoverSafeZone } from "@/hooks/use-hover-safe-zone";
+import { useAppLocale } from "@/hooks/use-app-locale";
+import { getAppMessages } from "@/i18n/sub2api";
 
 interface Rect {
   x: number;
@@ -206,6 +208,8 @@ function WorkspaceHoverCardContent({
   contentRef: React.RefObject<View | null>;
 }): ReactElement | null {
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const text = getAppMessages(locale).workspace;
   const bottomSheetInternal = useBottomSheetModalInternal(true);
   const [triggerRect, setTriggerRect] = useState<Rect | null>(null);
   const [contentSize, setContentSize] = useState<{ width: number; height: number } | null>(null);
@@ -258,7 +262,7 @@ function WorkspaceHoverCardContent({
           collapsable={false}
           onLayout={handleLayout}
           accessibilityRole="menu"
-          accessibilityLabel="Workspace scripts"
+          accessibilityLabel={text.workspaceScripts}
           testID="workspace-hover-card"
           style={[
             styles.card,
