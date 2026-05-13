@@ -1,8 +1,11 @@
 import type { SegmentedControlOption } from "@/components/ui/segmented-control";
+import type { getSub2APIMessages } from "@/i18n/sub2api";
 import type {
   DesktopProviderPayload,
   ManagedProviderTarget,
 } from "@/screens/settings/sub2api-provider-types";
+
+type DesktopProviderText = ReturnType<typeof getSub2APIMessages>["settings"]["desktopProviders"];
 
 export function providerWritesClaude(p: { target?: ManagedProviderTarget }): boolean {
   return p.target === "claude";
@@ -12,20 +15,25 @@ export function providerWritesCodex(p: { target?: ManagedProviderTarget }): bool
   return p.target === "codex";
 }
 
-export function providerTargetHint(p: DesktopProviderPayload): string {
+export function providerTargetHint(p: DesktopProviderPayload, text?: DesktopProviderText): string {
   if (p.target === "claude") {
-    return "Claude Code · Anthropic";
+    return text?.providerTargetHints.claude ?? "Claude Code · Anthropic";
   }
   if (p.target === "codex") {
-    return "Codex · Responses";
+    return text?.providerTargetHints.codex ?? "Codex · Responses";
   }
-  return "Legacy unscoped endpoint";
+  return text?.providerTargetHints.legacy ?? "Legacy unscoped endpoint";
 }
 
-export const CUSTOM_TARGET_SEGMENT_OPTIONS: SegmentedControlOption<ManagedProviderTarget>[] = [
-  { value: "claude", label: "Claude Code" },
-  { value: "codex", label: "Codex" },
-];
+export function getCustomTargetSegmentOptions(text: {
+  claude: string;
+  codex: string;
+}): SegmentedControlOption<ManagedProviderTarget>[] {
+  return [
+    { value: "claude", label: text.claude },
+    { value: "codex", label: text.codex },
+  ];
+}
 
 export const ENDPOINT_PLACEHOLDER =
   "https://api.example.com — omit /v1 (a trailing /v1 is stripped if present)";

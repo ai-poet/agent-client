@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildWorkspaceTabMenuEntries } from "@/screens/workspace/workspace-tab-menu";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
+import { getAppMessages } from "@/i18n/sub2api";
+
+const text = getAppMessages("en").workspace;
 
 function createAgentTab(): WorkspaceTabDescriptor {
   return {
@@ -22,6 +25,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
     const onCloseOtherTabs = vi.fn();
 
     const entries = buildWorkspaceTabMenuEntries({
+      text,
       surface: "desktop",
       tab: createAgentTab(),
       index: 1,
@@ -49,6 +53,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
 
   it("uses stacked ordering labels for mobile menus", () => {
     const entries = buildWorkspaceTabMenuEntries({
+      text,
       surface: "mobile",
       tab: createAgentTab(),
       index: 1,
@@ -76,6 +81,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
 
   it("omits agent copy actions for non-agent tabs", () => {
     const entries = buildWorkspaceTabMenuEntries({
+      text,
       surface: "mobile",
       tab: {
         key: "draft_123",
@@ -106,6 +112,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
 
   it("adds reload tooltip copy for agent tabs", () => {
     const entries = buildWorkspaceTabMenuEntries({
+      text,
       surface: "desktop",
       tab: createAgentTab(),
       index: 0,

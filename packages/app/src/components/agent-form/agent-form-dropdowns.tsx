@@ -34,6 +34,8 @@ import {
   useIsolatedBottomSheetVisibility,
 } from "@/components/ui/isolated-bottom-sheet-modal";
 import { APP_NAME } from "@/config/branding";
+import { useAppLocale } from "@/hooks/use-app-locale";
+import { getAppMessages } from "@/i18n/sub2api";
 import { baseColors } from "@/styles/theme";
 import { isNative } from "@/constants/platform";
 
@@ -191,7 +193,11 @@ export function SelectField({
   const hasConcreteValue =
     normalizedValue.length > 0 &&
     (normalizedPlaceholder.length === 0 || normalizedValue !== normalizedPlaceholder);
-  const displayText = hasConcreteValue ? normalizedValue : normalizedPlaceholder || "Select...";
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
+  const displayText = hasConcreteValue
+    ? normalizedValue
+    : normalizedPlaceholder || text.selectPlaceholder;
 
   return (
     <View style={styles.selectFieldContainer}>
@@ -210,11 +216,11 @@ export function SelectField({
         <View style={styles.selectFieldContent}>
           <Text style={styles.selectFieldLabel}>{label}</Text>
           <Text
-            style={value ? styles.selectFieldValue : styles.selectFieldPlaceholder}
+            style={hasConcreteValue ? styles.selectFieldValue : styles.selectFieldPlaceholder}
             numberOfLines={1}
             ellipsizeMode={valueEllipsizeMode ?? "tail"}
           >
-            {value || placeholder || "Select..."}
+            {displayText}
           </Text>
         </View>
         <ChevronRight size={theme.iconSize.lg} color={theme.colors.foregroundMuted} />
@@ -260,6 +266,8 @@ export function DropdownSheet({
   children,
 }: DropdownSheetProps): ReactElement {
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
   const titleColor = theme.colors.foreground;
   const snapPoints = useMemo(() => ["60%", "90%"], []);
   const { sheetRef, handleSheetChange } = useIsolatedBottomSheetVisibility({
@@ -298,7 +306,7 @@ export function DropdownSheet({
         </Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Close sheet"
+          accessibilityLabel={text.closeSheet}
           onPress={handleClose}
           hitSlop={10}
           testID="dropdown-sheet-close"
@@ -357,6 +365,8 @@ export function ComboSelect({
 }: ComboSelectProps): ReactElement {
   const [isOpen, setIsOpen] = useState(false);
   const anchorRef = useRef<View>(null);
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
 
   const selectedOption = options.find((opt) => opt.id === value);
   const displayValue = selectedOption?.label ?? "";
@@ -383,7 +393,7 @@ export function ComboSelect({
         options={options}
         value={value}
         onSelect={onSelect}
-        searchPlaceholder={`Search ${label.toLowerCase()}...`}
+        searchPlaceholder={text.searchPlaceholder(label)}
         allowCustomValue={allowCustomValue}
         title={title}
         open={isOpen}
@@ -457,7 +467,11 @@ export function FormSelectTrigger({
   const hasConcreteValue =
     normalizedValue.length > 0 &&
     (normalizedPlaceholder.length === 0 || normalizedValue !== normalizedPlaceholder);
-  const displayText = hasConcreteValue ? normalizedValue : normalizedPlaceholder || "Select...";
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
+  const displayText = hasConcreteValue
+    ? normalizedValue
+    : normalizedPlaceholder || text.selectPlaceholder;
 
   return (
     <Pressable
@@ -531,6 +545,8 @@ export function AgentConfigRow({
   disabled,
 }: AgentConfigRowProps): ReactElement {
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
 
   const providerOptions: ComboSelectOption[] = useMemo(
     () =>
@@ -543,13 +559,13 @@ export function AgentConfigRow({
 
   const modeSelectOptions: ComboSelectOption[] = useMemo(() => {
     if (modeOptions.length === 0) {
-      return [{ id: "", label: "Default" }];
+      return [{ id: "", label: text.default }];
     }
     return modeOptions.map((mode) => ({
       id: mode.id,
       label: mode.label,
     }));
-  }, [modeOptions]);
+  }, [modeOptions, text.default]);
 
   const modelSelectOptions: ComboSelectOption[] = useMemo(() => {
     return models.map((model) => ({
@@ -583,11 +599,13 @@ export function AgentConfigRow({
     <View style={styles.agentConfigRow}>
       <View style={styles.agentConfigColumn}>
         <ComboSelect
-          label="Provider"
-          title="Select provider"
+          label={text.provider}
+          title={text.selectProvider}
           value={selectedProvider}
           options={providerOptions}
-          placeholder={providerOptions.length > 0 ? "Select..." : "No providers available"}
+          placeholder={
+            providerOptions.length > 0 ? text.selectPlaceholder : text.noProvidersAvailable
+          }
           disabled={disabled || providerOptions.length === 0}
           onSelect={onSelectProvider}
           icon={<Bot size={theme.iconSize.md} color={theme.colors.foregroundMuted} />}
@@ -597,11 +615,11 @@ export function AgentConfigRow({
       </View>
       <View style={styles.agentConfigColumn}>
         <ComboSelect
-          label="Model"
-          title="Select model"
+          label={text.model}
+          title={text.selectModel}
           value={selectedModel}
           options={modelSelectOptions}
-          placeholder={isModelLoading ? "Loading..." : "Select model"}
+          placeholder={isModelLoading ? text.loading : text.selectModel}
           disabled={disabled}
           isLoading={isModelLoading}
           onSelect={onSelectModel}
@@ -612,11 +630,11 @@ export function AgentConfigRow({
       </View>
       <View style={styles.agentConfigColumn}>
         <ComboSelect
-          label="Mode"
-          title="Select mode"
+          label={text.mode}
+          title={text.selectMode}
           value={effectiveSelectedMode}
           options={modeSelectOptions}
-          placeholder="Default"
+          placeholder={text.default}
           disabled={disabled || modeOptions.length === 0}
           onSelect={onSelectMode}
           icon={<ModeIcon size={theme.iconSize.md} color={modeIconColor} />}
@@ -627,11 +645,11 @@ export function AgentConfigRow({
       {thinkingSelectOptions.length > 0 ? (
         <View style={styles.agentConfigColumn}>
           <ComboSelect
-            label="Thinking"
-            title="Select thinking effort"
+            label={text.thinking}
+            title={text.selectThinking}
             value={effectiveSelectedThinkingOption}
             options={thinkingSelectOptions}
-            placeholder="Select..."
+            placeholder={text.selectPlaceholder}
             disabled={disabled}
             onSelect={onSelectThinkingOption}
             icon={<Brain size={theme.iconSize.md} color={theme.colors.foregroundMuted} />}
@@ -658,6 +676,8 @@ export function AssistantDropdown({
 }: AssistantDropdownProps): ReactElement {
   const [isOpen, setIsOpen] = useState(false);
   const anchorRef = useRef<View>(null);
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
 
   const selectedDefinition = providerDefinitions.find(
     (definition) => definition.id === selectedProvider,
@@ -678,9 +698,9 @@ export function AssistantDropdown({
   return (
     <>
       <SelectField
-        label="AGENT"
+        label={text.agent}
         value={selectedDefinition?.label ?? ""}
-        placeholder="Select assistant"
+        placeholder={text.selectAssistant}
         onPress={handleOpen}
         disabled={disabled}
         controlRef={anchorRef}
@@ -689,7 +709,7 @@ export function AssistantDropdown({
         options={options}
         value={selectedProvider}
         onSelect={(id) => onSelect(id as AgentProvider)}
-        title="Choose assistant"
+        title={text.chooseAssistant}
         open={isOpen}
         onOpenChange={handleOpenChange}
         anchorRef={anchorRef}
@@ -713,13 +733,15 @@ export function PermissionsDropdown({
 }: PermissionsDropdownProps): ReactElement {
   const [isOpen, setIsOpen] = useState(false);
   const anchorRef = useRef<View>(null);
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
 
   const hasOptions = modeOptions.length > 0;
   const selectedModeLabel = hasOptions
     ? (modeOptions.find((mode) => mode.id === selectedMode)?.label ??
       modeOptions[0]?.label ??
-      "Default")
-    : "Automatic";
+      text.default)
+    : text.automatic;
 
   const options = useMemo(
     () =>
@@ -741,14 +763,12 @@ export function PermissionsDropdown({
   return (
     <>
       <SelectField
-        label="PERMISSIONS"
+        label={text.permissions}
         value={selectedModeLabel}
-        placeholder={hasOptions ? "Select permissions" : "Automatic"}
+        placeholder={hasOptions ? text.selectPermissions : text.automatic}
         onPress={handleOpen}
         disabled={disabled || !hasOptions}
-        helperText={
-          hasOptions ? undefined : "This assistant does not expose selectable permissions."
-        }
+        helperText={hasOptions ? undefined : text.permissionsUnavailable}
         controlRef={anchorRef}
       />
       {hasOptions ? (
@@ -756,7 +776,7 @@ export function PermissionsDropdown({
           options={options}
           value={selectedMode}
           onSelect={onSelect}
-          title="Permissions"
+          title={text.permissions}
           open={isOpen}
           onOpenChange={handleOpenChange}
           anchorRef={anchorRef}
@@ -787,16 +807,18 @@ export function ModelDropdown({
 }: ModelDropdownProps): ReactElement {
   const [isOpen, setIsOpen] = useState(false);
   const anchorRef = useRef<View>(null);
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
 
   const selectedLabel =
-    models.find((model) => model.id === selectedModel)?.label ?? selectedModel ?? "Select model";
-  const placeholder = isLoading && models.length === 0 ? "Loading..." : "Select model";
+    models.find((model) => model.id === selectedModel)?.label ?? selectedModel ?? text.selectModel;
+  const placeholder = isLoading && models.length === 0 ? text.loading : text.selectModel;
   const helperText = error
     ? undefined
     : isLoading
-      ? "Fetching available models..."
+      ? text.fetchingModels
       : models.length === 0
-        ? "This assistant did not expose selectable models."
+        ? text.noSelectableModels
         : undefined;
 
   const options = useMemo(() => {
@@ -819,7 +841,7 @@ export function ModelDropdown({
   return (
     <>
       <SelectField
-        label="MODEL"
+        label={text.model}
         value={selectedLabel}
         placeholder={placeholder}
         onPress={handleOpen}
@@ -832,7 +854,7 @@ export function ModelDropdown({
         options={options}
         value={selectedModel}
         onSelect={handleSelect}
-        title="Model"
+        title={text.model}
         open={isOpen}
         onOpenChange={handleOpenChange}
         anchorRef={anchorRef}
@@ -858,6 +880,8 @@ export function WorkingDirectoryDropdown({
 }: WorkingDirectoryDropdownProps): ReactElement {
   const [isOpen, setIsOpen] = useState(false);
   const anchorRef = useRef<View>(null);
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
 
   const options = useMemo(
     () => suggestedPaths.map((path) => ({ id: path, label: path })),
@@ -867,14 +891,14 @@ export function WorkingDirectoryDropdown({
   const handleOpen = useCallback(() => setIsOpen(true), []);
   const handleOpenChange = useCallback((open: boolean) => setIsOpen(open), []);
 
-  const emptyText = "No agent directories match your search.";
+  const emptyText = text.noAgentDirectories;
 
   return (
     <>
       <SelectField
-        label="WORKING DIRECTORY"
+        label={text.workingDirectory}
         value={workingDir}
-        placeholder="Choose a working directory"
+        placeholder={text.chooseWorkingDirectory}
         onPress={handleOpen}
         disabled={disabled}
         errorMessage={errorMessage || undefined}
@@ -886,13 +910,13 @@ export function WorkingDirectoryDropdown({
         options={options}
         value={workingDir}
         onSelect={onSelectPath}
-        searchPlaceholder="Search directories..."
+        searchPlaceholder={text.searchDirectories}
         emptyText={emptyText}
         allowCustomValue
         customValuePrefix=""
         customValueKind="directory"
         optionsPosition="above-search"
-        title="Working directory"
+        title={text.workingDirectory}
         open={isOpen}
         onOpenChange={handleOpenChange}
         anchorRef={anchorRef}
@@ -980,6 +1004,8 @@ export function GitOptionsSection({
   onSelectWorktreePath,
 }: GitOptionsSectionProps): ReactElement {
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
 
   const isLoading = status === "loading";
   const isCreateMode = worktreeMode === "create";
@@ -1022,9 +1048,9 @@ export function GitOptionsSection({
     worktreeOptions.find((option) => option.path === selectedWorktreePath)?.label ?? "";
   const worktreeHelperText =
     worktreeOptionsStatus === "loading"
-      ? "Loading worktrees..."
+      ? text.loadingWorktrees
       : worktreeOptions.length === 0
-        ? "No worktrees found"
+        ? text.noWorktreesFound
         : null;
 
   return (
@@ -1039,15 +1065,15 @@ export function GitOptionsSection({
           {isCreateMode ? <View style={styles.checkboxDot} /> : null}
         </View>
         <View style={styles.worktreeToggleContent}>
-          <Text style={styles.worktreeToggleLabel}>Create worktree</Text>
+          <Text style={styles.worktreeToggleLabel}>{text.createWorktree}</Text>
           <Text style={styles.worktreeToggleDescription}>
             {isLoading
-              ? "Inspecting repository…"
+              ? text.inspectingRepository
               : isCreateMode
-                ? `Will create: ${worktreeSlug || "preparing…"}`
+                ? text.willCreate(worktreeSlug)
                 : currentBranch
-                  ? `Run isolated from ${currentBranch}`
-                  : "Run in an isolated directory"}
+                  ? text.runIsolatedFrom(currentBranch)
+                  : text.runInIsolatedDirectory}
           </Text>
         </View>
       </Pressable>
@@ -1062,9 +1088,9 @@ export function GitOptionsSection({
           {isAttachMode ? <View style={styles.checkboxDot} /> : null}
         </View>
         <View style={styles.worktreeToggleContent}>
-          <Text style={styles.worktreeToggleLabel}>Attach to existing worktree</Text>
+          <Text style={styles.worktreeToggleLabel}>{text.attachWorktree}</Text>
           <Text style={styles.worktreeToggleDescription}>
-            {isLoading ? "Inspecting repository…" : `Pick a ${APP_NAME} worktree by branch`}
+            {isLoading ? text.inspectingRepository : text.pickWorktreeByBranch(APP_NAME)}
           </Text>
         </View>
       </Pressable>
@@ -1072,9 +1098,9 @@ export function GitOptionsSection({
       {isAttachMode ? (
         <>
           <SelectField
-            label="Worktree"
+            label={text.worktree}
             value={selectedWorktreeLabel}
-            placeholder="Select a worktree"
+            placeholder={text.selectWorktree}
             onPress={() => setIsWorktreeSheetOpen(true)}
             disabled={isLoading || worktreeOptionsStatus === "loading"}
             helperText={worktreeHelperText}
@@ -1082,7 +1108,7 @@ export function GitOptionsSection({
             testID="worktree-attach-picker"
           />
           <DropdownSheet
-            title="Select worktree"
+            title={text.selectWorktree}
             visible={isWorktreeSheetOpen}
             onClose={() => setIsWorktreeSheetOpen(false)}
           >
@@ -1104,7 +1130,7 @@ export function GitOptionsSection({
 
       {isCreateMode ? (
         <View style={styles.baseBranchRow}>
-          <Text style={styles.baseBranchLabel}>Base branch:</Text>
+          <Text style={styles.baseBranchLabel}>{text.baseBranch}</Text>
           {isEditingBranch ? (
             <View style={styles.baseBranchEditRow}>
               <TextInput
@@ -1114,7 +1140,7 @@ export function GitOptionsSection({
                 onChangeText={setEditedBranch}
                 autoCapitalize="none"
                 autoCorrect={false}
-                placeholder="branch name"
+                placeholder={text.branchName}
                 placeholderTextColor={theme.colors.foregroundMuted}
                 onSubmitEditing={handleConfirmEdit}
               />

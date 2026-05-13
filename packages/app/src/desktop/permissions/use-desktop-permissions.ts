@@ -1,13 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  DEFAULT_DESKTOP_PERMISSION_MESSAGES,
   getDesktopPermissionSnapshot,
   requestDesktopPermission,
   shouldShowDesktopPermissionSection,
   type DesktopPermissionKind,
+  type DesktopPermissionMessages,
   type DesktopPermissionSnapshot,
 } from "@/desktop/permissions/desktop-permissions";
 import { sendOsNotification } from "@/utils/os-notifications";
 import { APP_NAME } from "@/config/branding";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 
 export interface UseDesktopPermissionsReturn {
   isDesktopApp: boolean;
@@ -21,18 +25,38 @@ export interface UseDesktopPermissionsReturn {
   sendTestNotification: () => Promise<void>;
 }
 
-const EMPTY_NOTIFICATION_STATUS = {
-  state: "unknown" as const,
-  detail: "Notification status has not been checked yet.",
-};
-
-const EMPTY_MICROPHONE_STATUS = {
-  state: "unknown" as const,
-  detail: "Microphone status has not been checked yet.",
-};
-
 export function useDesktopPermissions(): UseDesktopPermissionsReturn {
   const isDesktopApp = shouldShowDesktopPermissionSection();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).settings.permissions, [locale]);
+  const permissionMessages = useMemo<DesktopPermissionMessages>(
+    () => ({
+      ...DEFAULT_DESKTOP_PERMISSION_MESSAGES,
+      notifications: {
+        ...DEFAULT_DESKTOP_PERMISSION_MESSAGES.notifications,
+        allowedByOs: text.details.notifications.granted,
+        deniedInSystem: text.details.notifications.denied,
+        notGrantedYet: text.details.notifications.prompt,
+        desktopStatusWebOnly: text.details.notifications.unavailable,
+        webApiUnavailable: text.details.notifications.unavailable,
+        requestWebOnly: text.details.notifications.unavailable,
+        requestApiUnavailable: text.details.notifications.unavailable,
+      },
+      microphone: {
+        ...DEFAULT_DESKTOP_PERMISSION_MESSAGES.microphone,
+        desktopStatusWebOnly: text.details.microphone.unavailable,
+        navigatorUnavailable: text.details.microphone.unavailable,
+        granted: text.details.microphone.granted,
+        deniedInSystem: text.details.microphone.denied,
+        notGrantedYet: text.details.microphone.prompt,
+        captureUnavailable: text.details.microphone.unavailable,
+        permissionStatusUnavailable: text.details.microphone.unknown,
+        requestWebOnly: text.details.microphone.unavailable,
+        requestCaptureUnavailable: text.details.microphone.unavailable,
+      },
+    }),
+    [text.details.microphone, text.details.notifications],
+  );
   const isMountedRef = useRef(true);
   const [snapshot, setSnapshot] = useState<DesktopPermissionSnapshot | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -54,7 +78,7 @@ export function useDesktopPermissions(): UseDesktopPermissionsReturn {
 
     setIsRefreshing(true);
     try {
-      const nextSnapshot = await getDesktopPermissionSnapshot();
+      const nextSnapshot = await getDesktopPermissionSnapshot(permissionMessages);
       if (!isMountedRef.current) {
         return;
       }
@@ -66,7 +90,7 @@ export function useDesktopPermissions(): UseDesktopPermissionsReturn {
         setIsRefreshing(false);
       }
     }
-  }, [isDesktopApp]);
+  }, [isDesktopApp, permissionMessages]);
 
   const requestPermission = useCallback(
     async (kind: DesktopPermissionKind) => {
@@ -76,7 +100,7 @@ export function useDesktopPermissions(): UseDesktopPermissionsReturn {
 
       setRequestingPermission(kind);
       try {
-        const status = await requestDesktopPermission({ kind });
+        const status = await requestDesktopPermission({ kind, messages: permissionMessages });
         if (!isMountedRef.current) {
           return;
         }
@@ -84,8 +108,14 @@ export function useDesktopPermissions(): UseDesktopPermissionsReturn {
         setSnapshot((previous) => {
           const base: DesktopPermissionSnapshot = previous ?? {
             checkedAt: Date.now(),
-            notifications: EMPTY_NOTIFICATION_STATUS,
-            microphone: EMPTY_MICROPHONE_STATUS,
+            notifications: {
+              state: "unknown",
+              detail: text.details.notifications.unknown,
+            },
+            microphone: {
+              state: "unknown",
+              detail: text.details.microphone.unknown,
+            },
           };
 
           if (kind === "notifications") {
@@ -111,7 +141,13 @@ export function useDesktopPermissions(): UseDesktopPermissionsReturn {
         await refreshPermissions();
       }
     },
-    [isDesktopApp, refreshPermissions],
+    [
+      isDesktopApp,
+      permissionMessages,
+      refreshPermissions,
+      text.details.microphone.unknown,
+      text.details.notifications.unknown,
+    ],
   );
 
   const [testNotificationError, setTestNotificationError] = useState<string | null>(null);
@@ -125,22 +161,26 @@ export function useDesktopPermissions(): UseDesktopPermissionsReturn {
     setTestNotificationError(null);
     try {
       const sent = await sendOsNotification({
-        title: `${APP_NAME} notification test`,
-        body: "If you can see this, desktop notifications work.",
+        title: text.testNotificationTitle(APP_NAME),
+        body: text.testNotificationBody,
       });
       if (!sent) {
-        setTestNotificationError(
-          "Notification was not delivered. Check System Settings > Notifications.",
-        );
+        setTestNotificationError(text.notificationNotDelivered);
       }
     } catch (error) {
-      setTestNotificationError("Failed to send notification.");
+      setTestNotificationError(text.failedSendNotification);
     } finally {
       if (isMountedRef.current) {
         setIsSendingTestNotification(false);
       }
     }
-  }, [isDesktopApp]);
+  }, [
+    isDesktopApp,
+    text.failedSendNotification,
+    text.notificationNotDelivered,
+    text.testNotificationBody,
+    text.testNotificationTitle,
+  ]);
 
   useEffect(() => {
     if (!isDesktopApp) {

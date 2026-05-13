@@ -9,6 +9,8 @@ import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-
 import { useToast } from "@/contexts/toast-context";
 import { useBranchSwitcher } from "@/hooks/use-branch-switcher";
 import { ScreenTitle } from "@/components/headers/screen-title";
+import { useAppLocale } from "@/hooks/use-app-locale";
+import { getAppMessages } from "@/i18n/sub2api";
 
 interface BranchSwitcherProps {
   currentBranchName: string | null;
@@ -32,6 +34,8 @@ export function BranchSwitcher({
   const isConnected = useHostRuntimeIsConnected(serverId);
   const toast = useToast();
   const queryClient = useQueryClient();
+  const locale = useAppLocale();
+  const text = getAppMessages(locale).workspace;
 
   const { branchOptions, isOpen, setIsOpen, handleBranchSelect } = useBranchSwitcher({
     client,
@@ -42,6 +46,7 @@ export function BranchSwitcher({
     isConnected,
     toast,
     queryClient,
+    text,
   });
 
   const titleContent = (
@@ -65,7 +70,7 @@ export function BranchSwitcher({
           (hovered || pressed) && styles.branchSwitcherTriggerHovered,
         ]}
         accessibilityRole="button"
-        accessibilityLabel={`Current branch: ${currentBranchName}. Press to switch branch.`}
+        accessibilityLabel={text.currentBranchAccessibility(currentBranchName)}
       >
         {titleContent}
         {!isCompact ? <ChevronDown size={12} color={theme.colors.foregroundMuted} /> : null}
@@ -75,10 +80,10 @@ export function BranchSwitcher({
         value={currentBranchName}
         onSelect={handleBranchSelect}
         searchable
-        placeholder="Switch branch..."
-        searchPlaceholder="Filter branches..."
-        emptyText="No branches found."
-        title="Switch branch"
+        placeholder={text.switchBranchPlaceholder}
+        searchPlaceholder={text.filterBranches}
+        emptyText={text.noBranchesFound}
+        title={text.switchBranchTitle}
         open={isOpen}
         onOpenChange={setIsOpen}
         anchorRef={anchorRef}

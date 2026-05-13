@@ -598,7 +598,7 @@ function SettingsSidebar({
         })}
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={text.addHost}
+          accessibilityLabel={text.addHostLabel}
           onPress={onAddHost}
           testID="settings-add-host"
           style={({ hovered = false }) => [
@@ -608,7 +608,7 @@ function SettingsSidebar({
         >
           <Plus size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
           <Text style={sidebarStyles.label} numberOfLines={1}>
-            {text.addHost}
+            {text.addHostLabel}
           </Text>
         </Pressable>
       </View>

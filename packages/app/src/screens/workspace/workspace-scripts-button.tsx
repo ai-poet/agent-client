@@ -6,6 +6,7 @@ import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
 import { useSessionStore } from "@/stores/session-store";
 import { useHostRuntimeSnapshot } from "@/runtime/host-runtime";
+import { useAppLocale } from "@/hooks/use-app-locale";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,6 +17,7 @@ import { useToast } from "@/contexts/toast-context";
 import { isNative } from "@/constants/platform";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { resolveWorkspaceScriptLink } from "@/utils/workspace-script-links";
+import { getAppMessages } from "@/i18n/sub2api";
 
 type ScriptActionIcon = "start" | "view";
 
@@ -90,16 +92,17 @@ interface HostLinkProps {
   label: string;
   url: string | null;
   scriptName: string;
+  text: ReturnType<typeof getAppMessages>["workspace"];
 }
 
-function HostLinkRow({ label, url, scriptName }: HostLinkProps): ReactElement {
+function HostLinkRow({ label, url, scriptName, text }: HostLinkProps): ReactElement {
   const { theme } = useUnistyles();
   const disabled = !url;
 
   return (
     <Pressable
       accessibilityRole="link"
-      accessibilityLabel={`Open ${scriptName} at ${label}`}
+      accessibilityLabel={text.openScriptAt(scriptName, label)}
       disabled={disabled}
       hitSlop={2}
       onPress={(event) => {
@@ -126,12 +129,18 @@ function HostLinkRow({ label, url, scriptName }: HostLinkProps): ReactElement {
   );
 }
 
-function ExitCodeBadge({ code }: { code: number }): ReactElement {
+function ExitCodeBadge({
+  code,
+  text,
+}: {
+  code: number;
+  text: ReturnType<typeof getAppMessages>["workspace"];
+}): ReactElement {
   const { theme } = useUnistyles();
   const color = code === 0 ? theme.colors.foregroundMuted : theme.colors.palette.red[300];
   return (
     <View style={styles.exitBadge}>
-      <Text style={[styles.exitBadgeText, { color }]}>exit {code}</Text>
+      <Text style={[styles.exitBadgeText, { color }]}>{text.exitCode(code)}</Text>
     </View>
   );
 }
@@ -153,6 +162,8 @@ export function WorkspaceScriptsButton({
 }: WorkspaceScriptsButtonProps): ReactElement | null {
   const { theme } = useUnistyles();
   const toast = useToast();
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).workspace, [locale]);
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
   const activeConnection = useHostRuntimeSnapshot(serverId)?.activeConnection ?? null;
   const liveTerminalIdSet = useMemo(() => new Set(liveTerminalIds), [liveTerminalIds]);
@@ -160,7 +171,7 @@ export function WorkspaceScriptsButton({
   const startScriptMutation = useMutation({
     mutationFn: async (scriptName: string) => {
       if (!client) {
-        throw new Error("Daemon client not available");
+        throw new Error(text.daemonClientUnavailable);
       }
       const result = await client.startWorkspaceScript(workspaceId, scriptName);
       if (result.error) {
@@ -169,7 +180,7 @@ export function WorkspaceScriptsButton({
       return result;
     },
     onError: (error, scriptName) => {
-      toast.show(error instanceof Error ? error.message : `Failed to start ${scriptName}`, {
+      toast.show(error instanceof Error ? error.message : text.failedStartScript(scriptName), {
         variant: "error",
       });
     },
@@ -197,7 +208,7 @@ export function WorkspaceScriptsButton({
               (hovered || pressed || open) && styles.splitButtonPrimaryHovered,
             ]}
             accessibilityRole="button"
-            accessibilityLabel="Workspace scripts"
+            accessibilityLabel={text.workspaceScripts}
           >
             <View style={styles.splitButtonContent}>
               <Play
@@ -207,7 +218,7 @@ export function WorkspaceScriptsButton({
                 }
                 fill="transparent"
               />
-              {!hideLabels && <Text style={styles.splitButtonText}>Scripts</Text>}
+              {!hideLabels && <Text style={styles.splitButtonText}>{text.scripts}</Text>}
               <ChevronDown size={14} color={theme.colors.foregroundMuted} />
             </View>
           </DropdownMenuTrigger>
@@ -272,21 +283,21 @@ export function WorkspaceScriptsButton({
                 if (isRunning && liveTerminalId) {
                   primaryAction = (
                     <ScriptActionButton
-                      accessibilityLabel={`View ${script.scriptName} terminal`}
+                      accessibilityLabel={text.viewScriptTerminal(script.scriptName)}
                       testID={`workspace-scripts-view-${script.scriptName}`}
                       icon="view"
-                      label="View"
+                      label={text.view}
                       onPress={() => onViewTerminal?.(liveTerminalId)}
                     />
                   );
                 } else if (!isRunning) {
                   primaryAction = (
                     <ScriptActionButton
-                      accessibilityLabel={`Run ${script.scriptName} script`}
+                      accessibilityLabel={text.runScript(script.scriptName)}
                       testID={`workspace-scripts-start-${script.scriptName}`}
                       disabled={startScriptMutation.isPending}
                       icon="start"
-                      label="Run"
+                      label={text.run}
                       onPress={() => startScriptMutation.mutate(script.scriptName)}
                     />
                   );
@@ -297,7 +308,7 @@ export function WorkspaceScriptsButton({
                     {index > 0 ? <DropdownMenuSeparator /> : null}
                     <View
                       testID={`workspace-scripts-item-${script.scriptName}`}
-                      accessibilityLabel={`${script.scriptName} script`}
+                      accessibilityLabel={text.scriptLabel(script.scriptName)}
                       style={styles.scriptItem}
                     >
                       <View style={styles.scriptHeader}>
@@ -315,7 +326,7 @@ export function WorkspaceScriptsButton({
                         >
                           {script.scriptName}
                         </Text>
-                        {showExitBadge ? <ExitCodeBadge code={exitCode} /> : null}
+                        {showExitBadge ? <ExitCodeBadge code={exitCode} text={text} /> : null}
                         <View style={styles.spacer} />
                         {primaryAction}
                       </View>
@@ -327,6 +338,7 @@ export function WorkspaceScriptsButton({
                               label={link.label}
                               url={link.url}
                               scriptName={script.scriptName}
+                              text={text}
                             />
                           ))}
                         </View>

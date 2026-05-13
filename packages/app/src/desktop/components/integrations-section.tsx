@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Text, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -21,16 +21,16 @@ import {
   installNode22Runtime,
   type ModelCliRuntimeStatus,
 } from "@/desktop/daemon/desktop-daemon";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 
 const CLI_DOCS_URL = "https://paseo.sh/docs/cli";
 const SKILLS_DOCS_URL = "https://paseo.sh/docs/skills";
 
-const CHECKING_ENV_MESSAGE = "Checking environment…";
-const RUNTIME_STATUS_UNAVAILABLE =
-  "Couldn't read managed Node / Codex / Claude status. You can still try Install below.";
-
 export function IntegrationsSection() {
   const { theme } = useUnistyles();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).settings.integrations, [locale]);
   const showSection = shouldUseDesktopDaemon();
 
   const [cliStatus, setCliStatus] = useState<InstallStatus | null>(null);
@@ -101,7 +101,7 @@ export function IntegrationsSection() {
       .then(setCliStatus)
       .catch((error) => {
         console.error("[Integrations] Failed to install CLI", error);
-        Alert.alert("Install failed", error instanceof Error ? error.message : String(error));
+        Alert.alert(text.installFailed, error instanceof Error ? error.message : String(error));
       })
       .finally(() => {
         setIsInstallingCli(false);
@@ -115,7 +115,7 @@ export function IntegrationsSection() {
       .then(setSkillsStatus)
       .catch((error) => {
         console.error("[Integrations] Failed to install skills", error);
-        Alert.alert("Install failed", error instanceof Error ? error.message : String(error));
+        Alert.alert(text.installFailed, error instanceof Error ? error.message : String(error));
       })
       .finally(() => {
         setIsInstallingSkills(false);
@@ -131,7 +131,7 @@ export function IntegrationsSection() {
       })
       .catch((error) => {
         console.error("[Integrations] Failed to install Node.js 22 runtime", error);
-        Alert.alert("Install failed", error instanceof Error ? error.message : String(error));
+        Alert.alert(text.installFailed, error instanceof Error ? error.message : String(error));
       })
       .finally(() => {
         setIsInstallingNodeRuntime(false);
@@ -147,7 +147,7 @@ export function IntegrationsSection() {
       })
       .catch((error) => {
         console.error("[Integrations] Failed to install Codex CLI", error);
-        Alert.alert("Install failed", error instanceof Error ? error.message : String(error));
+        Alert.alert(text.installFailed, error instanceof Error ? error.message : String(error));
       })
       .finally(() => {
         setIsInstallingCodex(false);
@@ -163,7 +163,7 @@ export function IntegrationsSection() {
       })
       .catch((error) => {
         console.error("[Integrations] Failed to install Claude Code CLI", error);
-        Alert.alert("Install failed", error instanceof Error ? error.message : String(error));
+        Alert.alert(text.installFailed, error instanceof Error ? error.message : String(error));
       })
       .finally(() => {
         setIsInstallingClaudeCode(false);
@@ -179,7 +179,7 @@ export function IntegrationsSection() {
       })
       .catch((error) => {
         console.error("[Integrations] Failed to install Node.js and model CLIs", error);
-        Alert.alert("Install failed", error instanceof Error ? error.message : String(error));
+        Alert.alert(text.installFailed, error instanceof Error ? error.message : String(error));
       })
       .finally(() => {
         setIsInstallingAll(false);
@@ -191,30 +191,31 @@ export function IntegrationsSection() {
   }
 
   const nodeRuntimeHint = integrationCheckPending
-    ? CHECKING_ENV_MESSAGE
+    ? text.checkingEnvironment
     : modelRuntimeUnavailable
-      ? RUNTIME_STATUS_UNAVAILABLE
+      ? text.runtimeStatusUnavailable
       : modelCliStatus?.node.installed
         ? modelCliStatus.node.satisfies
-          ? `Node.js ${modelCliStatus.node.version} · npm ${modelCliStatus.node.npmVersion ?? "unknown"}`
-          : `Detected Node.js ${modelCliStatus.node.version}. Use Node 22 for Codex and Claude Code installs.`
-        : (modelCliStatus?.node.error ?? "Node.js was not detected yet.");
+          ? text.nodeRuntimeStatus(
+              modelCliStatus.node.version ?? text.unknown,
+              modelCliStatus.node.npmVersion ?? text.unknown,
+            )
+          : text.nodeVersionMismatch(modelCliStatus.node.version ?? text.unknown)
+        : (modelCliStatus?.node.error ?? text.nodeNotDetected);
   const codexHint = integrationCheckPending
-    ? CHECKING_ENV_MESSAGE
+    ? text.checkingEnvironment
     : modelRuntimeUnavailable
-      ? RUNTIME_STATUS_UNAVAILABLE
+      ? text.runtimeStatusUnavailable
       : modelCliStatus?.codex.installed
-        ? `Codex ${modelCliStatus.codex.version ?? "installed"}`
-        : (modelCliStatus?.codex.error ??
-          "Install the Codex CLI into the managed Node 22 runtime.");
+        ? text.codexInstalled(modelCliStatus.codex.version ?? text.installed)
+        : (modelCliStatus?.codex.error ?? text.codexInstallHint);
   const claudeHint = integrationCheckPending
-    ? CHECKING_ENV_MESSAGE
+    ? text.checkingEnvironment
     : modelRuntimeUnavailable
-      ? RUNTIME_STATUS_UNAVAILABLE
+      ? text.runtimeStatusUnavailable
       : modelCliStatus?.claude.installed
-        ? `Claude Code ${modelCliStatus.claude.version ?? "installed"}`
-        : (modelCliStatus?.claude.error ??
-          "Install the Claude Code CLI into the managed Node 22 runtime.");
+        ? text.claudeInstalled(modelCliStatus.claude.version ?? text.installed)
+        : (modelCliStatus?.claude.error ?? text.claudeInstallHint);
   const isRuntimeBusy =
     isInstallingNodeRuntime || isInstallingCodex || isInstallingClaudeCode || isInstallingAll;
   const runtimeActionsDisabled = isRuntimeBusy || integrationCheckPending;
@@ -228,9 +229,9 @@ export function IntegrationsSection() {
         textStyle={settingsStyles.sectionHeaderLinkText}
         style={settingsStyles.sectionHeaderLink}
         onPress={() => void openExternalUrl(CLI_DOCS_URL)}
-        accessibilityLabel="Open CLI documentation"
+        accessibilityLabel={text.openCliDocs}
       >
-        CLI docs
+        {text.cliDocs}
       </Button>
       <Button
         variant="ghost"
@@ -239,32 +240,30 @@ export function IntegrationsSection() {
         textStyle={settingsStyles.sectionHeaderLinkText}
         style={settingsStyles.sectionHeaderLink}
         onPress={() => void openExternalUrl(SKILLS_DOCS_URL)}
-        accessibilityLabel="Open skills documentation"
+        accessibilityLabel={text.openSkillsDocs}
       >
-        Skills docs
+        {text.skillsDocs}
       </Button>
     </View>
   );
 
   return (
-    <SettingsSection title="Integrations" trailing={trailing}>
+    <SettingsSection title={text.title} trailing={trailing}>
       <View style={settingsStyles.card}>
         <View style={settingsStyles.row}>
           <View style={settingsStyles.rowContent}>
             <View style={styles.rowTitleRow}>
               <Terminal size={theme.iconSize.md} color={theme.colors.foreground} />
-              <Text style={settingsStyles.rowTitle}>Command line</Text>
+              <Text style={settingsStyles.rowTitle}>{text.commandLine}</Text>
             </View>
-            <Text style={settingsStyles.rowHint}>
-              Control and script agents from your terminal.
-            </Text>
+            <Text style={settingsStyles.rowHint}>{text.commandLineHint}</Text>
           </View>
           {integrationCheckPending ? (
             <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
           ) : cliStatus?.installed ? (
             <View style={styles.installedLabel}>
               <Check size={14} color={theme.colors.foregroundMuted} />
-              <Text style={styles.mutedText}>Installed</Text>
+              <Text style={styles.mutedText}>{text.installed}</Text>
             </View>
           ) : (
             <Button
@@ -273,7 +272,7 @@ export function IntegrationsSection() {
               onPress={handleInstallCli}
               disabled={isInstallingCli || integrationCheckPending}
             >
-              {isInstallingCli ? "Installing..." : "Install"}
+              {isInstallingCli ? text.installing : text.install}
             </Button>
           )}
         </View>
@@ -281,18 +280,16 @@ export function IntegrationsSection() {
           <View style={settingsStyles.rowContent}>
             <View style={styles.rowTitleRow}>
               <Blocks size={theme.iconSize.md} color={theme.colors.foreground} />
-              <Text style={settingsStyles.rowTitle}>Orchestration skills</Text>
+              <Text style={settingsStyles.rowTitle}>{text.orchestrationSkills}</Text>
             </View>
-            <Text style={settingsStyles.rowHint}>
-              Teach your agents to orchestrate through the CLI.
-            </Text>
+            <Text style={settingsStyles.rowHint}>{text.orchestrationSkillsHint}</Text>
           </View>
           {integrationCheckPending ? (
             <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
           ) : skillsStatus?.installed ? (
             <View style={styles.installedLabel}>
               <Check size={14} color={theme.colors.foregroundMuted} />
-              <Text style={styles.mutedText}>Installed</Text>
+              <Text style={styles.mutedText}>{text.installed}</Text>
             </View>
           ) : (
             <Button
@@ -301,7 +298,7 @@ export function IntegrationsSection() {
               onPress={handleInstallSkills}
               disabled={isInstallingSkills || integrationCheckPending}
             >
-              {isInstallingSkills ? "Installing..." : "Install"}
+              {isInstallingSkills ? text.installing : text.install}
             </Button>
           )}
         </View>
@@ -312,7 +309,7 @@ export function IntegrationsSection() {
           <View style={settingsStyles.rowContent}>
             <View style={styles.rowTitleRow}>
               <Cpu size={theme.iconSize.md} color={theme.colors.foreground} />
-              <Text style={settingsStyles.rowTitle}>Node.js 22 runtime</Text>
+              <Text style={settingsStyles.rowTitle}>{text.nodeRuntime}</Text>
             </View>
             <Text style={settingsStyles.rowHint}>{nodeRuntimeHint}</Text>
           </View>
@@ -321,7 +318,7 @@ export function IntegrationsSection() {
           ) : modelCliStatus?.node.satisfies ? (
             <View style={styles.installedLabel}>
               <Check size={14} color={theme.colors.foregroundMuted} />
-              <Text style={styles.mutedText}>Ready</Text>
+              <Text style={styles.mutedText}>{text.ready}</Text>
             </View>
           ) : (
             <Button
@@ -330,7 +327,7 @@ export function IntegrationsSection() {
               onPress={handleInstallNodeRuntime}
               disabled={runtimeActionsDisabled}
             >
-              {isInstallingNodeRuntime ? "Installing..." : "Install"}
+              {isInstallingNodeRuntime ? text.installing : text.install}
             </Button>
           )}
         </View>
@@ -338,7 +335,7 @@ export function IntegrationsSection() {
           <View style={settingsStyles.rowContent}>
             <View style={styles.rowTitleRow}>
               <Terminal size={theme.iconSize.md} color={theme.colors.foreground} />
-              <Text style={settingsStyles.rowTitle}>Codex CLI</Text>
+              <Text style={settingsStyles.rowTitle}>{text.codexCli}</Text>
             </View>
             <Text style={settingsStyles.rowHint}>{codexHint}</Text>
           </View>
@@ -349,17 +346,17 @@ export function IntegrationsSection() {
             disabled={runtimeActionsDisabled}
           >
             {isInstallingCodex
-              ? "Installing..."
+              ? text.installing
               : modelCliStatus?.codex.installed
-                ? "Reinstall"
-                : "Install"}
+                ? text.reinstall
+                : text.install}
           </Button>
         </View>
         <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
           <View style={settingsStyles.rowContent}>
             <View style={styles.rowTitleRow}>
               <Terminal size={theme.iconSize.md} color={theme.colors.foreground} />
-              <Text style={settingsStyles.rowTitle}>Claude Code CLI</Text>
+              <Text style={settingsStyles.rowTitle}>{text.claudeCodeCli}</Text>
             </View>
             <Text style={settingsStyles.rowHint}>{claudeHint}</Text>
           </View>
@@ -370,21 +367,19 @@ export function IntegrationsSection() {
             disabled={runtimeActionsDisabled}
           >
             {isInstallingClaudeCode
-              ? "Installing..."
+              ? text.installing
               : modelCliStatus?.claude.installed
-                ? "Reinstall"
-                : "Install"}
+                ? text.reinstall
+                : text.install}
           </Button>
         </View>
         <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
           <View style={settingsStyles.rowContent}>
             <View style={styles.rowTitleRow}>
               <Wrench size={theme.iconSize.md} color={theme.colors.foreground} />
-              <Text style={settingsStyles.rowTitle}>External agent stack</Text>
+              <Text style={settingsStyles.rowTitle}>{text.externalAgentStack}</Text>
             </View>
-            <Text style={settingsStyles.rowHint}>
-              Install Git Bash, Node.js 22, Codex, and Claude Code in one pass.
-            </Text>
+            <Text style={settingsStyles.rowHint}>{text.externalAgentStackHint}</Text>
           </View>
           <Button
             variant="outline"
@@ -392,7 +387,7 @@ export function IntegrationsSection() {
             onPress={handleInstallAll}
             disabled={runtimeActionsDisabled}
           >
-            {isInstallingAll ? "Installing..." : "Install all"}
+            {isInstallingAll ? text.installing : text.installAll}
           </Button>
         </View>
       </View>

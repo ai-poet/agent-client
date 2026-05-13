@@ -267,7 +267,30 @@ describe("useAgentFormState", () => {
       },
     ];
 
-    it("keeps provider, mode, and model unset on first open without preferences or explicit values", () => {
+    const claudeModels: AgentModelDefinition[] = [
+      {
+        provider: "claude",
+        id: "claude-opus-4-7[1m]",
+        label: "Opus 4.7 1M",
+        thinkingOptions: [
+          { id: "low", label: "Low" },
+          { id: "max", label: "Max" },
+        ],
+      },
+      {
+        provider: "claude",
+        id: "claude-opus-4-6",
+        label: "Opus 4.6",
+        isDefault: true,
+        defaultThinkingOptionId: "high",
+        thinkingOptions: [
+          { id: "medium", label: "Medium" },
+          { id: "high", label: "High", isDefault: true },
+        ],
+      },
+    ];
+
+    it("defaults fresh drafts to the built-in Claude provider and first listed Claude model", () => {
       const resolved = __private__.resolveFormState(
         undefined,
         {},
@@ -290,15 +313,45 @@ describe("useAgentFormState", () => {
         },
         new Set<string>(),
         makeProviderMap(TEST_CLAUDE_DEFINITION, TEST_CODEX_DEFINITION),
+        new Map([["claude", claudeModels]]),
       );
 
-      expect(resolved.provider).toBeNull();
-      expect(resolved.modeId).toBe("");
-      expect(resolved.model).toBe("");
-      expect(resolved.thinkingOptionId).toBe("");
+      expect(resolved.provider).toBe("claude");
+      expect(resolved.modeId).toBe("default");
+      expect(resolved.model).toBe("claude-opus-4-7[1m]");
+      expect(resolved.thinkingOptionId).toBe("low");
     });
 
-    it("does not auto-select a model on fresh drafts without preferences", () => {
+    it("defaults to Claude first model even when another Claude model is marked as provider default", () => {
+      const resolved = __private__.resolveFormState(
+        undefined,
+        {},
+        claudeModels,
+        {
+          serverId: false,
+          provider: false,
+          modeId: false,
+          model: false,
+          thinkingOptionId: false,
+          workingDir: false,
+        },
+        {
+          serverId: null,
+          provider: "claude",
+          modeId: "",
+          model: "",
+          thinkingOptionId: "",
+          workingDir: "",
+        },
+        new Set<string>(),
+        claudeProviderMap,
+      );
+
+      expect(resolved.provider).toBe("claude");
+      expect(resolved.model).toBe("claude-opus-4-7[1m]");
+    });
+
+    it("does not override a saved provider preference with the Claude create-flow default", () => {
       const resolved = __private__.resolveFormState(
         undefined,
         { provider: "codex" },
@@ -320,9 +373,114 @@ describe("useAgentFormState", () => {
           workingDir: "",
         },
         new Set<string>(),
-        codexProviderMap,
+        makeProviderMap(TEST_CLAUDE_DEFINITION, TEST_CODEX_DEFINITION),
+        new Map([
+          ["claude", claudeModels],
+          ["codex", codexModels],
+        ]),
       );
 
+      expect(resolved.provider).toBe("codex");
+      expect(resolved.model).toBe("");
+      expect(resolved.thinkingOptionId).toBe("");
+    });
+
+    it("does not override a saved model preference with the Claude create-flow default", () => {
+      const resolved = __private__.resolveFormState(
+        undefined,
+        { provider: "codex", providerPreferences: { codex: { model: "gpt-5.3-codex" } } },
+        codexModels,
+        {
+          serverId: false,
+          provider: false,
+          modeId: false,
+          model: false,
+          thinkingOptionId: false,
+          workingDir: false,
+        },
+        {
+          serverId: null,
+          provider: "codex",
+          modeId: "",
+          model: "",
+          thinkingOptionId: "",
+          workingDir: "",
+        },
+        new Set<string>(),
+        makeProviderMap(TEST_CLAUDE_DEFINITION, TEST_CODEX_DEFINITION),
+        new Map([
+          ["claude", claudeModels],
+          ["codex", codexModels],
+        ]),
+      );
+
+      expect(resolved.provider).toBe("codex");
+      expect(resolved.model).toBe("gpt-5.3-codex");
+      expect(resolved.thinkingOptionId).toBe("xhigh");
+    });
+
+    it("keeps explicit initial provider and model ahead of the Claude create-flow default", () => {
+      const resolved = __private__.resolveFormState(
+        { provider: "codex", model: "gpt-5.3-codex" },
+        {},
+        codexModels,
+        {
+          serverId: false,
+          provider: false,
+          modeId: false,
+          model: false,
+          thinkingOptionId: false,
+          workingDir: false,
+        },
+        {
+          serverId: null,
+          provider: "codex",
+          modeId: "",
+          model: "",
+          thinkingOptionId: "",
+          workingDir: "",
+        },
+        new Set<string>(),
+        makeProviderMap(TEST_CLAUDE_DEFINITION, TEST_CODEX_DEFINITION),
+        new Map([
+          ["claude", claudeModels],
+          ["codex", codexModels],
+        ]),
+      );
+
+      expect(resolved.provider).toBe("codex");
+      expect(resolved.model).toBe("gpt-5.3-codex");
+      expect(resolved.thinkingOptionId).toBe("xhigh");
+    });
+
+    it("does not force the Claude create-flow default when Claude is unavailable", () => {
+      const resolved = __private__.resolveFormState(
+        undefined,
+        {},
+        null,
+        {
+          serverId: false,
+          provider: false,
+          modeId: false,
+          model: false,
+          thinkingOptionId: false,
+          workingDir: false,
+        },
+        {
+          serverId: null,
+          provider: null,
+          modeId: "",
+          model: "",
+          thinkingOptionId: "",
+          workingDir: "",
+        },
+        new Set<string>(),
+        codexProviderMap,
+        new Map([["codex", codexModels]]),
+      );
+
+      expect(resolved.provider).toBeNull();
+      expect(resolved.modeId).toBe("");
       expect(resolved.model).toBe("");
       expect(resolved.thinkingOptionId).toBe("");
     });

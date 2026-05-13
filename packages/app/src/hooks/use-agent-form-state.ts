@@ -45,6 +45,8 @@ const INITIAL_USER_MODIFIED: UserModifiedFields = {
   workingDir: false,
 };
 
+const CREATE_FLOW_DEFAULT_PROVIDER: AgentProvider = "claude";
+
 // Internal form state
 interface FormState {
   serverId: string | null;
@@ -118,6 +120,10 @@ function resolveDefaultModelId(availableModels: AgentModelDefinition[] | null): 
   return resolveDefaultModel(availableModels)?.id ?? "";
 }
 
+function resolveFirstModelId(availableModels: AgentModelDefinition[] | null): string {
+  return availableModels?.[0]?.id ?? "";
+}
+
 function resolveEffectiveModel(
   availableModels: AgentModelDefinition[] | null,
   modelId: string,
@@ -169,6 +175,76 @@ function mergeSelectedComposerPreferences(args: {
   });
 }
 
+function hasExplicitAgentSelectionInitialValue(
+  initialValues: FormInitialValues | undefined,
+): boolean {
+  if (!initialValues) {
+    return false;
+  }
+
+  return Boolean(
+    initialValues.provider ||
+      normalizeSelectedModelId(initialValues.model) ||
+      (typeof initialValues.modeId === "string" && initialValues.modeId.trim().length > 0) ||
+      (typeof initialValues.thinkingOptionId === "string" &&
+        initialValues.thinkingOptionId.trim().length > 0),
+  );
+}
+
+function hasSavedProviderOrModelPreference(preferences: FormPreferences | null): boolean {
+  if (!preferences) {
+    return false;
+  }
+
+  if (typeof preferences.provider === "string" && preferences.provider.trim().length > 0) {
+    return true;
+  }
+
+  return Object.values(preferences.providerPreferences ?? {}).some((providerPreferences) =>
+    Boolean(normalizeSelectedModelId(providerPreferences.model)),
+  );
+}
+
+function shouldUseClaudeCreateFlowDefault(args: {
+  initialValues: FormInitialValues | undefined;
+  preferences: FormPreferences | null;
+  userModified: UserModifiedFields;
+  allowedProviderMap: Map<AgentProvider, AgentProviderDefinition>;
+}): boolean {
+  if (args.userModified.provider || args.userModified.model) {
+    return false;
+  }
+  if (hasExplicitAgentSelectionInitialValue(args.initialValues)) {
+    return false;
+  }
+  if (hasSavedProviderOrModelPreference(args.preferences)) {
+    return false;
+  }
+  return args.allowedProviderMap.has(CREATE_FLOW_DEFAULT_PROVIDER);
+}
+
+function resolveProviderModels(args: {
+  provider: AgentProvider | null;
+  currentProvider: AgentProvider | null;
+  availableModels: AgentModelDefinition[] | null;
+  allProviderModels?: Map<string, AgentModelDefinition[]>;
+}): AgentModelDefinition[] | null {
+  if (!args.provider) {
+    return null;
+  }
+
+  const providerModels = args.allProviderModels?.get(args.provider);
+  if (providerModels && providerModels.length > 0) {
+    return providerModels;
+  }
+
+  if (args.provider === args.currentProvider) {
+    return args.availableModels;
+  }
+
+  return null;
+}
+
 /**
  * Pure function that resolves form state from multiple data sources.
  * Priority: explicit (URL params) > provider defaults > lightweight app prefs > fallback
@@ -183,9 +259,16 @@ function resolveFormState(
   currentState: FormState,
   validServerIds: Set<string>,
   allowedProviderMap: Map<AgentProvider, AgentProviderDefinition>,
+  allProviderModels?: Map<string, AgentModelDefinition[]>,
 ): FormState {
   // Start with current state - we only update non-user-modified fields
   const result = { ...currentState };
+  const shouldUseClaudeDefault = shouldUseClaudeCreateFlowDefault({
+    initialValues,
+    preferences,
+    userModified,
+    allowedProviderMap,
+  });
   // 1. Resolve provider first (other fields depend on it)
   if (!userModified.provider) {
     if (initialValues?.provider && allowedProviderMap.has(initialValues.provider)) {
@@ -195,6 +278,8 @@ function resolveFormState(
       allowedProviderMap.has(preferences.provider as AgentProvider)
     ) {
       result.provider = preferences.provider as AgentProvider;
+    } else if (shouldUseClaudeDefault) {
+      result.provider = CREATE_FLOW_DEFAULT_PROVIDER;
     } else if (
       result.provider &&
       allowedProviderMap.size > 0 &&
@@ -211,6 +296,12 @@ function resolveFormState(
   }
 
   const providerDef = result.provider ? allowedProviderMap.get(result.provider) : undefined;
+  const providerModels = resolveProviderModels({
+    provider: result.provider,
+    currentProvider: currentState.provider,
+    availableModels,
+    allProviderModels,
+  });
   const providerPrefs = result.provider
     ? preferences?.providerPreferences?.[result.provider]
     : undefined;
@@ -236,25 +327,28 @@ function resolveFormState(
 
   // 3. Resolve model (depends on provider + availableModels)
   if (!userModified.model) {
-    const isValidModel = (m: string) => availableModels?.some((am) => am.id === m) ?? false;
+    const isValidModel = (m: string) => providerModels?.some((am) => am.id === m) ?? false;
     const initialModel = normalizeSelectedModelId(initialValues?.model);
     const preferredModel = normalizeSelectedModelId(providerPrefs?.model);
-    const defaultModelId = resolveDefaultModelId(availableModels);
+    const defaultModelId = resolveDefaultModelId(providerModels);
+    const firstModelId = resolveFirstModelId(providerModels);
 
     if (!result.provider) {
       result.model = "";
     } else if (initialModel) {
-      if (!availableModels || isValidModel(initialModel)) {
+      if (!providerModels || isValidModel(initialModel)) {
         result.model = initialModel;
       } else {
         result.model = defaultModelId;
       }
     } else if (preferredModel) {
-      if (!availableModels || isValidModel(preferredModel)) {
+      if (!providerModels || isValidModel(preferredModel)) {
         result.model = preferredModel;
       } else {
         result.model = defaultModelId;
       }
+    } else if (shouldUseClaudeDefault && result.provider === CREATE_FLOW_DEFAULT_PROVIDER) {
+      result.model = firstModelId;
     } else {
       result.model = "";
     }
@@ -284,9 +378,9 @@ function resolveFormState(
   }
 
   // Validate thinking option once model metadata is available.
-  if (result.provider && availableModels) {
+  if (result.provider && providerModels) {
     result.thinkingOptionId = resolveThinkingOptionId({
-      availableModels,
+      availableModels: providerModels,
       modelId: result.model,
       requestedThinkingOptionId: result.thinkingOptionId,
     });
@@ -501,6 +595,7 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
       formStateRef.current,
       validServerIds,
       snapshotResolvableProviderDefinitionMap,
+      allProviderModels,
     );
 
     // Only update if something changed
@@ -523,6 +618,7 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
     combinedInitialValues,
     preferences,
     availableModels,
+    allProviderModels,
     userModified,
     validServerIds,
     snapshotResolvableProviderDefinitionMap,
@@ -744,6 +840,25 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
     refetchSnapshotIfStale(formStateRef.current.provider);
   }, [refetchSnapshotIfStale]);
 
+  useEffect(() => {
+    if (!isVisible || !isCreateFlow || !isTargetDaemonReady) {
+      return;
+    }
+    if (!formState.serverId || !formState.provider) {
+      return;
+    }
+
+    refetchSnapshotIfStale(formState.provider);
+  }, [
+    formState.provider,
+    formState.serverId,
+    formState.workingDir,
+    isCreateFlow,
+    isTargetDaemonReady,
+    isVisible,
+    refetchSnapshotIfStale,
+  ]);
+
   const persistFormPreferences = useCallback(async () => {
     if (!formState.provider) {
       return;
@@ -866,6 +981,7 @@ export const __private__ = {
   combineInitialValues,
   mergeSelectedComposerPreferences,
   resolveDefaultModel,
+  resolveFirstModelId,
   resolveFormState,
   resolveThinkingOptionId,
 };

@@ -14,6 +14,7 @@ export type DesktopAppUpdateStatus =
   | "checking"
   | "pending"
   | "up-to-date"
+  | "disabled"
   | "available"
   | "installing"
   | "installed"
@@ -45,8 +46,9 @@ function formatStatusText(input: {
   status: DesktopAppUpdateStatus;
   availableUpdate: DesktopAppUpdateCheckResult | null;
   installMessage: string | null;
+  disabledReason: string | null;
 }): string {
-  const { status, availableUpdate, installMessage } = input;
+  const { status, availableUpdate, installMessage, disabledReason } = input;
 
   if (status === "checking") {
     return "Checking for app updates...";
@@ -58,6 +60,10 @@ function formatStatusText(input: {
 
   if (status === "up-to-date") {
     return "App is up to date.";
+  }
+
+  if (status === "disabled") {
+    return disabledReason ?? "App updates are not configured for this brand.";
   }
 
   if (status === "pending") {
@@ -91,6 +97,7 @@ export function useDesktopAppUpdater(): UseDesktopAppUpdaterReturn {
   const [availableUpdate, setAvailableUpdate] = useState<DesktopAppUpdateCheckResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [installMessage, setInstallMessage] = useState<string | null>(null);
+  const [disabledReason, setDisabledReason] = useState<string | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
 
   const checkForUpdates = useCallback(
@@ -106,6 +113,7 @@ export function useDesktopAppUpdater(): UseDesktopAppUpdaterReturn {
         setStatus("checking");
       }
       setErrorMessage(null);
+      setDisabledReason(null);
 
       try {
         const result = await checkDesktopAppUpdate({ releaseChannel });
@@ -116,7 +124,11 @@ export function useDesktopAppUpdater(): UseDesktopAppUpdaterReturn {
         setInstallMessage(null);
         setLastCheckedAt(Date.now());
 
-        if (result.readyToInstall) {
+        if (result.disabledReason) {
+          setDisabledReason(result.disabledReason);
+          setAvailableUpdate(null);
+          setStatus("disabled");
+        } else if (result.readyToInstall) {
           setAvailableUpdate(result);
           setStatus("available");
         } else if (result.hasUpdate) {
@@ -206,6 +218,7 @@ export function useDesktopAppUpdater(): UseDesktopAppUpdaterReturn {
       status,
       availableUpdate,
       installMessage,
+      disabledReason,
     }),
     availableUpdate,
     errorMessage,

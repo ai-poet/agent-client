@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { buildGitActions, type BuildGitActionsInput } from "./git-actions-policy";
+import { getAppMessages } from "@/i18n/sub2api";
+
+const text = getAppMessages("en").gitDiff;
 
 function createInput(overrides: Partial<BuildGitActionsInput> = {}): BuildGitActionsInput {
   return {
@@ -20,6 +23,7 @@ function createInput(overrides: Partial<BuildGitActionsInput> = {}): BuildGitAct
     behindOfOrigin: 0,
     shouldPromoteArchive: false,
     shipDefault: "merge",
+    text,
     runtime: {
       commit: {
         disabled: false,

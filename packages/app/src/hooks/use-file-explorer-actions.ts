@@ -1,5 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useSessionStore, type AgentFileExplorerState } from "@/stores/session-store";
+import { getAppMessages } from "@/i18n/sub2api";
+import { useAppLocale } from "./use-app-locale";
 
 function createExplorerState(): AgentFileExplorerState {
   return {
@@ -51,6 +53,8 @@ export function buildWorkspaceExplorerStateKey(scope: FileExplorerWorkspaceScope
 
 export function useFileExplorerActions(params: { serverId: string } & FileExplorerWorkspaceScope) {
   const { serverId, workspaceId, workspaceRoot } = params;
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).files, [locale]);
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
   const setFileExplorer = useSessionStore((state) => state.setFileExplorer);
   const normalizedWorkspaceRoot = useMemo(
@@ -113,7 +117,7 @@ export function useFileExplorerActions(params: { serverId: string } & FileExplor
         updateExplorerState((state) => ({
           ...state,
           isLoading: false,
-          lastError: "Workspace is unavailable",
+          lastError: text.workspaceUnavailable,
           pendingRequest: null,
         }));
         return false;
@@ -123,7 +127,7 @@ export function useFileExplorerActions(params: { serverId: string } & FileExplor
         updateExplorerState((state) => ({
           ...state,
           isLoading: false,
-          lastError: "Host is not connected",
+          lastError: text.hostNotConnected,
           pendingRequest: null,
         }));
         return false;
@@ -158,13 +162,21 @@ export function useFileExplorerActions(params: { serverId: string } & FileExplor
         updateExplorerState((state) => ({
           ...state,
           isLoading: false,
-          lastError: error instanceof Error ? error.message : "Failed to list directory",
+          lastError: error instanceof Error ? error.message : text.failedListDirectory,
           pendingRequest: null,
         }));
         return false;
       }
     },
-    [client, normalizedWorkspaceRoot, updateExplorerState, workspaceStateKey],
+    [
+      client,
+      normalizedWorkspaceRoot,
+      text.failedListDirectory,
+      text.hostNotConnected,
+      text.workspaceUnavailable,
+      updateExplorerState,
+      workspaceStateKey,
+    ],
   );
 
   const requestFilePreview = useCallback(
@@ -184,7 +196,7 @@ export function useFileExplorerActions(params: { serverId: string } & FileExplor
         updateExplorerState((state) => ({
           ...state,
           isLoading: false,
-          lastError: "Workspace is unavailable",
+          lastError: text.workspaceUnavailable,
           pendingRequest: null,
         }));
         return;
@@ -194,7 +206,7 @@ export function useFileExplorerActions(params: { serverId: string } & FileExplor
         updateExplorerState((state) => ({
           ...state,
           isLoading: false,
-          lastError: "Host is not connected",
+          lastError: text.hostNotConnected,
           pendingRequest: null,
         }));
         return;
@@ -233,16 +245,23 @@ export function useFileExplorerActions(params: { serverId: string } & FileExplor
         }));
       }
     },
-    [client, normalizedWorkspaceRoot, updateExplorerState, workspaceStateKey],
+    [
+      client,
+      normalizedWorkspaceRoot,
+      text.hostNotConnected,
+      text.workspaceUnavailable,
+      updateExplorerState,
+      workspaceStateKey,
+    ],
   );
 
   const requestFileDownloadToken = useCallback(
     async (path: string) => {
       if (!normalizedWorkspaceRoot) {
-        throw new Error("Workspace is unavailable");
+        throw new Error(text.workspaceUnavailable);
       }
       if (!client) {
-        throw new Error("Host is not connected");
+        throw new Error(text.hostNotConnected);
       }
       const payload = await client.requestDownloadToken(normalizedWorkspaceRoot, path);
       if (payload.error) {
@@ -250,7 +269,7 @@ export function useFileExplorerActions(params: { serverId: string } & FileExplor
       }
       return payload;
     },
-    [client, normalizedWorkspaceRoot],
+    [client, normalizedWorkspaceRoot, text.hostNotConnected, text.workspaceUnavailable],
   );
 
   const selectExplorerEntry = useCallback(

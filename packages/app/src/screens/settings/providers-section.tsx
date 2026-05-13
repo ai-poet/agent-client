@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { settingsStyles } from "@/styles/settings";
@@ -11,6 +11,8 @@ import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { RotateCw } from "lucide-react-native";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 
 export interface ProvidersSectionProps {
   serverId: string;
@@ -18,6 +20,8 @@ export interface ProvidersSectionProps {
 
 export function ProvidersSection({ serverId }: ProvidersSectionProps) {
   const { theme } = useUnistyles();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).settings.providers, [locale]);
   const isConnected = useHostRuntimeIsConnected(serverId);
   const { entries, isLoading, isRefreshing, refresh } = useProvidersSnapshot(serverId);
   const [diagnosticProvider, setDiagnosticProvider] = useState<string | null>(null);
@@ -34,7 +38,7 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
         hitSlop={8}
         style={settingsStyles.sectionHeaderLink}
         accessibilityRole="button"
-        accessibilityLabel={providerRefreshInFlight ? "Refreshing providers" : "Refresh providers"}
+        accessibilityLabel={providerRefreshInFlight ? text.refreshing : text.refresh}
       >
         {providerRefreshInFlight ? (
           <LoadingSpinner size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
@@ -47,18 +51,18 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
   return (
     <>
       <SettingsSection
-        title="Providers"
+        title={text.title}
         trailing={refreshAction}
         testID="host-page-providers-card"
         style={styles.sectionSpacing}
       >
         {!hasServer || !isConnected ? (
           <View style={[settingsStyles.card, styles.emptyCard]}>
-            <Text style={styles.emptyText}>Connect to this host to see providers</Text>
+            <Text style={styles.emptyText}>{text.connectToSee}</Text>
           </View>
         ) : isLoading ? (
           <View style={[settingsStyles.card, styles.emptyCard]}>
-            <Text style={styles.emptyText}>Loading...</Text>
+            <Text style={styles.emptyText}>{text.loading}</Text>
           </View>
         ) : (
           <View style={settingsStyles.card}>
@@ -92,20 +96,18 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
                       </Text>
                     ) : null}
                     {status === "ready" && modelCount > 0 ? (
-                      <Text style={settingsStyles.rowHint}>
-                        {modelCount === 1 ? "1 model" : `${modelCount} models`}
-                      </Text>
+                      <Text style={settingsStyles.rowHint}>{text.modelCount(modelCount)}</Text>
                     ) : null}
                   </View>
                   <StatusBadge
                     label={
                       status === "ready"
-                        ? "Available"
+                        ? text.statuses.available
                         : status === "error"
-                          ? "Error"
+                          ? text.statuses.error
                           : status === "loading"
-                            ? "Loading..."
-                            : "Not installed"
+                            ? text.statuses.loading
+                            : text.statuses.notInstalled
                     }
                     variant={
                       status === "ready" ? "success" : status === "error" ? "error" : "muted"

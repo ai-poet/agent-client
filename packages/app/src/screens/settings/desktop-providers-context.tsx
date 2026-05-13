@@ -11,6 +11,8 @@ import { Alert } from "react-native";
 import { invokeDesktopCommand } from "@/desktop/electron/invoke";
 import { getIsElectron } from "@/constants/platform";
 import { useSub2APIAuth } from "@/hooks/use-sub2api-auth";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 import type {
   DesktopProviderPayload,
   ManagedProviderTarget,
@@ -61,6 +63,8 @@ export function resolveScopedActiveProviderIds(store: ProviderStore): {
 
 export function DesktopProvidersStoreProvider({ children }: { children: ReactNode }) {
   const { auth, isLoggedIn } = useSub2APIAuth();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).settings.desktopProviders, [locale]);
   const isElectron = getIsElectron();
   const [providers, setProviders] = useState<DesktopProviderPayload[]>([]);
   const [activeClaudeProviderId, setActiveClaudeProviderId] = useState<string | null>(null);
@@ -125,10 +129,10 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
         });
         await loadProviders();
       } catch (error) {
-        Alert.alert("Switch failed", getErrorMessage(error));
+        Alert.alert(text.switchFailed, getErrorMessage(error));
       }
     },
-    [loadProviders],
+    [loadProviders, text.switchFailed],
   );
 
   const handleAddProvider = useCallback(async () => {
@@ -137,11 +141,11 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
     const apiKey = editProviderApiKey.trim();
 
     if (!name || !endpoint || !apiKey) {
-      Alert.alert("Missing information", "Name, endpoint and API key are required.");
+      Alert.alert(text.missingInformationTitle, text.missingInformationBody);
       return;
     }
     if (!isValidSub2APIEndpoint(endpoint)) {
-      Alert.alert("Invalid endpoint", "Please enter a valid http(s) endpoint.");
+      Alert.alert(text.invalidEndpointTitle, text.invalidEndpointBody);
       return;
     }
 
@@ -163,7 +167,7 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
       closeCustomProviderForm();
       await loadProviders();
     } catch (error) {
-      Alert.alert("Add provider failed", getErrorMessage(error));
+      Alert.alert(text.addProviderFailed, getErrorMessage(error));
     }
   }, [
     closeCustomProviderForm,
@@ -172,6 +176,11 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
     editProviderEndpoint,
     editProviderName,
     loadProviders,
+    text.addProviderFailed,
+    text.invalidEndpointBody,
+    text.invalidEndpointTitle,
+    text.missingInformationBody,
+    text.missingInformationTitle,
   ]);
 
   const handleRemoveProvider = useCallback(
@@ -180,10 +189,10 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
         await invokeDesktopCommand("remove_provider", { id });
         await loadProviders();
       } catch (error) {
-        Alert.alert("Remove provider failed", getErrorMessage(error));
+        Alert.alert(text.removeProviderFailed, getErrorMessage(error));
       }
     },
-    [loadProviders],
+    [loadProviders, text.removeProviderFailed],
   );
 
   const activeClaudeProvider = useMemo(

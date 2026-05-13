@@ -15,8 +15,10 @@ import { SidebarMenuToggle } from "@/components/headers/menu-header";
 import { ScreenHeader } from "@/components/headers/screen-header";
 import { HEADER_INNER_HEIGHT, MAX_CONTENT_WIDTH, useIsCompactFormFactor } from "@/constants/layout";
 import { useToast } from "@/contexts/toast-context";
+import { useAppLocale } from "@/hooks/use-app-locale";
 import { useAgentInputDraft } from "@/hooks/use-agent-input-draft";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+import { getAppMessages } from "@/i18n/sub2api";
 import { normalizeWorkspaceDescriptor, useSessionStore } from "@/stores/session-store";
 import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import { encodeImages } from "@/utils/encode-images";
@@ -106,6 +108,8 @@ export function NewWorkspaceScreen({
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   const toast = useToast();
+  const locale = useAppLocale();
+  const messages = useMemo(() => getAppMessages(locale).newWorkspace, [locale]);
   const mergeWorkspaces = useSessionStore((state) => state.mergeWorkspaces);
   const setAgents = useSessionStore((state) => state.setAgents);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -148,10 +152,10 @@ export function NewWorkspaceScreen({
 
   const withConnectedClient = useCallback(() => {
     if (!client || !isConnected) {
-      throw new Error("Host is not connected");
+      throw new Error(messages.errors.hostNotConnected);
     }
     return client;
-  }, [client, isConnected]);
+  }, [client, isConnected, messages.errors.hostNotConnected]);
 
   const checkoutStatusQuery = useQuery({
     queryKey: ["checkout-status", serverId, sourceDirectory],
@@ -303,7 +307,7 @@ export function NewWorkspaceScreen({
       const payload = await connectedClient.createPaseoWorktree(buildCreateWorktreeInput(input));
 
       if (payload.error || !payload.workspace) {
-        throw new Error(payload.error ?? "Failed to create worktree");
+        throw new Error(payload.error ?? messages.errors.failedCreateWorktree);
       }
 
       const normalizedWorkspace = normalizeWorkspaceDescriptor(payload.workspace);
@@ -311,7 +315,14 @@ export function NewWorkspaceScreen({
       setCreatedWorkspace(normalizedWorkspace);
       return normalizedWorkspace;
     },
-    [buildCreateWorktreeInput, createdWorkspace, mergeWorkspaces, serverId, withConnectedClient],
+    [
+      buildCreateWorktreeInput,
+      createdWorkspace,
+      mergeWorkspaces,
+      serverId,
+      messages.errors.failedCreateWorktree,
+      withConnectedClient,
+    ],
   );
 
   const handleCreateChatAgent = useCallback(
@@ -324,10 +335,10 @@ export function NewWorkspaceScreen({
         const workspace = await ensureWorkspace({ cwd, attachments: reviewAttachments });
         const connectedClient = withConnectedClient();
         if (!composerState) {
-          throw new Error("Composer state is required");
+          throw new Error(messages.errors.composerStateRequired);
         }
         if (!composerState.selectedProvider) {
-          throw new Error("Select a model");
+          throw new Error(messages.errors.selectModel);
         }
 
         const initialPrompt = text.trim();
@@ -370,7 +381,16 @@ export function NewWorkspaceScreen({
         setPendingAction(null);
       }
     },
-    [composerState, ensureWorkspace, serverId, setAgents, toast, withConnectedClient],
+    [
+      composerState,
+      ensureWorkspace,
+      serverId,
+      setAgents,
+      messages.errors.composerStateRequired,
+      messages.errors.selectModel,
+      toast,
+      withConnectedClient,
+    ],
   );
 
   const workspaceTitle =
@@ -417,7 +437,9 @@ export function NewWorkspaceScreen({
         : `new-workspace-ref-picker-pr-${item.item.number}`;
 
       const description =
-        !isBranch && item.item.baseRefName ? `into ${item.item.baseRefName}` : undefined;
+        !isBranch && item.item.baseRefName
+          ? messages.intoBaseRef(item.item.baseRefName)
+          : undefined;
 
       return (
         <ComboboxItem
@@ -432,7 +454,7 @@ export function NewWorkspaceScreen({
         />
       );
     },
-    [isPending, itemById, theme.colors.foregroundMuted, theme.iconSize.sm],
+    [isPending, itemById, messages, theme.colors.foregroundMuted, theme.iconSize.sm],
   );
 
   return (
@@ -443,7 +465,7 @@ export function NewWorkspaceScreen({
             <SidebarMenuToggle />
             <View style={styles.headerTitleContainer}>
               <Text style={styles.headerTitle} numberOfLines={1}>
-                New workspace
+                {messages.title}
               </Text>
               <Text style={styles.headerProjectTitle} numberOfLines={1}>
                 {workspaceTitle}
@@ -469,7 +491,7 @@ export function NewWorkspaceScreen({
             isPaneFocused={true}
             onSubmitMessage={handleCreateChatAgent}
             allowEmptySubmit={true}
-            submitButtonAccessibilityLabel="Create"
+            submitButtonAccessibilityLabel={messages.create}
             submitIcon="return"
             isSubmitLoading={pendingAction === "chat"}
             submitBehavior="preserve-and-lock"
@@ -510,7 +532,7 @@ export function NewWorkspaceScreen({
                       isPending && styles.badgeDisabled,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel="Starting ref"
+                    accessibilityLabel={messages.startingRef}
                   >
                     <View style={styles.badgeIconBox}>
                       {selectedItem?.kind === "github-pr" ? (
@@ -529,7 +551,7 @@ export function NewWorkspaceScreen({
                   </Pressable>
                 </TooltipTrigger>
                 <TooltipContent side="top" align="center" offset={8}>
-                  <Text style={styles.tooltipText}>Choose where to start from</Text>
+                  <Text style={styles.tooltipText}>{messages.chooseStartingRef}</Text>
                 </TooltipContent>
               </Tooltip>
               <Combobox
@@ -537,8 +559,8 @@ export function NewWorkspaceScreen({
                 value={selectedOptionId}
                 onSelect={handleSelectOption}
                 searchable
-                searchPlaceholder="Search branches and PRs"
-                title="Start from"
+                searchPlaceholder={messages.searchRefs}
+                title={messages.startFrom}
                 open={pickerOpen}
                 onOpenChange={(nextOpen) => {
                   setPickerOpen(nextOpen);
@@ -551,8 +573,8 @@ export function NewWorkspaceScreen({
                 anchorRef={pickerAnchorRef}
                 emptyText={
                   branchSuggestionsQuery.isFetching || githubPrSearchQuery.isFetching
-                    ? "Searching..."
-                    : "No matching refs."
+                    ? messages.searching
+                    : messages.noMatchingRefs
                 }
                 renderOption={renderPickerOption}
               />

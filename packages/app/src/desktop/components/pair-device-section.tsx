@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { ActivityIndicator, Image, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import * as QRCode from "qrcode";
@@ -10,9 +10,13 @@ import { Button } from "@/components/ui/button";
 import { getDesktopDaemonPairing, shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
 import { APP_NAME } from "@/config/branding";
 import { useState } from "react";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 
 export function PairDeviceSection() {
   const { theme } = useUnistyles();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).settings.host.pairDeviceSection, [locale]);
   const showSection = shouldUseDesktopDaemon();
   const [copied, setCopied] = useState(false);
 
@@ -51,14 +55,14 @@ export function PairDeviceSection() {
         {pairingQuery.isPending ? (
           <View style={styles.centered}>
             <ActivityIndicator size="small" />
-            <Text style={styles.hint}>Loading pairing offer…</Text>
+            <Text style={styles.hint}>{text.loadingOffer}</Text>
           </View>
         ) : pairingQuery.isError ? (
           <View style={styles.centered}>
             <Text style={styles.hint}>
               {pairingQuery.error instanceof Error
                 ? pairingQuery.error.message
-                : "Failed to load pairing offer."}
+                : text.failedLoadOffer}
             </Text>
             <Button
               variant="outline"
@@ -66,15 +70,15 @@ export function PairDeviceSection() {
               leftIcon={<RotateCw size={theme.iconSize.sm} color={theme.colors.foreground} />}
               onPress={() => void pairingQuery.refetch()}
             >
-              Retry
+              {text.retry}
             </Button>
           </View>
         ) : !pairingQuery.data?.url ? (
           <View style={styles.centered}>
             <Text style={styles.hint}>
               {pairingQuery.data?.relayEnabled === false
-                ? "Relay is not enabled. Enable relay to pair a device."
-                : "Pairing offer unavailable."}
+                ? text.relayDisabled
+                : text.offerUnavailable}
             </Text>
             <Button
               variant="outline"
@@ -82,19 +86,17 @@ export function PairDeviceSection() {
               leftIcon={<RotateCw size={theme.iconSize.sm} color={theme.colors.foreground} />}
               onPress={() => void pairingQuery.refetch()}
             >
-              Retry
+              {text.retry}
             </Button>
           </View>
         ) : (
           <View style={styles.content}>
-            <Text style={styles.hint}>
-              Scan this QR code with {APP_NAME} on your phone, or copy the link below.
-            </Text>
+            <Text style={styles.hint}>{text.instruction(APP_NAME)}</Text>
             <View style={styles.qrContainer}>
               {qrQuery.data ? (
                 <Image source={{ uri: qrQuery.data }} style={styles.qrImage} resizeMode="contain" />
               ) : qrQuery.isError ? (
-                <Text style={styles.hint}>QR code unavailable.</Text>
+                <Text style={styles.hint}>{text.qrUnavailable}</Text>
               ) : (
                 <ActivityIndicator size="small" />
               )}
@@ -121,7 +123,7 @@ export function PairDeviceSection() {
                 }
                 onPress={() => void handleCopyLink()}
               >
-                {copied ? "Copied" : "Copy"}
+                {copied ? text.copied : text.copy}
               </Button>
             </View>
           </View>

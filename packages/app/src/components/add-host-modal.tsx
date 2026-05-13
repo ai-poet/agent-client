@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Alert, Text, TextInput, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -10,6 +10,8 @@ import { DaemonConnectionTestError, connectToDaemon } from "@/utils/test-daemon-
 import { APP_NAME } from "@/config/branding";
 import { AdaptiveModalSheet, AdaptiveTextInput } from "./adaptive-modal-sheet";
 import { Button } from "@/components/ui/button";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 
 const styles = StyleSheet.create((theme) => ({
   field: {
@@ -74,7 +76,7 @@ function formatTechnicalTransportDetails(details: Array<string | null>): string 
   });
 
   if (allGeneric) {
-    return `${unique[0]} (no additional details provided)`;
+    return unique[0];
   }
 
   return unique.join(" — ");
@@ -83,8 +85,9 @@ function formatTechnicalTransportDetails(details: Array<string | null>): string 
 function buildConnectionFailureCopy(
   endpoint: string,
   error: unknown,
+  text: ReturnType<typeof getSub2APIMessages>["settings"]["addHost"],
 ): { title: string; detail: string | null; raw: string | null } {
-  const title = `We failed to connect to ${endpoint}.`;
+  const title = text.errors.failureTitle(endpoint);
 
   const raw = (() => {
     if (error instanceof DaemonConnectionTestError) {
@@ -103,31 +106,35 @@ function buildConnectionFailureCopy(
   let detail: string | null = null;
 
   if (rawLower.includes("timed out")) {
-    detail = "Connection timed out. Check the host/port and your network.";
+    detail = text.errors.timeout;
   } else if (
     rawLower.includes("econnrefused") ||
     rawLower.includes("connection refused") ||
     rawLower.includes("err_connection_refused")
   ) {
-    detail = "Connection refused. Is the server running at this address?";
+    detail = text.errors.refused;
   } else if (rawLower.includes("enotfound") || rawLower.includes("not found")) {
-    detail = "Host not found. Check the hostname and try again.";
+    detail = text.errors.notFound;
   } else if (rawLower.includes("ehostunreach") || rawLower.includes("host is unreachable")) {
-    detail = "Host is unreachable. Check your network and firewall.";
+    detail = text.errors.unreachable;
   } else if (
     rawLower.includes("certificate") ||
     rawLower.includes("tls") ||
     rawLower.includes("ssl")
   ) {
-    detail =
-      "TLS error. Direct connections use an unencrypted local connection. Use relay for remote access.";
+    detail = text.errors.tls;
   } else if (raw) {
-    detail = "Unable to connect. Check the host/port and that the daemon is reachable.";
+    detail = text.errors.unable;
   } else {
-    detail = "Unable to connect. Check the host/port and that the daemon is reachable.";
+    detail = text.errors.unable;
   }
 
-  return { title, detail, raw };
+  return {
+    title,
+    detail,
+    raw:
+      raw && raw.toLowerCase() === "transport error" ? text.errors.noAdditionalDetails(raw) : raw,
+  };
 }
 
 export interface AddHostModalProps {
@@ -144,6 +151,8 @@ export interface AddHostModalProps {
 
 export function AddHostModal({ visible, onClose, onCancel, onSaved }: AddHostModalProps) {
   const { theme } = useUnistyles();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).settings.addHost, [locale]);
   const daemons = useHosts();
   const { upsertDirectConnection } = useHostMutations();
   const isMobile = useIsCompactFormFactor();
@@ -178,11 +187,11 @@ export function AddHostModal({ visible, onClose, onCancel, onSaved }: AddHostMod
 
     const raw = endpointRawRef.current.trim();
     if (!raw) {
-      setErrorMessage("Host is required");
+      setErrorMessage(text.errors.hostRequired);
       return;
     }
     if (!isHostPortOnly(raw)) {
-      setErrorMessage("Enter host:port only (no ws://, no /ws)");
+      setErrorMessage(text.errors.hostPortOnly);
       return;
     }
 
@@ -190,7 +199,7 @@ export function AddHostModal({ visible, onClose, onCancel, onSaved }: AddHostMod
     try {
       endpoint = normalizeHostPort(raw);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Invalid host:port";
+      const message = error instanceof Error ? error.message : text.errors.invalidHostPort;
       setErrorMessage(message);
       return;
     }
@@ -215,34 +224,34 @@ export function AddHostModal({ visible, onClose, onCancel, onSaved }: AddHostMod
       onSaved?.({ profile, serverId, hostname, isNewHost });
       handleClose();
     } catch (error) {
-      const { title, detail, raw } = buildConnectionFailureCopy(endpoint, error);
+      const { title, detail, raw } = buildConnectionFailureCopy(endpoint, error, text);
       const combined =
         raw && detail && raw !== detail
-          ? `${title}\n${detail}\nDetails: ${raw}`
+          ? `${title}\n${detail}\n${text.errors.details}: ${raw}`
           : detail
             ? `${title}\n${detail}`
             : title;
       setErrorMessage(combined);
       if (!isMobile) {
         // Desktop/web: also surface it as a dialog for quick visibility.
-        Alert.alert("Connection failed", combined);
+        Alert.alert(text.connectionFailed, combined);
       }
     } finally {
       setIsSaving(false);
     }
-  }, [daemons, handleClose, isMobile, isSaving, onSaved, upsertDirectConnection]);
+  }, [daemons, handleClose, isMobile, isSaving, onSaved, text, upsertDirectConnection]);
 
   return (
     <AdaptiveModalSheet
-      title="Direct connection"
+      title={text.directTitle}
       visible={visible}
       onClose={handleClose}
       testID="add-host-modal"
     >
-      <Text style={styles.helper}>Enter the address of a {APP_NAME} server.</Text>
+      <Text style={styles.helper}>{text.directHelper(APP_NAME)}</Text>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Host</Text>
+        <Text style={styles.label}>{text.host}</Text>
         <AdaptiveTextInput
           ref={hostInputRef}
           testID="direct-host-input"
@@ -251,7 +260,7 @@ export function AddHostModal({ visible, onClose, onCancel, onSaved }: AddHostMod
           onChangeText={(next) => {
             endpointRawRef.current = next;
           }}
-          placeholder="hostname:port"
+          placeholder={text.hostPlaceholder}
           placeholderTextColor={theme.colors.foregroundMuted}
           style={styles.input}
           autoCapitalize="none"
@@ -266,7 +275,7 @@ export function AddHostModal({ visible, onClose, onCancel, onSaved }: AddHostMod
 
       <View style={styles.actions}>
         <Button style={{ flex: 1 }} variant="secondary" onPress={handleCancel} disabled={isSaving}>
-          Cancel
+          {text.cancel}
         </Button>
         <Button
           style={{ flex: 1 }}
@@ -276,7 +285,7 @@ export function AddHostModal({ visible, onClose, onCancel, onSaved }: AddHostMod
           leftIcon={<Link2 size={16} color={theme.colors.palette.white} />}
           testID="direct-host-submit"
         >
-          {isSaving ? "Connecting..." : "Connect"}
+          {isSaving ? text.connecting : text.connect}
         </Button>
       </View>
     </AdaptiveModalSheet>

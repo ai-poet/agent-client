@@ -7,6 +7,7 @@ import { Composer } from "@/components/composer";
 import { FileDropZone } from "@/components/file-drop-zone";
 import { AgentStreamView } from "@/components/agent-stream-view";
 import type { ImageAttachment } from "@/components/message-input";
+import { useAppLocale } from "@/hooks/use-app-locale";
 import { useAgentInputDraft } from "@/hooks/use-agent-input-draft";
 import { useDraftAgentCreateFlow } from "@/hooks/use-draft-agent-create-flow";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
@@ -19,6 +20,7 @@ import { useWorkspaceExecutionAuthority } from "@/stores/session-store-hooks";
 import { buildWorkspaceTabPersistenceKey } from "@/stores/workspace-tabs-store";
 import { encodeImages } from "@/utils/encode-images";
 import { shouldAutoFocusWorkspaceDraftComposer } from "@/screens/workspace/workspace-draft-pane-focus";
+import { getAppMessages } from "@/i18n/sub2api";
 import type { AgentCapabilityFlags } from "@server/server/agent/agent-sdk-types";
 import type { AgentSnapshotPayload } from "@server/shared/messages";
 import { isWeb } from "@/constants/platform";
@@ -54,6 +56,8 @@ export function WorkspaceDraftAgentTab({
 }: WorkspaceDraftAgentTabProps) {
   const { theme } = useUnistyles();
   const insets = useSafeAreaInsets();
+  const locale = useAppLocale();
+  const messages = useMemo(() => getAppMessages(locale).draftAgent, [locale]);
   const client = useHostRuntimeClient(serverId);
   const isConnected = useHostRuntimeIsConnected(serverId);
   const workspaceAuthority = useWorkspaceExecutionAuthority(serverId, workspaceId);
@@ -90,7 +94,7 @@ export function WorkspaceDraftAgentTab({
   });
   const composerState = draftInput.composerState;
   if (!composerState) {
-    throw new Error("Workspace draft composer state is required");
+    throw new Error(messages.errors.composerStateRequired);
   }
 
   const {
@@ -104,25 +108,25 @@ export function WorkspaceDraftAgentTab({
     getPendingServerId: () => serverId,
     validateBeforeSubmit: ({ text }) => {
       if (!text.trim()) {
-        return "Initial prompt is required";
+        return messages.errors.initialPromptRequired;
       }
       if (composerState.providerDefinitions.length === 0) {
-        return "No available providers on the selected host";
+        return messages.errors.noProviders;
       }
       if (!composerState.selectedProvider) {
-        return "Select a model";
+        return messages.errors.selectModel;
       }
       if (composerState.isModelLoading) {
-        return "Model defaults are still loading";
+        return messages.errors.modelLoading;
       }
       if (!composerState.effectiveModelId) {
-        return "No model is available for the selected provider";
+        return messages.errors.noModel;
       }
       if (!workspaceDirectory) {
-        return "Workspace directory not found";
+        return messages.errors.workspaceDirectoryNotFound;
       }
       if (!client) {
-        return "Host is not connected";
+        return messages.errors.hostNotConnected;
       }
       return null;
     },
@@ -134,7 +138,7 @@ export function WorkspaceDraftAgentTab({
       Keyboard.dismiss();
     },
     buildDraftAgent: (attempt) => {
-      invariant(workspaceDirectory, "Workspace directory is required");
+      invariant(workspaceDirectory, messages.errors.workspaceDirectoryRequired);
       const now = attempt.timestamp;
       const model = composerState.effectiveModelId || null;
       const thinkingOptionId = composerState.effectiveThinkingOptionId || null;
@@ -144,7 +148,7 @@ export function WorkspaceDraftAgentTab({
           : null;
       const provider = composerState.selectedProvider;
       if (!provider) {
-        throw new Error("Select a model");
+        throw new Error(messages.errors.selectModel);
       }
       return {
         serverId,
@@ -161,7 +165,7 @@ export function WorkspaceDraftAgentTab({
         pendingPermissions: [],
         persistence: null,
         runtimeInfo: { provider, sessionId: null, model, modeId },
-        title: "Agent",
+        title: messages.title,
         cwd: workspaceDirectory,
         model,
         features: composerState.statusControls.features,
@@ -170,15 +174,15 @@ export function WorkspaceDraftAgentTab({
       };
     },
     createRequest: async ({ attempt, text, images, attachments }) => {
-      invariant(workspaceDirectory, "Workspace directory is required");
-      invariant(workspaceExecutionAuthority, "Workspace authority is required");
+      invariant(workspaceDirectory, messages.errors.workspaceDirectoryRequired);
+      invariant(workspaceExecutionAuthority, messages.errors.workspaceAuthorityRequired);
       if (!client) {
-        throw new Error("Host is not connected");
+        throw new Error(messages.errors.hostNotConnected);
       }
 
       const provider = composerState.selectedProvider;
       if (!provider) {
-        throw new Error("Select a model");
+        throw new Error(messages.errors.selectModel);
       }
       const config = buildWorkspaceDraftAgentConfig({
         provider,
@@ -301,11 +305,8 @@ export function WorkspaceDraftAgentTab({
                   <View style={styles.setupLoadingRow} testID="workspace-draft-setup-loading">
                     <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
                     <View style={styles.setupLoadingTextGroup}>
-                      <Text style={styles.setupLoadingTitle}>Setting up workspace…</Text>
-                      <Text style={styles.setupLoadingText}>
-                        The worktree is being prepared. You can start typing; the message will send
-                        once setup is ready.
-                      </Text>
+                      <Text style={styles.setupLoadingTitle}>{messages.setupLoadingTitle}</Text>
+                      <Text style={styles.setupLoadingText}>{messages.setupLoadingBody}</Text>
                     </View>
                   </View>
                 ) : null}
