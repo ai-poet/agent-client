@@ -177,7 +177,10 @@ function createSeedOrderStatus(order: PaymentCenterCreateOrderResponse): Payment
   };
 }
 
-function describeOrderStatus(status: PaymentCenterOrderStatus, locale: Sub2APILocale): StageDescriptor {
+function describeOrderStatus(
+  status: PaymentCenterOrderStatus,
+  locale: Sub2APILocale,
+): StageDescriptor {
   const text = getSub2APIMessages(locale).pay.status;
   if (status.rechargeSuccess || status.status.toUpperCase() === "COMPLETED") {
     return {
@@ -197,9 +200,7 @@ function describeOrderStatus(status: PaymentCenterOrderStatus, locale: Sub2APILo
     if (status.rechargeStatus === "failed") {
       return {
         title: text.rechargeUnfinishedTitle,
-        message:
-          status.failedReason ??
-          text.rechargeUnfinishedMessage,
+        message: status.failedReason ?? text.rechargeUnfinishedMessage,
         tone: "warning",
       };
     }
@@ -216,9 +217,7 @@ function describeOrderStatus(status: PaymentCenterOrderStatus, locale: Sub2APILo
   if (normalizedStatus === "FAILED") {
     return {
       title: text.paymentFailedTitle,
-      message:
-        status.failedReason ??
-        text.paymentFailedMessage,
+      message: status.failedReason ?? text.paymentFailedMessage,
       tone: "error",
     };
   }
@@ -894,9 +893,13 @@ export function Sub2APIPayModal({
         return;
       }
 
-      const cancelUrl = buildPayCenterApiUrl(endpoint, `/api/orders/${activeOrder.orderId}/cancel`, {
-        lang: clientLocale,
-      });
+      const cancelUrl = buildPayCenterApiUrl(
+        endpoint,
+        `/api/orders/${activeOrder.orderId}/cancel`,
+        {
+          lang: clientLocale,
+        },
+      );
       const cancelResponse = await fetch(cancelUrl, {
         method: "POST",
         headers: { "Accept-Language": clientLocale, "Content-Type": "application/json" },
@@ -984,9 +987,7 @@ export function Sub2APIPayModal({
         {stage === "error" ? (
           <View style={styles.errorCard}>
             <Text style={styles.errorTitle}>{text.unableToLoadRechargeOptions}</Text>
-            <Text style={styles.errorText}>
-              {errorMessage ?? text.fullPayCenterFallback}
-            </Text>
+            <Text style={styles.errorText}>{errorMessage ?? text.fullPayCenterFallback}</Text>
             {payCenterUrl ? (
               <Button
                 size="sm"
@@ -1146,15 +1147,16 @@ export function Sub2APIPayModal({
               </Text>
               <Text style={styles.statusMeta}>
                 {text.amountToPay} {formatCny(activeOrder.payAmount ?? activeOrder.amount)} ·{" "}
-                {text.credited}{" "}
-                {formatUsd(activeOrder.amount)}
+                {text.credited} {formatUsd(activeOrder.amount)}
               </Text>
             </View>
 
             {activeFlow === "qr" ? (
               <View style={styles.paymentCard}>
                 <Text style={styles.fieldLabel}>
-                  {text.qrInstruction(getSub2APIPaymentLabel(activeOrder.paymentType, clientLocale))}
+                  {text.qrInstruction(
+                    getSub2APIPaymentLabel(activeOrder.paymentType, clientLocale),
+                  )}
                 </Text>
                 <View style={styles.qrContainer}>
                   {qrCodeDataUrl ? (

@@ -33,7 +33,9 @@ export function buildCatalogModelCardItem(model: GroupFirstCatalogModel): Sub2AP
     best_group: model.group,
     effective_pricing_usd: model.effectivePricing,
     comparison: model.comparison,
-    other_groups: (model.item.other_groups ?? []).filter((entry) => entry.group.id !== model.group.id),
+    other_groups: (model.item.other_groups ?? []).filter(
+      (entry) => entry.group.id !== model.group.id,
+    ),
   };
 }
 

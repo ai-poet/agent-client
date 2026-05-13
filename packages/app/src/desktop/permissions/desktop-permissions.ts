@@ -22,6 +22,39 @@ export interface DesktopPermissionSnapshot {
   microphone: DesktopPermissionStatus;
 }
 
+export interface DesktopPermissionMessages {
+  notifications: {
+    allowedByOs: string;
+    deniedInSystem: string;
+    notGrantedYet: string;
+    unexpectedState: (permission: string) => string;
+    desktopStatusWebOnly: string;
+    supported: string;
+    notSupported: string;
+    webApiUnavailable: string;
+    requestWebOnly: string;
+    requestApiUnavailable: string;
+    failedRequest: (message: string) => string;
+  };
+  microphone: {
+    desktopStatusWebOnly: string;
+    navigatorUnavailable: string;
+    granted: string;
+    deniedInSystem: string;
+    notGrantedYet: string;
+    unexpectedState: (state: string) => string;
+    runtimeStatusApiUnavailable: string;
+    failedQuery: (message: string) => string;
+    captureUnavailable: string;
+    permissionStatusUnavailable: string;
+    requestWebOnly: string;
+    requestCaptureUnavailable: string;
+    deniedByUserOrSystem: string;
+    noDeviceFound: string;
+    failedRequest: (message: string) => string;
+  };
+}
+
 type NotificationConstructorLike = {
   permission?: string;
   requestPermission?: () => Promise<string>;
@@ -107,36 +140,77 @@ function getNavigatorLike(): NavigatorLike | null {
   return webNavigator as NavigatorLike;
 }
 
-function mapNotificationPermissionString(permission: string): DesktopPermissionStatus {
+export const DEFAULT_DESKTOP_PERMISSION_MESSAGES: DesktopPermissionMessages = {
+  notifications: {
+    allowedByOs: "Notifications are allowed by the OS.",
+    deniedInSystem: "Notifications are denied in system settings.",
+    notGrantedYet: "Notifications have not been granted yet.",
+    unexpectedState: (permission: string) =>
+      `Unexpected notification permission state: ${permission}`,
+    desktopStatusWebOnly: "Desktop notification status is only available on web runtime.",
+    supported: "Desktop notifications are supported.",
+    notSupported: "Desktop notifications are not supported on this platform.",
+    webApiUnavailable: "Web Notification API is unavailable in this environment.",
+    requestWebOnly: "Desktop notification requests are only available on web runtime.",
+    requestApiUnavailable: "Web Notification API requestPermission() is unavailable.",
+    failedRequest: (message: string) => `Failed to request notification permission: ${message}`,
+  },
+  microphone: {
+    desktopStatusWebOnly: "Desktop microphone status is only available on web runtime.",
+    navigatorUnavailable: "Navigator is unavailable in this environment.",
+    granted: "Microphone access is granted.",
+    deniedInSystem: "Microphone access is denied in system settings.",
+    notGrantedYet: "Microphone permission has not been granted yet.",
+    unexpectedState: (state: string) => `Unexpected microphone permission state: ${state}`,
+    runtimeStatusApiUnavailable:
+      "Microphone status API is unavailable in this runtime. Use Request to check access.",
+    failedQuery: (message: string) => `Failed to query microphone status: ${message}`,
+    captureUnavailable: "Microphone capture is unavailable in this environment.",
+    permissionStatusUnavailable:
+      "Permission status API is unavailable. Use Request to check access.",
+    requestWebOnly: "Desktop microphone requests are only available on web runtime.",
+    requestCaptureUnavailable: "Microphone capture API is unavailable in this environment.",
+    deniedByUserOrSystem: "Microphone permission was denied by the user or system.",
+    noDeviceFound: "No microphone device was found.",
+    failedRequest: (message: string) => `Failed to request microphone permission: ${message}`,
+  },
+};
+
+function mapNotificationPermissionString(
+  permission: string,
+  messages: DesktopPermissionMessages,
+): DesktopPermissionStatus {
   if (permission === "granted") {
     return status({
       state: "granted",
-      detail: "Notifications are allowed by the OS.",
+      detail: messages.notifications.allowedByOs,
     });
   }
   if (permission === "denied") {
     return status({
       state: "denied",
-      detail: "Notifications are denied in system settings.",
+      detail: messages.notifications.deniedInSystem,
     });
   }
   if (permission === "default") {
     return status({
       state: "prompt",
-      detail: "Notifications have not been granted yet.",
+      detail: messages.notifications.notGrantedYet,
     });
   }
   return status({
     state: "unknown",
-    detail: `Unexpected notification permission state: ${permission}`,
+    detail: messages.notifications.unexpectedState(permission),
   });
 }
 
-async function getNotificationPermissionStatus(): Promise<DesktopPermissionStatus> {
+async function getNotificationPermissionStatus(
+  messages: DesktopPermissionMessages,
+): Promise<DesktopPermissionStatus> {
   if (isNative) {
     return status({
       state: "unavailable",
-      detail: "Desktop notification status is only available on web runtime.",
+      detail: messages.notifications.desktopStatusWebOnly,
     });
   }
 
@@ -146,9 +220,7 @@ async function getNotificationPermissionStatus(): Promise<DesktopPermissionStatu
       const supported = await desktopHost.notification.isSupported();
       return status({
         state: supported ? "granted" : "unavailable",
-        detail: supported
-          ? "Desktop notifications are supported."
-          : "Desktop notifications are not supported on this platform.",
+        detail: supported ? messages.notifications.supported : messages.notifications.notSupported,
       });
     } catch {
       // Fall through to web API check
@@ -157,20 +229,22 @@ async function getNotificationPermissionStatus(): Promise<DesktopPermissionStatu
 
   const NotificationConstructor = getWebNotificationConstructor();
   if (NotificationConstructor && typeof NotificationConstructor.permission === "string") {
-    return mapNotificationPermissionString(NotificationConstructor.permission);
+    return mapNotificationPermissionString(NotificationConstructor.permission, messages);
   }
 
   return status({
     state: "unavailable",
-    detail: "Web Notification API is unavailable in this environment.",
+    detail: messages.notifications.webApiUnavailable,
   });
 }
 
-async function getMicrophonePermissionStatus(): Promise<DesktopPermissionStatus> {
+async function getMicrophonePermissionStatus(
+  messages: DesktopPermissionMessages,
+): Promise<DesktopPermissionStatus> {
   if (isNative) {
     return status({
       state: "unavailable",
-      detail: "Desktop microphone status is only available on web runtime.",
+      detail: messages.microphone.desktopStatusWebOnly,
     });
   }
 
@@ -178,7 +252,7 @@ async function getMicrophonePermissionStatus(): Promise<DesktopPermissionStatus>
   if (!webNavigator) {
     return status({
       state: "unavailable",
-      detail: "Navigator is unavailable in this environment.",
+      detail: messages.microphone.navigatorUnavailable,
     });
   }
 
@@ -189,36 +263,35 @@ async function getMicrophonePermissionStatus(): Promise<DesktopPermissionStatus>
       if (result?.state === "granted") {
         return status({
           state: "granted",
-          detail: "Microphone access is granted.",
+          detail: messages.microphone.granted,
         });
       }
       if (result?.state === "denied") {
         return status({
           state: "denied",
-          detail: "Microphone access is denied in system settings.",
+          detail: messages.microphone.deniedInSystem,
         });
       }
       if (result?.state === "prompt") {
         return status({
           state: "prompt",
-          detail: "Microphone permission has not been granted yet.",
+          detail: messages.microphone.notGrantedYet,
         });
       }
       return status({
         state: "unknown",
-        detail: `Unexpected microphone permission state: ${result?.state ?? "unknown"}`,
+        detail: messages.microphone.unexpectedState(result?.state ?? "unknown"),
       });
     } catch (error) {
       if (isPermissionsQueryRuntimeUnsupported(error)) {
         return status({
           state: "unknown",
-          detail:
-            "Microphone status API is unavailable in this runtime. Use Request to check access.",
+          detail: messages.microphone.runtimeStatusApiUnavailable,
         });
       }
       return status({
         state: "unknown",
-        detail: `Failed to query microphone status: ${getErrorMessage(error)}`,
+        detail: messages.microphone.failedQuery(getErrorMessage(error)),
       });
     }
   }
@@ -226,21 +299,23 @@ async function getMicrophonePermissionStatus(): Promise<DesktopPermissionStatus>
   if (typeof webNavigator.mediaDevices?.getUserMedia !== "function") {
     return status({
       state: "unavailable",
-      detail: "Microphone capture is unavailable in this environment.",
+      detail: messages.microphone.captureUnavailable,
     });
   }
 
   return status({
     state: "unknown",
-    detail: "Permission status API is unavailable. Use Request to check access.",
+    detail: messages.microphone.permissionStatusUnavailable,
   });
 }
 
-async function requestNotificationPermissionStatus(): Promise<DesktopPermissionStatus> {
+async function requestNotificationPermissionStatus(
+  messages: DesktopPermissionMessages,
+): Promise<DesktopPermissionStatus> {
   if (isNative) {
     return status({
       state: "unavailable",
-      detail: "Desktop notification requests are only available on web runtime.",
+      detail: messages.notifications.requestWebOnly,
     });
   }
 
@@ -248,26 +323,28 @@ async function requestNotificationPermissionStatus(): Promise<DesktopPermissionS
   if (NotificationConstructor && typeof NotificationConstructor.requestPermission === "function") {
     try {
       const permission = await NotificationConstructor.requestPermission();
-      return mapNotificationPermissionString(permission);
+      return mapNotificationPermissionString(permission, messages);
     } catch (error) {
       return status({
         state: "unknown",
-        detail: `Failed to request notification permission: ${getErrorMessage(error)}`,
+        detail: messages.notifications.failedRequest(getErrorMessage(error)),
       });
     }
   }
 
   return status({
     state: "unavailable",
-    detail: "Web Notification API requestPermission() is unavailable.",
+    detail: messages.notifications.requestApiUnavailable,
   });
 }
 
-async function requestMicrophonePermissionStatus(): Promise<DesktopPermissionStatus> {
+async function requestMicrophonePermissionStatus(
+  messages: DesktopPermissionMessages,
+): Promise<DesktopPermissionStatus> {
   if (isNative) {
     return status({
       state: "unavailable",
-      detail: "Desktop microphone requests are only available on web runtime.",
+      detail: messages.microphone.requestWebOnly,
     });
   }
 
@@ -275,7 +352,7 @@ async function requestMicrophonePermissionStatus(): Promise<DesktopPermissionSta
   if (!webNavigator || typeof webNavigator.mediaDevices?.getUserMedia !== "function") {
     return status({
       state: "unavailable",
-      detail: "Microphone capture API is unavailable in this environment.",
+      detail: messages.microphone.requestCaptureUnavailable,
     });
   }
 
@@ -287,41 +364,45 @@ async function requestMicrophonePermissionStatus(): Promise<DesktopPermissionSta
         track.stop();
       }
     });
-    return await getMicrophonePermissionStatus();
+    return await getMicrophonePermissionStatus(messages);
   } catch (error) {
     const errorName = getErrorName(error);
     if (errorName === "NotAllowedError" || errorName === "PermissionDeniedError") {
       return status({
         state: "denied",
-        detail: "Microphone permission was denied by the user or system.",
+        detail: messages.microphone.deniedByUserOrSystem,
       });
     }
     if (errorName === "NotFoundError" || errorName === "DevicesNotFoundError") {
       return status({
         state: "unavailable",
-        detail: "No microphone device was found.",
+        detail: messages.microphone.noDeviceFound,
       });
     }
     return status({
       state: "unknown",
-      detail: `Failed to request microphone permission: ${getErrorMessage(error)}`,
+      detail: messages.microphone.failedRequest(getErrorMessage(error)),
     });
   }
 }
 
 export async function requestDesktopPermission(input: {
   kind: DesktopPermissionKind;
+  messages?: DesktopPermissionMessages;
 }): Promise<DesktopPermissionStatus> {
+  const messages = input.messages ?? DEFAULT_DESKTOP_PERMISSION_MESSAGES;
   if (input.kind === "notifications") {
-    return await requestNotificationPermissionStatus();
+    return await requestNotificationPermissionStatus(messages);
   }
-  return await requestMicrophonePermissionStatus();
+  return await requestMicrophonePermissionStatus(messages);
 }
 
-export async function getDesktopPermissionSnapshot(): Promise<DesktopPermissionSnapshot> {
+export async function getDesktopPermissionSnapshot(
+  messages: DesktopPermissionMessages = DEFAULT_DESKTOP_PERMISSION_MESSAGES,
+): Promise<DesktopPermissionSnapshot> {
   const [notifications, microphone] = await Promise.all([
-    getNotificationPermissionStatus(),
-    getMicrophonePermissionStatus(),
+    getNotificationPermissionStatus(messages),
+    getMicrophonePermissionStatus(messages),
   ]);
 
   return {

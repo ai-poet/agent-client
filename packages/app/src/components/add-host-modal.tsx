@@ -133,9 +133,7 @@ function buildConnectionFailureCopy(
     title,
     detail,
     raw:
-      raw && raw.toLowerCase() === "transport error"
-        ? text.errors.noAdditionalDetails(raw)
-        : raw,
+      raw && raw.toLowerCase() === "transport error" ? text.errors.noAdditionalDetails(raw) : raw,
   };
 }
 

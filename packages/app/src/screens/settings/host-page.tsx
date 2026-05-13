@@ -482,27 +482,18 @@ function RestartDaemonCard({ host }: { host: HostProfile }) {
     if (isMountedRef.current) {
       setIsRestarting(false);
       if (!reconnected) {
-        Alert.alert(
-          text.unableReconnectTitle,
-          text.unableReconnectMessage(host.label),
-        );
+        Alert.alert(text.unableReconnectTitle, text.unableReconnectMessage(host.label));
       }
     }
   }, [host.label, isHostConnected, text, waitForCondition]);
 
   const handleRestart = useCallback(() => {
     if (!daemonClient) {
-      Alert.alert(
-        text.hostUnavailableTitle,
-        text.hostUnavailableMessage,
-      );
+      Alert.alert(text.hostUnavailableTitle, text.hostUnavailableMessage);
       return;
     }
     if (!isHostConnected()) {
-      Alert.alert(
-        text.hostOfflineTitle,
-        text.hostOfflineMessage(APP_NAME),
-      );
+      Alert.alert(text.hostOfflineTitle, text.hostOfflineMessage(APP_NAME));
       return;
     }
 
@@ -522,10 +513,7 @@ function RestartDaemonCard({ host }: { host: HostProfile }) {
             console.error(`[HostPage] Failed to restart daemon ${host.label}`, error);
             if (!isMountedRef.current) return;
             setIsRestarting(false);
-            Alert.alert(
-              text.error,
-              text.failedRestartRequest(APP_NAME),
-            );
+            Alert.alert(text.error, text.failedRestartRequest(APP_NAME));
           });
         void waitForDaemonRestart();
       })
@@ -661,9 +649,7 @@ function RemoveHostSection({ host, onRemoved }: { host: HostProfile; onRemoved?:
           }}
           testID="remove-host-confirm-modal"
         >
-          <Text style={styles.confirmText}>
-            {text.removeHostConfirmMessage(host.label)}
-          </Text>
+          <Text style={styles.confirmText}>{text.removeHostConfirmMessage(host.label)}</Text>
           <View style={styles.confirmActions}>
             <Button
               variant="secondary"

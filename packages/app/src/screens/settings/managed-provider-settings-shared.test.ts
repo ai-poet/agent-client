@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DesktopProviderPayload } from "@/screens/settings/sub2api-provider-types";
 import {
+  getCustomTargetSegmentOptions,
   providerTargetHint,
   providerWritesClaude,
   providerWritesCodex,
@@ -50,5 +51,14 @@ describe("provider write scopes", () => {
   it("does not expose legacy unscoped rows as usable write targets", () => {
     expect(providerWritesClaude(createProvider({ target: undefined }))).toBe(false);
     expect(providerWritesCodex(createProvider({ target: undefined }))).toBe(false);
+  });
+});
+
+describe("getCustomTargetSegmentOptions", () => {
+  it("builds localized segment labels", () => {
+    expect(getCustomTargetSegmentOptions({ claude: "Claude Code", codex: "Codex" })).toEqual([
+      { value: "claude", label: "Claude Code" },
+      { value: "codex", label: "Codex" },
+    ]);
   });
 });

@@ -99,18 +99,21 @@ export function DesktopProvidersPanel() {
     handleAddProvider,
   } = useDesktopProvidersStore();
 
-  const openConfigPreview = useCallback(async (target: Exclude<ConfigPreviewTarget, null>) => {
-    try {
-      setIsPreviewLoading(true);
-      const snapshot = await invokeDesktopCommand<ConfigSnapshot>("backup_config");
-      setConfigSnapshot(snapshot);
-      setPreviewTarget(target);
-    } catch (error) {
-      Alert.alert(text.unablePreviewConfig, getErrorMessage(error));
-    } finally {
-      setIsPreviewLoading(false);
-    }
-  }, [text.unablePreviewConfig]);
+  const openConfigPreview = useCallback(
+    async (target: Exclude<ConfigPreviewTarget, null>) => {
+      try {
+        setIsPreviewLoading(true);
+        const snapshot = await invokeDesktopCommand<ConfigSnapshot>("backup_config");
+        setConfigSnapshot(snapshot);
+        setPreviewTarget(target);
+      } catch (error) {
+        Alert.alert(text.unablePreviewConfig, getErrorMessage(error));
+      } finally {
+        setIsPreviewLoading(false);
+      }
+    },
+    [text.unablePreviewConfig],
+  );
 
   const openConfigFile = useCallback(
     async (target: "claude-settings" | "codex-auth" | "codex-config") => {
@@ -123,8 +126,7 @@ export function DesktopProvidersPanel() {
     [text.unableOpenConfig],
   );
 
-  const previewTitle =
-    previewTarget === "codex" ? text.previewTitleCodex : text.previewTitleClaude;
+  const previewTitle = previewTarget === "codex" ? text.previewTitleCodex : text.previewTitleClaude;
   const previewBlocks = useMemo(() => {
     if (!configSnapshot || !previewTarget) {
       return [];
@@ -242,10 +244,16 @@ export function DesktopProvidersPanel() {
                   <View style={settingsStyles.rowContent}>
                     <Text style={settingsStyles.rowTitle}>{provider.name}</Text>
                     <Text style={settingsStyles.rowHint}>{provider.endpoint}</Text>
-                    <Text style={styles.providerMetaHint}>{providerTargetHint(provider, text)}</Text>
+                    <Text style={styles.providerMetaHint}>
+                      {providerTargetHint(provider, text)}
+                    </Text>
                     <View style={[styles.scopeActionsRow, { marginTop: theme.spacing[1] }]}>
-                      {claudeActive ? <Text style={styles.scopeBadge}>{text.claudeActive}</Text> : null}
-                      {codexActive ? <Text style={styles.scopeBadge}>{text.codexActive}</Text> : null}
+                      {claudeActive ? (
+                        <Text style={styles.scopeBadge}>{text.claudeActive}</Text>
+                      ) : null}
+                      {codexActive ? (
+                        <Text style={styles.scopeBadge}>{text.codexActive}</Text>
+                      ) : null}
                     </View>
                   </View>
                   <View style={[styles.providerActions, { flexWrap: "wrap", maxWidth: 200 }]}>
@@ -386,9 +394,7 @@ export function DesktopProvidersPanel() {
               <View key={block.title} style={styles.routeSummaryCard}>
                 <Text style={styles.formTitle}>{block.title}</Text>
                 <Text style={styles.usageHint}>
-                  {block.contents
-                    ? text.currentOnDiskContents
-                    : text.fileNotCreatedYet}
+                  {block.contents ? text.currentOnDiskContents : text.fileNotCreatedYet}
                 </Text>
                 <View style={styles.configPreviewBlock}>
                   <Text

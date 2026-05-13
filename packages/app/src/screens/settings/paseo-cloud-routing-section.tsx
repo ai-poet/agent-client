@@ -256,11 +256,7 @@ export function PaseoCloudRoutingSection({
         await keysQuery.refetch();
         Alert.alert(
           text.globalUpdatedTitle,
-          text.globalGroupUpdatedMessage(
-            group.name,
-            scopeMeta.cliLabel,
-            scopeMeta.configTarget,
-          ),
+          text.globalGroupUpdatedMessage(group.name, scopeMeta.cliLabel, scopeMeta.configTarget),
         );
       } catch (error) {
         Alert.alert(text.switchFailed, getErrorMessage(error));
@@ -386,7 +382,9 @@ export function PaseoCloudRoutingSection({
                         {text.activeRouteVia(maskApiKey(activeKey.key))}
                       </Text>
                     ) : groupKeys.length > 0 ? (
-                      <Text style={styles.usageHint}>{text.reusableKeyCount(groupKeys.length)}</Text>
+                      <Text style={styles.usageHint}>
+                        {text.reusableKeyCount(groupKeys.length)}
+                      </Text>
                     ) : (
                       <Text style={styles.usageHint}>{text.noExistingKey}</Text>
                     )}

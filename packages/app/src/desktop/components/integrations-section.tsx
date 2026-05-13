@@ -196,8 +196,11 @@ export function IntegrationsSection() {
       ? text.runtimeStatusUnavailable
       : modelCliStatus?.node.installed
         ? modelCliStatus.node.satisfies
-          ? text.nodeRuntimeStatus(modelCliStatus.node.version, modelCliStatus.node.npmVersion ?? text.unknown)
-          : text.nodeVersionMismatch(modelCliStatus.node.version)
+          ? text.nodeRuntimeStatus(
+              modelCliStatus.node.version ?? text.unknown,
+              modelCliStatus.node.npmVersion ?? text.unknown,
+            )
+          : text.nodeVersionMismatch(modelCliStatus.node.version ?? text.unknown)
         : (modelCliStatus?.node.error ?? text.nodeNotDetected);
   const codexHint = integrationCheckPending
     ? text.checkingEnvironment

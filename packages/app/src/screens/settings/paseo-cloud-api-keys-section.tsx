@@ -359,9 +359,7 @@ export function PaseoCloudApiKeysSection({
             />
           </View>
 
-          <Text style={styles.usageHint}>
-            {text.pageHint}
-          </Text>
+          <Text style={styles.usageHint}>{text.pageHint}</Text>
           {scopedGroups.length === 0 ? (
             <View style={styles.dashedCard}>
               <Text style={styles.emptyTitle}>{text.noCompatibleGroupsTitle}</Text>

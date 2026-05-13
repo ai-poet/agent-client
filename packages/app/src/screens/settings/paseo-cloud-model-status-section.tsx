@@ -254,13 +254,7 @@ function HistoryRow({
   );
 }
 
-function RecordRow({
-  record,
-  text,
-}: {
-  record: Sub2APIGroupStatusRecord;
-  text: ModelStatusText;
-}) {
+function RecordRow({ record, text }: { record: Sub2APIGroupStatusRecord; text: ModelStatusText }) {
   const status = normalizeStatus(record.status);
   const excerpt = shorten(record.error_detail || record.response_excerpt, 140);
   return (
@@ -280,13 +274,7 @@ function RecordRow({
   );
 }
 
-function EventRow({
-  event,
-  text,
-}: {
-  event: Sub2APIGroupStatusEvent;
-  text: ModelStatusText;
-}) {
+function EventRow({ event, text }: { event: Sub2APIGroupStatusEvent; text: ModelStatusText }) {
   const status = normalizeStatus(event.to_status);
   const excerpt = shorten(event.error_detail, 140);
   return (
@@ -295,9 +283,8 @@ function EventRow({
         <View style={styles.statusTitleRow}>
           <View style={[styles.statusDotSmall, { backgroundColor: getStatusColor(status) }]} />
           <Text style={styles.detailRowTitle}>
-            {event.event_type || text.statusFallback}:{" "}
-            {event.from_status || text.unknownStatus} {"->"}{" "}
-            {event.to_status || text.unknownStatus}
+            {event.event_type || text.statusFallback}: {event.from_status || text.unknownStatus}{" "}
+            {"->"} {event.to_status || text.unknownStatus}
           </Text>
         </View>
         <Text style={styles.detailRowMeta}>

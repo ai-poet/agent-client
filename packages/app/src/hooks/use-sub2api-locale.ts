@@ -4,8 +4,5 @@ import { resolveSub2APILocaleFromPreference, type Sub2APILocale } from "@/i18n/s
 
 export function useSub2APILocale(): Sub2APILocale {
   const { settings } = useAppSettings();
-  return useMemo(
-    () => resolveSub2APILocaleFromPreference(settings.language),
-    [settings.language],
-  );
+  return useMemo(() => resolveSub2APILocaleFromPreference(settings.language), [settings.language]);
 }

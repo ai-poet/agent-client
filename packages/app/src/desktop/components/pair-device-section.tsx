@@ -16,10 +16,7 @@ import { getSub2APIMessages } from "@/i18n/sub2api";
 export function PairDeviceSection() {
   const { theme } = useUnistyles();
   const locale = useSub2APILocale();
-  const text = useMemo(
-    () => getSub2APIMessages(locale).settings.host.pairDeviceSection,
-    [locale],
-  );
+  const text = useMemo(() => getSub2APIMessages(locale).settings.host.pairDeviceSection, [locale]);
   const showSection = shouldUseDesktopDaemon();
   const [copied, setCopied] = useState(false);
 
@@ -94,9 +91,7 @@ export function PairDeviceSection() {
           </View>
         ) : (
           <View style={styles.content}>
-            <Text style={styles.hint}>
-              {text.instruction(APP_NAME)}
-            </Text>
+            <Text style={styles.hint}>{text.instruction(APP_NAME)}</Text>
             <View style={styles.qrContainer}>
               {qrQuery.data ? (
                 <Image source={{ uri: qrQuery.data }} style={styles.qrImage} resizeMode="contain" />

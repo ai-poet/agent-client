@@ -406,9 +406,7 @@ export function useSub2APIPaymentConfig() {
           };
         };
         return {
-          balanceCreditCnyPerUsd: parsePositiveNumber(
-            payload.config?.balanceCreditCnyPerUsd,
-          ),
+          balanceCreditCnyPerUsd: parsePositiveNumber(payload.config?.balanceCreditCnyPerUsd),
           usdExchangeRate: parsePositiveNumber(payload.config?.usdExchangeRate),
         };
       } catch {

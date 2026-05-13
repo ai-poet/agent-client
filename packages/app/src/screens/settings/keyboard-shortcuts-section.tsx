@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { View, Text } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { StyleSheet } from "react-native-unistyles";
@@ -22,16 +22,20 @@ import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import { getIsElectronRuntime } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 
 function ShortcutSequence({
   chord,
   heldModifiers,
+  text,
 }: {
   chord: string[] | null;
   heldModifiers: string | null;
+  text: ReturnType<typeof getSub2APIMessages>["settings"]["shortcuts"];
 }) {
   if ((!chord || chord.length === 0) && !heldModifiers) {
-    return <Text style={styles.capturingText}>Press shortcut...</Text>;
+    return <Text style={styles.capturingText}>{text.pressShortcut}</Text>;
   }
 
   const displayCombos = [...(chord ?? [])];
@@ -53,6 +57,7 @@ function ShortcutRow({
   onDone,
   onCancel,
   onReset,
+  text,
 }: {
   row: KeyboardShortcutHelpRow;
   bindingId: string | null;
@@ -64,6 +69,7 @@ function ShortcutRow({
   onDone: () => void;
   onCancel: () => void;
   onReset: () => void;
+  text: ReturnType<typeof getSub2APIMessages>["settings"]["shortcuts"];
 }) {
   const displayChord = overrideCombo ? chordStringToShortcutKeys(overrideCombo) : [row.keys];
 
@@ -72,7 +78,7 @@ function ShortcutRow({
       <Text style={styles.rowLabel}>{row.label}</Text>
       <View style={styles.rowActions}>
         {isCapturing ? (
-          <ShortcutSequence chord={capturedCombos} heldModifiers={heldModifiers} />
+          <ShortcutSequence chord={capturedCombos} heldModifiers={heldModifiers} text={text} />
         ) : (
           <Shortcut chord={displayChord} />
         )}
@@ -80,17 +86,17 @@ function ShortcutRow({
           <>
             {isCapturing && capturedCombos.length > 0 ? (
               <Button variant="ghost" size="sm" onPress={onDone}>
-                Done
+                {text.done}
               </Button>
             ) : null}
             <Button variant="ghost" size="sm" onPress={isCapturing ? onCancel : onRebind}>
-              {isCapturing ? "Cancel" : "Rebind"}
+              {isCapturing ? text.cancel : text.rebind}
             </Button>
           </>
         )}
         {overrideCombo !== undefined && !isCapturing && (
           <Button variant="ghost" size="sm" onPress={onReset}>
-            <Text style={styles.resetText}>Reset</Text>
+            <Text style={styles.resetText}>{text.reset}</Text>
           </Button>
         )}
       </View>
@@ -99,6 +105,8 @@ function ShortcutRow({
 }
 
 export function KeyboardShortcutsSection() {
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).settings.shortcuts, [locale]);
   const [capturingBindingId, setCapturingBindingId] = useState<string | null>(null);
   const [capturedCombos, setCapturedCombos] = useState<string[]>([]);
   const [heldModifiers, setHeldModifiers] = useState<string | null>(null);
@@ -177,9 +185,9 @@ export function KeyboardShortcutsSection() {
 
   if (isNative) {
     return (
-      <SettingsSection title="Shortcuts">
+      <SettingsSection title={text.title}>
         <View style={[settingsStyles.card, styles.mobileCard]}>
-          <Text style={styles.mobileText}>Keyboard shortcuts are only available on desktop</Text>
+          <Text style={styles.mobileText}>{text.desktopOnly}</Text>
         </View>
       </SettingsSection>
     );
@@ -187,7 +195,7 @@ export function KeyboardShortcutsSection() {
 
   const resetAllButton = hasOverrides ? (
     <Button variant="ghost" size="sm" onPress={() => void resetAll()}>
-      Reset all
+      {text.resetAll}
     </Button>
   ) : undefined;
 
@@ -227,6 +235,7 @@ export function KeyboardShortcutsSection() {
                       onReset={() => {
                         if (bindingId) void removeOverride(bindingId);
                       }}
+                      text={text}
                     />
                     {index < section.rows.length - 1 && <View style={styles.separator} />}
                   </View>

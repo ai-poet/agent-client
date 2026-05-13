@@ -10,7 +10,9 @@ type PayCenterUrlOptions = {
 const DEFAULT_PAY_LANG = "zh";
 
 function resolvePayLang(lang?: string | null): string {
-  return lang ? normalizeSub2APILocale(lang) : resolveSub2APILocale({ explicitLocale: DEFAULT_PAY_LANG });
+  return lang
+    ? normalizeSub2APILocale(lang)
+    : resolveSub2APILocale({ explicitLocale: DEFAULT_PAY_LANG });
 }
 
 export function buildPayCenterUrl(

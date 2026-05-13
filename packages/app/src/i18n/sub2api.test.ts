@@ -75,6 +75,12 @@ describe("sub2api i18n helpers", () => {
     expect(getSub2APIMessages("en").modelCatalog.title).toBe("Model catalog");
     expect(getSub2APIMessages("zh").settings.sections.general).toBe("通用");
     expect(getSub2APIMessages("en").settings.sections.general).toBe("General");
+    expect(getSub2APIMessages("zh").cloudPanel.signInBody("Paseo Cloud", "Paseo")).toContain(
+      "使用我们子托管的AI模型服务",
+    );
+    expect(getSub2APIMessages("en").cloudPanel.signInBody("Paseo Cloud", "Paseo")).toContain(
+      "sub-managed AI model service",
+    );
     expect(getSub2APIMessages("zh").sidebar.projects).toBe("项目");
     expect(getSub2APIMessages("en").sidebar.projects).toBe("Projects");
     expect(getSub2APIMessages("zh").sidebar.chat).toBe("聊天");
@@ -110,5 +116,9 @@ describe("sub2api i18n helpers", () => {
     expect(getAppMessages("en").composer.send).toBe("Send");
     expect(getAppMessages("zh").modelSelector.favorites).toBe("收藏");
     expect(getAppMessages("en").modelSelector.favorites).toBe("Favorites");
+    expect(getAppMessages("zh").settings.addHost.title).toBe("添加连接");
+    expect(getAppMessages("en").settings.addHost.title).toBe("Add connection");
+    expect(getAppMessages("zh").settings.host.sections.dangerZone).toBe("危险区");
+    expect(getAppMessages("en").settings.host.sections.dangerZone).toBe("Danger zone");
   });
 });

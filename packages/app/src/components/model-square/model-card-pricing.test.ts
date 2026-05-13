@@ -49,10 +49,13 @@ describe("model card pricing", () => {
 
   it("localizes actual paid section labels", () => {
     expect(
-      getActualPaidSectionLabel({
-        balanceCreditCnyPerUsd: 7.2,
-        usdExchangeRate: 6.9,
-      }, "zh-CN"),
+      getActualPaidSectionLabel(
+        {
+          balanceCreditCnyPerUsd: 7.2,
+          usdExchangeRate: 6.9,
+        },
+        "zh-CN",
+      ),
     ).toBe("实付价格");
     expect(getActualPaidSectionLabel(null, "zh-CN")).toBe("余额价格");
   });

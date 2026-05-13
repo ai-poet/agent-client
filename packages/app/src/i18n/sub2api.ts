@@ -1094,7 +1094,7 @@ export const sub2apiMessages = {
       loadingSettings: "正在加载设置…",
       back: "返回",
       local: "本地",
-      addHost: "添加主机",
+      addHostLabel: "添加主机",
       sections: {
         general: "通用",
         paseoCloud: "云服务",
@@ -1132,6 +1132,16 @@ export const sub2apiMessages = {
       playing: "播放中…",
       playTest: "播放测试",
       playbackFailed: (message: string) => `播放失败：${message}`,
+      shortcuts: {
+        title: "快捷键",
+        desktopOnly: "键盘快捷键仅在桌面端可用",
+        pressShortcut: "按下快捷键…",
+        done: "完成",
+        cancel: "取消",
+        rebind: "重新绑定",
+        reset: "重置",
+        resetAll: "全部重置",
+      },
       about: "关于",
       version: "版本",
       releaseChannel: "发布通道",
@@ -2504,7 +2514,7 @@ export const sub2apiMessages = {
       loadingSettings: "Loading settings...",
       back: "Back",
       local: "Local",
-      addHost: "Add host",
+      addHostLabel: "Add host",
       sections: {
         general: "General",
         paseoCloud: "Cloud service",
@@ -2542,6 +2552,16 @@ export const sub2apiMessages = {
       playing: "Playing...",
       playTest: "Play test",
       playbackFailed: (message: string) => `Playback failed: ${message}`,
+      shortcuts: {
+        title: "Shortcuts",
+        desktopOnly: "Keyboard shortcuts are only available on desktop",
+        pressShortcut: "Press shortcut...",
+        done: "Done",
+        cancel: "Cancel",
+        rebind: "Rebind",
+        reset: "Reset",
+        resetAll: "Reset all",
+      },
       about: "About",
       version: "Version",
       releaseChannel: "Release channel",
@@ -2760,7 +2780,8 @@ export const sub2apiMessages = {
         target: "Target",
         claudeUsageHint:
           "Claude Code is configured as native Anthropic Messages only (ANTHROPIC_BASE_URL). OpenAI-compatible upstreams will be supported via a separate gateway later.",
-        codexUsageHint: "Codex is configured for the OpenAI Responses wire only (not Chat Completions).",
+        codexUsageHint:
+          "Codex is configured for the OpenAI Responses wire only (not Chat Completions).",
         name: "Name",
         providerNamePlaceholder: "Provider name",
         endpoint: "Endpoint",
@@ -2828,8 +2849,7 @@ export const sub2apiMessages = {
         reinstall: "Reinstall",
         claudeCodeCli: "Claude Code CLI",
         externalAgentStack: "External agent stack",
-        externalAgentStackHint:
-          "Install Git Bash, Node.js 22, Codex, and Claude Code in one pass.",
+        externalAgentStackHint: "Install Git Bash, Node.js 22, Codex, and Claude Code in one pass.",
         installAll: "Install all",
       },
       permissions: {
@@ -2888,8 +2908,7 @@ export const sub2apiMessages = {
         error: "Error",
         unableOpenDaemonConfirmation: "Unable to open the daemon confirmation dialog.",
         daemonManagement: "Daemon management",
-        managementPausedHint:
-          "Paused. The built-in daemon stays stopped until you start it again.",
+        managementPausedHint: "Paused. The built-in daemon stays stopped until you start it again.",
         managementEnabledHint: (appName: string) =>
           `Enabled. ${appName} can manage the built-in daemon from the desktop app.`,
         resuming: "Resuming...",

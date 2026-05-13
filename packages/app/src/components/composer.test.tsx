@@ -778,24 +778,8 @@ function getComposerKeyboardActionHandler(): {
 
 describe("Composer keyboard shortcuts", () => {
   it("resolves the next mode id for agent mode cycling", () => {
-    expect(
-      resolveNextAgentModeId(
-        [
-          { id: "ask" },
-          { id: "code" },
-        ],
-        "ask",
-      ),
-    ).toBe("code");
-    expect(
-      resolveNextAgentModeId(
-        [
-          { id: "ask" },
-          { id: "code" },
-        ],
-        "code",
-      ),
-    ).toBe("ask");
+    expect(resolveNextAgentModeId([{ id: "ask" }, { id: "code" }], "ask")).toBe("code");
+    expect(resolveNextAgentModeId([{ id: "ask" }, { id: "code" }], "code")).toBe("ask");
     expect(resolveNextAgentModeId([{ id: "ask" }], "ask")).toBeNull();
   });
 

@@ -6,9 +6,14 @@ import { DesktopPermissionRow } from "@/desktop/components/desktop-permission-ro
 import { useDesktopPermissions } from "@/desktop/permissions/use-desktop-permissions";
 import { settingsStyles } from "@/styles/settings";
 import { SettingsSection } from "@/screens/settings/settings-section";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
+import { useMemo } from "react";
 
 export function DesktopPermissionsSection() {
   const { theme } = useUnistyles();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).settings.permissions, [locale]);
   const {
     isDesktopApp,
     snapshot,
@@ -37,23 +42,23 @@ export function DesktopPermissionsSection() {
         void refreshPermissions();
       }}
       disabled={isBusy}
-      accessibilityLabel="Refresh desktop permissions"
+      accessibilityLabel={text.refreshDesktopPermissions}
     >
-      {isRefreshing ? "Refreshing..." : "Refresh"}
+      {isRefreshing ? text.refreshing : text.refresh}
     </Button>
   );
 
   return (
-    <SettingsSection title="Permissions" trailing={refreshButton}>
+    <SettingsSection title={text.title} trailing={refreshButton}>
       <View style={settingsStyles.card}>
         <DesktopPermissionRow
-          title="Notifications"
+          title={text.notifications}
           status={snapshot?.notifications ?? null}
           isRequesting={requestingPermission === "notifications"}
           onRequest={() => {
             void requestPermission("notifications");
           }}
-          extraActionLabel="Test"
+          extraActionLabel={text.test}
           isExtraActionBusy={isSendingTestNotification}
           isExtraActionDisabled={!notificationsGranted || isBusy}
           onExtraAction={() => {
@@ -66,7 +71,7 @@ export function DesktopPermissionsSection() {
           </Text>
         ) : null}
         <DesktopPermissionRow
-          title="Microphone"
+          title={text.microphone}
           showBorder
           status={snapshot?.microphone ?? null}
           isRequesting={requestingPermission === "microphone"}

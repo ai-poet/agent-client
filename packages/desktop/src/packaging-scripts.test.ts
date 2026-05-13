@@ -70,8 +70,10 @@ describe("desktop packaging scripts", () => {
   it("windows shim discovers the packaged executable without hard-coding Paseo.exe", () => {
     const script = readFileSync(path.join(desktopPackageRoot, "bin/paseo.cmd"), "utf-8");
 
-    expect(script).toContain("set \"EXECUTABLE_NAME_FILE=%RESOURCES_DIR%\\bin\\app-executable-name\"");
-    expect(script).toContain("for %%F in (\"%RESOURCES_DIR%\\..\\*.exe\") do");
+    expect(script).toContain(
+      'set "EXECUTABLE_NAME_FILE=%RESOURCES_DIR%\\bin\\app-executable-name"',
+    );
+    expect(script).toContain('for %%F in ("%RESOURCES_DIR%\\..\\*.exe") do');
     expect(script).not.toContain("Paseo.exe");
   });
 });

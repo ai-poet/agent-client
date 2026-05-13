@@ -34,11 +34,9 @@ describe("sub2api-pay-url", () => {
 
   it("can append normalized language to payment API calls", () => {
     expect(
-      buildPayCenterApiUrl(
-        "https://ai-coding.cyberspirit.io",
-        "/api/orders/my?token=abc",
-        { lang: "en-US" },
-      ),
+      buildPayCenterApiUrl("https://ai-coding.cyberspirit.io", "/api/orders/my?token=abc", {
+        lang: "en-US",
+      }),
     ).toBe("https://ai-coding.cyberspirit.io/pay/api/orders/my?token=abc&lang=en");
   });
 
@@ -50,13 +48,12 @@ describe("sub2api-pay-url", () => {
 
   it("can include normalized language in single-order status URLs", () => {
     expect(
-      buildPayCenterOrderStatusUrl(
-        "https://ai-coding.cyberspirit.io",
-        "order-123",
-        "status-456",
-        { lang: "en-US" },
-      ),
-    ).toBe("https://ai-coding.cyberspirit.io/pay/api/orders/order-123?access_token=status-456&lang=en");
+      buildPayCenterOrderStatusUrl("https://ai-coding.cyberspirit.io", "order-123", "status-456", {
+        lang: "en-US",
+      }),
+    ).toBe(
+      "https://ai-coding.cyberspirit.io/pay/api/orders/order-123?access_token=status-456&lang=en",
+    );
   });
 
   it("builds stripe popup URLs under /pay/stripe-popup", () => {

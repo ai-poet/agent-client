@@ -301,7 +301,9 @@ describe("PaseoCloudPanel", () => {
 
     render(<PaseoCloudPanel />);
 
-    expect(screen.queryByText(/does not match a key in the current Paseo Cloud account/)).not.toBeNull();
+    expect(
+      screen.queryByText(/does not match a key in the current Paseo Cloud account/),
+    ).not.toBeNull();
 
     fireEvent.click(screen.getByTestId("paseo-cloud-route-repair-routing-claude-code"));
     expect(screen.queryByText("Routing section content")).not.toBeNull();

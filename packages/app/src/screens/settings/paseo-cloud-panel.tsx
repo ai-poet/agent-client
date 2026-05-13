@@ -67,7 +67,11 @@ function getSectionLabel(section: PaseoCloudSection, text: CloudPanelText): stri
 }
 
 function routeActionId(scopeLabel: string): string {
-  return scopeLabel.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return scopeLabel
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 function getLocalTimeZone(): string {

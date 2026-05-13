@@ -65,8 +65,8 @@ export default function PairScanScreen() {
         <View style={styles.card}>
           <Text style={styles.title}>Coming soon</Text>
           <Text style={styles.bodyText}>
-            QR pairing is temporarily unavailable. Paste a pairing link or use direct connection
-            for now.
+            QR pairing is temporarily unavailable. Paste a pairing link or use direct connection for
+            now.
           </Text>
           <Pressable style={styles.button} onPress={closeToSource}>
             <Text style={styles.buttonText}>Back</Text>

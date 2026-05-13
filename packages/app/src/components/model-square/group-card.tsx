@@ -96,7 +96,9 @@ export const ModelCard = memo(function ModelCard({
 
       {/* Pricing — actual paid (effective) is primary */}
       <View style={styles.pricingSection}>
-        <Text style={styles.sectionLabel}>{getActualPaidSectionLabel(actualPaidPricing, locale)}</Text>
+        <Text style={styles.sectionLabel}>
+          {getActualPaidSectionLabel(actualPaidPricing, locale)}
+        </Text>
         {isToken ? (
           <>
             <PriceRow

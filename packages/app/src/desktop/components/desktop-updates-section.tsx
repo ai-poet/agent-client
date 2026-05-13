@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -21,9 +21,13 @@ import {
 import { useDaemonStatus } from "@/desktop/hooks/use-daemon-status";
 import { resolveAppVersion } from "@/utils/app-version";
 import { APP_NAME } from "@/config/branding";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 
 export function LocalDaemonSection() {
   const { theme } = useUnistyles();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).settings.daemon, [locale]);
   const showSection = shouldUseDesktopDaemon();
   const appVersion = resolveAppVersion();
   const { settings, updateSettings } = useAppSettings();
@@ -42,14 +46,13 @@ export function LocalDaemonSection() {
 
   const daemonVersionMismatch = isVersionMismatch(appVersion, daemonVersion);
   const daemonStatusStateText =
-    statusError ?? (daemonStatus?.status === "running" ? daemonStatus.status : "not running");
-  const daemonStatusDetailText = `PID ${daemonStatus?.pid ? daemonStatus.pid : "—"}`;
+    statusError ?? (daemonStatus?.status === "running" ? daemonStatus.status : text.notRunning);
+  const daemonStatusDetailText = text.pid(daemonStatus?.pid);
   const isDaemonManagementPaused = !settings.manageBuiltInDaemon;
-  const daemonActionLabel = daemonStatus?.status === "running" ? "Restart daemon" : "Start daemon";
+  const daemonActionLabel =
+    daemonStatus?.status === "running" ? text.restartDaemon : text.startDaemon;
   const daemonActionMessage =
-    daemonStatus?.status === "running"
-      ? "Restarts the built-in daemon."
-      : "Starts the built-in daemon.";
+    daemonStatus?.status === "running" ? text.restartDaemonHint : text.startDaemonHint;
 
   const handleUpdateLocalDaemon = useCallback(() => {
     if (!showSection || isRestartingDaemon) {
@@ -59,11 +62,9 @@ export function LocalDaemonSection() {
     void confirmDialog({
       title: daemonActionLabel,
       message:
-        daemonStatus?.status === "running"
-          ? "This will restart the built-in daemon. The app will reconnect automatically."
-          : "This will start the built-in daemon.",
+        daemonStatus?.status === "running" ? text.restartConfirmMessage : text.startConfirmMessage,
       confirmLabel: daemonActionLabel,
-      cancelLabel: "Cancel",
+      cancelLabel: text.cancel,
     })
       .then((confirmed) => {
         if (!confirmed) {
@@ -80,14 +81,14 @@ export function LocalDaemonSection() {
           .then((newStatus) => {
             setStatus(newStatus);
             setStatusMessage(
-              daemonStatus?.status === "running" ? "Daemon restarted." : "Daemon started.",
+              daemonStatus?.status === "running" ? text.daemonRestarted : text.daemonStarted,
             );
             refetch();
           })
           .catch((error) => {
             console.error("[Settings] Failed to change desktop daemon state", error);
             const message = error instanceof Error ? error.message : String(error);
-            setStatusMessage(`${daemonActionLabel} failed: ${message}`);
+            setStatusMessage(text.actionFailed(daemonActionLabel, message));
           })
           .finally(() => {
             setIsRestartingDaemon(false);
@@ -95,7 +96,7 @@ export function LocalDaemonSection() {
       })
       .catch((error) => {
         console.error("[Settings] Failed to open desktop daemon action confirmation", error);
-        Alert.alert("Error", "Unable to open the daemon confirmation dialog.");
+        Alert.alert(text.error, text.unableOpenDaemonConfirmation);
       });
   }, [
     daemonActionLabel,
@@ -104,6 +105,7 @@ export function LocalDaemonSection() {
     refetch,
     setStatus,
     showSection,
+    text,
   ]);
 
   const handleToggleDaemonManagement = useCallback(() => {
@@ -116,11 +118,11 @@ export function LocalDaemonSection() {
       setStatusMessage(null);
       void updateSettings({ manageBuiltInDaemon: true })
         .then(() => {
-          setStatusMessage("Built-in daemon management resumed.");
+          setStatusMessage(text.managementResumed);
         })
         .catch((error) => {
           console.error("[Settings] Failed to update built-in daemon management", error);
-          Alert.alert("Error", "Unable to update built-in daemon management.");
+          Alert.alert(text.error, text.unableUpdateManagement);
         })
         .finally(() => {
           setIsUpdatingDaemonManagement(false);
@@ -129,11 +131,10 @@ export function LocalDaemonSection() {
     }
 
     void confirmDialog({
-      title: "Pause built-in daemon",
-      message:
-        "This will stop the built-in daemon immediately. Running agents and terminals connected to the built-in daemon will be stopped.",
-      confirmLabel: "Pause and stop",
-      cancelLabel: "Cancel",
+      title: text.pauseBuiltInDaemon,
+      message: text.pauseBuiltInDaemonMessage,
+      confirmLabel: text.pauseAndStop,
+      cancelLabel: text.cancel,
       destructive: true,
     })
       .then((confirmed) => {
@@ -158,11 +159,11 @@ export function LocalDaemonSection() {
           })
           .then(() => {
             refetch();
-            setStatusMessage("Built-in daemon paused and stopped.");
+            setStatusMessage(text.managementPausedAndStopped);
           })
           .catch((error) => {
             console.error("[Settings] Failed to pause built-in daemon management", error);
-            Alert.alert("Error", "Unable to pause built-in daemon management.");
+            Alert.alert(text.error, text.unablePauseManagement);
           })
           .finally(() => {
             setIsUpdatingDaemonManagement(false);
@@ -170,7 +171,7 @@ export function LocalDaemonSection() {
       })
       .catch((error) => {
         console.error("[Settings] Failed to open built-in daemon pause confirmation", error);
-        Alert.alert("Error", "Unable to open the daemon confirmation dialog.");
+        Alert.alert(text.error, text.unableOpenDaemonConfirmation);
       });
   }, [
     daemonStatus,
@@ -178,6 +179,7 @@ export function LocalDaemonSection() {
     refetch,
     setStatus,
     settings.manageBuiltInDaemon,
+    text,
     updateSettings,
   ]);
 
@@ -189,13 +191,13 @@ export function LocalDaemonSection() {
 
     void Clipboard.setStringAsync(logPath)
       .then(() => {
-        Alert.alert("Copied", "Log path copied.");
+        Alert.alert(text.copied, text.logPathCopied);
       })
       .catch((error) => {
         console.error("[Settings] Failed to copy log path", error);
-        Alert.alert("Error", "Unable to copy log path.");
+        Alert.alert(text.error, text.unableCopyLogPath);
       });
-  }, [daemonLogs?.logPath]);
+  }, [daemonLogs?.logPath, text]);
 
   const handleOpenLogs = useCallback(() => {
     if (!daemonLogs) {
@@ -211,7 +213,7 @@ export function LocalDaemonSection() {
       setIsCliStatusModalOpen(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setCliStatusOutput(`Failed to fetch daemon status: ${message}`);
+      setCliStatusOutput(text.failedFetchStatus(message));
       setIsCliStatusModalOpen(true);
     } finally {
       setIsLoadingCliStatus(false);
@@ -224,12 +226,12 @@ export function LocalDaemonSection() {
     }
     void Clipboard.setStringAsync(cliStatusOutput)
       .then(() => {
-        Alert.alert("Copied", "Status copied to clipboard.");
+        Alert.alert(text.copied, text.statusCopied);
       })
       .catch((error) => {
         console.error("[Settings] Failed to copy daemon status", error);
       });
-  }, [cliStatusOutput]);
+  }, [cliStatusOutput, text]);
 
   if (!showSection) {
     return null;
@@ -243,15 +245,15 @@ export function LocalDaemonSection() {
       textStyle={settingsStyles.sectionHeaderLinkText}
       style={settingsStyles.sectionHeaderLink}
       onPress={() => void openExternalUrl(ADVANCED_DAEMON_SETTINGS_URL)}
-      accessibilityLabel="Open advanced daemon settings"
+      accessibilityLabel={text.openAdvancedSettings}
     >
-      Advanced settings
+      {text.advancedSettings}
     </Button>
   );
 
   return (
     <SettingsSection
-      title="Daemon"
+      title={text.title}
       trailing={advancedSettingsButton}
       testID="host-page-daemon-lifecycle-card"
     >
@@ -264,10 +266,8 @@ export function LocalDaemonSection() {
           <View style={settingsStyles.card}>
             <View style={settingsStyles.row}>
               <View style={settingsStyles.rowContent}>
-                <Text style={settingsStyles.rowTitle}>Status</Text>
-                <Text style={settingsStyles.rowHint}>
-                  Only the built-in desktop daemon is shown here.
-                </Text>
+                <Text style={settingsStyles.rowTitle}>{text.status}</Text>
+                <Text style={settingsStyles.rowHint}>{text.builtInOnly}</Text>
               </View>
               <View style={styles.statusValueGroup}>
                 <Text style={styles.valueText}>{daemonStatusStateText}</Text>
@@ -276,11 +276,11 @@ export function LocalDaemonSection() {
             </View>
             <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
               <View style={settingsStyles.rowContent}>
-                <Text style={settingsStyles.rowTitle}>Daemon management</Text>
+                <Text style={settingsStyles.rowTitle}>{text.daemonManagement}</Text>
                 <Text style={settingsStyles.rowHint}>
                   {isDaemonManagementPaused
-                    ? "Paused. The built-in daemon stays stopped until you start it again."
-                    : `Enabled. ${APP_NAME} can manage the built-in daemon from the desktop app.`}
+                    ? text.managementPausedHint
+                    : text.managementEnabledHint(APP_NAME)}
                 </Text>
               </View>
               <Button
@@ -298,11 +298,11 @@ export function LocalDaemonSection() {
               >
                 {isUpdatingDaemonManagement
                   ? isDaemonManagementPaused
-                    ? "Resuming..."
-                    : "Pausing..."
+                    ? text.resuming
+                    : text.pausing
                   : isDaemonManagementPaused
-                    ? "Resume"
-                    : "Pause"}
+                    ? text.resume
+                    : text.pause}
               </Button>
             </View>
             <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
@@ -320,16 +320,16 @@ export function LocalDaemonSection() {
               >
                 {isRestartingDaemon
                   ? daemonStatus?.status === "running"
-                    ? "Restarting..."
-                    : "Starting..."
+                    ? text.restartDaemon
+                    : text.startDaemon
                   : daemonActionLabel}
               </Button>
             </View>
             <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
               <View style={settingsStyles.rowContent}>
-                <Text style={settingsStyles.rowTitle}>Log file</Text>
+                <Text style={settingsStyles.rowTitle}>{text.logFile}</Text>
                 <Text style={settingsStyles.rowHint}>
-                  {daemonLogs?.logPath ?? "Log path unavailable."}
+                  {daemonLogs?.logPath ?? text.logPathUnavailable}
                 </Text>
               </View>
               <View style={styles.actionGroup}>
@@ -340,7 +340,7 @@ export function LocalDaemonSection() {
                     leftIcon={<Copy size={theme.iconSize.sm} color={theme.colors.foreground} />}
                     onPress={handleCopyLogPath}
                   >
-                    Copy path
+                    {text.copyPath}
                   </Button>
                 ) : null}
                 <Button
@@ -350,16 +350,14 @@ export function LocalDaemonSection() {
                   onPress={handleOpenLogs}
                   disabled={!daemonLogs}
                 >
-                  Open logs
+                  {text.openLogs}
                 </Button>
               </View>
             </View>
             <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
               <View style={settingsStyles.rowContent}>
-                <Text style={settingsStyles.rowTitle}>Full status</Text>
-                <Text style={settingsStyles.rowHint}>
-                  Runs `paseo daemon status` and shows the output.
-                </Text>
+                <Text style={settingsStyles.rowTitle}>{text.fullStatus}</Text>
+                <Text style={settingsStyles.rowHint}>{text.fullStatusHint}</Text>
               </View>
               <Button
                 variant="outline"
@@ -368,17 +366,14 @@ export function LocalDaemonSection() {
                 onPress={() => void handleOpenCliStatus()}
                 disabled={isLoadingCliStatus}
               >
-                {isLoadingCliStatus ? "Loading..." : "View status"}
+                {isLoadingCliStatus ? text.loading : text.viewStatus}
               </Button>
             </View>
           </View>
 
           {daemonVersionMismatch ? (
             <View style={styles.warningCard}>
-              <Text style={styles.warningText}>
-                App and daemon versions don't match. Update both to the same version for the best
-                experience.
-              </Text>
+              <Text style={styles.warningText}>{text.versionMismatch}</Text>
             </View>
           ) : null}
         </>
@@ -387,16 +382,16 @@ export function LocalDaemonSection() {
       <AdaptiveModalSheet
         visible={isLogsModalOpen}
         onClose={() => setIsLogsModalOpen(false)}
-        title="Daemon logs"
+        title={text.daemonLogs}
         testID="managed-daemon-logs-dialog"
         snapPoints={["70%", "92%"]}
       >
         <View style={styles.modalBody}>
           <Text style={settingsStyles.rowHint}>
-            {daemonLogs?.logPath ?? "Log path unavailable."}
+            {daemonLogs?.logPath ?? text.logPathUnavailable}
           </Text>
           <Text style={styles.logOutput} selectable>
-            {daemonLogs?.contents.length ? daemonLogs.contents : "(log file is empty)"}
+            {daemonLogs?.contents.length ? daemonLogs.contents : text.logFileEmpty}
           </Text>
         </View>
       </AdaptiveModalSheet>
@@ -404,7 +399,7 @@ export function LocalDaemonSection() {
       <AdaptiveModalSheet
         visible={isCliStatusModalOpen}
         onClose={() => setIsCliStatusModalOpen(false)}
-        title="Daemon status"
+        title={text.daemonStatus}
         testID="daemon-cli-status-dialog"
         snapPoints={["60%", "85%"]}
       >
@@ -414,10 +409,10 @@ export function LocalDaemonSection() {
           </Text>
           <View style={styles.modalActions}>
             <Button variant="outline" size="sm" onPress={() => setIsCliStatusModalOpen(false)}>
-              Close
+              {text.close}
             </Button>
             <Button size="sm" onPress={handleCopyCliStatus}>
-              Copy
+              {text.copy}
             </Button>
           </View>
         </View>

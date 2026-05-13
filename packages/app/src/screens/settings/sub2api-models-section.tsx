@@ -65,7 +65,9 @@ function matchesModelSearch(
   );
 }
 
-function isGroupCatalogModel(value: GroupFirstCatalogModel | unknown): value is GroupFirstCatalogModel {
+function isGroupCatalogModel(
+  value: GroupFirstCatalogModel | unknown,
+): value is GroupFirstCatalogModel {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -212,9 +214,15 @@ export function Sub2APIModelsSection() {
             <>
               {summary ? (
                 <View style={styles.summaryGrid}>
-                  <Text style={styles.summaryCell}>{text.models}: {summary.total_models}</Text>
-                  <Text style={styles.summaryCell}>{text.token}: {summary.token_models}</Text>
-                  <Text style={styles.summaryCell}>{text.nonToken}: {summary.non_token_models}</Text>
+                  <Text style={styles.summaryCell}>
+                    {text.models}: {summary.total_models}
+                  </Text>
+                  <Text style={styles.summaryCell}>
+                    {text.token}: {summary.token_models}
+                  </Text>
+                  <Text style={styles.summaryCell}>
+                    {text.nonToken}: {summary.non_token_models}
+                  </Text>
                   <Text style={styles.summaryCell}>
                     {text.bestSavings}: {summary.max_savings_percent.toFixed(1)}%
                   </Text>

@@ -58,13 +58,7 @@ export function parseSub2APIAuthCallback(url: string): Sub2APIAuthCallback {
   const endpoint = normalizeEndpoint(params.get("endpoint")?.trim() ?? "");
   const expiresIn = Number.parseInt(params.get("expires_in") ?? "0", 10);
 
-  if (
-    !accessToken ||
-    !refreshToken ||
-    !endpoint ||
-    !Number.isFinite(expiresIn) ||
-    expiresIn <= 0
-  ) {
+  if (!accessToken || !refreshToken || !endpoint || !Number.isFinite(expiresIn) || expiresIn <= 0) {
     throw new Error("OAuth callback did not include a complete session.");
   }
 

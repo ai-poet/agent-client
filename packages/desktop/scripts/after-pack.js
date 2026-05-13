@@ -112,8 +112,7 @@ function writeExecutableMetadata({ appOutDir, platform, executableName }) {
 }
 
 function pruneNativeModules(appOutDir, platform, arch, executableName) {
-  const resourcesDir =
-    resolveResourcesDir({ appOutDir, platform, executableName });
+  const resourcesDir = resolveResourcesDir({ appOutDir, platform, executableName });
 
   const nodeModules = path.join(resourcesDir, "app.asar.unpacked", "node_modules");
   if (!fs.existsSync(nodeModules)) return;
@@ -174,7 +173,9 @@ exports.default = async function afterPack(context) {
     console.log(`Renamed ${executableName} to ${executableName}.bin for Linux wrapper`);
   }
 
-  fs.writeFileSync(executablePath, createLinuxWrapperScript(executableName), { mode: WRAPPER_MODE });
+  fs.writeFileSync(executablePath, createLinuxWrapperScript(executableName), {
+    mode: WRAPPER_MODE,
+  });
   fs.chmodSync(executablePath, WRAPPER_MODE);
   console.log(`Created Linux wrapper for ${executableName} with --no-sandbox`);
 };
