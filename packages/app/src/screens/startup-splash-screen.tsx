@@ -12,6 +12,8 @@ import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { isWeb } from "@/constants/platform";
 import { useWebScrollbarStyle } from "@/hooks/use-web-scrollbar-style";
 import { APP_NAME } from "@/config/branding";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
 
 type StartupSplashScreenProps = {
   bootstrapState?: {
@@ -164,6 +166,8 @@ const styles = StyleSheet.create((theme) => ({
 
 export function StartupSplashScreen({ bootstrapState }: StartupSplashScreenProps) {
   const { theme } = useUnistyles();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).startupSplash, [locale]);
   const webScrollbarStyle = useWebScrollbarStyle();
   const [daemonLogs, setDaemonLogs] = useState<DesktopDaemonLogs | null>(null);
   const [logsError, setLogsError] = useState<string | null>(null);
@@ -198,7 +202,7 @@ export function StartupSplashScreen({ bootstrapState }: StartupSplashScreenProps
         }
         const message = error instanceof Error ? error.message : String(error);
         setDaemonLogs(null);
-        setLogsError(`Unable to load daemon logs: ${message}`);
+        setLogsError(text.unableLoadDaemonLogs(message));
       })
       .finally(() => {
         if (!isCancelled) {
@@ -213,24 +217,24 @@ export function StartupSplashScreen({ bootstrapState }: StartupSplashScreenProps
 
   const progressSteps =
     phase === "starting-daemon"
-      ? [{ key: "starting-daemon", label: "Starting local server...", status: "active" as const }]
+      ? [{ key: "starting-daemon", label: text.startingDaemon, status: "active" as const }]
       : phase === "connecting"
         ? [
-            { key: "starting-daemon", label: "Started local server", status: "complete" as const },
+            { key: "starting-daemon", label: text.startedDaemon, status: "complete" as const },
             {
               key: "connecting",
-              label: "Connecting to local server...",
+              label: text.connectingLocalServer,
               status: "active" as const,
             },
           ]
         : [
-            { key: "starting-daemon", label: "Started local server", status: "complete" as const },
-            { key: "connecting", label: "Connected to local server", status: "complete" as const },
+            { key: "starting-daemon", label: text.startedDaemon, status: "complete" as const },
+            { key: "connecting", label: text.connectedLocalServer, status: "complete" as const },
           ];
 
   const logsText = useMemo(() => {
     if (isLoadingLogs) {
-      return "Loading daemon logs...";
+      return text.loadingDaemonLogs;
     }
     if (daemonLogs?.contents) {
       return daemonLogs.contents;
@@ -238,8 +242,8 @@ export function StartupSplashScreen({ bootstrapState }: StartupSplashScreenProps
     if (logsError) {
       return logsError;
     }
-    return "No daemon logs available.";
-  }, [daemonLogs?.contents, isLoadingLogs, logsError]);
+    return text.noDaemonLogs;
+  }, [daemonLogs?.contents, isLoadingLogs, logsError, text.loadingDaemonLogs, text.noDaemonLogs]);
 
   const handleCopyLogs = () => {
     const payload = daemonLogs?.logPath
@@ -253,7 +257,7 @@ export function StartupSplashScreen({ bootstrapState }: StartupSplashScreenProps
       <View style={styles.container}>
         <TitlebarDragRegion />
         <PaseoLogo size={96} />
-        <Text style={styles.subtitle}>Starting up…</Text>
+        <Text style={styles.subtitle}>{text.startingUp}</Text>
       </View>
     );
   }
@@ -264,7 +268,7 @@ export function StartupSplashScreen({ bootstrapState }: StartupSplashScreenProps
         <TitlebarDragRegion />
         <View style={styles.centeredContent}>
           <PaseoLogo size={96} />
-          <Text style={styles.title}>Welcome to {APP_NAME}</Text>
+          <Text style={styles.title}>{text.welcome(APP_NAME)}</Text>
           <View style={styles.progressSteps}>
             {progressSteps.map((step) => (
               <View key={step.key} style={styles.progressStepRow}>
@@ -293,13 +297,10 @@ export function StartupSplashScreen({ bootstrapState }: StartupSplashScreenProps
         <View style={styles.errorContent}>
           <View style={styles.errorHeader}>
             <PaseoLogo size={64} />
-            <Text style={[styles.title, styles.titleError]}>Something went wrong</Text>
+            <Text style={[styles.title, styles.titleError]}>{text.somethingWentWrong}</Text>
           </View>
 
-          <Text style={styles.errorDescription}>
-            The local server failed to start. If this keeps happening, please report the issue on
-            GitHub and include the logs below.
-          </Text>
+          <Text style={styles.errorDescription}>{text.localServerFailed}</Text>
 
           <Text style={styles.errorMessage}>{bootstrapState.error}</Text>
 
@@ -323,28 +324,28 @@ export function StartupSplashScreen({ bootstrapState }: StartupSplashScreenProps
               leftIcon={<Copy size={16} color={theme.colors.foreground} />}
               onPress={handleCopyLogs}
             >
-              Copy logs
+              {text.copyLogs}
             </Button>
             <Button
               variant="outline"
               leftIcon={<TriangleAlert size={16} color={theme.colors.foreground} />}
               onPress={() => void openExternalUrl(GITHUB_ISSUE_URL)}
             >
-              Open GitHub issue
+              {text.openGithubIssue}
             </Button>
             <Button
               variant="outline"
               leftIcon={<BookOpen size={16} color={theme.colors.foreground} />}
               onPress={() => void openExternalUrl(DOCS_URL)}
             >
-              Docs
+              {text.docs}
             </Button>
             <Button
               variant="default"
               leftIcon={<RotateCw size={16} color={theme.colors.palette.white} />}
               onPress={bootstrapState.retry}
             >
-              Retry
+              {text.retry}
             </Button>
           </View>
         </View>
