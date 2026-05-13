@@ -9,6 +9,7 @@ export interface DesktopAppUpdateCheckResult {
   latestVersion: string | null;
   body: string | null;
   date: string | null;
+  disabledReason: string | null;
 }
 
 export interface DesktopAppUpdateInstallResult {
@@ -88,6 +89,7 @@ export async function checkDesktopAppUpdate({
     latestVersion: toStringOrNull(result.latestVersion),
     body: toStringOrNull(result.body),
     date: toStringOrNull(result.date),
+    disabledReason: toStringOrNull(result.disabledReason),
   };
 }
 

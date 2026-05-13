@@ -20,8 +20,7 @@ const BRAND_ENV_KEYS = [
   "PASEO_DESKTOP_ICON_MAC",
   "PASEO_DESKTOP_ICON_WIN",
   "PASEO_DESKTOP_ICON_LINUX",
-  "PASEO_DESKTOP_UPDATE_OWNER",
-  "PASEO_DESKTOP_UPDATE_REPO",
+  "PASEO_DESKTOP_UPDATE_URL",
 ];
 
 function loadBuilderConfig(env: NodeJS.ProcessEnv = {}) {
@@ -48,11 +47,10 @@ function loadBuilderConfig(env: NodeJS.ProcessEnv = {}) {
         artifactName?: string;
         icon: string;
       };
-      publish: {
+      publish: Array<{
         provider: string;
-        owner: string;
-        repo: string;
-      };
+        url: string;
+      }> | null;
       extraResources: Array<{ from: string; to: string }>;
     };
   } finally {
@@ -83,11 +81,7 @@ describe("desktop packaging", () => {
     expect(config.executableName).toBe("Paseo");
     expect(config.mac.artifactName).toBe("Paseo-${version}-${arch}.${ext}");
     expect(config.win.artifactName).toBe("Paseo-${version}-${arch}.${ext}");
-    expect(config.publish).toMatchObject({
-      provider: "github",
-      owner: "ai-poet",
-      repo: "paseo",
-    });
+    expect(config.publish).toBeNull();
   });
 
   it("uses CyberAICoding package identity and icons from env", () => {
@@ -97,8 +91,7 @@ describe("desktop packaging", () => {
       PASEO_DESKTOP_ICON_PNG: "assets/cybercode-icon.png",
       PASEO_DESKTOP_ICON_MAC: "assets/cybercode-icon.icns",
       PASEO_DESKTOP_ICON_WIN: "assets/cybercode-icon.ico",
-      PASEO_DESKTOP_UPDATE_OWNER: "ai-poet",
-      PASEO_DESKTOP_UPDATE_REPO: "paseo",
+      PASEO_DESKTOP_UPDATE_URL: "minio.cyberspirit.io",
     });
 
     expect(config.appId).toBe("com.cyberaicoding.desktop");
@@ -114,8 +107,25 @@ describe("desktop packaging", () => {
     );
     expect(config.mac.artifactName).toBe("CyberAICoding-${version}-${arch}.${ext}");
     expect(config.win.artifactName).toBe("CyberAICoding-${version}-${arch}.${ext}");
-    expect(config.publish.owner).toBe("ai-poet");
-    expect(config.publish.repo).toBe("paseo");
+    expect(config.publish).toEqual([
+      {
+        provider: "generic",
+        url: "https://minio.cyberspirit.io/",
+      },
+    ]);
+  });
+
+  it("uses the cheapRouter MinIO update URL by brand name", () => {
+    const config = loadBuilderConfig({
+      PASEO_APP_NAME: "cheapRouter",
+    });
+
+    expect(config.publish).toEqual([
+      {
+        provider: "generic",
+        url: "https://file.masterwordai.com/",
+      },
+    ]);
   });
 
   it("forwards root build:desktop flags to the desktop workspace builder", () => {
@@ -150,8 +160,7 @@ describe("desktop packaging", () => {
         desktopIconMac: "assets/cybercode-icon.icns",
         desktopIconWin: "assets/cybercode-icon.ico",
         desktopIconLinux: "assets/cybercode",
-        desktopUpdateOwner: "ai-poet",
-        desktopUpdateRepo: "paseo",
+        desktopUpdateUrl: "https://minio.cyberspirit.io/",
       }),
     );
     const previousAppName = process.env.PASEO_APP_NAME;
@@ -161,6 +170,7 @@ describe("desktop packaging", () => {
     try {
       expect(module.getDesktopBranding().appName).toBe("CyberAICoding");
       expect(module.getDesktopBranding().desktopIconWin).toBe("assets/cybercode-icon.ico");
+      expect(module.getDesktopBranding().desktopUpdateUrl).toBe("https://minio.cyberspirit.io/");
     } finally {
       if (previousAppName === undefined) {
         delete process.env.PASEO_APP_NAME;

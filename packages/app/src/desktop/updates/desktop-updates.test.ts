@@ -9,6 +9,7 @@ async function loadModuleForPlatform(platform: "web" | "ios" | "android") {
 describe("desktop-updates helpers", () => {
   afterEach(() => {
     vi.doUnmock("react-native");
+    vi.doUnmock("@/desktop/electron/invoke");
     vi.restoreAllMocks();
     vi.resetModules();
   });
@@ -91,5 +92,35 @@ describe("desktop-updates helpers", () => {
     expect(diagnostics).toContain("Exit code: 1");
     expect(diagnostics).toContain("STDOUT:\nstdout text");
     expect(diagnostics).toContain("STDERR:\nstderr text");
+  });
+
+  it("parses desktop app update disabled reason", async () => {
+    const invoke = vi.fn(async () => ({
+      hasUpdate: false,
+      readyToInstall: false,
+      currentVersion: "1.0.0",
+      latestVersion: "1.0.0",
+      body: null,
+      date: null,
+      disabledReason: "Desktop updates are not configured for this brand.",
+    }));
+    vi.resetModules();
+    vi.doMock("react-native", () => ({ Platform: { OS: "web" } }));
+    vi.doMock("@/desktop/electron/invoke", () => ({
+      invokeDesktopCommand: invoke,
+    }));
+    const { checkDesktopAppUpdate } = await import("./desktop-updates");
+
+    const result = await checkDesktopAppUpdate({ releaseChannel: "stable" });
+
+    expect(result).toEqual({
+      hasUpdate: false,
+      readyToInstall: false,
+      currentVersion: "1.0.0",
+      latestVersion: "1.0.0",
+      body: null,
+      date: null,
+      disabledReason: "Desktop updates are not configured for this brand.",
+    });
   });
 });

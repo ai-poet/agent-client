@@ -2,6 +2,14 @@ const { resolveDesktopBrandingFromEnv } = require("./branding.cjs");
 
 const brand = resolveDesktopBrandingFromEnv(process.env);
 const artifactName = `${brand.appName}-\${version}-\${arch}.\${ext}`;
+const publish = brand.desktopUpdateUrl
+  ? [
+      {
+        provider: "generic",
+        url: brand.desktopUpdateUrl,
+      },
+    ]
+  : null;
 
 module.exports = {
   npmRebuild: false,
@@ -20,11 +28,7 @@ module.exports = {
     { from: brand.desktopIconPng, to: "icon.png" },
     { from: brand.desktopIconWin, to: "icon.ico" },
   ],
-  publish: {
-    provider: "github",
-    owner: brand.desktopUpdateOwner,
-    repo: brand.desktopUpdateRepo,
-  },
+  publish,
   mac: {
     artifactName,
     category: "public.app-category.developer-tools",

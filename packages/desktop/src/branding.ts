@@ -8,8 +8,7 @@ export interface DesktopBranding {
   desktopIconMac: string;
   desktopIconWin: string;
   desktopIconLinux: string;
-  desktopUpdateOwner: string;
-  desktopUpdateRepo: string;
+  desktopUpdateUrl: string | null;
 }
 
 const DEFAULT_DESKTOP_BRANDING: DesktopBranding = {
@@ -19,8 +18,12 @@ const DEFAULT_DESKTOP_BRANDING: DesktopBranding = {
   desktopIconMac: "assets/icon.icns",
   desktopIconWin: "assets/icon.ico",
   desktopIconLinux: "assets",
-  desktopUpdateOwner: "ai-poet",
-  desktopUpdateRepo: "paseo",
+  desktopUpdateUrl: null,
+};
+
+const DESKTOP_UPDATE_URL_BY_BRAND: Record<string, string> = {
+  cyberaicoding: "https://minio.cyberspirit.io/",
+  cheaprouter: "https://file.masterwordai.com/",
 };
 
 function trimToNull(value: string | undefined): string | null {
@@ -29,6 +32,30 @@ function trimToNull(value: string | undefined): string | null {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+export function normalizeDesktopUpdateUrl(value: string | undefined | null): string | null {
+  const trimmed = trimToNull(value ?? undefined);
+  if (!trimmed) {
+    return null;
+  }
+
+  const withProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+  try {
+    const url = new URL(withProtocol);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+    url.hash = "";
+    url.search = "";
+    if (!url.pathname.endsWith("/")) {
+      url.pathname = `${url.pathname}/`;
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 function readStringField(value: unknown): string | null {
@@ -46,8 +73,7 @@ function readCompiledDesktopBranding(): Partial<DesktopBranding> {
       desktopIconMac: readStringField(parsed.desktopIconMac) ?? undefined,
       desktopIconWin: readStringField(parsed.desktopIconWin) ?? undefined,
       desktopIconLinux: readStringField(parsed.desktopIconLinux) ?? undefined,
-      desktopUpdateOwner: readStringField(parsed.desktopUpdateOwner) ?? undefined,
-      desktopUpdateRepo: readStringField(parsed.desktopUpdateRepo) ?? undefined,
+      desktopUpdateUrl: readStringField(parsed.desktopUpdateUrl),
     };
   } catch {
     return {};
@@ -58,6 +84,7 @@ export function getDesktopBranding(): DesktopBranding {
   const compiled = readCompiledDesktopBranding();
   const appName =
     trimToNull(process.env.PASEO_APP_NAME) ?? compiled.appName ?? DEFAULT_DESKTOP_BRANDING.appName;
+  const defaultUpdateUrl = DESKTOP_UPDATE_URL_BY_BRAND[appName.toLowerCase()] ?? null;
   return {
     appName,
     desktopAppId:
@@ -80,13 +107,10 @@ export function getDesktopBranding(): DesktopBranding {
       trimToNull(process.env.PASEO_DESKTOP_ICON_LINUX) ??
       compiled.desktopIconLinux ??
       DEFAULT_DESKTOP_BRANDING.desktopIconLinux,
-    desktopUpdateOwner:
-      trimToNull(process.env.PASEO_DESKTOP_UPDATE_OWNER) ??
-      compiled.desktopUpdateOwner ??
-      DEFAULT_DESKTOP_BRANDING.desktopUpdateOwner,
-    desktopUpdateRepo:
-      trimToNull(process.env.PASEO_DESKTOP_UPDATE_REPO) ??
-      compiled.desktopUpdateRepo ??
-      DEFAULT_DESKTOP_BRANDING.desktopUpdateRepo,
+    desktopUpdateUrl:
+      normalizeDesktopUpdateUrl(process.env.PASEO_DESKTOP_UPDATE_URL) ??
+      normalizeDesktopUpdateUrl(compiled.desktopUpdateUrl) ??
+      normalizeDesktopUpdateUrl(defaultUpdateUrl) ??
+      DEFAULT_DESKTOP_BRANDING.desktopUpdateUrl,
   };
 }

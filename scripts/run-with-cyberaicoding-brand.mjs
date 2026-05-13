@@ -26,8 +26,7 @@ const cyberAiCodingEnv = {
   PASEO_DESKTOP_ICON_MAC: "assets/cybercode-icon.icns",
   PASEO_DESKTOP_ICON_WIN: "assets/cybercode-icon.ico",
   PASEO_DESKTOP_ICON_LINUX: "assets/cybercode",
-  PASEO_DESKTOP_UPDATE_OWNER: "ai-poet",
-  PASEO_DESKTOP_UPDATE_REPO: "paseo",
+  PASEO_DESKTOP_UPDATE_URL: "https://minio.cyberspirit.io/",
 };
 
 const [command, ...commandArgs] = args;
