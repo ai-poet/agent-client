@@ -921,7 +921,12 @@ export class HostRuntimeController {
     });
   }
 
-  private isRecoverableAbnormalDirectDisconnect(state: ConnectionState): boolean {
+  private isRecoverableAbnormalDirectDisconnect(state: ConnectionState): state is Extract<
+    ConnectionState,
+    { status: "disconnected" }
+  > & {
+    closeCode: 1006;
+  } {
     const desktopPlatform = this.deps.getDesktopPlatform?.() ?? null;
     return (
       state.status === "disconnected" &&
