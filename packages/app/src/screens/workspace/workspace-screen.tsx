@@ -86,7 +86,11 @@ import {
   getWorkspaceExecutionAuthority,
   resolveWorkspaceRouteId,
 } from "@/utils/workspace-execution";
-import { isCreatingWorktreePlaceholderId } from "@/utils/quick-create-worktree";
+import {
+  createWorktreeQuickly,
+  isCreatingWorktreePlaceholderId,
+} from "@/utils/quick-create-worktree";
+import { navigateToPreparedWorkspaceTab } from "@/utils/workspace-navigation";
 import {
   WorkspaceTabPresentationResolver,
   WorkspaceTabIcon,
@@ -1121,6 +1125,9 @@ function WorkspaceScreenContent({
     [uiTabs, workspaceLayout],
   );
   const setFocusedAgentId = useSessionStore((state) => state.setFocusedAgentId);
+  const mergeWorkspaces = useSessionStore((state) => state.mergeWorkspaces);
+  const removeWorkspace = useSessionStore((state) => state.removeWorkspace);
+  const setWorkspaces = useSessionStore((state) => state.setWorkspaces);
   const focusedPaneAgentId = useMemo(() => {
     const target = focusedPaneTabState.activeTab?.descriptor.target;
     if (target?.kind !== "agent") {
@@ -1172,6 +1179,73 @@ function WorkspaceScreenContent({
       return openWorkspaceTabFocused(persistenceKey, target);
     },
     [openWorkspaceTabFocused, openWorkspaceTabInBackground, persistenceKey],
+  );
+
+  const handleCreateWorktreeFromBranch = useCallback(
+    (branchName: string) => {
+      if (!client || !isConnected || !workspaceDescriptor) {
+        return;
+      }
+      if (workspaceDescriptor.projectKind !== "git") {
+        return;
+      }
+
+      const projectRootPath = trimNonEmpty(workspaceDescriptor.projectRootPath);
+      if (!projectRootPath) {
+        toast.error(text.workspacePathUnavailable);
+        return;
+      }
+
+      const draftId = generateDraftId();
+      void createWorktreeQuickly({
+        client,
+        isConnected,
+        serverId: normalizedServerId,
+        sourceDirectory: projectRootPath,
+        refName: branchName,
+        projectId: workspaceDescriptor.projectId,
+        projectDisplayName: workspaceDescriptor.projectDisplayName,
+        projectRootPath,
+        mergeWorkspaces,
+        removeWorkspace,
+        setWorkspaces,
+        toast,
+        onPlaceholderCreated: (placeholderWorkspace) => {
+          navigateToPreparedWorkspaceTab({
+            serverId: normalizedServerId,
+            workspaceId: placeholderWorkspace.id,
+            target: { kind: "draft", draftId },
+            navigationMethod: "navigate",
+          });
+        },
+        onCreated: ({ workspace }) => {
+          navigateToPreparedWorkspaceTab({
+            serverId: normalizedServerId,
+            workspaceId: workspace.id,
+            target: { kind: "draft", draftId },
+            navigationMethod: "replace",
+          });
+        },
+      });
+    },
+    [
+      client,
+      isConnected,
+      mergeWorkspaces,
+      normalizedServerId,
+      removeWorkspace,
+      setWorkspaces,
+      text.workspacePathUnavailable,
+      toast,
+      workspaceDescriptor,
+    ],
+  );
+  const canCreateWorktreeFromBranch = Boolean(
+    client &&
+      isConnected &&
+      isGitCheckout &&
+      workspaceDescriptor?.projectKind === "git" &&
+      trimNonEmpty(workspaceDescriptor.projectRootPath),
   );
 
   useEffect(() => {
@@ -2276,6 +2350,9 @@ function WorkspaceScreenContent({
                           serverId={normalizedServerId}
                           workspaceId={normalizedWorkspaceId}
                           isGitCheckout={isGitCheckout}
+                          onCreateWorktreeFromBranch={
+                            canCreateWorktreeFromBranch ? handleCreateWorktreeFromBranch : undefined
+                          }
                         />
                         {shouldShowWorkspaceHeaderSubtitle ? (
                           <Text

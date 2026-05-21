@@ -769,6 +769,7 @@ export const sub2apiMessages = {
       filterBranches: "过滤分支…",
       noBranchesFound: "没有找到分支。",
       switchBranchTitle: "切换分支",
+      createWorktreeFromBranch: (branch: string) => `从 ${branch} 新建工作树`,
       uncommittedChangesTitle: "未提交更改",
       stashBeforeSwitchMessage: "你有未提交更改。切换分支前要先 stash 吗？",
       stashAndSwitch: "Stash 并切换",
@@ -2220,6 +2221,7 @@ export const sub2apiMessages = {
       filterBranches: "Filter branches...",
       noBranchesFound: "No branches found.",
       switchBranchTitle: "Switch branch",
+      createWorktreeFromBranch: (branch: string) => `Create worktree from ${branch}`,
       uncommittedChangesTitle: "Uncommitted changes",
       stashBeforeSwitchMessage:
         "You have uncommitted changes. Stash them before switching branches?",

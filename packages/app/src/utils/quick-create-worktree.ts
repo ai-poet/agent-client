@@ -55,6 +55,7 @@ export async function createWorktreeQuickly(input: {
   isConnected: boolean;
   serverId: string;
   sourceDirectory: string;
+  refName?: string;
   projectId: string;
   projectDisplayName: string;
   projectRootPath: string;
@@ -89,6 +90,7 @@ export async function createWorktreeQuickly(input: {
     const payload = await input.client.createPaseoWorktree({
       cwd: input.sourceDirectory,
       worktreeSlug: placeholder.name,
+      ...(input.refName ? { refName: input.refName } : {}),
     });
 
     if (payload.error || !payload.workspace) {

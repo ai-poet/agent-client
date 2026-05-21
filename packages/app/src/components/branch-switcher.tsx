@@ -1,9 +1,10 @@
 import { useRef } from "react";
 import { Pressable, View } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, GitBranch } from "lucide-react-native";
+import { ChevronDown, GitBranch, GitBranchPlus } from "lucide-react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { Combobox, ComboboxItem, type ComboboxOption } from "@/components/ui/combobox";
+import { Combobox, ComboboxItem } from "@/components/ui/combobox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useToast } from "@/contexts/toast-context";
@@ -18,6 +19,7 @@ interface BranchSwitcherProps {
   serverId: string;
   workspaceId: string;
   isGitCheckout: boolean;
+  onCreateWorktreeFromBranch?: (branchName: string) => void;
 }
 
 export function BranchSwitcher({
@@ -26,6 +28,7 @@ export function BranchSwitcher({
   serverId,
   workspaceId,
   isGitCheckout,
+  onCreateWorktreeFromBranch,
 }: BranchSwitcherProps) {
   const { theme } = useUnistyles();
   const isCompact = useIsCompactFormFactor();
@@ -48,6 +51,7 @@ export function BranchSwitcher({
     queryClient,
     text,
   });
+  const canCreateFromBranch = Boolean(onCreateWorktreeFromBranch && isGitCheckout);
 
   const titleContent = (
     <View style={styles.titleRow}>
@@ -98,6 +102,42 @@ export function BranchSwitcher({
             active={active}
             onPress={onPress}
             leadingSlot={<GitBranch size={14} color={theme.colors.foregroundMuted} />}
+            trailingSlot={
+              canCreateFromBranch ? (
+                <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
+                  <TooltipTrigger asChild>
+                    <Pressable
+                      hitSlop={8}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        onCreateWorktreeFromBranch?.(option.id);
+                      }}
+                      style={({ hovered, pressed }) => [
+                        styles.branchWorktreeButton,
+                        (hovered || pressed) && styles.branchWorktreeButtonActive,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={text.createWorktreeFromBranch(option.id)}
+                      testID={`branch-create-worktree-${option.id}`}
+                    >
+                      {({ hovered, pressed }) => (
+                        <GitBranchPlus
+                          size={14}
+                          color={
+                            hovered || pressed
+                              ? theme.colors.foreground
+                              : theme.colors.foregroundMuted
+                          }
+                        />
+                      )}
+                    </Pressable>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" align="center" offset={8}>
+                    {text.createWorktreeFromBranch(option.id)}
+                  </TooltipContent>
+                </Tooltip>
+              ) : null
+            }
           />
         )}
       />
@@ -132,5 +172,15 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[1],
     minWidth: 0,
     overflow: "hidden",
+  },
+  branchWorktreeButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 16,
+    height: 16,
+    borderRadius: theme.borderRadius.sm,
+  },
+  branchWorktreeButtonActive: {
+    backgroundColor: theme.colors.surface2,
   },
 }));
