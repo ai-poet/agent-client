@@ -1018,19 +1018,13 @@ function ProjectHeaderRow({
           <NewWorktreeButton
             displayName={displayName}
             onPress={handleBeginWorkspaceSetup}
-            visible={isHovered || platformIsNative || isMobileBreakpoint}
+            visible
             showShortcutHint={isProjectActive}
             testID={`sidebar-project-new-worktree-${project.projectKey}`}
           />
         ) : null}
         {onRemoveProject ? (
-          <View
-            style={
-              !(isHovered || platformIsNative || isMobileBreakpoint) &&
-              styles.projectKebabButtonHidden
-            }
-            pointerEvents={isHovered || platformIsNative || isMobileBreakpoint ? "auto" : "none"}
-          >
+          <View>
             <DropdownMenu>
               <DropdownMenuTrigger
                 hitSlop={8}

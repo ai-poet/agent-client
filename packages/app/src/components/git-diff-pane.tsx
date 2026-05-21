@@ -4,6 +4,7 @@ import { DiffStat } from "@/components/diff-stat";
 import {
   View,
   Text,
+  TextInput,
   ActivityIndicator,
   Pressable,
   FlatList,
@@ -11,6 +12,7 @@ import {
   type NativeSyntheticEvent,
   type NativeScrollEvent,
   TextStyle,
+  type TextInput as TextInputInstance,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -18,6 +20,7 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import {
   AlignJustify,
   Archive,
+  CheckSquare,
   ChevronDown,
   Columns2,
   Download,
@@ -28,6 +31,7 @@ import {
   ListChevronsUpDown,
   Pilcrow,
   RefreshCcw,
+  Square,
   Upload,
   WrapText,
 } from "lucide-react-native";
@@ -71,10 +75,12 @@ import { useWebScrollViewScrollbar } from "@/components/use-web-scrollbar";
 import { buildNewAgentRoute, resolveNewAgentWorkingDir } from "@/utils/new-agent-routing";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { GitActionsSplitButton } from "@/components/git-actions-split-button";
+import { Button } from "@/components/ui/button";
 import { usePanelStore } from "@/stores/panel-store";
+import { buildExplorerCheckoutKey } from "@/stores/explorer-tab-memory";
 import { buildWorkspaceExplorerStateKey } from "@/hooks/use-file-explorer-actions";
 import { useToast } from "@/contexts/toast-context";
-import { useGitCommitDialog } from "@/contexts/git-commit-dialog-context";
+import { useGitCommitDialog, type GitCommitDialogFile } from "@/contexts/git-commit-dialog-context";
 import { useAppLocale } from "@/hooks/use-app-locale";
 import { getAppMessages } from "@/i18n/sub2api";
 import {
@@ -138,6 +144,9 @@ interface DiffFileSectionProps {
   file: ParsedDiffFile;
   isExpanded: boolean;
   onToggle: (path: string) => void;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelected?: (path: string) => void;
   onHeaderHeightChange?: (path: string, height: number) => void;
   testID?: string;
 }
@@ -421,9 +430,13 @@ const DiffFileHeader = memo(function DiffFileHeader({
   file,
   isExpanded,
   onToggle,
+  selectable = false,
+  selected = false,
+  onToggleSelected,
   onHeaderHeightChange,
   testID,
 }: DiffFileSectionProps) {
+  const { theme } = useUnistyles();
   const layoutYRef = useRef<number | null>(null);
   const pressHandledRef = useRef(false);
   const pressInRef = useRef<{ ts: number; pageX: number; pageY: number } | null>(null);
@@ -475,6 +488,25 @@ const DiffFileHeader = memo(function DiffFileHeader({
         }}
         onPress={toggleExpanded}
       >
+        {selectable ? (
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: selected }}
+            testID={testID ? `${testID}-select` : undefined}
+            hitSlop={8}
+            onPress={(event) => {
+              event.stopPropagation();
+              onToggleSelected?.(file.path);
+            }}
+            style={styles.fileSelectButton}
+          >
+            {selected ? (
+              <CheckSquare size={16} color={theme.colors.accent} />
+            ) : (
+              <Square size={16} color={theme.colors.foregroundMuted} />
+            )}
+          </Pressable>
+        ) : null}
         <View style={styles.fileHeaderLeft}>
           <Text style={styles.fileName}>{file.path.split("/").pop()}</Text>
           <Text style={styles.fileDir} numberOfLines={1}>
@@ -646,6 +678,10 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
   const [diffModeOverride, setDiffModeOverride] = useState<"uncommitted" | "base" | null>(null);
   const [postShipArchiveSuggested, setPostShipArchiveSuggested] = useState(false);
   const [shipDefault, setShipDefault] = useState<"merge" | "pr">("merge");
+  const [commitMessage, setCommitMessage] = useState("");
+  const [commitError, setCommitError] = useState<string | null>(null);
+  const [selectedCommitPaths, setSelectedCommitPaths] = useState<Set<string>>(() => new Set());
+  const commitInputRef = useRef<TextInputInstance>(null);
   const { preferences: changesPreferences, updatePreferences: updateChangesPreferences } =
     useChangesPreferences();
   const wrapLines = changesPreferences.wrapLines;
@@ -715,6 +751,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       }),
     [normalizedWorkspaceRoot, workspaceId],
   );
+  const commitFocusKey = useMemo(() => buildExplorerCheckoutKey(serverId, cwd), [cwd, serverId]);
   const expandedPathsArray = usePanelStore((state) =>
     workspaceStateKey ? state.diffExpandedPathsByWorkspace[workspaceStateKey] : undefined,
   );
@@ -893,10 +930,75 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     }
   }, [allExpanded, files, setDiffExpandedPathsForWorkspace, workspaceStateKey]);
 
+  const commitFilePaths = useMemo(
+    () => (diffMode === "uncommitted" ? files.map((file) => file.path) : []),
+    [diffMode, files],
+  );
+  const commitDialogFiles = useMemo<GitCommitDialogFile[]>(() => {
+    if (diffMode !== "uncommitted") {
+      return [];
+    }
+    return files.map((file) => ({
+      path: file.path,
+      additions: file.additions,
+      deletions: file.deletions,
+      isNew: file.isNew,
+      isDeleted: file.isDeleted,
+      status: file.status,
+    }));
+  }, [diffMode, files]);
+  const selectedCommitCount = selectedCommitPaths.size;
+  const allCommitFilesSelected =
+    commitFilePaths.length > 0 && selectedCommitCount === commitFilePaths.length;
+
+  useEffect(() => {
+    setSelectedCommitPaths((current) => {
+      const availablePaths = new Set(commitFilePaths);
+      const next = new Set<string>();
+      let changed = current.size !== availablePaths.size;
+      for (const path of commitFilePaths) {
+        if (current.has(path) || current.size === 0) {
+          next.add(path);
+        }
+        if (!current.has(path)) {
+          changed = true;
+        }
+      }
+      for (const path of current) {
+        if (!availablePaths.has(path)) {
+          changed = true;
+          break;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [commitFilePaths]);
+
+  useEffect(() => {
+    if (diffMode !== "uncommitted") {
+      setCommitError(null);
+    }
+  }, [diffMode]);
+
   // Clear diff mode override when auto mode changes (e.g., after commit)
   useEffect(() => {
     setDiffModeOverride(null);
   }, [autoDiffMode]);
+
+  const commitFocusRequest = usePanelStore((state) => {
+    if (!commitFocusKey) {
+      return undefined;
+    }
+    return state.commitFocusRequestByCheckout[commitFocusKey];
+  });
+
+  useEffect(() => {
+    if (!commitFocusRequest) {
+      return;
+    }
+    const timeout = setTimeout(() => commitInputRef.current?.focus(), 0);
+    return () => clearTimeout(timeout);
+  }, [commitFocusRequest]);
 
   const commitStatus = useCheckoutGitActionsStore((state) =>
     state.getStatus({ serverId, cwd, actionId: "commit" }),
@@ -943,16 +1045,90 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     [toast],
   );
 
-  const handleCommit = useCallback(() => {
-    openCommitDialog({
-      serverId,
-      cwd,
-      onCommit: async (message) => {
-        await runCommit({ serverId, cwd, message, addAll: true });
-        toastActionSuccess(text.committedToast);
-      },
+  const toggleCommitPath = useCallback((path: string) => {
+    setSelectedCommitPaths((current) => {
+      const next = new Set(current);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
     });
-  }, [cwd, openCommitDialog, runCommit, serverId, text.committedToast, toastActionSuccess]);
+    setCommitError(null);
+  }, []);
+
+  const selectAllCommitFiles = useCallback(() => {
+    setSelectedCommitPaths(new Set(commitFilePaths));
+    setCommitError(null);
+  }, [commitFilePaths]);
+
+  const clearCommitFiles = useCallback(() => {
+    setSelectedCommitPaths(new Set());
+    setCommitError(null);
+  }, []);
+
+  const handleCommitMessageChange = useCallback((next: string) => {
+    setCommitMessage(next);
+    setCommitError(null);
+  }, []);
+
+  const handleCommit = useCallback(() => {
+    if (isMobile) {
+      openCommitDialog({
+        serverId,
+        cwd,
+        files: commitDialogFiles,
+        onCommit: async (message, options) => {
+          await runCommit({
+            serverId,
+            cwd,
+            message,
+            addAll: options?.addAll ?? true,
+            paths: options?.paths,
+          });
+          toastActionSuccess(text.committedToast);
+        },
+      });
+      return;
+    }
+
+    const message = commitMessage.trim();
+    if (!message) {
+      setCommitError(text.commitMessageRequired);
+      commitInputRef.current?.focus();
+      return;
+    }
+    const paths = commitFilePaths.filter((path) => selectedCommitPaths.has(path));
+    if (paths.length === 0) {
+      setCommitError(text.commitFilesRequired);
+      return;
+    }
+    void runCommit({ serverId, cwd, message, addAll: false, paths })
+      .then(() => {
+        setCommitMessage("");
+        setCommitError(null);
+        toastActionSuccess(text.committedToast);
+      })
+      .catch((err) => {
+        setCommitError(err instanceof Error ? err.message : text.failedCommit);
+      });
+  }, [
+    commitFilePaths,
+    commitDialogFiles,
+    commitMessage,
+    cwd,
+    isMobile,
+    openCommitDialog,
+    runCommit,
+    selectedCommitPaths,
+    serverId,
+    text.commitFilesRequired,
+    text.commitMessageRequired,
+    text.committedToast,
+    text.failedCommit,
+    toastActionSuccess,
+  ]);
 
   const handlePull = useCallback(() => {
     void runPull({ serverId, cwd })
@@ -1097,6 +1273,9 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
             file={item.file}
             isExpanded={item.isExpanded}
             onToggle={handleToggleExpanded}
+            selectable={diffMode === "uncommitted"}
+            selected={selectedCommitPaths.has(item.file.path)}
+            onToggleSelected={toggleCommitPath}
             onHeaderHeightChange={handleHeaderHeightChange}
             testID={`diff-file-${item.fileIndex}`}
           />
@@ -1115,10 +1294,13 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     },
     [
       effectiveLayout,
+      diffMode,
       handleBodyHeightChange,
       handleHeaderHeightChange,
       handleToggleExpanded,
+      selectedCommitPaths,
       text,
+      toggleCommitPath,
       wrapLines,
     ],
   );
@@ -1164,7 +1346,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     !hasUncommittedChanges &&
     (postShipArchiveSuggested || isMergedPullRequest);
 
-  const commitDisabled = actionsDisabled || commitStatus === "pending";
+  const commitDisabled = actionsDisabled || commitStatus === "pending" || (!isMobile && hasChanges);
   const pullDisabled = actionsDisabled || pullStatus === "pending";
   const prDisabled = actionsDisabled || prCreateStatus === "pending";
   const mergeDisabled = actionsDisabled || mergeStatus === "pending";
@@ -1571,6 +1753,52 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
 
       {prErrorMessage ? <Text style={styles.actionErrorText}>{prErrorMessage}</Text> : null}
 
+      {isGit && diffMode === "uncommitted" && !isMobile && hasChanges ? (
+        <View style={styles.inlineCommitPanel} testID="changes-inline-commit">
+          <TextInput
+            ref={commitInputRef}
+            value={commitMessage}
+            onChangeText={handleCommitMessageChange}
+            placeholder={text.commitMessagePlaceholder}
+            placeholderTextColor={theme.colors.foregroundMuted}
+            autoCapitalize="sentences"
+            autoCorrect
+            editable={commitStatus !== "pending"}
+            returnKeyType="done"
+            onSubmitEditing={handleCommit}
+            style={styles.inlineCommitInput}
+            testID="changes-inline-commit-message"
+          />
+          <View style={styles.inlineCommitMetaRow}>
+            <Text style={styles.inlineCommitCount} numberOfLines={1}>
+              {text.commitFilesSelected(selectedCommitCount, commitFilePaths.length)}
+            </Text>
+            <View style={styles.inlineCommitMetaActions}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onPress={allCommitFilesSelected ? clearCommitFiles : selectAllCommitFiles}
+                disabled={commitStatus === "pending"}
+                testID="changes-inline-toggle-all-files"
+              >
+                {allCommitFilesSelected ? text.clearCommitFiles : text.selectAllCommitFiles}
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onPress={handleCommit}
+                disabled={commitStatus === "pending"}
+                leftIcon={<GitCommitHorizontal size={14} color={theme.colors.palette.white} />}
+                testID="changes-inline-commit-submit"
+              >
+                {commitStatus === "pending" ? text.committing : text.commitAction}
+              </Button>
+            </View>
+          </View>
+          {commitError ? <Text style={styles.inlineCommitError}>{commitError}</Text> : null}
+        </View>
+      ) : null}
+
       <View style={styles.diffContainer}>
         {bodyContent}
         {hasChanges ? scrollbar.overlay : null}
@@ -1721,6 +1949,47 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.destructive,
   },
+  inlineCommitPanel: {
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  inlineCommitInput: {
+    minHeight: 34,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface0,
+    color: theme.colors.foreground,
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    fontSize: theme.fontSize.sm,
+  },
+  inlineCommitMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[2],
+  },
+  inlineCommitCount: {
+    flex: 1,
+    minWidth: 0,
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+  },
+  inlineCommitMetaActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    flexShrink: 0,
+  },
+  inlineCommitError: {
+    color: theme.colors.destructive,
+    fontSize: theme.fontSize.xs,
+  },
   diffContainer: {
     flex: 1,
     minHeight: 0,
@@ -1795,6 +2064,14 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[1],
     zIndex: 2,
     elevation: 2,
+  },
+  fileSelectButton: {
+    width: 22,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: theme.borderRadius.base,
+    flexShrink: 0,
   },
   fileHeaderPressed: {
     opacity: 0.7,

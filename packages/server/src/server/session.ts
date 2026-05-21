@@ -4658,6 +4658,7 @@ export class Session {
       await commitChanges(cwd, {
         message,
         addAll: msg.addAll ?? true,
+        paths: msg.paths,
       });
       await this.notifyGitMutation(cwd, "commit-changes");
       this.checkoutDiffManager.scheduleRefreshForCwd(cwd);

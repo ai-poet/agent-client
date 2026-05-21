@@ -1108,6 +1108,7 @@ export const CheckoutCommitRequestSchema = z.object({
   cwd: z.string(),
   message: z.string().optional(),
   addAll: z.boolean().optional(),
+  paths: z.array(z.string()).optional(),
   requestId: z.string(),
 });
 

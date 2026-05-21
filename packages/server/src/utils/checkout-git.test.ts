@@ -8,6 +8,7 @@ import {
   __resetPullRequestStatusCacheForTests,
   __setPullRequestStatusCacheTtlForTests,
   commitAll,
+  commitChanges,
   getCachedCheckoutShortstat,
   getCurrentBranch,
   getCheckoutDiff,
@@ -213,6 +214,24 @@ describe("checkout git utilities", () => {
     expect(cleanStatus.isDirty).toBe(false);
     const message = execSync("git log -1 --pretty=%B", { cwd: repoDir }).toString().trim();
     expect(message).toBe("update file");
+  });
+
+  it("commits only selected paths when commit paths are provided", async () => {
+    writeFileSync(join(repoDir, "file.txt"), "selected\n");
+    writeFileSync(join(repoDir, "other.txt"), "left uncommitted\n");
+
+    await commitChanges(repoDir, {
+      message: "commit selected path",
+      addAll: false,
+      paths: ["file.txt"],
+    });
+
+    const committedFile = execSync("git show HEAD:file.txt", { cwd: repoDir }).toString();
+    expect(committedFile).toBe("selected\n");
+    expect(() => execSync("git show HEAD:other.txt", { cwd: repoDir })).toThrow();
+
+    const porcelain = execSync("git status --porcelain", { cwd: repoDir }).toString();
+    expect(porcelain).toContain("?? other.txt");
   });
 
   it("hides whitespace-only changes when requested", async () => {

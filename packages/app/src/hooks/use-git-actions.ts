@@ -8,7 +8,6 @@ import { buildGitActions, type GitActions } from "@/components/git-actions-polic
 import { buildNewAgentRoute, resolveNewAgentWorkingDir } from "@/utils/new-agent-routing";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { useToast } from "@/contexts/toast-context";
-import { useGitCommitDialog } from "@/contexts/git-commit-dialog-context";
 import { useAppLocale } from "@/hooks/use-app-locale";
 import { getAppMessages } from "@/i18n/sub2api";
 
@@ -31,6 +30,7 @@ interface UseGitActionsInput {
     mergeFromBase: ReactElement;
     archive: ReactElement;
   };
+  onCommit?: () => void;
 }
 
 interface UseGitActionsResult {
@@ -39,10 +39,14 @@ interface UseGitActionsResult {
   isGit: boolean;
 }
 
-export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): UseGitActionsResult {
+export function useGitActions({
+  serverId,
+  cwd,
+  icons,
+  onCommit,
+}: UseGitActionsInput): UseGitActionsResult {
   const router = useRouter();
   const toast = useToast();
-  const { openCommitDialog } = useGitCommitDialog();
   const locale = useAppLocale();
   const text = useMemo(() => getAppMessages(locale).gitDiff, [locale]);
   const [postShipArchiveSuggested, setPostShipArchiveSuggested] = useState(false);
@@ -128,7 +132,6 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
     state.getStatus({ serverId, cwd, actionId: "archive-worktree" }),
   );
 
-  const runCommit = useCheckoutGitActionsStore((state) => state.commit);
   const runPull = useCheckoutGitActionsStore((state) => state.pull);
   const runPush = useCheckoutGitActionsStore((state) => state.push);
   const runCreatePr = useCheckoutGitActionsStore((state) => state.createPr);
@@ -153,15 +156,8 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
 
   // Handlers
   const handleCommit = useCallback(() => {
-    openCommitDialog({
-      serverId,
-      cwd,
-      onCommit: async (message) => {
-        await runCommit({ serverId, cwd, message, addAll: true });
-        toastActionSuccess(text.committedToast);
-      },
-    });
-  }, [cwd, openCommitDialog, runCommit, serverId, text.committedToast, toastActionSuccess]);
+    onCommit?.();
+  }, [onCommit]);
 
   const handlePull = useCallback(() => {
     void runPull({ serverId, cwd })

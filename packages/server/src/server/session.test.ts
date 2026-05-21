@@ -624,6 +624,40 @@ describe("session checkout commit handling", () => {
     });
   });
 
+  test("passes selected commit paths through to checkout git utilities", async () => {
+    const messages: unknown[] = [];
+    const checkoutDiffManager = { scheduleRefreshForCwd: vi.fn() };
+    const workspaceGitService = { getSnapshot: vi.fn().mockResolvedValue({}) };
+    const session = createSessionForTest({ checkoutDiffManager, workspaceGitService, messages });
+
+    checkoutGitMocks.commitChanges.mockResolvedValue(undefined);
+
+    await (session as any).handleCheckoutCommitRequest({
+      type: "checkout_commit_request",
+      cwd: "/tmp/request-worktree",
+      message: "Ship selected files",
+      addAll: false,
+      paths: ["src/app.ts", "README.md"],
+      requestId: "request-commit-selected",
+    });
+
+    expect(checkoutGitMocks.commitChanges).toHaveBeenCalledWith("/tmp/request-worktree", {
+      message: "Ship selected files",
+      addAll: false,
+      paths: ["src/app.ts", "README.md"],
+    });
+    expect(checkoutDiffManager.scheduleRefreshForCwd).toHaveBeenCalledWith("/tmp/request-worktree");
+    expect(messages).toContainEqual({
+      type: "checkout_commit_response",
+      payload: {
+        cwd: "/tmp/request-worktree",
+        success: true,
+        error: null,
+        requestId: "request-commit-selected",
+      },
+    });
+  });
+
   test("generates commit messages from checkout diffs read through the workspace git service", async () => {
     const messages: unknown[] = [];
     const workspaceGitService = {

@@ -932,6 +932,9 @@ function WorkspaceScreenContent({
       state.mobileView === "agent" && !selectIsFileExplorerOpen(state, { isCompact: true }),
   );
   const openFileExplorerForCheckout = usePanelStore((state) => state.openFileExplorerForCheckout);
+  const focusChangesCommitForCheckout = usePanelStore(
+    (state) => state.focusChangesCommitForCheckout,
+  );
   const toggleFileExplorerForCheckout = usePanelStore(
     (state) => state.toggleFileExplorerForCheckout,
   );
@@ -957,6 +960,22 @@ function WorkspaceScreenContent({
       checkout: activeExplorerCheckout,
     });
   }, [activeExplorerCheckout, isMobile, openFileExplorerForCheckout]);
+
+  const handleFocusChangesCommit = useCallback(() => {
+    if (!activeExplorerCheckout) {
+      return;
+    }
+    openFileExplorerForCheckout({
+      isCompact: isMobile,
+      checkout: { ...activeExplorerCheckout, isGit: true },
+    });
+    focusChangesCommitForCheckout({ ...activeExplorerCheckout, isGit: true });
+  }, [
+    activeExplorerCheckout,
+    focusChangesCommitForCheckout,
+    isMobile,
+    openFileExplorerForCheckout,
+  ]);
 
   const handleToggleExplorer = useCallback(() => {
     if (!activeExplorerCheckout) {
@@ -2371,6 +2390,7 @@ function WorkspaceScreenContent({
                         serverId={normalizedServerId}
                         cwd={normalizedWorkspaceId}
                         hideLabels={showCompactButtonLabels}
+                        onCommit={handleFocusChangesCommit}
                       />
                       <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
                         <TooltipTrigger asChild>

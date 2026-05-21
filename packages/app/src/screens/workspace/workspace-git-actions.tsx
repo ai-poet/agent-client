@@ -16,9 +16,15 @@ interface WorkspaceGitActionsProps {
   serverId: string;
   cwd: string;
   hideLabels?: boolean;
+  onCommit?: () => void;
 }
 
-export function WorkspaceGitActions({ serverId, cwd, hideLabels }: WorkspaceGitActionsProps) {
+export function WorkspaceGitActions({
+  serverId,
+  cwd,
+  hideLabels,
+  onCommit,
+}: WorkspaceGitActionsProps) {
   const { theme } = useUnistyles();
 
   const icons = useMemo(
@@ -35,7 +41,7 @@ export function WorkspaceGitActions({ serverId, cwd, hideLabels }: WorkspaceGitA
     [theme.colors.foregroundMuted],
   );
 
-  const { gitActions, isGit } = useGitActions({ serverId, cwd, icons });
+  const { gitActions, isGit } = useGitActions({ serverId, cwd, icons, onCommit });
 
   if (!isGit) {
     return null;

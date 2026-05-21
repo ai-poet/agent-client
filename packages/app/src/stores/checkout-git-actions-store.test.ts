@@ -64,7 +64,7 @@ describe("checkout-git-actions-store", () => {
     expect(store.getStatus({ serverId, cwd, actionId: "commit" })).toBe("idle");
   });
 
-  it("passes manual commit message and add-all preference to the daemon", async () => {
+  it("passes manual commit message, add-all preference, and selected paths to the daemon", async () => {
     const client = {
       checkoutCommit: vi.fn(async () => ({})),
     };
@@ -77,13 +77,18 @@ describe("checkout-git-actions-store", () => {
       },
     }));
 
-    await useCheckoutGitActionsStore
-      .getState()
-      .commit({ serverId, cwd, message: "Manual commit", addAll: false });
+    await useCheckoutGitActionsStore.getState().commit({
+      serverId,
+      cwd,
+      message: "Manual commit",
+      addAll: false,
+      paths: ["src/app.ts", "README.md"],
+    });
 
     expect(client.checkoutCommit).toHaveBeenCalledWith(cwd, {
       message: "Manual commit",
       addAll: false,
+      paths: ["src/app.ts", "README.md"],
     });
   });
 

@@ -77,6 +77,7 @@ export interface PanelState {
   explorerTabByCheckout: Record<string, ExplorerTab>;
   expandedPathsByWorkspace: Record<string, string[]>;
   diffExpandedPathsByWorkspace: Record<string, string[]>;
+  commitFocusRequestByCheckout: Record<string, number>;
   sidebarWidth: number;
   explorerWidth: number;
   explorerSortOption: SortOption;
@@ -103,6 +104,7 @@ export interface PanelState {
   setExpandedPathsForWorkspace: (workspaceKey: string, paths: string[]) => void;
   setDiffExpandedPathsForWorkspace: (workspaceKey: string, paths: string[]) => void;
   activateExplorerTabForCheckout: (checkout: ExplorerCheckoutContext) => void;
+  focusChangesCommitForCheckout: (checkout: ExplorerCheckoutContext) => void;
   setSidebarWidth: (width: number) => void;
   setExplorerWidth: (width: number) => void;
   setExplorerSortOption: (option: SortOption) => void;
@@ -198,6 +200,7 @@ export const usePanelStore = create<PanelState>()(
       explorerTabByCheckout: {},
       expandedPathsByWorkspace: {},
       diffExpandedPathsByWorkspace: {},
+      commitFocusRequestByCheckout: {},
       sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
       explorerWidth: DEFAULT_EXPLORER_SIDEBAR_WIDTH,
       explorerSortOption: "name",
@@ -342,6 +345,24 @@ export const usePanelStore = create<PanelState>()(
             explorerTabByCheckout: state.explorerTabByCheckout,
           }),
         })),
+      focusChangesCommitForCheckout: (checkout) =>
+        set((state) => {
+          const key = buildExplorerCheckoutKey(checkout.serverId, checkout.cwd);
+          if (!key) {
+            return state;
+          }
+          return {
+            commitFocusRequestByCheckout: {
+              ...state.commitFocusRequestByCheckout,
+              [key]: Date.now(),
+            },
+            explorerTab: coerceExplorerTabForCheckout("changes", checkout.isGit),
+            explorerTabByCheckout: {
+              ...state.explorerTabByCheckout,
+              [key]: coerceExplorerTabForCheckout("changes", checkout.isGit),
+            },
+          };
+        }),
       setSidebarWidth: (width) => set({ sidebarWidth: clampSidebarWidth(width) }),
       setExplorerWidth: (width) => set({ explorerWidth: clampWidth(width) }),
       setExplorerSortOption: (option) => set({ explorerSortOption: option }),
@@ -441,6 +462,8 @@ export const usePanelStore = create<PanelState>()(
         ) {
           state.diffExpandedPathsByWorkspace = {};
         }
+
+        state.commitFocusRequestByCheckout = {};
 
         return state as PanelState;
       },

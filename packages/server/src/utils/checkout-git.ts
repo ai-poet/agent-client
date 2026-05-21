@@ -1740,16 +1740,31 @@ export async function getCheckoutDiff(
 
 export async function commitChanges(
   cwd: string,
-  options: { message: string; addAll?: boolean },
+  options: { message: string; addAll?: boolean; paths?: string[] },
 ): Promise<void> {
   await requireGitRepo(cwd);
-  if (options.addAll ?? true) {
+  const paths = Array.from(
+    new Set((options.paths ?? []).map((path) => path.trim()).filter(Boolean)),
+  );
+  if (paths.length > 0) {
+    await runGitCommand(["add", "--", ...paths], { cwd, timeout: 120_000 });
+  } else if (options.addAll ?? true) {
     await runGitCommand(["add", "-A"], { cwd, timeout: 120_000 });
   }
-  await runGitCommand(["-c", "commit.gpgsign=false", "commit", "-m", options.message], {
-    cwd,
-    timeout: 120_000,
-  });
+  await runGitCommand(
+    [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      options.message,
+      ...(paths.length > 0 ? ["--", ...paths] : []),
+    ],
+    {
+      cwd,
+      timeout: 120_000,
+    },
+  );
 }
 
 export async function commitAll(cwd: string, message: string): Promise<void> {
