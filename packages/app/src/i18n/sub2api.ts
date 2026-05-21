@@ -9,8 +9,6 @@ type LocaleResolutionInput = {
 };
 
 const DEFAULT_LOCALE: Sub2APILocale = "zh";
-const FIAT_PAYMENT_PREFIXES = ["wxpay"] as const;
-const CRYPTO_PAYMENT_PREFIXES = ["usdt", "usdc"] as const;
 
 export function normalizeSub2APILocale(value: string | null | undefined): Sub2APILocale {
   const normalized = value?.trim().toLowerCase();
@@ -89,17 +87,18 @@ export function isSub2APIEnglish(locale: string | null | undefined): boolean {
   return normalizeSub2APILocale(locale) === "en";
 }
 
-function startsWithAny(value: string, prefixes: readonly string[]): boolean {
-  return prefixes.some((prefix) => value.startsWith(prefix));
-}
-
 export function filterSub2APIPaymentTypesByLocale(
   types: readonly string[],
   locale: string | null | undefined,
 ): string[] {
   const normalizedLocale = normalizeSub2APILocale(locale);
-  const prefixes = normalizedLocale === "en" ? CRYPTO_PAYMENT_PREFIXES : FIAT_PAYMENT_PREFIXES;
-  return types.filter((type) => startsWithAny(type.trim().toLowerCase(), prefixes));
+  return types.filter((type) => {
+    const normalizedType = type.trim().toLowerCase();
+    if (normalizedLocale === "zh") {
+      return normalizedType === "alipay" || normalizedType.startsWith("wxpay");
+    }
+    return normalizedType.startsWith("bank");
+  });
 }
 
 function stablecoinLabel(type: string, base: "USDT" | "USDC"): string {

@@ -59,13 +59,10 @@ describe("sub2api i18n helpers", () => {
   });
 
   it("filters payment methods by locale like the Sub2API pay center", () => {
-    const allTypes = ["alipay", "wxpay_direct", "stripe", "usdt.plasma", "usdc.solana"];
+    const allTypes = ["alipay", "wxpay_direct", "bank", "stripe", "usdt.plasma"];
 
-    expect(filterSub2APIPaymentTypesByLocale(allTypes, "zh")).toEqual(["wxpay_direct"]);
-    expect(filterSub2APIPaymentTypesByLocale(allTypes, "en")).toEqual([
-      "usdt.plasma",
-      "usdc.solana",
-    ]);
+    expect(filterSub2APIPaymentTypesByLocale(allTypes, "zh")).toEqual(["alipay", "wxpay_direct"]);
+    expect(filterSub2APIPaymentTypesByLocale(allTypes, "en")).toEqual(["bank"]);
   });
 
   it("exposes Chinese and English UI copy", () => {
