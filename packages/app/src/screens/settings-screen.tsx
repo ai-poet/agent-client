@@ -21,6 +21,7 @@ import {
   Puzzle,
   Plus,
   Cloud,
+  RotateCcw,
 } from "lucide-react-native";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { SidebarSeparator } from "@/components/sidebar/sidebar-separator";
@@ -38,6 +39,7 @@ import { getHostRuntimeStore, isHostRuntimeConnected, useHosts } from "@/runtime
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { useWindowControlsPadding } from "@/utils/desktop-window";
 import { confirmDialog } from "@/utils/confirm-dialog";
+import { resetPaseoEnvironment } from "@/utils/reset-paseo-environment";
 import { BackHeader } from "@/components/headers/back-header";
 import { ScreenHeader } from "@/components/headers/screen-header";
 import { AddHostMethodModal } from "@/components/add-host-method-modal";
@@ -295,6 +297,66 @@ function DiagnosticsSection({
             disabled={!voiceAudioEngine || isPlaybackTestRunning}
           >
             {isPlaybackTestRunning ? text.playing : text.playTest}
+          </Button>
+        </View>
+      </View>
+    </SettingsSection>
+  );
+}
+
+interface DangerZoneSectionProps {
+  text: SettingsText;
+}
+
+function DangerZoneSection({ text }: DangerZoneSectionProps) {
+  const [isResetting, setIsResetting] = useState(false);
+
+  const handleResetEnvironment = useCallback(() => {
+    if (isResetting) {
+      return;
+    }
+    void confirmDialog({
+      title: text.resetEnvironmentTitle,
+      message: text.resetEnvironmentConfirmMessage,
+      confirmLabel: text.resetEnvironmentAction,
+      cancelLabel: text.cancel,
+      destructive: true,
+    })
+      .then((confirmed) => {
+        if (!confirmed) {
+          return;
+        }
+        setIsResetting(true);
+        void resetPaseoEnvironment().catch((error) => {
+          setIsResetting(false);
+          const message = error instanceof Error ? error.message : String(error);
+          Alert.alert(text.error, text.resetEnvironmentFailed(message));
+        });
+      })
+      .catch((error) => {
+        console.error("[Settings] Failed to open reset confirmation", error);
+        Alert.alert(text.error, text.resetEnvironmentFailed(String(error)));
+      });
+  }, [isResetting, text]);
+
+  return (
+    <SettingsSection title={text.sections.dangerZone}>
+      <View style={settingsStyles.card}>
+        <View style={settingsStyles.row}>
+          <View style={settingsStyles.rowContent}>
+            <Text style={settingsStyles.rowTitle}>{text.resetEnvironmentTitle}</Text>
+            <Text style={settingsStyles.rowHint}>{text.resetEnvironmentHint}</Text>
+          </View>
+          <Button
+            variant="ghost"
+            size="sm"
+            onPress={handleResetEnvironment}
+            disabled={isResetting}
+            leftIcon={RotateCcw}
+            textStyle={styles.dangerText}
+            testID="settings-reset-environment"
+          >
+            {isResetting ? text.resettingEnvironment : text.resetEnvironmentAction}
           </Button>
         </View>
       </View>
@@ -837,13 +899,16 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
           return isDesktopApp ? <DesktopPermissionsSection /> : null;
         case "diagnostics":
           return (
-            <DiagnosticsSection
-              text={settingsText}
-              voiceAudioEngine={voiceAudioEngine}
-              isPlaybackTestRunning={isPlaybackTestRunning}
-              playbackTestResult={playbackTestResult}
-              handlePlaybackTest={handlePlaybackTest}
-            />
+            <>
+              <DiagnosticsSection
+                text={settingsText}
+                voiceAudioEngine={voiceAudioEngine}
+                isPlaybackTestRunning={isPlaybackTestRunning}
+                playbackTestResult={playbackTestResult}
+                handlePlaybackTest={handlePlaybackTest}
+              />
+              {isDesktopApp ? <DangerZoneSection text={settingsText} /> : null}
+            </>
           );
         case "about":
           return (
@@ -1042,6 +1107,9 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
+  },
+  dangerText: {
+    color: theme.colors.destructive,
   },
   themeTrigger: {
     flexDirection: "row",

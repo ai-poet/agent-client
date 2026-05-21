@@ -607,6 +607,78 @@ describe("HostRuntimeController", () => {
     });
   });
 
+  it("keeps Windows desktop direct 1006 disconnects in reconnecting state", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      const host = makeHost({
+        connections: [
+          {
+            id: "direct:localhost:6767",
+            type: "directTcp",
+            endpoint: "localhost:6767",
+          },
+        ],
+        preferredConnectionId: "direct:localhost:6767",
+      });
+      const clients: FakeDaemonClient[] = [];
+      const getDesktopDaemonStatus = vi.fn(async () => ({
+        serverId: host.serverId,
+        status: "running" as const,
+        listen: "127.0.0.1:6767",
+        hostname: null,
+        pid: 1234,
+        home: "C:\\Users\\test\\.paseo",
+        version: null,
+        desktopManaged: true,
+        error: null,
+      }));
+      const controller = new HostRuntimeController({
+        host,
+        deps: {
+          ...makeDeps(
+            {
+              "direct:localhost:6767": 12,
+            },
+            clients,
+          ),
+          getDesktopPlatform: () => "win32",
+          getDesktopDaemonStatus,
+        },
+      });
+
+      await controller.start({ autoProbe: false });
+      clients[0]?.setConnectionState({
+        status: "disconnected",
+        reason: "Connection closed abnormally (code 1006)",
+        closeCode: 1006,
+        wasClean: false,
+        reconnectAttempt: 1,
+      });
+
+      expect(controller.getSnapshot()).toMatchObject({
+        connectionStatus: "connecting",
+        lastError: null,
+      });
+      await vi.waitFor(() => {
+        expect(getDesktopDaemonStatus).toHaveBeenCalledTimes(1);
+      });
+      await vi.waitFor(() => {
+        expect(clients[0]?.ensureConnectedCalls).toBeGreaterThan(0);
+      });
+      expect(infoSpy).toHaveBeenCalledWith(
+        "[HostRuntime] direct transport abnormal close",
+        expect.objectContaining({
+          closeCode: 1006,
+          daemonPid: 1234,
+          daemonListen: "127.0.0.1:6767",
+          transport: "direct",
+        }),
+      );
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
   it("does not emit legacy typed reason-code transition logs", async () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
     try {

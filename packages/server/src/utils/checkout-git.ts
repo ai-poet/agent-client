@@ -137,6 +137,14 @@ function normalizeBranchSuggestionName(raw: string): string | null {
   return normalized;
 }
 
+function assertResolvedGitRefFormat(refName: string): void {
+  if (/%[({]/.test(refName)) {
+    throw new Error(
+      "Git branch list output contained an unresolved format placeholder. On Windows, this usually means Git was run through a shell that expanded percent placeholders.",
+    );
+  }
+}
+
 interface GitRef {
   name: string;
   committerDate: number;
@@ -166,6 +174,7 @@ async function listGitRefs(cwd: string, refPrefix: string): Promise<GitRef[]> {
       if (!trimmed) return null;
       const [name, dateStr] = trimmed.split("\t");
       if (!name) return null;
+      assertResolvedGitRefFormat(name);
       return { name, committerDate: Number(dateStr) || 0 };
     })
     .filter((ref): ref is GitRef => ref !== null);
@@ -960,7 +969,13 @@ export async function resolveRepositoryDefaultBranch(repoRoot: string): Promise<
   });
   const branches = stdout
     .split("\n")
-    .map((line) => line.trim())
+    .map((line) => {
+      const trimmed = line.trim();
+      if (trimmed) {
+        assertResolvedGitRefFormat(trimmed);
+      }
+      return trimmed;
+    })
     .filter((line) => line.length > 0);
 
   if (branches.includes("main")) {

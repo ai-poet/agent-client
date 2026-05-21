@@ -8,6 +8,7 @@ import { buildGitActions, type GitActions } from "@/components/git-actions-polic
 import { buildNewAgentRoute, resolveNewAgentWorkingDir } from "@/utils/new-agent-routing";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { useToast } from "@/contexts/toast-context";
+import { useGitCommitDialog } from "@/contexts/git-commit-dialog-context";
 import { useAppLocale } from "@/hooks/use-app-locale";
 import { getAppMessages } from "@/i18n/sub2api";
 
@@ -41,6 +42,7 @@ interface UseGitActionsResult {
 export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): UseGitActionsResult {
   const router = useRouter();
   const toast = useToast();
+  const { openCommitDialog } = useGitCommitDialog();
   const locale = useAppLocale();
   const text = useMemo(() => getAppMessages(locale).gitDiff, [locale]);
   const [postShipArchiveSuggested, setPostShipArchiveSuggested] = useState(false);
@@ -151,22 +153,15 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
 
   // Handlers
   const handleCommit = useCallback(() => {
-    void runCommit({ serverId, cwd })
-      .then(() => {
+    openCommitDialog({
+      serverId,
+      cwd,
+      onCommit: async (message) => {
+        await runCommit({ serverId, cwd, message, addAll: true });
         toastActionSuccess(text.committedToast);
-      })
-      .catch((err) => {
-        toastActionError(err, text.failedCommit);
-      });
-  }, [
-    cwd,
-    runCommit,
-    serverId,
-    text.committedToast,
-    text.failedCommit,
-    toastActionError,
-    toastActionSuccess,
-  ]);
+      },
+    });
+  }, [cwd, openCommitDialog, runCommit, serverId, text.committedToast, toastActionSuccess]);
 
   const handlePull = useCallback(() => {
     void runPull({ serverId, cwd })

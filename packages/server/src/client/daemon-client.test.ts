@@ -930,6 +930,62 @@ describe("DaemonClient", () => {
     }
   });
 
+  test("keeps close diagnostics and reconnects immediately after abnormal close", async () => {
+    vi.useFakeTimers();
+    try {
+      const logger = createMockLogger();
+      const first = createMockTransport();
+      const second = createMockTransport();
+      const transports = [first, second];
+      let transportIndex = 0;
+
+      const client = new DaemonClient({
+        url: "ws://test",
+        clientId: "clsk_unit_test",
+        logger,
+        reconnect: {
+          enabled: true,
+          baseDelayMs: 5000,
+          maxDelayMs: 5000,
+        },
+        transportFactory: () => {
+          const next = transports[Math.min(transportIndex, transports.length - 1)];
+          transportIndex += 1;
+          return next.transport;
+        },
+      });
+      clients.push(client);
+
+      const connectPromise = client.connect();
+      first.triggerOpen();
+      await connectPromise;
+
+      first.triggerClose({ code: 1006, wasClean: false });
+      expect(client.getConnectionState()).toMatchObject({
+        status: "disconnected",
+        closeCode: 1006,
+        wasClean: false,
+        reasonCode: "transport_abnormal_close",
+        reconnectAttempt: 0,
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(client.getConnectionState().status).toBe("connecting");
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transport: "direct",
+          closeCode: 1006,
+          wasClean: false,
+          attempt: 0,
+          reasonCode: "transport_abnormal_close",
+        }),
+        "DaemonClientTransition",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("requires non-empty clientId", () => {
     expect(() => {
       new DaemonClient({

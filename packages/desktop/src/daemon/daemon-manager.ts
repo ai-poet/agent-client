@@ -1,5 +1,6 @@
 import { type ChildProcess } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 import { app, ipcMain, powerMonitor, shell } from "electron";
 import log from "electron-log/main";
@@ -417,6 +418,26 @@ async function restartDaemon(): Promise<DesktopDaemonStatus> {
   return startDaemon();
 }
 
+async function resetPaseoEnvironment(): Promise<{ success: true; home: string }> {
+  const home = getPaseoHome();
+  const status = await resolveStatus();
+  logDesktopDaemonLifecycle("resetting Paseo environment", {
+    home,
+    status: status.status,
+    pid: status.pid,
+  });
+
+  if (status.status === "running") {
+    await stopDaemon();
+  }
+
+  if (existsSync(home)) {
+    await rm(home, { recursive: true, force: true });
+  }
+
+  return { success: true, home };
+}
+
 function getDaemonLogs(): DesktopDaemonLogs {
   const logPath = logFilePath();
   return {
@@ -488,6 +509,7 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     start_desktop_daemon: () => startDaemon(),
     stop_desktop_daemon: () => stopDaemon(),
     restart_desktop_daemon: () => restartDaemon(),
+    reset_paseo_environment: () => resetPaseoEnvironment(),
     desktop_daemon_logs: () => getDaemonLogs(),
     desktop_daemon_pairing: () => getDaemonPairing(),
     desktop_get_system_idle_time: () => getSystemIdleTimeMs(),

@@ -64,6 +64,29 @@ describe("checkout-git-actions-store", () => {
     expect(store.getStatus({ serverId, cwd, actionId: "commit" })).toBe("idle");
   });
 
+  it("passes manual commit message and add-all preference to the daemon", async () => {
+    const client = {
+      checkoutCommit: vi.fn(async () => ({})),
+    };
+
+    useSessionStore.setState((state) => ({
+      ...state,
+      sessions: {
+        ...(state.sessions as any),
+        [serverId]: { client } as any,
+      },
+    }));
+
+    await useCheckoutGitActionsStore
+      .getState()
+      .commit({ serverId, cwd, message: "Manual commit", addAll: false });
+
+    expect(client.checkoutCommit).toHaveBeenCalledWith(cwd, {
+      message: "Manual commit",
+      addAll: false,
+    });
+  });
+
   it("invalidates checkout PR status and every PR pane timeline for a checkout", async () => {
     const queryClient = new QueryClient();
 

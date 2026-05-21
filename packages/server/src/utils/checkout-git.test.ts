@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { execSync } from "child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync, realpathSync } from "fs";
 import { join } from "path";
@@ -1729,5 +1729,67 @@ const x = 1;
     it("is case insensitive on Windows paths", () => {
       expect(isDescendantPath("c:\\repo\\child", "C:\\repo")).toBe(true);
     });
+  });
+});
+
+describe("checkout git branch format guards", () => {
+  afterEach(() => {
+    vi.doUnmock("./run-git-command.js");
+    vi.resetModules();
+  });
+
+  it("rejects unresolved git for-each-ref placeholders before they become branch names", async () => {
+    vi.resetModules();
+    vi.doMock("./run-git-command.js", () => ({
+      runGitCommand: vi.fn(async (args: string[]) => {
+        if (args[0] === "rev-parse") {
+          return { stdout: "/tmp/repo\n", stderr: "", truncated: false, exitCode: 0, signal: null };
+        }
+        if (args[0] === "for-each-ref") {
+          return {
+            stdout: "%(refname)%09%(committerdate:unix)\n",
+            stderr: "",
+            truncated: false,
+            exitCode: 0,
+            signal: null,
+          };
+        }
+        throw new Error(`Unexpected git command: git ${args.join(" ")}`);
+      }),
+    }));
+
+    const { listBranchSuggestions } = await import("./checkout-git.js");
+    await expect(listBranchSuggestions("/tmp/repo")).rejects.toThrow(
+      /unresolved format placeholder/i,
+    );
+  });
+
+  it("rejects unresolved git branch format placeholders while resolving default branch", async () => {
+    vi.resetModules();
+    vi.doMock("./run-git-command.js", () => ({
+      runGitCommand: vi.fn(async (args: string[]) => {
+        if (args[0] === "rev-parse") {
+          return { stdout: "/tmp/repo\n", stderr: "", truncated: false, exitCode: 0, signal: null };
+        }
+        if (args[0] === "symbolic-ref") {
+          return { stdout: "", stderr: "", truncated: false, exitCode: 1, signal: null };
+        }
+        if (args[0] === "branch") {
+          return {
+            stdout: "%(refname:short)\n",
+            stderr: "",
+            truncated: false,
+            exitCode: 0,
+            signal: null,
+          };
+        }
+        throw new Error(`Unexpected git command: git ${args.join(" ")}`);
+      }),
+    }));
+
+    const { resolveRepositoryDefaultBranch } = await import("./checkout-git.js");
+    await expect(resolveRepositoryDefaultBranch("/tmp/repo")).rejects.toThrow(
+      /unresolved format placeholder/i,
+    );
   });
 });

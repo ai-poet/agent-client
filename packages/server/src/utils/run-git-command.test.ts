@@ -11,6 +11,7 @@ interface FakeSpawnBehavior {
 
 interface FakeSpawnController {
   activeCount: number;
+  calls: Array<{ command: string; args: string[]; options: Record<string, unknown> }>;
   nextPid: number;
   peakActiveCount: number;
   processes: FakeChildProcess[];
@@ -20,6 +21,7 @@ interface FakeSpawnController {
 
 const fakeSpawnController = vi.hoisted<FakeSpawnController>(() => ({
   activeCount: 0,
+  calls: [],
   nextPid: 1000,
   peakActiveCount: 0,
   processes: [],
@@ -30,6 +32,7 @@ const fakeSpawnController = vi.hoisted<FakeSpawnController>(() => ({
     }
 
     this.activeCount = 0;
+    this.calls = [];
     this.nextPid = 1000;
     this.peakActiveCount = 0;
     this.processes = [];
@@ -158,7 +161,8 @@ vi.mock("node:child_process", async () => {
 
   return {
     ...actual,
-    spawn: vi.fn(() => {
+    spawn: vi.fn((command: string, args: string[], options: Record<string, unknown>) => {
+      fakeSpawnController.calls.push({ command, args, options });
       const behavior = fakeSpawnController.queue.shift() ?? {};
       const child = new FakeChildProcess(behavior);
       fakeSpawnController.processes.push(child);
@@ -186,6 +190,42 @@ describe("runGitCommand", () => {
     fakeSpawnController.reset();
     vi.resetModules();
     vi.unstubAllEnvs();
+  });
+
+  it("spawns git without a shell by default so Windows percent format args survive", async () => {
+    const { runGitCommand } = await loadRunGitCommand(1);
+
+    enqueueSpawnBehaviors({ delayMs: 0, stdoutData: "refs/heads/main\t1\n" });
+
+    await expect(
+      runGitCommand(["for-each-ref", "--format=%(refname)%09%(committerdate:unix)"], {
+        cwd: process.cwd(),
+      }),
+    ).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: "refs/heads/main\t1\n",
+    });
+
+    expect(fakeSpawnController.calls[0]).toMatchObject({
+      command: "git",
+      args: ["for-each-ref", "--format=%(refname)%09%(committerdate:unix)"],
+      options: expect.objectContaining({ shell: false }),
+    });
+  });
+
+  it("allows callers to opt into shell execution", async () => {
+    const { runGitCommand } = await loadRunGitCommand(1);
+
+    enqueueSpawnBehaviors({ delayMs: 0, stdoutData: "ok" });
+
+    await expect(
+      runGitCommand(["status"], {
+        cwd: process.cwd(),
+        shell: true,
+      }),
+    ).resolves.toMatchObject({ stdout: "ok" });
+
+    expect(fakeSpawnController.calls[0]?.options).toEqual(expect.objectContaining({ shell: true }));
   });
 
   it("throttles concurrent git commands to the configured limit", async () => {

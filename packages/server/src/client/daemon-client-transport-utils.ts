@@ -27,6 +27,61 @@ export function extractRelayMessageData(event: unknown): string | ArrayBuffer {
   return String(raw ?? "");
 }
 
+export type TransportCloseDetails = {
+  code?: number;
+  reason?: string;
+  wasClean?: boolean;
+};
+
+function normalizeCloseReason(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(value)) {
+    const trimmed = value.toString("utf8").trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (value instanceof Uint8Array) {
+    const decoded =
+      typeof TextDecoder !== "undefined"
+        ? new TextDecoder().decode(value)
+        : typeof Buffer !== "undefined"
+          ? Buffer.from(value).toString("utf8")
+          : "";
+    const trimmed = decoded.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  return undefined;
+}
+
+export function getTransportCloseDetails(event?: unknown): TransportCloseDetails {
+  if (typeof event === "number" && Number.isFinite(event)) {
+    return { code: event };
+  }
+  if (!event || typeof event !== "object" || event instanceof Error) {
+    return {};
+  }
+
+  const record = event as { code?: unknown; reason?: unknown; wasClean?: unknown };
+  const reason = normalizeCloseReason(record.reason);
+  return {
+    ...(typeof record.code === "number" && Number.isFinite(record.code)
+      ? { code: record.code }
+      : {}),
+    ...(reason ? { reason } : {}),
+    ...(typeof record.wasClean === "boolean" ? { wasClean: record.wasClean } : {}),
+  };
+}
+
+export function isAbnormalTransportClose(details: TransportCloseDetails): boolean {
+  return details.code === 1006;
+}
+
+export function getTransportCloseReasonCode(details: TransportCloseDetails): string {
+  return isAbnormalTransportClose(details) ? "transport_abnormal_close" : "transport_closed";
+}
+
 export function describeTransportClose(event?: unknown): string {
   if (!event) {
     return "Transport closed";
@@ -37,17 +92,21 @@ export function describeTransportClose(event?: unknown): string {
   if (typeof event === "string") {
     return event;
   }
+  const details = getTransportCloseDetails(event);
+  if (details.reason) {
+    return details.reason;
+  }
   if (typeof event === "object") {
-    const record = event as { reason?: unknown; message?: unknown; code?: unknown };
-    if (typeof record.reason === "string" && record.reason.trim().length > 0) {
-      return record.reason.trim();
-    }
+    const record = event as { message?: unknown };
     if (typeof record.message === "string" && record.message.trim().length > 0) {
       return record.message.trim();
     }
-    if (typeof record.code === "number") {
-      return `Transport closed (code ${record.code})`;
+  }
+  if (typeof details.code === "number") {
+    if (isAbnormalTransportClose(details)) {
+      return "Connection closed abnormally (code 1006)";
     }
+    return `Transport closed (code ${details.code})`;
   }
   return "Transport closed";
 }

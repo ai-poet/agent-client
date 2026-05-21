@@ -46,7 +46,18 @@ export function createWebSocketTransportFactory(factory: WebSocketFactory): Daem
         }
       },
       onOpen: (handler) => bindWsHandler(ws, "open", handler),
-      onClose: (handler) => bindWsHandler(ws, "close", handler),
+      onClose: (handler) =>
+        bindWsHandler(ws, "close", (...args: unknown[]) => {
+          if (typeof args[0] === "number") {
+            handler({
+              code: args[0],
+              ...(args[1] !== undefined ? { reason: args[1] } : {}),
+              wasClean: args[0] === 1000,
+            });
+            return;
+          }
+          handler(args[0]);
+        }),
       onError: (handler) => bindWsHandler(ws, "error", handler),
       onMessage: (handler) => bindWsHandler(ws, "message", handler),
     };

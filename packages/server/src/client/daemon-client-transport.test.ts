@@ -8,6 +8,7 @@ import {
   describeTransportError,
   encodeUtf8String,
   extractRelayMessageData,
+  getTransportCloseDetails,
 } from "./daemon-client-transport.js";
 
 const createClientChannelMock = vi.hoisted(() => vi.fn());
@@ -88,6 +89,32 @@ describe("daemon-client transport helpers", () => {
     expect(() => transport.send("hello")).toThrow("WebSocket not open (readyState=3)");
   });
 
+  test("createWebSocketTransportFactory normalizes node close code and reason", () => {
+    class MockNodeWebSocket extends EventEmitter {
+      readyState = 1;
+      send = vi.fn();
+      close = vi.fn();
+    }
+
+    const ws = new MockNodeWebSocket();
+    const transport = createWebSocketTransportFactory(() => ws)({ url: "ws://example.test" });
+    const onClose = vi.fn();
+    transport.onClose(onClose);
+
+    ws.emit("close", 1006, Buffer.from("socket hang up"));
+
+    expect(onClose).toHaveBeenCalledWith({
+      code: 1006,
+      reason: Buffer.from("socket hang up"),
+      wasClean: false,
+    });
+    expect(getTransportCloseDetails(onClose.mock.calls[0]?.[0])).toEqual({
+      code: 1006,
+      reason: "socket hang up",
+      wasClean: false,
+    });
+  });
+
   test("createWebSocketTransportFactory binds and unbinds event listeners", () => {
     const listeners = new Map<string, (...args: any[]) => void>();
     const ws = {
@@ -135,6 +162,7 @@ describe("daemon-client transport helpers", () => {
     expect(describeTransportClose({ reason: "peer closed" })).toBe("peer closed");
     expect(describeTransportClose({ message: "closed" })).toBe("closed");
     expect(describeTransportClose({ code: 1001 })).toBe("Transport closed (code 1001)");
+    expect(describeTransportClose({ code: 1006 })).toBe("Connection closed abnormally (code 1006)");
     expect(describeTransportClose()).toBe("Transport closed");
   });
 

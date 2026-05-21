@@ -95,6 +95,9 @@ import {
   describeTransportClose,
   describeTransportError,
   encodeUtf8String,
+  getTransportCloseDetails,
+  getTransportCloseReasonCode,
+  isAbnormalTransportClose,
   type DaemonTransport,
   type DaemonTransportFactory,
   type WebSocketFactory,
@@ -135,7 +138,15 @@ export type ConnectionState =
   | { status: "idle" }
   | { status: "connecting"; attempt: number }
   | { status: "connected" }
-  | { status: "disconnected"; reason?: string }
+  | {
+      status: "disconnected";
+      reason?: string;
+      closeCode?: number;
+      closeReason?: string;
+      wasClean?: boolean;
+      reasonCode?: string;
+      reconnectAttempt?: number;
+    }
   | { status: "disposed" };
 
 export type DaemonEvent =
@@ -815,6 +826,8 @@ export class DaemonClient {
             clearTimeout(this.pendingGenericTransportErrorTimeout);
             this.pendingGenericTransportErrorTimeout = null;
           }
+          const closeDetails = getTransportCloseDetails(event);
+          const isAbnormalClose = isAbnormalTransportClose(closeDetails);
           const reason = describeTransportClose(event);
           if (reason) {
             this.lastErrorValue = reason;
@@ -822,7 +835,13 @@ export class DaemonClient {
           this.scheduleReconnect({
             reason,
             event: "TRANSPORT_CLOSE",
-            reasonCode: "transport_closed",
+            reasonCode: getTransportCloseReasonCode(closeDetails),
+            immediate: isAbnormalClose,
+            ...(typeof closeDetails.code === "number" ? { closeCode: closeDetails.code } : {}),
+            ...(closeDetails.reason ? { closeReason: closeDetails.reason } : {}),
+            ...(typeof closeDetails.wasClean === "boolean"
+              ? { wasClean: closeDetails.wasClean }
+              : {}),
           });
         }),
         transport.onError((event) => {
@@ -3829,7 +3848,15 @@ export class DaemonClient {
 
   private updateConnectionState(
     next: ConnectionState,
-    metadata?: { event: string; reason?: string; reasonCode?: string },
+    metadata?: {
+      event: string;
+      reason?: string;
+      reasonCode?: string;
+      closeCode?: number;
+      closeReason?: string;
+      wasClean?: boolean;
+      attempt?: number;
+    },
   ): void {
     const previous = this.connectionState;
     this.connectionState = next;
@@ -3845,9 +3872,15 @@ export class DaemonClient {
         to: next.status,
         event: metadata?.event ?? "STATE_UPDATE",
         connectionPath: this.logConnectionPath,
+        transport: this.logConnectionPath === "relay" ? "relay" : "direct",
+        platform: typeof process !== "undefined" ? process.platform : "unknown",
         generation: this.logGeneration,
         reasonCode,
         reason,
+        ...(typeof metadata?.closeCode === "number" ? { closeCode: metadata.closeCode } : {}),
+        ...(metadata?.closeReason ? { closeReason: metadata.closeReason } : {}),
+        ...(typeof metadata?.wasClean === "boolean" ? { wasClean: metadata.wasClean } : {}),
+        ...(typeof metadata?.attempt === "number" ? { attempt: metadata.attempt } : {}),
       },
       "DaemonClientTransition",
     );
@@ -3868,6 +3901,10 @@ export class DaemonClient {
     reason?: string;
     event?: string;
     reasonCode?: string;
+    closeCode?: number;
+    closeReason?: string;
+    wasClean?: boolean;
+    immediate?: boolean;
   }): void {
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
@@ -3895,11 +3932,20 @@ export class DaemonClient {
       {
         status: "disconnected",
         ...(reason ? { reason } : {}),
+        ...(typeof input?.closeCode === "number" ? { closeCode: input.closeCode } : {}),
+        ...(input?.closeReason ? { closeReason: input.closeReason } : {}),
+        ...(typeof input?.wasClean === "boolean" ? { wasClean: input.wasClean } : {}),
+        ...(input?.reasonCode ? { reasonCode: input.reasonCode } : {}),
+        reconnectAttempt: this.reconnectAttempt,
       },
       {
         event: input?.event ?? "TRANSPORT_CLOSE",
         ...(reason ? { reason } : {}),
         ...(input?.reasonCode ? { reasonCode: input.reasonCode } : {}),
+        ...(typeof input?.closeCode === "number" ? { closeCode: input.closeCode } : {}),
+        ...(input?.closeReason ? { closeReason: input.closeReason } : {}),
+        ...(typeof input?.wasClean === "boolean" ? { wasClean: input.wasClean } : {}),
+        attempt: this.reconnectAttempt,
       },
     );
     if (!this.shouldReconnect || this.config.reconnect?.enabled === false) {
@@ -3910,7 +3956,7 @@ export class DaemonClient {
     const attempt = this.reconnectAttempt;
     const baseDelay = this.config.reconnect?.baseDelayMs ?? DEFAULT_RECONNECT_BASE_DELAY_MS;
     const maxDelay = this.config.reconnect?.maxDelayMs ?? DEFAULT_RECONNECT_MAX_DELAY_MS;
-    const delay = Math.min(baseDelay * 2 ** attempt, maxDelay);
+    const delay = input?.immediate ? 0 : Math.min(baseDelay * 2 ** attempt, maxDelay);
     this.reconnectAttempt = attempt + 1;
     this.reconnectTimeout = setTimeout(() => {
       this.reconnectTimeout = null;

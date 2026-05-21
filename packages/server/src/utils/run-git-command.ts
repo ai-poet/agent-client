@@ -14,6 +14,7 @@ export interface GitCommandOptions {
   timeout?: number;
   maxOutputBytes?: number;
   acceptExitCodes?: number[];
+  shell?: boolean;
 }
 
 export interface GitCommandResult {
@@ -40,6 +41,7 @@ export function runGitCommand(
           cwd: options.cwd,
           env: options.env,
           stdio: ["ignore", "pipe", "pipe"],
+          shell: options.shell ?? false,
         });
 
         let settled = false;

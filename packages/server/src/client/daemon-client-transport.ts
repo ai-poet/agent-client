@@ -11,6 +11,9 @@ export {
   describeTransportError,
   encodeUtf8String,
   extractRelayMessageData,
+  getTransportCloseDetails,
+  getTransportCloseReasonCode,
+  isAbnormalTransportClose,
   normalizeTransportPayload,
   safeRandomId,
 } from "./daemon-client-transport-utils.js";

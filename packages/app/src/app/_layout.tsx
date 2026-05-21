@@ -48,6 +48,7 @@ import { LeftSidebar } from "@/components/left-sidebar";
 import { DownloadToast } from "@/components/download-toast";
 import { UpdateBanner } from "@/desktop/updates/update-banner";
 import { ToastProvider } from "@/contexts/toast-context";
+import { GitCommitDialogProvider } from "@/contexts/git-commit-dialog-context";
 import { usePanelStore } from "@/stores/panel-store";
 import { runOnJS, interpolate, Extrapolation, useSharedValue } from "react-native-reanimated";
 import {
@@ -943,16 +944,18 @@ export default function RootLayout() {
               <HostRuntimeBootstrapProvider>
                 <PushNotificationRouter />
                 <ToastProvider>
-                  <ProvidersWrapper>
-                    <SidebarAnimationProvider>
-                      <HorizontalScrollProvider>
-                        <OpenProjectListener />
-                        <AppWithSidebar>
-                          <RootStack />
-                        </AppWithSidebar>
-                      </HorizontalScrollProvider>
-                    </SidebarAnimationProvider>
-                  </ProvidersWrapper>
+                  <GitCommitDialogProvider>
+                    <ProvidersWrapper>
+                      <SidebarAnimationProvider>
+                        <HorizontalScrollProvider>
+                          <OpenProjectListener />
+                          <AppWithSidebar>
+                            <RootStack />
+                          </AppWithSidebar>
+                        </HorizontalScrollProvider>
+                      </SidebarAnimationProvider>
+                    </ProvidersWrapper>
+                  </GitCommitDialogProvider>
                 </ToastProvider>
               </HostRuntimeBootstrapProvider>
             </QueryProvider>

@@ -74,6 +74,7 @@ import { GitActionsSplitButton } from "@/components/git-actions-split-button";
 import { usePanelStore } from "@/stores/panel-store";
 import { buildWorkspaceExplorerStateKey } from "@/hooks/use-file-explorer-actions";
 import { useToast } from "@/contexts/toast-context";
+import { useGitCommitDialog } from "@/contexts/git-commit-dialog-context";
 import { useAppLocale } from "@/hooks/use-app-locale";
 import { getAppMessages } from "@/i18n/sub2api";
 import {
@@ -635,6 +636,7 @@ type DiffFlatItem =
 export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDiffPaneProps) {
   const { theme } = useUnistyles();
   const toast = useToast();
+  const { openCommitDialog } = useGitCommitDialog();
   const locale = useAppLocale();
   const text = useMemo(() => getAppMessages(locale).gitDiff, [locale]);
   const isMobile = useIsCompactFormFactor();
@@ -942,22 +944,15 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
   );
 
   const handleCommit = useCallback(() => {
-    void runCommit({ serverId, cwd })
-      .then(() => {
+    openCommitDialog({
+      serverId,
+      cwd,
+      onCommit: async (message) => {
+        await runCommit({ serverId, cwd, message, addAll: true });
         toastActionSuccess(text.committedToast);
-      })
-      .catch((err) => {
-        toastActionError(err, text.failedCommit);
-      });
-  }, [
-    cwd,
-    runCommit,
-    serverId,
-    text.committedToast,
-    text.failedCommit,
-    toastActionError,
-    toastActionSuccess,
-  ]);
+      },
+    });
+  }, [cwd, openCommitDialog, runCommit, serverId, text.committedToast, toastActionSuccess]);
 
   const handlePull = useCallback(() => {
     void runPull({ serverId, cwd })

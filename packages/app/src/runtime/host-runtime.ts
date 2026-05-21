@@ -17,7 +17,13 @@ import {
 import { decodeOfferFragmentPayload, normalizeHostPort } from "@/utils/daemon-endpoints";
 import { resolveAppVersion } from "@/utils/app-version";
 import { ConnectionOfferSchema, type ConnectionOffer } from "@server/shared/connection-offer";
-import { shouldUseDesktopDaemon, startDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
+import {
+  getDesktopDaemonStatus,
+  shouldUseDesktopDaemon,
+  startDesktopDaemon,
+  type DesktopDaemonStatus,
+} from "@/desktop/daemon/desktop-daemon";
+import { getDesktopHost } from "@/desktop/host";
 import { connectToDaemon } from "@/utils/test-daemon-connection";
 import { buildDaemonWebSocketUrl, buildRelayWebSocketUrl } from "@/utils/daemon-endpoints";
 import { getOrCreateClientId } from "@/utils/client-id";
@@ -68,6 +74,22 @@ export type HostRuntimeSnapshot = {
   probeByConnectionId: Map<string, ConnectionProbeState>;
   clientGeneration: number;
 };
+
+function isLocalDirectDesktopConnection(connection: ActiveConnection | null): boolean {
+  if (!connection || connection.type === "relay") {
+    return false;
+  }
+  if (connection.type === "directSocket" || connection.type === "directPipe") {
+    return true;
+  }
+  const endpoint = connection.endpoint.toLowerCase();
+  return (
+    endpoint.startsWith("localhost:") ||
+    endpoint.startsWith("127.") ||
+    endpoint.startsWith("[::1]:") ||
+    endpoint === "::1"
+  );
+}
 
 type HostRuntimeSnapshotPatch = Partial<Omit<HostRuntimeSnapshot, "serverId" | "clientGeneration">>;
 
@@ -124,6 +146,8 @@ export type HostRuntimeControllerDeps = {
     hostname: string | null;
   }>;
   getClientId: () => Promise<string>;
+  getDesktopDaemonStatus?: () => Promise<DesktopDaemonStatus>;
+  getDesktopPlatform?: () => string | null;
 };
 
 export type HostRuntimeStartOptions = {
@@ -233,7 +257,12 @@ type HostRuntimeConnectionMachineState =
 
 type HostRuntimeConnectionMachineEvent =
   | { type: "select_connection"; connectionId: string; connection: ActiveConnection }
-  | { type: "client_state"; state: ConnectionState; lastError: string | null }
+  | {
+      type: "client_state";
+      state: ConnectionState;
+      lastError: string | null;
+      isRecoverableAbnormalDisconnect?: boolean;
+    }
   | { type: "connect_failed"; message: string }
   | { type: "no_connections" }
   | { type: "stopped" };
@@ -328,6 +357,14 @@ function nextConnectionMachineState(input: {
   }
 
   const reason = event.state.reason ?? event.lastError ?? null;
+  if (event.isRecoverableAbnormalDisconnect) {
+    return {
+      tag: "connecting",
+      activeConnectionId: previousActiveConnectionId,
+      activeConnection: previousActiveConnection,
+    };
+  }
+
   if (!reason || reason === "client_closed") {
     return {
       tag: "offline",
@@ -467,6 +504,8 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
     connectToDaemon: ({ host, connection }) =>
       connectToDaemon(connection, { serverId: host.serverId }),
     getClientId: () => getOrCreateClientId(),
+    getDesktopDaemonStatus: shouldUseDesktopDaemon() ? () => getDesktopDaemonStatus() : undefined,
+    getDesktopPlatform: () => getDesktopHost()?.platform ?? null,
   };
 }
 
@@ -882,6 +921,55 @@ export class HostRuntimeController {
     });
   }
 
+  private isRecoverableAbnormalDirectDisconnect(state: ConnectionState): boolean {
+    const desktopPlatform = this.deps.getDesktopPlatform?.() ?? null;
+    return (
+      state.status === "disconnected" &&
+      state.closeCode === 1006 &&
+      Boolean(this.deps.getDesktopDaemonStatus) &&
+      desktopPlatform === "win32" &&
+      isLocalDirectDesktopConnection(this.snapshot.activeConnection)
+    );
+  }
+
+  private handleAbnormalDirectDisconnect(state: ConnectionState): void {
+    if (!this.isRecoverableAbnormalDirectDisconnect(state)) {
+      return;
+    }
+
+    const desktopPlatform = this.deps.getDesktopPlatform?.() ?? "win32";
+    const attempt = state.reconnectAttempt ?? 0;
+    void this.deps.getDesktopDaemonStatus!()
+      .then((daemonStatus) => {
+        console.info("[HostRuntime] direct transport abnormal close", {
+          platform: desktopPlatform,
+          transport: "direct",
+          closeCode: state.closeCode,
+          reason: state.reason,
+          wasClean: state.wasClean,
+          attempt,
+          daemonStatus: daemonStatus.status,
+          daemonPid: daemonStatus.pid,
+          daemonListen: daemonStatus.listen,
+          daemonError: daemonStatus.error,
+        });
+        if (daemonStatus.status === "running") {
+          this.activeClient?.ensureConnected();
+        }
+      })
+      .catch((error: unknown) => {
+        console.warn("[HostRuntime] failed to inspect daemon after abnormal close", {
+          platform: desktopPlatform,
+          transport: "direct",
+          closeCode: state.closeCode,
+          reason: state.reason,
+          wasClean: state.wasClean,
+          attempt,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+  }
+
   private logConnectionTransition(_input: {
     from: HostRuntimeConnectionMachineState["tag"];
     to: HostRuntimeConnectionMachineState["tag"];
@@ -1043,7 +1131,9 @@ export class HostRuntimeController {
         type: "client_state",
         state,
         lastError: client.lastError,
+        isRecoverableAbnormalDisconnect: this.isRecoverableAbnormalDirectDisconnect(state),
       });
+      this.handleAbnormalDirectDisconnect(state);
       const patch: HostRuntimeSnapshotPatch = {
         ...toSnapshotConnectionPatch(this.connectionMachineState),
       };
@@ -1375,6 +1465,20 @@ export class HostRuntimeStore {
     const remaining = this.hosts.filter((daemon) => daemon.serverId !== serverId);
     this.setHostsAndSync(remaining);
     await this.persistHosts();
+  }
+
+  async reset(): Promise<void> {
+    this.storageLoaded = true;
+    this.bootstrapAttempted = false;
+    this.setHostsAndSync([]);
+    this.lastConnectionStatusByServer.clear();
+    this.agentDirectoryBootstrapInFlight.clear();
+    try {
+      await AsyncStorage.removeItem(REGISTRY_STORAGE_KEY);
+      await AsyncStorage.removeItem(DEFAULT_LOCALHOST_BOOTSTRAP_KEY);
+    } catch (error) {
+      console.error("[HostRuntime] Failed to clear host registry", error);
+    }
   }
 
   async removeConnection(serverId: string, connectionId: string): Promise<void> {
