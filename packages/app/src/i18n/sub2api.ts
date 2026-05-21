@@ -1122,6 +1122,39 @@ export const sub2apiMessages = {
         return status;
       },
     },
+    onboardingGuide: {
+      title: "快速上手",
+      progressLabel: "新手引导进度",
+      stepCount: (current: number, total: number) => `${current}/${total}`,
+      previous: "上一步",
+      next: "下一步",
+      finish: "完成",
+      skip: "跳过",
+      skipAccessibilityLabel: "跳过并完成新手引导",
+      goToStep: (step: number) => `跳到第 ${step} 步`,
+      steps: [
+        {
+          title: "打开项目",
+          body: "从左侧项目列表进入仓库，或用打开项目按钮添加本机目录。每个项目会记住自己的工作区和代理会话。",
+        },
+        {
+          title: "给代理发消息",
+          body: "在底部输入框描述任务，必要时用 @ 标记文件。运行中再次发送会按你的默认发送设置中断或排队。",
+        },
+        {
+          title: "选择模型和权限",
+          body: "发送前可以切换模型、推理强度和权限范围。常用组合会跟随当前工作区，减少重复配置。",
+        },
+        {
+          title: "用分支和工作树隔离任务",
+          body: "顶部可切换分支；分支列表右侧的按钮可从该分支新建 worktree，让实验和修复互不干扰。",
+        },
+        {
+          title: "查看 diff 并提交",
+          body: "右侧 Changes 面板会展示未提交改动。确认后填写提交信息并提交，文件列表也可以单独勾选。",
+        },
+      ],
+    },
     settings: {
       title: "设置",
       loadingSettings: "正在加载设置…",
@@ -1145,6 +1178,10 @@ export const sub2apiMessages = {
       languageHint: "用于客户端界面、云服务、支付和模型广场",
       defaultSend: "默认发送",
       defaultSendHint: "当代理正在运行时，按 Enter 后的处理方式",
+      onboardingGuide: "新手引导",
+      onboardingGuideHint: "重新查看项目、聊天、模型、工作树和提交的核心流程。",
+      replayOnboardingGuide: "重新展示",
+      replayOnboardingGuideAccessibilityLabel: "重新展示新手引导",
       interrupt: "中断",
       queue: "排队",
       themes: {
@@ -2586,6 +2623,39 @@ export const sub2apiMessages = {
       historyTitle: "Referral history",
       statusLabel: (status: string) => status,
     },
+    onboardingGuide: {
+      title: "Quick start",
+      progressLabel: "Onboarding guide progress",
+      stepCount: (current: number, total: number) => `${current}/${total}`,
+      previous: "Back",
+      next: "Next",
+      finish: "Done",
+      skip: "Skip",
+      skipAccessibilityLabel: "Skip and complete onboarding guide",
+      goToStep: (step: number) => `Go to step ${step}`,
+      steps: [
+        {
+          title: "Open a project",
+          body: "Enter a repository from the left project list, or add a local folder with the open project button. Each project remembers its workspaces and agent sessions.",
+        },
+        {
+          title: "Message your agent",
+          body: "Describe the task in the composer and tag files with @ when useful. Sending while an agent is running follows your default interrupt or queue behavior.",
+        },
+        {
+          title: "Choose model and permissions",
+          body: "Before sending, switch the model, reasoning effort, and permission scope. Common choices stay close to the current workspace.",
+        },
+        {
+          title: "Use branches and worktrees",
+          body: "Switch branches from the title bar. The button on the right side of each branch row creates a new worktree from that branch.",
+        },
+        {
+          title: "Review diffs and commit",
+          body: "The Changes panel shows uncommitted edits. Pick the files you want, write a commit message, and commit when the diff looks right.",
+        },
+      ],
+    },
     settings: {
       title: "Settings",
       loadingSettings: "Loading settings...",
@@ -2609,6 +2679,10 @@ export const sub2apiMessages = {
       languageHint: "Used for the client UI, cloud service, payments, and the model catalog",
       defaultSend: "Default send",
       defaultSendHint: "What happens when you press Enter while the agent is running",
+      onboardingGuide: "Onboarding guide",
+      onboardingGuideHint: "Review the core project, chat, model, worktree, and commit flow.",
+      replayOnboardingGuide: "Replay",
+      replayOnboardingGuideAccessibilityLabel: "Replay onboarding guide",
       interrupt: "Interrupt",
       queue: "Queue",
       themes: {

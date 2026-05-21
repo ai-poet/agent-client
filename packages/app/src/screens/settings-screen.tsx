@@ -68,6 +68,7 @@ import { HostPage, HostRenameButton } from "@/screens/settings/host-page";
 import { ManagedProviderSettingsPage } from "@/screens/settings/managed-provider-settings-page";
 import { PaseoCloudSettingsPage } from "@/screens/settings/paseo-cloud-settings-page";
 import { DesktopProvidersStoreProvider } from "@/screens/settings/desktop-providers-context";
+import { OnboardingGuideRow } from "@/screens/settings/onboarding-guide-row";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import { APP_NAME, CLOUD_NAME } from "@/config/branding";
@@ -78,6 +79,7 @@ import {
   buildSettingsSectionRoute,
   type SettingsSectionSlug,
 } from "@/utils/host-routes";
+import { useOnboardingGuideStore } from "@/stores/onboarding-guide-store";
 
 // ---------------------------------------------------------------------------
 // View model
@@ -180,6 +182,7 @@ interface GeneralSectionProps {
   handleThemeChange: (theme: AppSettings["theme"]) => void;
   handleLanguageChange: (language: AppLanguage) => void;
   handleSendBehaviorChange: (behavior: SendBehavior) => void;
+  handleReplayOnboardingGuide: () => void;
 }
 
 function GeneralSection({
@@ -188,6 +191,7 @@ function GeneralSection({
   handleThemeChange,
   handleLanguageChange,
   handleSendBehaviorChange,
+  handleReplayOnboardingGuide,
 }: GeneralSectionProps) {
   const { theme } = useUnistyles();
   const iconSize = theme.iconSize.md;
@@ -260,6 +264,13 @@ function GeneralSection({
             ]}
           />
         </View>
+        <OnboardingGuideRow
+          title={text.onboardingGuide}
+          hint={text.onboardingGuideHint}
+          actionLabel={text.replayOnboardingGuide}
+          accessibilityLabel={text.replayOnboardingGuideAccessibilityLabel}
+          onReplay={handleReplayOnboardingGuide}
+        />
       </View>
     </SettingsSection>
   );
@@ -691,6 +702,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
   const { theme } = useUnistyles();
   const voiceAudioEngine = useVoiceAudioEngineOptional();
   const { settings, isLoading: settingsLoading, updateSettings } = useAppSettings();
+  const openOnboardingGuide = useOnboardingGuideStore((state) => state.openGuide);
   const appLocale = useMemo(
     () => resolveSub2APILocaleFromPreference(settings.language),
     [settings.language],
@@ -730,6 +742,10 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
     },
     [updateSettings],
   );
+
+  const handleReplayOnboardingGuide = useCallback(() => {
+    openOnboardingGuide({ source: "manual" });
+  }, [openOnboardingGuide]);
 
   const handlePlaybackTest = useCallback(async () => {
     if (!voiceAudioEngine || isPlaybackTestRunning) {
@@ -885,6 +901,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
               handleThemeChange={handleThemeChange}
               handleLanguageChange={handleLanguageChange}
               handleSendBehaviorChange={handleSendBehaviorChange}
+              handleReplayOnboardingGuide={handleReplayOnboardingGuide}
             />
           );
         case "paseo-cloud":

@@ -63,6 +63,7 @@ import { getIsElectronRuntime, useIsCompactFormFactor } from "@/constants/layout
 import { CommandCenter } from "@/components/command-center";
 import { ProjectPickerModal } from "@/components/project-picker-modal";
 import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
+import { OnboardingGuideDialog } from "@/components/onboarding-guide-dialog";
 import { WorkspaceSetupDialog } from "@/components/workspace-setup-dialog";
 import { WorkspaceShortcutTargetsSubscriber } from "@/components/workspace-shortcut-targets-subscriber";
 import { resolveActiveHost } from "@/utils/active-host";
@@ -99,6 +100,7 @@ import {
 import { isWeb, isNative } from "@/constants/platform";
 import { useSub2APIAuth } from "@/hooks/use-sub2api-auth";
 import { Sub2apiDesktopAuthBridge } from "@/hooks/sub2api-desktop-auth-bridge";
+import { useOnboardingGuideStore } from "@/stores/onboarding-guide-store";
 
 polyfillCrypto();
 
@@ -430,7 +432,10 @@ function AppContainer({
 }: AppContainerProps) {
   const { theme } = useUnistyles();
   const daemons = useHosts();
-  const { settings, updateSettings } = useAppSettings();
+  const { settings, isLoading: settingsLoading, updateSettings } = useAppSettings();
+  const onboardingGuideOpen = useOnboardingGuideStore((state) => state.open);
+  const onboardingAutoPrompted = useOnboardingGuideStore((state) => state.autoPrompted);
+  const openOnboardingGuide = useOnboardingGuideStore((state) => state.openGuide);
   const toggleMobileAgentList = usePanelStore((state) => state.toggleMobileAgentList);
   const toggleDesktopAgentList = usePanelStore((state) => state.toggleDesktopAgentList);
   const openDesktopAgentList = usePanelStore((state) => state.openDesktopAgentList);
@@ -475,6 +480,27 @@ function AppContainer({
   // global concerns like keyboard shortcuts. Split those out so settings (and
   // other non-workspace routes) don't need a special-case to keep shortcuts alive.
   const keyboardShortcutsEnabled = chromeEnabled || pathname.startsWith("/settings");
+  const isWorkspaceRoute = /^\/h\/[^/]+\/workspace\/[^/]+(?:\/|$)/.test(pathname);
+
+  useEffect(() => {
+    if (
+      !isWorkspaceRoute ||
+      settingsLoading ||
+      settings.onboardingGuideCompleted ||
+      onboardingAutoPrompted ||
+      onboardingGuideOpen
+    ) {
+      return;
+    }
+    openOnboardingGuide({ source: "auto" });
+  }, [
+    isWorkspaceRoute,
+    onboardingAutoPrompted,
+    onboardingGuideOpen,
+    openOnboardingGuide,
+    settings.onboardingGuideCompleted,
+    settingsLoading,
+  ]);
 
   useEffect(() => {
     const bp = UnistylesRuntime.breakpoint;
@@ -540,6 +566,7 @@ function AppContainer({
       />
       <WorkspaceSetupDialog />
       <KeyboardShortcutsDialog />
+      <OnboardingGuideDialog />
     </View>
   );
 

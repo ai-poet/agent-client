@@ -24,6 +24,7 @@ export interface AppSettings {
   releaseChannel: ReleaseChannel;
   accessMode: AccessMode | null;
   setupCheckCompleted: boolean;
+  onboardingGuideCompleted: boolean;
   language: AppLanguage;
 }
 
@@ -34,6 +35,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   releaseChannel: "stable",
   accessMode: null,
   setupCheckCompleted: false,
+  onboardingGuideCompleted: false,
   language: "auto",
 };
 
@@ -110,6 +112,12 @@ export async function loadSettingsFromStorage(): Promise<AppSettings> {
       }
       if (parsed.language && !VALID_APP_LANGUAGES.has(parsed.language)) {
         parsed.language = DEFAULT_APP_SETTINGS.language;
+      }
+      if (
+        parsed.onboardingGuideCompleted !== undefined &&
+        typeof parsed.onboardingGuideCompleted !== "boolean"
+      ) {
+        parsed.onboardingGuideCompleted = DEFAULT_APP_SETTINGS.onboardingGuideCompleted;
       }
       return { ...DEFAULT_APP_SETTINGS, ...parsed };
     }

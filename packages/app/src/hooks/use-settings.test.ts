@@ -71,9 +71,42 @@ describe("use-settings", () => {
       releaseChannel: "stable",
       accessMode: null,
       setupCheckCompleted: false,
+      onboardingGuideCompleted: false,
       language: "auto",
     });
     expect(asyncStorageMock.setItem).not.toHaveBeenCalled();
+  });
+
+  it("loads persisted onboarding completion state", async () => {
+    asyncStorageMock.getItem.mockImplementation(async (key: string) => {
+      if (key === "@paseo:app-settings") {
+        return JSON.stringify({
+          onboardingGuideCompleted: true,
+        });
+      }
+      return null;
+    });
+
+    const mod = await import("./use-settings");
+    const result = await mod.loadSettingsFromStorage();
+
+    expect(result.onboardingGuideCompleted).toBe(true);
+  });
+
+  it("defaults invalid onboarding completion state to incomplete", async () => {
+    asyncStorageMock.getItem.mockImplementation(async (key: string) => {
+      if (key === "@paseo:app-settings") {
+        return JSON.stringify({
+          onboardingGuideCompleted: "yes",
+        });
+      }
+      return null;
+    });
+
+    const mod = await import("./use-settings");
+    const result = await mod.loadSettingsFromStorage();
+
+    expect(result.onboardingGuideCompleted).toBe(false);
   });
 
   it("loads persisted beta release channel", async () => {
