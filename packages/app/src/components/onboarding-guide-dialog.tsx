@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Dimensions, Pressable, Text, View } from "react-native";
+import { Dimensions, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Button } from "@/components/ui/button";
 import { useAppSettings } from "@/hooks/use-settings";
@@ -7,6 +7,7 @@ import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 import { getSub2APIMessages } from "@/i18n/sub2api";
 import { useOnboardingGuideStore } from "@/stores/onboarding-guide-store";
 import {
+  type OnboardingGuideTargetId,
   type OnboardingGuideTargetRect,
   useOnboardingGuideTargetRegistry,
 } from "@/components/onboarding-guide-target";
@@ -15,6 +16,34 @@ const SPOTLIGHT_PADDING = 8;
 const PANEL_WIDTH = 360;
 const PANEL_MARGIN = 16;
 const FALLBACK_PANEL_TOP = 96;
+const PANEL_ESTIMATED_HEIGHT = 330;
+
+const TARGET_FALLBACKS: Partial<
+  Record<OnboardingGuideTargetId, readonly OnboardingGuideTargetId[]>
+> = {
+  "sidebar.initializeGit": ["sidebar.newWorktree", "sidebar.projects"],
+  "workspace.branchWorktree": ["workspace.branchSwitcher"],
+  "changes.commit": ["agent.composer"],
+};
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function isVisibleRect(
+  rect: OnboardingGuideTargetRect | null,
+  screen: { width: number; height: number },
+): rect is OnboardingGuideTargetRect {
+  if (!rect || rect.width <= 0 || rect.height <= 0) {
+    return false;
+  }
+  return (
+    rect.x < screen.width &&
+    rect.y < screen.height &&
+    rect.x + rect.width > 0 &&
+    rect.y + rect.height > 0
+  );
+}
 
 function expandRect(
   rect: OnboardingGuideTargetRect,
@@ -37,18 +66,22 @@ function computePanelPosition(input: {
   screen: { width: number; height: number };
 }): { left: number; top: number; width: number } {
   const width = Math.min(PANEL_WIDTH, input.screen.width - PANEL_MARGIN * 2);
+  const maxTop = Math.max(
+    PANEL_MARGIN,
+    input.screen.height - PANEL_ESTIMATED_HEIGHT - PANEL_MARGIN,
+  );
   if (!input.rect) {
     return {
       left: Math.max(PANEL_MARGIN, (input.screen.width - width) / 2),
-      top: Math.min(FALLBACK_PANEL_TOP, Math.max(PANEL_MARGIN, input.screen.height - 260)),
+      top: clamp(FALLBACK_PANEL_TOP, PANEL_MARGIN, maxTop),
       width,
     };
   }
 
   const belowTop = input.rect.y + input.rect.height + PANEL_MARGIN;
-  const aboveTop = input.rect.y - 220 - PANEL_MARGIN;
-  const hasRoomBelow = belowTop + 220 < input.screen.height;
-  const top = hasRoomBelow ? belowTop : Math.max(PANEL_MARGIN, aboveTop);
+  const aboveTop = input.rect.y - PANEL_ESTIMATED_HEIGHT - PANEL_MARGIN;
+  const hasRoomBelow = belowTop + PANEL_ESTIMATED_HEIGHT < input.screen.height;
+  const top = clamp(hasRoomBelow ? belowTop : aboveTop, PANEL_MARGIN, maxTop);
   const centerX = input.rect.x + input.rect.width / 2;
   const left = Math.max(
     PANEL_MARGIN,
@@ -65,6 +98,9 @@ const styles = StyleSheet.create((theme) => ({
   dim: {
     position: "absolute",
     backgroundColor: "rgba(0, 0, 0, 0.76)",
+  },
+  fallbackDim: {
+    backgroundColor: "rgba(0, 0, 0, 0.62)",
   },
   spotlightBorder: {
     position: "absolute",
@@ -127,27 +163,16 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    flexWrap: "wrap",
     gap: theme.spacing[3],
   },
   footerGroup: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "flex-end",
+    flexShrink: 1,
+    flexWrap: "wrap",
     gap: theme.spacing[2],
-  },
-  dotButton: {
-    width: 18,
-    height: 18,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  dotButtonInner: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: theme.colors.surface3,
-  },
-  dotButtonInnerActive: {
-    backgroundColor: theme.colors.accent,
   },
 }));
 
@@ -161,7 +186,6 @@ export function OnboardingGuideDialog() {
   const closeGuide = useOnboardingGuideStore((state) => state.closeGuide);
   const nextStep = useOnboardingGuideStore((state) => state.nextStep);
   const previousStep = useOnboardingGuideStore((state) => state.previousStep);
-  const setStepIndex = useOnboardingGuideStore((state) => state.setStepIndex);
   const [targetRect, setTargetRect] = useState<OnboardingGuideTargetRect | null>(null);
   const [screen, setScreen] = useState(() => Dimensions.get("window"));
 
@@ -186,8 +210,10 @@ export function OnboardingGuideDialog() {
 
     let cancelled = false;
     const measure = () => {
-      void registry.measure(step.targetId).then((rect) => {
+      const targetIds = [step.targetId, ...(TARGET_FALLBACKS[step.targetId] ?? [])];
+      void Promise.all(targetIds.map((targetId) => registry.measure(targetId))).then((rects) => {
         if (!cancelled) {
+          const rect = rects.find((candidate) => isVisibleRect(candidate, screen)) ?? null;
           setTargetRect(rect ? expandRect(rect, screen) : null);
         }
       });
@@ -223,40 +249,46 @@ export function OnboardingGuideDialog() {
 
   return (
     <View style={styles.overlay} pointerEvents="auto" testID="onboarding-guide-dialog">
-      <View style={[styles.dim, { top: 0, left: 0, right: 0, height: rect?.y ?? screen.height }]} />
-      <View
-        style={[
-          styles.dim,
-          {
-            top: rect ? rect.y + rect.height : 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-          },
-        ]}
-      />
-      <View
-        style={[
-          styles.dim,
-          {
-            top: rect?.y ?? 0,
-            left: 0,
-            width: rect?.x ?? screen.width,
-            height: rect?.height ?? 0,
-          },
-        ]}
-      />
-      <View
-        style={[
-          styles.dim,
-          {
-            top: rect?.y ?? 0,
-            left: rect ? rect.x + rect.width : 0,
-            right: 0,
-            height: rect?.height ?? 0,
-          },
-        ]}
-      />
+      {rect ? (
+        <>
+          <View style={[styles.dim, { top: 0, left: 0, right: 0, height: rect.y }]} />
+          <View
+            style={[
+              styles.dim,
+              {
+                top: rect.y + rect.height,
+                left: 0,
+                right: 0,
+                bottom: 0,
+              },
+            ]}
+          />
+          <View
+            style={[
+              styles.dim,
+              {
+                top: rect.y,
+                left: 0,
+                width: rect.x,
+                height: rect.height,
+              },
+            ]}
+          />
+          <View
+            style={[
+              styles.dim,
+              {
+                top: rect.y,
+                left: rect.x + rect.width,
+                right: 0,
+                height: rect.height,
+              },
+            ]}
+          />
+        </>
+      ) : (
+        <View style={[styles.dim, styles.fallbackDim, StyleSheet.absoluteFillObject]} />
+      )}
       {rect ? <View pointerEvents="none" style={[styles.spotlightBorder, rect] as any} /> : null}
 
       <View style={[styles.panel, panel] as any} testID="onboarding-guide-content">
@@ -294,23 +326,6 @@ export function OnboardingGuideDialog() {
             >
               {text.previous}
             </Button>
-            {steps.map((item, index) => (
-              <Pressable
-                key={item.title}
-                accessibilityRole="button"
-                accessibilityLabel={text.goToStep(index + 1)}
-                onPress={() => setStepIndex(index)}
-                style={styles.dotButton}
-                testID={`onboarding-guide-step-${index + 1}`}
-              >
-                <View
-                  style={[
-                    styles.dotButtonInner,
-                    index === safeStepIndex && styles.dotButtonInnerActive,
-                  ]}
-                />
-              </Pressable>
-            ))}
             <Button
               variant="default"
               size="sm"

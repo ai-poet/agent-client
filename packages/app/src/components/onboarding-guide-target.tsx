@@ -7,7 +7,7 @@ import React, {
   useRef,
   type PropsWithChildren,
 } from "react";
-import { View, type StyleProp, type ViewProps, type ViewStyle } from "react-native";
+import { Dimensions, View, type StyleProp, type ViewProps, type ViewStyle } from "react-native";
 
 export type OnboardingGuideTargetId =
   | "sidebar.projects"
@@ -52,6 +52,16 @@ function measureView(ref: TargetRef): Promise<OnboardingGuideTargetRect | null> 
   });
 }
 
+function rectIntersectsWindow(rect: OnboardingGuideTargetRect): boolean {
+  const screen = Dimensions.get("window");
+  return (
+    rect.x < screen.width &&
+    rect.y < screen.height &&
+    rect.x + rect.width > 0 &&
+    rect.y + rect.height > 0
+  );
+}
+
 export function OnboardingGuideTargetProvider({ children }: PropsWithChildren) {
   const targetsRef = useRef(new Map<OnboardingGuideTargetId, Set<TargetRef>>());
 
@@ -69,13 +79,17 @@ export function OnboardingGuideTargetProvider({ children }: PropsWithChildren) {
 
   const measure = useCallback(async (id: OnboardingGuideTargetId) => {
     const refs = Array.from(targetsRef.current.get(id) ?? []);
+    let fallbackRect: OnboardingGuideTargetRect | null = null;
     for (let index = refs.length - 1; index >= 0; index -= 1) {
       const rect = await measureView(refs[index]!);
       if (rect) {
-        return rect;
+        fallbackRect = fallbackRect ?? rect;
+        if (rectIntersectsWindow(rect)) {
+          return rect;
+        }
       }
     }
-    return null;
+    return fallbackRect;
   }, []);
 
   const value = useMemo(() => ({ register, measure }), [measure, register]);

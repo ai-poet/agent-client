@@ -328,7 +328,7 @@ export const sub2apiMessages = {
         retry: "重试",
         manageRoutes: "管理路由",
         install: "安装",
-        installAll: "全部安装",
+        installAll: "安装缺失项",
         configure: "配置",
       },
       health: {
@@ -1521,8 +1521,9 @@ export const sub2apiMessages = {
         reinstall: "重新安装",
         claudeCodeCli: "Claude Code CLI",
         externalAgentStack: "外部代理栈",
-        externalAgentStackHint: "一次性安装 Git Bash、Node.js 22、Codex 和 Claude Code。",
+        externalAgentStackHint: "只安装当前缺失的 Git Bash、Node.js 22、Codex 或 Claude Code。",
         installAll: "全部安装",
+        installMissing: "安装缺失项",
       },
       permissions: {
         title: "权限",
@@ -1824,7 +1825,7 @@ export const sub2apiMessages = {
         retry: "Retry",
         manageRoutes: "Manage Routes",
         install: "Install",
-        installAll: "Install All",
+        installAll: "Install Missing",
         configure: "Configure",
       },
       health: {
@@ -3051,8 +3052,10 @@ export const sub2apiMessages = {
         reinstall: "Reinstall",
         claudeCodeCli: "Claude Code CLI",
         externalAgentStack: "External agent stack",
-        externalAgentStackHint: "Install Git Bash, Node.js 22, Codex, and Claude Code in one pass.",
+        externalAgentStackHint:
+          "Install only the missing Git Bash, Node.js 22, Codex, or Claude Code pieces.",
         installAll: "Install all",
+        installMissing: "Install missing",
       },
       permissions: {
         title: "Permissions",

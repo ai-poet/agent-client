@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
+vi.hoisted(() => {
+  (globalThis as { __DEV__?: boolean }).__DEV__ = false;
+});
+
 vi.mock("expo-router", () => ({
   useRouter: () => ({
     push: vi.fn(),
@@ -412,5 +416,21 @@ describe("use-setup-checks availability helpers", () => {
         installingDescription: "正在安装 Claude Code CLI...",
       },
     ]);
+  });
+
+  it("filters CLI installation steps to only missing tools", () => {
+    const status = makeRuntimeStatus({
+      claude: {
+        command: "claude",
+        packageName: "@anthropic-ai/claude-code",
+        installed: false,
+        version: null,
+        error: "Claude Code was not found.",
+      },
+    });
+
+    expect(
+      getCliInstallSteps(status, getSub2APIMessages("en").setupCheck).map((step) => step.id),
+    ).toEqual(["claude"]);
   });
 });

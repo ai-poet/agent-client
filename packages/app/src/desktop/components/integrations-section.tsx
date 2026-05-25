@@ -15,10 +15,11 @@ import {
   installSkills,
   type InstallStatus,
   getModelCliRuntimeStatus,
-  installAllModelClis,
   installClaudeCodeCli,
   installCodexCli,
+  installGitBashRuntime,
   installNode22Runtime,
+  type ModelCliInstallResult,
   type ModelCliRuntimeStatus,
 } from "@/desktop/daemon/desktop-daemon";
 import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
@@ -26,6 +27,28 @@ import { getSub2APIMessages } from "@/i18n/sub2api";
 
 const CLI_DOCS_URL = "https://paseo.sh/docs/cli";
 const SKILLS_DOCS_URL = "https://paseo.sh/docs/skills";
+
+type RuntimeInstallStep = {
+  id: "git" | "node" | "codex" | "claude";
+  run: () => Promise<ModelCliInstallResult>;
+};
+
+function getMissingRuntimeInstallSteps(status: ModelCliRuntimeStatus): RuntimeInstallStep[] {
+  const steps: RuntimeInstallStep[] = [];
+  if (!status.git.installed) {
+    steps.push({ id: "git", run: installGitBashRuntime });
+  }
+  if (!status.node.installed || !status.node.satisfies) {
+    steps.push({ id: "node", run: installNode22Runtime });
+  }
+  if (!status.codex.installed) {
+    steps.push({ id: "codex", run: installCodexCli });
+  }
+  if (!status.claude.installed) {
+    steps.push({ id: "claude", run: installClaudeCodeCli });
+  }
+  return steps;
+}
 
 export function IntegrationsSection() {
   const { theme } = useUnistyles();
@@ -173,10 +196,15 @@ export function IntegrationsSection() {
   const handleInstallAll = useCallback(() => {
     if (isInstallingAll) return;
     setIsInstallingAll(true);
-    void installAllModelClis()
-      .then((result) => {
-        setModelCliStatus(result.status);
-      })
+    void (async () => {
+      let status = modelCliStatus ?? (await getModelCliRuntimeStatus());
+      let result: ModelCliInstallResult | null = null;
+      for (const step of getMissingRuntimeInstallSteps(status)) {
+        result = await step.run();
+        status = result.status;
+      }
+      setModelCliStatus(result?.status ?? status);
+    })()
       .catch((error) => {
         console.error("[Integrations] Failed to install Node.js and model CLIs", error);
         Alert.alert(text.installFailed, error instanceof Error ? error.message : String(error));
@@ -184,7 +212,7 @@ export function IntegrationsSection() {
       .finally(() => {
         setIsInstallingAll(false);
       });
-  }, [isInstallingAll]);
+  }, [isInstallingAll, modelCliStatus, text.installFailed]);
 
   if (!showSection) {
     return null;
@@ -387,7 +415,7 @@ export function IntegrationsSection() {
             onPress={handleInstallAll}
             disabled={runtimeActionsDisabled}
           >
-            {isInstallingAll ? text.installing : text.installAll}
+            {isInstallingAll ? text.installing : text.installMissing}
           </Button>
         </View>
       </View>

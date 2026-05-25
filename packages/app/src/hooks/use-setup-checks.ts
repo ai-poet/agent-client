@@ -8,7 +8,6 @@ import { createSub2APIClient, type Sub2APIGroup, type Sub2APIKey } from "@/lib/s
 import {
   getModelCliRuntimeStatus,
   installClaudeCodeCli,
-  installAllModelClis,
   installCodexCli,
   installGitBashRuntime,
   installNode22Runtime,
@@ -244,10 +243,28 @@ interface CliInstallStep {
   run: () => Promise<{ status: ModelCliRuntimeStatus }>;
 }
 
+function isModelCliRuntimeStatus(value: unknown): value is ModelCliRuntimeStatus {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "git" in value &&
+    "node" in value &&
+    "codex" in value &&
+    "claude" in value
+  );
+}
+
 export function getCliInstallSteps(
-  text: SetupCheckText = getSub2APIMessages("en").setupCheck,
+  statusOrText?: ModelCliRuntimeStatus | SetupCheckText | null,
+  maybeText?: SetupCheckText,
 ): CliInstallStep[] {
-  return [
+  const status = isModelCliRuntimeStatus(statusOrText) ? statusOrText : null;
+  const text =
+    maybeText ??
+    (statusOrText && !isModelCliRuntimeStatus(statusOrText)
+      ? statusOrText
+      : getSub2APIMessages("en").setupCheck);
+  const steps: CliInstallStep[] = [
     {
       id: "git",
       label: "Git Bash",
@@ -273,6 +290,23 @@ export function getCliInstallSteps(
       run: installClaudeCodeCli,
     },
   ];
+
+  if (!status) {
+    return steps;
+  }
+
+  return steps.filter((step) => {
+    switch (step.id) {
+      case "git":
+        return !status.git.installed;
+      case "node":
+        return !status.node.installed || !status.node.satisfies;
+      case "codex":
+        return !status.codex.installed;
+      case "claude":
+        return !status.claude.installed;
+    }
+  });
 }
 
 export function useSetupChecks(): UseSetupChecksReturn {
@@ -488,7 +522,7 @@ export function useSetupChecks(): UseSetupChecksReturn {
               description: text.cli.preparingInstall,
             });
             try {
-              const installSteps = getCliInstallSteps(text);
+              const installSteps = getCliInstallSteps(status, text);
               let result: { status: ModelCliRuntimeStatus } | null = null;
               for (const step of installSteps) {
                 updateCheck("cliConfig", {
@@ -504,16 +538,16 @@ export function useSetupChecks(): UseSetupChecksReturn {
                   description: text.cli.stepReadyContinuing(step.label),
                 });
               }
-              result = result ?? (await installAllModelClis());
-              cliStatusRef.current = result.status;
-              const allInstalled = getMissingCliDependencyNames(result.status).length === 0;
+              const finalStatus = result?.status ?? cliStatusRef.current ?? status;
+              cliStatusRef.current = finalStatus;
+              const allInstalled = getMissingCliDependencyNames(finalStatus).length === 0;
               if (allInstalled) {
                 await runCliConfigCheck();
               } else {
                 updateCheck("cliConfig", {
                   status: "failed",
                   error: text.cli.installationIncomplete(
-                    getMissingCliDependencyNames(result.status).join(", "),
+                    getMissingCliDependencyNames(finalStatus).join(", "),
                   ),
                   description: text.cli.someToolsFailed,
                   fixLabel: text.actions.retry,

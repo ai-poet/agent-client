@@ -2009,25 +2009,32 @@ export async function installAllModelClis(): Promise<ModelCliInstallResult> {
   const outputs: string[] = [];
 
   try {
-    if (process.platform === "win32") {
+    let status = await getModelCliRuntimeStatus();
+    if (process.platform === "win32" && !status.git.installed) {
       outputs.push(await installWindowsGitBash());
+      status = await getModelCliRuntimeStatus();
     }
 
     const gitBashPath = await resolveWindowsGitBashPath();
     await patchClaudeCodeGitBashPathForWindows(gitBashPath);
-    const nodeStatus = await readNodeStatus(manager, { gitBashPath });
 
-    if (!nodeStatus.satisfies) {
+    if (!status.node.satisfies) {
       outputs.push(await installNode22IntoManager(manager, { gitBashPath }));
+      status = await getModelCliRuntimeStatus();
     } else {
       await ensureWindowsExternalCliPathReady();
     }
-    outputs.push(await installPackageIntoRuntime(CODEX_PACKAGE_NAME, manager, { gitBashPath }));
-    outputs.push(
-      await installPackageIntoRuntime(CLAUDE_CODE_PACKAGE_NAME, manager, { gitBashPath }),
-    );
+    if (!status.codex.installed) {
+      outputs.push(await installPackageIntoRuntime(CODEX_PACKAGE_NAME, manager, { gitBashPath }));
+      status = await getModelCliRuntimeStatus();
+    }
+    if (!status.claude.installed) {
+      outputs.push(
+        await installPackageIntoRuntime(CLAUDE_CODE_PACKAGE_NAME, manager, { gitBashPath }),
+      );
+    }
 
-    const status = await getModelCliRuntimeStatus();
+    status = await getModelCliRuntimeStatus();
     log.info("[model-cli-manager] installed runtime stack", {
       gitVersion: status.git.version,
       gitBashPath: status.git.bashPath,
