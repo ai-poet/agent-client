@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
@@ -1477,6 +1477,148 @@ describe("workspace aggregation", () => {
     const response = emitted.find((message) => message.type === "open_project_response") as any;
     expect(response?.payload.error).toBeNull();
     expect(response?.payload.workspace?.id).toBe(cwd);
+  });
+
+  test("initialize_project_git_request initializes a directory and promotes it to a git workspace", async () => {
+    const emitted: Array<{ type: string; payload: any }> = [];
+    const tempDir = realpathSync(mkdtempSync(path.join(tmpdir(), "session-init-git-")));
+    const projects = new Map<string, ReturnType<typeof createPersistedProjectRecord>>();
+    const workspaces = new Map<string, ReturnType<typeof createPersistedWorkspaceRecord>>();
+    const createdAt = "2026-03-01T12:00:00.000Z";
+
+    projects.set(
+      tempDir,
+      createPersistedProjectRecord({
+        projectId: tempDir,
+        rootPath: tempDir,
+        kind: "non_git",
+        displayName: path.basename(tempDir),
+        createdAt,
+        updatedAt: createdAt,
+      }),
+    );
+    workspaces.set(
+      tempDir,
+      createPersistedWorkspaceRecord({
+        workspaceId: tempDir,
+        projectId: tempDir,
+        cwd: tempDir,
+        kind: "directory",
+        displayName: path.basename(tempDir),
+        createdAt,
+        updatedAt: createdAt,
+      }),
+    );
+
+    const workspaceGitService = createNoopWorkspaceGitService();
+    workspaceGitService.getSnapshot = vi.fn(async (cwd: string) => {
+      const isGit = existsSync(path.join(cwd, ".git"));
+      return createWorkspaceRuntimeSnapshot(cwd, {
+        git: {
+          isGit,
+          repoRoot: isGit ? cwd : null,
+          currentBranch: isGit ? "main" : null,
+          remoteUrl: null,
+          isDirty: isGit ? false : null,
+          hasRemote: false,
+          diffStat: null,
+        },
+        github: {
+          featuresEnabled: false,
+          pullRequest: null,
+        },
+      });
+    });
+    workspaceGitService.peekSnapshot = vi.fn((cwd: string) => {
+      if (!existsSync(path.join(cwd, ".git"))) {
+        return null;
+      }
+      return createWorkspaceRuntimeSnapshot(cwd, {
+        git: {
+          repoRoot: cwd,
+          currentBranch: "main",
+          remoteUrl: null,
+          hasRemote: false,
+          diffStat: null,
+        },
+        github: {
+          featuresEnabled: false,
+          pullRequest: null,
+        },
+      });
+    });
+
+    const session = createSessionForWorkspaceTests({ workspaceGitService }) as any;
+    session.emit = (message: any) => emitted.push(message);
+    session.workspaceUpdatesSubscription = {
+      subscriptionId: "sub-init-git",
+      filter: undefined,
+      isBootstrapping: false,
+      pendingUpdatesByWorkspaceId: new Map(),
+      lastEmittedByWorkspaceId: new Map(),
+    };
+    session.reconcileActiveWorkspaceRecords = async () => new Set();
+    session.listAgentPayloads = async () => [];
+    session.projectRegistry.get = async (projectId: string) => projects.get(projectId) ?? null;
+    session.projectRegistry.list = async () => Array.from(projects.values());
+    session.projectRegistry.upsert = async (
+      record: ReturnType<typeof createPersistedProjectRecord>,
+    ) => {
+      projects.set(record.projectId, record);
+    };
+    session.projectRegistry.archive = async (projectId: string, archivedAt: string) => {
+      const existing = projects.get(projectId);
+      if (!existing) return;
+      projects.set(projectId, { ...existing, archivedAt, updatedAt: archivedAt });
+    };
+    session.workspaceRegistry.get = async (workspaceId: string) =>
+      workspaces.get(workspaceId) ?? null;
+    session.workspaceRegistry.list = async () => Array.from(workspaces.values());
+    session.workspaceRegistry.upsert = async (
+      record: ReturnType<typeof createPersistedWorkspaceRecord>,
+    ) => {
+      workspaces.set(record.workspaceId, record);
+    };
+    session.workspaceRegistry.archive = async (workspaceId: string, archivedAt: string) => {
+      const existing = workspaces.get(workspaceId);
+      if (!existing) return;
+      workspaces.set(workspaceId, { ...existing, archivedAt, updatedAt: archivedAt });
+    };
+
+    try {
+      await session.handleMessage({
+        type: "initialize_project_git_request",
+        cwd: tempDir,
+        requestId: "req-init-git",
+      });
+
+      expect(existsSync(path.join(tempDir, ".git"))).toBe(true);
+      expect(projects.get(tempDir)?.kind).toBe("git");
+      expect(workspaces.get(tempDir)?.kind).toBe("local_checkout");
+
+      const response = emitted.find(
+        (message) => message.type === "initialize_project_git_response",
+      );
+      expect(response?.payload).toMatchObject({
+        requestId: "req-init-git",
+        error: null,
+        workspace: {
+          id: tempDir,
+          projectKind: "git",
+          workspaceKind: "local_checkout",
+        },
+      });
+      expect(
+        emitted.some(
+          (message) =>
+            message.type === "workspace_update" &&
+            message.payload.kind === "upsert" &&
+            message.payload.workspace.id === tempDir,
+        ),
+      ).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   test.skip("open_project_request collapses a git subdirectory onto the repo root workspace", async () => {

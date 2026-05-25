@@ -12,6 +12,7 @@ import { useBranchSwitcher } from "@/hooks/use-branch-switcher";
 import { ScreenTitle } from "@/components/headers/screen-title";
 import { useAppLocale } from "@/hooks/use-app-locale";
 import { getAppMessages } from "@/i18n/sub2api";
+import { OnboardingGuideTarget } from "@/components/onboarding-guide-target";
 
 interface BranchSwitcherProps {
   currentBranchName: string | null;
@@ -66,19 +67,21 @@ export function BranchSwitcher({
 
   return (
     <View ref={anchorRef} collapsable={false}>
-      <Pressable
-        testID="workspace-header-branch-switcher"
-        onPress={() => setIsOpen(true)}
-        style={({ hovered, pressed }) => [
-          styles.branchSwitcherTrigger,
-          (hovered || pressed) && styles.branchSwitcherTriggerHovered,
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel={text.currentBranchAccessibility(currentBranchName)}
-      >
-        {titleContent}
-        {!isCompact ? <ChevronDown size={12} color={theme.colors.foregroundMuted} /> : null}
-      </Pressable>
+      <OnboardingGuideTarget id="workspace.branchSwitcher">
+        <Pressable
+          testID="workspace-header-branch-switcher"
+          onPress={() => setIsOpen(true)}
+          style={({ hovered, pressed }) => [
+            styles.branchSwitcherTrigger,
+            (hovered || pressed) && styles.branchSwitcherTriggerHovered,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={text.currentBranchAccessibility(currentBranchName)}
+        >
+          {titleContent}
+          {!isCompact ? <ChevronDown size={12} color={theme.colors.foregroundMuted} /> : null}
+        </Pressable>
+      </OnboardingGuideTarget>
       <Combobox
         options={branchOptions}
         value={currentBranchName}
@@ -105,33 +108,35 @@ export function BranchSwitcher({
             trailingSlot={
               canCreateFromBranch ? (
                 <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
-                  <TooltipTrigger asChild>
-                    <Pressable
-                      hitSlop={8}
-                      onPress={(event) => {
-                        event.stopPropagation();
-                        onCreateWorktreeFromBranch?.(option.id);
-                      }}
-                      style={({ hovered, pressed }) => [
-                        styles.branchWorktreeButton,
-                        (hovered || pressed) && styles.branchWorktreeButtonActive,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel={text.createWorktreeFromBranch(option.id)}
-                      testID={`branch-create-worktree-${option.id}`}
-                    >
-                      {({ hovered, pressed }) => (
-                        <GitBranchPlus
-                          size={14}
-                          color={
-                            hovered || pressed
-                              ? theme.colors.foreground
-                              : theme.colors.foregroundMuted
-                          }
-                        />
-                      )}
-                    </Pressable>
-                  </TooltipTrigger>
+                  <OnboardingGuideTarget id="workspace.branchWorktree">
+                    <TooltipTrigger asChild>
+                      <Pressable
+                        hitSlop={8}
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          onCreateWorktreeFromBranch?.(option.id);
+                        }}
+                        style={({ hovered, pressed }) => [
+                          styles.branchWorktreeButton,
+                          (hovered || pressed) && styles.branchWorktreeButtonActive,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={text.createWorktreeFromBranch(option.id)}
+                        testID={`branch-create-worktree-${option.id}`}
+                      >
+                        {({ hovered, pressed }) => (
+                          <GitBranchPlus
+                            size={14}
+                            color={
+                              hovered || pressed
+                                ? theme.colors.foreground
+                                : theme.colors.foregroundMuted
+                            }
+                          />
+                        )}
+                      </Pressable>
+                    </TooltipTrigger>
+                  </OnboardingGuideTarget>
                   <TooltipContent side="bottom" align="center" offset={8}>
                     {text.createWorktreeFromBranch(option.id)}
                   </TooltipContent>

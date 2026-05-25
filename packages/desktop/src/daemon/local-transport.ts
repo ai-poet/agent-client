@@ -1,10 +1,15 @@
 import { BrowserWindow } from "electron";
 import WebSocket from "ws";
 
-type TransportTarget = {
-  transportType: "socket" | "pipe";
-  transportPath: string;
-};
+type TransportTarget =
+  | {
+      transportType: "socket" | "pipe";
+      transportPath: string;
+    }
+  | {
+      transportType: "tcp";
+      transportEndpoint: string;
+    };
 
 type TransportEventPayload = {
   sessionId: string;
@@ -44,11 +49,17 @@ function emitTransportEvent(payload: TransportEventPayload): void {
  * path used during the WebSocket upgrade handshake.
  */
 function buildLocalWebSocketUrl(target: TransportTarget): string {
+  if (target.transportType === "tcp") {
+    return `ws://${target.transportEndpoint}${WS_ENDPOINT_PATH}`;
+  }
   const ipcPath = target.transportPath;
   return `ws+unix://${ipcPath}:${WS_ENDPOINT_PATH}`;
 }
 
 function describeTransportTarget(target: TransportTarget): string {
+  if (target.transportType === "tcp") {
+    return "local daemon TCP endpoint";
+  }
   return target.transportType === "pipe" ? "local daemon pipe" : "local daemon socket";
 }
 

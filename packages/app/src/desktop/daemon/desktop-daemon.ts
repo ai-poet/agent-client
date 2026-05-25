@@ -26,10 +26,15 @@ export type DesktopPairingOffer = {
   qr: string | null;
 };
 
-export type LocalTransportTarget = {
-  transportType: "socket" | "pipe";
-  transportPath: string;
-};
+export type LocalTransportTarget =
+  | {
+      transportType: "socket" | "pipe";
+      transportPath: string;
+    }
+  | {
+      transportType: "tcp";
+      transportEndpoint: string;
+    };
 
 type LocalTransportEventPayload = {
   sessionId: string;

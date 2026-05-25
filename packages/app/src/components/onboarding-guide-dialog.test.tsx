@@ -16,12 +16,14 @@ const { theme, updateSettingsMock } = vi.hoisted(() => ({
     borderRadius: { lg: 8, "2xl": 16, full: 999 },
     borderWidth: { 1: 1 },
     fontSize: { xs: 12, sm: 14, lg: 18 },
-    fontWeight: { medium: "500", normal: "400" },
+    fontWeight: { medium: "500", normal: "400", semibold: "600" },
     opacity: { 50: 0.5 },
+    shadow: { lg: {} },
     colors: {
       accent: "#2563eb",
       accentForeground: "#fff",
       border: "#ddd",
+      borderAccent: "#ddd",
       foreground: "#111",
       foregroundMuted: "#666",
       palette: { white: "#fff" },
@@ -75,6 +77,10 @@ function mapProps(props: Record<string, unknown>): Record<string, unknown> {
 }
 
 vi.mock("react-native", () => ({
+  Dimensions: {
+    get: () => ({ width: 1024, height: 768 }),
+    addEventListener: () => ({ remove: vi.fn() }),
+  },
   Pressable: (props: Record<string, unknown>) => {
     const children =
       typeof props.children === "function"
@@ -83,7 +89,9 @@ vi.mock("react-native", () => ({
     return React.createElement("button", mapProps({ ...props, children }));
   },
   Text: (props: Record<string, unknown>) => React.createElement("span", mapProps(props)),
-  View: (props: Record<string, unknown>) => React.createElement("div", mapProps(props)),
+  View: React.forwardRef<HTMLDivElement, Record<string, unknown>>((props, ref) =>
+    React.createElement("div", { ...mapProps(props), ref }),
+  ),
 }));
 
 vi.mock("react-native-unistyles", () => ({
@@ -93,36 +101,8 @@ vi.mock("react-native-unistyles", () => ({
   useUnistyles: () => ({ theme }),
 }));
 
-vi.mock("lucide-react-native", () => {
-  const createIcon = (name: string) => (props: Record<string, unknown>) =>
-    React.createElement("span", { ...props, "data-icon": name });
-  return {
-    BotMessageSquare: createIcon("BotMessageSquare"),
-    CheckCircle2: createIcon("CheckCircle2"),
-    FolderOpen: createIcon("FolderOpen"),
-    GitBranchPlus: createIcon("GitBranchPlus"),
-    SlidersHorizontal: createIcon("SlidersHorizontal"),
-  };
-});
-
-vi.mock("@/components/adaptive-modal-sheet", () => ({
-  AdaptiveModalSheet: ({
-    title,
-    visible,
-    children,
-    testID,
-  }: {
-    title: string;
-    visible: boolean;
-    children: React.ReactNode;
-    testID?: string;
-  }) =>
-    visible ? (
-      <div data-testid={testID}>
-        <h2>{title}</h2>
-        {children}
-      </div>
-    ) : null,
+vi.mock("@/components/onboarding-guide-target", () => ({
+  useOnboardingGuideTargetRegistry: () => null,
 }));
 
 vi.mock("@/hooks/use-sub2api-locale", () => ({
@@ -180,7 +160,7 @@ describe("OnboardingGuideDialog", () => {
     renderDialog();
 
     expect(container?.textContent).toContain("Quick start");
-    expect(container?.textContent).toContain("Open a project");
+    expect(container?.textContent).toContain("Add or open a project");
   });
 
   it("moves forward and backward through steps", () => {
@@ -190,7 +170,7 @@ describe("OnboardingGuideDialog", () => {
       (container?.querySelector('[data-testid="onboarding-guide-next"]') as HTMLElement).click();
     });
 
-    expect(container?.textContent).toContain("Message your agent");
+    expect(container?.textContent).toContain("Meet the Git requirement");
 
     act(() => {
       (
@@ -198,11 +178,11 @@ describe("OnboardingGuideDialog", () => {
       ).click();
     });
 
-    expect(container?.textContent).toContain("Open a project");
+    expect(container?.textContent).toContain("Add or open a project");
   });
 
   it("marks onboarding complete when finishing", () => {
-    useOnboardingGuideStore.setState({ stepIndex: 4 });
+    useOnboardingGuideStore.setState({ stepIndex: 6 });
     renderDialog();
 
     act(() => {
@@ -221,6 +201,6 @@ describe("OnboardingGuideDialog", () => {
     renderDialog();
 
     expect(useOnboardingGuideStore.getState().source).toBe("manual");
-    expect(container?.textContent).toContain("Open a project");
+    expect(container?.textContent).toContain("Add or open a project");
   });
 });

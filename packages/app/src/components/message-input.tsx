@@ -60,6 +60,7 @@ import {
 import { isWeb } from "@/constants/platform";
 import { getAppMessages } from "@/i18n/sub2api";
 import { useComposerHeightMirror } from "./composer-height-mirror";
+import { OnboardingGuideTarget } from "@/components/onboarding-guide-target";
 
 export type ImageAttachment = AttachmentMetadata;
 
@@ -953,210 +954,215 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(funct
   return (
     <View ref={rootRef} style={styles.container} testID="message-input-root">
       {/* Regular input */}
-      <Animated.View
-        ref={inputWrapperRef}
-        style={[styles.inputWrapper, inputWrapperStyle, inputAnimatedStyle]}
-      >
-        {/* Text input */}
-        <View style={styles.textInputScrollWrapper}>
-          <TextInput
-            ref={textInputRef}
-            value={value}
-            onChangeText={handleInputChange}
-            placeholder={placeholder ?? text.defaultPlaceholder}
-            placeholderTextColor={theme.colors.surface4}
-            accessibilityLabel={text.messageAgent}
-            onFocus={() => {
-              isInputFocusedRef.current = true;
-              setIsInputFocused(true);
-              onFocusChange?.(true);
-            }}
-            onBlur={() => {
-              isInputFocusedRef.current = false;
-              setIsInputFocused(false);
-              onFocusChange?.(false);
-            }}
-            style={[
-              styles.textInput,
-              isWeb
-                ? {
-                    height: inputHeight,
-                    minHeight: MIN_INPUT_HEIGHT,
-                    maxHeight: MAX_INPUT_HEIGHT,
-                  }
-                : {
-                    minHeight: MIN_INPUT_HEIGHT,
-                    maxHeight: MAX_INPUT_HEIGHT,
-                  },
-            ]}
-            multiline
-            scrollEnabled={isWeb ? inputHeight >= MAX_INPUT_HEIGHT : true}
-            onContentSizeChange={handleContentSizeChange}
-            editable={!isDictating && !isRealtimeVoiceForCurrentAgent && !disabled}
-            onKeyPress={shouldHandleDesktopSubmit ? handleDesktopKeyPress : undefined}
-            onSelectionChange={handleSelectionChange}
-            autoFocus={isWeb && autoFocus}
-          />
-          {inputScrollbar}
-          {isWeb && isPaneFocused && !isInputFocused && !value && focusInputKeys ? (
-            <Text style={styles.focusHintText} pointerEvents="none">
-              {formatShortcut(focusInputKeys[0], getShortcutOs())} to focus
-            </Text>
-          ) : null}
-        </View>
-
-        {/* Button row */}
-        <View style={styles.buttonRow}>
-          {/* Left: attachment button + leftContent slot */}
-          <View style={styles.leftButtonGroup}>
-            <DropdownMenu>
-              <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger
-                    disabled={!isConnected || disabled}
-                    accessibilityLabel={text.addAttachment}
-                    accessibilityRole="button"
-                    testID="message-input-attach-button"
-                    style={({ hovered }) => [
-                      styles.attachButton,
-                      hovered && styles.iconButtonHovered,
-                      (!isConnected || disabled) && styles.buttonDisabled,
-                    ]}
-                  >
-                    {({ hovered }) => (
-                      <View
-                        ref={onAttachButtonRef}
-                        collapsable={false}
-                        style={styles.attachButtonAnchor}
-                      >
-                        <Plus
-                          size={buttonIconSize}
-                          color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
-                        />
-                      </View>
-                    )}
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="top" align="center" offset={8}>
-                  <Text style={styles.tooltipText}>{text.addAttachment}</Text>
-                </TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent
-                side="top"
-                align="start"
-                offset={8}
-                minWidth={220}
-                testID="message-input-attachment-menu"
-              >
-                {attachmentMenuItems.map((item) => (
-                  <DropdownMenuItem
-                    key={item.id}
-                    testID={`message-input-attachment-menu-item-${item.id}`}
-                    disabled={item.disabled}
-                    onSelect={item.onSelect}
-                    leading={item.icon ?? null}
-                  >
-                    {item.label}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {leftContent}
+      <Animated.View ref={inputWrapperRef} style={[inputWrapperStyle, inputAnimatedStyle]}>
+        <OnboardingGuideTarget id="agent.composer" style={styles.inputWrapper}>
+          {/* Text input */}
+          <View style={styles.textInputScrollWrapper}>
+            <TextInput
+              ref={textInputRef}
+              value={value}
+              onChangeText={handleInputChange}
+              placeholder={placeholder ?? text.defaultPlaceholder}
+              placeholderTextColor={theme.colors.surface4}
+              accessibilityLabel={text.messageAgent}
+              onFocus={() => {
+                isInputFocusedRef.current = true;
+                setIsInputFocused(true);
+                onFocusChange?.(true);
+              }}
+              onBlur={() => {
+                isInputFocusedRef.current = false;
+                setIsInputFocused(false);
+                onFocusChange?.(false);
+              }}
+              style={[
+                styles.textInput,
+                isWeb
+                  ? {
+                      height: inputHeight,
+                      minHeight: MIN_INPUT_HEIGHT,
+                      maxHeight: MAX_INPUT_HEIGHT,
+                    }
+                  : {
+                      minHeight: MIN_INPUT_HEIGHT,
+                      maxHeight: MAX_INPUT_HEIGHT,
+                    },
+              ]}
+              multiline
+              scrollEnabled={isWeb ? inputHeight >= MAX_INPUT_HEIGHT : true}
+              onContentSizeChange={handleContentSizeChange}
+              editable={!isDictating && !isRealtimeVoiceForCurrentAgent && !disabled}
+              onKeyPress={shouldHandleDesktopSubmit ? handleDesktopKeyPress : undefined}
+              onSelectionChange={handleSelectionChange}
+              autoFocus={isWeb && autoFocus}
+            />
+            {inputScrollbar}
+            {isWeb && isPaneFocused && !isInputFocused && !value && focusInputKeys ? (
+              <Text style={styles.focusHintText} pointerEvents="none">
+                {formatShortcut(focusInputKeys[0], getShortcutOs())} to focus
+              </Text>
+            ) : null}
           </View>
 
-          {/* Right: voice button, contextual button (realtime/send/cancel) */}
-          <View style={styles.rightButtonGroup}>
-            {beforeVoiceContent}
-            <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
-              <TooltipTrigger
-                onPress={handleVoicePress}
-                disabled={!isDictationStartEnabled}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  isRealtimeVoiceForCurrentAgent
-                    ? voice?.isMuted
-                      ? text.unmuteVoiceMode
-                      : text.muteVoiceMode
-                    : isDictating
-                      ? text.stopDictation
-                      : text.startDictation
-                }
-                style={({ hovered }) => [
-                  styles.voiceButton,
-                  hovered && !isDictating && styles.iconButtonHovered,
-                  !isDictationStartEnabled && styles.buttonDisabled,
-                  isDictating && styles.voiceButtonRecording,
-                ]}
-              >
-                {({ hovered }) =>
-                  isDictating ? (
-                    <Square size={buttonIconSize} color="white" fill="white" />
-                  ) : isRealtimeVoiceForCurrentAgent && voice?.isMuted ? (
-                    <MicOff
-                      size={buttonIconSize}
-                      color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
-                    />
-                  ) : (
-                    <Mic
-                      size={buttonIconSize}
-                      color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
-                    />
-                  )
-                }
-              </TooltipTrigger>
-              <TooltipContent side="top" align="center" offset={8}>
-                <View style={styles.tooltipRow}>
-                  <Text style={styles.tooltipText}>
-                    {isRealtimeVoiceForCurrentAgent
-                      ? voice?.isMuted
-                        ? text.unmuteVoice
-                        : text.muteVoice
-                      : text.dictation}
-                  </Text>
-                  {(isRealtimeVoiceForCurrentAgent ? voiceMuteToggleKeys : dictationToggleKeys) ? (
-                    <Shortcut
-                      chord={
-                        (isRealtimeVoiceForCurrentAgent
-                          ? voiceMuteToggleKeys
-                          : dictationToggleKeys)!
-                      }
-                      style={styles.tooltipShortcut}
-                    />
-                  ) : null}
-                </View>
-              </TooltipContent>
-            </Tooltip>
-            {rightContent}
-            {shouldShowSendButton && (
+          {/* Button row */}
+          <View style={styles.buttonRow}>
+            {/* Left: attachment button + leftContent slot */}
+            <View style={styles.leftButtonGroup}>
+              <DropdownMenu>
+                <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger
+                      disabled={!isConnected || disabled}
+                      accessibilityLabel={text.addAttachment}
+                      accessibilityRole="button"
+                      testID="message-input-attach-button"
+                      style={({ hovered }) => [
+                        styles.attachButton,
+                        hovered && styles.iconButtonHovered,
+                        (!isConnected || disabled) && styles.buttonDisabled,
+                      ]}
+                    >
+                      {({ hovered }) => (
+                        <View
+                          ref={onAttachButtonRef}
+                          collapsable={false}
+                          style={styles.attachButtonAnchor}
+                        >
+                          <Plus
+                            size={buttonIconSize}
+                            color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
+                          />
+                        </View>
+                      )}
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" align="center" offset={8}>
+                    <Text style={styles.tooltipText}>{text.addAttachment}</Text>
+                  </TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent
+                  side="top"
+                  align="start"
+                  offset={8}
+                  minWidth={220}
+                  testID="message-input-attachment-menu"
+                >
+                  {attachmentMenuItems.map((item) => (
+                    <DropdownMenuItem
+                      key={item.id}
+                      testID={`message-input-attachment-menu-item-${item.id}`}
+                      disabled={item.disabled}
+                      onSelect={item.onSelect}
+                      leading={item.icon ?? null}
+                    >
+                      {item.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {leftContent}
+            </View>
+
+            {/* Right: voice button, contextual button (realtime/send/cancel) */}
+            <View style={styles.rightButtonGroup}>
+              {beforeVoiceContent}
               <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
                 <TooltipTrigger
-                  onPress={canPressLoadingButton ? onSubmitLoadingPress : handleDefaultSendAction}
-                  disabled={isSendButtonDisabled}
-                  accessibilityLabel={submitAccessibilityLabel}
+                  onPress={handleVoicePress}
+                  disabled={!isDictationStartEnabled}
                   accessibilityRole="button"
-                  style={[styles.sendButton, isSendButtonDisabled && styles.buttonDisabled]}
+                  accessibilityLabel={
+                    isRealtimeVoiceForCurrentAgent
+                      ? voice?.isMuted
+                        ? text.unmuteVoiceMode
+                        : text.muteVoiceMode
+                      : isDictating
+                        ? text.stopDictation
+                        : text.startDictation
+                  }
+                  style={({ hovered }) => [
+                    styles.voiceButton,
+                    hovered && !isDictating && styles.iconButtonHovered,
+                    !isDictationStartEnabled && styles.buttonDisabled,
+                    isDictating && styles.voiceButtonRecording,
+                  ]}
                 >
-                  {isSubmitLoading ? (
-                    <ActivityIndicator size="small" color="white" />
-                  ) : submitIcon === "return" ? (
-                    <CornerDownLeft size={buttonIconSize} color="white" />
-                  ) : (
-                    <ArrowUp size={buttonIconSize} color="white" />
-                  )}
+                  {({ hovered }) =>
+                    isDictating ? (
+                      <Square size={buttonIconSize} color="white" fill="white" />
+                    ) : isRealtimeVoiceForCurrentAgent && voice?.isMuted ? (
+                      <MicOff
+                        size={buttonIconSize}
+                        color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
+                      />
+                    ) : (
+                      <Mic
+                        size={buttonIconSize}
+                        color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
+                      />
+                    )
+                  }
                 </TooltipTrigger>
                 <TooltipContent side="top" align="center" offset={8}>
                   <View style={styles.tooltipRow}>
                     <Text style={styles.tooltipText}>
-                      {submitButtonAccessibilityLabel ??
-                        (defaultActionQueues ? text.queue : text.send)}
+                      {isRealtimeVoiceForCurrentAgent
+                        ? voice?.isMuted
+                          ? text.unmuteVoice
+                          : text.muteVoice
+                        : text.dictation}
                     </Text>
-                    {sendKeys ? <Shortcut chord={sendKeys} style={styles.tooltipShortcut} /> : null}
+                    {(
+                      isRealtimeVoiceForCurrentAgent
+                        ? voiceMuteToggleKeys
+                        : dictationToggleKeys
+                    ) ? (
+                      <Shortcut
+                        chord={
+                          (isRealtimeVoiceForCurrentAgent
+                            ? voiceMuteToggleKeys
+                            : dictationToggleKeys)!
+                        }
+                        style={styles.tooltipShortcut}
+                      />
+                    ) : null}
                   </View>
                 </TooltipContent>
               </Tooltip>
-            )}
+              {rightContent}
+              {shouldShowSendButton && (
+                <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
+                  <TooltipTrigger
+                    onPress={canPressLoadingButton ? onSubmitLoadingPress : handleDefaultSendAction}
+                    disabled={isSendButtonDisabled}
+                    accessibilityLabel={submitAccessibilityLabel}
+                    accessibilityRole="button"
+                    style={[styles.sendButton, isSendButtonDisabled && styles.buttonDisabled]}
+                  >
+                    {isSubmitLoading ? (
+                      <ActivityIndicator size="small" color="white" />
+                    ) : submitIcon === "return" ? (
+                      <CornerDownLeft size={buttonIconSize} color="white" />
+                    ) : (
+                      <ArrowUp size={buttonIconSize} color="white" />
+                    )}
+                  </TooltipTrigger>
+                  <TooltipContent side="top" align="center" offset={8}>
+                    <View style={styles.tooltipRow}>
+                      <Text style={styles.tooltipText}>
+                        {submitButtonAccessibilityLabel ??
+                          (defaultActionQueues ? text.queue : text.send)}
+                      </Text>
+                      {sendKeys ? (
+                        <Shortcut chord={sendKeys} style={styles.tooltipShortcut} />
+                      ) : null}
+                    </View>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </View>
           </View>
-        </View>
+        </OnboardingGuideTarget>
       </Animated.View>
 
       {/* Dictation overlay */}

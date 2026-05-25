@@ -226,6 +226,7 @@ type GitMutationRefreshReason =
   | "create-branch"
   | "stash-push"
   | "stash-pop"
+  | "initialize-git"
   | "create-worktree";
 
 // TODO: Remove once all app store clients are on >=0.1.45 and understand arbitrary provider strings.
@@ -1740,6 +1741,10 @@ export class Session {
 
           case "open_project_request":
             await this.handleOpenProjectRequest(msg);
+            break;
+
+          case "initialize_project_git_request":
+            await this.handleInitializeProjectGitRequest(msg);
             break;
 
           case "archive_workspace_request":
@@ -6214,6 +6219,66 @@ export class Session {
     return workspaceRecord;
   }
 
+  private async upsertWorkspaceForInitializedGitDirectory(input: {
+    requestedCwd: string;
+    previousWorkspace: PersistedWorkspaceRecord | null;
+  }): Promise<PersistedWorkspaceRecord> {
+    const normalizedCwd = normalizePersistedWorkspaceId(input.requestedCwd);
+    const placement = await buildProjectPlacementForCwdStandalone({
+      cwd: normalizedCwd,
+      workspaceGitService: this.workspaceGitService,
+    });
+    if (!placement.checkout.isGit) {
+      throw new Error(`Directory is not a Git repository after initialization: ${normalizedCwd}`);
+    }
+
+    const workspaceId = deriveWorkspaceId(normalizedCwd, placement.checkout);
+    const timestamp = new Date().toISOString();
+    const existingProject = await this.projectRegistry.get(placement.projectKey);
+    const existingWorkspace =
+      (await this.workspaceRegistry.get(workspaceId)) ?? input.previousWorkspace;
+
+    await this.projectRegistry.upsert(
+      createPersistedProjectRecord({
+        projectId: placement.projectKey,
+        rootPath: deriveProjectRootPath({ cwd: normalizedCwd, checkout: placement.checkout }),
+        kind: deriveProjectKind(placement.checkout),
+        displayName: placement.projectName,
+        createdAt: existingProject?.createdAt ?? input.previousWorkspace?.createdAt ?? timestamp,
+        updatedAt: timestamp,
+      }),
+    );
+
+    const workspace = createPersistedWorkspaceRecord({
+      workspaceId,
+      projectId: placement.projectKey,
+      cwd: normalizedCwd,
+      kind: deriveWorkspaceKind(placement.checkout),
+      displayName: deriveWorkspaceDisplayName({
+        cwd: normalizedCwd,
+        checkout: placement.checkout,
+      }),
+      createdAt: existingWorkspace?.createdAt ?? timestamp,
+      updatedAt: timestamp,
+    });
+    await this.workspaceRegistry.upsert(workspace);
+
+    if (input.previousWorkspace && input.previousWorkspace.workspaceId !== workspace.workspaceId) {
+      await this.workspaceRegistry.archive(input.previousWorkspace.workspaceId, timestamp);
+      const siblingWorkspaces = (await this.workspaceRegistry.list()).filter(
+        (candidate) =>
+          candidate.projectId === input.previousWorkspace?.projectId &&
+          candidate.workspaceId !== input.previousWorkspace?.workspaceId &&
+          !candidate.archivedAt,
+      );
+      if (siblingWorkspaces.length === 0) {
+        await this.projectRegistry.archive(input.previousWorkspace.projectId, timestamp);
+      }
+    }
+
+    return workspace;
+  }
+
   private async ensureWorkspaceRecordUnarchived(
     workspace: PersistedWorkspaceRecord,
   ): Promise<PersistedWorkspaceRecord> {
@@ -6560,6 +6625,45 @@ export class Session {
       this.sessionLogger.error({ err: error, cwd: request.cwd }, "Failed to open project");
       this.emit({
         type: "open_project_response",
+        payload: {
+          requestId: request.requestId,
+          workspace: null,
+          error: message,
+        },
+      });
+    }
+  }
+
+  private async handleInitializeProjectGitRequest(
+    request: Extract<SessionInboundMessage, { type: "initialize_project_git_request" }>,
+  ): Promise<void> {
+    try {
+      const normalizedCwd = normalizePersistedWorkspaceId(request.cwd);
+      const previousWorkspace = await this.findWorkspaceByDirectory(normalizedCwd);
+      await execCommand("git", ["init"], { cwd: normalizedCwd, timeout: 30000 });
+      await this.notifyGitMutation(normalizedCwd, "initialize-git");
+      const workspace = await this.upsertWorkspaceForInitializedGitDirectory({
+        requestedCwd: normalizedCwd,
+        previousWorkspace,
+      });
+      await this.emitWorkspaceUpdatesForWorkspaceIds(
+        [...(previousWorkspace ? [previousWorkspace.workspaceId] : []), workspace.workspaceId],
+        { skipReconcile: true },
+      );
+      const descriptor = await this.describeWorkspaceRecordWithGitData(workspace);
+      this.emit({
+        type: "initialize_project_git_response",
+        payload: {
+          requestId: request.requestId,
+          workspace: descriptor,
+          error: null,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to initialize Git";
+      this.sessionLogger.error({ err: error, cwd: request.cwd }, "Failed to initialize Git");
+      this.emit({
+        type: "initialize_project_git_response",
         payload: {
           requestId: request.requestId,
           workspace: null,

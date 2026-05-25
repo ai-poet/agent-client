@@ -13,6 +13,7 @@ import { Shortcut } from "@/components/ui/shortcut";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import { useToast } from "@/contexts/toast-context";
 import type { GitAction, GitActions } from "@/components/git-actions-policy";
+import { OnboardingGuideTarget } from "@/components/onboarding-guide-target";
 
 interface GitActionsSplitButtonProps {
   gitActions: GitActions;
@@ -47,7 +48,7 @@ export function GitActionsSplitButton({ gitActions, hideLabels }: GitActionsSpli
   return (
     <View style={styles.row}>
       {gitActions.primary ? (
-        <View style={styles.splitButton}>
+        <OnboardingGuideTarget id="changes.commit" style={styles.splitButton}>
           <Pressable
             testID="changes-primary-cta"
             style={({ hovered, pressed }) => [
@@ -121,7 +122,7 @@ export function GitActionsSplitButton({ gitActions, hideLabels }: GitActionsSpli
               </DropdownMenuContent>
             </DropdownMenu>
           ) : null}
-        </View>
+        </OnboardingGuideTarget>
       ) : null}
       {gitActions.menu.length > 0 ? (
         <DropdownMenu>

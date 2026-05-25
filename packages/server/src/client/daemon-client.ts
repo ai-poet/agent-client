@@ -46,6 +46,7 @@ import type {
   ListAvailableEditorsResponseMessage,
   OpenInEditorResponseMessage,
   OpenProjectResponseMessage,
+  InitializeProjectGitResponseMessage,
   ArchiveWorkspaceResponseMessage,
   WorkspaceSetupStatusResponseMessage,
   ListCommandsResponse,
@@ -505,6 +506,7 @@ export type InspectScheduleOptions = {
 type ListAvailableEditorsPayload = ListAvailableEditorsResponseMessage["payload"];
 type OpenInEditorPayload = OpenInEditorResponseMessage["payload"];
 type OpenProjectPayload = OpenProjectResponseMessage["payload"];
+type InitializeProjectGitPayload = InitializeProjectGitResponseMessage["payload"];
 type ArchiveWorkspacePayload = ArchiveWorkspaceResponseMessage["payload"];
 type WorkspaceSetupStatusPayload = WorkspaceSetupStatusResponseMessage["payload"];
 export type EditorTargetDescriptor = ListAvailableEditorsPayload["editors"][number];
@@ -1415,6 +1417,21 @@ export class DaemonClient {
       },
       responseType: "open_project_response",
       timeout: 10000,
+    });
+  }
+
+  async initializeProjectGit(
+    input: { cwd: string },
+    requestId?: string,
+  ): Promise<InitializeProjectGitPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "initialize_project_git_request",
+        cwd: input.cwd,
+      },
+      responseType: "initialize_project_git_response",
+      timeout: 30000,
     });
   }
 

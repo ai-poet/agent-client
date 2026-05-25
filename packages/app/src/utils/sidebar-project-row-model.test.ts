@@ -56,7 +56,7 @@ describe("buildSidebarProjectRowModel", () => {
       kind: "workspace_link",
       workspace: flattenedWorkspace,
       chevron: null,
-      trailingAction: "none",
+      trailingAction: "init_git_hint",
     });
   });
 
@@ -78,7 +78,7 @@ describe("buildSidebarProjectRowModel", () => {
       kind: "workspace_link",
       workspace: flattenedWorkspace,
       chevron: null,
-      trailingAction: "none",
+      trailingAction: "init_git_hint",
     });
     expect(result).not.toHaveProperty("selected");
   });

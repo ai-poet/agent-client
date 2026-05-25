@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import React from "react";
 import type { ReactElement } from "react";
-import { getSidebarRenderableProjects } from "@/components/sidebar-workspace-list";
+import { getSidebarRenderableProjects } from "@/utils/sidebar-renderable-projects";
 
 vi.hoisted(() => {
   (globalThis as unknown as { __DEV__: boolean }).__DEV__ = false;
@@ -36,12 +36,309 @@ import {
   useIsNavigationWorkspaceSelected,
 } from "@/stores/navigation-active-workspace-store";
 
+const { theme } = vi.hoisted(() => ({
+  theme: {
+    spacing: { 1: 4, 2: 8, 3: 12, 4: 16, 5: 20 },
+    iconSize: { sm: 14, md: 18 },
+    borderWidth: { 1: 1 },
+    borderRadius: { md: 6, lg: 8, full: 999 },
+    fontSize: { xs: 11, sm: 13 },
+    fontWeight: { normal: "400", medium: "500" },
+    opacity: { 50: 0.5 },
+    shadow: { md: {} },
+    colors: {
+      surface0: "#000",
+      surface1: "#111",
+      surface2: "#222",
+      surface3: "#333",
+      surface4: "#444",
+      surfaceSidebarHover: "#222",
+      foreground: "#fff",
+      foregroundMuted: "#aaa",
+      border: "#333",
+      borderAccent: "#444",
+      accent: "#0a84ff",
+      destructive: "#ff453a",
+      palette: {
+        blue: { 500: "#0a84ff" },
+        green: { 500: "#30d158" },
+        purple: { 500: "#bf5af2" },
+        red: { 500: "#ff453a" },
+      },
+    },
+  },
+}));
+
+vi.mock("react-native-unistyles", () => ({
+  StyleSheet: {
+    create: (factory: unknown) => (typeof factory === "function" ? factory(theme) : factory),
+  },
+  useUnistyles: () => ({ theme, rt: { breakpoint: "lg" } }),
+}));
+
+function normalizeStyle(style: unknown): Record<string, unknown> | undefined {
+  if (Array.isArray(style)) {
+    return Object.assign(
+      {},
+      ...style.filter((item) => typeof item === "object" && item !== null && !Array.isArray(item)),
+    );
+  }
+  return typeof style === "object" && style !== null
+    ? (style as Record<string, unknown>)
+    : undefined;
+}
+
+function mapNativeProps(props: Record<string, unknown>): Record<string, unknown> {
+  const {
+    accessibilityLabel,
+    accessibilityRole,
+    children,
+    disabled,
+    onPress,
+    style,
+    testID,
+    ...rest
+  } = props;
+  const resolvedStyle =
+    typeof style === "function" ? style({ hovered: false, pressed: false, open: false }) : style;
+  return {
+    ...rest,
+    ...(normalizeStyle(resolvedStyle) ? { style: normalizeStyle(resolvedStyle) } : {}),
+    ...(typeof accessibilityLabel === "string" ? { "aria-label": accessibilityLabel } : {}),
+    ...(accessibilityRole === "button" ? { role: "button" } : {}),
+    ...(typeof testID === "string" ? { "data-testid": testID } : {}),
+    children,
+    disabled: Boolean(disabled) || undefined,
+    onClick:
+      typeof onPress === "function"
+        ? (event: React.MouseEvent) => onPress({ stopPropagation: () => event.stopPropagation() })
+        : undefined,
+  };
+}
+
+vi.mock("react-native", () => ({
+  ActivityIndicator: (props: Record<string, unknown>) =>
+    React.createElement("span", mapNativeProps(props)),
+  Image: (props: Record<string, unknown>) => React.createElement("img", mapNativeProps(props)),
+  Platform: { OS: "web", select: (options: Record<string, unknown>) => options.web },
+  Pressable: (props: Record<string, unknown>) => {
+    const children =
+      typeof props.children === "function"
+        ? props.children({ hovered: false, pressed: false, open: false })
+        : props.children;
+    return React.createElement("button", mapNativeProps({ ...props, children }));
+  },
+  ScrollView: React.forwardRef<HTMLDivElement, Record<string, unknown>>((props, ref) =>
+    React.createElement("div", { ...mapNativeProps(props), ref }),
+  ),
+  StatusBar: { currentHeight: 0 },
+  Text: (props: Record<string, unknown>) => React.createElement("span", mapNativeProps(props)),
+  View: React.forwardRef<HTMLDivElement, Record<string, unknown>>((props, ref) =>
+    React.createElement("div", { ...mapNativeProps(props), ref }),
+  ),
+}));
+
+vi.mock("@/constants/layout", () => ({
+  useIsCompactFormFactor: () => false,
+}));
+
+vi.mock("@/constants/platform", () => ({
+  getIsElectron: () => false,
+  isNative: false,
+  isWeb: true,
+}));
+
+vi.mock("expo-haptics", () => ({
+  impactAsync: vi.fn(async () => {}),
+  notificationAsync: vi.fn(async () => {}),
+  ImpactFeedbackStyle: { Light: "light" },
+  NotificationFeedbackType: { Success: "success" },
+}));
+
+vi.mock("lucide-react-native", () => {
+  const createIcon = (name: string) => (props: Record<string, unknown>) =>
+    React.createElement("span", { ...props, "data-icon": name });
+  return {
+    Archive: createIcon("Archive"),
+    ChevronDown: createIcon("ChevronDown"),
+    ChevronRight: createIcon("ChevronRight"),
+    CircleAlert: createIcon("CircleAlert"),
+    Copy: createIcon("Copy"),
+    ExternalLink: createIcon("ExternalLink"),
+    FolderGit2: createIcon("FolderGit2"),
+    GitPullRequest: createIcon("GitPullRequest"),
+    Globe: createIcon("Globe"),
+    Monitor: createIcon("Monitor"),
+    MoreVertical: createIcon("MoreVertical"),
+    Pencil: createIcon("Pencil"),
+    Plus: createIcon("Plus"),
+    SquareTerminal: createIcon("SquareTerminal"),
+    Trash2: createIcon("Trash2"),
+  };
+});
+
+vi.mock("react-native-reanimated", () => ({
+  default: {
+    View: "div",
+  },
+  Easing: { linear: "linear" },
+  makeMutable: (value: unknown) => ({ value }),
+  runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
+  useAnimatedStyle: (factory: () => unknown) => factory(),
+  useSharedValue: (value: unknown) => ({ value }),
+  withRepeat: (value: unknown) => value,
+  withTiming: (value: unknown) => value,
+}));
+
+vi.mock("react-native-gesture-handler", () => ({
+  Gesture: {},
+}));
+
+vi.mock("@/components/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: React.ReactNode }) =>
+    React.createElement("div", null, children),
+  TooltipContent: ({ children }: { children: React.ReactNode }) =>
+    React.createElement("div", null, children),
+  TooltipTrigger: ({ children }: { children: React.ReactNode }) =>
+    React.createElement(React.Fragment, null, children),
+}));
+
+vi.mock("@/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) =>
+    React.createElement("div", null, children),
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) =>
+    React.createElement("div", null, children),
+  DropdownMenuItem: ({
+    children,
+    onSelect,
+    testID,
+  }: {
+    children: React.ReactNode;
+    onSelect?: () => void;
+    testID?: string;
+  }) => React.createElement("button", { "data-testid": testID, onClick: onSelect }, children),
+  DropdownMenuTrigger: ({
+    children,
+    testID,
+  }: {
+    children: React.ReactNode | ((state: unknown) => React.ReactNode);
+    testID?: string;
+  }) =>
+    React.createElement(
+      "button",
+      { "data-testid": testID },
+      typeof children === "function" ? children({ hovered: false, pressed: false }) : children,
+    ),
+}));
+
+vi.mock("@/components/ui/context-menu", () => ({
+  ContextMenu: ({ children }: { children: React.ReactNode }) =>
+    React.createElement("div", null, children),
+  ContextMenuContent: ({ children }: { children: React.ReactNode }) =>
+    React.createElement("div", null, children),
+  ContextMenuItem: ({ children }: { children: React.ReactNode }) =>
+    React.createElement("button", null, children),
+  ContextMenuTrigger: ({ children }: { children: React.ReactNode }) =>
+    React.createElement(React.Fragment, null, children),
+  useContextMenu: () => null,
+}));
+
+vi.mock("@/components/onboarding-guide-target", () => ({
+  OnboardingGuideTarget: ({ children }: { children: React.ReactNode }) =>
+    React.createElement(React.Fragment, null, children),
+}));
+
+vi.mock("@/components/synced-loader", () => ({
+  SyncedLoader: () => React.createElement("span", null),
+}));
+
+vi.mock("@/components/diff-stat", () => ({
+  DiffStat: () => React.createElement("span", null),
+}));
+
+vi.mock("@/components/ui/shortcut", () => ({
+  Shortcut: () => React.createElement("span", null),
+}));
+
+vi.mock("@/components/workspace-hover-card", () => ({
+  WorkspaceHoverCard: ({ children }: { children: React.ReactNode }) =>
+    React.createElement(React.Fragment, null, children),
+}));
+
+vi.mock("@/components/icons/github-icon", () => ({
+  GitHubIcon: () => React.createElement("span", null),
+}));
+
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
     getItem: vi.fn(),
     setItem: vi.fn(),
     removeItem: vi.fn(),
   },
+}));
+
+vi.mock("expo-router", () => ({
+  router: {
+    navigate: vi.fn(),
+    replace: vi.fn(),
+  },
+  usePathname: () => "/h/sidebar-render-count/workspace/a-main",
+}));
+
+vi.mock("expo-clipboard", () => ({
+  setStringAsync: vi.fn(async () => true),
+}));
+
+vi.mock("expo-constants", () => ({
+  default: {
+    expoConfig: { version: "0.0.0-test" },
+    manifest: null,
+    nativeAppVersion: null,
+  },
+}));
+
+vi.mock("react-native-draggable-flatlist", () => ({
+  NestableScrollContainer: ({ children }: { children: React.ReactNode }) =>
+    React.createElement("div", null, children),
+}));
+
+vi.mock("./draggable-list", () => ({
+  DraggableList: ({
+    data,
+    keyExtractor,
+    renderItem,
+    testID,
+    ListFooterComponent,
+    ListHeaderComponent,
+    ListEmptyComponent,
+  }: {
+    data: unknown[];
+    keyExtractor: (item: unknown, index: number) => string;
+    renderItem: (input: {
+      item: unknown;
+      index: number;
+      drag: () => void;
+      isActive: boolean;
+    }) => React.ReactNode;
+    testID?: string;
+    ListFooterComponent?: React.ReactNode;
+    ListHeaderComponent?: React.ReactNode;
+    ListEmptyComponent?: React.ReactNode;
+  }) =>
+    React.createElement(
+      "div",
+      { "data-testid": testID },
+      ListHeaderComponent,
+      data.length === 0 ? ListEmptyComponent : null,
+      data.map((item, index) =>
+        React.createElement(
+          React.Fragment,
+          { key: keyExtractor(item, index) },
+          renderItem({ item, index, drag: vi.fn(), isActive: false }),
+        ),
+      ),
+      ListFooterComponent,
+    ),
 }));
 
 vi.mock("@/hooks/use-sub2api-locale", () => ({

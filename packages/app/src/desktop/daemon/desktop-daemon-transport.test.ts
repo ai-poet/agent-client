@@ -132,4 +132,15 @@ describe("desktop-daemon-transport", () => {
     expect(desktopDaemonMock.closeLocalTransportSession).toHaveBeenCalledWith("local-session-2");
     expect(cleanup).toHaveBeenCalledTimes(1);
   });
+
+  it("encodes local TCP targets into the transport URL", async () => {
+    const mod = await import("./desktop-daemon-transport");
+
+    expect(
+      mod.buildLocalDaemonTransportUrl({
+        transportType: "tcp",
+        transportEndpoint: "localhost:6767",
+      }),
+    ).toBe("paseo+local://tcp?endpoint=localhost%3A6767");
+  });
 });

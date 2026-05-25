@@ -59,10 +59,11 @@ export async function buildClientConfig(
     suppressSendErrors: true,
     reconnect: { enabled: false },
     ...(isDev ? { runtimeMetricsIntervalMs: 10_000 } : {}),
-    ...(connection.type === "directSocket" || connection.type === "directPipe"
-      ? localTransportFactory
-        ? { transportFactory: localTransportFactory }
-        : {}
+    ...(localTransportFactory &&
+    (connection.type === "directTcp" ||
+      connection.type === "directSocket" ||
+      connection.type === "directPipe")
+      ? { transportFactory: localTransportFactory }
       : {}),
   };
 
@@ -77,6 +78,15 @@ export async function buildClientConfig(
   }
 
   if (connection.type === "directTcp") {
+    if (localTransportFactory) {
+      return {
+        ...base,
+        url: buildLocalDaemonTransportUrl({
+          transportType: "tcp",
+          transportEndpoint: connection.endpoint,
+        }),
+      };
+    }
     return {
       ...base,
       url: buildDaemonWebSocketUrl(connection.endpoint),

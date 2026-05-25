@@ -29,7 +29,11 @@ function decodeBase64ToBytes(base64: string): Uint8Array {
 
 export function buildLocalDaemonTransportUrl(target: LocalTransportTarget): string {
   const url = new URL(`${LOCAL_TRANSPORT_SCHEME}//${target.transportType}`);
-  url.searchParams.set("path", target.transportPath);
+  if (target.transportType === "tcp") {
+    url.searchParams.set("endpoint", target.transportEndpoint);
+  } else {
+    url.searchParams.set("path", target.transportPath);
+  }
   return url.toString();
 }
 
@@ -39,6 +43,16 @@ function parseLocalDaemonTransportUrl(url: string): LocalTransportTarget {
     throw new Error(`Unsupported local transport URL: ${url}`);
   }
   const transportType = parsed.hostname;
+  if (transportType === "tcp") {
+    const transportEndpoint = parsed.searchParams.get("endpoint")?.trim() ?? "";
+    if (!transportEndpoint) {
+      throw new Error(`Invalid local transport target: ${url}`);
+    }
+    return {
+      transportType,
+      transportEndpoint,
+    };
+  }
   const transportPath = parsed.searchParams.get("path")?.trim() ?? "";
   if ((transportType !== "socket" && transportType !== "pipe") || !transportPath) {
     throw new Error(`Invalid local transport target: ${url}`);

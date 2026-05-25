@@ -7,13 +7,13 @@ export interface SidebarProjectWorkspaceLinkRowModel {
   kind: "workspace_link";
   workspace: SidebarWorkspaceEntry;
   chevron: null;
-  trailingAction: "new_worktree" | "none";
+  trailingAction: "new_worktree" | "init_git_hint" | "none";
 }
 
 export interface SidebarProjectSectionRowModel {
   kind: "project_section";
   chevron: "expand" | "collapse" | null;
-  trailingAction: "new_worktree" | "none";
+  trailingAction: "new_worktree" | "init_git_hint" | "none";
 }
 
 export type SidebarProjectRowModel =
@@ -37,7 +37,7 @@ export function buildSidebarProjectRowModel(input: {
       kind: "workspace_link",
       workspace: flattenedWorkspace,
       chevron: null,
-      trailingAction: input.project.projectKind === "git" ? "new_worktree" : "none",
+      trailingAction: input.project.projectKind === "git" ? "new_worktree" : "init_git_hint",
     };
   }
 
@@ -46,6 +46,6 @@ export function buildSidebarProjectRowModel(input: {
   return {
     kind: "project_section",
     chevron: collapsible ? (input.collapsed ? "expand" : "collapse") : null,
-    trailingAction: input.project.projectKind === "git" ? "new_worktree" : "none",
+    trailingAction: input.project.projectKind === "git" ? "new_worktree" : "init_git_hint",
   };
 }

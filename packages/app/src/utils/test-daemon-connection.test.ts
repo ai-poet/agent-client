@@ -59,16 +59,29 @@ vi.mock("./client-id", () => ({
   getOrCreateClientId: clientIdMock.getOrCreateClientId,
 }));
 
+vi.mock("./app-version", () => ({
+  resolveAppVersion: vi.fn(() => "0.1.78"),
+}));
+
+vi.mock("@/constants/platform", () => ({
+  isDev: false,
+}));
+
 vi.mock("@/desktop/daemon/desktop-daemon-transport", () => ({
-  createDesktopLocalDaemonTransportFactory: vi.fn(() => null),
+  createDesktopLocalDaemonTransportFactory: vi.fn(() => ({}) as object),
   buildLocalDaemonTransportUrl: vi.fn(
     ({
       transportType,
       transportPath,
+      transportEndpoint,
     }: {
-      transportType: "socket" | "pipe";
-      transportPath: string;
-    }) => `paseo+local://${transportType}?path=${encodeURIComponent(transportPath)}`,
+      transportType: "socket" | "pipe" | "tcp";
+      transportPath?: string;
+      transportEndpoint?: string;
+    }) =>
+      transportType === "tcp"
+        ? `paseo+local://tcp?endpoint=${encodeURIComponent(transportEndpoint ?? "")}`
+        : `paseo+local://${transportType}?path=${encodeURIComponent(transportPath ?? "")}`,
   ),
 }));
 
@@ -113,6 +126,21 @@ describe("test-daemon-connection connectToDaemon", () => {
 
     expect(daemonClientMock.createdConfigs[0]?.url).toBe(
       "paseo+local://socket?path=%2Ftmp%2Fpaseo.sock",
+    );
+  });
+
+  it("routes local direct TCP probing through the desktop transport", async () => {
+    const mod = await import("./test-daemon-connection");
+
+    const result = await mod.connectToDaemon({
+      id: "direct:localhost:6767",
+      type: "directTcp",
+      endpoint: "localhost:6767",
+    });
+    await result.client.close();
+
+    expect(daemonClientMock.createdConfigs[0]?.url).toBe(
+      "paseo+local://tcp?endpoint=localhost%3A6767",
     );
   });
 });

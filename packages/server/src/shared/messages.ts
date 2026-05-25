@@ -1327,6 +1327,12 @@ export const OpenProjectRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const InitializeProjectGitRequestSchema = z.object({
+  type: z.literal("initialize_project_git_request"),
+  cwd: z.string(),
+  requestId: z.string(),
+});
+
 export const ArchiveWorkspaceRequestSchema = z.object({
   type: z.literal("archive_workspace_request"),
   workspaceId: z.string(),
@@ -1602,6 +1608,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ListAvailableEditorsRequestSchema,
   OpenInEditorRequestSchema,
   OpenProjectRequestSchema,
+  InitializeProjectGitRequestSchema,
   ArchiveWorkspaceRequestSchema,
   FileExplorerRequestSchema,
   ProjectIconRequestSchema,
@@ -2188,6 +2195,15 @@ export const WorkspaceSetupStatusResponseMessageSchema = z.object({
 
 export const OpenProjectResponseMessageSchema = z.object({
   type: z.literal("open_project_response"),
+  payload: z.object({
+    requestId: z.string(),
+    workspace: WorkspaceDescriptorPayloadSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const InitializeProjectGitResponseMessageSchema = z.object({
+  type: z.literal("initialize_project_git_response"),
   payload: z.object({
     requestId: z.string(),
     workspace: WorkspaceDescriptorPayloadSchema.nullable(),
@@ -3109,6 +3125,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   FetchAgentsResponseMessageSchema,
   FetchWorkspacesResponseMessageSchema,
   OpenProjectResponseMessageSchema,
+  InitializeProjectGitResponseMessageSchema,
   StartWorkspaceScriptResponseMessageSchema,
   ListAvailableEditorsResponseMessageSchema,
   OpenInEditorResponseMessageSchema,
@@ -3232,6 +3249,9 @@ export type FetchAgentsResponseMessage = z.infer<typeof FetchAgentsResponseMessa
 export type FetchWorkspacesResponseMessage = z.infer<typeof FetchWorkspacesResponseMessageSchema>;
 export type ScriptStatusUpdateMessage = z.infer<typeof ScriptStatusUpdateMessageSchema>;
 export type OpenProjectResponseMessage = z.infer<typeof OpenProjectResponseMessageSchema>;
+export type InitializeProjectGitResponseMessage = z.infer<
+  typeof InitializeProjectGitResponseMessageSchema
+>;
 export type StartWorkspaceScriptResponseMessage = z.infer<
   typeof StartWorkspaceScriptResponseMessageSchema
 >;

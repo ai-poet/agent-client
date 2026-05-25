@@ -81,6 +81,7 @@ import { SidebarUserMenu } from "@/components/sidebar-user-menu";
 import { CLOUD_NAME } from "@/config/branding";
 import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 import { getSub2APIMessages } from "@/i18n/sub2api";
+import { OnboardingGuideTarget } from "@/components/onboarding-guide-target";
 
 const MIN_CHAT_WIDTH = 400;
 
@@ -623,7 +624,7 @@ function MobileSidebar({
         >
           <View style={styles.sidebarContent} pointerEvents="auto">
             {/* Project header + 3 always-visible icons */}
-            <View style={styles.sidebarHeader}>
+            <OnboardingGuideTarget id="sidebar.projects" style={styles.sidebarHeader}>
               <Text style={styles.sidebarHeaderTitle}>{text.projects}</Text>
               <View style={styles.sidebarHeaderIcons}>
                 <Pressable
@@ -645,32 +646,34 @@ function MobileSidebar({
                   setSortMode={setSortMode}
                   text={text}
                 />
-                <Tooltip delayDuration={300}>
-                  <TooltipTrigger asChild>
-                    <Pressable
-                      style={styles.headerIconButton}
-                      accessibilityLabel={text.addProject}
-                      accessibilityRole="button"
-                      onPress={handleOpenProject}
-                      testID="sidebar-add-project"
-                    >
-                      {({ hovered }) => (
-                        <FolderPlus
-                          size={theme.iconSize.md}
-                          color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
-                        />
-                      )}
-                    </Pressable>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" align="center" offset={8}>
-                    <View style={styles.tooltipRow}>
-                      <Text style={styles.tooltipText}>{text.addProject}</Text>
-                      {newAgentKeys ? <Shortcut chord={newAgentKeys} /> : null}
-                    </View>
-                  </TooltipContent>
-                </Tooltip>
+                <OnboardingGuideTarget id="sidebar.projectAdd">
+                  <Tooltip delayDuration={300}>
+                    <TooltipTrigger asChild>
+                      <Pressable
+                        style={styles.headerIconButton}
+                        accessibilityLabel={text.addProject}
+                        accessibilityRole="button"
+                        onPress={handleOpenProject}
+                        testID="sidebar-add-project"
+                      >
+                        {({ hovered }) => (
+                          <FolderPlus
+                            size={theme.iconSize.md}
+                            color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
+                          />
+                        )}
+                      </Pressable>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" align="center" offset={8}>
+                      <View style={styles.tooltipRow}>
+                        <Text style={styles.tooltipText}>{text.addProject}</Text>
+                        {newAgentKeys ? <Shortcut chord={newAgentKeys} /> : null}
+                      </View>
+                    </TooltipContent>
+                  </Tooltip>
+                </OnboardingGuideTarget>
               </View>
-            </View>
+            </OnboardingGuideTarget>
 
             {isInitialLoad ? (
               <SidebarAgentListSkeleton />
@@ -880,7 +883,7 @@ function DesktopSidebar({
           <TitlebarDragRegion />
           {padding.top > 0 ? <View style={{ height: padding.top }} /> : null}
           {/* Project header + 3 always-visible icons */}
-          <View style={styles.sidebarHeader}>
+          <OnboardingGuideTarget id="sidebar.projects" style={styles.sidebarHeader}>
             <Text style={styles.sidebarHeaderTitle}>{text.projects}</Text>
             <View style={styles.sidebarHeaderIcons}>
               <Pressable
@@ -902,32 +905,34 @@ function DesktopSidebar({
                 setSortMode={setSortMode}
                 text={text}
               />
-              <Tooltip delayDuration={300}>
-                <TooltipTrigger asChild>
-                  <Pressable
-                    style={styles.headerIconButton}
-                    accessibilityLabel={text.addProject}
-                    accessibilityRole="button"
-                    onPress={handleOpenProject}
-                    testID="sidebar-add-project"
-                  >
-                    {({ hovered }) => (
-                      <FolderPlus
-                        size={theme.iconSize.md}
-                        color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
-                      />
-                    )}
-                  </Pressable>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" align="center" offset={8}>
-                  <View style={styles.tooltipRow}>
-                    <Text style={styles.tooltipText}>{text.addProject}</Text>
-                    {newAgentKeys ? <Shortcut chord={newAgentKeys} /> : null}
-                  </View>
-                </TooltipContent>
-              </Tooltip>
+              <OnboardingGuideTarget id="sidebar.projectAdd">
+                <Tooltip delayDuration={300}>
+                  <TooltipTrigger asChild>
+                    <Pressable
+                      style={styles.headerIconButton}
+                      accessibilityLabel={text.addProject}
+                      accessibilityRole="button"
+                      onPress={handleOpenProject}
+                      testID="sidebar-add-project"
+                    >
+                      {({ hovered }) => (
+                        <FolderPlus
+                          size={theme.iconSize.md}
+                          color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
+                        />
+                      )}
+                    </Pressable>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" align="center" offset={8}>
+                    <View style={styles.tooltipRow}>
+                      <Text style={styles.tooltipText}>{text.addProject}</Text>
+                      {newAgentKeys ? <Shortcut chord={newAgentKeys} /> : null}
+                    </View>
+                  </TooltipContent>
+                </Tooltip>
+              </OnboardingGuideTarget>
             </View>
-          </View>
+          </OnboardingGuideTarget>
         </View>
 
         {isInitialLoad ? (

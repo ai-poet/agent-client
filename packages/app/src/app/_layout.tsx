@@ -64,6 +64,7 @@ import { CommandCenter } from "@/components/command-center";
 import { ProjectPickerModal } from "@/components/project-picker-modal";
 import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
 import { OnboardingGuideDialog } from "@/components/onboarding-guide-dialog";
+import { OnboardingGuideTargetProvider } from "@/components/onboarding-guide-target";
 import { WorkspaceSetupDialog } from "@/components/workspace-setup-dialog";
 import { WorkspaceShortcutTargetsSubscriber } from "@/components/workspace-shortcut-targets-subscriber";
 import { resolveActiveHost } from "@/utils/active-host";
@@ -414,7 +415,7 @@ function QueryProvider({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 
-const rowStyle = { flex: 1, flexDirection: "row" } as const;
+const rowStyle = { flex: 1, flexDirection: "row", position: "relative" } as const;
 const flexStyle = { flex: 1 } as const;
 
 interface AppContainerProps {
@@ -556,6 +557,7 @@ function AppContainer({
         <View style={flexStyle}>{children}</View>
       </View>
       {isCompactLayout && chromeEnabled && <LeftSidebar selectedAgentId={selectedAgentId} />}
+      <OnboardingGuideDialog />
       <DownloadToast />
       <UpdateBanner />
       <CommandCenter />
@@ -566,7 +568,6 @@ function AppContainer({
       />
       <WorkspaceSetupDialog />
       <KeyboardShortcutsDialog />
-      <OnboardingGuideDialog />
     </View>
   );
 
@@ -975,10 +976,12 @@ export default function RootLayout() {
                     <ProvidersWrapper>
                       <SidebarAnimationProvider>
                         <HorizontalScrollProvider>
-                          <OpenProjectListener />
-                          <AppWithSidebar>
-                            <RootStack />
-                          </AppWithSidebar>
+                          <OnboardingGuideTargetProvider>
+                            <OpenProjectListener />
+                            <AppWithSidebar>
+                              <RootStack />
+                            </AppWithSidebar>
+                          </OnboardingGuideTargetProvider>
                         </HorizontalScrollProvider>
                       </SidebarAnimationProvider>
                     </ProvidersWrapper>

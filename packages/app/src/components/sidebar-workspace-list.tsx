@@ -123,8 +123,13 @@ import {
   createWorktreeQuickly,
   isCreatingWorktreePlaceholderId,
 } from "@/utils/quick-create-worktree";
+import {
+  findPlaceholderToRealWorkspaceReplacements,
+  getSidebarRenderableProjects,
+} from "@/utils/sidebar-renderable-projects";
 import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 import { getSub2APIMessages } from "@/i18n/sub2api";
+import { OnboardingGuideTarget } from "@/components/onboarding-guide-target";
 
 function toProjectIconDataUri(icon: { mimeType: string; data: string } | null): string | null {
   if (!icon) {
@@ -180,6 +185,7 @@ interface ProjectHeaderRowProps {
   onPress: () => void;
   serverId: string | null;
   canCreateWorktree: boolean;
+  showInitializeGitHint?: boolean;
   isProjectActive?: boolean;
   onWorkspacePress?: () => void;
   shortcutNumber?: number | null;
@@ -213,104 +219,6 @@ interface WorkspaceRowInnerProps {
   onCopyBranchName?: () => void;
   onCopyPath?: () => void;
   archiveShortcutKeys?: ShortcutKey[][] | null;
-}
-
-function normalizePlaceholderWorkspaceName(name: string): string {
-  return name.trim().toLocaleLowerCase();
-}
-
-function extractPlaceholderSlug(workspaceId: string): string | null {
-  const separatorIndex = workspaceId.indexOf(":");
-  if (separatorIndex < 0 || separatorIndex >= workspaceId.length - 1) {
-    return null;
-  }
-  return workspaceId.slice(separatorIndex + 1);
-}
-
-function workspaceDirectoryHasSlug(workspaceDirectory: string | undefined, slug: string): boolean {
-  if (!workspaceDirectory) {
-    return false;
-  }
-  const normalizedDirectory = workspaceDirectory.replace(/\\/g, "/");
-  return normalizedDirectory.endsWith(`/${slug}`);
-}
-
-function findPlaceholderReplacement(
-  placeholder: SidebarWorkspaceEntry,
-  realWorkspaces: readonly SidebarWorkspaceEntry[],
-): SidebarWorkspaceEntry | null {
-  const normalizedPlaceholderName = normalizePlaceholderWorkspaceName(placeholder.name);
-  const byName = realWorkspaces.find(
-    (workspace) => normalizePlaceholderWorkspaceName(workspace.name) === normalizedPlaceholderName,
-  );
-  if (byName) {
-    return byName;
-  }
-  const placeholderSlug = extractPlaceholderSlug(placeholder.workspaceId);
-  if (!placeholderSlug) {
-    return null;
-  }
-  return (
-    realWorkspaces.find((workspace) =>
-      workspaceDirectoryHasSlug(workspace.workspaceDirectory, placeholderSlug),
-    ) ?? null
-  );
-}
-
-export function getSidebarRenderableProjects(
-  projects: SidebarProjectEntry[],
-): SidebarProjectEntry[] {
-  let didChange = false;
-  const nextProjects = projects.map((project) => {
-    const realWorkspaces = project.workspaces.filter(
-      (workspace) => !isCreatingWorktreePlaceholderId(workspace.workspaceId),
-    );
-    if (realWorkspaces.length === 0) {
-      return project;
-    }
-
-    const filteredWorkspaces = project.workspaces.filter((workspace) => {
-      if (!isCreatingWorktreePlaceholderId(workspace.workspaceId)) {
-        return true;
-      }
-      return findPlaceholderReplacement(workspace, realWorkspaces) === null;
-    });
-
-    if (filteredWorkspaces.length === project.workspaces.length) {
-      return project;
-    }
-    didChange = true;
-    return {
-      ...project,
-      workspaces: filteredWorkspaces,
-    };
-  });
-
-  return didChange ? nextProjects : projects;
-}
-
-export function findPlaceholderToRealWorkspaceReplacements(
-  projects: readonly SidebarProjectEntry[],
-): Map<string, SidebarWorkspaceEntry> {
-  const replacements = new Map<string, SidebarWorkspaceEntry>();
-  for (const project of projects) {
-    const realWorkspaces = project.workspaces.filter(
-      (workspace) => !isCreatingWorktreePlaceholderId(workspace.workspaceId),
-    );
-    if (realWorkspaces.length === 0) {
-      continue;
-    }
-    for (const workspace of project.workspaces) {
-      if (!isCreatingWorktreePlaceholderId(workspace.workspaceId)) {
-        continue;
-      }
-      const replacement = findPlaceholderReplacement(workspace, realWorkspaces);
-      if (replacement) {
-        replacements.set(workspace.workspaceId, replacement);
-      }
-    }
-  }
-  return replacements;
 }
 
 function useSidebarWorkspaceEntry(
@@ -635,7 +543,11 @@ function NewWorktreeButton({
   const newWorktreeKeys = useShortcutKeys("new-worktree");
 
   return (
-    <View style={styles.projectTrailingControlSlot} pointerEvents={visible ? "auto" : "none"}>
+    <OnboardingGuideTarget
+      id="sidebar.newWorktree"
+      style={styles.projectTrailingControlSlot}
+      pointerEvents={visible ? "auto" : "none"}
+    >
       <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
         <TooltipTrigger asChild disabled={!visible}>
           <Pressable
@@ -676,7 +588,87 @@ function NewWorktreeButton({
           </View>
         </TooltipContent>
       </Tooltip>
-    </View>
+    </OnboardingGuideTarget>
+  );
+}
+
+function InitializeGitHintButton({
+  displayName,
+  cwd,
+  serverId,
+  testID,
+}: {
+  displayName: string;
+  cwd: string;
+  serverId: string | null;
+  testID: string;
+}) {
+  const { theme } = useUnistyles();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).sidebarWorkspace, [locale]);
+  const toast = useToast();
+  const mergeWorkspaces = useSessionStore((state) => state.mergeWorkspaces);
+  const [status, setStatus] = useState<"idle" | "pending">("idle");
+
+  const handleInitializeGit = useCallback(() => {
+    if (!serverId || status === "pending") {
+      return;
+    }
+    const client = getHostRuntimeStore().getClient(serverId);
+    if (!client) {
+      toast.error(text.hostNotConnected);
+      return;
+    }
+    setStatus("pending");
+    void (async () => {
+      try {
+        const payload = await client.initializeProjectGit({ cwd });
+        if (payload.error || !payload.workspace) {
+          throw new Error(payload.error ?? text.failedInitializeGit);
+        }
+        mergeWorkspaces(serverId, [normalizeWorkspaceDescriptor(payload.workspace)]);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : text.failedInitializeGit);
+      } finally {
+        setStatus("idle");
+      }
+    })();
+  }, [cwd, mergeWorkspaces, serverId, status, text, toast]);
+
+  return (
+    <OnboardingGuideTarget id="sidebar.initializeGit" style={styles.projectTrailingControlSlot}>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          style={({ hovered, pressed, open }) => [
+            styles.projectIconActionButton,
+            styles.projectIconActionButtonDisabled,
+            (hovered || pressed || open) && styles.projectIconActionButtonHovered,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={text.initializeGitRequired(displayName)}
+          testID={testID}
+        >
+          <Plus size={15} color={theme.colors.foregroundMuted} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" width={260}>
+          <View style={styles.initializeGitTooltip}>
+            <Text style={styles.projectActionTooltipText}>
+              {text.initializeGitRequired(displayName)}
+            </Text>
+            <DropdownMenuItem
+              onSelect={handleInitializeGit}
+              disabled={!serverId}
+              status={status}
+              pendingLabel={text.initializingGit}
+              closeOnSelect={false}
+              testID={`${testID}-initialize`}
+            >
+              {text.initializeGit}
+            </DropdownMenuItem>
+          </View>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </OnboardingGuideTarget>
   );
 }
 
@@ -907,6 +899,7 @@ function ProjectHeaderRow({
   onPress,
   serverId,
   canCreateWorktree,
+  showInitializeGitHint = false,
   isProjectActive = false,
   onWorkspacePress,
   shortcutNumber = null,
@@ -1021,6 +1014,13 @@ function ProjectHeaderRow({
             visible
             showShortcutHint={isProjectActive}
             testID={`sidebar-project-new-worktree-${project.projectKey}`}
+          />
+        ) : showInitializeGitHint ? (
+          <InitializeGitHintButton
+            displayName={displayName}
+            cwd={project.iconWorkingDir}
+            serverId={serverId}
+            testID={`sidebar-project-init-git-${project.projectKey}`}
           />
         ) : null}
         {onRemoveProject ? (
@@ -1558,6 +1558,7 @@ function NonGitProjectRowWithMenuContent({
   drag,
   isDragging,
   dragHandleProps,
+  serverId,
 }: {
   project: SidebarProjectEntry;
   displayName: string;
@@ -1570,6 +1571,7 @@ function NonGitProjectRowWithMenuContent({
   drag: () => void;
   isDragging: boolean;
   dragHandleProps?: DraggableListDragHandleProps;
+  serverId: string | null;
 }) {
   const toast = useToast();
   const locale = useSub2APILocale();
@@ -1642,7 +1644,7 @@ function NonGitProjectRowWithMenuContent({
         selected={selected}
         chevron={null}
         onPress={onPress}
-        serverId={null}
+        serverId={serverId}
         canCreateWorktree={false}
         shortcutNumber={shortcutNumber}
         showShortcutBadge={showShortcutBadge}
@@ -1651,6 +1653,7 @@ function NonGitProjectRowWithMenuContent({
         isArchiving={isArchivingWorkspace}
         menuController={contextMenu}
         dragHandleProps={dragHandleProps}
+        showInitializeGitHint
       />
       <ContextMenuContent
         align="start"
@@ -1684,6 +1687,7 @@ function NonGitProjectRowWithMenu(props: {
   drag: () => void;
   isDragging: boolean;
   dragHandleProps?: DraggableListDragHandleProps;
+  serverId: string | null;
 }) {
   return (
     <ContextMenu>
@@ -1754,6 +1758,7 @@ function FlattenedProjectRow({
         drag={drag}
         isDragging={isDragging}
         dragHandleProps={dragHandleProps}
+        serverId={serverId}
       />
     );
   }
@@ -1769,6 +1774,7 @@ function FlattenedProjectRow({
       onPress={onPress}
       serverId={serverId}
       canCreateWorktree={rowModel.trailingAction === "new_worktree"}
+      showInitializeGitHint={rowModel.trailingAction === "init_git_hint"}
       isProjectActive={isProjectActive}
       onWorkspacePress={onWorkspacePress}
       shortcutNumber={shortcutNumber}
@@ -2051,6 +2057,7 @@ function ProjectBlock({
             onPress={onToggleCollapsed}
             serverId={serverId}
             canCreateWorktree={rowModel.trailingAction === "new_worktree"}
+            showInitializeGitHint={rowModel.trailingAction === "init_git_hint"}
             isProjectActive={isProjectActive}
             onWorkspacePress={onWorkspacePress}
             drag={drag}
@@ -2512,6 +2519,9 @@ const styles = StyleSheet.create((theme) => ({
   projectIconActionButtonHidden: {
     opacity: 0,
   },
+  projectIconActionButtonDisabled: {
+    opacity: theme.opacity[50],
+  },
   projectTrailingActions: {
     flexDirection: "row",
     alignItems: "center",
@@ -2551,6 +2561,11 @@ const styles = StyleSheet.create((theme) => ({
   projectActionTooltipShortcut: {
     backgroundColor: theme.colors.surface3,
     borderColor: theme.colors.borderAccent,
+  },
+  initializeGitTooltip: {
+    gap: theme.spacing[2],
+    maxWidth: 240,
+    padding: theme.spacing[2],
   },
   workspaceRow: {
     minHeight: 36,

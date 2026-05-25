@@ -468,6 +468,11 @@ export const sub2apiMessages = {
     sidebarWorkspace: {
       newWorktree: "新建工作树",
       createNewWorktree: (name: string) => `为 ${name} 新建工作树`,
+      initializeGit: "初始化 Git",
+      initializingGit: "初始化中...",
+      initializeGitRequired: (name: string) =>
+        `${name} 还不是 Git 项目。初始化 Git 后可以新建工作树。`,
+      failedInitializeGit: "初始化 Git 失败",
       projectActions: "项目操作",
       renameProject: "重命名项目",
       deleteProject: "删除项目",
@@ -1126,6 +1131,7 @@ export const sub2apiMessages = {
       title: "快速上手",
       progressLabel: "新手引导进度",
       stepCount: (current: number, total: number) => `${current}/${total}`,
+      targetUnavailable: "当前界面暂时没有这个控件，按下一步继续即可。",
       previous: "上一步",
       next: "下一步",
       finish: "完成",
@@ -1134,24 +1140,39 @@ export const sub2apiMessages = {
       goToStep: (step: number) => `跳到第 ${step} 步`,
       steps: [
         {
-          title: "打开项目",
-          body: "从左侧项目列表进入仓库，或用打开项目按钮添加本机目录。每个项目会记住自己的工作区和代理会话。",
+          targetId: "sidebar.projectAdd",
+          title: "添加或打开项目",
+          body: "左上角的加号会一直保留，用它添加本机目录。添加后，项目会出现在左侧列表里。",
         },
         {
-          title: "给代理发消息",
-          body: "在底部输入框描述任务，必要时用 @ 标记文件。运行中再次发送会按你的默认发送设置中断或排队。",
+          targetId: "sidebar.initializeGit",
+          title: "先满足 Git 条件",
+          body: "worktree 只会在项目已 Git 初始化时可用。未初始化时项目行的加号会变灰，旁边会提示你先初始化 Git。",
         },
         {
-          title: "选择模型和权限",
-          body: "发送前可以切换模型、推理强度和权限范围。常用组合会跟随当前工作区，减少重复配置。",
+          targetId: "sidebar.newWorktree",
+          title: "新增 worktree",
+          body: "Git 项目行右侧的加号会新建 worktree。每个 worktree 会作为同一个项目下的独立工作区展示。",
         },
         {
-          title: "用分支和工作树隔离任务",
-          body: "顶部可切换分支；分支列表右侧的按钮可从该分支新建 worktree，让实验和修复互不干扰。",
+          targetId: "workspace.branchSwitcher",
+          title: "切换分支",
+          body: "顶部标题旁的分支入口可以切换当前工作区分支；有未提交更改时会先提示你处理。",
         },
         {
-          title: "查看 diff 并提交",
-          body: "右侧 Changes 面板会展示未提交改动。确认后填写提交信息并提交，文件列表也可以单独勾选。",
+          targetId: "workspace.branchWorktree",
+          title: "从分支创建 worktree",
+          body: "打开分支下拉后，每个分支行右侧的按钮可以从该分支新增 worktree 树。",
+        },
+        {
+          targetId: "agent.composer",
+          title: "给 agent 发消息",
+          body: "在输入框描述任务，也可以直接要求 agent 修改后提交代码。运行中再次发送会按你的默认设置中断或排队。",
+        },
+        {
+          targetId: "changes.commit",
+          title: "手动提交代码",
+          body: "Changes 面板会展示未提交改动。你可以勾选文件、填写提交信息并手动提交。",
         },
       ],
     },
@@ -1950,6 +1971,11 @@ export const sub2apiMessages = {
     sidebarWorkspace: {
       newWorktree: "New worktree",
       createNewWorktree: (name: string) => `Create a new worktree for ${name}`,
+      initializeGit: "Initialize Git",
+      initializingGit: "Initializing...",
+      initializeGitRequired: (name: string) =>
+        `${name} is not a Git project yet. Initialize Git to create worktrees.`,
+      failedInitializeGit: "Failed to initialize Git",
       projectActions: "Project actions",
       renameProject: "Rename project",
       deleteProject: "Delete project",
@@ -2627,6 +2653,7 @@ export const sub2apiMessages = {
       title: "Quick start",
       progressLabel: "Onboarding guide progress",
       stepCount: (current: number, total: number) => `${current}/${total}`,
+      targetUnavailable: "This control is not visible here yet. Continue to the next step.",
       previous: "Back",
       next: "Next",
       finish: "Done",
@@ -2635,24 +2662,39 @@ export const sub2apiMessages = {
       goToStep: (step: number) => `Go to step ${step}`,
       steps: [
         {
-          title: "Open a project",
-          body: "Enter a repository from the left project list, or add a local folder with the open project button. Each project remembers its workspaces and agent sessions.",
+          targetId: "sidebar.projectAdd",
+          title: "Add or open a project",
+          body: "The top-left plus stays available for adding a local folder. Once added, the project appears in the left list.",
         },
         {
+          targetId: "sidebar.initializeGit",
+          title: "Meet the Git requirement",
+          body: "Worktrees are available only after a project is initialized with Git. Until then, the project-row plus is disabled and explains how to initialize Git.",
+        },
+        {
+          targetId: "sidebar.newWorktree",
+          title: "Create a worktree",
+          body: "The plus on a Git project row creates a new worktree. Each worktree appears as an isolated workspace under the same project.",
+        },
+        {
+          targetId: "workspace.branchSwitcher",
+          title: "Switch branches",
+          body: "Use the branch entry beside the workspace title to switch branches. If there are local edits, you will be prompted before switching.",
+        },
+        {
+          targetId: "workspace.branchWorktree",
+          title: "Create from a branch",
+          body: "Open the branch dropdown and use the button on a branch row to create a new worktree tree from that branch.",
+        },
+        {
+          targetId: "agent.composer",
           title: "Message your agent",
-          body: "Describe the task in the composer and tag files with @ when useful. Sending while an agent is running follows your default interrupt or queue behavior.",
+          body: "Describe the task in the composer, or ask the agent to edit and commit code for you. Sending while it runs follows your default interrupt or queue setting.",
         },
         {
-          title: "Choose model and permissions",
-          body: "Before sending, switch the model, reasoning effort, and permission scope. Common choices stay close to the current workspace.",
-        },
-        {
-          title: "Use branches and worktrees",
-          body: "Switch branches from the title bar. The button on the right side of each branch row creates a new worktree from that branch.",
-        },
-        {
-          title: "Review diffs and commit",
-          body: "The Changes panel shows uncommitted edits. Pick the files you want, write a commit message, and commit when the diff looks right.",
+          targetId: "changes.commit",
+          title: "Commit manually",
+          body: "The Changes panel shows uncommitted edits. Pick files, write a commit message, and commit manually when the diff looks right.",
         },
       ],
     },
