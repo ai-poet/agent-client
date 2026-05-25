@@ -74,12 +74,15 @@ import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import { APP_NAME, CLOUD_NAME } from "@/config/branding";
 import { getSub2APIMessages, resolveSub2APILocaleFromPreference } from "@/i18n/sub2api";
 import {
+  buildHostRootRoute,
+  buildHostWorkspaceRoute,
   buildHostOpenProjectRoute,
   buildSettingsHostRoute,
   buildSettingsSectionRoute,
   type SettingsSectionSlug,
 } from "@/utils/host-routes";
 import { useOnboardingGuideStore } from "@/stores/onboarding-guide-store";
+import { getNavigationActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 
 // ---------------------------------------------------------------------------
 // View model
@@ -744,8 +747,21 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
   );
 
   const handleReplayOnboardingGuide = useCallback(() => {
+    const activeWorkspace = getNavigationActiveWorkspaceSelection();
+    const targetRoute = activeWorkspace
+      ? buildHostWorkspaceRoute(activeWorkspace.serverId, activeWorkspace.workspaceId)
+      : anyOnlineServerId
+        ? buildHostRootRoute(anyOnlineServerId)
+        : null;
+
+    if (targetRoute && targetRoute !== "/") {
+      router.navigate(targetRoute);
+      setTimeout(() => openOnboardingGuide({ source: "manual" }), 180);
+      return;
+    }
+
     openOnboardingGuide({ source: "manual" });
-  }, [openOnboardingGuide]);
+  }, [anyOnlineServerId, openOnboardingGuide, router]);
 
   const handlePlaybackTest = useCallback(async () => {
     if (!voiceAudioEngine || isPlaybackTestRunning) {

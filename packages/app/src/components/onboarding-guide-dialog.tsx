@@ -17,6 +17,7 @@ const PANEL_WIDTH = 360;
 const PANEL_MARGIN = 16;
 const FALLBACK_PANEL_TOP = 96;
 const PANEL_ESTIMATED_HEIGHT = 330;
+const MEASURE_DELAYS_MS = [0, 90, 240, 520] as const;
 
 const TARGET_FALLBACKS: Partial<
   Record<OnboardingGuideTargetId, readonly OnboardingGuideTargetId[]>
@@ -209,8 +210,8 @@ export function OnboardingGuideDialog() {
     }
 
     let cancelled = false;
+    const targetIds = [step.targetId, ...(TARGET_FALLBACKS[step.targetId] ?? [])];
     const measure = () => {
-      const targetIds = [step.targetId, ...(TARGET_FALLBACKS[step.targetId] ?? [])];
       void Promise.all(targetIds.map((targetId) => registry.measure(targetId))).then((rects) => {
         if (!cancelled) {
           const rect = rects.find((candidate) => isVisibleRect(candidate, screen)) ?? null;
@@ -219,8 +220,9 @@ export function OnboardingGuideDialog() {
       });
     };
 
-    measure();
-    const timers = [setTimeout(measure, 120), setTimeout(measure, 360)];
+    setTargetRect(null);
+    void Promise.all(targetIds.map((targetId) => registry.reveal(targetId))).catch(() => undefined);
+    const timers = MEASURE_DELAYS_MS.map((delay) => setTimeout(measure, delay));
     return () => {
       cancelled = true;
       timers.forEach(clearTimeout);

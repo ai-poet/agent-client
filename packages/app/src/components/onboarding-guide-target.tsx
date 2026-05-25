@@ -8,6 +8,7 @@ import React, {
   type PropsWithChildren,
 } from "react";
 import { Dimensions, View, type StyleProp, type ViewProps, type ViewStyle } from "react-native";
+import { isWeb } from "@/constants/platform";
 
 export type OnboardingGuideTargetId =
   | "sidebar.projects"
@@ -31,6 +32,7 @@ type TargetRef = React.RefObject<View | null>;
 interface OnboardingGuideTargetRegistry {
   register: (id: OnboardingGuideTargetId, ref: TargetRef) => () => void;
   measure: (id: OnboardingGuideTargetId) => Promise<OnboardingGuideTargetRect | null>;
+  reveal: (id: OnboardingGuideTargetId) => Promise<boolean>;
 }
 
 const OnboardingGuideTargetContext = createContext<OnboardingGuideTargetRegistry | null>(null);
@@ -60,6 +62,20 @@ function rectIntersectsWindow(rect: OnboardingGuideTargetRect): boolean {
     rect.x + rect.width > 0 &&
     rect.y + rect.height > 0
   );
+}
+
+function revealView(ref: TargetRef): boolean {
+  if (!isWeb) {
+    return false;
+  }
+  const element = ref.current as unknown as {
+    scrollIntoView?: (options?: ScrollIntoViewOptions) => void;
+  } | null;
+  if (typeof element?.scrollIntoView !== "function") {
+    return false;
+  }
+  element.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+  return true;
 }
 
 export function OnboardingGuideTargetProvider({ children }: PropsWithChildren) {
@@ -92,7 +108,17 @@ export function OnboardingGuideTargetProvider({ children }: PropsWithChildren) {
     return fallbackRect;
   }, []);
 
-  const value = useMemo(() => ({ register, measure }), [measure, register]);
+  const reveal = useCallback(async (id: OnboardingGuideTargetId) => {
+    const refs = Array.from(targetsRef.current.get(id) ?? []);
+    for (let index = refs.length - 1; index >= 0; index -= 1) {
+      if (revealView(refs[index]!)) {
+        return true;
+      }
+    }
+    return false;
+  }, []);
+
+  const value = useMemo(() => ({ register, measure, reveal }), [measure, register, reveal]);
 
   return (
     <OnboardingGuideTargetContext.Provider value={value}>
