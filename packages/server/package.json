@@ -1,6 +1,6 @@
 {
   "name": "@getpaseo/server",
-  "version": "0.1.60-beta.1",
+  "version": "0.1.78",
   "description": "Paseo backend server",
   "type": "module",
   "publishConfig": {
@@ -60,8 +60,8 @@
     "@ai-sdk/openai": "2.0.52",
     "@anthropic-ai/claude-agent-sdk": "^0.2.11",
     "@deepgram/sdk": "^3.4.0",
-    "@getpaseo/highlight": "0.1.60-beta.1",
-    "@getpaseo/relay": "0.1.60-beta.1",
+    "@getpaseo/highlight": "0.1.78",
+    "@getpaseo/relay": "0.1.78",
     "@isaacs/ttlcache": "^2.1.4",
     "@mariozechner/pi-coding-agent": "^0.67.68",
     "@modelcontextprotocol/sdk": "^1.20.1",
