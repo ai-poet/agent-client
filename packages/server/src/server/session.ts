@@ -175,6 +175,7 @@ import {
   pushCurrentBranch,
   createPullRequest,
 } from "../utils/checkout-git.js";
+import { getCommitGraph } from "../utils/git-graph.js";
 import { getProjectIcon } from "../utils/project-icon.js";
 import { expandTilde } from "../utils/path.js";
 import { searchHomeDirectories, searchWorkspaceEntries } from "../utils/directory-suggestions.js";
@@ -1649,6 +1650,10 @@ export class Session {
 
           case "branch_suggestions_request":
             await this.handleBranchSuggestionsRequest(msg);
+            break;
+
+          case "commit_graph_request":
+            await this.handleCommitGraphRequest(msg);
             break;
 
           case "directory_suggestions_request":
@@ -4080,6 +4085,40 @@ export class Session {
           remoteUrl: null,
           isPaseoOwnedWorktree: false,
           error: toCheckoutError(error),
+          requestId,
+        },
+      });
+    }
+  }
+
+  private async handleCommitGraphRequest(
+    msg: Extract<SessionInboundMessage, { type: "commit_graph_request" }>,
+  ): Promise<void> {
+    const { cwd, requestId } = msg;
+
+    try {
+      const graph = await getCommitGraph(cwd, { limit: msg.limit ?? undefined });
+      this.emit({
+        type: "commit_graph_response",
+        payload: {
+          cwd,
+          graph,
+          error: null,
+          requestId,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "commit_graph_response",
+        payload: {
+          cwd,
+          graph: {
+            commits: [],
+            branches: [],
+            headCommit: null,
+            rootCommits: [],
+          },
+          error: error instanceof Error ? error.message : "Unknown error",
           requestId,
         },
       });

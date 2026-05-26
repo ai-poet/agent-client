@@ -37,6 +37,7 @@ import type {
   StashListResponse,
   ValidateBranchResponse,
   BranchSuggestionsResponse,
+  CommitGraphResponse,
   GitHubSearchResponse,
   GitHubSearchRequest,
   DirectorySuggestionsResponse,
@@ -2729,6 +2730,22 @@ export class DaemonClient {
       },
       responseType: "branch_suggestions_response",
       timeout: 10000,
+    });
+  }
+
+  async getCommitGraph(
+    options: { cwd: string; limit?: number },
+    requestId?: string,
+  ): Promise<CommitGraphResponse["payload"]> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "commit_graph_request",
+        cwd: options.cwd,
+        limit: options.limit,
+      },
+      responseType: "commit_graph_response",
+      timeout: 15000,
     });
   }
 

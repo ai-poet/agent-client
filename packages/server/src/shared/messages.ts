@@ -1211,6 +1211,13 @@ export const BranchSuggestionsRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const CommitGraphRequestSchema = z.object({
+  type: z.literal("commit_graph_request"),
+  cwd: z.string(),
+  limit: z.number().int().min(1).max(500).optional(),
+  requestId: z.string(),
+});
+
 export const GitHubSearchItemSchema = z.object({
   kind: z.enum(["issue", "pr"]),
   number: z.number(),
@@ -1599,6 +1606,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   StashListRequestSchema,
   ValidateBranchRequestSchema,
   BranchSuggestionsRequestSchema,
+  CommitGraphRequestSchema,
   GitHubSearchRequestSchema,
   DirectorySuggestionsRequestSchema,
   PaseoWorktreeListRequestSchema,
@@ -2770,6 +2778,41 @@ export const BranchSuggestionsResponseSchema = z.object({
   }),
 });
 
+export const CommitGraphResponseSchema = z.object({
+  type: z.literal("commit_graph_response"),
+  payload: z.object({
+    cwd: z.string(),
+    graph: z.object({
+      commits: z.array(
+        z.object({
+          hash: z.string(),
+          fullHash: z.string(),
+          message: z.string(),
+          author: z.string(),
+          authorEmail: z.string(),
+          date: z.number(),
+          parents: z.array(z.string()),
+          branchTips: z.array(z.string()),
+          tags: z.array(z.string()),
+          isMerge: z.boolean(),
+        }),
+      ),
+      branches: z.array(
+        z.object({
+          name: z.string(),
+          isRemote: z.boolean(),
+          isCurrent: z.boolean(),
+          tipCommit: z.string(),
+        }),
+      ),
+      headCommit: z.string().nullable(),
+      rootCommits: z.array(z.string()),
+    }),
+    error: z.string().nullable(),
+    requestId: z.string(),
+  }),
+});
+
 export const GitHubSearchResponseSchema = z.object({
   type: z.literal("github_search_response"),
   payload: z.object({
@@ -3167,6 +3210,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   StashListResponseSchema,
   ValidateBranchResponseSchema,
   BranchSuggestionsResponseSchema,
+  CommitGraphResponseSchema,
   GitHubSearchResponseSchema,
   DirectorySuggestionsResponseSchema,
   PaseoWorktreeListResponseSchema,
@@ -3415,6 +3459,11 @@ export type ValidateBranchRequest = z.infer<typeof ValidateBranchRequestSchema>;
 export type ValidateBranchResponse = z.infer<typeof ValidateBranchResponseSchema>;
 export type BranchSuggestionsRequest = z.infer<typeof BranchSuggestionsRequestSchema>;
 export type BranchSuggestionsResponse = z.infer<typeof BranchSuggestionsResponseSchema>;
+export type CommitGraphRequest = z.infer<typeof CommitGraphRequestSchema>;
+export type CommitGraphResponse = z.infer<typeof CommitGraphResponseSchema>;
+export type GitGraph = CommitGraphResponse["payload"]["graph"];
+export type GitGraphCommit = GitGraph["commits"][number];
+export type GitGraphBranch = GitGraph["branches"][number];
 export type GitHubSearchItem = z.infer<typeof GitHubSearchItemSchema>;
 export type GitHubSearchKind = z.infer<typeof GitHubSearchKindSchema>;
 export type GitHubSearchRequest = z.infer<typeof GitHubSearchRequestSchema>;

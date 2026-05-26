@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useIsFocused } from "@react-navigation/native";
+import { useRouter } from "expo-router";
 import { ActivityIndicator, BackHandler, Keyboard, Pressable, Text, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
@@ -13,6 +14,7 @@ import {
   Copy,
   Ellipsis,
   EllipsisVertical,
+  GitCommitHorizontal,
   PanelRight,
   RotateCw,
   Settings,
@@ -650,6 +652,7 @@ function WorkspaceScreenContent({
   const insets = useSafeAreaInsets();
   const mainBackgroundColor = theme.colors.surfaceWorkspace;
   const toast = useToast();
+  const router = useRouter();
   const locale = useAppLocale();
   const appText = useMemo(() => getAppMessages(locale), [locale]);
   const text = appText.workspace;
@@ -2472,6 +2475,38 @@ function WorkspaceScreenContent({
                       <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
                         <TooltipTrigger asChild>
                           <Pressable
+                            testID="workspace-graph-button"
+                            onPress={() =>
+                              router.push(
+                                `/h/${encodeURIComponent(normalizedServerId)}/workspace/${encodeURIComponent(normalizedWorkspaceId)}/graph`,
+                              )
+                            }
+                            accessibilityRole="button"
+                            accessibilityLabel="View commit graph"
+                            style={({ hovered, pressed }) => [
+                              styles.sourceControlButton,
+                              (hovered || pressed) && styles.sourceControlButtonHovered,
+                            ]}
+                          >
+                            {({ hovered, pressed }) => (
+                              <GitCommitHorizontal
+                                size={theme.iconSize.md}
+                                color={
+                                  hovered || pressed
+                                    ? theme.colors.foreground
+                                    : theme.colors.foregroundMuted
+                                }
+                              />
+                            )}
+                          </Pressable>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" align="center" offset={8}>
+                          <Text style={styles.tooltipText}>View commit graph</Text>
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
+                        <TooltipTrigger asChild>
+                          <Pressable
                             testID="workspace-explorer-toggle"
                             onPress={handleToggleExplorer}
                             accessibilityRole="button"
@@ -2829,6 +2864,10 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
+  },
+  tooltipText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.popoverForeground,
   },
   explorerTooltipText: {
     fontSize: theme.fontSize.sm,
