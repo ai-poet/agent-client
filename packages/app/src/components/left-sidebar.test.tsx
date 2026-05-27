@@ -15,6 +15,8 @@ const {
   routerPushMock,
   theme,
 } = vi.hoisted(() => {
+  (globalThis as typeof globalThis & { __DEV__?: boolean }).__DEV__ = false;
+
   const panelState = {
     isOpen: false,
     showMobileAgent: vi.fn(),
@@ -99,6 +101,85 @@ vi.mock("react-native-gesture-handler", () => {
   };
 });
 
+function normalizeStyle(style: unknown): Record<string, unknown> | undefined {
+  if (Array.isArray(style)) {
+    return Object.assign(
+      {},
+      ...style.filter((item) => typeof item === "object" && item !== null && !Array.isArray(item)),
+    );
+  }
+  return typeof style === "object" && style !== null
+    ? (style as Record<string, unknown>)
+    : undefined;
+}
+
+function mapNativeProps(props: Record<string, unknown>): Record<string, unknown> {
+  const {
+    accessibilityLabel,
+    accessibilityRole,
+    accessible,
+    children,
+    collapsable,
+    disabled,
+    nativeID,
+    numberOfLines,
+    onPress,
+    showsVerticalScrollIndicator,
+    style,
+    testID,
+    ...rest
+  } = props;
+  const resolvedStyle =
+    typeof style === "function" ? style({ hovered: false, pressed: false }) : style;
+  return {
+    ...rest,
+    ...(normalizeStyle(resolvedStyle) ? { style: normalizeStyle(resolvedStyle) } : {}),
+    ...(typeof accessibilityLabel === "string" ? { "aria-label": accessibilityLabel } : {}),
+    ...(accessibilityRole === "button" ? { role: "button" } : {}),
+    ...(typeof testID === "string" ? { "data-testid": testID } : {}),
+    children,
+    disabled: Boolean(disabled) || undefined,
+    onClick:
+      typeof onPress === "function"
+        ? (event: React.MouseEvent) => onPress({ stopPropagation: () => event.stopPropagation() })
+        : undefined,
+  };
+}
+
+vi.mock("react-native", () => ({
+  Modal: ({ children, visible }: { children: React.ReactNode; visible: boolean }) =>
+    visible ? React.createElement("div", null, children) : null,
+  Platform: {
+    OS: "web",
+    select: (specifics: Record<string, unknown>) => specifics.web ?? specifics.default,
+  },
+  Pressable: (props: Record<string, unknown>) => {
+    const children =
+      typeof props.children === "function"
+        ? props.children({ hovered: false, pressed: false, open: false })
+        : props.children;
+    return React.createElement("button", mapNativeProps({ ...props, children }));
+  },
+  ScrollView: ({ children, contentContainerStyle, ...props }: Record<string, unknown>) =>
+    React.createElement(
+      "div",
+      mapNativeProps({
+        ...props,
+        style: contentContainerStyle ?? props.style,
+        children,
+      }),
+    ),
+  Text: (props: Record<string, unknown>) => React.createElement("span", mapNativeProps(props)),
+  useWindowDimensions: () => ({ width: 390, height: 844 }),
+  View: React.forwardRef<HTMLDivElement, Record<string, unknown>>((props, ref) =>
+    React.createElement("div", { ...mapNativeProps(props), ref }),
+  ),
+  StyleSheet: {
+    absoluteFillObject: {},
+    create: (styles: unknown) => styles,
+  },
+}));
+
 vi.mock("lucide-react-native", () => {
   const createIcon = (name: string) => {
     function MockIcon(props: Record<string, unknown>) {
@@ -116,9 +197,11 @@ vi.mock("lucide-react-native", () => {
     Folder: createIcon("Folder"),
     FolderPlus: createIcon("FolderPlus"),
     MessageSquarePlus: createIcon("MessageSquarePlus"),
+    Box: createIcon("Box"),
     MessagesSquare: createIcon("MessagesSquare"),
     Plus: createIcon("Plus"),
     Settings: createIcon("Settings"),
+    X: createIcon("X"),
   };
 });
 
@@ -138,6 +221,10 @@ vi.mock("@/constants/layout", () => ({
 vi.mock("@/constants/platform", () => ({
   isWeb: true,
   isNative: false,
+}));
+
+vi.mock("@/config/branding", () => ({
+  CLOUD_NAME: "Paseo Cloud",
 }));
 
 vi.mock("@/stores/panel-store", () => ({
@@ -334,6 +421,22 @@ describe("LeftSidebar", () => {
     expect(container?.querySelector('[data-testid="sidebar-new-chat"]')).not.toBeNull();
     expect(container?.textContent).toContain("New chat");
     expect(container?.textContent).not.toContain("Chat");
+  });
+
+  it("opens the Skill Library from the sidebar skills action", async () => {
+    await act(async () => {
+      root?.render(<LeftSidebar />);
+    });
+
+    await act(async () => {
+      container
+        ?.querySelector<HTMLButtonElement>('[data-testid="sidebar-skill-library"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(container?.querySelector('[data-testid="skill-library-panel"]')).not.toBeNull();
+    expect(container?.textContent).toContain("Skill Library");
+    expect(container?.textContent).toContain("paseo-development");
   });
 
   it("opens a focused draft tab for the current workspace", async () => {

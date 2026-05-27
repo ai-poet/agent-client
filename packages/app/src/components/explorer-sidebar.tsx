@@ -27,6 +27,7 @@ import {
   usePanelStore,
 } from "@/stores/panel-store";
 import { useWindowControlsPadding } from "@/utils/desktop-window";
+import { CommitGraphPane } from "./commit-graph-pane";
 import { FileExplorerPane } from "./file-explorer-pane";
 import { GitDiffPane } from "./git-diff-pane";
 import { PrPane } from "./pr-pane";
@@ -369,7 +370,9 @@ function SidebarContent({
   });
   const hasPullRequest = prPane.prNumber !== null;
   const requestedTab: ExplorerTab =
-    !isGit && (activeTab === "changes" || activeTab === "pr") ? "files" : activeTab;
+    !isGit && (activeTab === "changes" || activeTab === "gitGraph" || activeTab === "pr")
+      ? "files"
+      : activeTab;
   const resolvedTab: ExplorerTab =
     requestedTab === "pr" && !hasPullRequest ? "changes" : requestedTab;
   const prTabLabel = prPane.prNumber === null ? "" : `#${prPane.prNumber}`;
@@ -400,6 +403,17 @@ function SidebarContent({
               Files
             </Text>
           </Pressable>
+          {isGit && (
+            <Pressable
+              testID="explorer-tab-git-graph"
+              style={[styles.tab, resolvedTab === "gitGraph" && styles.tabActive]}
+              onPress={() => onTabPress("gitGraph")}
+            >
+              <Text style={[styles.tabText, resolvedTab === "gitGraph" && styles.tabTextActive]}>
+                Git Graph
+              </Text>
+            </Pressable>
+          )}
           {isGit && hasPullRequest && (
             <Pressable
               testID="explorer-tab-pr"
@@ -444,6 +458,9 @@ function SidebarContent({
             workspaceRoot={workspaceRoot}
             onOpenFile={onOpenFile}
           />
+        )}
+        {resolvedTab === "gitGraph" && isGit && (
+          <CommitGraphPane serverId={serverId} cwd={workspaceRoot} />
         )}
         {resolvedTab === "pr" && prPane.data && <PrPane data={prPane.data} />}
       </View>

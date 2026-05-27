@@ -5,6 +5,7 @@ import {
   useState,
   useEffect,
   useRef,
+  type ComponentType,
   type Dispatch,
   type ReactElement,
   type RefObject,
@@ -14,6 +15,8 @@ import {
   View,
   Pressable,
   Text,
+  Modal,
+  ScrollView,
   useWindowDimensions,
   StyleSheet as RNStyleSheet,
 } from "react-native";
@@ -29,6 +32,7 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import {
   ArrowDownNarrowWide,
+  Box,
   Check,
   ChevronsDownUp,
   Cloud,
@@ -36,6 +40,7 @@ import {
   FolderPlus,
   MessageSquarePlus,
   Settings,
+  X,
 } from "lucide-react-native";
 import {
   DropdownMenu,
@@ -82,6 +87,7 @@ import { generateDraftId } from "@/stores/draft-keys";
 import { useSessionStore } from "@/stores/session-store";
 import { buildNewAgentRoute, resolveNewChatTarget } from "@/utils/new-agent-routing";
 import { navigateToPreparedWorkspaceTab } from "@/utils/workspace-navigation";
+import { WORKTREE_PERSONA_ROLES, WORKTREE_PERSONA_SKILLS } from "@server/shared/worktree-persona";
 
 const MIN_CHAT_WIDTH = 400;
 
@@ -115,6 +121,7 @@ interface SidebarSharedProps {
   handleRefresh: () => void;
   handleHostSelect: (nextServerId: string) => void;
   handleNewChat: () => void;
+  handleOpenSkills: () => void;
   handleOpenProject: () => void;
   handlePaseoCloud: () => void;
   handleSettings: () => void;
@@ -203,6 +210,7 @@ export const LeftSidebar = memo(function LeftSidebar({ selectedAgentId }: LeftSi
   );
   const hostTriggerRef = useRef<View | null>(null);
   const [isHostPickerOpen, setIsHostPickerOpen] = useState(false);
+  const [isSkillLibraryOpen, setIsSkillLibraryOpen] = useState(false);
 
   const { projects, isInitialLoad, isRevalidating, refreshAll } = useSidebarWorkspacesList({
     serverId: activeServerId,
@@ -287,6 +295,10 @@ export const LeftSidebar = memo(function LeftSidebar({ selectedAgentId }: LeftSi
     handleNewChat();
   }, [handleNewChat, showMobileAgent]);
 
+  const handleOpenSkills = useCallback(() => {
+    setIsSkillLibraryOpen(true);
+  }, []);
+
   const handleHostSelect = useCallback(
     (nextServerId: string) => {
       if (!nextServerId) {
@@ -339,35 +351,48 @@ export const LeftSidebar = memo(function LeftSidebar({ selectedAgentId }: LeftSi
     handleRefresh,
     handleHostSelect,
     renderHostOption,
+    handleOpenSkills,
     text: sidebarText,
   };
 
   if (isCompactLayout) {
     return (
-      <MobileSidebar
-        {...sharedProps}
-        insetsTop={insets.top}
-        insetsBottom={insets.bottom}
-        isOpen={isOpen}
-        closeToAgent={showMobileAgent}
-        handleNewChat={handleNewChatMobile}
-        handleOpenProject={handleOpenProjectMobile}
-        handlePaseoCloud={handlePaseoCloudMobile}
-        handleSettings={handleSettingsMobile}
-      />
+      <>
+        <MobileSidebar
+          {...sharedProps}
+          insetsTop={insets.top}
+          insetsBottom={insets.bottom}
+          isOpen={isOpen}
+          closeToAgent={showMobileAgent}
+          handleNewChat={handleNewChatMobile}
+          handleOpenProject={handleOpenProjectMobile}
+          handlePaseoCloud={handlePaseoCloudMobile}
+          handleSettings={handleSettingsMobile}
+        />
+        <SkillLibrarySheet
+          visible={isSkillLibraryOpen}
+          onClose={() => setIsSkillLibraryOpen(false)}
+        />
+      </>
     );
   }
 
   return (
-    <DesktopSidebar
-      {...sharedProps}
-      insetsTop={insets.top}
-      isOpen={isOpen}
-      handleNewChat={handleNewChat}
-      handleOpenProject={handleOpenProjectDesktop}
-      handlePaseoCloud={handlePaseoCloudDesktop}
-      handleSettings={handleSettingsDesktop}
-    />
+    <>
+      <DesktopSidebar
+        {...sharedProps}
+        insetsTop={insets.top}
+        isOpen={isOpen}
+        handleNewChat={handleNewChat}
+        handleOpenProject={handleOpenProjectDesktop}
+        handlePaseoCloud={handlePaseoCloudDesktop}
+        handleSettings={handleSettingsDesktop}
+      />
+      <SkillLibrarySheet
+        visible={isSkillLibraryOpen}
+        onClose={() => setIsSkillLibraryOpen(false)}
+      />
+    </>
   );
 });
 
@@ -456,6 +481,144 @@ function HostSwitchOption({
   );
 }
 
+function SidebarTopAction({
+  icon: Icon,
+  label,
+  onPress,
+  testID,
+}: {
+  icon: ComponentType<{ size?: number; color?: string }>;
+  label: string;
+  onPress: () => void;
+  testID: string;
+}) {
+  const { theme } = useUnistyles();
+
+  return (
+    <Pressable
+      style={({ hovered = false, pressed = false }) => [
+        styles.sidebarPrimaryAction,
+        (hovered || pressed) && styles.sidebarPrimaryActionHovered,
+      ]}
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      onPress={onPress}
+      testID={testID}
+    >
+      {({ hovered, pressed }) => {
+        const active = hovered || pressed;
+        return (
+          <>
+            <Icon
+              size={theme.iconSize.md}
+              color={active ? theme.colors.foreground : theme.colors.foregroundMuted}
+            />
+            <Text style={styles.sidebarPrimaryActionText} numberOfLines={1}>
+              {label}
+            </Text>
+          </>
+        );
+      }}
+    </Pressable>
+  );
+}
+
+function SkillLibrarySheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const { theme } = useUnistyles();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).sidebar, [locale]);
+  const isZh = locale === "zh";
+
+  const skills = useMemo(
+    () =>
+      WORKTREE_PERSONA_SKILLS.map((skill) => ({
+        skill,
+        roles: WORKTREE_PERSONA_ROLES.filter((role) => role.defaultSkillIds.includes(skill.id)),
+      })),
+    [],
+  );
+
+  return (
+    <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
+      <View style={styles.skillLibraryOverlay} testID="skill-library-panel">
+        <Pressable style={staticStyles.modalBackdrop} onPress={onClose} />
+        <View style={styles.skillLibrarySheet}>
+          <View style={styles.skillLibraryHeader}>
+            <View style={styles.skillLibraryHeaderText}>
+              <Text style={styles.skillLibraryPanelTitle}>{text.skillLibraryTitle}</Text>
+              <Text style={styles.skillLibrarySubtitle}>
+                {text.skillLibrarySubtitle(WORKTREE_PERSONA_SKILLS.length)}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityLabel={text.closeSkillLibrary}
+              accessibilityRole="button"
+              style={styles.skillLibraryCloseButton}
+              onPress={onClose}
+            >
+              <X size={16} color={theme.colors.foregroundMuted} />
+            </Pressable>
+          </View>
+          <ScrollView
+            style={styles.skillLibraryBody}
+            contentContainerStyle={styles.skillLibraryList}
+            showsVerticalScrollIndicator={false}
+          >
+            {skills.map(({ skill, roles }) => (
+              <View key={skill.id} style={styles.skillLibraryCard}>
+                <View style={styles.skillLibraryCardHeader}>
+                  <View style={styles.skillLibraryIcon}>
+                    <Box size={16} color={theme.colors.accent} />
+                  </View>
+                  <View style={styles.skillLibraryTitleGroup}>
+                    <View style={styles.skillLibraryNameRow}>
+                      <Text style={styles.skillLibraryName} numberOfLines={1}>
+                        {skill.name}
+                      </Text>
+                      <View style={styles.skillLibraryTag}>
+                        <Text style={styles.skillLibraryTagText}>{text.skillBuiltIn}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.skillLibraryDescription}>{skill.description}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.skillLibraryRoleRow}>
+                  <Text style={styles.skillLibraryMetaLabel}>{text.skillDefaultRoles}</Text>
+                  <View style={styles.skillLibraryBadges}>
+                    {roles.map((role) => (
+                      <View key={role.id} style={styles.skillLibraryRoleBadge}>
+                        <Text style={styles.skillLibraryRoleBadgeText}>
+                          {isZh ? role.labelZh : role.label}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+
+                <View style={styles.skillLibraryMetaGrid}>
+                  <View style={styles.skillLibraryMetaItem}>
+                    <Text style={styles.skillLibraryMetaLabel}>{text.skillSource}</Text>
+                    <Text style={styles.skillLibraryMetaValue} numberOfLines={1}>
+                      {skill.sourceUrl}
+                    </Text>
+                  </View>
+                  <View style={styles.skillLibraryMetaItem}>
+                    <Text style={styles.skillLibraryMetaLabel}>{text.skillLicense}</Text>
+                    <Text style={styles.skillLibraryMetaValue} numberOfLines={1}>
+                      {skill.license}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function MobileSidebar({
   theme,
   activeServerId,
@@ -480,6 +643,7 @@ function MobileSidebar({
   renderHostOption,
   text,
   handleNewChat,
+  handleOpenSkills,
   handleOpenProject,
   handlePaseoCloud,
   handleSettings,
@@ -627,31 +791,18 @@ function MobileSidebar({
         >
           <View style={styles.sidebarContent} pointerEvents="auto">
             <View style={styles.sidebarTopActions}>
-              <Pressable
-                style={({ hovered = false, pressed = false }) => [
-                  styles.sidebarPrimaryAction,
-                  (hovered || pressed) && styles.sidebarPrimaryActionHovered,
-                ]}
-                accessibilityLabel={text.newChat}
-                accessibilityRole="button"
+              <SidebarTopAction
+                icon={MessageSquarePlus}
+                label={text.newChat}
                 onPress={handleNewChat}
                 testID="sidebar-new-chat"
-              >
-                {({ hovered, pressed }) => {
-                  const active = hovered || pressed;
-                  return (
-                    <>
-                      <MessageSquarePlus
-                        size={theme.iconSize.md}
-                        color={active ? theme.colors.foreground : theme.colors.foregroundMuted}
-                      />
-                      <Text style={styles.sidebarPrimaryActionText} numberOfLines={1}>
-                        {text.newChat}
-                      </Text>
-                    </>
-                  );
-                }}
-              </Pressable>
+              />
+              <SidebarTopAction
+                icon={Box}
+                label={text.skills}
+                onPress={handleOpenSkills}
+                testID="sidebar-skill-library"
+              />
             </View>
 
             <OnboardingGuideTarget id="sidebar.projects" style={styles.sidebarHeader}>
@@ -823,6 +974,7 @@ function DesktopSidebar({
   renderHostOption,
   text,
   handleNewChat,
+  handleOpenSkills,
   handleOpenProject,
   handlePaseoCloud,
   handleSettings,
@@ -887,31 +1039,18 @@ function DesktopSidebar({
           <TitlebarDragRegion />
           {padding.top > 0 ? <View style={{ height: padding.top }} /> : null}
           <View style={styles.sidebarTopActions}>
-            <Pressable
-              style={({ hovered = false, pressed = false }) => [
-                styles.sidebarPrimaryAction,
-                (hovered || pressed) && styles.sidebarPrimaryActionHovered,
-              ]}
-              accessibilityLabel={text.newChat}
-              accessibilityRole="button"
+            <SidebarTopAction
+              icon={MessageSquarePlus}
+              label={text.newChat}
               onPress={handleNewChat}
               testID="sidebar-new-chat"
-            >
-              {({ hovered, pressed }) => {
-                const active = hovered || pressed;
-                return (
-                  <>
-                    <MessageSquarePlus
-                      size={theme.iconSize.md}
-                      color={active ? theme.colors.foreground : theme.colors.foregroundMuted}
-                    />
-                    <Text style={styles.sidebarPrimaryActionText} numberOfLines={1}>
-                      {text.newChat}
-                    </Text>
-                  </>
-                );
-              }}
-            </Pressable>
+            />
+            <SidebarTopAction
+              icon={Box}
+              label={text.skills}
+              onPress={handleOpenSkills}
+              testID="sidebar-skill-library"
+            />
           </View>
 
           <OnboardingGuideTarget id="sidebar.projects" style={styles.sidebarHeader}>
@@ -1069,6 +1208,9 @@ const staticStyles = RNStyleSheet.create({
     ...RNStyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
   },
+  modalBackdrop: {
+    ...RNStyleSheet.absoluteFillObject,
+  },
   mobileSidebar: {
     position: "absolute" as const,
     top: 0,
@@ -1106,6 +1248,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingHorizontal: theme.spacing[3],
     paddingTop: theme.spacing[3],
     paddingBottom: theme.spacing[2],
+    gap: theme.spacing[1],
   },
   sidebarPrimaryAction: {
     minHeight: 34,
@@ -1253,5 +1396,153 @@ const styles = StyleSheet.create((theme) => ({
   tooltipText: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.popoverForeground,
+  },
+  skillLibraryOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: theme.spacing[4],
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  skillLibrarySheet: {
+    width: "100%",
+    maxWidth: 720,
+    maxHeight: "88%",
+    minHeight: 0,
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+    overflow: "hidden",
+  },
+  skillLibraryHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: theme.spacing[3],
+    padding: theme.spacing[4],
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+  },
+  skillLibraryHeaderText: {
+    flex: 1,
+    minWidth: 0,
+    gap: theme.spacing[1],
+  },
+  skillLibraryPanelTitle: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  skillLibrarySubtitle: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+  },
+  skillLibraryCloseButton: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface2,
+  },
+  skillLibraryBody: {
+    minHeight: 0,
+  },
+  skillLibraryList: {
+    gap: theme.spacing[3],
+    padding: theme.spacing[4],
+  },
+  skillLibraryCard: {
+    gap: theme.spacing[3],
+    padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  skillLibraryCardHeader: {
+    flexDirection: "row",
+    gap: theme.spacing[3],
+    alignItems: "flex-start",
+  },
+  skillLibraryIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: theme.borderRadius.md,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.colors.surface2,
+  },
+  skillLibraryTitleGroup: {
+    flex: 1,
+    minWidth: 0,
+    gap: theme.spacing[1],
+  },
+  skillLibraryNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    minWidth: 0,
+  },
+  skillLibraryName: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.semibold,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  skillLibraryDescription: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+    lineHeight: 19,
+  },
+  skillLibraryTag: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 2,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.surface2,
+    flexShrink: 0,
+  },
+  skillLibraryTagText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+  },
+  skillLibraryRoleRow: {
+    gap: theme.spacing[2],
+  },
+  skillLibraryBadges: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[2],
+  },
+  skillLibraryRoleBadge: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface2,
+  },
+  skillLibraryRoleBadgeText: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+  },
+  skillLibraryMetaGrid: {
+    gap: theme.spacing[2],
+  },
+  skillLibraryMetaItem: {
+    gap: theme.spacing[1],
+  },
+  skillLibraryMetaLabel: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  skillLibraryMetaValue: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.xs,
   },
 }));

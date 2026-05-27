@@ -53,10 +53,6 @@ export const DEFAULT_EXPLORER_FILES_SPLIT_RATIO = 0.38;
 export const MIN_EXPLORER_FILES_SPLIT_RATIO = 0.2;
 export const MAX_EXPLORER_FILES_SPLIT_RATIO = 0.8;
 
-export const DEFAULT_COMMIT_GRAPH_WIDTH = 720;
-export const MIN_COMMIT_GRAPH_WIDTH = 420;
-export const MAX_COMMIT_GRAPH_WIDTH = 2000;
-
 export interface PanelVisibilityState {
   isAgentListOpen: boolean;
   isFileExplorerOpen: boolean;
@@ -85,8 +81,6 @@ export interface PanelState {
   commitFocusRequestByCheckout: Record<string, number>;
   sidebarWidth: number;
   explorerWidth: number;
-  commitGraphOpen: boolean;
-  commitGraphWidth: number;
   explorerSortOption: SortOption;
   explorerFilesSplitRatio: number;
 
@@ -99,9 +93,6 @@ export interface PanelState {
   closeDesktopAgentList: () => void;
   toggleDesktopAgentList: () => void;
   closeDesktopFileExplorer: () => void;
-  openCommitGraphForCheckout: (input: ExplorerPanelIntent) => void;
-  closeCommitGraph: () => void;
-  toggleCommitGraphForCheckout: (input: ExplorerPanelIntent) => void;
   openAgentListForLayout: (input: PanelLayoutInput) => void;
   closeAgentListForLayout: (input: PanelLayoutInput) => void;
   toggleAgentListForLayout: (input: PanelLayoutInput) => void;
@@ -117,7 +108,6 @@ export interface PanelState {
   focusChangesCommitForCheckout: (checkout: ExplorerCheckoutContext) => void;
   setSidebarWidth: (width: number) => void;
   setExplorerWidth: (width: number) => void;
-  setCommitGraphWidth: (width: number) => void;
   setExplorerSortOption: (option: SortOption) => void;
   setExplorerFilesSplitRatio: (ratio: number) => void;
 }
@@ -135,10 +125,6 @@ function clampSidebarWidth(width: number): number {
 
 function clampWidth(width: number): number {
   return clampNumber(width, MIN_EXPLORER_SIDEBAR_WIDTH, MAX_EXPLORER_SIDEBAR_WIDTH);
-}
-
-function clampCommitGraphWidth(width: number): number {
-  return clampNumber(width, MIN_COMMIT_GRAPH_WIDTH, MAX_COMMIT_GRAPH_WIDTH);
 }
 
 function clampExplorerFilesSplitRatio(ratio: number): number {
@@ -168,22 +154,6 @@ function buildOpenFileExplorerPatch(
   return {
     desktop: { ...state.desktop, fileExplorerOpen: true },
     explorerTab: resolvedTab,
-  };
-}
-
-function buildCommitGraphPatch(state: PanelState, input: ExplorerPanelIntent): Partial<PanelState> {
-  const key = buildExplorerCheckoutKey(input.checkout.serverId, input.checkout.cwd);
-  const changesTab = coerceExplorerTabForCheckout("changes", input.checkout.isGit);
-  return {
-    ...buildOpenFileExplorerPatch(state, input),
-    commitGraphOpen: !input.isCompact && input.checkout.isGit,
-    explorerTab: changesTab,
-    explorerTabByCheckout: key
-      ? {
-          ...state.explorerTabByCheckout,
-          [key]: changesTab,
-        }
-      : state.explorerTabByCheckout,
   };
 }
 
@@ -234,8 +204,6 @@ export const usePanelStore = create<PanelState>()(
       commitFocusRequestByCheckout: {},
       sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
       explorerWidth: DEFAULT_EXPLORER_SIDEBAR_WIDTH,
-      commitGraphOpen: false,
-      commitGraphWidth: DEFAULT_COMMIT_GRAPH_WIDTH,
       explorerSortOption: "name",
       explorerFilesSplitRatio: DEFAULT_EXPLORER_FILES_SPLIT_RATIO,
 
@@ -292,24 +260,6 @@ export const usePanelStore = create<PanelState>()(
             return state;
           }
           return { desktop: { ...state.desktop, fileExplorerOpen: false } };
-        }),
-
-      openCommitGraphForCheckout: (input) => set((state) => buildCommitGraphPatch(state, input)),
-
-      closeCommitGraph: () =>
-        set((state) => {
-          if (!state.commitGraphOpen) {
-            return state;
-          }
-          return { commitGraphOpen: false };
-        }),
-
-      toggleCommitGraphForCheckout: (input) =>
-        set((state) => {
-          if (state.commitGraphOpen) {
-            return { commitGraphOpen: false };
-          }
-          return buildCommitGraphPatch(state, input);
         }),
 
       openAgentListForLayout: ({ isCompact }) =>
@@ -416,7 +366,6 @@ export const usePanelStore = create<PanelState>()(
         }),
       setSidebarWidth: (width) => set({ sidebarWidth: clampSidebarWidth(width) }),
       setExplorerWidth: (width) => set({ explorerWidth: clampWidth(width) }),
-      setCommitGraphWidth: (width) => set({ commitGraphWidth: clampCommitGraphWidth(width) }),
       setExplorerSortOption: (option) => set({ explorerSortOption: option }),
       setExplorerFilesSplitRatio: (ratio) =>
         set({
@@ -497,16 +446,6 @@ export const usePanelStore = create<PanelState>()(
 
         if (version < 6 || typeof state.sidebarWidth !== "number") {
           state.sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
-        }
-
-        if (version < 11 || typeof state.commitGraphOpen !== "boolean") {
-          state.commitGraphOpen = false;
-        }
-
-        if (version < 11 || typeof state.commitGraphWidth !== "number") {
-          state.commitGraphWidth = DEFAULT_COMMIT_GRAPH_WIDTH;
-        } else {
-          state.commitGraphWidth = clampCommitGraphWidth(state.commitGraphWidth);
         }
 
         if (

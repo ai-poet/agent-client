@@ -1,10 +1,9 @@
-import { useLocalSearchParams } from "expo-router";
-import { View, Text, Pressable } from "react-native";
-import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft, GitGraph } from "lucide-react-native";
-import { useRouter } from "expo-router";
-import { CommitGraphPane } from "@/components/commit-graph-pane";
+import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { CommitGraphPane } from "@/components/commit-graph-pane";
 import { useWorkspaceExecutionAuthority } from "@/stores/session-store-hooks";
 
 function getParamValue(value: string | string[] | undefined): string {
@@ -51,7 +50,7 @@ export default function CommitGraphRoute() {
           <ArrowLeft size={20} color={theme.colors.foreground} />
         </Pressable>
         <View style={styles.headerCenter}>
-          <Text style={[styles.headerTitle, { color: theme.colors.foreground }]}>Commit Graph</Text>
+          <Text style={[styles.headerTitle, { color: theme.colors.foreground }]}>Git Graph</Text>
           <Text style={[styles.headerSubtitle, { color: theme.colors.foregroundMuted }]}>
             {normalizedWorkspaceId}
           </Text>

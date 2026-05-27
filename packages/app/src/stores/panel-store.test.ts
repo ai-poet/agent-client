@@ -20,9 +20,6 @@ import {
   resolveExplorerTabForCheckout,
 } from "@/stores/explorer-tab-memory";
 import {
-  DEFAULT_COMMIT_GRAPH_WIDTH,
-  MAX_COMMIT_GRAPH_WIDTH,
-  MIN_COMMIT_GRAPH_WIDTH,
   type PanelState,
   selectIsAgentListOpen,
   selectIsFileExplorerOpen,
@@ -40,8 +37,6 @@ function resetPanelStore() {
     },
     explorerTab: "changes",
     explorerTabByCheckout: {},
-    commitGraphOpen: false,
-    commitGraphWidth: DEFAULT_COMMIT_GRAPH_WIDTH,
   });
 }
 
@@ -105,6 +100,20 @@ describe("panel-store explorer tab resolution", () => {
     ).toBe("files");
   });
 
+  it("restores a stored Git Graph tab for git checkouts", () => {
+    const key = buildExplorerCheckoutKey(serverId, cwd)!;
+    expect(
+      resolveExplorerTabForCheckout({
+        serverId,
+        cwd,
+        isGit: true,
+        explorerTabByCheckout: {
+          [key]: "gitGraph",
+        },
+      }),
+    ).toBe("gitGraph");
+  });
+
   it("falls back to default when stored tab is invalid", () => {
     const key = buildExplorerCheckoutKey(serverId, cwd)!;
     expect(
@@ -128,6 +137,20 @@ describe("panel-store explorer tab resolution", () => {
         isGit: false,
         explorerTabByCheckout: {
           [key]: "changes",
+        },
+      }),
+    ).toBe("files");
+  });
+
+  it("coerces stored Git Graph to files for non-git checkouts", () => {
+    const key = buildExplorerCheckoutKey(serverId, cwd)!;
+    expect(
+      resolveExplorerTabForCheckout({
+        serverId,
+        cwd,
+        isGit: false,
+        explorerTabByCheckout: {
+          [key]: "gitGraph",
         },
       }),
     ).toBe("files");
@@ -249,69 +272,21 @@ describe("panel-store checkout-intent file explorer actions", () => {
     expect(usePanelStore.getState().desktop.fileExplorerOpen).toBe(true);
     expect(usePanelStore.getState().explorerTab).toBe("files");
   });
-});
 
-describe("panel-store commit graph sidecar actions", () => {
-  it("opens the expanded explorer on Changes and shows the independent graph sidecar", () => {
+  it("opens the expanded explorer on a stored Git Graph tab", () => {
     const checkout = { serverId: "server-1", cwd: "/tmp/repo", isGit: true };
     const key = buildExplorerCheckoutKey(checkout.serverId, checkout.cwd)!;
     usePanelStore.setState({
-      explorerTab: "files",
-      explorerTabByCheckout: { [key]: "files" },
-      desktop: {
-        agentListOpen: false,
-        fileExplorerOpen: false,
-        focusModeEnabled: false,
-      },
+      explorerTab: "changes",
+      explorerTabByCheckout: { [key]: "gitGraph" },
     });
 
-    usePanelStore.getState().openCommitGraphForCheckout({
+    usePanelStore.getState().openFileExplorerForCheckout({
       isCompact: false,
       checkout,
     });
 
     expect(usePanelStore.getState().desktop.fileExplorerOpen).toBe(true);
-    expect(usePanelStore.getState().explorerTab).toBe("changes");
-    expect(usePanelStore.getState().explorerTabByCheckout[key]).toBe("changes");
-    expect(usePanelStore.getState().commitGraphOpen).toBe(true);
-  });
-
-  it("closes the graph sidecar without closing the explorer", () => {
-    usePanelStore.setState({
-      commitGraphOpen: true,
-      desktop: {
-        agentListOpen: false,
-        fileExplorerOpen: true,
-        focusModeEnabled: false,
-      },
-      explorerTab: "changes",
-    });
-
-    usePanelStore.getState().toggleCommitGraphForCheckout({
-      isCompact: false,
-      checkout: { serverId: "server-1", cwd: "/tmp/repo", isGit: true },
-    });
-
-    expect(usePanelStore.getState().commitGraphOpen).toBe(false);
-    expect(usePanelStore.getState().desktop.fileExplorerOpen).toBe(true);
-    expect(usePanelStore.getState().explorerTab).toBe("changes");
-  });
-
-  it("does not open the graph sidecar for compact layouts", () => {
-    usePanelStore.getState().openCommitGraphForCheckout({
-      isCompact: true,
-      checkout: { serverId: "server-1", cwd: "/tmp/repo", isGit: true },
-    });
-
-    expect(usePanelStore.getState().mobileView).toBe("file-explorer");
-    expect(usePanelStore.getState().commitGraphOpen).toBe(false);
-  });
-
-  it("clamps the persisted graph sidecar width", () => {
-    usePanelStore.getState().setCommitGraphWidth(MIN_COMMIT_GRAPH_WIDTH - 100);
-    expect(usePanelStore.getState().commitGraphWidth).toBe(MIN_COMMIT_GRAPH_WIDTH);
-
-    usePanelStore.getState().setCommitGraphWidth(MAX_COMMIT_GRAPH_WIDTH + 100);
-    expect(usePanelStore.getState().commitGraphWidth).toBe(MAX_COMMIT_GRAPH_WIDTH);
+    expect(usePanelStore.getState().explorerTab).toBe("gitGraph");
   });
 });

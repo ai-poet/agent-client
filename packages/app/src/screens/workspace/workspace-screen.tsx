@@ -2,6 +2,7 @@ import { useIsFocused } from "@react-navigation/native";
 import type { ListTerminalsResponse } from "@server/shared/messages";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
+import { useRouter } from "expo-router";
 import {
   ArrowLeftToLine,
   ArrowRightToLine,
@@ -11,7 +12,6 @@ import {
   CopyX,
   Ellipsis,
   EllipsisVertical,
-  GitGraph,
   PanelRight,
   RotateCw,
   Settings,
@@ -19,7 +19,6 @@ import {
   SquareTerminal,
   X,
 } from "lucide-react-native";
-import { useRouter } from "expo-router";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, BackHandler, Keyboard, Pressable, Text, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
@@ -29,7 +28,6 @@ import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import invariant from "tiny-invariant";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { BranchSwitcher } from "@/components/branch-switcher";
-import { CommitGraphSidecar } from "@/components/commit-graph-sidecar";
 import { DiffStat } from "@/components/diff-stat";
 import { ExplorerSidebar } from "@/components/explorer-sidebar";
 import { HeaderBalanceBadge } from "@/components/header-balance-badge";
@@ -115,6 +113,7 @@ import { shouldShowWorkspaceSetup, useWorkspaceSetupStore } from "@/stores/works
 import type { WorkspaceTab, WorkspaceTabTarget } from "@/stores/workspace-tabs-store";
 import { useWorkspaceTerminalSessionRetention } from "@/terminal/hooks/use-workspace-terminal-session-retention";
 import { confirmDialog } from "@/utils/confirm-dialog";
+import { buildSettingsSectionRoute } from "@/utils/host-routes";
 import { isAbsolutePath } from "@/utils/path";
 import { buildProviderCommand } from "@/utils/provider-command-templates";
 import {
@@ -128,7 +127,6 @@ import {
   resolveWorkspaceRouteId,
 } from "@/utils/workspace-execution";
 import { navigateToPreparedWorkspaceTab } from "@/utils/workspace-navigation";
-import { buildSettingsSectionRoute } from "@/utils/host-routes";
 import {
   normalizeWorkspaceTabTarget,
   workspaceTabTargetsEqual,
@@ -951,16 +949,7 @@ function WorkspaceScreenContent({
   const toggleFileExplorerForCheckout = usePanelStore(
     (state) => state.toggleFileExplorerForCheckout,
   );
-  const toggleCommitGraphForCheckout = usePanelStore((state) => state.toggleCommitGraphForCheckout);
-  const closeCommitGraph = usePanelStore((state) => state.closeCommitGraph);
-  const isCommitGraphOpen = usePanelStore((state) => state.commitGraphOpen);
-  const explorerWidth = usePanelStore((state) => state.explorerWidth);
-  const explorerTab = usePanelStore((state) => state.explorerTab);
   const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
-
-  useEffect(() => {
-    closeCommitGraph();
-  }, [closeCommitGraph, normalizedServerId, workspaceDirectory]);
 
   const activeExplorerCheckout = useMemo<ExplorerCheckoutContext | null>(() => {
     if (!normalizedServerId || !workspaceDirectory) {
@@ -1008,33 +997,6 @@ function WorkspaceScreenContent({
       checkout: activeExplorerCheckout,
     });
   }, [activeExplorerCheckout, isMobile, toggleFileExplorerForCheckout]);
-
-  const handleToggleCommitGraph = useCallback(() => {
-    if (!activeExplorerCheckout) {
-      return;
-    }
-
-    toggleCommitGraphForCheckout({
-      isCompact: isMobile,
-      checkout: { ...activeExplorerCheckout, isGit: true },
-    });
-  }, [activeExplorerCheckout, isMobile, toggleCommitGraphForCheckout]);
-
-  useEffect(() => {
-    if (
-      isCommitGraphOpen &&
-      (!isExplorerOpen || explorerTab !== "changes" || !isGitCheckout || !workspaceDirectory)
-    ) {
-      closeCommitGraph();
-    }
-  }, [
-    closeCommitGraph,
-    explorerTab,
-    isCommitGraphOpen,
-    isExplorerOpen,
-    isGitCheckout,
-    workspaceDirectory,
-  ]);
 
   const explorerOpenGesture = useExplorerOpenGesture({
     enabled: isMobile && canOpenExplorerFromAgentView,
@@ -2524,41 +2486,6 @@ function WorkspaceScreenContent({
                       <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
                         <TooltipTrigger asChild>
                           <Pressable
-                            testID="workspace-graph-button"
-                            onPress={handleToggleCommitGraph}
-                            accessibilityRole="button"
-                            accessibilityLabel={
-                              isCommitGraphOpen ? "Hide commit graph" : "View commit graph"
-                            }
-                            accessibilityState={{ expanded: isCommitGraphOpen }}
-                            style={({ hovered, pressed }) => [
-                              styles.sourceControlButton,
-                              (hovered || pressed || isCommitGraphOpen) &&
-                                styles.sourceControlButtonHovered,
-                            ]}
-                          >
-                            {({ hovered, pressed }) => {
-                              const isActive = hovered || pressed || isCommitGraphOpen;
-                              return (
-                                <GitGraph
-                                  size={theme.iconSize.md}
-                                  color={
-                                    isActive
-                                      ? theme.colors.foreground
-                                      : theme.colors.foregroundMuted
-                                  }
-                                />
-                              );
-                            }}
-                          </Pressable>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" align="center" offset={8}>
-                          <Text style={styles.tooltipText}>View commit graph</Text>
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
-                        <TooltipTrigger asChild>
-                          <Pressable
                             testID="workspace-explorer-toggle"
                             onPress={handleToggleExplorer}
                             accessibilityRole="button"
@@ -2771,20 +2698,6 @@ function WorkspaceScreenContent({
               workspaceRoot={workspaceDirectory}
               isGit={isGitCheckout}
               onOpenFile={handleOpenFileFromExplorer}
-            />
-          ) : null)}
-        {isRouteFocused &&
-          !isMobile &&
-          (!isFocusModeEnabled || isMobile) &&
-          isGitCheckout &&
-          isCommitGraphOpen &&
-          (workspaceDirectory ? (
-            <CommitGraphSidecar
-              serverId={normalizedServerId}
-              workspaceRoot={workspaceDirectory}
-              isOpen={isCommitGraphOpen}
-              explorerWidth={explorerWidth}
-              onClose={closeCommitGraph}
             />
           ) : null)}
       </View>

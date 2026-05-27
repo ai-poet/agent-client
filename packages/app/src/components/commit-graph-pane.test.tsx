@@ -130,6 +130,7 @@ vi.mock("react-native", () => {
       contentContainerStyle,
       horizontal,
       onChangeText,
+      onLayout,
       onPress,
       placeholder,
       placeholderTextColor,
@@ -163,6 +164,7 @@ vi.mock("react-native", () => {
                 nativeEvent: { metaKey: event.metaKey, ctrlKey: event.ctrlKey },
               })
           : undefined,
+      ref: undefined,
     };
   };
 
@@ -181,7 +183,15 @@ vi.mock("react-native", () => {
     ),
     Text: (props: Record<string, unknown>) => React.createElement("span", mapProps(props)),
     TextInput: (props: Record<string, unknown>) => React.createElement("input", mapProps(props)),
-    View: (props: Record<string, unknown>) => React.createElement("div", mapProps(props)),
+    View: (props: Record<string, unknown>) => {
+      const mappedProps = mapProps(props);
+      React.useEffect(() => {
+        if (typeof props.onLayout === "function") {
+          props.onLayout({ nativeEvent: { layout: { width: 720, height: 480 } } });
+        }
+      }, [props.onLayout]);
+      return React.createElement("div", mappedProps);
+    },
   };
 });
 
@@ -222,21 +232,26 @@ vi.mock("@/components/ui/context-menu", () => ({
     </button>
   ),
   ContextMenuSeparator: () => <div role="separator" />,
-  ContextMenuTrigger: ({ children, onPress, testID, accessibilityLabel, style }: any) => (
-    <button
-      type="button"
-      data-testid={testID}
-      aria-label={accessibilityLabel}
-      style={
-        typeof style === "function" ? style({ hovered: false, pressed: false, open: false }) : style
-      }
-      onClick={(event) =>
-        onPress?.({ nativeEvent: { metaKey: event.metaKey, ctrlKey: event.ctrlKey } })
-      }
-    >
-      {children}
-    </button>
-  ),
+  ContextMenuTrigger: ({ children, onPress, testID, accessibilityLabel, style }: any) => {
+    const resolvedStyle =
+      typeof style === "function" ? style({ hovered: false, pressed: false, open: false }) : style;
+    const normalizedStyle = Array.isArray(resolvedStyle)
+      ? Object.assign({}, ...resolvedStyle.filter((item) => item && typeof item === "object"))
+      : resolvedStyle;
+    return (
+      <button
+        type="button"
+        data-testid={testID}
+        aria-label={accessibilityLabel}
+        style={normalizedStyle}
+        onClick={(event) =>
+          onPress?.({ nativeEvent: { metaKey: event.metaKey, ctrlKey: event.ctrlKey } })
+        }
+      >
+        {children}
+      </button>
+    );
+  },
 }));
 
 vi.mock("@/components/ui/tooltip", () => ({
@@ -321,6 +336,19 @@ describe("CommitGraphPane", () => {
     expect(document.body.textContent).toContain("fix: update API localization");
     expect(document.body.textContent).toContain("main");
     expect(document.body.textContent).toContain("v0.1.27");
+  });
+
+  it("uses a compact adaptive table without a horizontal scroller", () => {
+    renderPane();
+
+    expect(document.querySelector('[data-testid="commit-graph-horizontal-scroll"]')).toBeNull();
+
+    const graphPane = document.querySelector('[data-testid="commit-graph-pane"]') as HTMLElement;
+    expect(graphPane.textContent).toContain("Git Graph");
+
+    const row = document.querySelector('[data-testid="commit-graph-row-c222222"]') as HTMLElement;
+    expect(row.style.width).toBe("100%");
+    expect(row.style.height).toBe("28px");
   });
 
   it("renders a detail card under the selected commit row", () => {

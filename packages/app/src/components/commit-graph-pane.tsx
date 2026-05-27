@@ -17,6 +17,7 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   type GestureResponderEvent,
+  type LayoutChangeEvent,
   Pressable,
   ScrollView,
   type ScrollView as ScrollViewInstance,
@@ -45,13 +46,17 @@ interface CommitGraphPaneProps {
   onClose?: () => void;
 }
 
-const GRAPH_WIDTH_PADDING = 28;
-const MESSAGE_COLUMN_WIDTH = 620;
-const DATE_COLUMN_WIDTH = 150;
-const AUTHOR_COLUMN_WIDTH = 92;
-const HASH_COLUMN_WIDTH = 96;
-const ROW_HORIZONTAL_PADDING = 12;
-const DETAIL_CARD_HEIGHT = 150;
+const GRAPH_COLUMN_WIDTH = 92;
+const MEDIUM_GRAPH_COLUMN_WIDTH = 78;
+const NARROW_GRAPH_COLUMN_WIDTH = 64;
+const GRAPH_COLUMN_SPACING = 14;
+const GRAPH_NODE_RADIUS = 3;
+const COMMIT_ROW_HEIGHT = 28;
+const DATE_COLUMN_WIDTH = 118;
+const AUTHOR_COLUMN_WIDTH = 76;
+const HASH_COLUMN_WIDTH = 70;
+const ROW_HORIZONTAL_PADDING = 8;
+const DETAIL_CARD_HEIGHT = 128;
 const COMMIT_LIMIT = 200;
 
 function formatCommitDate(timestamp: number): string {
@@ -162,22 +167,28 @@ function RefBadge({ label, kind }: { label: string; kind: "branch" | "tag" }) {
   );
 }
 
+function HiddenRefsBadge({ count }: { count: number }) {
+  return (
+    <View style={styles.hiddenRefsBadge}>
+      <Text style={styles.hiddenRefsText}>+{count}</Text>
+    </View>
+  );
+}
+
 function CommitCard({
   commit,
   compareCommit,
   onClearCompare,
   graphWidth,
-  rowWidth,
 }: {
   commit: GitGraphCommit;
   compareCommit: GitGraphCommit | null;
   onClearCompare: () => void;
   graphWidth: number;
-  rowWidth: number;
 }) {
   const { theme } = useUnistyles();
   return (
-    <View style={[styles.commitCardRow, { width: rowWidth, height: DETAIL_CARD_HEIGHT }]}>
+    <View style={[styles.commitCardRow, { minHeight: DETAIL_CARD_HEIGHT }]}>
       <View style={{ width: graphWidth }} />
       <View style={styles.commitCard} testID="commit-graph-detail">
         <View style={styles.commitCardMain}>
@@ -222,12 +233,15 @@ function CommitCard({
 
         <View style={styles.commitCardAside}>
           <View style={styles.detailRefs}>
-            {commit.branchTips.map((branch) => (
+            {commit.branchTips.slice(0, 4).map((branch) => (
               <RefBadge key={`branch-${branch}`} label={branch} kind="branch" />
             ))}
-            {commit.tags.map((tagName) => (
+            {commit.tags.slice(0, 3).map((tagName) => (
               <RefBadge key={`tag-${tagName}`} label={tagName} kind="tag" />
             ))}
+            {commit.branchTips.length + commit.tags.length > 7 ? (
+              <HiddenRefsBadge count={commit.branchTips.length + commit.tags.length - 7} />
+            ) : null}
           </View>
           <View style={styles.changedFilesStub}>
             <Text style={styles.changedFilesTitle}>Changed files</Text>
@@ -293,8 +307,8 @@ function GraphLayer({
         const y1 = fromNode.y;
         const y2 = toNode.y;
         const minX = Math.min(x1, x2);
-        const width = Math.max(2, Math.abs(x2 - x1));
-        const midY = y1 + Math.max(12, Math.min(34, (y2 - y1) / 2));
+        const width = Math.max(1, Math.abs(x2 - x1));
+        const midY = y1 + Math.max(8, Math.min(18, (y2 - y1) / 2));
 
         if (x1 === x2) {
           return (
@@ -308,7 +322,7 @@ function GraphLayer({
                   left: x1 - 1,
                   top: y1,
                   height: Math.max(y2 - y1, 1),
-                  width: 2,
+                  width: 1.5,
                 },
               ]}
             />
@@ -325,7 +339,7 @@ function GraphLayer({
                   left: x1 - 1,
                   top: y1,
                   height: Math.max(midY - y1, 1),
-                  width: 2,
+                  width: 1.5,
                 },
               ]}
             />
@@ -337,7 +351,7 @@ function GraphLayer({
                   left: minX,
                   top: midY - 1,
                   width,
-                  height: 2,
+                  height: 1.5,
                 },
               ]}
             />
@@ -349,7 +363,7 @@ function GraphLayer({
                   left: x2 - 1,
                   top: midY,
                   height: Math.max(y2 - midY, 1),
-                  width: 2,
+                  width: 1.5,
                 },
               ]}
             />
@@ -382,11 +396,11 @@ function GraphLayer({
                 style={[
                   styles.headRing,
                   {
-                    left: node.x - layout.nodeRadius - 6,
-                    top: node.y - layout.nodeRadius - 6,
-                    width: layout.nodeRadius * 2 + 12,
-                    height: layout.nodeRadius * 2 + 12,
-                    borderRadius: layout.nodeRadius + 6,
+                    left: node.x - layout.nodeRadius - 3,
+                    top: node.y - layout.nodeRadius - 3,
+                    width: layout.nodeRadius * 2 + 6,
+                    height: layout.nodeRadius * 2 + 6,
+                    borderRadius: layout.nodeRadius + 3,
                     borderColor: node.color,
                   },
                 ]}
@@ -404,7 +418,8 @@ interface CommitRowProps {
   layout: GraphLayout;
   graph: GitGraph;
   graphWidth: number;
-  rowWidth: number;
+  showMetadata: boolean;
+  showAuthor: boolean;
   showRefs: boolean;
   selected: boolean;
   compareSelected: boolean;
@@ -418,7 +433,8 @@ function CommitRow({
   layout,
   graph,
   graphWidth,
-  rowWidth,
+  showMetadata,
+  showAuthor,
   showRefs,
   selected,
   compareSelected,
@@ -429,6 +445,9 @@ function CommitRow({
   const { theme } = useUnistyles();
   const isHead = graph.headCommit === node.commit.fullHash;
   const refs = visibleRefLabels(node.commit, showRefs);
+  const branchBadges = showRefs ? node.commit.branchTips.slice(0, 2) : [];
+  const tagBadges = showRefs ? node.commit.tags.slice(0, 1) : [];
+  const hiddenRefCount = Math.max(0, refs.length - branchBadges.length - tagBadges.length);
 
   return (
     <ContextMenu>
@@ -436,7 +455,7 @@ function CommitRow({
         testID={`commit-graph-row-${node.commit.hash}`}
         style={({ hovered, pressed, open }) => [
           styles.commitRow,
-          { width: rowWidth, height: layout.rowHeight },
+          { height: layout.rowHeight },
           (hovered || pressed || open) && styles.commitRowHovered,
           selected && styles.commitRowSelected,
           compareSelected && styles.commitRowCompareSelected,
@@ -449,51 +468,56 @@ function CommitRow({
         <View style={{ width: graphWidth }} />
 
         <View style={styles.messageCell}>
-          <View style={styles.messageLine}>
-            <Text numberOfLines={1} style={styles.commitMessage}>
-              {node.commit.message || "(no commit message)"}
-            </Text>
-            {isHead ? (
-              <View style={styles.headBadge}>
-                <Text style={styles.headBadgeText}>HEAD</Text>
-              </View>
-            ) : null}
-          </View>
           {refs.length > 0 ? (
-            <View style={styles.refsRow}>
-              {node.commit.branchTips.map((branch) => (
+            <View style={styles.refsInline}>
+              {branchBadges.map((branch) => (
                 <RefBadge
                   key={`${node.commit.fullHash}-branch-${branch}`}
                   label={branch}
                   kind="branch"
                 />
               ))}
-              {node.commit.tags.map((tagName) => (
+              {tagBadges.map((tagName) => (
                 <RefBadge
                   key={`${node.commit.fullHash}-tag-${tagName}`}
                   label={tagName}
                   kind="tag"
                 />
               ))}
+              {hiddenRefCount > 0 ? <HiddenRefsBadge count={hiddenRefCount} /> : null}
+            </View>
+          ) : null}
+          <Text numberOfLines={1} style={styles.commitMessage}>
+            {node.commit.message || "(no commit message)"}
+          </Text>
+          {isHead ? (
+            <View style={styles.headBadge}>
+              <Text style={styles.headBadgeText}>HEAD</Text>
             </View>
           ) : null}
         </View>
 
-        <View style={styles.dateCell}>
-          <Text numberOfLines={1} style={styles.dateText}>
-            {formatCommitDate(node.commit.date)}
-          </Text>
-        </View>
+        {showMetadata ? (
+          <View style={styles.dateCell}>
+            <Text numberOfLines={1} style={styles.dateText}>
+              {formatCommitDate(node.commit.date)}
+            </Text>
+          </View>
+        ) : null}
 
-        <View style={styles.authorCell}>
-          <Text numberOfLines={1} style={styles.authorText}>
-            {node.commit.author}
-          </Text>
-        </View>
+        {showAuthor ? (
+          <View style={styles.authorCell}>
+            <Text numberOfLines={1} style={styles.authorText}>
+              {node.commit.author}
+            </Text>
+          </View>
+        ) : null}
 
-        <Text selectable numberOfLines={1} style={styles.hashText}>
-          {node.commit.hash}
-        </Text>
+        {showMetadata ? (
+          <Text selectable numberOfLines={1} style={styles.hashText}>
+            {node.commit.hash}
+          </Text>
+        ) : null}
       </ContextMenuTrigger>
       <ContextMenuContent width={240} testID={`commit-graph-menu-${node.commit.hash}`}>
         <ContextMenuItem
@@ -542,6 +566,7 @@ export const CommitGraphPane = memo(function CommitGraphPane({
   const [compareCommit, setCompareCommit] = useState<GitGraphCommit | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showRefs, setShowRefs] = useState(true);
+  const [containerWidth, setContainerWidth] = useState(0);
 
   const normalizedSearchQuery = normalizeSearch(searchQuery);
   const filteredGraph = useMemo(() => {
@@ -553,10 +578,22 @@ export const CommitGraphPane = memo(function CommitGraphPane({
 
   const layout = useMemo(() => {
     if (!filteredGraph || filteredGraph.commits.length === 0) return null;
-    return layoutGitGraph(filteredGraph, { isDark: theme.colorScheme === "dark", rowHeight: 58 });
+    return layoutGitGraph(filteredGraph, {
+      isDark: theme.colorScheme === "dark",
+      columnWidth: GRAPH_COLUMN_SPACING,
+      rowHeight: COMMIT_ROW_HEIGHT,
+      nodeRadius: GRAPH_NODE_RADIUS,
+    });
   }, [filteredGraph, theme.colorScheme]);
 
-  const graphWidth = layout ? Math.max(layout.width + GRAPH_WIDTH_PADDING, 96) : 96;
+  const showMetadata = containerWidth >= 540;
+  const showAuthor = containerWidth >= 680;
+  const graphWidth =
+    containerWidth > 0 && containerWidth < 420
+      ? NARROW_GRAPH_COLUMN_WIDTH
+      : containerWidth > 0 && containerWidth < 560
+        ? MEDIUM_GRAPH_COLUMN_WIDTH
+        : GRAPH_COLUMN_WIDTH;
   const graphHeight = layout
     ? layout.height +
       (selectedCommit &&
@@ -564,13 +601,6 @@ export const CommitGraphPane = memo(function CommitGraphPane({
         ? DETAIL_CARD_HEIGHT
         : 0)
     : 0;
-  const rowWidth =
-    graphWidth +
-    MESSAGE_COLUMN_WIDTH +
-    DATE_COLUMN_WIDTH +
-    AUTHOR_COLUMN_WIDTH +
-    HASH_COLUMN_WIDTH +
-    ROW_HORIZONTAL_PADDING * 2;
   const headIndex = useMemo(() => {
     if (!filteredGraph?.headCommit) {
       return -1;
@@ -637,6 +667,11 @@ export const CommitGraphPane = memo(function CommitGraphPane({
     setSearchQuery("");
   }, []);
 
+  const handleContainerLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextWidth = event.nativeEvent.layout.width;
+    setContainerWidth((previous) => (Math.abs(previous - nextWidth) > 1 ? nextWidth : previous));
+  }, []);
+
   if (isLoading) {
     return (
       <View style={styles.center} testID="commit-graph-loading">
@@ -658,11 +693,11 @@ export const CommitGraphPane = memo(function CommitGraphPane({
   const visibleCommits = filteredGraph?.commits ?? [];
 
   return (
-    <View style={styles.container} testID="commit-graph-pane">
+    <View style={styles.container} testID="commit-graph-pane" onLayout={handleContainerLayout}>
       <View style={styles.toolbar}>
         <View style={styles.titleGroup}>
           <GitCommitHorizontal size={16} color={theme.colors.foregroundMuted} />
-          <Text style={styles.title}>Commit Graph</Text>
+          <Text style={styles.title}>Git Graph</Text>
           {isFetching ? (
             <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
           ) : null}
@@ -730,62 +765,63 @@ export const CommitGraphPane = memo(function CommitGraphPane({
         <>
           <View style={styles.tableHeader}>
             <View style={{ width: graphWidth }} />
-            <Text style={[styles.columnHeader, { width: MESSAGE_COLUMN_WIDTH }]}>Description</Text>
-            <Text style={[styles.columnHeader, { width: DATE_COLUMN_WIDTH }]}>Date</Text>
-            <Text style={[styles.columnHeader, { width: AUTHOR_COLUMN_WIDTH }]}>Author</Text>
-            <Text style={[styles.columnHeader, { width: HASH_COLUMN_WIDTH }]}>Commit</Text>
+            <Text style={[styles.columnHeader, styles.descriptionHeader]}>Description</Text>
+            {showMetadata ? (
+              <Text style={[styles.columnHeader, { width: DATE_COLUMN_WIDTH }]}>Date</Text>
+            ) : null}
+            {showAuthor ? (
+              <Text style={[styles.columnHeader, { width: AUTHOR_COLUMN_WIDTH }]}>Author</Text>
+            ) : null}
+            {showMetadata ? (
+              <Text style={[styles.columnHeader, { width: HASH_COLUMN_WIDTH }]}>Commit</Text>
+            ) : null}
           </View>
           <ScrollView
             ref={scrollRef}
-            showsVerticalScrollIndicator
+            style={styles.scrollView}
+            showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}
           >
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator
-              contentContainerStyle={[styles.horizontalContent, { minWidth: rowWidth }]}
-            >
-              <View style={{ position: "relative", minHeight: graphHeight }}>
-                <GraphLayer
-                  layout={layout}
-                  nodes={layout.nodes}
-                  graphWidth={graphWidth}
-                  graphHeight={graphHeight}
-                  selectedHash={selectedCommit?.fullHash ?? null}
-                  headHash={filteredGraph.headCommit}
-                />
-                {layout.nodes.map((node) => (
-                  <View key={node.commit.fullHash}>
-                    <CommitRow
-                      node={node}
-                      layout={layout}
-                      graph={filteredGraph}
+            <View style={[styles.graphTable, { minHeight: graphHeight }]}>
+              <GraphLayer
+                layout={layout}
+                nodes={layout.nodes}
+                graphWidth={graphWidth}
+                graphHeight={graphHeight}
+                selectedHash={selectedCommit?.fullHash ?? null}
+                headHash={filteredGraph.headCommit}
+              />
+              {layout.nodes.map((node) => (
+                <View key={node.commit.fullHash}>
+                  <CommitRow
+                    node={node}
+                    layout={layout}
+                    graph={filteredGraph}
+                    graphWidth={graphWidth}
+                    showMetadata={showMetadata}
+                    showAuthor={showAuthor}
+                    showRefs={showRefs}
+                    selected={selectedCommit?.fullHash === node.commit.fullHash}
+                    compareSelected={compareCommit?.fullHash === node.commit.fullHash}
+                    onPress={handleCommitPress}
+                    onCopyHash={handleCopyHash}
+                    onCopyRefs={handleCopyRefs}
+                  />
+                  {selectedCommit?.fullHash === node.commit.fullHash ? (
+                    <CommitCard
+                      commit={selectedCommit}
+                      compareCommit={
+                        compareCommit && compareCommit.fullHash !== selectedCommit.fullHash
+                          ? compareCommit
+                          : null
+                      }
+                      onClearCompare={() => setCompareCommit(null)}
                       graphWidth={graphWidth}
-                      rowWidth={rowWidth}
-                      showRefs={showRefs}
-                      selected={selectedCommit?.fullHash === node.commit.fullHash}
-                      compareSelected={compareCommit?.fullHash === node.commit.fullHash}
-                      onPress={handleCommitPress}
-                      onCopyHash={handleCopyHash}
-                      onCopyRefs={handleCopyRefs}
                     />
-                    {selectedCommit?.fullHash === node.commit.fullHash ? (
-                      <CommitCard
-                        commit={selectedCommit}
-                        compareCommit={
-                          compareCommit && compareCommit.fullHash !== selectedCommit.fullHash
-                            ? compareCommit
-                            : null
-                        }
-                        onClearCompare={() => setCompareCommit(null)}
-                        graphWidth={graphWidth}
-                        rowWidth={rowWidth}
-                      />
-                    ) : null}
-                  </View>
-                ))}
-              </View>
-            </ScrollView>
+                  ) : null}
+                </View>
+              ))}
+            </View>
           </ScrollView>
         </>
       )}
@@ -807,12 +843,12 @@ const styles = StyleSheet.create((theme) => ({
     padding: theme.spacing[6],
   },
   toolbar: {
-    minHeight: 44,
+    minHeight: 38,
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
@@ -821,18 +857,20 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
-    minWidth: 142,
+    minWidth: 0,
+    flexShrink: 1,
   },
   title: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.medium,
+    flexShrink: 1,
   },
   searchBox: {
     flex: 1,
-    minWidth: 160,
-    maxWidth: 300,
-    height: 30,
+    minWidth: 120,
+    maxWidth: 260,
+    height: 28,
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
@@ -857,11 +895,12 @@ const styles = StyleSheet.create((theme) => ({
   toolbarActions: {
     flexDirection: "row",
     alignItems: "center",
+    flexShrink: 0,
     gap: theme.spacing[1],
   },
   toolbarButton: {
-    width: 30,
-    height: 30,
+    width: 28,
+    height: 28,
     borderRadius: theme.borderRadius.md,
     alignItems: "center",
     justifyContent: "center",
@@ -870,7 +909,7 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface2,
   },
   tableHeader: {
-    height: 32,
+    height: 26,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: ROW_HORIZONTAL_PADDING,
@@ -884,15 +923,25 @@ const styles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.medium,
     textTransform: "uppercase",
   },
+  descriptionHeader: {
+    flex: 1,
+    minWidth: 0,
+  },
+  scrollView: {
+    flex: 1,
+    minHeight: 0,
+  },
   scrollContent: {
     flexGrow: 1,
   },
-  horizontalContent: {
-    flexGrow: 1,
+  graphTable: {
+    position: "relative",
+    overflow: "hidden",
   },
   commitRow: {
+    width: "100%",
     flexDirection: "row",
-    alignItems: "stretch",
+    alignItems: "center",
     paddingHorizontal: ROW_HORIZONTAL_PADDING,
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
@@ -905,57 +954,50 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface2,
   },
   commitRowCompareSelected: {
-    borderLeftWidth: 3,
+    borderLeftWidth: 2,
     borderLeftColor: theme.colors.accent,
-  },
-  graphCell: {
-    position: "relative",
-    justifyContent: "center",
-    overflow: "hidden",
   },
   graphLayer: {
     position: "absolute",
     left: ROW_HORIZONTAL_PADDING,
     top: 0,
     zIndex: 1,
+    overflow: "hidden",
   },
   graphLine: {
     position: "absolute",
-    opacity: 0.9,
+    opacity: 0.95,
   },
   graphNode: {
     position: "absolute",
-    borderWidth: 2,
+    borderWidth: 1.5,
     zIndex: 3,
   },
   graphNodeSelected: {
-    borderWidth: 3,
+    borderWidth: 2,
   },
   headRing: {
     position: "absolute",
-    borderWidth: 2,
+    borderWidth: 1.5,
     zIndex: 2,
   },
   messageCell: {
-    width: MESSAGE_COLUMN_WIDTH,
-    justifyContent: "center",
-    gap: 4,
-    paddingRight: theme.spacing[3],
-  },
-  messageLine: {
+    flex: 1,
     minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
+    gap: theme.spacing[1],
+    paddingRight: theme.spacing[2],
   },
   commitMessage: {
-    flexShrink: 1,
+    flex: 1,
     minWidth: 0,
     color: theme.colors.foreground,
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.normal,
   },
-  refsRow: {
+  refsInline: {
+    maxWidth: "35%",
     minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
@@ -963,12 +1005,12 @@ const styles = StyleSheet.create((theme) => ({
     overflow: "hidden",
   },
   refBadge: {
-    maxWidth: 140,
-    minHeight: 19,
+    maxWidth: 96,
+    height: 18,
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    paddingHorizontal: 6,
+    paddingHorizontal: 5,
     borderRadius: theme.borderRadius.base,
     borderWidth: 1,
   },
@@ -984,13 +1026,26 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 1,
     minWidth: 0,
     fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
+    fontWeight: theme.fontWeight.normal,
   },
   branchBadgeText: {
     color: theme.colors.accent,
   },
   tagBadgeText: {
     color: theme.colors.foregroundMuted,
+  },
+  hiddenRefsBadge: {
+    height: 18,
+    justifyContent: "center",
+    paddingHorizontal: 5,
+    borderRadius: theme.borderRadius.base,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  hiddenRefsText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
   },
   headBadge: {
     height: 18,
@@ -1007,12 +1062,12 @@ const styles = StyleSheet.create((theme) => ({
   dateCell: {
     width: DATE_COLUMN_WIDTH,
     justifyContent: "center",
-    paddingRight: theme.spacing[3],
+    paddingRight: theme.spacing[2],
   },
   authorCell: {
     width: AUTHOR_COLUMN_WIDTH,
     justifyContent: "center",
-    paddingRight: theme.spacing[3],
+    paddingRight: theme.spacing[2],
   },
   authorText: {
     color: theme.colors.foreground,
@@ -1040,9 +1095,10 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minWidth: 0,
     flexDirection: "row",
-    gap: theme.spacing[4],
+    flexWrap: "wrap",
+    gap: theme.spacing[3],
     marginVertical: theme.spacing[2],
-    padding: theme.spacing[3],
+    padding: theme.spacing[2],
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface2,
@@ -1053,7 +1109,8 @@ const styles = StyleSheet.create((theme) => ({
     gap: 3,
   },
   commitCardAside: {
-    width: 300,
+    width: 220,
+    maxWidth: "100%",
     gap: theme.spacing[2],
   },
   detailRefs: {
