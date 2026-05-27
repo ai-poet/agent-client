@@ -78,6 +78,7 @@ import { APP_NAME, CLOUD_NAME } from "@/config/branding";
 import { getSub2APIMessages, resolveSub2APILocaleFromPreference } from "@/i18n/sub2api";
 import {
   buildHostRootRoute,
+  buildHostSimpleRoute,
   buildHostWorkspaceRoute,
   buildHostOpenProjectRoute,
   buildSettingsHostRoute,
@@ -765,9 +766,22 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
 
   const handleExperienceModeChange = useCallback(
     (experienceMode: ExperienceMode) => {
-      void updateSettings({ experienceMode });
+      void (async () => {
+        await updateSettings({ experienceMode });
+        if (!anyOnlineServerId) {
+          router.replace("/");
+          return;
+        }
+        router.replace(
+          experienceMode === "simple"
+            ? buildHostSimpleRoute(anyOnlineServerId)
+            : buildHostOpenProjectRoute(anyOnlineServerId),
+        );
+      })().catch((error) => {
+        console.error("[settings] failed to switch experience mode", error);
+      });
     },
-    [updateSettings],
+    [anyOnlineServerId, router, updateSettings],
   );
 
   const handleSendBehaviorChange = useCallback(

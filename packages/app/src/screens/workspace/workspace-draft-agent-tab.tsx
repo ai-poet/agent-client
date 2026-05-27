@@ -418,11 +418,13 @@ const styles = StyleSheet.create((theme) => ({
   heroComposer: {
     width: "100%",
     alignSelf: "center",
+    position: "relative",
+    zIndex: 10,
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface0,
-    overflow: "hidden",
+    overflow: "visible",
     ...theme.shadow.md,
   },
   heroComposerInput: {
