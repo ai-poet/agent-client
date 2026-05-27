@@ -1,10 +1,11 @@
 import { useLocalSearchParams } from "expo-router";
 import { View, Text, Pressable } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { ArrowLeft, GitCommitHorizontal } from "lucide-react-native";
+import { ArrowLeft, GitGraph } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import { CommitGraphPane } from "@/components/commit-graph-pane";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useWorkspaceExecutionAuthority } from "@/stores/session-store-hooks";
 
 function getParamValue(value: string | string[] | undefined): string {
   if (typeof value === "string") {
@@ -25,6 +26,14 @@ export default function CommitGraphRoute() {
 
   const normalizedServerId = getParamValue(serverId);
   const normalizedWorkspaceId = getParamValue(workspaceId);
+  const workspaceAuthority = useWorkspaceExecutionAuthority(
+    normalizedServerId || null,
+    normalizedWorkspaceId || null,
+  );
+  const graphCwd =
+    workspaceAuthority?.ok === true
+      ? workspaceAuthority.authority.workspaceDirectory
+      : normalizedWorkspaceId;
 
   const handleBack = () => {
     router.back();
@@ -47,11 +56,11 @@ export default function CommitGraphRoute() {
             {normalizedWorkspaceId}
           </Text>
         </View>
-        <GitCommitHorizontal size={20} color={theme.colors.foregroundMuted} />
+        <GitGraph size={20} color={theme.colors.foregroundMuted} />
       </View>
       <View style={styles.content}>
-        {normalizedServerId && normalizedWorkspaceId ? (
-          <CommitGraphPane serverId={normalizedServerId} cwd={normalizedWorkspaceId} />
+        {normalizedServerId && graphCwd ? (
+          <CommitGraphPane serverId={normalizedServerId} cwd={graphCwd} />
         ) : (
           <View style={styles.error}>
             <Text style={[styles.errorText, { color: theme.colors.foregroundMuted }]}>

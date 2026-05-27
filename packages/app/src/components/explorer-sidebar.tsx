@@ -26,6 +26,7 @@ import { useExplorerSidebarAnimation } from "@/contexts/explorer-sidebar-animati
 import { HEADER_INNER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout";
 import { GitDiffPane } from "./git-diff-pane";
 import { FileExplorerPane } from "./file-explorer-pane";
+import { CommitGraphPane } from "./commit-graph-pane";
 import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
 import { useWindowControlsPadding } from "@/utils/desktop-window";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
@@ -39,6 +40,7 @@ interface ExplorerSidebarProps {
   workspaceId?: string | null;
   workspaceRoot: string;
   isGit: boolean;
+  showCommitGraph?: boolean;
   onOpenFile?: (filePath: string) => void;
 }
 
@@ -47,6 +49,7 @@ export function ExplorerSidebar({
   workspaceId,
   workspaceRoot,
   isGit,
+  showCommitGraph = false,
   onOpenFile,
 }: ExplorerSidebarProps) {
   const { theme } = useUnistyles();
@@ -291,6 +294,7 @@ export function ExplorerSidebar({
               workspaceId={workspaceId}
               workspaceRoot={workspaceRoot}
               isGit={isGit}
+              showCommitGraph={showCommitGraph}
               isMobile={isMobile}
               isOpen={isOpen}
               onOpenFile={onOpenFile}
@@ -324,6 +328,7 @@ export function ExplorerSidebar({
           workspaceId={workspaceId}
           workspaceRoot={workspaceRoot}
           isGit={isGit}
+          showCommitGraph={showCommitGraph}
           isMobile={false}
           isOpen={isOpen}
           onOpenFile={onOpenFile}
@@ -341,6 +346,7 @@ interface SidebarContentProps {
   workspaceId?: string | null;
   workspaceRoot: string;
   isGit: boolean;
+  showCommitGraph: boolean;
   isMobile: boolean;
   isOpen: boolean;
   onOpenFile?: (filePath: string) => void;
@@ -354,6 +360,7 @@ function SidebarContent({
   workspaceId,
   workspaceRoot,
   isGit,
+  showCommitGraph,
   isMobile,
   isOpen,
   onOpenFile,
@@ -430,12 +437,21 @@ function SidebarContent({
       {/* Content based on active tab */}
       <View style={styles.contentArea} testID="explorer-content-area">
         {resolvedTab === "changes" && (
-          <GitDiffPane
-            serverId={serverId}
-            workspaceId={workspaceId}
-            cwd={workspaceRoot}
-            hideHeaderRow={!isMobile}
-          />
+          <View style={styles.changesContentRow}>
+            <View style={styles.changesDiffPane}>
+              <GitDiffPane
+                serverId={serverId}
+                workspaceId={workspaceId}
+                cwd={workspaceRoot}
+                hideHeaderRow={!isMobile}
+              />
+            </View>
+            {showCommitGraph && !isMobile ? (
+              <View testID="explorer-commit-graph-panel" style={styles.commitGraphPane}>
+                <CommitGraphPane serverId={serverId} cwd={workspaceRoot} />
+              </View>
+            ) : null}
+          </View>
         )}
         {resolvedTab === "files" && (
           <FileExplorerPane
@@ -538,5 +554,21 @@ const styles = StyleSheet.create((theme) => ({
   contentArea: {
     flex: 1,
     minHeight: 0,
+  },
+  changesContentRow: {
+    flex: 1,
+    minHeight: 0,
+    flexDirection: "row",
+  },
+  changesDiffPane: {
+    flex: 1,
+    minWidth: 0,
+  },
+  commitGraphPane: {
+    width: 320,
+    minWidth: 280,
+    borderLeftWidth: 1,
+    borderLeftColor: theme.colors.border,
+    backgroundColor: theme.colors.background,
   },
 }));

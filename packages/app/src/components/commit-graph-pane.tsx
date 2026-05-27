@@ -89,7 +89,7 @@ export const CommitGraphPane = memo(function CommitGraphPane({
   serverId,
   cwd,
 }: CommitGraphPaneProps) {
-  const { graph, isLoading, isError } = useCommitGraphQuery({ serverId, cwd });
+  const { graph, isLoading, isError, error } = useCommitGraphQuery({ serverId, cwd });
   const [selectedCommit, setSelectedCommit] = useState<GitGraphCommit | null>(null);
   const { theme } = useUnistyles();
   const isCompact = useIsCompactFormFactor();
@@ -113,10 +113,11 @@ export const CommitGraphPane = memo(function CommitGraphPane({
   }
 
   if (isError || !graph) {
+    const errorMessage = error instanceof Error ? error.message : "Failed to load commit graph";
     return (
       <View style={styles.center}>
         <Text style={[styles.errorText, { color: theme.colors.foregroundMuted }]}>
-          Failed to load commit graph
+          {errorMessage}
         </Text>
       </View>
     );

@@ -20,12 +20,35 @@ interface CommitGraphClient {
   getCommitGraph: (options: { cwd: string; limit?: number }) => Promise<CommitGraphPayload>;
 }
 
+function normalizeCommitGraphError(error: unknown): Error {
+  const rpcError = error as Error & { code?: unknown; requestType?: unknown };
+  if (
+    rpcError?.name === "DaemonRpcError" &&
+    rpcError.code === "unknown_schema" &&
+    rpcError.requestType === "commit_graph_request"
+  ) {
+    return new Error("Commit graph requires a newer Paseo daemon. Update or restart the daemon.");
+  }
+
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 function fetchCommitGraph(
   client: CommitGraphClient,
   cwd: string,
   limit?: number,
 ): Promise<CommitGraphPayload> {
-  return client.getCommitGraph({ cwd, limit });
+  return client
+    .getCommitGraph({ cwd, limit })
+    .then((payload) => {
+      if (payload.error) {
+        throw new Error(payload.error);
+      }
+      return payload;
+    })
+    .catch((error) => {
+      throw normalizeCommitGraphError(error);
+    });
 }
 
 async function peekOrFetchSnapshot({
@@ -44,6 +67,9 @@ async function peekOrFetchSnapshot({
   const queryKey = commitGraphQueryKey(serverId, cwd);
   const cached = queryClient.getQueryData<CommitGraphPayload>(queryKey);
   if (cached) {
+    if (cached.error) {
+      throw new Error(cached.error);
+    }
     return cached;
   }
 
@@ -67,16 +93,24 @@ export function useCommitGraphQuery({ serverId, cwd, limit }: UseCommitGraphQuer
     },
     enabled: !!client && isConnected && !!cwd,
     staleTime: COMMIT_GRAPH_STALE_TIME,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
+    refetchOnMount: true,
+    refetchOnReconnect: true,
     refetchOnWindowFocus: false,
   });
 
+  const payloadError = query.data?.error ?? null;
+  const error =
+    query.error !== null
+      ? normalizeCommitGraphError(query.error)
+      : payloadError
+        ? new Error(payloadError)
+        : null;
+
   return {
-    graph: query.data?.graph ?? null,
+    graph: payloadError ? null : (query.data?.graph ?? null),
     isLoading: query.isLoading,
     isFetching: query.isFetching,
-    isError: query.isError,
-    error: query.error,
+    isError: query.isError || payloadError !== null,
+    error,
   };
 }

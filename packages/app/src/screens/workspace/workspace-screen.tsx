@@ -1,7 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useIsFocused } from "@react-navigation/native";
-import { useRouter } from "expo-router";
 import { ActivityIndicator, BackHandler, Keyboard, Pressable, Text, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
@@ -14,7 +13,7 @@ import {
   Copy,
   Ellipsis,
   EllipsisVertical,
-  GitCommitHorizontal,
+  GitGraph,
   PanelRight,
   RotateCw,
   Settings,
@@ -652,7 +651,6 @@ function WorkspaceScreenContent({
   const insets = useSafeAreaInsets();
   const mainBackgroundColor = theme.colors.surfaceWorkspace;
   const toast = useToast();
-  const router = useRouter();
   const locale = useAppLocale();
   const appText = useMemo(() => getAppMessages(locale), [locale]);
   const text = appText.workspace;
@@ -926,10 +924,15 @@ function WorkspaceScreenContent({
   );
 
   const isGitCheckout = checkoutQuery.data?.isGit ?? false;
+  const [isCommitGraphOpen, setIsCommitGraphOpen] = useState(false);
   const currentBranchName =
     checkoutQuery.data?.isGit && checkoutQuery.data.currentBranch !== "HEAD"
       ? trimNonEmpty(checkoutQuery.data.currentBranch)
       : null;
+
+  useEffect(() => {
+    setIsCommitGraphOpen(false);
+  }, [normalizedServerId, workspaceDirectory]);
 
   const isExplorerOpen = usePanelStore((state) =>
     selectIsFileExplorerOpen(state, { isCompact: isMobile }),
@@ -945,6 +948,9 @@ function WorkspaceScreenContent({
   const toggleFileExplorerForCheckout = usePanelStore(
     (state) => state.toggleFileExplorerForCheckout,
   );
+  const setExplorerTabForCheckout = usePanelStore((state) => state.setExplorerTabForCheckout);
+  const setExplorerWidth = usePanelStore((state) => state.setExplorerWidth);
+  const explorerTab = usePanelStore((state) => state.explorerTab);
   const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
 
   const activeExplorerCheckout = useMemo<ExplorerCheckoutContext | null>(() => {
@@ -993,6 +999,40 @@ function WorkspaceScreenContent({
       checkout: activeExplorerCheckout,
     });
   }, [activeExplorerCheckout, isMobile, toggleFileExplorerForCheckout]);
+
+  const handleToggleCommitGraph = useCallback(() => {
+    if (!activeExplorerCheckout) {
+      return;
+    }
+    if (isCommitGraphOpen) {
+      setIsCommitGraphOpen(false);
+      return;
+    }
+
+    openFileExplorerForCheckout({
+      isCompact: isMobile,
+      checkout: { ...activeExplorerCheckout, isGit: true },
+    });
+    setExplorerTabForCheckout({ ...activeExplorerCheckout, isGit: true, tab: "changes" });
+    setExplorerWidth(760);
+    setIsCommitGraphOpen(true);
+  }, [
+    activeExplorerCheckout,
+    isCommitGraphOpen,
+    isMobile,
+    openFileExplorerForCheckout,
+    setExplorerTabForCheckout,
+    setExplorerWidth,
+  ]);
+
+  useEffect(() => {
+    if (
+      isCommitGraphOpen &&
+      (!isExplorerOpen || explorerTab !== "changes" || !isGitCheckout || !workspaceDirectory)
+    ) {
+      setIsCommitGraphOpen(false);
+    }
+  }, [explorerTab, isCommitGraphOpen, isExplorerOpen, isGitCheckout, workspaceDirectory]);
 
   const explorerOpenGesture = useExplorerOpenGesture({
     enabled: isMobile && canOpenExplorerFromAgentView,
@@ -2476,28 +2516,31 @@ function WorkspaceScreenContent({
                         <TooltipTrigger asChild>
                           <Pressable
                             testID="workspace-graph-button"
-                            onPress={() =>
-                              router.push(
-                                `/h/${encodeURIComponent(normalizedServerId)}/workspace/${encodeURIComponent(normalizedWorkspaceId)}/graph`,
-                              )
-                            }
+                            onPress={handleToggleCommitGraph}
                             accessibilityRole="button"
-                            accessibilityLabel="View commit graph"
+                            accessibilityLabel={
+                              isCommitGraphOpen ? "Hide commit graph" : "View commit graph"
+                            }
+                            accessibilityState={{ expanded: isCommitGraphOpen }}
                             style={({ hovered, pressed }) => [
                               styles.sourceControlButton,
-                              (hovered || pressed) && styles.sourceControlButtonHovered,
+                              (hovered || pressed || isCommitGraphOpen) &&
+                                styles.sourceControlButtonHovered,
                             ]}
                           >
-                            {({ hovered, pressed }) => (
-                              <GitCommitHorizontal
-                                size={theme.iconSize.md}
-                                color={
-                                  hovered || pressed
-                                    ? theme.colors.foreground
-                                    : theme.colors.foregroundMuted
-                                }
-                              />
-                            )}
+                            {({ hovered, pressed }) => {
+                              const isActive = hovered || pressed || isCommitGraphOpen;
+                              return (
+                                <GitGraph
+                                  size={theme.iconSize.md}
+                                  color={
+                                    isActive
+                                      ? theme.colors.foreground
+                                      : theme.colors.foregroundMuted
+                                  }
+                                />
+                              );
+                            }}
                           </Pressable>
                         </TooltipTrigger>
                         <TooltipContent side="bottom" align="center" offset={8}>
@@ -2718,6 +2761,7 @@ function WorkspaceScreenContent({
               workspaceId={normalizedWorkspaceId}
               workspaceRoot={workspaceDirectory}
               isGit={isGitCheckout}
+              showCommitGraph={isCommitGraphOpen}
               onOpenFile={handleOpenFileFromExplorer}
             />
           ) : null)}
