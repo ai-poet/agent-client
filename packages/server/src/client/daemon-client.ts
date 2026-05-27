@@ -43,6 +43,7 @@ import type {
   DirectorySuggestionsResponse,
   PaseoWorktreeListResponse,
   PaseoWorktreeArchiveResponse,
+  UpdateWorkspacePersonaRequest,
   ProjectIconResponse,
   ListAvailableEditorsResponseMessage,
   OpenInEditorResponseMessage,
@@ -223,6 +224,7 @@ export type DaemonClientConfig = {
 
 export type SendMessageOptions = {
   messageId?: string;
+  hidden?: boolean;
   images?: Array<{ data: string; mimeType: string }>;
   attachments?: SendAgentMessageRequest["attachments"];
 };
@@ -241,6 +243,7 @@ export interface CreateAgentRequestOptions extends AgentConfigOverrides {
   attachments?: CreateAgentRequestMessage["attachments"];
   git?: GitSetupOptions;
   worktreeName?: string;
+  worktreePersona?: CreateAgentRequestMessage["worktreePersona"];
   requestId?: string;
   labels?: Record<string, string>;
 }
@@ -248,8 +251,17 @@ export interface CreateAgentRequestOptions extends AgentConfigOverrides {
 export interface CreatePaseoWorktreeInput
   extends Pick<
     CreatePaseoWorktreeRequest,
-    "cwd" | "worktreeSlug" | "attachments" | "refName" | "action" | "githubPrNumber"
+    | "cwd"
+    | "worktreeSlug"
+    | "worktreePersona"
+    | "attachments"
+    | "refName"
+    | "action"
+    | "githubPrNumber"
   > {}
+
+export interface UpdateWorkspacePersonaInput
+  extends Pick<UpdateWorkspacePersonaRequest, "workspaceId" | "worktreePersona"> {}
 
 type CheckoutStatusPayload = CheckoutStatusResponse["payload"];
 type SubscribeCheckoutDiffPayload = Extract<
@@ -278,6 +290,10 @@ type PaseoWorktreeArchivePayload = PaseoWorktreeArchiveResponse["payload"];
 type CreatePaseoWorktreePayload = Extract<
   SessionOutboundMessage,
   { type: "create_paseo_worktree_response" }
+>["payload"];
+type UpdateWorkspacePersonaPayload = Extract<
+  SessionOutboundMessage,
+  { type: "update_workspace_persona_response" }
 >["payload"];
 type FileExplorerPayload = FileExplorerResponse["payload"];
 type FileDownloadTokenPayload = FileDownloadTokenResponse["payload"];
@@ -1594,6 +1610,7 @@ export class DaemonClient {
         : {}),
       ...(options.git ? { git: options.git } : {}),
       ...(options.worktreeName ? { worktreeName: options.worktreeName } : {}),
+      ...(options.worktreePersona ? { worktreePersona: options.worktreePersona } : {}),
       ...(options.labels && Object.keys(options.labels).length > 0
         ? { labels: options.labels }
         : {}),
@@ -1821,6 +1838,7 @@ export class DaemonClient {
       agentId,
       text,
       ...(messageId ? { messageId } : {}),
+      ...(options?.hidden ? { hidden: true } : {}),
       ...(options?.images ? { images: options.images } : {}),
       ...(options?.attachments ? { attachments: options.attachments } : {}),
     });
@@ -2688,6 +2706,7 @@ export class DaemonClient {
         type: "create_paseo_worktree_request",
         cwd: input.cwd,
         worktreeSlug: input.worktreeSlug,
+        ...(input.worktreePersona ? { worktreePersona: input.worktreePersona } : {}),
         ...(input.attachments && input.attachments.length > 0
           ? { attachments: input.attachments }
           : {}),
@@ -2697,6 +2716,22 @@ export class DaemonClient {
       },
       responseType: "create_paseo_worktree_response",
       timeout: 60000,
+    });
+  }
+
+  async updateWorkspacePersona(
+    input: UpdateWorkspacePersonaInput,
+    requestId?: string,
+  ): Promise<UpdateWorkspacePersonaPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "update_workspace_persona_request",
+        workspaceId: input.workspaceId,
+        worktreePersona: input.worktreePersona,
+      },
+      responseType: "update_workspace_persona_response",
+      timeout: 20000,
     });
   }
 

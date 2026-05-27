@@ -4,6 +4,7 @@ import type { CheckoutStatusPayload } from "@/hooks/use-checkout-status-query";
 import {
   buildNewAgentRoute,
   parseAgentKey,
+  resolveNewChatTarget,
   resolveNewAgentWorkingDir,
   resolveSelectedAgentForNewAgent,
 } from "./new-agent-routing";
@@ -103,5 +104,84 @@ describe("resolveSelectedAgentForNewAgent", () => {
         pathname: "/h/srv-1/settings",
       }),
     ).toBeNull();
+  });
+});
+
+describe("resolveNewChatTarget", () => {
+  const getAgent = (serverId: string, agentId: string) => {
+    if (serverId === "srv-1" && agentId === "agent-1") {
+      return { cwd: "/repo/main" };
+    }
+    if (serverId === "srv-1" && agentId === "agent-missing-workspace") {
+      return { cwd: "/repo/unknown" };
+    }
+    return null;
+  };
+  const getWorkspaces = (serverId: string) =>
+    serverId === "srv-1"
+      ? [
+          {
+            id: "workspace-1",
+            workspaceDirectory: "/repo/main",
+          },
+        ]
+      : [];
+
+  it("uses the current workspace route", () => {
+    expect(
+      resolveNewChatTarget({
+        pathname: "/h/srv-1/workspace/workspace-1",
+        activeServerId: "srv-9",
+        getAgent,
+        getWorkspaces,
+      }),
+    ).toEqual({
+      kind: "workspace",
+      serverId: "srv-1",
+      workspaceId: "workspace-1",
+    });
+  });
+
+  it("maps an agent route to the workspace with the same cwd", () => {
+    expect(
+      resolveNewChatTarget({
+        pathname: "/h/srv-1/agent/agent-1",
+        getAgent,
+        getWorkspaces,
+      }),
+    ).toEqual({
+      kind: "workspace",
+      serverId: "srv-1",
+      workspaceId: "workspace-1",
+    });
+  });
+
+  it("falls back to the agent working directory when no workspace matches", () => {
+    expect(
+      resolveNewChatTarget({
+        pathname: "/h/srv-1/agent/agent-missing-workspace",
+        getAgent,
+        getWorkspaces,
+      }),
+    ).toEqual({
+      kind: "fallback",
+      serverId: "srv-1",
+      workingDir: "/repo/unknown",
+    });
+  });
+
+  it("falls back to the active server when no current project is available", () => {
+    expect(
+      resolveNewChatTarget({
+        pathname: "/settings",
+        activeServerId: "srv-1",
+        getAgent,
+        getWorkspaces,
+      }),
+    ).toEqual({
+      kind: "fallback",
+      serverId: "srv-1",
+      workingDir: null,
+    });
   });
 });

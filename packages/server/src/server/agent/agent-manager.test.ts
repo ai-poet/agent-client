@@ -4725,6 +4725,72 @@ describe("AgentManager", () => {
     );
   });
 
+  test("hidden foreground prompt suppresses matching provider user_message but keeps assistant output", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-hidden-user-message-"));
+    const storagePath = join(workdir, "agents");
+    const storage = new AgentStorage(storagePath, logger);
+
+    class HiddenEchoSession extends TestAgentSession {
+      override async startTurn(): Promise<{ turnId: string }> {
+        const turnId = "turn-hidden-1";
+        setTimeout(() => {
+          this.pushEvent({ type: "turn_started", provider: this.provider, turnId });
+          this.pushEvent({
+            type: "timeline",
+            provider: this.provider,
+            item: {
+              type: "user_message",
+              text: "hidden commit prompt",
+              messageId: "hidden-message-1",
+            },
+            turnId,
+          });
+          this.pushEvent({
+            type: "timeline",
+            provider: this.provider,
+            item: { type: "assistant_message", text: "committed selected files" },
+            turnId,
+          });
+          this.pushEvent({ type: "turn_completed", provider: this.provider, turnId });
+        }, 0);
+        return { turnId };
+      }
+    }
+
+    class HiddenEchoClient implements AgentClient {
+      readonly provider = "codex" as const;
+      readonly capabilities = TEST_CAPABILITIES;
+      async isAvailable(): Promise<boolean> {
+        return true;
+      }
+      async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+        return new HiddenEchoSession(config);
+      }
+      async resumeSession(): Promise<AgentSession> {
+        throw new Error("unused");
+      }
+    }
+
+    const manager = new AgentManager({
+      clients: { codex: new HiddenEchoClient() },
+      registry: storage,
+      logger,
+      idFactory: () => "00000000-0000-4000-8000-000000000404",
+    });
+
+    const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir });
+
+    await manager.runAgent(snapshot.id, "hidden commit prompt", {
+      hiddenUserMessage: { text: "hidden commit prompt", messageId: "hidden-message-1" },
+    });
+
+    const timeline = manager.getTimeline(snapshot.id);
+    expect(timeline.filter((item) => item.type === "user_message")).toHaveLength(0);
+    expect(timeline.filter((item) => item.type === "assistant_message")).toEqual([
+      { type: "assistant_message", text: "committed selected files" },
+    ]);
+  });
+
   test("replaceAgentRun succeeds when foreground turn terminal event is never delivered", async () => {
     const workdir = mkdtempSync(join(tmpdir(), "agent-manager-stale-fg-"));
     const storagePath = join(workdir, "agents");

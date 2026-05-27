@@ -21,6 +21,7 @@ import {
   type MutableRefObject,
 } from "react";
 import { router, usePathname } from "expo-router";
+import { Portal } from "@gorhom/portal";
 import { navigateToWorkspace } from "@/hooks/use-workspace-navigation";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { type GestureType } from "react-native-gesture-handler";
@@ -33,6 +34,7 @@ import {
   ChevronRight,
   Copy,
   ExternalLink,
+  Folder,
   FolderGit2,
   GitPullRequest,
   Globe,
@@ -42,6 +44,7 @@ import {
   Pencil,
   Plus,
   Trash2,
+  Users,
 } from "lucide-react-native";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
 import { DraggableList, type DraggableRenderItemInfo } from "./draggable-list";
@@ -117,6 +120,12 @@ import {
 } from "@/utils/workspace-navigation";
 import { WorkspaceHoverCard } from "@/components/workspace-hover-card";
 import { GitHubIcon } from "@/components/icons/github-icon";
+import { WorktreePersonaSection } from "@/components/agent-form/agent-form-dropdowns";
+import {
+  createDefaultWorktreePersona,
+  getWorktreePersonaRole,
+  type WorktreePersona,
+} from "@server/shared/worktree-persona";
 import { generateDraftId } from "@/stores/draft-keys";
 import { isWeb as platformIsWeb, isNative as platformIsNative } from "@/constants/platform";
 import {
@@ -216,6 +225,7 @@ interface WorkspaceRowInnerProps {
   archiveStatus?: "idle" | "pending" | "success";
   archivePendingLabel?: string;
   onArchive?: () => void;
+  onConfigureColleague?: () => void;
   onCopyBranchName?: () => void;
   onCopyPath?: () => void;
   archiveShortcutKeys?: ShortcutKey[][] | null;
@@ -420,6 +430,7 @@ function ProjectLeadingVisual({
   const placeholderLabel = projectIconPlaceholderLabelFromDisplayName(displayName);
   const placeholderInitial = placeholderLabel.charAt(0).toUpperCase();
   const activeWorkspace = workspace;
+  const shouldUseFolderIcon = activeWorkspace === null;
   const shouldShowWorkspaceStatus =
     activeWorkspace !== null && (isArchiving || activeWorkspace.statusBucket !== "done");
   const shouldShowSyncedLoader = activeWorkspace
@@ -434,7 +445,9 @@ function ProjectLeadingVisual({
     );
   }
 
-  const projectIcon = iconDataUri ? (
+  const projectIcon = shouldUseFolderIcon ? (
+    <Folder size={15} color={theme.colors.foregroundMuted} />
+  ) : iconDataUri ? (
     <Image source={{ uri: iconDataUri }} style={styles.projectIcon} />
   ) : (
     <View style={styles.projectIconFallback}>
@@ -1133,6 +1146,13 @@ function ProjectHeaderRow({
   );
 }
 
+function resolveWorkspacePersona(workspace: SidebarWorkspaceEntry): WorktreePersona | null {
+  if (workspace.workspaceKind !== "worktree") {
+    return null;
+  }
+  return workspace.worktreePersona ?? createDefaultWorktreePersona();
+}
+
 function WorkspaceRowInner({
   workspace,
   selected,
@@ -1149,6 +1169,7 @@ function WorkspaceRowInner({
   archiveStatus = "idle",
   archivePendingLabel,
   onArchive,
+  onConfigureColleague,
   onCopyBranchName,
   onCopyPath,
   archiveShortcutKeys,
@@ -1185,6 +1206,10 @@ function WorkspaceRowInner({
   const hasRunningService = workspace.scripts.some(
     (s) => s.lifecycle === "running" && (s.type ?? "service") === "service",
   );
+  const persona = resolveWorkspacePersona(workspace);
+  const personaRole = persona ? getWorktreePersonaRole(persona.roleId) : null;
+  const personaLabel =
+    personaRole && locale === "zh" ? personaRole.labelZh : (personaRole?.label ?? null);
 
   return (
     <WorkspaceHoverCard workspace={workspace} prHint={prHint} isDragging={isDragging}>
@@ -1231,6 +1256,13 @@ function WorkspaceRowInner({
               >
                 {workspace.name}
               </Text>
+              {personaRole ? (
+                <View style={styles.personaBadge}>
+                  <Text style={styles.personaBadgeText} numberOfLines={1}>
+                    {personaLabel}
+                  </Text>
+                </View>
+              ) : null}
             </View>
             <View style={styles.workspaceRowRight}>
               {showScriptsIcon ? (
@@ -1283,6 +1315,15 @@ function WorkspaceRowInner({
                         {text.copyBranchName}
                       </DropdownMenuItem>
                     ) : null}
+                    {onConfigureColleague ? (
+                      <DropdownMenuItem
+                        testID={`sidebar-workspace-menu-configure-colleague-${workspace.workspaceKey}`}
+                        leading={<Users size={14} color={theme.colors.foregroundMuted} />}
+                        onSelect={onConfigureColleague}
+                      >
+                        {text.configureColleague}
+                      </DropdownMenuItem>
+                    ) : null}
                     <DropdownMenuItem
                       testID={`sidebar-workspace-menu-archive-${workspace.workspaceKey}`}
                       leading={<Archive size={14} color={theme.colors.foregroundMuted} />}
@@ -1314,6 +1355,12 @@ function WorkspaceRowInner({
             <View style={styles.workspacePrBadgeRow}>
               <PrBadge hint={prHint} />
               <ChecksBadge checks={prHint.checks} />
+            </View>
+          ) : persona ? (
+            <View style={styles.workspacePrBadgeRow}>
+              <Text style={styles.workspacePersonaSummary} numberOfLines={1}>
+                {persona.skillIds.length} skills
+              </Text>
             </View>
           ) : null}
         </Pressable>
@@ -1350,6 +1397,10 @@ function WorkspaceRowWithMenu({
   const text = useMemo(() => getSub2APIMessages(locale).sidebarWorkspace, [locale]);
   const archiveWorktree = useCheckoutGitActionsStore((state) => state.archiveWorktree);
   const [isArchivingWorkspace, setIsArchivingWorkspace] = useState(false);
+  const [isPersonaSheetOpen, setIsPersonaSheetOpen] = useState(false);
+  const [personaDraft, setPersonaDraft] = useState<WorktreePersona>(
+    () => resolveWorkspacePersona(workspace) ?? createDefaultWorktreePersona(),
+  );
   const isCreatingPlaceholder = isCreatingWorktreePlaceholderId(workspace.workspaceId);
   const workspaceDirectory = resolveWorkspaceExecutionDirectory({
     workspaceDirectory: workspace.workspaceDirectory,
@@ -1497,6 +1548,36 @@ function WorkspaceRowWithMenu({
     toast.copied(text.branchNameCopied);
   }, [text.branchNameCopied, toast, workspace.name]);
 
+  const handleConfigureColleague = useCallback(() => {
+    setPersonaDraft(resolveWorkspacePersona(workspace) ?? createDefaultWorktreePersona());
+    setIsPersonaSheetOpen(true);
+  }, [workspace]);
+
+  const handleSaveColleague = useCallback(() => {
+    const client = getHostRuntimeStore().getClient(workspace.serverId);
+    if (!client) {
+      toast.error(text.hostNotConnected);
+      return;
+    }
+    void client
+      .updateWorkspacePersona({
+        workspaceId: workspace.workspaceId,
+        worktreePersona: personaDraft,
+      })
+      .then((payload) => {
+        if (payload.error || !payload.workspace) {
+          throw new Error(payload.error ?? text.failedConfigureColleague);
+        }
+        useSessionStore
+          .getState()
+          .mergeWorkspaces(workspace.serverId, [normalizeWorkspaceDescriptor(payload.workspace)]);
+        setIsPersonaSheetOpen(false);
+      })
+      .catch((error) => {
+        toast.error(error instanceof Error ? error.message : text.failedConfigureColleague);
+      });
+  }, [personaDraft, text, toast, workspace.serverId, workspace.workspaceId]);
+
   const archiveShortcutKeys = useShortcutKeys("archive-worktree");
 
   useKeyboardActionHandler({
@@ -1514,7 +1595,7 @@ function WorkspaceRowWithMenu({
     },
   });
 
-  return (
+  const row = (
     <WorkspaceRowInner
       workspace={workspace}
       selected={selected}
@@ -1541,8 +1622,47 @@ function WorkspaceRowWithMenu({
         canCopyBranchName && !isCreatingPlaceholder ? handleCopyBranchName : undefined
       }
       onCopyPath={isCreatingPlaceholder ? undefined : handleCopyPath}
+      onConfigureColleague={
+        isWorktree && !isCreatingPlaceholder ? handleConfigureColleague : undefined
+      }
       archiveShortcutKeys={selected && !isCreatingPlaceholder ? archiveShortcutKeys : null}
     />
+  );
+
+  return (
+    <>
+      {row}
+      {isPersonaSheetOpen ? (
+        <Portal>
+          <View style={styles.personaSheetOverlay}>
+            <Pressable
+              style={styles.personaSheetBackdrop}
+              onPress={() => setIsPersonaSheetOpen(false)}
+            />
+            <View style={styles.personaSheet}>
+              <Text style={styles.personaSheetTitle}>{text.configureColleague}</Text>
+              <WorktreePersonaSection persona={personaDraft} onPersonaChange={setPersonaDraft} />
+              <View style={styles.personaSheetActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  style={styles.personaSheetButton}
+                  onPress={() => setIsPersonaSheetOpen(false)}
+                >
+                  <Text style={styles.personaSheetButtonText}>{text.cancel}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  style={[styles.personaSheetButton, styles.personaSheetPrimaryButton]}
+                  onPress={handleSaveColleague}
+                >
+                  <Text style={styles.personaSheetPrimaryButtonText}>{text.saveColleague}</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Portal>
+      ) : null}
+    </>
   );
 }
 
@@ -2383,15 +2503,15 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
   },
   listContent: {
-    paddingHorizontal: theme.spacing[2],
-    paddingTop: theme.spacing[2],
-    paddingBottom: theme.spacing[4],
+    paddingHorizontal: theme.spacing[3],
+    paddingTop: theme.spacing[1],
+    paddingBottom: theme.spacing[3],
   },
   projectListContainer: {
     width: "100%",
   },
   projectBlock: {
-    marginBottom: theme.spacing[1],
+    marginBottom: theme.spacing[2],
   },
   workspaceListContainer: {},
   emptyContainer: {
@@ -2417,15 +2537,15 @@ const styles = StyleSheet.create((theme) => ({
     textAlign: "center",
   },
   projectRow: {
-    minHeight: 36,
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[2],
-    borderRadius: theme.borderRadius.lg,
-    marginBottom: theme.spacing[1],
+    minHeight: 28,
+    paddingVertical: theme.spacing[1],
+    paddingHorizontal: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    marginBottom: 2,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: theme.spacing[2],
+    gap: theme.spacing[1],
     userSelect: "none",
   },
   projectRowHovered: {
@@ -2463,8 +2583,8 @@ const styles = StyleSheet.create((theme) => ({
   },
   projectLeadingVisualSlot: {
     position: "relative",
-    width: theme.iconSize.md,
-    height: theme.iconSize.md,
+    width: 18,
+    height: 18,
     flexShrink: 0,
     alignItems: "center",
     justifyContent: "center",
@@ -2483,9 +2603,9 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: 9,
   },
   projectTitle: {
-    color: theme.colors.foreground,
+    color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
-    fontWeight: "400",
+    fontWeight: "500",
     minWidth: 0,
     flexShrink: 1,
   },
@@ -2506,8 +2626,8 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
   },
   projectIconActionButton: {
-    width: 24,
-    height: 24,
+    width: 22,
+    height: 22,
     borderRadius: theme.borderRadius.md,
     alignItems: "center",
     justifyContent: "center",
@@ -2529,8 +2649,8 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 0,
   },
   projectKebabButton: {
-    width: 24,
-    height: 24,
+    width: 22,
+    height: 22,
     borderRadius: theme.borderRadius.md,
     alignItems: "center",
     justifyContent: "center",
@@ -2543,8 +2663,8 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface2,
   },
   projectTrailingControlSlot: {
-    width: 24,
-    height: 24,
+    width: 22,
+    height: 22,
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
@@ -2568,36 +2688,36 @@ const styles = StyleSheet.create((theme) => ({
     padding: theme.spacing[2],
   },
   workspaceRow: {
-    minHeight: 36,
-    marginBottom: theme.spacing[1],
-    paddingVertical: theme.spacing[2],
+    minHeight: 28,
+    marginBottom: 2,
+    paddingVertical: theme.spacing[1],
     paddingLeft: theme.spacing[3] + theme.spacing[3],
-    paddingRight: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
+    paddingRight: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
     flexDirection: "column",
     alignItems: "stretch",
     justifyContent: "center",
-    gap: theme.spacing[1],
+    gap: 2,
     userSelect: "none",
   },
   workspaceRowMain: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: theme.spacing[2],
+    gap: theme.spacing[1],
     width: "100%",
   },
   workspaceRowLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
+    gap: theme.spacing[1],
     flex: 1,
     minWidth: 0,
   },
   workspaceRowRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
+    gap: theme.spacing[1],
     flexShrink: 0,
   },
   workspaceRowHovered: {
@@ -2657,7 +2777,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,
     fontWeight: "400",
-    lineHeight: 20,
+    lineHeight: 18,
     opacity: 0.76,
     flex: 1,
     minWidth: 0,
@@ -2671,8 +2791,91 @@ const styles = StyleSheet.create((theme) => ({
   workspacePrBadgeRow: {
     flexDirection: "row",
     alignItems: "center",
+    gap: theme.spacing[1],
+    paddingLeft: WORKSPACE_STATUS_DOT_WIDTH + theme.spacing[1],
+  },
+  personaBadge: {
+    maxWidth: 92,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.surface2,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    flexShrink: 0,
+  },
+  personaBadgeText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: theme.fontWeight.medium,
+  },
+  workspacePersonaSummary: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    lineHeight: 14,
+  },
+  personaSheetOverlay: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 1000,
+    justifyContent: "center",
+    padding: theme.spacing[4],
+  },
+  personaSheetBackdrop: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.36)",
+  },
+  personaSheet: {
+    width: "100%",
+    maxWidth: 360,
+    alignSelf: "center",
+    gap: theme.spacing[4],
+    padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+  },
+  personaSheetTitle: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  personaSheetActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
     gap: theme.spacing[2],
-    paddingLeft: WORKSPACE_STATUS_DOT_WIDTH + theme.spacing[2],
+  },
+  personaSheetButton: {
+    minHeight: 32,
+    justifyContent: "center",
+    paddingHorizontal: theme.spacing[3],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface2,
+  },
+  personaSheetPrimaryButton: {
+    backgroundColor: theme.colors.palette.blue[500],
+  },
+  personaSheetButtonText: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+  },
+  personaSheetPrimaryButtonText: {
+    color: theme.colors.palette.white,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
   },
   workspaceCreatingText: {
     color: theme.colors.foregroundMuted,

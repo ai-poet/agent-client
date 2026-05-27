@@ -17,6 +17,7 @@ import {
   X,
   Bot,
   Brain,
+  Users,
   ShieldCheck,
   ShieldAlert,
   ShieldOff,
@@ -28,6 +29,14 @@ import type {
 } from "@server/server/agent/agent-sdk-types";
 import type { AgentProviderDefinition } from "@server/server/agent/provider-manifest";
 import { getModeVisuals, type AgentModeIcon } from "@server/server/agent/provider-manifest";
+import {
+  getWorktreePersonaRole,
+  getWorktreePersonaSkill,
+  WORKTREE_PERSONA_ROLES,
+  WORKTREE_PERSONA_SKILLS,
+  type WorktreePersona,
+  type WorktreePersonaRoleId,
+} from "@server/shared/worktree-persona";
 import { Combobox, ComboboxItem, ComboboxEmpty } from "@/components/ui/combobox";
 import {
   IsolatedBottomSheetModal,
@@ -327,6 +336,113 @@ export function DropdownSheet({
 
 // Re-export ComboboxItem as SelectOption for backwards compatibility
 const SelectOption = ComboboxItem;
+
+export function WorktreePersonaSection({
+  persona,
+  onPersonaChange,
+  disabled,
+}: {
+  persona: WorktreePersona;
+  onPersonaChange: (persona: WorktreePersona) => void;
+  disabled?: boolean;
+}): ReactElement {
+  const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
+  const [isRoleSheetOpen, setIsRoleSheetOpen] = useState(false);
+  const [isSkillsSheetOpen, setIsSkillsSheetOpen] = useState(false);
+  const selectedRole = getWorktreePersonaRole(persona.roleId);
+  const selectedSkillLabels = persona.skillIds
+    .map((skillId) => getWorktreePersonaSkill(skillId)?.name ?? skillId)
+    .join(", ");
+
+  const handleSelectRole = useCallback(
+    (roleId: WorktreePersonaRoleId) => {
+      const role = getWorktreePersonaRole(roleId);
+      onPersonaChange({ roleId: role.id, skillIds: role.defaultSkillIds });
+      setIsRoleSheetOpen(false);
+    },
+    [onPersonaChange],
+  );
+
+  const handleToggleSkill = useCallback(
+    (skillId: string) => {
+      const hasSkill = persona.skillIds.includes(skillId);
+      const nextSkillIds = hasSkill
+        ? persona.skillIds.filter((id) => id !== skillId)
+        : [...persona.skillIds, skillId];
+      onPersonaChange({
+        roleId: persona.roleId,
+        skillIds: nextSkillIds,
+      });
+    },
+    [onPersonaChange, persona],
+  );
+
+  return (
+    <View style={styles.personaContainer}>
+      <View style={styles.personaHeader}>
+        <Users size={16} color={theme.colors.foregroundMuted} />
+        <Text style={styles.personaHeaderText}>{text.colleague}</Text>
+      </View>
+      <SelectField
+        label={text.colleagueRole}
+        value={locale === "zh" ? selectedRole.labelZh : selectedRole.label}
+        placeholder={text.selectColleagueRole}
+        onPress={() => setIsRoleSheetOpen(true)}
+        disabled={disabled}
+        helperText={locale === "zh" ? selectedRole.descriptionZh : selectedRole.description}
+        testID="worktree-persona-role-picker"
+      />
+      <SelectField
+        label={text.skills}
+        value={selectedSkillLabels || text.noSkillsSelected}
+        placeholder={text.selectSkills}
+        onPress={() => setIsSkillsSheetOpen(true)}
+        disabled={disabled}
+        helperText={text.skillsHelper}
+        testID="worktree-persona-skills-picker"
+      />
+
+      <DropdownSheet
+        title={text.selectColleagueRole}
+        visible={isRoleSheetOpen}
+        onClose={() => setIsRoleSheetOpen(false)}
+      >
+        {WORKTREE_PERSONA_ROLES.map((role) => (
+          <SelectOption
+            key={role.id}
+            label={locale === "zh" ? role.labelZh : role.label}
+            description={locale === "zh" ? role.descriptionZh : role.description}
+            selected={role.id === persona.roleId}
+            testID={`worktree-persona-role-${role.id}`}
+            onPress={() => handleSelectRole(role.id)}
+          />
+        ))}
+      </DropdownSheet>
+
+      <DropdownSheet
+        title={text.selectSkills}
+        visible={isSkillsSheetOpen}
+        onClose={() => setIsSkillsSheetOpen(false)}
+      >
+        {WORKTREE_PERSONA_SKILLS.map((skill) => {
+          const selected = persona.skillIds.includes(skill.id);
+          return (
+            <SelectOption
+              key={skill.id}
+              label={skill.name}
+              description={skill.description}
+              selected={selected}
+              testID={`worktree-persona-skill-${skill.id}`}
+              onPress={() => handleToggleSkill(skill.id)}
+            />
+          );
+        })}
+      </DropdownSheet>
+    </View>
+  );
+}
 
 interface ComboSelectOption {
   id: string;
@@ -1393,6 +1509,21 @@ const styles = StyleSheet.create((theme) => ({
   },
   gitOptionsContainer: {
     gap: theme.spacing[3],
+  },
+  personaContainer: {
+    gap: theme.spacing[3],
+  },
+  personaHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  personaHeaderText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
   worktreeToggle: {
     flexDirection: "row",

@@ -132,6 +132,10 @@ export type AgentRunOptions = {
   outputSchema?: unknown;
   resumeFrom?: AgentPersistenceHandle;
   maxThinkingTokens?: number;
+  hiddenUserMessage?: {
+    text: string;
+    messageId?: string;
+  };
 };
 
 export type AgentUsage = {

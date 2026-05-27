@@ -22,6 +22,11 @@ import { PrBadge } from "@/components/sidebar-workspace-list";
 import { useHoverSafeZone } from "@/hooks/use-hover-safe-zone";
 import { useAppLocale } from "@/hooks/use-app-locale";
 import { getAppMessages } from "@/i18n/sub2api";
+import {
+  createDefaultWorktreePersona,
+  getWorktreePersonaRole,
+  getWorktreePersonaSkill,
+} from "@server/shared/worktree-persona";
 
 interface Rect {
   x: number;
@@ -210,6 +215,13 @@ function WorkspaceHoverCardContent({
   const { theme } = useUnistyles();
   const locale = useAppLocale();
   const text = getAppMessages(locale).workspace;
+  const persona =
+    workspace.workspaceKind === "worktree"
+      ? (workspace.worktreePersona ?? createDefaultWorktreePersona())
+      : null;
+  const personaRole = persona ? getWorktreePersonaRole(persona.roleId) : null;
+  const personaSkills =
+    persona?.skillIds.map((skillId) => getWorktreePersonaSkill(skillId)?.name ?? skillId) ?? [];
   const bottomSheetInternal = useBottomSheetModalInternal(true);
   const [triggerRect, setTriggerRect] = useState<Rect | null>(null);
   const [contentSize, setContentSize] = useState<{ width: number; height: number } | null>(null);
@@ -289,6 +301,22 @@ function WorkspaceHoverCardContent({
               ) : null}
               {prHint ? <PrBadge hint={prHint} /> : null}
             </View>
+          ) : null}
+          {personaRole ? (
+            <>
+              <View style={styles.separator} />
+              <View style={styles.personaBlock}>
+                <Text style={styles.personaTitle}>
+                  {locale === "zh" ? personaRole.labelZh : personaRole.label}
+                </Text>
+                <Text style={styles.personaDescription}>
+                  {locale === "zh" ? personaRole.descriptionZh : personaRole.description}
+                </Text>
+                <Text style={styles.personaSkills} numberOfLines={2}>
+                  {personaSkills.join(", ")}
+                </Text>
+              </View>
+            </>
           ) : null}
           {prHint?.checks && prHint.checks.length > 0 ? (
             <>
@@ -394,6 +422,26 @@ const styles = StyleSheet.create((theme) => ({
     gap: 6,
     paddingHorizontal: theme.spacing[3],
     paddingBottom: theme.spacing[2],
+  },
+  personaBlock: {
+    gap: 3,
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+  },
+  personaTitle: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  personaDescription: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    lineHeight: 16,
+  },
+  personaSkills: {
+    color: theme.colors.palette.blue[500],
+    fontSize: theme.fontSize.xs,
+    lineHeight: 16,
   },
   separator: {
     height: 1,

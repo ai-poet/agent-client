@@ -14,6 +14,7 @@ import { HeaderToggleButton } from "@/components/headers/header-toggle-button";
 import { Composer } from "@/components/composer";
 import { AgentStreamView } from "@/components/agent-stream-view";
 import { FormSelectTrigger } from "@/components/agent-form/agent-form-dropdowns";
+import { WorktreePersonaSection } from "@/components/agent-form/agent-form-dropdowns";
 import { ExplorerSidebar } from "@/components/explorer-sidebar";
 import { Combobox } from "@/components/ui/combobox";
 import { FileDropZone } from "@/components/file-drop-zone";
@@ -61,6 +62,10 @@ import { useDraftAgentFeatures } from "@/hooks/use-draft-agent-features";
 import { isWeb } from "@/constants/platform";
 import { useAppLocale } from "@/hooks/use-app-locale";
 import { getAppMessages } from "@/i18n/sub2api";
+import {
+  createDefaultWorktreePersona,
+  type WorktreePersona,
+} from "@server/shared/worktree-persona";
 
 const EMPTY_PENDING_PERMISSIONS = new Map();
 const DRAFT_CAPABILITIES: AgentCapabilityFlags = {
@@ -263,6 +268,9 @@ function DraftAgentScreenContent({
 
   const [worktreeMode, setWorktreeMode] = useState<"none" | "create" | "attach">(
     initialWorktreeMode,
+  );
+  const [worktreePersona, setWorktreePersona] = useState<WorktreePersona>(() =>
+    createDefaultWorktreePersona(),
   );
   const [baseBranch, setBaseBranch] = useState("");
   const [worktreeSlug, setWorktreeSlug] = useState("");
@@ -958,6 +966,7 @@ function DraftAgentScreenContent({
         ...(imagesData && imagesData.length > 0 ? { images: imagesData } : {}),
         ...(attachments && attachments.length > 0 ? { attachments } : {}),
         git: gitOptions,
+        ...(isCreateWorktree ? { worktreePersona } : {}),
       });
 
       if (!result.id || !selectedServerId) {
@@ -1172,6 +1181,13 @@ function DraftAgentScreenContent({
                   ) : null}
                   {worktreeOptionsError ? (
                     <Text style={styles.errorInlineText}>{worktreeOptionsError}</Text>
+                  ) : null}
+                  {worktreeMode === "create" ? (
+                    <WorktreePersonaSection
+                      persona={worktreePersona}
+                      onPersonaChange={setWorktreePersona}
+                      disabled={isSubmitting}
+                    />
                   ) : null}
                 </View>
                 <Combobox

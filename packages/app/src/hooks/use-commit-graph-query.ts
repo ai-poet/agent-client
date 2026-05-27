@@ -1,6 +1,6 @@
+import type { CommitGraphResponse } from "@server/shared/messages";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import type { CommitGraphResponse } from "@server/shared/messages";
 
 export const COMMIT_GRAPH_STALE_TIME = 30_000;
 
@@ -112,5 +112,6 @@ export function useCommitGraphQuery({ serverId, cwd, limit }: UseCommitGraphQuer
     isFetching: query.isFetching,
     isError: query.isError || payloadError !== null,
     error,
+    refetch: query.refetch,
   };
 }

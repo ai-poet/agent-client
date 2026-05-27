@@ -5,6 +5,28 @@ import {
   parseHostAgentRouteFromPathname,
   parseHostWorkspaceRouteFromPathname,
 } from "@/utils/host-routes";
+import { resolveWorkspaceIdByExecutionDirectory } from "@/utils/workspace-execution";
+
+type NewChatAgentLookup = {
+  cwd: string;
+};
+
+type NewChatWorkspaceLookup = {
+  id: string;
+  workspaceDirectory: string;
+};
+
+export type NewChatTarget =
+  | {
+      kind: "workspace";
+      serverId: string;
+      workspaceId: string;
+    }
+  | {
+      kind: "fallback";
+      serverId: string | null;
+      workingDir: string | null;
+    };
 
 export function parseAgentKey(
   key: string | null | undefined,
@@ -72,4 +94,61 @@ export function resolveNewAgentWorkingDir(
 export function buildNewAgentRoute(serverId: string, workingDir?: string | null) {
   const trimmedWorkingDir = workingDir?.trim();
   return buildHostWorkspaceRoute(serverId, trimmedWorkingDir || ".");
+}
+
+export function resolveNewChatTarget(input: {
+  pathname: string;
+  selectedAgentId?: string;
+  activeServerId?: string | null;
+  getAgent: (serverId: string, agentId: string) => NewChatAgentLookup | null | undefined;
+  getWorkspaces: (serverId: string) => Iterable<NewChatWorkspaceLookup> | null | undefined;
+}): NewChatTarget {
+  const workspaceRoute = parseHostWorkspaceRouteFromPathname(input.pathname);
+  if (workspaceRoute) {
+    return {
+      kind: "workspace",
+      serverId: workspaceRoute.serverId,
+      workspaceId: workspaceRoute.workspaceId,
+    };
+  }
+
+  const selectedAgent = resolveSelectedAgentForNewAgent({
+    pathname: input.pathname,
+    selectedAgentId: input.selectedAgentId,
+  });
+  if (selectedAgent) {
+    const agent = input.getAgent(selectedAgent.serverId, selectedAgent.agentId);
+    const workingDir = agent?.cwd.trim() || null;
+    if (!workingDir) {
+      return {
+        kind: "fallback",
+        serverId: selectedAgent.serverId,
+        workingDir: null,
+      };
+    }
+
+    const workspaceId = resolveWorkspaceIdByExecutionDirectory({
+      workspaces: input.getWorkspaces(selectedAgent.serverId),
+      workspaceDirectory: workingDir,
+    });
+    if (workspaceId) {
+      return {
+        kind: "workspace",
+        serverId: selectedAgent.serverId,
+        workspaceId,
+      };
+    }
+
+    return {
+      kind: "fallback",
+      serverId: selectedAgent.serverId,
+      workingDir,
+    };
+  }
+
+  return {
+    kind: "fallback",
+    serverId: input.activeServerId?.trim() || null,
+    workingDir: null,
+  };
 }

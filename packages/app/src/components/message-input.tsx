@@ -954,8 +954,8 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(funct
   return (
     <View ref={rootRef} style={styles.container} testID="message-input-root">
       {/* Regular input */}
-      <Animated.View ref={inputWrapperRef} style={[inputWrapperStyle, inputAnimatedStyle]}>
-        <OnboardingGuideTarget id="agent.composer" style={styles.inputWrapper}>
+      <Animated.View ref={inputWrapperRef} style={inputAnimatedStyle}>
+        <OnboardingGuideTarget id="agent.composer" style={[styles.inputWrapper, inputWrapperStyle]}>
           {/* Text input */}
           <View style={styles.textInputScrollWrapper}>
             <TextInput

@@ -165,6 +165,7 @@ vi.mock("lucide-react-native", () => {
     CircleAlert: createIcon("CircleAlert"),
     Copy: createIcon("Copy"),
     ExternalLink: createIcon("ExternalLink"),
+    Folder: createIcon("Folder"),
     FolderGit2: createIcon("FolderGit2"),
     GitPullRequest: createIcon("GitPullRequest"),
     Globe: createIcon("Globe"),

@@ -8,8 +8,11 @@ import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitDiffPane } from "./git-diff-pane";
 
-const { commitMock } = vi.hoisted(() => ({
+const { commitMock, sendAgentMessageMock, toastShowMock, toastErrorMock } = vi.hoisted(() => ({
   commitMock: vi.fn(),
+  sendAgentMessageMock: vi.fn(),
+  toastShowMock: vi.fn(),
+  toastErrorMock: vi.fn(),
 }));
 
 const { diffFiles } = vi.hoisted(() => ({
@@ -184,6 +187,7 @@ vi.mock("lucide-react-native", () => {
     RefreshCcw: createIcon("RefreshCcw"),
     Square: createIcon("Square"),
     Upload: createIcon("Upload"),
+    WandSparkles: createIcon("WandSparkles"),
     WrapText: createIcon("WrapText"),
   };
 });
@@ -276,11 +280,25 @@ vi.mock("@/stores/panel-store", () => ({
 }));
 
 vi.mock("@/contexts/toast-context", () => ({
-  useToast: () => ({ error: vi.fn(), show: vi.fn() }),
+  useToast: () => ({ error: toastErrorMock, show: toastShowMock }),
 }));
 
 vi.mock("@/contexts/git-commit-dialog-context", () => ({
   useGitCommitDialog: () => ({ openCommitDialog: vi.fn() }),
+}));
+
+vi.mock("@/stores/session-store", () => ({
+  useSessionStore: (selector: (state: any) => unknown) =>
+    selector({
+      sessions: {
+        "server-1": {
+          focusedAgentId: "agent-1",
+          agents: new Map([["agent-1", { id: "agent-1", cwd: "/repo" }]]),
+          client: { sendAgentMessage: sendAgentMessageMock },
+          serverInfo: { features: { hiddenAgentMessages: true } },
+        },
+      },
+    }),
 }));
 
 vi.mock("@/components/diff-scroll", () => ({
@@ -361,6 +379,7 @@ beforeEach(() => {
   vi.stubGlobal("navigator", dom.window.navigator);
 
   commitMock.mockResolvedValue(undefined);
+  sendAgentMessageMock.mockResolvedValue(undefined);
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -375,6 +394,9 @@ afterEach(() => {
   root = null;
   container = null;
   commitMock.mockReset();
+  sendAgentMessageMock.mockReset();
+  toastShowMock.mockReset();
+  toastErrorMock.mockReset();
   vi.unstubAllGlobals();
 });
 
@@ -455,5 +477,27 @@ describe("GitDiffPane inline commit", () => {
 
     expect(commitMock).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("Select at least one file");
+  });
+
+  it("asks the focused agent to commit selected files with a hidden prompt", async () => {
+    renderPane();
+
+    changeMessage("Manual text stays put");
+    click("diff-file-1-select");
+    click("changes-inline-magic-commit");
+
+    await vi.waitFor(() => {
+      expect(sendAgentMessageMock).toHaveBeenCalledWith(
+        "agent-1",
+        expect.stringContaining('"src/app.ts"'),
+        expect.objectContaining({ hidden: true, attachments: [] }),
+      );
+    });
+    expect(sendAgentMessageMock.mock.calls[0]?.[1]).not.toContain('"README.md"');
+    expect(commitMock).not.toHaveBeenCalled();
+    expect(
+      (document.querySelector('[data-testid="changes-inline-commit-message"]') as HTMLInputElement)
+        .value,
+    ).toBe("Manual text stays put");
   });
 });

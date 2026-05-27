@@ -22,8 +22,12 @@ import {
 } from "./worktree-core.js";
 import type { WorktreeConfig } from "../utils/worktree.js";
 import type { WorktreeCreationIntent } from "./resolve-worktree-creation-intent.js";
+import { createDefaultWorktreePersona, type WorktreePersona } from "../shared/worktree-persona.js";
+import { persistWorktreePersona } from "./worktree-persona-service.js";
 
-export interface CreatePaseoWorktreeInput extends CreateWorktreeCoreInput {}
+export interface CreatePaseoWorktreeInput extends CreateWorktreeCoreInput {
+  worktreePersona?: WorktreePersona | null;
+}
 
 export interface CreatePaseoWorktreeResult {
   worktree: WorktreeConfig;
@@ -53,6 +57,12 @@ export async function createPaseoWorktree(
   deps: CreatePaseoWorktreeDeps,
 ): Promise<CreatePaseoWorktreeResult> {
   const createdWorktree = await createWorktreeCore(input, deps);
+  if (input.worktreePersona !== undefined || createdWorktree.created) {
+    await persistWorktreePersona({
+      worktreeRoot: createdWorktree.worktree.worktreePath,
+      persona: input.worktreePersona ?? createDefaultWorktreePersona(),
+    });
+  }
   const workspace = await upsertWorkspaceForWorktree({
     worktree: createdWorktree.worktree,
     deps,

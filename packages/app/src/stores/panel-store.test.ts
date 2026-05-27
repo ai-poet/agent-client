@@ -20,11 +20,14 @@ import {
   resolveExplorerTabForCheckout,
 } from "@/stores/explorer-tab-memory";
 import {
+  DEFAULT_COMMIT_GRAPH_WIDTH,
+  MAX_COMMIT_GRAPH_WIDTH,
+  MIN_COMMIT_GRAPH_WIDTH,
+  type PanelState,
   selectIsAgentListOpen,
   selectIsFileExplorerOpen,
   selectPanelVisibility,
   usePanelStore,
-  type PanelState,
 } from "@/stores/panel-store";
 
 function resetPanelStore() {
@@ -37,6 +40,8 @@ function resetPanelStore() {
     },
     explorerTab: "changes",
     explorerTabByCheckout: {},
+    commitGraphOpen: false,
+    commitGraphWidth: DEFAULT_COMMIT_GRAPH_WIDTH,
   });
 }
 
@@ -243,5 +248,70 @@ describe("panel-store checkout-intent file explorer actions", () => {
 
     expect(usePanelStore.getState().desktop.fileExplorerOpen).toBe(true);
     expect(usePanelStore.getState().explorerTab).toBe("files");
+  });
+});
+
+describe("panel-store commit graph sidecar actions", () => {
+  it("opens the expanded explorer on Changes and shows the independent graph sidecar", () => {
+    const checkout = { serverId: "server-1", cwd: "/tmp/repo", isGit: true };
+    const key = buildExplorerCheckoutKey(checkout.serverId, checkout.cwd)!;
+    usePanelStore.setState({
+      explorerTab: "files",
+      explorerTabByCheckout: { [key]: "files" },
+      desktop: {
+        agentListOpen: false,
+        fileExplorerOpen: false,
+        focusModeEnabled: false,
+      },
+    });
+
+    usePanelStore.getState().openCommitGraphForCheckout({
+      isCompact: false,
+      checkout,
+    });
+
+    expect(usePanelStore.getState().desktop.fileExplorerOpen).toBe(true);
+    expect(usePanelStore.getState().explorerTab).toBe("changes");
+    expect(usePanelStore.getState().explorerTabByCheckout[key]).toBe("changes");
+    expect(usePanelStore.getState().commitGraphOpen).toBe(true);
+  });
+
+  it("closes the graph sidecar without closing the explorer", () => {
+    usePanelStore.setState({
+      commitGraphOpen: true,
+      desktop: {
+        agentListOpen: false,
+        fileExplorerOpen: true,
+        focusModeEnabled: false,
+      },
+      explorerTab: "changes",
+    });
+
+    usePanelStore.getState().toggleCommitGraphForCheckout({
+      isCompact: false,
+      checkout: { serverId: "server-1", cwd: "/tmp/repo", isGit: true },
+    });
+
+    expect(usePanelStore.getState().commitGraphOpen).toBe(false);
+    expect(usePanelStore.getState().desktop.fileExplorerOpen).toBe(true);
+    expect(usePanelStore.getState().explorerTab).toBe("changes");
+  });
+
+  it("does not open the graph sidecar for compact layouts", () => {
+    usePanelStore.getState().openCommitGraphForCheckout({
+      isCompact: true,
+      checkout: { serverId: "server-1", cwd: "/tmp/repo", isGit: true },
+    });
+
+    expect(usePanelStore.getState().mobileView).toBe("file-explorer");
+    expect(usePanelStore.getState().commitGraphOpen).toBe(false);
+  });
+
+  it("clamps the persisted graph sidecar width", () => {
+    usePanelStore.getState().setCommitGraphWidth(MIN_COMMIT_GRAPH_WIDTH - 100);
+    expect(usePanelStore.getState().commitGraphWidth).toBe(MIN_COMMIT_GRAPH_WIDTH);
+
+    usePanelStore.getState().setCommitGraphWidth(MAX_COMMIT_GRAPH_WIDTH + 100);
+    expect(usePanelStore.getState().commitGraphWidth).toBe(MAX_COMMIT_GRAPH_WIDTH);
   });
 });

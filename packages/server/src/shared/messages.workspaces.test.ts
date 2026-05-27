@@ -168,6 +168,46 @@ describe("workspace message schemas", () => {
     ]);
   });
 
+  test("parses worktree persona request and workspace payload", () => {
+    const request = SessionInboundMessageSchema.parse({
+      type: "update_workspace_persona_request",
+      workspaceId: "ws-worktree",
+      worktreePersona: {
+        roleId: "technical_director",
+        skillIds: ["paseo-technical-director"],
+      },
+      requestId: "req-persona",
+    });
+
+    expect(request.type).toBe("update_workspace_persona_request");
+
+    const response = SessionOutboundMessageSchema.parse({
+      type: "workspace_update",
+      payload: {
+        kind: "upsert",
+        workspace: {
+          id: "ws-worktree",
+          projectId: "proj-1",
+          projectDisplayName: "repo",
+          projectRootPath: "/repo",
+          workspaceDirectory: "/repo/.paseo/worktrees/dev",
+          projectKind: "git",
+          workspaceKind: "worktree",
+          name: "dev",
+          status: "done",
+          activityAt: null,
+          scripts: [],
+          worktreePersona: {
+            roleId: "technical_director",
+            skillIds: ["paseo-technical-director"],
+          },
+        },
+      },
+    });
+
+    expect(response.type).toBe("workspace_update");
+  });
+
   test("parses legacy workspace descriptor enum values", () => {
     const parsed = SessionOutboundMessageSchema.parse({
       type: "workspace_update",

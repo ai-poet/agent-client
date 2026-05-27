@@ -28,6 +28,7 @@ import type {
   AgentSnapshotPayload,
   WorkspaceDescriptorPayload,
 } from "@server/shared/messages";
+import type { WorktreePersona } from "@server/shared/worktree-persona";
 import { normalizeWorkspaceOpaqueId } from "@/utils/workspace-identity";
 import {
   createAgentLastActivityCoalescer,
@@ -125,6 +126,7 @@ export interface WorkspaceDescriptor {
   status: WorkspaceDescriptorPayload["status"];
   diffStat: { additions: number; deletions: number } | null;
   scripts: WorkspaceDescriptorPayload["scripts"];
+  worktreePersona?: WorktreePersona | null;
 }
 
 export function normalizeWorkspaceDescriptor(
@@ -142,6 +144,7 @@ export function normalizeWorkspaceDescriptor(
     status: payload.status,
     diffStat: payload.diffStat ?? null,
     scripts: (payload.scripts ?? []).map((s) => ({ ...s })),
+    worktreePersona: payload.worktreePersona ?? null,
   };
 }
 

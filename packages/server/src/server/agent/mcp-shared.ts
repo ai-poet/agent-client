@@ -217,6 +217,7 @@ export interface SendPromptToAgentParams {
   prompt: AgentPromptInput;
   messageId?: string;
   runOptions?: AgentRunOptions;
+  hidden?: boolean;
   /** Optional mode to set on the agent before the run starts. */
   sessionMode?: string;
   logger: Logger;
@@ -238,6 +239,7 @@ export async function sendPromptToAgent(params: SendPromptToAgentParams): Promis
     prompt,
     messageId,
     runOptions,
+    hidden,
     sessionMode,
     logger,
   } = params;
@@ -254,18 +256,23 @@ export async function sendPromptToAgent(params: SendPromptToAgentParams): Promis
     await agentManager.setAgentMode(agentId, sessionMode);
   }
 
-  try {
-    agentManager.recordUserMessage(agentId, userMessageText, {
-      messageId,
-      emitState: false,
-    });
-  } catch (error) {
-    logger.error({ err: error, agentId }, "Failed to record user message");
+  if (!hidden) {
+    try {
+      agentManager.recordUserMessage(agentId, userMessageText, {
+        messageId,
+        emitState: false,
+      });
+    } catch (error) {
+      logger.error({ err: error, agentId }, "Failed to record user message");
+    }
   }
 
   startAgentRun(agentManager, agentId, prompt, logger, {
     replaceRunning: true,
-    runOptions,
+    runOptions: {
+      ...(runOptions ?? {}),
+      ...(hidden ? { hiddenUserMessage: { text: userMessageText, messageId } } : {}),
+    },
   });
 }
 

@@ -213,6 +213,12 @@ import {
   killTerminalsUnderPath as killWorktreeTerminalsUnderPath,
 } from "./worktree-session.js";
 import { toWorktreeWireError } from "./worktree-errors.js";
+import type { WorktreePersona } from "../shared/worktree-persona.js";
+import { readPaseoWorktreePersona } from "../utils/worktree-metadata.js";
+import {
+  buildWorktreePersonaSystemPrompt,
+  persistWorktreePersona,
+} from "./worktree-persona-service.js";
 
 const MAX_INITIAL_AGENT_TITLE_CHARS = Math.min(60, MAX_EXPLICIT_AGENT_TITLE_CHARS);
 const WORKSPACE_GIT_WATCH_REMOVED_FINGERPRINT = "__removed__";
@@ -1731,6 +1737,9 @@ export class Session {
           case "create_paseo_worktree_request":
             await this.handleCreatePaseoWorktreeRequest(msg);
             break;
+          case "update_workspace_persona_request":
+            await this.handleUpdateWorkspacePersonaRequest(msg);
+            break;
 
           case "workspace_setup_status_request":
             await this.handleWorkspaceSetupStatusRequest(msg);
@@ -2740,7 +2749,7 @@ export class Session {
     images?: Array<{ data: string; mimeType: string }>,
     attachments?: AgentAttachment[],
     runOptions?: AgentRunOptions,
-    options?: { spokenInput?: boolean },
+    options?: { spokenInput?: boolean; hidden?: boolean },
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     this.sessionLogger.info(
       {
@@ -2748,6 +2757,7 @@ export class Session {
         textPreview: text.substring(0, 50),
         imageCount: images?.length ?? 0,
         attachmentCount: attachments?.length ?? 0,
+        hidden: options?.hidden === true,
       },
       `Sending text to agent ${agentId}${
         images && images.length > 0 ? ` with ${images.length} image attachment(s)` : ""
@@ -2770,6 +2780,7 @@ export class Session {
         prompt,
         messageId,
         runOptions,
+        hidden: options?.hidden === true,
         logger: this.sessionLogger,
       });
       return { ok: true };
@@ -2799,6 +2810,7 @@ export class Session {
       images,
       attachments,
       labels,
+      worktreePersona,
     } = msg;
     this.sessionLogger.info(
       { cwd: config.cwd, provider: config.provider, worktreeName },
@@ -2823,6 +2835,7 @@ export class Session {
         git,
         worktreeName,
         attachments,
+        worktreePersona,
       );
       const resolvedWorkspace = msg.workspaceId
         ? await this.workspaceRegistry.get(msg.workspaceId)
@@ -2831,10 +2844,21 @@ export class Session {
       if (!resolvedWorkspace) {
         throw new Error(`Workspace not found: ${msg.workspaceId}`);
       }
+      const persistedPersona =
+        resolvedWorkspace.kind === "worktree"
+          ? readPaseoWorktreePersona(resolvedWorkspace.cwd)
+          : null;
+      const personaSystemPrompt = buildWorktreePersonaSystemPrompt(
+        worktreePersona !== undefined ? worktreePersona : persistedPersona,
+      );
+      const systemPrompt = [personaSystemPrompt, sessionConfig.systemPrompt]
+        .filter((part): part is string => Boolean(part?.trim()))
+        .join("\n\n");
       const snapshot = await this.agentManager.createAgent(
         {
           ...sessionConfig,
           cwd: resolvedWorkspace.cwd,
+          ...(systemPrompt ? { systemPrompt } : {}),
         },
         undefined,
         {
@@ -3080,6 +3104,7 @@ export class Session {
     gitOptions?: GitSetupOptions,
     legacyWorktreeName?: string,
     attachments?: AgentAttachment[],
+    worktreePersona?: WorktreePersona | null,
   ): Promise<{
     sessionConfig: AgentSessionConfig;
     worktreeBootstrap?: { worktree: WorktreeConfig; shouldBootstrap: boolean };
@@ -3099,6 +3124,7 @@ export class Session {
       gitOptions,
       legacyWorktreeName,
       attachments,
+      worktreePersona,
     );
   }
 
@@ -5076,6 +5102,55 @@ export class Session {
     );
   }
 
+  private async handleUpdateWorkspacePersonaRequest(
+    msg: Extract<SessionInboundMessage, { type: "update_workspace_persona_request" }>,
+  ): Promise<void> {
+    try {
+      const workspace = await this.workspaceRegistry.get(msg.workspaceId);
+      if (!workspace) {
+        throw new Error(`Workspace not found: ${msg.workspaceId}`);
+      }
+      if (workspace.kind !== "worktree") {
+        throw new Error("Workspace persona can only be set on Paseo worktrees");
+      }
+
+      await persistWorktreePersona({
+        worktreeRoot: workspace.cwd,
+        persona: msg.worktreePersona,
+      });
+
+      const descriptor = await this.describeWorkspaceRecordWithGitData(workspace);
+      this.emit({
+        type: "update_workspace_persona_response",
+        payload: {
+          workspace: descriptor,
+          error: null,
+          requestId: msg.requestId,
+        },
+      });
+      this.emit({
+        type: "workspace_update",
+        payload: {
+          kind: "upsert",
+          workspace: descriptor,
+        },
+      });
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, workspaceId: msg.workspaceId },
+        "Failed to update workspace persona",
+      );
+      this.emit({
+        type: "update_workspace_persona_response",
+        payload: {
+          workspace: null,
+          error: error instanceof Error ? error.message : String(error),
+          requestId: msg.requestId,
+        },
+      });
+    }
+  }
+
   private async handlePaseoWorktreeArchiveRequest(
     msg: Extract<SessionInboundMessage, { type: "paseo_worktree_archive_request" }>,
   ): Promise<void> {
@@ -5730,6 +5805,8 @@ export class Session {
     if (snapshot?.git.diffStat) {
       diffStat = snapshot.git.diffStat;
     }
+    const worktreePersona =
+      workspace.kind === "worktree" ? readPaseoWorktreePersona(workspace.cwd) : null;
 
     return {
       id: workspace.workspaceId,
@@ -5755,6 +5832,7 @@ export class Session {
               resolveHealth: this.resolveScriptHealth ?? undefined,
             })
           : [],
+      ...(workspace.kind === "worktree" ? { worktreePersona } : {}),
     };
   }
 
@@ -7208,7 +7286,12 @@ export class Session {
 
       const prompt = this.buildAgentPrompt(msg.text, msg.images, msg.attachments);
       this.sessionLogger.trace(
-        { agentId, messageId: msg.messageId, textPrefix: msg.text.slice(0, 80) },
+        {
+          agentId,
+          messageId: msg.messageId,
+          hidden: msg.hidden === true,
+          textPrefix: msg.text.slice(0, 80),
+        },
         "send_agent_message_request: dispatching shared sendPromptToAgent",
       );
       try {
@@ -7219,6 +7302,7 @@ export class Session {
           userMessageText: msg.text,
           prompt,
           messageId: msg.messageId,
+          hidden: msg.hidden === true,
           logger: this.sessionLogger,
         });
       } catch (error) {

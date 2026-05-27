@@ -324,6 +324,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         message: string,
         images?: AttachmentMetadata[],
         attachments?: AgentAttachment[],
+        options?: { hidden?: boolean },
       ) => Promise<void>)
     | null
   >(null);
@@ -1633,35 +1634,38 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       message: string,
       images?: AttachmentMetadata[],
       attachments?: AgentAttachment[],
+      options?: { hidden?: boolean },
     ) => {
       const messageId = generateMessageId();
-      const userMessage: StreamItem = {
-        kind: "user_message",
-        id: messageId,
-        text: message,
-        timestamp: new Date(),
-      };
+      if (!options?.hidden) {
+        const userMessage: StreamItem = {
+          kind: "user_message",
+          id: messageId,
+          text: message,
+          timestamp: new Date(),
+        };
 
-      // Append to head if streaming (keeps the user message with the current
-      // turn so late text_deltas still find the existing assistant_message).
-      // Otherwise append to tail.
-      const currentHead = useSessionStore
-        .getState()
-        .sessions[serverId]?.agentStreamHead?.get(agentId);
-      if (currentHead && currentHead.length > 0) {
-        setAgentStreamHead(serverId, (prev) => {
-          const head = prev.get(agentId) || [];
-          const updated = new Map(prev);
-          updated.set(agentId, [...head, userMessage]);
-          return updated;
-        });
-      } else {
-        setAgentStreamTail(serverId, (prev) => {
-          const currentStream = prev.get(agentId) || [];
-          const updated = new Map(prev);
-          updated.set(agentId, [...currentStream, userMessage]);
-          return updated;
-        });
+        // Append to head if streaming (keeps the user message with the current
+        // turn so late text_deltas still find the existing assistant_message).
+        // Otherwise append to tail.
+        const currentHead = useSessionStore
+          .getState()
+          .sessions[serverId]?.agentStreamHead?.get(agentId);
+        if (currentHead && currentHead.length > 0) {
+          setAgentStreamHead(serverId, (prev) => {
+            const head = prev.get(agentId) || [];
+            const updated = new Map(prev);
+            updated.set(agentId, [...head, userMessage]);
+            return updated;
+          });
+        } else {
+          setAgentStreamTail(serverId, (prev) => {
+            const currentStream = prev.get(agentId) || [];
+            const updated = new Map(prev);
+            updated.set(agentId, [...currentStream, userMessage]);
+            return updated;
+          });
+        }
       }
 
       const imagesData = await encodeImages(images);
@@ -1672,6 +1676,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       void client
         .sendAgentMessage(agentId, message, {
           messageId,
+          ...(options?.hidden ? { hidden: true } : {}),
           ...(imagesData && imagesData.length > 0 ? { images: imagesData } : {}),
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
         })

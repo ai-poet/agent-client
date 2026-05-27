@@ -7,7 +7,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LeftSidebar } from "./left-sidebar";
 
-const { panelState, useSidebarWorkspacesListMock, theme } = vi.hoisted(() => {
+const {
+  panelState,
+  useSidebarWorkspacesListMock,
+  navigateToPreparedWorkspaceTabMock,
+  resolveNewChatTargetMock,
+  routerPushMock,
+  theme,
+} = vi.hoisted(() => {
   const panelState = {
     isOpen: false,
     showMobileAgent: vi.fn(),
@@ -16,6 +23,9 @@ const { panelState, useSidebarWorkspacesListMock, theme } = vi.hoisted(() => {
   return {
     panelState,
     useSidebarWorkspacesListMock: vi.fn(),
+    navigateToPreparedWorkspaceTabMock: vi.fn(),
+    resolveNewChatTargetMock: vi.fn(),
+    routerPushMock: vi.fn(),
     theme: {
       spacing: { 0: 0, 0.5: 2, 1: 4, 1.5: 6, 2: 8, 3: 12, 4: 16, 5: 20 },
       iconSize: { sm: 14, md: 18, lg: 22 },
@@ -103,6 +113,7 @@ vi.mock("lucide-react-native", () => {
     CheckCircle: createIcon("CheckCircle"),
     ChevronsDownUp: createIcon("ChevronsDownUp"),
     Cloud: createIcon("Cloud"),
+    Folder: createIcon("Folder"),
     FolderPlus: createIcon("FolderPlus"),
     MessageSquarePlus: createIcon("MessageSquarePlus"),
     MessagesSquare: createIcon("MessagesSquare"),
@@ -112,7 +123,7 @@ vi.mock("lucide-react-native", () => {
 });
 
 vi.mock("expo-router", () => ({
-  router: { push: vi.fn() },
+  router: { push: routerPushMock },
   usePathname: () => "/hosts/srv",
 }));
 
@@ -180,6 +191,26 @@ vi.mock("@/utils/host-routes", () => ({
   buildSettingsRoute: () => "/settings",
   mapPathnameToServer: (_pathname: string, serverId: string) => `/hosts/${serverId}`,
   parseServerIdFromPathname: () => "srv",
+}));
+
+vi.mock("@/stores/draft-keys", () => ({
+  generateDraftId: () => "draft-test",
+}));
+
+vi.mock("@/stores/session-store", () => ({
+  useSessionStore: {
+    getState: () => ({ sessions: {} }),
+  },
+}));
+
+vi.mock("@/utils/new-agent-routing", () => ({
+  buildNewAgentRoute: (serverId: string, workingDir?: string | null) =>
+    `/h/${serverId}/workspace/${workingDir || "."}`,
+  resolveNewChatTarget: resolveNewChatTargetMock,
+}));
+
+vi.mock("@/utils/workspace-navigation", () => ({
+  navigateToPreparedWorkspaceTab: navigateToPreparedWorkspaceTabMock,
 }));
 
 vi.mock("@/hooks/use-sub2api-locale", () => ({
@@ -253,6 +284,14 @@ describe("LeftSidebar", () => {
   beforeEach(() => {
     panelState.isOpen = false;
     panelState.showMobileAgent.mockReset();
+    routerPushMock.mockReset();
+    navigateToPreparedWorkspaceTabMock.mockReset();
+    resolveNewChatTargetMock.mockReset();
+    resolveNewChatTargetMock.mockReturnValue({
+      kind: "workspace",
+      serverId: "srv",
+      workspaceId: "workspace-1",
+    });
     useSidebarWorkspacesListMock.mockReset();
     useSidebarWorkspacesListMock.mockReturnValue({
       projects: [{ projectKey: "project-1", projectName: "Project 1", workspaces: [] }],
@@ -285,5 +324,56 @@ describe("LeftSidebar", () => {
       serverId: "srv",
       enabled: true,
     });
+  });
+
+  it("renders new chat as the primary action without the old chat section label", async () => {
+    await act(async () => {
+      root?.render(<LeftSidebar />);
+    });
+
+    expect(container?.querySelector('[data-testid="sidebar-new-chat"]')).not.toBeNull();
+    expect(container?.textContent).toContain("New chat");
+    expect(container?.textContent).not.toContain("Chat");
+  });
+
+  it("opens a focused draft tab for the current workspace", async () => {
+    await act(async () => {
+      root?.render(<LeftSidebar selectedAgentId="srv:agent-1" />);
+    });
+
+    await act(async () => {
+      container
+        ?.querySelector<HTMLButtonElement>('[data-testid="sidebar-new-chat"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(panelState.showMobileAgent).toHaveBeenCalledTimes(1);
+    expect(navigateToPreparedWorkspaceTabMock).toHaveBeenCalledWith({
+      serverId: "srv",
+      workspaceId: "workspace-1",
+      target: { kind: "draft", draftId: "draft-test" },
+      navigationMethod: "navigate",
+    });
+  });
+
+  it("falls back to the new-agent route when no current workspace is available", async () => {
+    resolveNewChatTargetMock.mockReturnValue({
+      kind: "fallback",
+      serverId: "srv",
+      workingDir: "/repo/other",
+    });
+
+    await act(async () => {
+      root?.render(<LeftSidebar />);
+    });
+
+    await act(async () => {
+      container
+        ?.querySelector<HTMLButtonElement>('[data-testid="sidebar-new-chat"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(navigateToPreparedWorkspaceTabMock).not.toHaveBeenCalled();
+    expect(routerPushMock).toHaveBeenCalledWith("/h/srv/workspace//repo/other");
   });
 });

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AGENT_LIFECYCLE_STATUSES } from "./agent-lifecycle.js";
+import { WorktreePersonaSchema } from "./worktree-persona.js";
 import { MAX_EXPLICIT_AGENT_TITLE_CHARS } from "../server/agent/agent-title-limits.js";
 import { AgentProviderSchema } from "../server/agent/provider-manifest.js";
 import { TOOL_CALL_ICON_NAMES } from "../server/agent/agent-sdk-types.js";
@@ -801,6 +802,7 @@ export const SendAgentMessageRequestSchema = z.object({
   agentId: z.string(),
   text: z.string(),
   messageId: z.string().optional(), // Client-provided ID for deduplication
+  hidden: z.boolean().optional(),
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,
 });
@@ -871,6 +873,7 @@ export const CreateAgentRequestMessageSchema = z.object({
   config: AgentSessionConfigSchema,
   workspaceId: z.string().optional(),
   worktreeName: z.string().optional(),
+  worktreePersona: WorktreePersonaSchema.nullable().optional(),
   initialPrompt: z.string().optional(),
   clientMessageId: z.string().optional(),
   outputSchema: z.record(z.unknown()).optional(),
@@ -1271,10 +1274,18 @@ export const CreatePaseoWorktreeRequestSchema = z.object({
   type: z.literal("create_paseo_worktree_request"),
   cwd: z.string(),
   worktreeSlug: z.string().optional(),
+  worktreePersona: WorktreePersonaSchema.nullable().optional(),
   attachments: AgentAttachmentsSchema,
   refName: z.string().min(1).optional(),
   action: z.enum(["branch-off", "checkout"]).optional(),
   githubPrNumber: z.number().int().positive().optional(),
+  requestId: z.string(),
+});
+
+export const UpdateWorkspacePersonaRequestSchema = z.object({
+  type: z.literal("update_workspace_persona_request"),
+  workspaceId: z.string(),
+  worktreePersona: WorktreePersonaSchema.nullable(),
   requestId: z.string(),
 });
 
@@ -1612,6 +1623,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   PaseoWorktreeListRequestSchema,
   PaseoWorktreeArchiveRequestSchema,
   CreatePaseoWorktreeRequestSchema,
+  UpdateWorkspacePersonaRequestSchema,
   WorkspaceSetupStatusRequestSchema,
   ListAvailableEditorsRequestSchema,
   OpenInEditorRequestSchema,
@@ -1820,6 +1832,7 @@ export const ServerInfoStatusPayloadSchema = z
     features: z
       .object({
         providersSnapshot: z.boolean().optional(),
+        hiddenAgentMessages: z.boolean().optional(),
       })
       .optional(),
   })
@@ -2076,6 +2089,7 @@ export const WorkspaceDescriptorPayloadSchema = z.object({
   scripts: z.array(WorkspaceScriptPayloadSchema).default([]),
   gitRuntime: WorkspaceGitRuntimePayloadSchema,
   githubRuntime: WorkspaceGitHubRuntimePayloadSchema,
+  worktreePersona: WorktreePersonaSchema.nullable().optional(),
 });
 
 export const AgentUpdateMessageSchema = z.object({
@@ -2878,6 +2892,15 @@ export const CreatePaseoWorktreeResponseSchema = z.object({
   }),
 });
 
+export const UpdateWorkspacePersonaResponseSchema = z.object({
+  type: z.literal("update_workspace_persona_response"),
+  payload: z.object({
+    workspace: WorkspaceDescriptorPayloadSchema.nullable(),
+    error: z.string().nullable(),
+    requestId: z.string(),
+  }),
+});
+
 export const FileExplorerResponseSchema = z.object({
   type: z.literal("file_explorer_response"),
   payload: z.object({
@@ -3216,6 +3239,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   PaseoWorktreeListResponseSchema,
   PaseoWorktreeArchiveResponseSchema,
   CreatePaseoWorktreeResponseSchema,
+  UpdateWorkspacePersonaResponseSchema,
   FileExplorerResponseSchema,
   ProjectIconResponseSchema,
   FileDownloadTokenResponseSchema,
@@ -3469,6 +3493,9 @@ export type GitHubSearchKind = z.infer<typeof GitHubSearchKindSchema>;
 export type GitHubSearchRequest = z.infer<typeof GitHubSearchRequestSchema>;
 export type GitHubSearchResponse = z.infer<typeof GitHubSearchResponseSchema>;
 export type CreatePaseoWorktreeRequest = z.infer<typeof CreatePaseoWorktreeRequestSchema>;
+export type CreatePaseoWorktreeResponse = z.infer<typeof CreatePaseoWorktreeResponseSchema>;
+export type UpdateWorkspacePersonaRequest = z.infer<typeof UpdateWorkspacePersonaRequestSchema>;
+export type UpdateWorkspacePersonaResponse = z.infer<typeof UpdateWorkspacePersonaResponseSchema>;
 export type DirectorySuggestionsRequest = z.infer<typeof DirectorySuggestionsRequestSchema>;
 export type DirectorySuggestionsResponse = z.infer<typeof DirectorySuggestionsResponseSchema>;
 export type PaseoWorktreeListRequest = z.infer<typeof PaseoWorktreeListRequestSchema>;

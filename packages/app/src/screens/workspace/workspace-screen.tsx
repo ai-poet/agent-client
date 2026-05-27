@@ -1,16 +1,13 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useIsFocused } from "@react-navigation/native";
-import { ActivityIndicator, BackHandler, Keyboard, Pressable, Text, View } from "react-native";
+import type { ListTerminalsResponse } from "@server/shared/messages";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
-import { DiffStat } from "@/components/diff-stat";
 import {
-  CopyX,
   ArrowLeftToLine,
   ArrowRightToLine,
   ChevronDown,
   Copy,
+  CopyX,
   Ellipsis,
   EllipsisVertical,
   GitGraph,
@@ -21,17 +18,25 @@ import {
   SquareTerminal,
   X,
 } from "lucide-react-native";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, BackHandler, Keyboard, Pressable, Text, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import invariant from "tiny-invariant";
-import { SidebarMenuToggle } from "@/components/headers/menu-header";
-import { HeaderToggleButton } from "@/components/headers/header-toggle-button";
-import { ScreenHeader } from "@/components/headers/screen-header";
+import { useStoreWithEqualityFn } from "zustand/traditional";
 import { BranchSwitcher } from "@/components/branch-switcher";
+import { CommitGraphSidecar } from "@/components/commit-graph-sidecar";
+import { DiffStat } from "@/components/diff-stat";
+import { ExplorerSidebar } from "@/components/explorer-sidebar";
+import { HeaderBalanceBadge } from "@/components/header-balance-badge";
+import { HeaderToggleButton } from "@/components/headers/header-toggle-button";
+import { SidebarMenuToggle } from "@/components/headers/menu-header";
+import { ScreenHeader } from "@/components/headers/screen-header";
+import { SourceControlPanelIcon } from "@/components/icons/source-control-panel-icon";
+import { SplitContainer } from "@/components/split-container";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import { Shortcut } from "@/components/ui/shortcut";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,96 +44,92 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Shortcut } from "@/components/ui/shortcut";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ExplorerSidebar } from "@/components/explorer-sidebar";
-import { SplitContainer } from "@/components/split-container";
-import { SourceControlPanelIcon } from "@/components/icons/source-control-panel-icon";
-import { WorkspaceGitActions } from "@/screens/workspace/workspace-git-actions";
-import { WorkspaceOpenInEditorButton } from "@/screens/workspace/workspace-open-in-editor-button";
-import { WorkspaceScriptsButton } from "@/screens/workspace/workspace-scripts-button";
+import { supportsDesktopPaneSplits, useIsCompactFormFactor } from "@/constants/layout";
+import { isNative, isWeb } from "@/constants/platform";
 import { ExplorerSidebarAnimationProvider } from "@/contexts/explorer-sidebar-animation-context";
 import { useToast } from "@/contexts/toast-context";
-import { useExplorerOpenGesture } from "@/hooks/use-explorer-open-gesture";
-import { selectIsFileExplorerOpen, usePanelStore } from "@/stores/panel-store";
-import { type ExplorerCheckoutContext } from "@/stores/explorer-checkout-context";
-import { useSessionStore } from "@/stores/session-store";
-import {
-  buildWorkspaceTabPersistenceKey,
-  collectAllTabs,
-  useWorkspaceLayoutStore,
-} from "@/stores/workspace-layout-store";
-import type { WorkspaceTab, WorkspaceTabTarget } from "@/stores/workspace-tabs-store";
-import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
-import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
-import { useCreateFlowStore } from "@/stores/create-flow-store";
-import {
-  normalizeWorkspaceTabTarget,
-  workspaceTabTargetsEqual,
-} from "@/utils/workspace-tab-identity";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { shouldShowWorkspaceSetup, useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
-import { useWorkspace } from "@/stores/session-store-hooks";
-import { useWorkspaceTerminalSessionRetention } from "@/terminal/hooks/use-workspace-terminal-session-retention";
-import {
-  checkoutStatusQueryKey,
-  type CheckoutStatusPayload,
-} from "@/hooks/use-checkout-status-query";
-import type { ListTerminalsResponse } from "@server/shared/messages";
-import { upsertTerminalListEntry } from "@/utils/terminal-list";
-import { confirmDialog } from "@/utils/confirm-dialog";
-import { useArchiveAgent } from "@/hooks/use-archive-agent";
 import { useAppLocale } from "@/hooks/use-app-locale";
+import { useArchiveAgent } from "@/hooks/use-archive-agent";
+import {
+  type CheckoutStatusPayload,
+  checkoutStatusQueryKey,
+} from "@/hooks/use-checkout-status-query";
+import { useContainerWidth } from "@/hooks/use-container-width";
+import { useExplorerOpenGesture } from "@/hooks/use-explorer-open-gesture";
+import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
+import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useStableEvent } from "@/hooks/use-stable-event";
-import { HeaderBalanceBadge } from "@/components/header-balance-badge";
-import { buildProviderCommand } from "@/utils/provider-command-templates";
-import { generateDraftId } from "@/stores/draft-keys";
-import {
-  getWorkspaceExecutionAuthority,
-  resolveWorkspaceRouteId,
-} from "@/utils/workspace-execution";
-import {
-  createWorktreeQuickly,
-  isCreatingWorktreePlaceholderId,
-} from "@/utils/quick-create-worktree";
-import { navigateToPreparedWorkspaceTab } from "@/utils/workspace-navigation";
-import {
-  WorkspaceTabPresentationResolver,
-  WorkspaceTabIcon,
-  WorkspaceTabOptionRow,
-} from "@/screens/workspace/workspace-tab-presentation";
-import {
-  WorkspaceDesktopTabsRow,
-  type WorkspaceDesktopTabRowItem,
-} from "@/screens/workspace/workspace-desktop-tabs-row";
-import { buildWorkspaceTabMenuEntries } from "@/screens/workspace/workspace-tab-menu";
-import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
-import {
-  resolveWorkspaceHeader,
-  shouldRenderMissingWorkspaceDescriptor,
-} from "@/screens/workspace/workspace-header-source";
+import { getAppMessages } from "@/i18n/sub2api";
+import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
+import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+import { useMountedTabSet } from "@/screens/workspace/use-mounted-tab-set";
 import {
   deriveWorkspaceAgentVisibility,
   workspaceAgentVisibilityEqual,
 } from "@/screens/workspace/workspace-agent-visibility";
-import { deriveWorkspacePaneState } from "@/screens/workspace/workspace-pane-state";
-import {
-  buildWorkspacePaneContentModel,
-  WorkspacePaneContent,
-  type WorkspacePaneContentModel,
-} from "@/screens/workspace/workspace-pane-content";
-import { useMountedTabSet } from "@/screens/workspace/use-mounted-tab-set";
 import {
   buildBulkCloseConfirmationMessage,
   classifyBulkClosableTabs,
   closeBulkWorkspaceTabs,
 } from "@/screens/workspace/workspace-bulk-close";
-import { findAdjacentPane } from "@/utils/split-navigation";
+import {
+  type WorkspaceDesktopTabRowItem,
+  WorkspaceDesktopTabsRow,
+} from "@/screens/workspace/workspace-desktop-tabs-row";
+import { WorkspaceGitActions } from "@/screens/workspace/workspace-git-actions";
+import {
+  resolveWorkspaceHeader,
+  shouldRenderMissingWorkspaceDescriptor,
+} from "@/screens/workspace/workspace-header-source";
+import { WorkspaceOpenInEditorButton } from "@/screens/workspace/workspace-open-in-editor-button";
+import {
+  buildWorkspacePaneContentModel,
+  WorkspacePaneContent,
+  type WorkspacePaneContentModel,
+} from "@/screens/workspace/workspace-pane-content";
+import { deriveWorkspacePaneState } from "@/screens/workspace/workspace-pane-state";
+import { WorkspaceScriptsButton } from "@/screens/workspace/workspace-scripts-button";
+import { buildWorkspaceTabMenuEntries } from "@/screens/workspace/workspace-tab-menu";
+import {
+  WorkspaceTabIcon,
+  WorkspaceTabOptionRow,
+  WorkspaceTabPresentationResolver,
+} from "@/screens/workspace/workspace-tab-presentation";
+import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
+import { useCreateFlowStore } from "@/stores/create-flow-store";
+import { generateDraftId } from "@/stores/draft-keys";
+import { type ExplorerCheckoutContext } from "@/stores/explorer-checkout-context";
+import { selectIsFileExplorerOpen, usePanelStore } from "@/stores/panel-store";
+import { useSessionStore } from "@/stores/session-store";
+import { useWorkspace } from "@/stores/session-store-hooks";
+import {
+  buildWorkspaceTabPersistenceKey,
+  collectAllTabs,
+  useWorkspaceLayoutStore,
+} from "@/stores/workspace-layout-store";
+import { shouldShowWorkspaceSetup, useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
+import type { WorkspaceTab, WorkspaceTabTarget } from "@/stores/workspace-tabs-store";
+import { useWorkspaceTerminalSessionRetention } from "@/terminal/hooks/use-workspace-terminal-session-retention";
+import { confirmDialog } from "@/utils/confirm-dialog";
 import { isAbsolutePath } from "@/utils/path";
-import { useIsCompactFormFactor, supportsDesktopPaneSplits } from "@/constants/layout";
-import { isWeb, isNative } from "@/constants/platform";
-import { useContainerWidth } from "@/hooks/use-container-width";
-import { getAppMessages } from "@/i18n/sub2api";
+import { buildProviderCommand } from "@/utils/provider-command-templates";
+import {
+  createWorktreeQuickly,
+  isCreatingWorktreePlaceholderId,
+} from "@/utils/quick-create-worktree";
+import { findAdjacentPane } from "@/utils/split-navigation";
+import { upsertTerminalListEntry } from "@/utils/terminal-list";
+import {
+  getWorkspaceExecutionAuthority,
+  resolveWorkspaceRouteId,
+} from "@/utils/workspace-execution";
+import { navigateToPreparedWorkspaceTab } from "@/utils/workspace-navigation";
+import {
+  normalizeWorkspaceTabTarget,
+  workspaceTabTargetsEqual,
+} from "@/utils/workspace-tab-identity";
 
 const TERMINALS_QUERY_STALE_TIME = 5_000;
 const EMPTY_UI_TABS: WorkspaceTab[] = [];
@@ -924,15 +925,10 @@ function WorkspaceScreenContent({
   );
 
   const isGitCheckout = checkoutQuery.data?.isGit ?? false;
-  const [isCommitGraphOpen, setIsCommitGraphOpen] = useState(false);
   const currentBranchName =
     checkoutQuery.data?.isGit && checkoutQuery.data.currentBranch !== "HEAD"
       ? trimNonEmpty(checkoutQuery.data.currentBranch)
       : null;
-
-  useEffect(() => {
-    setIsCommitGraphOpen(false);
-  }, [normalizedServerId, workspaceDirectory]);
 
   const isExplorerOpen = usePanelStore((state) =>
     selectIsFileExplorerOpen(state, { isCompact: isMobile }),
@@ -948,10 +944,16 @@ function WorkspaceScreenContent({
   const toggleFileExplorerForCheckout = usePanelStore(
     (state) => state.toggleFileExplorerForCheckout,
   );
-  const setExplorerTabForCheckout = usePanelStore((state) => state.setExplorerTabForCheckout);
-  const setExplorerWidth = usePanelStore((state) => state.setExplorerWidth);
+  const toggleCommitGraphForCheckout = usePanelStore((state) => state.toggleCommitGraphForCheckout);
+  const closeCommitGraph = usePanelStore((state) => state.closeCommitGraph);
+  const isCommitGraphOpen = usePanelStore((state) => state.commitGraphOpen);
+  const explorerWidth = usePanelStore((state) => state.explorerWidth);
   const explorerTab = usePanelStore((state) => state.explorerTab);
   const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
+
+  useEffect(() => {
+    closeCommitGraph();
+  }, [closeCommitGraph, normalizedServerId, workspaceDirectory]);
 
   const activeExplorerCheckout = useMemo<ExplorerCheckoutContext | null>(() => {
     if (!normalizedServerId || !workspaceDirectory) {
@@ -1004,35 +1006,28 @@ function WorkspaceScreenContent({
     if (!activeExplorerCheckout) {
       return;
     }
-    if (isCommitGraphOpen) {
-      setIsCommitGraphOpen(false);
-      return;
-    }
 
-    openFileExplorerForCheckout({
+    toggleCommitGraphForCheckout({
       isCompact: isMobile,
       checkout: { ...activeExplorerCheckout, isGit: true },
     });
-    setExplorerTabForCheckout({ ...activeExplorerCheckout, isGit: true, tab: "changes" });
-    setExplorerWidth(760);
-    setIsCommitGraphOpen(true);
-  }, [
-    activeExplorerCheckout,
-    isCommitGraphOpen,
-    isMobile,
-    openFileExplorerForCheckout,
-    setExplorerTabForCheckout,
-    setExplorerWidth,
-  ]);
+  }, [activeExplorerCheckout, isMobile, toggleCommitGraphForCheckout]);
 
   useEffect(() => {
     if (
       isCommitGraphOpen &&
       (!isExplorerOpen || explorerTab !== "changes" || !isGitCheckout || !workspaceDirectory)
     ) {
-      setIsCommitGraphOpen(false);
+      closeCommitGraph();
     }
-  }, [explorerTab, isCommitGraphOpen, isExplorerOpen, isGitCheckout, workspaceDirectory]);
+  }, [
+    closeCommitGraph,
+    explorerTab,
+    isCommitGraphOpen,
+    isExplorerOpen,
+    isGitCheckout,
+    workspaceDirectory,
+  ]);
 
   const explorerOpenGesture = useExplorerOpenGesture({
     enabled: isMobile && canOpenExplorerFromAgentView,
@@ -2761,8 +2756,21 @@ function WorkspaceScreenContent({
               workspaceId={normalizedWorkspaceId}
               workspaceRoot={workspaceDirectory}
               isGit={isGitCheckout}
-              showCommitGraph={isCommitGraphOpen}
               onOpenFile={handleOpenFileFromExplorer}
+            />
+          ) : null)}
+        {isRouteFocused &&
+          !isMobile &&
+          (!isFocusModeEnabled || isMobile) &&
+          isGitCheckout &&
+          isCommitGraphOpen &&
+          (workspaceDirectory ? (
+            <CommitGraphSidecar
+              serverId={normalizedServerId}
+              workspaceRoot={workspaceDirectory}
+              isOpen={isCommitGraphOpen}
+              explorerWidth={explorerWidth}
+              onClose={closeCommitGraph}
             />
           ) : null)}
       </View>

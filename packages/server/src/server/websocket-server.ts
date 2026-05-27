@@ -921,6 +921,7 @@ export class VoiceAssistantWebSocketServer {
       features: {
         // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
         providersSnapshot: true,
+        hiddenAgentMessages: true,
       },
     };
   }

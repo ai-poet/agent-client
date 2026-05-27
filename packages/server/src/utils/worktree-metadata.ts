@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { isAbsolute, join, resolve } from "path";
 import { z } from "zod";
+import { WorktreePersonaSchema, type WorktreePersona } from "../shared/worktree-persona.js";
 
 const PaseoWorktreeMetadataV1Schema = z.object({
   version: z.literal(1),
@@ -17,9 +18,21 @@ const PaseoWorktreeMetadataV2Schema = z.object({
     .optional(),
 });
 
+const PaseoWorktreeMetadataV3Schema = z.object({
+  version: z.literal(3),
+  baseRefName: z.string().min(1),
+  runtime: z
+    .object({
+      worktreePort: z.number().int().positive(),
+    })
+    .optional(),
+  persona: WorktreePersonaSchema.nullable().optional(),
+});
+
 const PaseoWorktreeMetadataSchema = z.union([
   PaseoWorktreeMetadataV1Schema,
   PaseoWorktreeMetadataV2Schema,
+  PaseoWorktreeMetadataV3Schema,
 ]);
 
 export type PaseoWorktreeMetadata = z.infer<typeof PaseoWorktreeMetadataSchema>;
@@ -79,7 +92,7 @@ export function writePaseoWorktreeMetadata(
 
   const metadataPath = getPaseoWorktreeMetadataPath(worktreeRoot);
   mkdirSync(join(getGitDirForWorktreeRoot(worktreeRoot), "paseo"), { recursive: true });
-  const metadata: PaseoWorktreeMetadata = { version: 1, baseRefName };
+  const metadata: PaseoWorktreeMetadata = { version: 3, baseRefName };
   writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
 }
 
@@ -99,11 +112,32 @@ export function writePaseoWorktreeRuntimeMetadata(
   const metadataPath = getPaseoWorktreeMetadataPath(worktreeRoot);
   mkdirSync(join(getGitDirForWorktreeRoot(worktreeRoot), "paseo"), { recursive: true });
   const next: PaseoWorktreeMetadata = {
-    version: 2,
+    version: 3,
     baseRefName: current.baseRefName,
     runtime: {
       worktreePort: options.worktreePort,
     },
+    ...(current.version === 3 && current.persona !== undefined ? { persona: current.persona } : {}),
+  };
+  writeFileSync(metadataPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+}
+
+export function writePaseoWorktreePersonaMetadata(
+  worktreeRoot: string,
+  persona: WorktreePersona | null,
+): void {
+  const current = readPaseoWorktreeMetadata(worktreeRoot);
+  if (!current) {
+    throw new Error("Cannot persist worktree persona metadata: missing base metadata");
+  }
+
+  const metadataPath = getPaseoWorktreeMetadataPath(worktreeRoot);
+  mkdirSync(join(getGitDirForWorktreeRoot(worktreeRoot), "paseo"), { recursive: true });
+  const next: PaseoWorktreeMetadata = {
+    version: 3,
+    baseRefName: current.baseRefName,
+    ...(current.version !== 1 && current.runtime ? { runtime: current.runtime } : {}),
+    persona,
   };
   writeFileSync(metadataPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
 }
@@ -134,5 +168,16 @@ export function readPaseoWorktreeRuntimePort(worktreeRoot: string): number | nul
   if (metadata.version === 2 && metadata.runtime?.worktreePort) {
     return metadata.runtime.worktreePort;
   }
+  if (metadata.version === 3 && metadata.runtime?.worktreePort) {
+    return metadata.runtime.worktreePort;
+  }
   return null;
+}
+
+export function readPaseoWorktreePersona(worktreeRoot: string): WorktreePersona | null {
+  const metadata = readPaseoWorktreeMetadata(worktreeRoot);
+  if (!metadata || metadata.version !== 3) {
+    return null;
+  }
+  return metadata.persona ?? null;
 }

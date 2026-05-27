@@ -1677,6 +1677,58 @@ describe("DaemonClient", () => {
     vi.useRealTimers();
   });
 
+  test("sends hidden agent message flag", async () => {
+    const logger = createMockLogger();
+    const mock = createMockTransport();
+
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_unit_test",
+      logger,
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
+
+    const connectPromise = client.connect();
+    mock.triggerOpen();
+    await connectPromise;
+
+    const sendPromise = client.sendAgentMessage("agent-1", "Commit selected files", {
+      hidden: true,
+      messageId: "client-message-1",
+    });
+
+    expect(mock.sent).toHaveLength(1);
+    const request = JSON.parse(mock.sent[0] as string) as {
+      message: {
+        type: string;
+        requestId: string;
+        hidden?: boolean;
+        messageId?: string;
+      };
+    };
+    expect(request.message).toMatchObject({
+      type: "send_agent_message_request",
+      hidden: true,
+      messageId: "client-message-1",
+    });
+
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "send_agent_message_response",
+        payload: {
+          requestId: request.message.requestId,
+          agentId: "agent-1",
+          accepted: true,
+          error: null,
+        },
+      }),
+    );
+
+    await expect(sendPromise).resolves.toBeUndefined();
+  });
+
   test("lists available providers via RPC", async () => {
     const logger = createMockLogger();
     const mock = createMockTransport();

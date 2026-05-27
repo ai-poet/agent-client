@@ -643,12 +643,14 @@ function ComposerHarness({
   isSubmitLoading = false,
   submitBehavior,
   statusControls,
+  inputWrapperStyle,
 }: {
   initialText?: string;
   initialAttachments?: ComposerAttachment[];
   isSubmitLoading?: boolean;
   submitBehavior?: "clear" | "preserve-and-lock";
   statusControls?: React.ComponentProps<typeof Composer>["statusControls"];
+  inputWrapperStyle?: React.ComponentProps<typeof Composer>["inputWrapperStyle"];
 }) {
   const [text, setText] = useState(initialText);
   const [attachments, setAttachments] = useState(initialAttachments);
@@ -673,6 +675,7 @@ function ComposerHarness({
         isSubmitLoading={isSubmitLoading}
         submitBehavior={submitBehavior}
         statusControls={statusControls}
+        inputWrapperStyle={inputWrapperStyle}
         cwd="/repo"
         clearDraft={vi.fn()}
       />
@@ -687,6 +690,7 @@ function renderComposer(
     isSubmitLoading?: boolean;
     submitBehavior?: "clear" | "preserve-and-lock";
     statusControls?: React.ComponentProps<typeof Composer>["statusControls"];
+    inputWrapperStyle?: React.ComponentProps<typeof Composer>["inputWrapperStyle"];
   } = {},
 ) {
   act(() => {
@@ -1019,6 +1023,15 @@ describe("Composer attachments", () => {
 
     expect(countMessageInputRenders()).toBe(renderCountBeforeLoading + 1);
     expect(document.querySelector('[aria-label="Send message"]')).toHaveProperty("disabled", true);
+  });
+
+  it("applies inputWrapperStyle to the visible composer frame", () => {
+    renderComposer({ inputWrapperStyle: { borderWidth: 0 } });
+
+    const root = queryByTestId("message-input-root");
+    const frame = root?.firstElementChild?.firstElementChild as HTMLElement | null;
+
+    expect(frame?.style.borderWidth).toBe("0px");
   });
 
   it("enables dictation from server capabilities before the agent directory finishes loading", () => {

@@ -12,6 +12,7 @@ import {
   type WorkspaceSetupSnapshot,
   type WorkspaceDescriptorPayload,
 } from "./messages.js";
+import type { WorktreePersona } from "../shared/worktree-persona.js";
 import type { PersistedWorkspaceRecord } from "./workspace-registry.js";
 import type { WorkspaceGitService } from "./workspace-git-service.js";
 import { normalizeWorkspaceId as normalizePersistedWorkspaceId } from "./workspace-registry-model.js";
@@ -149,6 +150,7 @@ export async function buildAgentSessionConfig(
   gitOptions?: GitSetupOptions,
   legacyWorktreeName?: string,
   attachments?: AgentAttachment[],
+  worktreePersona?: WorktreePersona | null,
 ): Promise<{
   sessionConfig: AgentSessionConfig;
   worktreeBootstrap?: { worktree: WorktreeConfig; shouldBootstrap: boolean };
@@ -180,6 +182,7 @@ export async function buildAgentSessionConfig(
         action: normalized.action,
         githubPrNumber: normalized.githubPrNumber,
         attachments,
+        ...(worktreePersona !== undefined ? { worktreePersona } : {}),
         runSetup: false,
         paseoHome: dependencies.paseoHome,
       },
@@ -594,6 +597,7 @@ export async function handleCreatePaseoWorktreeRequest(
     const createdWorktree = await dependencies.createPaseoWorktree({
       cwd: request.cwd,
       worktreeSlug: request.worktreeSlug,
+      worktreePersona: request.worktreePersona,
       refName: request.refName,
       action: request.action,
       githubPrNumber: request.githubPrNumber,
