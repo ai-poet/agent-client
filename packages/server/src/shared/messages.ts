@@ -48,6 +48,48 @@ import {
   LoopLogsResponseSchema,
   LoopStopResponseSchema,
 } from "../server/loop/rpc-schemas.js";
+import {
+  MemoryListRequestSchema,
+  MemoryGetRequestSchema,
+  MemoryCreateRequestSchema,
+  MemoryUpdateRequestSchema,
+  MemoryDeleteRequestSchema,
+  SkillsListRequestSchema,
+  SkillsImportRequestSchema,
+  SkillsExportRequestSchema,
+  PromptsListRequestSchema,
+  PromptsCreateRequestSchema,
+  PromptsUpdateRequestSchema,
+  PromptsDeleteRequestSchema,
+  PromptsRenderRequestSchema,
+  McpListRequestSchema,
+  McpUpsertRequestSchema,
+  McpDeleteRequestSchema,
+  McpTestRequestSchema,
+  MemoryListResponseSchema,
+  MemoryGetResponseSchema,
+  MemoryCreateResponseSchema,
+  MemoryUpdateResponseSchema,
+  MemoryDeleteResponseSchema,
+  SkillsListResponseSchema,
+  SkillsImportResponseSchema,
+  SkillsExportResponseSchema,
+  PromptsListResponseSchema,
+  PromptsCreateResponseSchema,
+  PromptsUpdateResponseSchema,
+  PromptsDeleteResponseSchema,
+  PromptsRenderResponseSchema,
+  McpListResponseSchema,
+  McpUpsertResponseSchema,
+  McpDeleteResponseSchema,
+  McpTestResponseSchema,
+  type ProjectMemoryItem,
+  type ProjectMemoryKind,
+  type PromptTemplate,
+  type ManagedSkillEntry,
+  type McpServerProfile,
+  type ContextHubMcpServerConfig,
+} from "../server/context-hub/rpc-schemas.js";
 // ---------------------------------------------------------------------------
 // Mutable daemon config schemas (shared between server store and client)
 // ---------------------------------------------------------------------------
@@ -805,6 +847,10 @@ export const SendAgentMessageRequestSchema = z.object({
   hidden: z.boolean().optional(),
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,
+  memoryIds: z.array(z.string()).optional(),
+  useWorkspaceMemory: z.boolean().optional(),
+  promptTemplateId: z.string().optional(),
+  mcpServerIds: z.array(z.string()).optional(),
 });
 
 export const WaitForFinishRequestSchema = z.object({
@@ -881,6 +927,10 @@ export const CreateAgentRequestMessageSchema = z.object({
   attachments: AgentAttachmentsSchema,
   git: GitSetupOptionsSchema.optional(),
   labels: z.record(z.string()).default({}),
+  memoryIds: z.array(z.string()).optional(),
+  useWorkspaceMemory: z.boolean().optional(),
+  promptTemplateId: z.string().optional(),
+  mcpServerIds: z.array(z.string()).optional(),
   requestId: z.string(),
 });
 
@@ -1655,6 +1705,23 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ChatPostRequestSchema,
   ChatReadRequestSchema,
   ChatWaitRequestSchema,
+  MemoryListRequestSchema,
+  MemoryGetRequestSchema,
+  MemoryCreateRequestSchema,
+  MemoryUpdateRequestSchema,
+  MemoryDeleteRequestSchema,
+  SkillsListRequestSchema,
+  SkillsImportRequestSchema,
+  SkillsExportRequestSchema,
+  PromptsListRequestSchema,
+  PromptsCreateRequestSchema,
+  PromptsUpdateRequestSchema,
+  PromptsDeleteRequestSchema,
+  PromptsRenderRequestSchema,
+  McpListRequestSchema,
+  McpUpsertRequestSchema,
+  McpDeleteRequestSchema,
+  McpTestRequestSchema,
   ScheduleCreateRequestSchema,
   ScheduleListRequestSchema,
   ScheduleInspectRequestSchema,
@@ -3266,6 +3333,23 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ChatPostResponseSchema,
   ChatReadResponseSchema,
   ChatWaitResponseSchema,
+  MemoryListResponseSchema,
+  MemoryGetResponseSchema,
+  MemoryCreateResponseSchema,
+  MemoryUpdateResponseSchema,
+  MemoryDeleteResponseSchema,
+  SkillsListResponseSchema,
+  SkillsImportResponseSchema,
+  SkillsExportResponseSchema,
+  PromptsListResponseSchema,
+  PromptsCreateResponseSchema,
+  PromptsUpdateResponseSchema,
+  PromptsDeleteResponseSchema,
+  PromptsRenderResponseSchema,
+  McpListResponseSchema,
+  McpUpsertResponseSchema,
+  McpDeleteResponseSchema,
+  McpTestResponseSchema,
   ScheduleCreateResponseSchema,
   ScheduleListResponseSchema,
   ScheduleInspectResponseSchema,
@@ -3371,6 +3455,29 @@ export type ChatDeleteResponse = z.infer<typeof ChatDeleteResponseSchema>;
 export type ChatPostResponse = z.infer<typeof ChatPostResponseSchema>;
 export type ChatReadResponse = z.infer<typeof ChatReadResponseSchema>;
 export type ChatWaitResponse = z.infer<typeof ChatWaitResponseSchema>;
+export type ContextHubProjectMemoryItem = ProjectMemoryItem;
+export type ContextHubProjectMemoryKind = ProjectMemoryKind;
+export type ContextHubPromptTemplate = PromptTemplate;
+export type ContextHubManagedSkillEntry = ManagedSkillEntry;
+export type ContextHubMcpServerProfile = McpServerProfile;
+export type ContextHubMcpServerConfigPayload = ContextHubMcpServerConfig;
+export type MemoryListResponse = z.infer<typeof MemoryListResponseSchema>;
+export type MemoryGetResponse = z.infer<typeof MemoryGetResponseSchema>;
+export type MemoryCreateResponse = z.infer<typeof MemoryCreateResponseSchema>;
+export type MemoryUpdateResponse = z.infer<typeof MemoryUpdateResponseSchema>;
+export type MemoryDeleteResponse = z.infer<typeof MemoryDeleteResponseSchema>;
+export type SkillsListResponse = z.infer<typeof SkillsListResponseSchema>;
+export type SkillsImportResponse = z.infer<typeof SkillsImportResponseSchema>;
+export type SkillsExportResponse = z.infer<typeof SkillsExportResponseSchema>;
+export type PromptsListResponse = z.infer<typeof PromptsListResponseSchema>;
+export type PromptsCreateResponse = z.infer<typeof PromptsCreateResponseSchema>;
+export type PromptsUpdateResponse = z.infer<typeof PromptsUpdateResponseSchema>;
+export type PromptsDeleteResponse = z.infer<typeof PromptsDeleteResponseSchema>;
+export type PromptsRenderResponse = z.infer<typeof PromptsRenderResponseSchema>;
+export type McpListResponse = z.infer<typeof McpListResponseSchema>;
+export type McpUpsertResponse = z.infer<typeof McpUpsertResponseSchema>;
+export type McpDeleteResponse = z.infer<typeof McpDeleteResponseSchema>;
+export type McpTestResponse = z.infer<typeof McpTestResponseSchema>;
 export type ScheduleCreateResponse = z.infer<typeof ScheduleCreateResponseSchema>;
 export type ScheduleListResponse = z.infer<typeof ScheduleListResponseSchema>;
 export type ScheduleInspectResponse = z.infer<typeof ScheduleInspectResponseSchema>;

@@ -359,6 +359,23 @@ export function buildHostOpenProjectRoute(serverId: string) {
   return `${base}/open-project` as const;
 }
 
+export function buildHostSimpleRoute(serverId: string) {
+  const base = buildHostRootRoute(serverId);
+  if (base === "/") {
+    return "/" as const;
+  }
+  return `${base}/simple` as const;
+}
+
+export function buildHostSimpleAgentRoute(serverId: string, agentId: string) {
+  const base = buildHostSimpleRoute(serverId);
+  const normalizedAgentId = trimNonEmpty(agentId);
+  if (base === "/" || !normalizedAgentId) {
+    return "/" as const;
+  }
+  return `${base}/agent/${encodeSegment(normalizedAgentId)}` as const;
+}
+
 export function buildHostNewWorkspaceRoute(
   serverId: string,
   sourceDirectory: string,
@@ -382,6 +399,7 @@ export const SETTINGS_SECTION_SLUGS = [
   "managed-provider",
   "shortcuts",
   "integrations",
+  "ai-context",
   "permissions",
   "diagnostics",
   "about",
@@ -449,6 +467,9 @@ export function mapPathnameToServer(pathname: string, nextServerId: string) {
   }
   if (suffix.startsWith("open-project")) {
     return `${base}/open-project` as const;
+  }
+  if (suffix.startsWith("simple")) {
+    return `${base}/${suffix}` as const;
   }
   const workspaceRoute = parseHostWorkspaceRouteFromPathname(pathname);
   if (workspaceRoute) {

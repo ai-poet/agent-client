@@ -138,6 +138,25 @@ export const agentPanelRegistration: PanelRegistration<"agent"> = {
   useDescriptor: useAgentPanelDescriptor,
 };
 
+export function StandaloneAgentConversation({
+  serverId,
+  agentId,
+  isFocused = true,
+}: {
+  serverId: string;
+  agentId: string;
+  isFocused?: boolean;
+}) {
+  return (
+    <AgentPanelContent
+      serverId={serverId}
+      agentId={agentId}
+      isPaneFocused={isFocused}
+      simpleMode
+    />
+  );
+}
+
 const EMPTY_STREAM_ITEMS: StreamItem[] = [];
 const EMPTY_PENDING_PERMISSIONS = new Map<string, PendingPermission>();
 const EMPTY_PENDING_PERMISSION_LIST: PendingPermission[] = [];
@@ -191,11 +210,13 @@ function AgentPanelContent({
   agentId,
   isPaneFocused,
   onOpenWorkspaceFile,
+  simpleMode = false,
 }: {
   serverId: string;
   agentId: string;
   isPaneFocused: boolean;
   onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+  simpleMode?: boolean;
 }) {
   const resolvedAgentId = agentId.trim() || undefined;
   const resolvedServerId = serverId.trim() || undefined;
@@ -238,6 +259,7 @@ function AgentPanelContent({
       isConnected={runtimeIsConnected}
       connectionStatus={connectionStatus}
       onOpenWorkspaceFile={onOpenWorkspaceFile}
+      simpleMode={simpleMode}
     />
   );
 }
@@ -250,6 +272,7 @@ function AgentPanelBody({
   isConnected,
   connectionStatus,
   onOpenWorkspaceFile,
+  simpleMode = false,
 }: {
   serverId: string;
   agentId?: string;
@@ -258,6 +281,7 @@ function AgentPanelBody({
   isConnected: boolean;
   connectionStatus: HostRuntimeConnectionStatus;
   onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+  simpleMode?: boolean;
 }) {
   const { theme } = useUnistyles();
   const { isArchivingAgent } = useArchiveAgent();
@@ -427,6 +451,7 @@ function AgentPanelBody({
       isConnected={isConnected}
       connectionStatus={connectionStatus}
       onOpenWorkspaceFile={onOpenWorkspaceFile}
+      simpleMode={simpleMode}
     />
   );
 }
@@ -439,6 +464,7 @@ function ChatAgentContent({
   isConnected,
   connectionStatus,
   onOpenWorkspaceFile,
+  simpleMode = false,
 }: {
   serverId: string;
   agentId?: string;
@@ -447,6 +473,7 @@ function ChatAgentContent({
   isConnected: boolean;
   connectionStatus: HostRuntimeConnectionStatus;
   onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+  simpleMode?: boolean;
 }) {
   const { theme } = useUnistyles();
   const panelToast = useToastHost();
@@ -891,6 +918,7 @@ function ChatAgentContent({
                 routeBottomAnchorRequest={routeBottomAnchorRequest}
                 hasAppliedAuthoritativeHistory={hasAppliedAuthoritativeHistory}
                 onOpenWorkspaceFile={onOpenWorkspaceFile}
+                simpleMode={simpleMode}
               />
             </ReanimatedAnimated.View>
           </View>
@@ -948,6 +976,7 @@ function AgentStreamSection({
   routeBottomAnchorRequest,
   hasAppliedAuthoritativeHistory,
   onOpenWorkspaceFile,
+  simpleMode = false,
 }: {
   streamViewRef: React.RefObject<AgentStreamViewHandle | null>;
   serverId: string;
@@ -959,6 +988,7 @@ function AgentStreamSection({
   routeBottomAnchorRequest: RouteBottomAnchorRequest;
   hasAppliedAuthoritativeHistory: boolean;
   onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+  simpleMode?: boolean;
 }) {
   const streamItemsRaw = useSessionStore((state) =>
     agentId ? state.sessions[serverId]?.agentStreamTail?.get(agentId) : undefined,
@@ -1086,6 +1116,7 @@ function AgentStreamSection({
       routeBottomAnchorRequest={routeBottomAnchorRequest}
       isAuthoritativeHistoryReady={hasAppliedAuthoritativeHistory}
       onOpenWorkspaceFile={onOpenWorkspaceFile}
+      simpleMode={simpleMode}
     />
   );
 }

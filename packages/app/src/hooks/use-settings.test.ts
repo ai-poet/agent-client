@@ -70,6 +70,8 @@ describe("use-settings", () => {
       sendBehavior: "interrupt",
       releaseChannel: "stable",
       accessMode: null,
+      experienceMode: "developer",
+      simpleTaskFolder: "",
       setupCheckCompleted: false,
       onboardingGuideCompleted: false,
       language: "auto",
@@ -91,6 +93,66 @@ describe("use-settings", () => {
     const result = await mod.loadSettingsFromStorage();
 
     expect(result.onboardingGuideCompleted).toBe(true);
+  });
+
+  it("defaults new users to no selected experience mode", async () => {
+    asyncStorageMock.getItem.mockResolvedValue(null);
+    asyncStorageMock.setItem.mockResolvedValue();
+
+    const mod = await import("./use-settings");
+    const result = await mod.loadSettingsFromStorage();
+
+    expect(result.experienceMode).toBeNull();
+  });
+
+  it("migrates existing app settings without an experience mode to developer", async () => {
+    asyncStorageMock.getItem.mockImplementation(async (key: string) => {
+      if (key === "@paseo:app-settings") {
+        return JSON.stringify({
+          accessMode: "byok",
+        });
+      }
+      return null;
+    });
+
+    const mod = await import("./use-settings");
+    const result = await mod.loadSettingsFromStorage();
+
+    expect(result.experienceMode).toBe("developer");
+  });
+
+  it("loads persisted simple experience mode and task folder", async () => {
+    asyncStorageMock.getItem.mockImplementation(async (key: string) => {
+      if (key === "@paseo:app-settings") {
+        return JSON.stringify({
+          experienceMode: "simple",
+          simpleTaskFolder: "/Users/me/Tasks",
+        });
+      }
+      return null;
+    });
+
+    const mod = await import("./use-settings");
+    const result = await mod.loadSettingsFromStorage();
+
+    expect(result.experienceMode).toBe("simple");
+    expect(result.simpleTaskFolder).toBe("/Users/me/Tasks");
+  });
+
+  it("resets invalid experience mode to unselected", async () => {
+    asyncStorageMock.getItem.mockImplementation(async (key: string) => {
+      if (key === "@paseo:app-settings") {
+        return JSON.stringify({
+          experienceMode: "expert",
+        });
+      }
+      return null;
+    });
+
+    const mod = await import("./use-settings");
+    const result = await mod.loadSettingsFromStorage();
+
+    expect(result.experienceMode).toBeNull();
   });
 
   it("defaults invalid onboarding completion state to incomplete", async () => {

@@ -188,6 +188,7 @@ import type pino from "pino";
 import { resolveClientMessageId } from "./client-message-id.js";
 import { ChatServiceError, FileBackedChatService } from "./chat/chat-service.js";
 import { notifyChatMentions } from "./chat/chat-mentions.js";
+import { ContextHubService } from "./context-hub/service.js";
 import { LoopService } from "./loop-service.js";
 import { ScheduleService } from "./schedule/service.js";
 import { execCommand } from "../utils/spawn.js";
@@ -502,6 +503,7 @@ export type SessionOptions = {
   projectRegistry: ProjectRegistry;
   workspaceRegistry: WorkspaceRegistry;
   chatService: FileBackedChatService;
+  contextHubService?: ContextHubService;
   scheduleService: ScheduleService;
   loopService: LoopService;
   checkoutDiffManager: CheckoutDiffManager;
@@ -676,6 +678,7 @@ export class Session {
   private readonly projectRegistry: ProjectRegistry;
   private readonly workspaceRegistry: WorkspaceRegistry;
   private readonly chatService: FileBackedChatService;
+  private readonly contextHubService: ContextHubService;
   private readonly scheduleService: ScheduleService;
   private readonly loopService: LoopService;
   private readonly checkoutDiffManager: CheckoutDiffManager;
@@ -771,6 +774,7 @@ export class Session {
       projectRegistry,
       workspaceRegistry,
       chatService,
+      contextHubService,
       scheduleService,
       loopService,
       checkoutDiffManager,
@@ -815,6 +819,12 @@ export class Session {
     this.projectRegistry = projectRegistry;
     this.workspaceRegistry = workspaceRegistry;
     this.chatService = chatService;
+    this.contextHubService =
+      contextHubService ??
+      new ContextHubService({
+        paseoHome,
+        logger: this.sessionLogger.child({ module: "context-hub" }),
+      });
     this.scheduleService = scheduleService;
     this.loopService = loopService;
     this.checkoutDiffManager = checkoutDiffManager;
@@ -1367,6 +1377,66 @@ export class Session {
     return workspaces.find((workspace) => workspace.cwd === normalizedCwd) ?? null;
   }
 
+  private async resolveContextHubWorkspaceCwd(workspaceId?: string | null): Promise<string | null> {
+    if (!workspaceId) {
+      return null;
+    }
+    const workspace = await this.workspaceRegistry.get(workspaceId);
+    return workspace?.cwd ?? null;
+  }
+
+  private async resolveWorkspaceIdForAgent(agentId: string): Promise<string | null> {
+    const agent = this.agentManager.getAgent(agentId);
+    const cwd = agent?.config.cwd;
+    if (!cwd) {
+      return null;
+    }
+    const workspace =
+      (await this.findWorkspaceByDirectory(cwd)) ?? (await this.findOrCreateWorkspaceForDirectory(cwd));
+    return workspace.workspaceId;
+  }
+
+  private async buildContextHubPromptText(
+    text: string,
+    options: {
+      workspaceId?: string | null;
+      agentId?: string;
+      memoryIds?: string[];
+      useWorkspaceMemory?: boolean;
+      promptTemplateId?: string;
+    },
+  ): Promise<string> {
+    let promptText = text;
+    if (options.promptTemplateId?.trim()) {
+      const rendered = await this.contextHubService.renderPrompt({
+        promptId: options.promptTemplateId,
+        argumentsText: text,
+        recordUsage: true,
+      });
+      promptText = rendered.text;
+    }
+
+    const shouldRenderMemory =
+      (options.memoryIds?.length ?? 0) > 0 || options.useWorkspaceMemory === true;
+    if (!shouldRenderMemory) {
+      return promptText;
+    }
+
+    const workspaceId =
+      options.workspaceId ??
+      (options.agentId ? await this.resolveWorkspaceIdForAgent(options.agentId) : null);
+    if (!workspaceId) {
+      return promptText;
+    }
+
+    const memoryContext = await this.contextHubService.renderProjectMemoryContext({
+      workspaceId,
+      memoryIds: options.memoryIds,
+      useWorkspaceMemory: options.useWorkspaceMemory,
+    });
+    return memoryContext ? `${memoryContext}\n\n${promptText}` : promptText;
+  }
+
   private async resolveWorkspaceDirectory(cwd: string): Promise<string> {
     const normalizedCwd = normalizePersistedWorkspaceId(cwd);
     try {
@@ -1901,6 +1971,74 @@ export class Session {
 
           case "chat/wait":
             await this.handleChatWaitRequest(msg);
+            break;
+
+          case "memory/list":
+            await this.handleMemoryListRequest(msg);
+            break;
+
+          case "memory/get":
+            await this.handleMemoryGetRequest(msg);
+            break;
+
+          case "memory/create":
+            await this.handleMemoryCreateRequest(msg);
+            break;
+
+          case "memory/update":
+            await this.handleMemoryUpdateRequest(msg);
+            break;
+
+          case "memory/delete":
+            await this.handleMemoryDeleteRequest(msg);
+            break;
+
+          case "skills/list":
+            await this.handleSkillsListRequest(msg);
+            break;
+
+          case "skills/import":
+            await this.handleSkillsImportRequest(msg);
+            break;
+
+          case "skills/export":
+            await this.handleSkillsExportRequest(msg);
+            break;
+
+          case "prompts/list":
+            await this.handlePromptsListRequest(msg);
+            break;
+
+          case "prompts/create":
+            await this.handlePromptsCreateRequest(msg);
+            break;
+
+          case "prompts/update":
+            await this.handlePromptsUpdateRequest(msg);
+            break;
+
+          case "prompts/delete":
+            await this.handlePromptsDeleteRequest(msg);
+            break;
+
+          case "prompts/render":
+            await this.handlePromptsRenderRequest(msg);
+            break;
+
+          case "mcp/list":
+            await this.handleMcpListRequest(msg);
+            break;
+
+          case "mcp/upsert":
+            await this.handleMcpUpsertRequest(msg);
+            break;
+
+          case "mcp/delete":
+            await this.handleMcpDeleteRequest(msg);
+            break;
+
+          case "mcp/test":
+            await this.handleMcpTestRequest(msg);
             break;
 
           case "schedule/create":
@@ -2749,7 +2887,14 @@ export class Session {
     images?: Array<{ data: string; mimeType: string }>,
     attachments?: AgentAttachment[],
     runOptions?: AgentRunOptions,
-    options?: { spokenInput?: boolean; hidden?: boolean },
+    options?: {
+      spokenInput?: boolean;
+      hidden?: boolean;
+      workspaceId?: string | null;
+      memoryIds?: string[];
+      useWorkspaceMemory?: boolean;
+      promptTemplateId?: string;
+    },
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     this.sessionLogger.info(
       {
@@ -2768,7 +2913,14 @@ export class Session {
       }`,
     );
 
-    const promptText = options?.spokenInput ? wrapSpokenInput(text) : text;
+    const contextText = await this.buildContextHubPromptText(text, {
+      agentId,
+      workspaceId: options?.workspaceId,
+      memoryIds: options?.memoryIds,
+      useWorkspaceMemory: options?.useWorkspaceMemory,
+      promptTemplateId: options?.promptTemplateId,
+    });
+    const promptText = options?.spokenInput ? wrapSpokenInput(contextText) : contextText;
     const prompt = this.buildAgentPrompt(promptText, images, attachments);
 
     try {
@@ -2811,6 +2963,10 @@ export class Session {
       attachments,
       labels,
       worktreePersona,
+      memoryIds,
+      useWorkspaceMemory,
+      promptTemplateId,
+      mcpServerIds,
     } = msg;
     this.sessionLogger.info(
       { cwd: config.cwd, provider: config.provider, worktreeName },
@@ -2854,11 +3010,24 @@ export class Session {
       const systemPrompt = [personaSystemPrompt, sessionConfig.systemPrompt]
         .filter((part): part is string => Boolean(part?.trim()))
         .join("\n\n");
+      const selectedMcpServers = await this.contextHubService.resolveMcpServers({
+        ids: mcpServerIds,
+        workspaceId: resolvedWorkspace.workspaceId,
+        provider: sessionConfig.provider,
+      });
+      const mergedMcpServers =
+        Object.keys(selectedMcpServers).length > 0 || sessionConfig.mcpServers
+          ? {
+              ...selectedMcpServers,
+              ...sessionConfig.mcpServers,
+            }
+          : undefined;
       const snapshot = await this.agentManager.createAgent(
         {
           ...sessionConfig,
           cwd: resolvedWorkspace.cwd,
           ...(systemPrompt ? { systemPrompt } : {}),
+          ...(mergedMcpServers ? { mcpServers: mergedMcpServers } : {}),
         },
         undefined,
         {
@@ -2890,6 +3059,12 @@ export class Session {
           images,
           attachments,
           outputSchema ? { outputSchema } : undefined,
+          {
+            workspaceId: resolvedWorkspace.workspaceId,
+            memoryIds,
+            useWorkspaceMemory,
+            promptTemplateId,
+          },
         );
         if (!started.ok) {
           throw new Error(started.error);
@@ -7284,13 +7459,20 @@ export class Session {
     try {
       const agentId = resolved.agentId;
 
-      const prompt = this.buildAgentPrompt(msg.text, msg.images, msg.attachments);
+      const effectiveText = await this.buildContextHubPromptText(msg.text, {
+        agentId,
+        memoryIds: msg.memoryIds,
+        useWorkspaceMemory: msg.useWorkspaceMemory,
+        promptTemplateId: msg.promptTemplateId,
+      });
+      const prompt = this.buildAgentPrompt(effectiveText, msg.images, msg.attachments);
       this.sessionLogger.trace(
         {
           agentId,
           messageId: msg.messageId,
           hidden: msg.hidden === true,
           textPrefix: msg.text.slice(0, 80),
+          contextHubApplied: effectiveText !== msg.text,
         },
         "send_agent_message_request: dispatching shared sendPromptToAgent",
       );
@@ -8406,6 +8588,359 @@ export class Session {
       });
     } catch (error) {
       this.emitChatRpcError(request, error);
+    }
+  }
+
+  private emitContextHubRpcError(request: { requestId: string; type: string }, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.sessionLogger.error(
+      { err: error, requestType: request.type },
+      "Context hub request failed",
+    );
+    this.emit({
+      type: "rpc_error",
+      payload: {
+        requestId: request.requestId,
+        requestType: request.type,
+        error: message,
+        code: "context_hub_request_failed",
+      },
+    });
+  }
+
+  private async handleMemoryListRequest(
+    request: Extract<SessionInboundMessage, { type: "memory/list" }>,
+  ): Promise<void> {
+    try {
+      const result = await this.contextHubService.listMemory(request);
+      this.emit({
+        type: "memory/list/response",
+        payload: {
+          requestId: request.requestId,
+          items: result.items,
+          total: result.total,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMemoryGetRequest(
+    request: Extract<SessionInboundMessage, { type: "memory/get" }>,
+  ): Promise<void> {
+    try {
+      const item = await this.contextHubService.getMemory(request.workspaceId, request.memoryId);
+      this.emit({
+        type: "memory/get/response",
+        payload: {
+          requestId: request.requestId,
+          item,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMemoryCreateRequest(
+    request: Extract<SessionInboundMessage, { type: "memory/create" }>,
+  ): Promise<void> {
+    try {
+      const item = await this.contextHubService.createMemory(request.input);
+      this.emit({
+        type: "memory/create/response",
+        payload: {
+          requestId: request.requestId,
+          item,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMemoryUpdateRequest(
+    request: Extract<SessionInboundMessage, { type: "memory/update" }>,
+  ): Promise<void> {
+    try {
+      const item = await this.contextHubService.updateMemory(
+        request.workspaceId,
+        request.memoryId,
+        request.patch,
+      );
+      this.emit({
+        type: "memory/update/response",
+        payload: {
+          requestId: request.requestId,
+          item,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMemoryDeleteRequest(
+    request: Extract<SessionInboundMessage, { type: "memory/delete" }>,
+  ): Promise<void> {
+    try {
+      const item = await this.contextHubService.deleteMemory(request.workspaceId, request.memoryId);
+      this.emit({
+        type: "memory/delete/response",
+        payload: {
+          requestId: request.requestId,
+          item,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleSkillsListRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/list" }>,
+  ): Promise<void> {
+    try {
+      const cwd = request.cwd ?? (await this.resolveContextHubWorkspaceCwd(request.workspaceId));
+      const skills = await this.contextHubService.listSkills({
+        workspaceId: request.workspaceId,
+        cwd,
+        includeContent: request.includeContent,
+      });
+      this.emit({
+        type: "skills/list/response",
+        payload: {
+          requestId: request.requestId,
+          skills,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleSkillsImportRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/import" }>,
+  ): Promise<void> {
+    try {
+      const skill = await this.contextHubService.importSkill({
+        name: request.name,
+        content: request.content,
+        description: request.description,
+      });
+      this.emit({
+        type: "skills/import/response",
+        payload: {
+          requestId: request.requestId,
+          skill,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleSkillsExportRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/export" }>,
+  ): Promise<void> {
+    try {
+      const cwd = request.cwd ?? (await this.resolveContextHubWorkspaceCwd(request.workspaceId));
+      const result = await this.contextHubService.exportSkill({
+        skillId: request.skillId,
+        workspaceId: request.workspaceId,
+        cwd,
+      });
+      this.emit({
+        type: "skills/export/response",
+        payload: {
+          requestId: request.requestId,
+          skill: result.skill,
+          content: result.content,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handlePromptsListRequest(
+    request: Extract<SessionInboundMessage, { type: "prompts/list" }>,
+  ): Promise<void> {
+    try {
+      const prompts = await this.contextHubService.listPrompts({
+        workspaceId: request.workspaceId,
+        includeDeleted: request.includeDeleted,
+      });
+      this.emit({
+        type: "prompts/list/response",
+        payload: {
+          requestId: request.requestId,
+          prompts,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handlePromptsCreateRequest(
+    request: Extract<SessionInboundMessage, { type: "prompts/create" }>,
+  ): Promise<void> {
+    try {
+      const prompt = await this.contextHubService.createPrompt(request.input);
+      this.emit({
+        type: "prompts/create/response",
+        payload: {
+          requestId: request.requestId,
+          prompt,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handlePromptsUpdateRequest(
+    request: Extract<SessionInboundMessage, { type: "prompts/update" }>,
+  ): Promise<void> {
+    try {
+      const prompt = await this.contextHubService.updatePrompt(request.promptId, request.patch);
+      this.emit({
+        type: "prompts/update/response",
+        payload: {
+          requestId: request.requestId,
+          prompt,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handlePromptsDeleteRequest(
+    request: Extract<SessionInboundMessage, { type: "prompts/delete" }>,
+  ): Promise<void> {
+    try {
+      const promptId = await this.contextHubService.deletePrompt(request.promptId);
+      this.emit({
+        type: "prompts/delete/response",
+        payload: {
+          requestId: request.requestId,
+          promptId,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handlePromptsRenderRequest(
+    request: Extract<SessionInboundMessage, { type: "prompts/render" }>,
+  ): Promise<void> {
+    try {
+      const result = await this.contextHubService.renderPrompt({
+        promptId: request.promptId,
+        variables: request.variables,
+        argumentsText: request.argumentsText,
+        recordUsage: request.recordUsage,
+      });
+      this.emit({
+        type: "prompts/render/response",
+        payload: {
+          requestId: request.requestId,
+          text: result.text,
+          prompt: result.prompt,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMcpListRequest(
+    request: Extract<SessionInboundMessage, { type: "mcp/list" }>,
+  ): Promise<void> {
+    try {
+      const profiles = await this.contextHubService.listMcpProfiles();
+      this.emit({
+        type: "mcp/list/response",
+        payload: {
+          requestId: request.requestId,
+          profiles,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMcpUpsertRequest(
+    request: Extract<SessionInboundMessage, { type: "mcp/upsert" }>,
+  ): Promise<void> {
+    try {
+      const profile = await this.contextHubService.upsertMcpProfile(request.profile);
+      this.emit({
+        type: "mcp/upsert/response",
+        payload: {
+          requestId: request.requestId,
+          profile,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMcpDeleteRequest(
+    request: Extract<SessionInboundMessage, { type: "mcp/delete" }>,
+  ): Promise<void> {
+    try {
+      const profileId = await this.contextHubService.deleteMcpProfile(request.profileId);
+      this.emit({
+        type: "mcp/delete/response",
+        payload: {
+          requestId: request.requestId,
+          profileId,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMcpTestRequest(
+    request: Extract<SessionInboundMessage, { type: "mcp/test" }>,
+  ): Promise<void> {
+    try {
+      const result = await this.contextHubService.testMcpProfile(request.profile);
+      this.emit({
+        type: "mcp/test/response",
+        payload: {
+          requestId: request.requestId,
+          ok: result.ok,
+          message: result.message,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
     }
   }
 

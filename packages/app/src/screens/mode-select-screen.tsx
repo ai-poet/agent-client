@@ -1,11 +1,18 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { useRouter } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ArrowRight, Cloud, KeyRound } from "lucide-react-native";
+import { ArrowRight, Cloud, Code2, KeyRound, Sparkles } from "lucide-react-native";
 import { PaseoLogo } from "@/components/icons/paseo-logo";
-import { useAppSettings, type AccessMode } from "@/hooks/use-settings";
+import { useAppSettings, type AccessMode, type ExperienceMode } from "@/hooks/use-settings";
 import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 import { getSub2APIMessages } from "@/i18n/sub2api";
 import { CLOUD_NAME } from "@/config/branding";
@@ -26,7 +33,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   content: {
     width: "100%",
-    maxWidth: 560,
+    maxWidth: 760,
     alignItems: "center",
     gap: theme.spacing[6],
   },
@@ -49,7 +56,12 @@ const styles = StyleSheet.create((theme) => ({
     width: "100%",
     gap: theme.spacing[4],
   },
+  cardsWide: {
+    flexDirection: "row",
+    alignItems: "stretch",
+  },
   card: {
+    flex: 1,
     padding: theme.spacing[4],
     borderRadius: theme.borderRadius.xl,
     backgroundColor: theme.colors.surface2,
@@ -120,16 +132,35 @@ const styles = StyleSheet.create((theme) => ({
 export function ModeSelectScreen() {
   const { theme } = useUnistyles();
   const insets = useSafeAreaInsets();
+  const dimensions = useWindowDimensions();
   const router = useRouter();
-  const { updateSettings } = useAppSettings();
+  const { settings, updateSettings } = useAppSettings();
   const locale = useSub2APILocale();
   const text = useMemo(() => getSub2APIMessages(locale).modeSelect, [locale]);
-  const [pending, setPending] = useState<AccessMode | null>(null);
+  const isExperienceSelect = settings.experienceMode === null;
+  const [pendingConnection, setPendingConnection] = useState<AccessMode | null>(null);
+  const [pendingExperience, setPendingExperience] = useState<ExperienceMode | null>(null);
+  const useWideCards = dimensions.width >= 720;
+
+  const pickExperience = useCallback(
+    async (mode: ExperienceMode) => {
+      if (pendingExperience) return;
+      setPendingExperience(mode);
+      try {
+        await updateSettings({ experienceMode: mode });
+      } catch (error) {
+        console.error("[mode-select] failed to save experience mode", error);
+      } finally {
+        setPendingExperience(null);
+      }
+    },
+    [pendingExperience, updateSettings],
+  );
 
   const pickMode = useCallback(
     async (mode: AccessMode) => {
-      if (pending) return;
-      setPending(mode);
+      if (pendingConnection) return;
+      setPendingConnection(mode);
       try {
         await updateSettings({ accessMode: mode, setupCheckCompleted: false });
         if (mode === "builtin") {
@@ -139,10 +170,10 @@ export function ModeSelectScreen() {
         }
       } catch (error) {
         console.error("[mode-select] failed to save mode", error);
-        setPending(null);
+        setPendingConnection(null);
       }
     },
-    [pending, router, updateSettings],
+    [pendingConnection, router, updateSettings],
   );
 
   return (
@@ -162,34 +193,68 @@ export function ModeSelectScreen() {
         <View style={styles.content}>
           <PaseoLogo size={96} />
           <View style={styles.copyBlock}>
-            <Text style={styles.title}>{text.title}</Text>
-            <Text style={styles.subtitle}>{text.subtitle(CLOUD_NAME)}</Text>
+            <Text style={styles.title}>
+              {isExperienceSelect ? text.experienceTitle : text.title}
+            </Text>
+            <Text style={styles.subtitle}>
+              {isExperienceSelect ? text.experienceSubtitle : text.subtitle(CLOUD_NAME)}
+            </Text>
           </View>
 
-          <View style={styles.cards}>
-            <ModeCard
-              icon={<Cloud size={20} color={theme.colors.accent} />}
-              title={CLOUD_NAME}
-              description={text.cloudDescription}
-              metaText={text.signInMeta}
-              recommendedLabel={text.recommended}
-              metaAccent
-              recommended
-              disabled={pending !== null && pending !== "builtin"}
-              loading={pending === "builtin"}
-              testID="mode-select-builtin"
-              onPress={() => void pickMode("builtin")}
-            />
-            <ModeCard
-              icon={<KeyRound size={20} color={theme.colors.foreground} />}
-              title="BYOK"
-              description={text.byokDescription}
-              metaText={text.noSignInMeta}
-              disabled={pending !== null && pending !== "byok"}
-              loading={pending === "byok"}
-              testID="mode-select-byok"
-              onPress={() => void pickMode("byok")}
-            />
+          <View style={[styles.cards, useWideCards ? styles.cardsWide : null]}>
+            {isExperienceSelect ? (
+              <>
+                <ModeCard
+                  icon={<Code2 size={20} color={theme.colors.foreground} />}
+                  title={text.developerTitle}
+                  description={text.developerDescription}
+                  metaText={text.developerMeta}
+                  disabled={pendingExperience !== null && pendingExperience !== "developer"}
+                  loading={pendingExperience === "developer"}
+                  testID="mode-select-developer"
+                  onPress={() => void pickExperience("developer")}
+                />
+                <ModeCard
+                  icon={<Sparkles size={20} color={theme.colors.accent} />}
+                  title={text.simpleTitle}
+                  description={text.simpleDescription}
+                  metaText={text.simpleMeta}
+                  metaAccent
+                  recommendedLabel={text.recommended}
+                  recommended
+                  disabled={pendingExperience !== null && pendingExperience !== "simple"}
+                  loading={pendingExperience === "simple"}
+                  testID="mode-select-simple"
+                  onPress={() => void pickExperience("simple")}
+                />
+              </>
+            ) : (
+              <>
+                <ModeCard
+                  icon={<Cloud size={20} color={theme.colors.accent} />}
+                  title={CLOUD_NAME}
+                  description={text.cloudDescription}
+                  metaText={text.signInMeta}
+                  recommendedLabel={text.recommended}
+                  metaAccent
+                  recommended
+                  disabled={pendingConnection !== null && pendingConnection !== "builtin"}
+                  loading={pendingConnection === "builtin"}
+                  testID="mode-select-builtin"
+                  onPress={() => void pickMode("builtin")}
+                />
+                <ModeCard
+                  icon={<KeyRound size={20} color={theme.colors.foreground} />}
+                  title="BYOK"
+                  description={text.byokDescription}
+                  metaText={text.noSignInMeta}
+                  disabled={pendingConnection !== null && pendingConnection !== "byok"}
+                  loading={pendingConnection === "byok"}
+                  testID="mode-select-byok"
+                  onPress={() => void pickMode("byok")}
+                />
+              </>
+            )}
           </View>
         </View>
       </ScrollView>

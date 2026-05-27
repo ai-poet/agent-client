@@ -42,6 +42,7 @@ import type { StreamItem } from "@/types/stream";
 import type { PendingPermission } from "@/types/shared";
 import type {
   AgentPermissionAction,
+  AgentPermissionRequest,
   AgentPermissionResponse,
 } from "@server/server/agent/agent-sdk-types";
 import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
@@ -75,6 +76,8 @@ import {
   WORKING_INDICATOR_OFFSETS,
 } from "@/utils/working-indicator";
 import { isWeb } from "@/constants/platform";
+import { useAppLocale } from "@/hooks/use-app-locale";
+import { getAppMessages } from "@/i18n/sub2api";
 
 const isUserMessageItem = (item?: StreamItem) => item?.kind === "user_message";
 const isToolSequenceItem = (item?: StreamItem) =>
@@ -93,6 +96,7 @@ export interface AgentStreamViewProps {
   routeBottomAnchorRequest?: BottomAnchorRouteRequest | null;
   isAuthoritativeHistoryReady?: boolean;
   onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+  simpleMode?: boolean;
 }
 
 const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamViewProps>(
@@ -106,6 +110,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       routeBottomAnchorRequest = null,
       isAuthoritativeHistoryReady = true,
       onOpenWorkspaceFile,
+      simpleMode = false,
     },
     ref,
   ) {
@@ -490,7 +495,12 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         pendingPermissionItems.length > 0 ? (
           <View style={stylesheet.permissionsContainer}>
             {pendingPermissionItems.map((permission) => (
-              <PermissionRequestCard key={permission.key} permission={permission} client={client} />
+              <PermissionRequestCard
+                key={permission.key}
+                permission={permission}
+                client={client}
+                simpleMode={simpleMode}
+              />
             ))}
           </View>
         ) : null;
@@ -713,19 +723,55 @@ function WorkingIndicator() {
 }
 
 // Permission Request Card Component
+type SimplePermissionText = ReturnType<typeof getAppMessages>["simplePermissions"];
+
+function resolveSimplePermissionTitle(
+  request: AgentPermissionRequest,
+  text: SimplePermissionText,
+): string {
+  if (request.kind === "plan") {
+    return text.confirmPlan;
+  }
+  const haystack = [request.name, request.title, request.description, request.kind]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+  if (/\b(read|search|list|scan|fetch|view|open|glob|grep)\b/.test(haystack)) {
+    return text.readFiles;
+  }
+  if (/\b(write|edit|modify|patch|create|delete|save|move|rename)\b/.test(haystack)) {
+    return text.changeFiles;
+  }
+  if (/\b(command|shell|terminal|exec|bash|run)\b/.test(haystack)) {
+    return text.runCommand;
+  }
+  return text.approval;
+}
+
 function PermissionRequestCard({
   permission,
   client,
+  simpleMode = false,
 }: {
   permission: PendingPermission;
   client: DaemonClient | null;
+  simpleMode?: boolean;
 }) {
   const { theme } = useUnistyles();
   const isMobile = useIsCompactFormFactor();
+  const locale = useAppLocale();
+  const simplePermissionText = useMemo(
+    () => getAppMessages(locale).simplePermissions,
+    [locale],
+  );
 
   const { request } = permission;
   const isPlanRequest = request.kind === "plan";
-  const title = isPlanRequest ? "Plan" : (request.title ?? request.name ?? "Permission Required");
+  const title = simpleMode
+    ? resolveSimplePermissionTitle(request, simplePermissionText)
+    : isPlanRequest
+      ? "Plan"
+      : (request.title ?? request.name ?? "Permission Required");
   const description = request.description ?? "";
   const resolvedActions = useMemo((): AgentPermissionAction[] => {
     if (request.kind === "question") {
@@ -737,19 +783,25 @@ function PermissionRequestCard({
     return [
       {
         id: "reject",
-        label: "Deny",
+        label: simpleMode ? simplePermissionText.deny : "Deny",
         behavior: "deny",
         variant: "danger",
         intent: "dismiss",
       },
       {
         id: "accept",
-        label: isPlanRequest ? "Implement" : "Accept",
+        label: simpleMode
+          ? isPlanRequest
+            ? simplePermissionText.start
+            : simplePermissionText.allow
+          : isPlanRequest
+            ? "Implement"
+            : "Accept",
         behavior: "allow",
         variant: "primary",
       },
     ];
-  }, [isPlanRequest, request]);
+  }, [isPlanRequest, request, simpleMode, simplePermissionText]);
 
   const planMarkdown = useMemo(() => {
     if (!request) {
@@ -843,7 +895,7 @@ function PermissionRequestCard({
         testID="permission-request-question"
         style={[permissionStyles.question, { color: theme.colors.foregroundMuted }]}
       >
-        How would you like to proceed?
+        {simpleMode ? simplePermissionText.question : "How would you like to proceed?"}
       </Text>
 
       <View

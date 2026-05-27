@@ -3,12 +3,15 @@ import {
   buildPaseoCloudRoute,
   buildHostAgentDetailRoute,
   buildHostRootRoute,
+  buildHostSimpleAgentRoute,
+  buildHostSimpleRoute,
   buildHostWorkspaceOpenRoute,
   buildHostWorkspaceRoute,
   decodeFilePathFromPathSegment,
   decodeWorkspaceIdFromPathSegment,
   encodeFilePathForPathSegment,
   encodeWorkspaceIdForPathSegment,
+  mapPathnameToServer,
   parseHostAgentRouteFromPathname,
   parseHostWorkspaceOpenIntentFromPathname,
   parseHostWorkspaceRouteFromPathname,
@@ -79,6 +82,18 @@ describe("workspace route parsing", () => {
 
   it("builds host root routes", () => {
     expect(buildHostRootRoute("local")).toBe("/h/local");
+  });
+
+  it("builds simple mode routes", () => {
+    expect(buildHostSimpleRoute("local")).toBe("/h/local/simple");
+    expect(buildHostSimpleAgentRoute("local", "agent-1")).toBe("/h/local/simple/agent/agent-1");
+  });
+
+  it("keeps simple route suffixes when switching hosts", () => {
+    expect(mapPathnameToServer("/h/local/simple", "remote")).toBe("/h/remote/simple");
+    expect(mapPathnameToServer("/h/local/simple/agent/agent-1", "remote")).toBe(
+      "/h/remote/simple/agent/agent-1",
+    );
   });
 
   it("parses workspace open intent from pathname query", () => {

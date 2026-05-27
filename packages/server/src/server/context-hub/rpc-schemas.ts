@@ -262,6 +262,7 @@ export const PromptsRenderRequestSchema = z.object({
   promptId: z.string().min(1),
   variables: z.record(z.string()).optional(),
   argumentsText: z.string().optional(),
+  recordUsage: z.boolean().optional(),
 });
 
 export const McpListRequestSchema = z.object({

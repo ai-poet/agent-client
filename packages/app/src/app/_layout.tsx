@@ -849,7 +849,8 @@ function AppWithSidebar({ children }: { children: ReactNode }) {
   const params = useGlobalSearchParams<{ open?: string | string[] }>();
   const hosts = useHosts();
   const activeServerId = useMemo(() => parseServerIdFromPathname(pathname), [pathname]);
-  const shouldShowAppChrome = activeServerId !== null;
+  const isSimpleRoute = /^\/h\/[^/]+\/simple(?:\/|$)/.test(pathname);
+  const shouldShowAppChrome = activeServerId !== null && !isSimpleRoute;
 
   useEffect(() => {
     if (!activeServerId || hosts.length === 0) {
@@ -927,6 +928,11 @@ function RootStack() {
         <Stack.Screen name="h/[serverId]/workspace/[workspaceId]" />
         <Stack.Screen name="h/[serverId]/agent/[agentId]" options={{ gestureEnabled: false }} />
         <Stack.Screen name="h/[serverId]/index" />
+        <Stack.Screen name="h/[serverId]/simple/index" />
+        <Stack.Screen
+          name="h/[serverId]/simple/agent/[agentId]"
+          options={{ gestureEnabled: false }}
+        />
         <Stack.Screen name="h/[serverId]/sessions" />
         <Stack.Screen name="h/[serverId]/open-project" />
         <Stack.Screen name="h/[serverId]/settings" />

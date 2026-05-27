@@ -5,6 +5,7 @@ import * as Clipboard from "expo-clipboard";
 import {
   ArrowLeftToLine,
   ArrowRightToLine,
+  Brain,
   ChevronDown,
   Copy,
   CopyX,
@@ -18,6 +19,7 @@ import {
   SquareTerminal,
   X,
 } from "lucide-react-native";
+import { useRouter } from "expo-router";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, BackHandler, Keyboard, Pressable, Text, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
@@ -126,6 +128,7 @@ import {
   resolveWorkspaceRouteId,
 } from "@/utils/workspace-execution";
 import { navigateToPreparedWorkspaceTab } from "@/utils/workspace-navigation";
+import { buildSettingsSectionRoute } from "@/utils/host-routes";
 import {
   normalizeWorkspaceTabTarget,
   workspaceTabTargetsEqual,
@@ -649,6 +652,7 @@ function WorkspaceScreenContent({
   isRouteFocused,
 }: WorkspaceScreenContentProps) {
   const { theme } = useUnistyles();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const mainBackgroundColor = theme.colors.surfaceWorkspace;
   const toast = useToast();
@@ -702,6 +706,9 @@ function WorkspaceScreenContent({
   const canCreateTerminalNow = Boolean(
     isRouteFocused && client && isConnected && workspaceDirectory,
   );
+  const handleOpenAIContextHub = useCallback(() => {
+    router.push(buildSettingsSectionRoute("ai-context"));
+  }, [router]);
 
   const workspaceAgentVisibility = useStoreWithEqualityFn(
     useSessionStore,
@@ -2443,6 +2450,13 @@ function WorkspaceScreenContent({
                           onSelect={handleCreateTerminal}
                         >
                           {text.newTerminal}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          testID="workspace-header-ai-context"
+                          leading={<Brain size={16} color={theme.colors.foregroundMuted} />}
+                          onSelect={handleOpenAIContextHub}
+                        >
+                          AI Context Hub
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           testID="workspace-header-copy-path"

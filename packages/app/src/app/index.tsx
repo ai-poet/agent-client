@@ -58,6 +58,10 @@ export default function Index() {
       return;
     }
 
+    if (settings.experienceMode === null) {
+      router.replace(MODE_SELECT_ROUTE);
+      return;
+    }
     if (settings.accessMode === null) {
       router.replace(MODE_SELECT_ROUTE);
       return;
@@ -86,6 +90,7 @@ export default function Index() {
     pathname,
     router,
     settings.accessMode,
+    settings.experienceMode,
     settings.setupCheckCompleted,
     settingsLoading,
     storeReady,

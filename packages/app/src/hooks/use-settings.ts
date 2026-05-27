@@ -11,11 +11,13 @@ export type SendBehavior = "interrupt" | "queue";
 export type ReleaseChannel = "stable" | "beta";
 export type AccessMode = "builtin" | "byok";
 export type AppLanguage = "auto" | "zh" | "en";
+export type ExperienceMode = "developer" | "simple";
 
 const VALID_THEMES = new Set<string>([...Object.keys(THEME_TO_UNISTYLES), "auto"]);
 const VALID_RELEASE_CHANNELS = new Set<string>(["stable", "beta"]);
 const VALID_ACCESS_MODES = new Set<string>(["builtin", "byok"]);
 const VALID_APP_LANGUAGES = new Set<string>(["auto", "zh", "en"]);
+const VALID_EXPERIENCE_MODES = new Set<string>(["developer", "simple"]);
 
 export interface AppSettings {
   theme: ThemeName | "auto";
@@ -23,6 +25,8 @@ export interface AppSettings {
   sendBehavior: SendBehavior;
   releaseChannel: ReleaseChannel;
   accessMode: AccessMode | null;
+  experienceMode: ExperienceMode | null;
+  simpleTaskFolder: string;
   setupCheckCompleted: boolean;
   onboardingGuideCompleted: boolean;
   language: AppLanguage;
@@ -34,6 +38,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   sendBehavior: "interrupt",
   releaseChannel: "stable",
   accessMode: null,
+  experienceMode: null,
+  simpleTaskFolder: "",
   setupCheckCompleted: false,
   onboardingGuideCompleted: false,
   language: "auto",
@@ -97,6 +103,7 @@ export async function loadSettingsFromStorage(): Promise<AppSettings> {
     const stored = await AsyncStorage.getItem(APP_SETTINGS_KEY);
     if (stored) {
       const parsed = JSON.parse(stored) as Partial<AppSettings>;
+      const hadExperienceMode = Object.prototype.hasOwnProperty.call(parsed, "experienceMode");
       if (parsed.theme && !VALID_THEMES.has(parsed.theme)) {
         parsed.theme = DEFAULT_APP_SETTINGS.theme;
       }
@@ -113,6 +120,18 @@ export async function loadSettingsFromStorage(): Promise<AppSettings> {
       if (parsed.language && !VALID_APP_LANGUAGES.has(parsed.language)) {
         parsed.language = DEFAULT_APP_SETTINGS.language;
       }
+      if (!hadExperienceMode) {
+        parsed.experienceMode = "developer";
+      } else if (
+        parsed.experienceMode !== null &&
+        parsed.experienceMode !== undefined &&
+        !VALID_EXPERIENCE_MODES.has(parsed.experienceMode)
+      ) {
+        parsed.experienceMode = DEFAULT_APP_SETTINGS.experienceMode;
+      }
+      if (parsed.simpleTaskFolder !== undefined && typeof parsed.simpleTaskFolder !== "string") {
+        parsed.simpleTaskFolder = DEFAULT_APP_SETTINGS.simpleTaskFolder;
+      }
       if (
         parsed.onboardingGuideCompleted !== undefined &&
         typeof parsed.onboardingGuideCompleted !== "boolean"
@@ -128,6 +147,7 @@ export async function loadSettingsFromStorage(): Promise<AppSettings> {
       const next = {
         ...DEFAULT_APP_SETTINGS,
         ...pickAppSettingsFromLegacy(legacyParsed),
+        experienceMode: "developer",
       } satisfies AppSettings;
       await AsyncStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(next));
       return next;
