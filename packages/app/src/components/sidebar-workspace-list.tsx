@@ -155,6 +155,17 @@ const DEFAULT_STATUS_DOT_SIZE = 7;
 const EMPHASIZED_STATUS_DOT_SIZE = 9;
 const DEFAULT_STATUS_DOT_OFFSET = 0;
 const EMPHASIZED_STATUS_DOT_OFFSET = -1;
+
+function getCompositeRowDragHandleAttributes(
+  attributes: DraggableListDragHandleProps["attributes"] | undefined,
+): DraggableListDragHandleProps["attributes"] | undefined {
+  if (!platformIsWeb || !attributes || attributes.role !== "button") {
+    return attributes;
+  }
+  const { role: _role, ...rest } = attributes;
+  return rest;
+}
+
 function getWorkspacePrIconColor(
   theme: ReturnType<typeof useUnistyles>["theme"],
   state: PrHint["state"],
@@ -992,6 +1003,7 @@ function ProjectHeaderRow({
     drag,
     menuController,
   });
+  const dragHandleAttributes = getCompositeRowDragHandleAttributes(dragHandleProps?.attributes);
 
   const handlePress = useCallback(() => {
     if (interaction.didLongPressRef.current) {
@@ -1091,7 +1103,7 @@ function ProjectHeaderRow({
   if (menuController) {
     return (
       <View
-        {...(dragHandleProps?.attributes as any)}
+        {...(dragHandleAttributes as any)}
         {...(dragHandleProps?.listeners as any)}
         ref={dragHandleProps?.setActivatorNodeRef as any}
         onPointerEnter={() => setIsHovered(true)}
@@ -1120,7 +1132,7 @@ function ProjectHeaderRow({
 
   return (
     <View
-      {...(dragHandleProps?.attributes as any)}
+      {...(dragHandleAttributes as any)}
       {...(dragHandleProps?.listeners as any)}
       ref={dragHandleProps?.setActivatorNodeRef as any}
       onPointerEnter={() => setIsHovered(true)}
@@ -1192,6 +1204,7 @@ function WorkspaceRowInner({
     drag,
     menuController,
   });
+  const dragHandleAttributes = getCompositeRowDragHandleAttributes(dragHandleProps?.attributes);
 
   const handlePress = useCallback(() => {
     if (interaction.didLongPressRef.current) {
@@ -1214,7 +1227,7 @@ function WorkspaceRowInner({
   return (
     <WorkspaceHoverCard workspace={workspace} prHint={prHint} isDragging={isDragging}>
       <View
-        {...(dragHandleProps?.attributes as any)}
+        {...(dragHandleAttributes as any)}
         {...(dragHandleProps?.listeners as any)}
         ref={dragHandleProps?.setActivatorNodeRef as any}
         style={styles.workspaceRowContainer}
@@ -1224,7 +1237,8 @@ function WorkspaceRowInner({
         <Pressable
           disabled={isArchiving}
           aria-selected={selected}
-          accessibilityRole="button"
+          accessibilityRole={platformIsWeb ? undefined : "button"}
+          role={platformIsWeb ? "group" : undefined}
           accessibilityState={{ selected }}
           style={({ pressed }) => [
             styles.workspaceRow,
@@ -1641,7 +1655,11 @@ function WorkspaceRowWithMenu({
             />
             <View style={styles.personaSheet}>
               <Text style={styles.personaSheetTitle}>{text.configureColleague}</Text>
-              <WorktreePersonaSection persona={personaDraft} onPersonaChange={setPersonaDraft} />
+              <WorktreePersonaSection
+                persona={personaDraft}
+                onPersonaChange={setPersonaDraft}
+                locale={locale}
+              />
               <View style={styles.personaSheetActions}>
                 <Pressable
                   accessibilityRole="button"

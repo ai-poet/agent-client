@@ -351,6 +351,14 @@ export function buildHostSessionsRoute(serverId: string) {
   return `${base}/sessions` as const;
 }
 
+export function buildHostSkillsRoute(serverId: string) {
+  const base = buildHostRootRoute(serverId);
+  if (base === "/") {
+    return "/" as const;
+  }
+  return `${base}/skills` as const;
+}
+
 export function buildHostOpenProjectRoute(serverId: string) {
   const base = buildHostRootRoute(serverId);
   if (base === "/") {

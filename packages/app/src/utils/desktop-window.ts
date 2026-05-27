@@ -17,7 +17,12 @@ type RawWindowControlsPadding = {
   top: number;
 };
 
-type WindowControlsPaddingRole = "sidebar" | "header" | "tabRow" | "explorerSidebar";
+type WindowControlsPaddingRole =
+  | "sidebar"
+  | "header"
+  | "standaloneHeader"
+  | "tabRow"
+  | "explorerSidebar";
 
 // Module-level cache so hook remounts (e.g., on navigation) don't briefly
 // fall back to the default `false` while the async fullscreen check resolves.
@@ -121,6 +126,9 @@ export function useWindowControlsPadding(role: WindowControlsPaddingRole): {
   if (role === "sidebar") {
     left = rawPadding.left;
     top = rawPadding.top;
+  } else if (role === "standaloneHeader") {
+    left = rawPadding.left;
+    right = rawPadding.right;
   } else if (role === "header") {
     left = sidebarClosed ? rawPadding.left : 0;
     right = explorerOpen ? 0 : rawPadding.right;

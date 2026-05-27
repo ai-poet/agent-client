@@ -429,8 +429,12 @@ export const sub2apiMessages = {
       hideAdvanced: "收起",
       startTask: "开始任务",
       creating: "正在创建…",
+      generalTaskHint: "这个助手可以处理各种通用任务。直接描述目标、资料、文件或你想要的结果即可。",
       promptPlaceholder:
-        "告诉助手你想完成什么。可以是整理资料、写文档、分析文件、规划行程或处理任何本地任务。",
+        "告诉助手你想完成什么。你可以写目标、背景、约束、已有资料，或直接描述希望得到的结果。",
+      skillsTitle: "技能",
+      skillsHint: "选择助手处理任务时的工作方式。不同模型会提供不同技能。",
+      selectSkill: "选择技能",
       chooseFolderTitle: "选择保存资料的位置",
       chooseFolderHint: "助手会在这里读取和保存任务资料。这个位置只在你的本机使用。",
       folderPathPlaceholder: "输入任务文件夹路径",
@@ -505,6 +509,11 @@ export const sub2apiMessages = {
       skillLibraryTitle: "Skill Library",
       skillLibrarySubtitle: (count: number) =>
         `内置 ${count} 个同事技能，可在工作树同事配置中启用。`,
+      skillLibraryPageSubtitle: "赋予 Codex 更强大的能力。",
+      skillRefresh: "刷新",
+      skillSearchPlaceholder: "搜索技能",
+      skillNew: "新技能",
+      skillInstalled: "已安装",
       skillBuiltIn: "内置",
       skillDefaultRoles: "默认角色",
       skillSource: "来源",
@@ -2024,8 +2033,14 @@ export const sub2apiMessages = {
       hideAdvanced: "Hide",
       startTask: "Start task",
       creating: "Creating...",
+      generalTaskHint:
+        "This assistant can handle many kinds of general tasks. Describe the goal, materials, files, or result you want.",
       promptPlaceholder:
-        "Tell the assistant what you want done. It can organize notes, write docs, analyze files, plan a trip, or handle a local task.",
+        "Tell the assistant what you want done. Include the goal, context, constraints, source material, or the result you want.",
+      skillsTitle: "Skills",
+      skillsHint:
+        "Choose how the assistant should work on this task. Different models expose different skills.",
+      selectSkill: "Select a skill",
       chooseFolderTitle: "Choose where to save task files",
       chooseFolderHint:
         "The assistant will read and save task materials here. This location stays on your machine.",
@@ -2101,6 +2116,11 @@ export const sub2apiMessages = {
       skillLibraryTitle: "Skill Library",
       skillLibrarySubtitle: (count: number) =>
         `${count} built-in colleague skills, enabled from each worktree colleague config.`,
+      skillLibraryPageSubtitle: "Give Codex stronger abilities.",
+      skillRefresh: "Refresh",
+      skillSearchPlaceholder: "Search skills",
+      skillNew: "New skill",
+      skillInstalled: "Installed",
       skillBuiltIn: "Built-in",
       skillDefaultRoles: "Default roles",
       skillSource: "Source",

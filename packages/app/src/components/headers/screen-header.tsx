@@ -17,6 +17,7 @@ interface ScreenHeaderProps {
   right?: ReactNode;
   leftStyle?: StyleProp<ViewStyle>;
   rightStyle?: StyleProp<ViewStyle>;
+  standalone?: boolean;
   borderless?: boolean;
   onRowLayout?: (event: LayoutChangeEvent) => void;
 }
@@ -30,13 +31,14 @@ export function ScreenHeader({
   right,
   leftStyle,
   rightStyle,
+  standalone = false,
   borderless,
   onRowLayout,
 }: ScreenHeaderProps) {
   const { theme } = useUnistyles();
   const insets = useSafeAreaInsets();
   const isMobile = useIsCompactFormFactor();
-  const padding = useWindowControlsPadding("header");
+  const padding = useWindowControlsPadding(standalone ? "standaloneHeader" : "header");
   // Only add extra padding on mobile for better touch targets; on desktop, only use safe area insets
   const topPadding = isMobile ? HEADER_TOP_PADDING_MOBILE : 0;
   const baseHorizontalPadding = theme.spacing[2];

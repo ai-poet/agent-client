@@ -44,7 +44,7 @@ import {
 } from "@/components/ui/isolated-bottom-sheet-modal";
 import { APP_NAME } from "@/config/branding";
 import { useAppLocale } from "@/hooks/use-app-locale";
-import { getAppMessages } from "@/i18n/sub2api";
+import { getAppMessages, type Sub2APILocale } from "@/i18n/sub2api";
 import { baseColors } from "@/styles/theme";
 import { isNative } from "@/constants/platform";
 
@@ -202,11 +202,7 @@ export function SelectField({
   const hasConcreteValue =
     normalizedValue.length > 0 &&
     (normalizedPlaceholder.length === 0 || normalizedValue !== normalizedPlaceholder);
-  const locale = useAppLocale();
-  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
-  const displayText = hasConcreteValue
-    ? normalizedValue
-    : normalizedPlaceholder || text.selectPlaceholder;
+  const displayText = hasConcreteValue ? normalizedValue : normalizedPlaceholder || "Select";
 
   return (
     <View style={styles.selectFieldContainer}>
@@ -248,6 +244,7 @@ interface DropdownSheetProps {
   visible: boolean;
   onClose: () => void;
   children: ReactNode;
+  closeLabel?: string;
 }
 
 function DropdownSheetBackground({ style }: BottomSheetBackgroundProps) {
@@ -273,10 +270,9 @@ export function DropdownSheet({
   visible,
   onClose,
   children,
+  closeLabel = "Close",
 }: DropdownSheetProps): ReactElement {
   const { theme } = useUnistyles();
-  const locale = useAppLocale();
-  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
   const titleColor = theme.colors.foreground;
   const snapPoints = useMemo(() => ["60%", "90%"], []);
   const { sheetRef, handleSheetChange } = useIsolatedBottomSheetVisibility({
@@ -315,7 +311,7 @@ export function DropdownSheet({
         </Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={text.closeSheet}
+          accessibilityLabel={closeLabel}
           onPress={handleClose}
           hitSlop={10}
           testID="dropdown-sheet-close"
@@ -340,14 +336,15 @@ const SelectOption = ComboboxItem;
 export function WorktreePersonaSection({
   persona,
   onPersonaChange,
+  locale,
   disabled,
 }: {
   persona: WorktreePersona;
   onPersonaChange: (persona: WorktreePersona) => void;
+  locale: Sub2APILocale;
   disabled?: boolean;
 }): ReactElement {
   const { theme } = useUnistyles();
-  const locale = useAppLocale();
   const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
   const [isRoleSheetOpen, setIsRoleSheetOpen] = useState(false);
   const [isSkillsSheetOpen, setIsSkillsSheetOpen] = useState(false);
@@ -408,6 +405,7 @@ export function WorktreePersonaSection({
         title={text.selectColleagueRole}
         visible={isRoleSheetOpen}
         onClose={() => setIsRoleSheetOpen(false)}
+        closeLabel={text.closeSheet}
       >
         {WORKTREE_PERSONA_ROLES.map((role) => (
           <SelectOption
@@ -425,6 +423,7 @@ export function WorktreePersonaSection({
         title={text.selectSkills}
         visible={isSkillsSheetOpen}
         onClose={() => setIsSkillsSheetOpen(false)}
+        closeLabel={text.closeSheet}
       >
         {WORKTREE_PERSONA_SKILLS.map((skill) => {
           const selected = persona.skillIds.includes(skill.id);

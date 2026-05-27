@@ -10,9 +10,25 @@ import {
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { FolderOpen, RefreshCw, Send, Settings, SlidersHorizontal } from "lucide-react-native";
+import {
+  Check,
+  ChevronDown,
+  FolderOpen,
+  Send,
+  Settings,
+  Settings2,
+  Zap,
+} from "lucide-react-native";
 import { DraftAgentStatusBar } from "@/components/agent-status-bar";
+import type { DraftAgentStatusBarProps } from "@/components/agent-status-bar";
+import { ScreenHeader } from "@/components/headers/screen-header";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { getProviderIcon } from "@/components/provider-icons";
 import { useAllAgentsList } from "@/hooks/use-all-agents-list";
 import { useAgentInputDraft } from "@/hooks/use-agent-input-draft";
@@ -36,7 +52,7 @@ import { shortenPath } from "@/utils/shorten-path";
 import { buildHostSimpleAgentRoute, buildSettingsRoute } from "@/utils/host-routes";
 import { useToast } from "@/contexts/toast-context";
 import type { AggregatedAgent } from "@/hooks/use-aggregated-agents";
-import type { AgentSessionConfig } from "@server/server/agent/agent-sdk-types";
+import type { AgentFeature, AgentSessionConfig } from "@server/server/agent/agent-sdk-types";
 import { isSimpleModeAgent, SIMPLE_EXPERIENCE_LABEL } from "./simple-mode";
 
 function toErrorMessage(error: unknown): string {
@@ -89,6 +105,8 @@ export function SimpleHomeScreen({ serverId }: { serverId: string }) {
   const providerDefinition = composerState?.providerDefinitions.find(
     (definition) => definition.id === selectedProvider,
   );
+  const availableSkills = composerState?.statusControls.features ?? [];
+  const canShowSkills = availableSkills.length > 0;
   const modelSummary = selectedProvider
     ? text.modelSummary(
         providerDefinition?.label ?? selectedProvider,
@@ -160,6 +178,7 @@ export function SimpleHomeScreen({ serverId }: { serverId: string }) {
         ...(composerState.effectiveThinkingOptionId
           ? { thinkingOptionId: composerState.effectiveThinkingOptionId }
           : {}),
+        ...(composerState.featureValues ? { featureValues: composerState.featureValues } : {}),
       };
       const { images, attachments } = splitComposerAttachmentsForSubmit(draftInput.attachments);
       const encodedImages = await encodeImages(images);
@@ -203,38 +222,38 @@ export function SimpleHomeScreen({ serverId }: { serverId: string }) {
 
   return (
     <View style={styles.root}>
-      <View
-        style={[
-          styles.header,
-          {
-            paddingTop: theme.spacing[3] + insets.top,
-          },
-        ]}
-      >
-        <View>
-          <Text style={styles.headerTitle}>{text.tasks}</Text>
-          <Text style={styles.headerSubtitle}>{modelSummary}</Text>
-        </View>
-        <View style={styles.headerActions}>
-          <Button
-            size="sm"
-            variant="ghost"
-            leftIcon={RefreshCw}
-            onPress={refreshAll}
-            disabled={isRevalidating}
-          >
-            {text.refresh}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            leftIcon={Settings}
-            onPress={() => router.push(buildSettingsRoute())}
-          >
-            {text.settings}
-          </Button>
-        </View>
-      </View>
+      <ScreenHeader
+        left={
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitle}>{text.tasks}</Text>
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
+              {modelSummary}
+            </Text>
+          </View>
+        }
+        right={
+          <View style={styles.headerActions}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onPress={refreshAll}
+              disabled={isRevalidating}
+            >
+              {text.refresh}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              leftIcon={Settings}
+              onPress={() => router.push(buildSettingsRoute())}
+            >
+              {text.settings}
+            </Button>
+          </View>
+        }
+        leftStyle={styles.headerLeft}
+        standalone
+      />
 
       <ScrollView
         style={styles.scrollView}
@@ -247,11 +266,14 @@ export function SimpleHomeScreen({ serverId }: { serverId: string }) {
       >
         <View style={styles.promptPanel}>
           <View style={styles.promptHeader}>
-            <Text style={styles.sectionTitle}>{text.newTask}</Text>
+            <View style={styles.promptCopy}>
+              <Text style={styles.sectionTitle}>{text.newTask}</Text>
+              <Text style={styles.promptHelper}>{text.generalTaskHint}</Text>
+            </View>
             <Button
               size="sm"
               variant="ghost"
-              leftIcon={SlidersHorizontal}
+              leftIcon={Settings2}
               onPress={() => setShowAdvanced((value) => !value)}
             >
               {showAdvanced ? text.hideAdvanced : text.advanced}
@@ -266,6 +288,13 @@ export function SimpleHomeScreen({ serverId }: { serverId: string }) {
             style={styles.promptInput}
             testID="simple-new-task-input"
           />
+          {canShowSkills && composerState ? (
+            <SimpleSkillsPicker
+              features={availableSkills}
+              onSetFeature={composerState.statusControls.onSetFeature}
+              text={text}
+            />
+          ) : null}
           {showAdvanced && composerState ? (
             <View style={styles.advancedControls}>
               <DraftAgentStatusBar
@@ -333,6 +362,128 @@ export function SimpleHomeScreen({ serverId }: { serverId: string }) {
   );
 }
 
+function SimpleSkillsPicker({
+  features,
+  onSetFeature,
+  text,
+}: {
+  features: AgentFeature[];
+  onSetFeature?: DraftAgentStatusBarProps["onSetFeature"];
+  text: ReturnType<typeof getSub2APIMessages>["simpleMode"];
+}) {
+  return (
+    <View style={styles.skillsSection} testID="simple-skills-section">
+      <View style={styles.skillsHeader}>
+        <Text style={styles.skillsTitle}>{text.skillsTitle}</Text>
+        <Text style={styles.skillsHint}>{text.skillsHint}</Text>
+      </View>
+      <View style={styles.skillsGrid}>
+        {features.map((feature) => (
+          <SimpleSkillControl
+            key={feature.id}
+            feature={feature}
+            onSetFeature={onSetFeature}
+            text={text}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function SimpleSkillControl({
+  feature,
+  onSetFeature,
+  text,
+}: {
+  feature: AgentFeature;
+  onSetFeature?: DraftAgentStatusBarProps["onSetFeature"];
+  text: ReturnType<typeof getSub2APIMessages>["simpleMode"];
+}) {
+  const { theme } = useUnistyles();
+  const description = feature.description ?? feature.tooltip ?? "";
+  const Icon = feature.icon === "zap" ? Zap : Settings2;
+
+  if (feature.type === "toggle") {
+    const enabled = Boolean(feature.value);
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ selected: enabled }}
+        testID={`simple-skill-${feature.id}`}
+        onPress={() => onSetFeature?.(feature.id, !enabled)}
+        style={({ pressed }) => [
+          styles.skillCard,
+          enabled ? styles.skillCardSelected : null,
+          pressed ? styles.pressed : null,
+        ]}
+      >
+        <View style={styles.skillCardHeader}>
+          <View style={[styles.skillIcon, enabled ? styles.skillIconSelected : null]}>
+            <Icon
+              size={16}
+              color={enabled ? theme.colors.accentForeground : theme.colors.foregroundMuted}
+            />
+          </View>
+          {enabled ? <Check size={16} color={theme.colors.accent} /> : null}
+        </View>
+        <Text style={styles.skillTitle} numberOfLines={1}>
+          {feature.label}
+        </Text>
+        {description ? (
+          <Text style={styles.skillDescription} numberOfLines={2}>
+            {description}
+          </Text>
+        ) : null}
+      </Pressable>
+    );
+  }
+
+  const selectedOption =
+    feature.options.find((option) => option.id === feature.value) ??
+    feature.options.find((option) => option.isDefault) ??
+    feature.options[0] ??
+    null;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        testID={`simple-skill-${feature.id}`}
+        style={({ pressed, open }) => [
+          styles.skillCard,
+          open ? styles.skillCardSelected : null,
+          pressed ? styles.pressed : null,
+        ]}
+      >
+        <View style={styles.skillCardHeader}>
+          <View style={styles.skillIcon}>
+            <Settings2 size={16} color={theme.colors.foregroundMuted} />
+          </View>
+          <ChevronDown size={16} color={theme.colors.foregroundMuted} />
+        </View>
+        <Text style={styles.skillTitle} numberOfLines={1}>
+          {feature.label}
+        </Text>
+        <Text style={styles.skillDescription} numberOfLines={2}>
+          {selectedOption?.label ?? text.selectSkill}
+        </Text>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="bottom" align="start" minWidth={220}>
+        {feature.options.map((option) => (
+          <DropdownMenuItem
+            key={option.id}
+            selected={option.id === feature.value}
+            onSelect={() => onSetFeature?.(feature.id, option.id)}
+            description={option.description}
+          >
+            {option.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function SimpleTaskRow({ agent }: { agent: AggregatedAgent }) {
   const { theme } = useUnistyles();
   const router = useRouter();
@@ -375,32 +526,28 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     backgroundColor: theme.colors.surface0,
   },
-  header: {
-    minHeight: 72,
-    paddingHorizontal: theme.spacing[6],
-    paddingBottom: theme.spacing[3],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
-    backgroundColor: theme.colors.surface0,
+  headerLeft: {
+    flex: 1,
+    minWidth: 0,
+  },
+  headerTitleContainer: {
+    flex: 1,
+    minWidth: 0,
+  },
+  headerActions: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: theme.spacing[4],
+    gap: theme.spacing[2],
   },
   headerTitle: {
     color: theme.colors.foreground,
-    fontSize: theme.fontSize.xl,
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.medium,
   },
   headerSubtitle: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.xs,
     marginTop: theme.spacing[1],
-  },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
   },
   scrollView: {
     flex: 1,
@@ -422,14 +569,24 @@ const styles = StyleSheet.create((theme) => ({
   },
   promptHeader: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     gap: theme.spacing[3],
+  },
+  promptCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: theme.spacing[1],
   },
   sectionTitle: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.medium,
+  },
+  promptHelper: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+    lineHeight: theme.fontSize.sm * 1.45,
   },
   promptInput: {
     minHeight: 148,
@@ -447,6 +604,72 @@ const styles = StyleSheet.create((theme) => ({
     borderTopWidth: 1,
     borderTopColor: theme.colors.border,
     paddingTop: theme.spacing[3],
+  },
+  skillsSection: {
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    paddingTop: theme.spacing[3],
+    gap: theme.spacing[3],
+  },
+  skillsHeader: {
+    gap: theme.spacing[1],
+  },
+  skillsTitle: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+  },
+  skillsHint: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    lineHeight: theme.fontSize.xs * 1.5,
+  },
+  skillsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[2],
+  },
+  skillCard: {
+    width: 180,
+    minHeight: 92,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+    padding: theme.spacing[3],
+    gap: theme.spacing[2],
+  },
+  skillCardSelected: {
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.surface2,
+  },
+  skillCardHeader: {
+    minHeight: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[2],
+  },
+  skillIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.surface2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  skillIconSelected: {
+    backgroundColor: theme.colors.accent,
+  },
+  skillTitle: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+  },
+  skillDescription: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    lineHeight: theme.fontSize.xs * 1.4,
   },
   promptFooter: {
     flexDirection: "row",

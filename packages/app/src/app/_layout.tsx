@@ -934,6 +934,7 @@ function RootStack() {
           options={{ gestureEnabled: false }}
         />
         <Stack.Screen name="h/[serverId]/sessions" />
+        <Stack.Screen name="h/[serverId]/skills" />
         <Stack.Screen name="h/[serverId]/open-project" />
         <Stack.Screen name="h/[serverId]/settings" />
         <Stack.Screen name="settings/hosts/[serverId]" />

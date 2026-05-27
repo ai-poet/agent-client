@@ -1186,6 +1186,7 @@ function DraftAgentScreenContent({
                     <WorktreePersonaSection
                       persona={worktreePersona}
                       onPersonaChange={setWorktreePersona}
+                      locale={locale}
                       disabled={isSubmitting}
                     />
                   ) : null}

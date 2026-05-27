@@ -593,6 +593,7 @@ export function NewWorkspaceScreen({
             <WorktreePersonaSection
               persona={worktreePersona}
               onPersonaChange={setWorktreePersona}
+              locale={locale}
               disabled={isPending}
             />
           </View>

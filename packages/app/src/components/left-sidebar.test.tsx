@@ -201,7 +201,6 @@ vi.mock("lucide-react-native", () => {
     MessagesSquare: createIcon("MessagesSquare"),
     Plus: createIcon("Plus"),
     Settings: createIcon("Settings"),
-    X: createIcon("X"),
   };
 });
 
@@ -273,6 +272,7 @@ vi.mock("@/utils/desktop-window", () => ({
 }));
 
 vi.mock("@/utils/host-routes", () => ({
+  buildHostSkillsRoute: (serverId: string) => `/h/${serverId}/skills`,
   buildHostSessionsRoute: (serverId: string) => `/hosts/${serverId}/sessions`,
   buildPaseoCloudRoute: () => "/settings/paseo-cloud",
   buildSettingsRoute: () => "/settings",
@@ -423,7 +423,7 @@ describe("LeftSidebar", () => {
     expect(container?.textContent).not.toContain("Chat");
   });
 
-  it("opens the Skill Library from the sidebar skills action", async () => {
+  it("navigates to the Skill Library page from the sidebar skills action", async () => {
     await act(async () => {
       root?.render(<LeftSidebar />);
     });
@@ -434,9 +434,7 @@ describe("LeftSidebar", () => {
         ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(container?.querySelector('[data-testid="skill-library-panel"]')).not.toBeNull();
-    expect(container?.textContent).toContain("Skill Library");
-    expect(container?.textContent).toContain("paseo-development");
+    expect(routerPushMock).toHaveBeenCalledWith("/h/srv/skills");
   });
 
   it("opens a focused draft tab for the current workspace", async () => {
