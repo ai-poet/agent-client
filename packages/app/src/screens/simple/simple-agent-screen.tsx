@@ -10,13 +10,7 @@ import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 import { getSub2APIMessages } from "@/i18n/sub2api";
 import { buildHostSimpleRoute, buildSettingsRoute } from "@/utils/host-routes";
 
-export function SimpleAgentScreen({
-  serverId,
-  agentId,
-}: {
-  serverId: string;
-  agentId: string;
-}) {
+export function SimpleAgentScreen({ serverId, agentId }: { serverId: string; agentId: string }) {
   const { theme } = useUnistyles();
   const router = useRouter();
   const locale = useSub2APILocale();

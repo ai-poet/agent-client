@@ -4,10 +4,7 @@ import { StyleSheet } from "react-native-unistyles";
 import { Database, FileText, Plug, Send, Wrench } from "lucide-react-native";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { Button } from "@/components/ui/button";
-import {
-  SegmentedControl,
-  type SegmentedControlOption,
-} from "@/components/ui/segmented-control";
+import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { Fonts } from "@/constants/theme";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import { useSessionStore } from "@/stores/session-store";
@@ -296,7 +293,10 @@ export function AIContextHubSection() {
         ? {
             type: "stdio" as const,
             command: mcpCommandOrUrl,
-            args: mcpArgs.split(/\s+/).map((arg) => arg.trim()).filter(Boolean),
+            args: mcpArgs
+              .split(/\s+/)
+              .map((arg) => arg.trim())
+              .filter(Boolean),
           }
         : {
             type: mcpKind,
@@ -331,7 +331,10 @@ export function AIContextHubSection() {
         ? {
             type: "stdio" as const,
             command: mcpCommandOrUrl,
-            args: mcpArgs.split(/\s+/).map((arg) => arg.trim()).filter(Boolean),
+            args: mcpArgs
+              .split(/\s+/)
+              .map((arg) => arg.trim())
+              .filter(Boolean),
           }
         : {
             type: mcpKind,
@@ -372,11 +375,17 @@ export function AIContextHubSection() {
               <Pressable
                 key={workspace.id}
                 onPress={() => setWorkspaceId(workspace.id)}
-                style={[styles.workspaceChip, workspace.id === workspaceId && styles.workspaceChipActive]}
+                style={[
+                  styles.workspaceChip,
+                  workspace.id === workspaceId && styles.workspaceChipActive,
+                ]}
               >
                 <Text
                   numberOfLines={1}
-                  style={[styles.workspaceChipText, workspace.id === workspaceId && styles.workspaceChipTextActive]}
+                  style={[
+                    styles.workspaceChipText,
+                    workspace.id === workspaceId && styles.workspaceChipTextActive,
+                  ]}
                 >
                   {workspace.name}
                 </Text>
@@ -394,10 +403,23 @@ export function AIContextHubSection() {
             <View style={styles.panel}>
               <Field label="Search" value={memoryQuery} onChangeText={setMemoryQuery} />
               <Field label="Title" value={memoryTitle} onChangeText={setMemoryTitle} />
-              <Field label="Summary" value={memorySummary} onChangeText={setMemorySummary} multiline />
+              <Field
+                label="Summary"
+                value={memorySummary}
+                onChangeText={setMemorySummary}
+                multiline
+              />
               <Field label="Detail" value={memoryDetail} onChangeText={setMemoryDetail} multiline />
-              <Field label="Tags" value={memoryTags} onChangeText={setMemoryTags} placeholder="comma,separated" />
-              <Button disabled={!workspaceId || !memorySummary.trim()} onPress={() => void createMemory()}>
+              <Field
+                label="Tags"
+                value={memoryTags}
+                onChangeText={setMemoryTags}
+                placeholder="comma,separated"
+              />
+              <Button
+                disabled={!workspaceId || !memorySummary.trim()}
+                onPress={() => void createMemory()}
+              >
                 Save Memory
               </Button>
             </View>
@@ -424,9 +446,21 @@ export function AIContextHubSection() {
           <View style={styles.grid}>
             <View style={styles.panel}>
               <Field label="Name" value={skillName} onChangeText={setSkillName} />
-              <Field label="Description" value={skillDescription} onChangeText={setSkillDescription} />
-              <Field label="SKILL.md" value={skillContent} onChangeText={setSkillContent} multiline />
-              <Button disabled={!skillName.trim() || !skillContent.trim()} onPress={() => void importSkill()}>
+              <Field
+                label="Description"
+                value={skillDescription}
+                onChangeText={setSkillDescription}
+              />
+              <Field
+                label="SKILL.md"
+                value={skillContent}
+                onChangeText={setSkillContent}
+                multiline
+              />
+              <Button
+                disabled={!skillName.trim() || !skillContent.trim()}
+                onPress={() => void importSkill()}
+              >
                 Import Skill
               </Button>
               {skillExport ? <Text style={styles.codeBlock}>{skillExport}</Text> : null}
@@ -438,7 +472,9 @@ export function AIContextHubSection() {
                   <Text style={styles.itemMeta}>
                     {skill.source} · {skill.readOnly ? "read-only" : "managed"}
                   </Text>
-                  {skill.description ? <Text style={styles.itemBody}>{skill.description}</Text> : null}
+                  {skill.description ? (
+                    <Text style={styles.itemBody}>{skill.description}</Text>
+                  ) : null}
                   <Button size="sm" variant="ghost" onPress={() => void exportSkill(skill)}>
                     Export
                   </Button>
@@ -454,9 +490,17 @@ export function AIContextHubSection() {
           <View style={styles.grid}>
             <View style={styles.panel}>
               <Field label="Name" value={promptName} onChangeText={setPromptName} />
-              <Field label="Template" value={promptContent} onChangeText={setPromptContent} multiline />
+              <Field
+                label="Template"
+                value={promptContent}
+                onChangeText={setPromptContent}
+                multiline
+              />
               <Field label="Arguments" value={promptArgs} onChangeText={setPromptArgs} />
-              <Button disabled={!promptName.trim() || !promptContent.trim()} onPress={() => void createPrompt()}>
+              <Button
+                disabled={!promptName.trim() || !promptContent.trim()}
+                onPress={() => void createPrompt()}
+              >
                 Save Prompt
               </Button>
               {renderedPrompt ? <Text style={styles.codeBlock}>{renderedPrompt}</Text> : null}
@@ -469,7 +513,11 @@ export function AIContextHubSection() {
                     {prompt.source} · used {prompt.usageCount}
                   </Text>
                   <View style={styles.buttonRow}>
-                    <Button size="sm" variant="ghost" onPress={() => void renderPrompt(prompt, false)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onPress={() => void renderPrompt(prompt, false)}
+                    >
                       Render
                     </Button>
                     <Button
@@ -518,10 +566,17 @@ export function AIContextHubSection() {
                 <Field label="Args" value={mcpArgs} onChangeText={setMcpArgs} />
               ) : null}
               <View style={styles.buttonRow}>
-                <Button disabled={!mcpName.trim() || !mcpCommandOrUrl.trim()} onPress={() => void upsertMcp()}>
+                <Button
+                  disabled={!mcpName.trim() || !mcpCommandOrUrl.trim()}
+                  onPress={() => void upsertMcp()}
+                >
                   Save
                 </Button>
-                <Button variant="outline" disabled={!mcpCommandOrUrl.trim()} onPress={() => void testMcp()}>
+                <Button
+                  variant="outline"
+                  disabled={!mcpCommandOrUrl.trim()}
+                  onPress={() => void testMcp()}
+                >
                   Test
                 </Button>
               </View>

@@ -8,11 +8,20 @@ import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitDiffPane } from "./git-diff-pane";
 
-const { commitMock, sendAgentMessageMock, toastShowMock, toastErrorMock } = vi.hoisted(() => ({
+const {
+  commitMock,
+  sendAgentMessageMock,
+  toastShowMock,
+  toastErrorMock,
+  storeHiddenAgentMessagesMock,
+  clientHiddenAgentMessagesMock,
+} = vi.hoisted(() => ({
   commitMock: vi.fn(),
   sendAgentMessageMock: vi.fn(),
   toastShowMock: vi.fn(),
   toastErrorMock: vi.fn(),
+  storeHiddenAgentMessagesMock: vi.fn(() => true),
+  clientHiddenAgentMessagesMock: vi.fn(() => true),
 }));
 
 const { diffFiles } = vi.hoisted(() => ({
@@ -294,8 +303,15 @@ vi.mock("@/stores/session-store", () => ({
         "server-1": {
           focusedAgentId: "agent-1",
           agents: new Map([["agent-1", { id: "agent-1", cwd: "/repo" }]]),
-          client: { sendAgentMessage: sendAgentMessageMock },
-          serverInfo: { features: { hiddenAgentMessages: true } },
+          client: {
+            getLastServerInfoMessage: () => ({
+              features: { hiddenAgentMessages: clientHiddenAgentMessagesMock() },
+            }),
+            sendAgentMessage: sendAgentMessageMock,
+          },
+          serverInfo: {
+            features: { hiddenAgentMessages: storeHiddenAgentMessagesMock() },
+          },
         },
       },
     }),
@@ -380,6 +396,8 @@ beforeEach(() => {
 
   commitMock.mockResolvedValue(undefined);
   sendAgentMessageMock.mockResolvedValue(undefined);
+  storeHiddenAgentMessagesMock.mockReturnValue(true);
+  clientHiddenAgentMessagesMock.mockReturnValue(true);
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -397,6 +415,8 @@ afterEach(() => {
   sendAgentMessageMock.mockReset();
   toastShowMock.mockReset();
   toastErrorMock.mockReset();
+  storeHiddenAgentMessagesMock.mockReset();
+  clientHiddenAgentMessagesMock.mockReset();
   vi.unstubAllGlobals();
 });
 
@@ -499,5 +519,24 @@ describe("GitDiffPane inline commit", () => {
       (document.querySelector('[data-testid="changes-inline-commit-message"]') as HTMLInputElement)
         .value,
     ).toBe("Manual text stays put");
+  });
+
+  it("uses the client's latest server info when store feature metadata is stale", async () => {
+    storeHiddenAgentMessagesMock.mockReturnValue(false);
+    clientHiddenAgentMessagesMock.mockReturnValue(true);
+    renderPane();
+
+    click("changes-inline-magic-commit");
+
+    await vi.waitFor(() => {
+      expect(sendAgentMessageMock).toHaveBeenCalledWith(
+        "agent-1",
+        expect.any(String),
+        expect.objectContaining({ hidden: true }),
+      );
+    });
+    expect(document.body.textContent).not.toContain(
+      "This host version does not support hidden sends",
+    );
   });
 });

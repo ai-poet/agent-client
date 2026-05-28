@@ -1,12 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -36,10 +29,7 @@ import { useAppSettings } from "@/hooks/use-settings";
 import { useIsLocalDaemon } from "@/hooks/use-is-local-daemon";
 import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 import { getSub2APIMessages } from "@/i18n/sub2api";
-import {
-  useHostRuntimeClient,
-  useHostRuntimeIsConnected,
-} from "@/runtime/host-runtime";
+import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useRecommendedProjectPaths } from "@/stores/session-store-hooks";
 import { useSessionStore } from "@/stores/session-store";
 import { pickDirectory } from "@/desktop/pick-directory";
@@ -233,12 +223,7 @@ export function SimpleHomeScreen({ serverId }: { serverId: string }) {
         }
         right={
           <View style={styles.headerActions}>
-            <Button
-              size="sm"
-              variant="ghost"
-              onPress={refreshAll}
-              disabled={isRevalidating}
-            >
+            <Button size="sm" variant="ghost" onPress={refreshAll} disabled={isRevalidating}>
               {text.refresh}
             </Button>
             <Button

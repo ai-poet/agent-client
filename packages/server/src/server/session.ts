@@ -1392,7 +1392,8 @@ export class Session {
       return null;
     }
     const workspace =
-      (await this.findWorkspaceByDirectory(cwd)) ?? (await this.findOrCreateWorkspaceForDirectory(cwd));
+      (await this.findWorkspaceByDirectory(cwd)) ??
+      (await this.findOrCreateWorkspaceForDirectory(cwd));
     return workspace.workspaceId;
   }
 
@@ -8591,7 +8592,10 @@ export class Session {
     }
   }
 
-  private emitContextHubRpcError(request: { requestId: string; type: string }, error: unknown): void {
+  private emitContextHubRpcError(
+    request: { requestId: string; type: string },
+    error: unknown,
+  ): void {
     const message = error instanceof Error ? error.message : String(error);
     this.sessionLogger.error(
       { err: error, requestType: request.type },

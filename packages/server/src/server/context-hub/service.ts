@@ -250,7 +250,10 @@ function renderPromptContent(
   argumentsText: string | undefined,
 ): string {
   const args = argumentsText ?? variables?.ARGUMENTS ?? "";
-  const argv = args.length > 0 ? args.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((part) => part.replace(/^"|"$/g, "")) ?? [] : [];
+  const argv =
+    args.length > 0
+      ? (args.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((part) => part.replace(/^"|"$/g, "")) ?? [])
+      : [];
   return content
     .replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (_match, key: string) => variables?.[key] ?? "")
     .replace(/\$ARGUMENTS\b/g, args)
@@ -269,7 +272,11 @@ function parseSkillDescription(content: string): string | null {
   return heading || null;
 }
 
-function ensureSkillMarkdown(name: string, description: string | undefined, content: string): string {
+function ensureSkillMarkdown(
+  name: string,
+  description: string | undefined,
+  content: string,
+): string {
   const body = content.trimEnd();
   if (!description || body.startsWith("---")) {
     return `${body}\n`;
@@ -418,7 +425,9 @@ export class ContextHubService {
       detail: patch.detail !== undefined ? patch.detail?.trim() || null : location.item.detail,
       rawText: patch.rawText !== undefined ? patch.rawText?.trim() || null : location.item.rawText,
       title:
-        patch.title !== undefined ? patch.title?.trim() || location.item.title : location.item.title,
+        patch.title !== undefined
+          ? patch.title?.trim() || location.item.title
+          : location.item.title,
       summary:
         patch.summary !== undefined
           ? patch.summary?.trim() || location.item.summary
@@ -605,7 +614,9 @@ export class ContextHubService {
     return imported;
   }
 
-  async exportSkill(options: ExportSkillOptions): Promise<{ skill: ManagedSkillEntry; content: string }> {
+  async exportSkill(
+    options: ExportSkillOptions,
+  ): Promise<{ skill: ManagedSkillEntry; content: string }> {
     const skills = await this.listSkills({
       workspaceId: options.workspaceId,
       cwd: options.cwd,
@@ -619,10 +630,9 @@ export class ContextHubService {
     return { skill, content };
   }
 
-  async listPrompts(options: {
-    workspaceId?: string;
-    includeDeleted?: boolean;
-  } = {}): Promise<PromptTemplate[]> {
+  async listPrompts(
+    options: { workspaceId?: string; includeDeleted?: boolean } = {},
+  ): Promise<PromptTemplate[]> {
     const managed = (await this.readPromptStore()).prompts
       .filter((prompt) => options.includeDeleted || !prompt.deletedAt)
       .filter((prompt) => prompt.scope === "global" || prompt.workspaceId === options.workspaceId);
@@ -638,7 +648,7 @@ export class ContextHubService {
     const prompt = PromptTemplateSchema.parse({
       id: `prompt_${randomUUID()}`,
       scope: input.scope ?? "global",
-      workspaceId: input.scope === "workspace" ? input.workspaceId?.trim() ?? null : null,
+      workspaceId: input.scope === "workspace" ? (input.workspaceId?.trim() ?? null) : null,
       name: input.name.trim(),
       description: input.description?.trim() || null,
       content: input.content,
@@ -756,7 +766,9 @@ export class ContextHubService {
     return profileId;
   }
 
-  async testMcpProfile(input: McpServerProfileUpsertInput): Promise<{ ok: boolean; message: string }> {
+  async testMcpProfile(
+    input: McpServerProfileUpsertInput,
+  ): Promise<{ ok: boolean; message: string }> {
     try {
       this.validateMcpServerConfig(input.server);
       return { ok: true, message: "Configuration looks valid." };

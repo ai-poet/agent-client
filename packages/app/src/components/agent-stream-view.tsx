@@ -760,10 +760,7 @@ function PermissionRequestCard({
   const { theme } = useUnistyles();
   const isMobile = useIsCompactFormFactor();
   const locale = useAppLocale();
-  const simplePermissionText = useMemo(
-    () => getAppMessages(locale).simplePermissions,
-    [locale],
-  );
+  const simplePermissionText = useMemo(() => getAppMessages(locale).simplePermissions, [locale]);
 
   const { request } = permission;
   const isPlanRequest = request.kind === "plan";

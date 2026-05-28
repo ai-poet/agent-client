@@ -71,7 +71,7 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
     focusedAgentId ? (state.sessions[currentServerId]?.agents.get(focusedAgentId) ?? null) : null,
   );
   const client = useSessionStore((state) => state.sessions[currentServerId]?.client ?? null);
-  const supportsHiddenAgentMessages = useSessionStore(
+  const storeSupportsHiddenAgentMessages = useSessionStore(
     (state) => state.sessions[currentServerId]?.serverInfo?.features?.hiddenAgentMessages === true,
   );
 
@@ -153,16 +153,19 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
       setError(text.commitFilesRequired);
       return;
     }
+    if (!client) {
+      setError(text.hostNotConnected);
+      return;
+    }
+    const supportsHiddenAgentMessages =
+      storeSupportsHiddenAgentMessages ||
+      client.getLastServerInfoMessage()?.features?.hiddenAgentMessages === true;
     if (!supportsHiddenAgentMessages) {
       setError(text.magicCommitUnsupported);
       return;
     }
     if (!focusedAgentId || focusedAgent?.cwd !== input.cwd) {
       setError(text.magicCommitNoFocusedAgent);
-      return;
-    }
-    if (!client) {
-      setError(text.hostNotConnected);
       return;
     }
 
@@ -187,7 +190,7 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
     isMagicSending,
     isSaving,
     selectedPaths,
-    supportsHiddenAgentMessages,
+    storeSupportsHiddenAgentMessages,
     text.commitFilesRequired,
     text.hostNotConnected,
     text.magicCommitFailed,

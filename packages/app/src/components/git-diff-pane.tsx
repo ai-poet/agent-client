@@ -693,7 +693,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     focusedAgentId ? (state.sessions[serverId]?.agents.get(focusedAgentId) ?? null) : null,
   );
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
-  const supportsHiddenAgentMessages = useSessionStore(
+  const storeSupportsHiddenAgentMessages = useSessionStore(
     (state) => state.sessions[serverId]?.serverInfo?.features?.hiddenAgentMessages === true,
   );
   const { preferences: changesPreferences, updatePreferences: updateChangesPreferences } =
@@ -1096,16 +1096,19 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       setCommitError(text.commitFilesRequired);
       return;
     }
+    if (!client) {
+      setCommitError(text.hostNotConnected);
+      return;
+    }
+    const supportsHiddenAgentMessages =
+      storeSupportsHiddenAgentMessages ||
+      client.getLastServerInfoMessage()?.features?.hiddenAgentMessages === true;
     if (!supportsHiddenAgentMessages) {
       setCommitError(text.magicCommitUnsupported);
       return;
     }
     if (!focusedAgentId || focusedAgent?.cwd !== cwd) {
       setCommitError(text.magicCommitNoFocusedAgent);
-      return;
-    }
-    if (!client) {
-      setCommitError(text.hostNotConnected);
       return;
     }
 
@@ -1133,7 +1136,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     focusedAgentId,
     isMagicCommitSending,
     selectedCommitPaths,
-    supportsHiddenAgentMessages,
+    storeSupportsHiddenAgentMessages,
     text.commitFilesRequired,
     text.hostNotConnected,
     text.magicCommitFailed,

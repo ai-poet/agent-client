@@ -150,9 +150,9 @@ export function WorkspaceColleagueScreen({ serverId, workspaceId }: WorkspaceCol
         testID="workspace-colleague-save"
       >
         {isSaving ? (
-          <ActivityIndicator size="small" color={theme.colors.palette.black} />
+          <ActivityIndicator size="small" color={theme.colors.accentForeground} />
         ) : (
-          <Save size={16} color={theme.colors.palette.black} />
+          <Save size={16} color={theme.colors.accentForeground} />
         )}
         <Text style={styles.primaryActionText}>
           {isSaving ? text.savingColleague : text.saveColleague}
@@ -364,13 +364,13 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[4],
     borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.foreground,
+    backgroundColor: theme.colors.accent,
   },
   primaryActionPressed: {
     opacity: 0.84,
   },
   primaryActionText: {
-    color: theme.colors.palette.black,
+    color: theme.colors.accentForeground,
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.semibold,
   },

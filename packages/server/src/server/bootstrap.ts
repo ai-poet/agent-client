@@ -336,6 +336,11 @@ export async function createPaseoDaemon(
         serverId,
         hostname: getHostname(),
         version: daemonVersion,
+        features: {
+          // Keep the HTTP status payload aligned with the websocket server_info handshake.
+          providersSnapshot: true,
+          hiddenAgentMessages: true,
+        },
         listen: formatListenTarget(boundListenTarget ?? listenTarget),
       });
     });

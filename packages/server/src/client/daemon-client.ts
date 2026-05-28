@@ -358,7 +358,10 @@ type ChatDeletePayload = Extract<
 type ChatPostPayload = Extract<SessionOutboundMessage, { type: "chat/post/response" }>["payload"];
 type ChatReadPayload = Extract<SessionOutboundMessage, { type: "chat/read/response" }>["payload"];
 type ChatWaitPayload = Extract<SessionOutboundMessage, { type: "chat/wait/response" }>["payload"];
-type MemoryListPayload = Extract<SessionOutboundMessage, { type: "memory/list/response" }>["payload"];
+type MemoryListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "memory/list/response" }
+>["payload"];
 type MemoryGetPayload = Extract<SessionOutboundMessage, { type: "memory/get/response" }>["payload"];
 type MemoryCreatePayload = Extract<
   SessionOutboundMessage,
@@ -372,7 +375,10 @@ type MemoryDeletePayload = Extract<
   SessionOutboundMessage,
   { type: "memory/delete/response" }
 >["payload"];
-type SkillsListPayload = Extract<SessionOutboundMessage, { type: "skills/list/response" }>["payload"];
+type SkillsListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "skills/list/response" }
+>["payload"];
 type SkillsImportPayload = Extract<
   SessionOutboundMessage,
   { type: "skills/import/response" }
@@ -1785,7 +1791,9 @@ export class DaemonClient {
       ...(options.labels && Object.keys(options.labels).length > 0
         ? { labels: options.labels }
         : {}),
-      ...(options.memoryIds && options.memoryIds.length > 0 ? { memoryIds: options.memoryIds } : {}),
+      ...(options.memoryIds && options.memoryIds.length > 0
+        ? { memoryIds: options.memoryIds }
+        : {}),
       ...(options.useWorkspaceMemory === undefined
         ? {}
         : { useWorkspaceMemory: options.useWorkspaceMemory }),
@@ -2020,7 +2028,9 @@ export class DaemonClient {
       ...(options?.hidden ? { hidden: true } : {}),
       ...(options?.images ? { images: options.images } : {}),
       ...(options?.attachments ? { attachments: options.attachments } : {}),
-      ...(options?.memoryIds && options.memoryIds.length > 0 ? { memoryIds: options.memoryIds } : {}),
+      ...(options?.memoryIds && options.memoryIds.length > 0
+        ? { memoryIds: options.memoryIds }
+        : {}),
       ...(options?.useWorkspaceMemory === undefined
         ? {}
         : { useWorkspaceMemory: options.useWorkspaceMemory }),

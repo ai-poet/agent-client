@@ -148,12 +148,7 @@ export function StandaloneAgentConversation({
   isFocused?: boolean;
 }) {
   return (
-    <AgentPanelContent
-      serverId={serverId}
-      agentId={agentId}
-      isPaneFocused={isFocused}
-      simpleMode
-    />
+    <AgentPanelContent serverId={serverId} agentId={agentId} isPaneFocused={isFocused} simpleMode />
   );
 }
 
