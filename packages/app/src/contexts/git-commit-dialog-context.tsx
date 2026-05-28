@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { CheckSquare, GitCommitHorizontal, Square, WandSparkles } from "lucide-react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { AdaptiveModalSheet, AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
@@ -172,10 +172,16 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
     setIsMagicSending(true);
     setError(null);
     try {
-      await client.sendAgentMessage(focusedAgentId, buildMagicCommitPrompt(selectedFilePaths), {
+      await client.sendAgentMessage(focusedAgentId, buildMagicCommitPrompt(selectedFilePaths, locale), {
         hidden: true,
         attachments: [],
       });
+      const result = await client.waitForFinish(focusedAgentId);
+      if (result.status === "timeout") {
+        setError(result.error ?? text.magicCommitFailed);
+      } else if (result.error) {
+        setError(result.error);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : text.magicCommitFailed);
     } finally {
@@ -189,6 +195,7 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
     hasFilePicker,
     isMagicSending,
     isSaving,
+    locale,
     selectedPaths,
     storeSupportsHiddenAgentMessages,
     text.commitFilesRequired,
@@ -389,10 +396,16 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
             variant="default"
             onPress={() => void submit()}
             disabled={isSaving || isMagicSending}
-            leftIcon={<GitCommitHorizontal size={16} color={theme.colors.palette.white} />}
+            leftIcon={
+              isMagicSending ? (
+                <ActivityIndicator size="small" color={theme.colors.palette.white} />
+              ) : (
+                <GitCommitHorizontal size={16} color={theme.colors.palette.white} />
+              )
+            }
             testID="git-commit-submit"
           >
-            {isSaving ? text.committing : text.commitAction}
+            {isSaving || isMagicSending ? text.committing : text.commitAction}
           </Button>
         </View>
       </AdaptiveModalSheet>

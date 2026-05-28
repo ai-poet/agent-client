@@ -1115,12 +1115,20 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     setIsMagicCommitSending(true);
     setCommitError(null);
     void client
-      .sendAgentMessage(focusedAgentId, buildMagicCommitPrompt(paths), {
+      .sendAgentMessage(focusedAgentId, buildMagicCommitPrompt(paths, locale), {
         hidden: true,
         attachments: [],
       })
       .then(() => {
         toastActionSuccess(text.magicCommitSent);
+        return client.waitForFinish(focusedAgentId);
+      })
+      .then((result) => {
+        if (result.status === "timeout") {
+          setCommitError(result.error ?? text.magicCommitFailed);
+        } else if (result.error) {
+          setCommitError(result.error);
+        }
       })
       .catch((err) => {
         setCommitError(err instanceof Error ? err.message : text.magicCommitFailed);
@@ -1135,6 +1143,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     focusedAgent?.cwd,
     focusedAgentId,
     isMagicCommitSending,
+    locale,
     selectedCommitPaths,
     storeSupportsHiddenAgentMessages,
     text.commitFilesRequired,
@@ -1891,10 +1900,18 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
                 size="sm"
                 onPress={handleCommit}
                 disabled={commitStatus === "pending" || isMagicCommitSending}
-                leftIcon={<GitCommitHorizontal size={14} color={theme.colors.palette.white} />}
+                leftIcon={
+                  isMagicCommitSending ? (
+                    <ActivityIndicator size="small" color={theme.colors.palette.white} />
+                  ) : (
+                    <GitCommitHorizontal size={14} color={theme.colors.palette.white} />
+                  )
+                }
                 testID="changes-inline-commit-submit"
               >
-                {commitStatus === "pending" ? text.committing : text.commitAction}
+                {commitStatus === "pending" || isMagicCommitSending
+                  ? text.committing
+                  : text.commitAction}
               </Button>
             </View>
           </View>

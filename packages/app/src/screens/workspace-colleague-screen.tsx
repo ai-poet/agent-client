@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { router } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Check, RotateCcw, Save, Users } from "lucide-react-native";
 import {
@@ -20,6 +21,7 @@ import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { normalizeWorkspaceDescriptor, useSessionStore } from "@/stores/session-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
 import { getSub2APIMessages } from "@/i18n/sub2api";
+import { buildHostWorkspaceRoute } from "@/utils/host-routes";
 
 interface WorkspaceColleagueScreenProps {
   serverId: string;
@@ -113,6 +115,7 @@ export function WorkspaceColleagueScreen({ serverId, workspaceId }: WorkspaceCol
           .getState()
           .mergeWorkspaces(serverId, [normalizeWorkspaceDescriptor(payload.workspace)]);
         toast.show(text.colleagueSaved, { variant: "success" });
+        router.replace(buildHostWorkspaceRoute(serverId, workspace.id));
       })
       .catch((error) => {
         toast.error(error instanceof Error ? error.message : text.failedConfigureColleague);
