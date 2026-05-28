@@ -1456,6 +1456,18 @@ export class Session {
     if (!project) {
       throw new Error(`Project not found for workspace ${workspace.workspaceId}`);
     }
+    const snapshot = this.workspaceGitService.peekSnapshot(workspace.cwd);
+    if (
+      snapshot?.git.isGit &&
+      normalizePersistedWorkspaceId(snapshot.cwd) === normalizePersistedWorkspaceId(workspace.cwd)
+    ) {
+      const checkout = checkoutLiteFromGitSnapshot(workspace.cwd, snapshot.git);
+      return {
+        projectKey: project.projectId,
+        projectName: project.displayName,
+        checkout,
+      };
+    }
     const checkout =
       project.kind !== "git"
         ? {
@@ -6041,21 +6053,24 @@ export class Session {
     };
   }
 
-  private async describeWorkspaceRecordWithGitData(
+  private describeWorkspaceWithRuntimeSnapshot(
+    base: WorkspaceDescriptorPayload,
     workspace: PersistedWorkspaceRecord,
-    projectRecord?: PersistedProjectRecord | null,
-  ): Promise<WorkspaceDescriptorPayload> {
-    const base = await this.describeWorkspaceRecord(workspace, projectRecord);
-    const snapshot = this.workspaceGitService.peekSnapshot(workspace.cwd);
-    if (!snapshot) {
-      return base;
-    }
-
+    snapshot: WorkspaceGitRuntimeSnapshot,
+  ): WorkspaceDescriptorPayload {
     const checkout = checkoutLiteFromGitSnapshot(workspace.cwd, snapshot.git);
     const displayName = deriveWorkspaceDisplayName({ cwd: workspace.cwd, checkout });
+    const projectKind = checkout.isGit ? "git" : base.projectKind;
+    const workspaceKind = checkout.isGit ? deriveWorkspaceKind(checkout) : base.workspaceKind;
+    const projectRootPath = checkout.isGit
+      ? deriveProjectRootPath({ cwd: workspace.cwd, checkout })
+      : base.projectRootPath;
 
     return {
       ...base,
+      projectRootPath,
+      projectKind,
+      workspaceKind,
       name: displayName,
       diffStat: snapshot.git.diffStat ?? null,
       gitRuntime: this.buildWorkspaceGitRuntimePayload(snapshot) ?? undefined,
@@ -6063,12 +6078,35 @@ export class Session {
     };
   }
 
+  private async describeWorkspaceRecordWithGitData(
+    workspace: PersistedWorkspaceRecord,
+    projectRecord?: PersistedProjectRecord | null,
+  ): Promise<WorkspaceDescriptorPayload> {
+    const base = await this.describeWorkspaceRecord(workspace, projectRecord);
+    const snapshot = this.workspaceGitService.peekSnapshot(workspace.cwd);
+    if (
+      !snapshot ||
+      normalizePersistedWorkspaceId(snapshot.cwd) !== normalizePersistedWorkspaceId(workspace.cwd)
+    ) {
+      return base;
+    }
+
+    return this.describeWorkspaceWithRuntimeSnapshot(base, workspace, snapshot);
+  }
+
   private async buildWorkspaceDescriptor(input: {
     workspace: PersistedWorkspaceRecord;
     projectRecord?: PersistedProjectRecord | null;
     includeGitData: boolean;
   }): Promise<WorkspaceDescriptorPayload> {
-    if (input.includeGitData && input.projectRecord?.kind === "git") {
+    const snapshot = input.includeGitData
+      ? this.workspaceGitService.peekSnapshot(input.workspace.cwd)
+      : null;
+    const hasMatchingGitSnapshot =
+      snapshot?.git.isGit === true &&
+      normalizePersistedWorkspaceId(snapshot.cwd) ===
+        normalizePersistedWorkspaceId(input.workspace.cwd);
+    if (input.includeGitData && (input.projectRecord?.kind === "git" || hasMatchingGitSnapshot)) {
       return this.describeWorkspaceRecordWithGitData(input.workspace, input.projectRecord);
     }
     return this.describeWorkspaceRecord(input.workspace, input.projectRecord);
@@ -6662,7 +6700,79 @@ export class Session {
   }
 
   private async reconcileActiveWorkspaceRecords(): Promise<Set<string>> {
-    return new Set();
+    const changedWorkspaceIds = new Set<string>();
+    const [projects, workspaces] = await Promise.all([
+      this.projectRegistry.list(),
+      this.workspaceRegistry.list(),
+    ]);
+    const projectsById = new Map(
+      projects
+        .filter((project) => !project.archivedAt)
+        .map((project) => [project.projectId, project] as const),
+    );
+
+    for (const workspace of workspaces) {
+      if (workspace.archivedAt) {
+        continue;
+      }
+
+      let placement: ProjectPlacementPayload;
+      try {
+        placement = await buildProjectPlacementForCwdStandalone({
+          cwd: workspace.cwd,
+          workspaceGitService: this.workspaceGitService,
+        });
+      } catch {
+        continue;
+      }
+      if (!placement.checkout.isGit) {
+        continue;
+      }
+
+      const project = projectsById.get(workspace.projectId);
+      const timestamp = new Date().toISOString();
+      const projectKind = deriveProjectKind(placement.checkout);
+      const projectRootPath = deriveProjectRootPath({
+        cwd: workspace.cwd,
+        checkout: placement.checkout,
+      });
+      const workspaceKind = deriveWorkspaceKind(placement.checkout);
+      const workspaceDisplayName = deriveWorkspaceDisplayName({
+        cwd: workspace.cwd,
+        checkout: placement.checkout,
+      });
+
+      if (
+        project &&
+        (project.kind !== projectKind ||
+          project.rootPath !== projectRootPath ||
+          project.displayName !== placement.projectName)
+      ) {
+        await this.projectRegistry.upsert({
+          ...project,
+          kind: projectKind,
+          rootPath: projectRootPath,
+          displayName: placement.projectName,
+          updatedAt: timestamp,
+        });
+      }
+
+      if (workspace.kind !== workspaceKind || workspace.displayName !== workspaceDisplayName) {
+        await this.workspaceRegistry.upsert({
+          ...workspace,
+          kind: workspaceKind,
+          displayName: workspaceDisplayName,
+          updatedAt: timestamp,
+        });
+        changedWorkspaceIds.add(workspace.workspaceId);
+      }
+
+      if (project?.kind !== projectKind || project?.rootPath !== projectRootPath) {
+        changedWorkspaceIds.add(workspace.workspaceId);
+      }
+    }
+
+    return changedWorkspaceIds;
   }
 
   private async emitWorkspaceUpdatesForWorkspaceIds(

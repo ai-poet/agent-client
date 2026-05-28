@@ -6,6 +6,7 @@ import pino from "pino";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { CheckoutPrStatusSchema } from "../shared/messages.js";
+import { BranchAlreadyCheckedOutError } from "../utils/checkout-git.js";
 import { normalizeCheckoutPrStatusPayload, Session } from "./session.js";
 import type {
   AgentClient,
@@ -1274,6 +1275,50 @@ describe("session checkout switch branch handling", () => {
         source: "local",
         error: null,
         requestId: "request-switch",
+      },
+    });
+  });
+
+  test("returns a structured reason when the target branch is checked out elsewhere", async () => {
+    const messages: unknown[] = [];
+    const workspaceGitService = {
+      getSnapshot: vi.fn().mockResolvedValue(
+        createWorkspaceGitSnapshot("/tmp/repo", {
+          git: {
+            isDirty: false,
+          },
+        }),
+      ),
+      validateBranchRef: vi.fn().mockResolvedValue({ kind: "local", name: "test" }),
+    };
+    const session = createSessionForTest({ workspaceGitService, messages });
+    checkoutGitMocks.checkoutResolvedBranch.mockRejectedValue(
+      new BranchAlreadyCheckedOutError({
+        branchName: "test",
+        worktreePath: "C:/Users/test/workspaces/repo/test",
+      }),
+    );
+
+    await (session as any).handleCheckoutSwitchBranchRequest({
+      type: "checkout_switch_branch_request",
+      cwd: "/tmp/repo",
+      branch: "test",
+      requestId: "request-occupied",
+    });
+
+    expect(messages).toContainEqual({
+      type: "checkout_switch_branch_response",
+      payload: {
+        cwd: "/tmp/repo",
+        success: false,
+        branch: "test",
+        error: {
+          code: "NOT_ALLOWED",
+          message:
+            'Branch "test" is already checked out in another worktree: C:/Users/test/workspaces/repo/test',
+          reason: "BRANCH_ALREADY_CHECKED_OUT",
+        },
+        requestId: "request-occupied",
       },
     });
   });

@@ -1129,6 +1129,7 @@ const CheckoutErrorCodeSchema = z.enum([
 const CheckoutErrorSchema = z.object({
   code: CheckoutErrorCodeSchema,
   message: z.string(),
+  reason: z.enum(["BRANCH_ALREADY_CHECKED_OUT"]).optional(),
 });
 
 const CheckoutDiffCompareSchema = z.object({

@@ -878,6 +878,8 @@ export const sub2apiMessages = {
       later: "稍后",
       stashedChangesRestored: "已恢复 stash 的更改",
       failedSwitchBranch: "切换分支失败",
+      branchAlreadyCheckedOut:
+        "该分支已在另一个工作树中打开。请切换到现有工作树，或从其他分支继续。",
     },
     composer: {
       desktopPlaceholder: "给代理发消息，标记 @文件，或使用 /命令 和 /技能",
@@ -2501,6 +2503,8 @@ export const sub2apiMessages = {
       later: "Later",
       stashedChangesRestored: "Stashed changes restored",
       failedSwitchBranch: "Failed to switch branch",
+      branchAlreadyCheckedOut:
+        "That branch is already open in another worktree. Switch to the existing worktree or continue from a different branch.",
     },
     composer: {
       desktopPlaceholder: "Message the agent, tag @files, or use /commands and /skills",
