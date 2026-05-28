@@ -21,7 +21,6 @@ import {
   type MutableRefObject,
 } from "react";
 import { router, usePathname } from "expo-router";
-import { Portal } from "@gorhom/portal";
 import { navigateToWorkspace } from "@/hooks/use-workspace-navigation";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { type GestureType } from "react-native-gesture-handler";
@@ -57,7 +56,10 @@ import {
 } from "@/runtime/host-runtime";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { projectIconQueryKey } from "@/hooks/use-project-icon-query";
-import { parseHostWorkspaceRouteFromPathname } from "@/utils/host-routes";
+import {
+  buildHostWorkspaceColleagueRoute,
+  parseHostWorkspaceRouteFromPathname,
+} from "@/utils/host-routes";
 import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
 import {
   createSidebarWorkspaceEntry,
@@ -120,7 +122,6 @@ import {
 } from "@/utils/workspace-navigation";
 import { WorkspaceHoverCard } from "@/components/workspace-hover-card";
 import { GitHubIcon } from "@/components/icons/github-icon";
-import { WorktreePersonaSection } from "@/components/agent-form/agent-form-dropdowns";
 import {
   createDefaultWorktreePersona,
   getWorktreePersonaRole,
@@ -1411,10 +1412,6 @@ function WorkspaceRowWithMenu({
   const text = useMemo(() => getSub2APIMessages(locale).sidebarWorkspace, [locale]);
   const archiveWorktree = useCheckoutGitActionsStore((state) => state.archiveWorktree);
   const [isArchivingWorkspace, setIsArchivingWorkspace] = useState(false);
-  const [isPersonaSheetOpen, setIsPersonaSheetOpen] = useState(false);
-  const [personaDraft, setPersonaDraft] = useState<WorktreePersona>(
-    () => resolveWorkspacePersona(workspace) ?? createDefaultWorktreePersona(),
-  );
   const isCreatingPlaceholder = isCreatingWorktreePlaceholderId(workspace.workspaceId);
   const workspaceDirectory = resolveWorkspaceExecutionDirectory({
     workspaceDirectory: workspace.workspaceDirectory,
@@ -1563,34 +1560,8 @@ function WorkspaceRowWithMenu({
   }, [text.branchNameCopied, toast, workspace.name]);
 
   const handleConfigureColleague = useCallback(() => {
-    setPersonaDraft(resolveWorkspacePersona(workspace) ?? createDefaultWorktreePersona());
-    setIsPersonaSheetOpen(true);
+    router.push(buildHostWorkspaceColleagueRoute(workspace.serverId, workspace.workspaceId));
   }, [workspace]);
-
-  const handleSaveColleague = useCallback(() => {
-    const client = getHostRuntimeStore().getClient(workspace.serverId);
-    if (!client) {
-      toast.error(text.hostNotConnected);
-      return;
-    }
-    void client
-      .updateWorkspacePersona({
-        workspaceId: workspace.workspaceId,
-        worktreePersona: personaDraft,
-      })
-      .then((payload) => {
-        if (payload.error || !payload.workspace) {
-          throw new Error(payload.error ?? text.failedConfigureColleague);
-        }
-        useSessionStore
-          .getState()
-          .mergeWorkspaces(workspace.serverId, [normalizeWorkspaceDescriptor(payload.workspace)]);
-        setIsPersonaSheetOpen(false);
-      })
-      .catch((error) => {
-        toast.error(error instanceof Error ? error.message : text.failedConfigureColleague);
-      });
-  }, [personaDraft, text, toast, workspace.serverId, workspace.workspaceId]);
 
   const archiveShortcutKeys = useShortcutKeys("archive-worktree");
 
@@ -1609,7 +1580,7 @@ function WorkspaceRowWithMenu({
     },
   });
 
-  const row = (
+  return (
     <WorkspaceRowInner
       workspace={workspace}
       selected={selected}
@@ -1641,46 +1612,6 @@ function WorkspaceRowWithMenu({
       }
       archiveShortcutKeys={selected && !isCreatingPlaceholder ? archiveShortcutKeys : null}
     />
-  );
-
-  return (
-    <>
-      {row}
-      {isPersonaSheetOpen ? (
-        <Portal>
-          <View style={styles.personaSheetOverlay}>
-            <Pressable
-              style={styles.personaSheetBackdrop}
-              onPress={() => setIsPersonaSheetOpen(false)}
-            />
-            <View style={styles.personaSheet}>
-              <Text style={styles.personaSheetTitle}>{text.configureColleague}</Text>
-              <WorktreePersonaSection
-                persona={personaDraft}
-                onPersonaChange={setPersonaDraft}
-                locale={locale}
-              />
-              <View style={styles.personaSheetActions}>
-                <Pressable
-                  accessibilityRole="button"
-                  style={styles.personaSheetButton}
-                  onPress={() => setIsPersonaSheetOpen(false)}
-                >
-                  <Text style={styles.personaSheetButtonText}>{text.cancel}</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  style={[styles.personaSheetButton, styles.personaSheetPrimaryButton]}
-                  onPress={handleSaveColleague}
-                >
-                  <Text style={styles.personaSheetPrimaryButtonText}>{text.saveColleague}</Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
-        </Portal>
-      ) : null}
-    </>
   );
 }
 
@@ -2832,68 +2763,6 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.xs,
     lineHeight: 14,
-  },
-  personaSheetOverlay: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    zIndex: 1000,
-    justifyContent: "center",
-    padding: theme.spacing[4],
-  },
-  personaSheetBackdrop: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.36)",
-  },
-  personaSheet: {
-    width: "100%",
-    maxWidth: 360,
-    alignSelf: "center",
-    gap: theme.spacing[4],
-    padding: theme.spacing[4],
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface1,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-  },
-  personaSheetTitle: {
-    color: theme.colors.foreground,
-    fontSize: theme.fontSize.base,
-    fontWeight: theme.fontWeight.semibold,
-  },
-  personaSheetActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: theme.spacing[2],
-  },
-  personaSheetButton: {
-    minHeight: 32,
-    justifyContent: "center",
-    paddingHorizontal: theme.spacing[3],
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.surface2,
-  },
-  personaSheetPrimaryButton: {
-    backgroundColor: theme.colors.palette.blue[500],
-  },
-  personaSheetButtonText: {
-    color: theme.colors.foreground,
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-  },
-  personaSheetPrimaryButtonText: {
-    color: theme.colors.palette.white,
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
   },
   workspaceCreatingText: {
     color: theme.colors.foregroundMuted,

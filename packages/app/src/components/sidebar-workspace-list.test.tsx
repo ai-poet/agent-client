@@ -175,6 +175,7 @@ vi.mock("lucide-react-native", () => {
     Plus: createIcon("Plus"),
     SquareTerminal: createIcon("SquareTerminal"),
     Trash2: createIcon("Trash2"),
+    Users: createIcon("Users"),
   };
 });
 
@@ -281,6 +282,7 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
 vi.mock("expo-router", () => ({
   router: {
     navigate: vi.fn(),
+    push: vi.fn(),
     replace: vi.fn(),
   },
   usePathname: () => "/h/sidebar-render-count/workspace/a-main",

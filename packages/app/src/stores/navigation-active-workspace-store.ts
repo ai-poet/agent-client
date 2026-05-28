@@ -1,6 +1,7 @@
 import { useMemo, useSyncExternalStore } from "react";
 import { useSyncExternalStoreWithSelector } from "use-sync-external-store/shim/with-selector";
 import {
+  parseHostWorkspaceColleagueRouteFromPathname,
   buildHostWorkspaceRoute,
   decodeWorkspaceIdFromPathSegment,
   parseHostWorkspaceRouteFromPathname,
@@ -66,7 +67,10 @@ function getBrowserLocationWorkspace(): ActiveWorkspaceSelection | null {
   if (!isWeb || typeof window === "undefined") {
     return null;
   }
-  return parseHostWorkspaceRouteFromPathname(window.location.pathname);
+  return (
+    parseHostWorkspaceRouteFromPathname(window.location.pathname) ??
+    parseHostWorkspaceColleagueRouteFromPathname(window.location.pathname)
+  );
 }
 
 function writeBrowserWorkspaceUrl(
@@ -100,7 +104,9 @@ function extractActiveWorkspaceFromRoute(
   }
 
   if (typeof route.path === "string") {
-    const parsed = parseHostWorkspaceRouteFromPathname(route.path);
+    const parsed =
+      parseHostWorkspaceRouteFromPathname(route.path) ??
+      parseHostWorkspaceColleagueRouteFromPathname(route.path);
     if (parsed) {
       return parsed;
     }
@@ -133,7 +139,9 @@ function classifyNavigationWorkspaceRoute(
   }
 
   if (typeof route.path === "string") {
-    const selection = parseHostWorkspaceRouteFromPathname(route.path);
+    const selection =
+      parseHostWorkspaceRouteFromPathname(route.path) ??
+      parseHostWorkspaceColleagueRouteFromPathname(route.path);
     if (selection) {
       return { kind: "workspace", selection };
     }

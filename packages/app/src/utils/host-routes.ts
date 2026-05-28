@@ -284,6 +284,28 @@ export function parseHostWorkspaceRouteFromPathname(
   return { serverId, workspaceId };
 }
 
+export function parseHostWorkspaceColleagueRouteFromPathname(
+  pathname: string,
+): { serverId: string; workspaceId: string } | null {
+  const pathOnly = stripSearchAndHash(pathname);
+  const match = pathOnly.match(/^\/h\/([^/]+)\/colleague\/([^/]+)\/?$/);
+  if (!match) {
+    return null;
+  }
+
+  const serverId = trimNonEmpty(decodeSegment(match[1]));
+  if (!serverId) {
+    return null;
+  }
+
+  const rawWorkspaceId = match[2];
+  const workspaceId = decodeWorkspaceIdFromPathSegment(rawWorkspaceId);
+  if (!workspaceId) {
+    return null;
+  }
+  return { serverId, workspaceId };
+}
+
 export function buildHostWorkspaceRoute(serverId: string, workspaceId: string) {
   const normalizedServerId = trimNonEmpty(serverId);
   const normalizedWorkspaceId = trimNonEmpty(workspaceId);
@@ -295,6 +317,21 @@ export function buildHostWorkspaceRoute(serverId: string, workspaceId: string) {
     return "/" as const;
   }
   return `/h/${encodeSegment(normalizedServerId)}/workspace/${encodeSegment(
+    encodedWorkspaceId,
+  )}` as const;
+}
+
+export function buildHostWorkspaceColleagueRoute(serverId: string, workspaceId: string) {
+  const normalizedServerId = trimNonEmpty(serverId);
+  const normalizedWorkspaceId = trimNonEmpty(workspaceId);
+  if (!normalizedServerId || !normalizedWorkspaceId) {
+    return "/" as const;
+  }
+  const encodedWorkspaceId = encodeWorkspaceIdForPathSegment(normalizedWorkspaceId);
+  if (!encodedWorkspaceId) {
+    return "/" as const;
+  }
+  return `/h/${encodeSegment(normalizedServerId)}/colleague/${encodeSegment(
     encodedWorkspaceId,
   )}` as const;
 }
