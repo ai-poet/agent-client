@@ -172,10 +172,14 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
     setIsMagicSending(true);
     setError(null);
     try {
-      await client.sendAgentMessage(focusedAgentId, buildMagicCommitPrompt(selectedFilePaths, locale), {
-        hidden: true,
-        attachments: [],
-      });
+      await client.sendAgentMessage(
+        focusedAgentId,
+        buildMagicCommitPrompt(selectedFilePaths, locale),
+        {
+          hidden: true,
+          attachments: [],
+        },
+      );
       const result = await client.waitForFinish(focusedAgentId);
       if (result.status === "timeout") {
         setError(result.error ?? text.magicCommitFailed);

@@ -11,6 +11,7 @@ import { GitDiffPane } from "./git-diff-pane";
 const {
   commitMock,
   sendAgentMessageMock,
+  waitForFinishMock,
   toastShowMock,
   toastErrorMock,
   storeHiddenAgentMessagesMock,
@@ -18,6 +19,7 @@ const {
 } = vi.hoisted(() => ({
   commitMock: vi.fn(),
   sendAgentMessageMock: vi.fn(),
+  waitForFinishMock: vi.fn(),
   toastShowMock: vi.fn(),
   toastErrorMock: vi.fn(),
   storeHiddenAgentMessagesMock: vi.fn(() => true),
@@ -308,6 +310,7 @@ vi.mock("@/stores/session-store", () => ({
               features: { hiddenAgentMessages: clientHiddenAgentMessagesMock() },
             }),
             sendAgentMessage: sendAgentMessageMock,
+            waitForFinish: waitForFinishMock,
           },
           serverInfo: {
             features: { hiddenAgentMessages: storeHiddenAgentMessagesMock() },
@@ -396,6 +399,7 @@ beforeEach(() => {
 
   commitMock.mockResolvedValue(undefined);
   sendAgentMessageMock.mockResolvedValue(undefined);
+  waitForFinishMock.mockResolvedValue({ status: "idle", final: null, error: null });
   storeHiddenAgentMessagesMock.mockReturnValue(true);
   clientHiddenAgentMessagesMock.mockReturnValue(true);
   container = document.createElement("div");
@@ -413,6 +417,7 @@ afterEach(() => {
   container = null;
   commitMock.mockReset();
   sendAgentMessageMock.mockReset();
+  waitForFinishMock.mockReset();
   toastShowMock.mockReset();
   toastErrorMock.mockReset();
   storeHiddenAgentMessagesMock.mockReset();
@@ -514,6 +519,7 @@ describe("GitDiffPane inline commit", () => {
       );
     });
     expect(sendAgentMessageMock.mock.calls[0]?.[1]).not.toContain('"README.md"');
+    expect(waitForFinishMock).toHaveBeenCalledWith("agent-1");
     expect(commitMock).not.toHaveBeenCalled();
     expect(
       (document.querySelector('[data-testid="changes-inline-commit-message"]') as HTMLInputElement)
@@ -538,5 +544,32 @@ describe("GitDiffPane inline commit", () => {
     expect(document.body.textContent).not.toContain(
       "This host version does not support hidden sends",
     );
+  });
+
+  it("keeps the manual submit button loading while the agent commit is running", async () => {
+    let resolveWaitForFinish!: () => void;
+    const waitForFinishPromise = new Promise((resolve) => {
+      resolveWaitForFinish = () => resolve({ status: "idle", final: null, error: null });
+    });
+    waitForFinishMock.mockReturnValue(waitForFinishPromise);
+    renderPane();
+
+    click("changes-inline-magic-commit");
+
+    await vi.waitFor(() => {
+      expect(waitForFinishMock).toHaveBeenCalledWith("agent-1");
+    });
+    expect(document.body.textContent).toContain("Committing...");
+    expect(
+      document
+        .querySelector('[data-testid="changes-inline-commit-submit"]')
+        ?.getAttribute("disabled"),
+    ).not.toBeNull();
+
+    resolveWaitForFinish();
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("Commit");
+    });
   });
 });
