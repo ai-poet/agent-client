@@ -14,5 +14,5 @@ function HostSkillsRouteContent() {
   const params = useLocalSearchParams<{ serverId?: string }>();
   const serverId = typeof params.serverId === "string" ? params.serverId : "";
 
-  return <SkillLibraryScreen key={serverId} />;
+  return <SkillLibraryScreen key={serverId} serverId={serverId} />;
 }

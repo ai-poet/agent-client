@@ -1,18 +1,34 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  cp,
+  lstat,
+  mkdir,
+  readlink,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  symlink as fsSymlink,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import AdmZip from "adm-zip";
 import type pino from "pino";
 import { z } from "zod";
 import type { AgentProvider } from "../agent/agent-sdk-types.js";
 import {
   ContextHubMcpServerConfigSchema,
   ManagedSkillEntrySchema,
+  MarketplaceSkillEntrySchema,
   McpServerProfileSchema,
   ProjectMemoryItemSchema,
   PromptTemplateSchema,
   type ContextHubMcpServerConfig,
   type ManagedSkillEntry,
+  type MarketplaceSkillEntry,
   type McpServerProfile,
   type McpServerProfileUpsertInput,
   type ProjectMemoryCreateInput,
@@ -32,6 +48,17 @@ const PROMPT_STORE_SCHEMA = z.object({
 const MCP_STORE_SCHEMA = z.object({
   profiles: z.array(McpServerProfileSchema),
 });
+const AI_SKILL_STORE_BASE_URL = "https://aiskillstore.io";
+const AI_SKILL_STORE_PLATFORM = "CodexCLI";
+const SKILL_PACKAGE_MAX_FILES = 100;
+const SKILL_PACKAGE_MAX_FILE_BYTES = 5 * 1024 * 1024;
+const SKILL_PACKAGE_MAX_TOTAL_BYTES = 20 * 1024 * 1024;
+const WORKSPACE_SKILL_EXCLUDE_ENTRIES = [
+  "# Paseo workspace skills",
+  ".agents/skills/",
+  ".codex/skills/",
+  ".claude/skills/",
+] as const;
 
 type Logger = Pick<pino.Logger, "debug" | "warn" | "error">;
 
@@ -74,6 +101,24 @@ type ExportSkillOptions = {
   cwd?: string | null;
 };
 
+type ListMarketplaceSkillsOptions = {
+  query?: string;
+  capability?: string;
+  limit?: number;
+  minTrust?: "verified" | "community" | "sandbox";
+  workspaceId?: string;
+  cwd?: string | null;
+};
+
+type InstallMarketplaceSkillOptions = {
+  workspaceId: string;
+  cwd: string;
+  skillId: string;
+  name: string;
+  version?: string;
+  overwrite?: boolean;
+};
+
 type RenderPromptOptions = {
   promptId: string;
   variables?: Record<string, string>;
@@ -91,6 +136,20 @@ type ResolveMcpServersOptions = {
   workspaceId?: string | null;
   provider?: AgentProvider | string | null;
 };
+
+type ValidSkillZipEntry = {
+  entryName: string;
+  relativePath: string;
+  isDirectory: boolean;
+  size: number;
+};
+
+class SkillMarketplaceConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SkillMarketplaceConflictError";
+  }
+}
 
 const REDACTION_RULES: Array<[RegExp, string | ((match: string) => string)]> = [
   [
@@ -163,6 +222,17 @@ function safeSegment(value: string): string {
     .replace(/^_+|_+$/g, "")
     .slice(0, 80);
   return `${prefix || "item"}-${hashText(value).slice(0, 10)}`;
+}
+
+function safeSkillName(value: string): string {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "skill"
+  );
 }
 
 function normalizeWhitespace(value: string): string {
@@ -290,6 +360,56 @@ async function exists(filePath: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function directoryDigest(dir: string): Promise<string | null> {
+  if (!(await exists(dir))) {
+    return null;
+  }
+  const hash = createHash("sha256");
+  async function visit(currentDir: string, prefix: string): Promise<void> {
+    const entries = (await readdir(currentDir, { withFileTypes: true })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+    for (const entry of entries) {
+      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const fullPath = path.join(currentDir, entry.name);
+      const stats = await lstat(fullPath);
+      if (stats.isSymbolicLink()) {
+        const target = await readlink(fullPath).catch(() => "");
+        hash.update(`link:${relativePath}:${target}\n`);
+        continue;
+      }
+      if (stats.isDirectory()) {
+        hash.update(`dir:${relativePath}\n`);
+        await visit(fullPath, relativePath);
+        continue;
+      }
+      if (stats.isFile()) {
+        hash.update(`file:${relativePath}:${stats.size}\n`);
+        hash.update(await readFile(fullPath));
+      }
+    }
+  }
+  await visit(dir, "");
+  return hash.digest("hex");
+}
+
+function assertPathInside(parent: string, candidate: string): void {
+  const relative = path.relative(parent, candidate);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Refusing to write outside workspace: ${candidate}`);
+  }
+}
+
+async function copyOrSymlinkSkillDirectory(sourceDir: string, destDir: string): Promise<void> {
+  await rm(destDir, { recursive: true, force: true });
+  await mkdir(path.dirname(destDir), { recursive: true });
+  try {
+    await fsSymlink(sourceDir, destDir, process.platform === "win32" ? "junction" : "dir");
+  } catch {
+    await cp(sourceDir, destDir, { recursive: true });
   }
 }
 
@@ -630,6 +750,120 @@ export class ContextHubService {
     return { skill, content };
   }
 
+  async listMarketplaceSkills(
+    options: ListMarketplaceSkillsOptions = {},
+  ): Promise<MarketplaceSkillEntry[]> {
+    const url = new URL("/v1/agent/search", AI_SKILL_STORE_BASE_URL);
+    const query = options.query?.trim();
+    const capability = options.capability?.trim();
+    if (query) {
+      url.searchParams.set("q", query);
+    }
+    if (capability) {
+      url.searchParams.set("capability", capability);
+    }
+    url.searchParams.set("platform", AI_SKILL_STORE_PLATFORM);
+    url.searchParams.set("usk_v3", "true");
+    url.searchParams.set("min_trust", options.minTrust ?? "verified");
+    url.searchParams.set("limit", String(Math.min(Math.max(options.limit ?? 20, 1), 50)));
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`AI Skill Store search failed: ${response.status} ${response.statusText}`);
+    }
+    const payload = z
+      .object({
+        skills: z.array(z.unknown()).default([]),
+      })
+      .parse(await response.json());
+    const installedNames = await this.getInstalledWorkspaceSkillNames({
+      workspaceId: options.workspaceId,
+      cwd: options.cwd,
+    });
+    return payload.skills
+      .map((raw) => this.mapAiSkillStoreSkill(raw, installedNames))
+      .filter((skill): skill is MarketplaceSkillEntry => skill !== null);
+  }
+
+  async installMarketplaceSkill(
+    options: InstallMarketplaceSkillOptions,
+  ): Promise<{ skill: ManagedSkillEntry; installed: boolean; conflict: boolean }> {
+    const workspaceRoot = options.cwd.trim();
+    if (!workspaceRoot) {
+      throw new Error("cwd is required to install a marketplace skill");
+    }
+    const packageBuffer = await this.downloadMarketplaceSkillPackage(options.skillId);
+    return this.installMarketplaceSkillPackage({
+      ...options,
+      packageBuffer,
+    });
+  }
+
+  async installMarketplaceSkillPackage(
+    options: InstallMarketplaceSkillOptions & { packageBuffer: Buffer },
+  ): Promise<{ skill: ManagedSkillEntry; installed: boolean; conflict: boolean }> {
+    const workspaceRoot = options.cwd.trim();
+    if (!workspaceRoot) {
+      throw new Error("cwd is required to install a marketplace skill");
+    }
+    const safeName = safeSkillName(options.name);
+    const tempRoot = path.join(
+      workspaceRoot,
+      ".agents",
+      "skills",
+      `.paseo-install-${safeName}-${randomUUID()}`,
+    );
+    const sourceDir = path.join(tempRoot, safeName);
+    const targetDir = path.join(workspaceRoot, ".agents", "skills", safeName);
+    assertPathInside(workspaceRoot, tempRoot);
+    assertPathInside(workspaceRoot, targetDir);
+
+    await rm(tempRoot, { recursive: true, force: true });
+    try {
+      await this.extractMarketplaceSkillPackage(options.packageBuffer, sourceDir);
+      const existingDigest = await directoryDigest(targetDir);
+      const nextDigest = await directoryDigest(sourceDir);
+      if (!nextDigest) {
+        throw new Error("Downloaded skill package did not produce an installable directory");
+      }
+      if (existingDigest && existingDigest !== nextDigest && options.overwrite !== true) {
+        throw new SkillMarketplaceConflictError(
+          `Skill already exists with different content: ${safeName}`,
+        );
+      }
+      if (existingDigest === nextDigest) {
+        await this.syncWorkspaceSkillProviderDirs(workspaceRoot, safeName);
+        await this.updateWorkspaceSkillExclude(workspaceRoot);
+        const skill = await this.findWorkspaceSkill({
+          workspaceId: options.workspaceId,
+          cwd: workspaceRoot,
+          name: safeName,
+        });
+        if (!skill) {
+          throw new Error(`Installed skill was not found after sync: ${safeName}`);
+        }
+        return { skill, installed: false, conflict: false };
+      }
+
+      await rm(targetDir, { recursive: true, force: true });
+      await mkdir(path.dirname(targetDir), { recursive: true });
+      await rename(sourceDir, targetDir);
+      await this.syncWorkspaceSkillProviderDirs(workspaceRoot, safeName);
+      await this.updateWorkspaceSkillExclude(workspaceRoot);
+      const skill = await this.findWorkspaceSkill({
+        workspaceId: options.workspaceId,
+        cwd: workspaceRoot,
+        name: safeName,
+      });
+      if (!skill) {
+        throw new Error(`Installed skill was not found: ${safeName}`);
+      }
+      return { skill, installed: true, conflict: false };
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  }
+
   async listPrompts(
     options: { workspaceId?: string; includeDeleted?: boolean } = {},
   ): Promise<PromptTemplate[]> {
@@ -815,6 +1049,233 @@ export class ContextHubService {
 
   private get mcpPath(): string {
     return path.join(this.paseoHome, "mcp", "servers.json");
+  }
+
+  private mapAiSkillStoreSkill(
+    raw: unknown,
+    installedNames: Set<string>,
+  ): MarketplaceSkillEntry | null {
+    const parsed = z
+      .object({
+        capabilities: z.array(z.string()).optional(),
+        days_since_update: z.number().int().nonnegative().nullable().optional(),
+        description: z.string().optional(),
+        download_count: z.number().int().nonnegative().optional(),
+        downloads_7d: z.number().int().nonnegative().optional(),
+        name: z.string().optional(),
+        permissions: z
+          .object({
+            network: z.boolean().optional(),
+            filesystem: z.boolean().optional(),
+            subprocess: z.boolean().optional(),
+            env_vars: z.array(z.string()).optional(),
+          })
+          .optional(),
+        platform_compatibility: z.array(z.string()).optional(),
+        skill_id: z.string().optional(),
+        trust_level: z.enum(["verified", "community", "sandbox"]).optional(),
+        version: z.string().optional(),
+        vetting_status: z.string().nullable().optional(),
+      })
+      .safeParse(raw);
+    if (!parsed.success || !parsed.data.skill_id || !parsed.data.name) {
+      return null;
+    }
+    const skillName = safeSkillName(parsed.data.name);
+    return MarketplaceSkillEntrySchema.parse({
+      id: parsed.data.skill_id,
+      name: parsed.data.name,
+      description: parsed.data.description ?? "AI Skill Store skill",
+      version: parsed.data.version ?? null,
+      trustLevel: parsed.data.trust_level ?? "sandbox",
+      vettingStatus: parsed.data.vetting_status ?? null,
+      capabilities: parsed.data.capabilities ?? [],
+      permissions: {
+        network: parsed.data.permissions?.network,
+        filesystem: parsed.data.permissions?.filesystem,
+        subprocess: parsed.data.permissions?.subprocess,
+        envVars: parsed.data.permissions?.env_vars ?? [],
+      },
+      platformCompatibility: parsed.data.platform_compatibility ?? [],
+      downloadCount: parsed.data.download_count ?? 0,
+      downloads7d: parsed.data.downloads_7d ?? 0,
+      daysSinceUpdate: parsed.data.days_since_update ?? null,
+      installed: installedNames.has(skillName),
+    });
+  }
+
+  private async getInstalledWorkspaceSkillNames(options: {
+    workspaceId?: string;
+    cwd?: string | null;
+  }): Promise<Set<string>> {
+    const cwd = options.cwd?.trim();
+    if (!cwd) {
+      return new Set();
+    }
+    const skills = await this.listSkills({
+      workspaceId: options.workspaceId,
+      cwd,
+    });
+    return new Set(
+      skills
+        .filter((skill) => skill.scope === "workspace")
+        .map((skill) => safeSkillName(skill.name)),
+    );
+  }
+
+  private async downloadMarketplaceSkillPackage(skillId: string): Promise<Buffer> {
+    const url = new URL(
+      `/v1/agent/skills/${encodeURIComponent(skillId)}/download`,
+      AI_SKILL_STORE_BASE_URL,
+    );
+    url.searchParams.set("platform", AI_SKILL_STORE_PLATFORM);
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`AI Skill Store download failed: ${response.status} ${response.statusText}`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  }
+
+  private validateSkillZipEntries(zip: AdmZip): ValidSkillZipEntry[] {
+    const entries = zip.getEntries();
+    if (entries.length === 0) {
+      throw new Error("Downloaded skill package is empty");
+    }
+    if (entries.length > SKILL_PACKAGE_MAX_FILES) {
+      throw new Error(`Skill package has too many files: ${entries.length}`);
+    }
+
+    let totalBytes = 0;
+    let hasTopLevelSkillFile = false;
+    const validated: ValidSkillZipEntry[] = [];
+    for (const entry of entries) {
+      const entryName = entry.entryName.replace(/\\/g, "/");
+      if (
+        !entryName ||
+        entryName.startsWith("/") ||
+        entryName.includes("../") ||
+        entryName.startsWith("../") ||
+        path.posix.isAbsolute(entryName)
+      ) {
+        throw new Error(`Unsafe skill package path: ${entry.entryName}`);
+      }
+      const parts = entryName.split("/").filter(Boolean);
+      if (parts.some((part) => part === "." || part === "..")) {
+        throw new Error(`Unsafe skill package path: ${entry.entryName}`);
+      }
+      const isDirectory = entry.isDirectory;
+      const size = entry.header.size;
+      if (!isDirectory && size > SKILL_PACKAGE_MAX_FILE_BYTES) {
+        throw new Error(`Skill package file is too large: ${entryName}`);
+      }
+      totalBytes += isDirectory ? 0 : size;
+      if (totalBytes > SKILL_PACKAGE_MAX_TOTAL_BYTES) {
+        throw new Error("Skill package is too large");
+      }
+      const relativePath = parts.join("/");
+      if (relativePath === "SKILL.md") {
+        hasTopLevelSkillFile = true;
+      }
+      validated.push({
+        entryName: entry.entryName,
+        relativePath,
+        isDirectory,
+        size,
+      });
+    }
+
+    if (!hasTopLevelSkillFile) {
+      throw new Error("Skill package must contain a top-level SKILL.md");
+    }
+    return validated;
+  }
+
+  private async extractMarketplaceSkillPackage(buffer: Buffer, targetDir: string): Promise<void> {
+    const zip = new AdmZip(buffer);
+    const entries = this.validateSkillZipEntries(zip);
+    await mkdir(targetDir, { recursive: true });
+    for (const entryInfo of entries) {
+      const destPath = path.join(targetDir, entryInfo.relativePath);
+      assertPathInside(targetDir, destPath);
+      if (entryInfo.isDirectory) {
+        await mkdir(destPath, { recursive: true });
+        continue;
+      }
+      const entry = zip.getEntry(entryInfo.entryName);
+      if (!entry) {
+        throw new Error(`Missing zip entry after validation: ${entryInfo.entryName}`);
+      }
+      await mkdir(path.dirname(destPath), { recursive: true });
+      await writeFile(destPath, entry.getData());
+    }
+  }
+
+  private async syncWorkspaceSkillProviderDirs(
+    workspaceRoot: string,
+    skillName: string,
+  ): Promise<void> {
+    const sourceDir = path.join(workspaceRoot, ".agents", "skills", skillName);
+    for (const root of [".codex/skills", ".claude/skills"] as const) {
+      const destDir = path.join(workspaceRoot, root, skillName);
+      assertPathInside(workspaceRoot, destDir);
+      await copyOrSymlinkSkillDirectory(sourceDir, destDir);
+    }
+  }
+
+  private async updateWorkspaceSkillExclude(workspaceRoot: string): Promise<void> {
+    const gitDir = await this.findGitDir(workspaceRoot);
+    if (!gitDir) {
+      return;
+    }
+    const excludePath = path.join(gitDir, "info", "exclude");
+    await mkdir(path.dirname(excludePath), { recursive: true });
+    const existing = (await readFile(excludePath, "utf8").catch(() => "")).trimEnd();
+    const missingEntries = WORKSPACE_SKILL_EXCLUDE_ENTRIES.filter(
+      (entry) => !existing.includes(entry),
+    );
+    if (missingEntries.length === 0) {
+      return;
+    }
+    const prefix = existing ? `${existing}\n` : "";
+    await writeFile(excludePath, `${prefix}${missingEntries.join("\n")}\n`, "utf8");
+  }
+
+  private async findGitDir(workspaceRoot: string): Promise<string | null> {
+    const dotGit = path.join(workspaceRoot, ".git");
+    const stats = await lstat(dotGit).catch(() => null);
+    if (!stats) {
+      return null;
+    }
+    if (stats.isDirectory()) {
+      return dotGit;
+    }
+    if (stats.isFile()) {
+      const content = await readFile(dotGit, "utf8").catch(() => "");
+      const match = content.match(/^gitdir:\s*(.+)$/m);
+      if (!match) {
+        return null;
+      }
+      const gitDir = path.isAbsolute(match[1]) ? match[1] : path.resolve(workspaceRoot, match[1]);
+      return gitDir;
+    }
+    return null;
+  }
+
+  private async findWorkspaceSkill(options: {
+    workspaceId: string;
+    cwd: string;
+    name: string;
+  }): Promise<ManagedSkillEntry | null> {
+    const skills = await this.listSkills({
+      workspaceId: options.workspaceId,
+      cwd: options.cwd,
+    });
+    return (
+      skills.find(
+        (skill) => skill.scope === "workspace" && safeSkillName(skill.name) === options.name,
+      ) ?? null
+    );
   }
 
   private memoryWorkspaceDir(workspaceId: string): string {

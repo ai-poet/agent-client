@@ -387,6 +387,14 @@ type SkillsExportPayload = Extract<
   SessionOutboundMessage,
   { type: "skills/export/response" }
 >["payload"];
+type SkillsMarketplaceListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "skills/marketplace/list/response" }
+>["payload"];
+type SkillsMarketplaceInstallPayload = Extract<
+  SessionOutboundMessage,
+  { type: "skills/marketplace/install/response" }
+>["payload"];
 type PromptsListPayload = Extract<
   SessionOutboundMessage,
   { type: "prompts/list/response" }
@@ -560,6 +568,18 @@ export type SkillsImportOptions = Omit<
 };
 export type SkillsExportOptions = Omit<
   Extract<SessionInboundMessage, { type: "skills/export" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type SkillsMarketplaceListOptions = Omit<
+  Extract<SessionInboundMessage, { type: "skills/marketplace/list" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type SkillsMarketplaceInstallOptions = Omit<
+  Extract<SessionInboundMessage, { type: "skills/marketplace/install" }>,
   "type" | "requestId"
 > & {
   requestId?: string;
@@ -3801,6 +3821,36 @@ export class DaemonClient {
       },
       responseType: "skills/export/response",
       timeout: 10000,
+    });
+  }
+
+  async skillsMarketplaceList(
+    options: SkillsMarketplaceListOptions = {},
+  ): Promise<SkillsMarketplaceListPayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "skills/marketplace/list",
+        ...message,
+      },
+      responseType: "skills/marketplace/list/response",
+      timeout: 15000,
+    });
+  }
+
+  async skillsMarketplaceInstall(
+    options: SkillsMarketplaceInstallOptions,
+  ): Promise<SkillsMarketplaceInstallPayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "skills/marketplace/install",
+        ...message,
+      },
+      responseType: "skills/marketplace/install/response",
+      timeout: 30000,
     });
   }
 

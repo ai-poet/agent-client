@@ -1,8 +1,29 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import AdmZip from "adm-zip";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ContextHubService } from "./service.js";
+
+function createSkillPackage(files: Record<string, string>): Buffer {
+  const zip = new AdmZip();
+  for (const [filePath, content] of Object.entries(files)) {
+    zip.addFile(filePath, Buffer.from(content, "utf8"));
+  }
+  return zip.toBuffer();
+}
+
+function createUnsafeSkillPackage(): Buffer {
+  const zip = new AdmZip();
+  zip.addFile("SKILL.md", Buffer.from("# Bad\n", "utf8"));
+  zip.addFile("safe.txt", Buffer.from("nope", "utf8"));
+  const entry = zip.getEntry("safe.txt");
+  if (!entry) {
+    throw new Error("Failed to create unsafe zip entry");
+  }
+  entry.entryName = "../escape.txt";
+  return zip.toBuffer();
+}
 
 describe("ContextHubService", () => {
   let paseoHome: string;
@@ -86,6 +107,176 @@ describe("ContextHubService", () => {
 
     const exported = await service.exportSkill({ skillId: skill.id });
     expect(exported.content).toContain("Use rg before reading broad file trees.");
+  });
+
+  it("installs marketplace skill packages into workspace provider skill directories", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "paseo-skill-workspace-"));
+    try {
+      const result = await service.installMarketplaceSkillPackage({
+        workspaceId: "workspace-1",
+        cwd: workspaceRoot,
+        skillId: "skill-1",
+        name: "Google Search",
+        packageBuffer: createSkillPackage({
+          "SKILL.md": "---\nname: google-search\ndescription: Search Google.\n---\n",
+          "main.py": "print('ok')\n",
+        }),
+      });
+
+      expect(result.installed).toBe(true);
+      expect(result.skill.scope).toBe("workspace");
+      expect(result.skill.name).toBe("google-search");
+      await expect(
+        readFile(
+          path.join(workspaceRoot, ".agents", "skills", "google-search", "SKILL.md"),
+          "utf8",
+        ),
+      ).resolves.toContain("Search Google");
+      await expect(
+        readFile(path.join(workspaceRoot, ".codex", "skills", "google-search", "SKILL.md"), "utf8"),
+      ).resolves.toContain("Search Google");
+      await expect(
+        readFile(
+          path.join(workspaceRoot, ".claude", "skills", "google-search", "SKILL.md"),
+          "utf8",
+        ),
+      ).resolves.toContain("Search Google");
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("treats repeated marketplace installs with identical content as idempotent", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "paseo-skill-workspace-"));
+    const packageBuffer = createSkillPackage({
+      "SKILL.md": "---\nname: stable-skill\ndescription: Stable skill.\n---\n",
+    });
+    try {
+      await service.installMarketplaceSkillPackage({
+        workspaceId: "workspace-1",
+        cwd: workspaceRoot,
+        skillId: "skill-1",
+        name: "stable-skill",
+        packageBuffer,
+      });
+      const second = await service.installMarketplaceSkillPackage({
+        workspaceId: "workspace-1",
+        cwd: workspaceRoot,
+        skillId: "skill-1",
+        name: "stable-skill",
+        packageBuffer,
+      });
+
+      expect(second.installed).toBe(false);
+      expect(second.conflict).toBe(false);
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects marketplace skill conflicts unless overwrite is explicit", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "paseo-skill-workspace-"));
+    try {
+      await service.installMarketplaceSkillPackage({
+        workspaceId: "workspace-1",
+        cwd: workspaceRoot,
+        skillId: "skill-1",
+        name: "review-helper",
+        packageBuffer: createSkillPackage({
+          "SKILL.md": "---\nname: review-helper\ndescription: First.\n---\n",
+        }),
+      });
+
+      await expect(
+        service.installMarketplaceSkillPackage({
+          workspaceId: "workspace-1",
+          cwd: workspaceRoot,
+          skillId: "skill-1",
+          name: "review-helper",
+          packageBuffer: createSkillPackage({
+            "SKILL.md": "---\nname: review-helper\ndescription: Second.\n---\n",
+          }),
+        }),
+      ).rejects.toThrow(/already exists with different content/);
+
+      const overwritten = await service.installMarketplaceSkillPackage({
+        workspaceId: "workspace-1",
+        cwd: workspaceRoot,
+        skillId: "skill-1",
+        name: "review-helper",
+        overwrite: true,
+        packageBuffer: createSkillPackage({
+          "SKILL.md": "---\nname: review-helper\ndescription: Second.\n---\n",
+        }),
+      });
+      expect(overwritten.installed).toBe(true);
+      await expect(
+        readFile(
+          path.join(workspaceRoot, ".agents", "skills", "review-helper", "SKILL.md"),
+          "utf8",
+        ),
+      ).resolves.toContain("Second");
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects marketplace packages without top-level SKILL.md or with unsafe paths", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "paseo-skill-workspace-"));
+    try {
+      await expect(
+        service.installMarketplaceSkillPackage({
+          workspaceId: "workspace-1",
+          cwd: workspaceRoot,
+          skillId: "skill-1",
+          name: "bad-skill",
+          packageBuffer: createSkillPackage({ "nested/SKILL.md": "# Bad\n" }),
+        }),
+      ).rejects.toThrow(/top-level SKILL\.md/);
+
+      await expect(
+        service.installMarketplaceSkillPackage({
+          workspaceId: "workspace-1",
+          cwd: workspaceRoot,
+          skillId: "skill-1",
+          name: "bad-skill",
+          packageBuffer: createUnsafeSkillPackage(),
+        }),
+      ).rejects.toThrow(/Unsafe skill package path/);
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("adds workspace skill directories to git exclude when available", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "paseo-skill-workspace-"));
+    try {
+      await writeFile(
+        path.join(workspaceRoot, ".git"),
+        "gitdir: ../git-dir/worktrees/demo\n",
+        "utf8",
+      );
+      await service.installMarketplaceSkillPackage({
+        workspaceId: "workspace-1",
+        cwd: workspaceRoot,
+        skillId: "skill-1",
+        name: "git-skill",
+        packageBuffer: createSkillPackage({
+          "SKILL.md": "---\nname: git-skill\ndescription: Git skill.\n---\n",
+        }),
+      });
+
+      const exclude = await readFile(
+        path.resolve(workspaceRoot, "..", "git-dir", "worktrees", "demo", "info", "exclude"),
+        "utf8",
+      );
+      expect(exclude).toContain(".agents/skills/");
+      expect(exclude).toContain(".codex/skills/");
+      expect(exclude).toContain(".claude/skills/");
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+      await rm(path.resolve(workspaceRoot, "..", "git-dir"), { recursive: true, force: true });
+    }
   });
 
   it("validates and resolves MCP server profiles", async () => {

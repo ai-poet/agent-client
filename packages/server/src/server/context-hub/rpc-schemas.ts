@@ -143,6 +143,31 @@ export const ManagedSkillEntrySchema = z.object({
   updatedAt: z.string().nullable(),
 });
 
+export const SkillMarketplaceTrustLevelSchema = z.enum(["verified", "community", "sandbox"]);
+
+export const MarketplaceSkillPermissionsSchema = z.object({
+  network: z.boolean().optional(),
+  filesystem: z.boolean().optional(),
+  subprocess: z.boolean().optional(),
+  envVars: z.array(z.string()).default([]),
+});
+
+export const MarketplaceSkillEntrySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  version: z.string().nullable(),
+  trustLevel: SkillMarketplaceTrustLevelSchema,
+  vettingStatus: z.string().nullable(),
+  capabilities: z.array(z.string()),
+  permissions: MarketplaceSkillPermissionsSchema,
+  platformCompatibility: z.array(z.string()),
+  downloadCount: z.number().int().nonnegative(),
+  downloads7d: z.number().int().nonnegative(),
+  daysSinceUpdate: z.number().int().nonnegative().nullable(),
+  installed: z.boolean(),
+});
+
 export const McpServerProfileSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -228,6 +253,29 @@ export const SkillsExportRequestSchema = z.object({
   skillId: z.string().min(1),
   workspaceId: z.string().optional(),
   cwd: z.string().optional(),
+});
+
+export const SkillsMarketplaceListRequestSchema = z.object({
+  type: z.literal("skills/marketplace/list"),
+  requestId: RequestIdSchema,
+  query: z.string().optional(),
+  capability: z.string().optional(),
+  limit: z.number().int().positive().max(50).optional(),
+  minTrust: SkillMarketplaceTrustLevelSchema.optional(),
+  refresh: z.boolean().optional(),
+  workspaceId: z.string().optional(),
+  cwd: z.string().optional(),
+});
+
+export const SkillsMarketplaceInstallRequestSchema = z.object({
+  type: z.literal("skills/marketplace/install"),
+  requestId: RequestIdSchema,
+  workspaceId: z.string().min(1),
+  cwd: z.string().optional(),
+  skillId: z.string().min(1),
+  name: z.string().min(1),
+  version: z.string().optional(),
+  overwrite: z.boolean().optional(),
 });
 
 export const PromptsListRequestSchema = z.object({
@@ -362,6 +410,26 @@ export const SkillsExportResponseSchema = z.object({
   }),
 });
 
+export const SkillsMarketplaceListResponseSchema = z.object({
+  type: z.literal("skills/marketplace/list/response"),
+  payload: z.object({
+    requestId: z.string(),
+    skills: z.array(MarketplaceSkillEntrySchema),
+    error: z.string().nullable(),
+  }),
+});
+
+export const SkillsMarketplaceInstallResponseSchema = z.object({
+  type: z.literal("skills/marketplace/install/response"),
+  payload: z.object({
+    requestId: z.string(),
+    skill: ManagedSkillEntrySchema.nullable(),
+    installed: z.boolean(),
+    conflict: z.boolean(),
+    error: z.string().nullable(),
+  }),
+});
+
 export const PromptsListResponseSchema = z.object({
   type: z.literal("prompts/list/response"),
   payload: z.object({
@@ -454,6 +522,8 @@ export type PromptTemplate = z.infer<typeof PromptTemplateSchema>;
 export type PromptTemplateCreateInput = z.infer<typeof PromptTemplateCreateInputSchema>;
 export type PromptTemplateUpdateInput = z.infer<typeof PromptTemplateUpdateInputSchema>;
 export type ManagedSkillEntry = z.infer<typeof ManagedSkillEntrySchema>;
+export type SkillMarketplaceTrustLevel = z.infer<typeof SkillMarketplaceTrustLevelSchema>;
+export type MarketplaceSkillEntry = z.infer<typeof MarketplaceSkillEntrySchema>;
 export type McpServerProfile = z.infer<typeof McpServerProfileSchema>;
 export type McpServerProfileUpsertInput = z.infer<typeof McpServerProfileUpsertInputSchema>;
 export type ContextHubMcpServerConfig = z.infer<typeof ContextHubMcpServerConfigSchema>;

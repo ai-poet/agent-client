@@ -2018,6 +2018,14 @@ export class Session {
             await this.handleSkillsExportRequest(msg);
             break;
 
+          case "skills/marketplace/list":
+            await this.handleSkillsMarketplaceListRequest(msg);
+            break;
+
+          case "skills/marketplace/install":
+            await this.handleSkillsMarketplaceInstallRequest(msg);
+            break;
+
           case "prompts/list":
             await this.handlePromptsListRequest(msg);
             break;
@@ -8883,6 +8891,80 @@ export class Session {
       });
     } catch (error) {
       this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleSkillsMarketplaceListRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/marketplace/list" }>,
+  ): Promise<void> {
+    try {
+      const cwd = request.cwd ?? (await this.resolveContextHubWorkspaceCwd(request.workspaceId));
+      const skills = await this.contextHubService.listMarketplaceSkills({
+        query: request.query,
+        capability: request.capability,
+        limit: request.limit,
+        minTrust: request.minTrust,
+        workspaceId: request.workspaceId,
+        cwd,
+      });
+      this.emit({
+        type: "skills/marketplace/list/response",
+        payload: {
+          requestId: request.requestId,
+          skills,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "skills/marketplace/list/response",
+        payload: {
+          requestId: request.requestId,
+          skills: [],
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  private async handleSkillsMarketplaceInstallRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/marketplace/install" }>,
+  ): Promise<void> {
+    try {
+      const cwd = request.cwd ?? (await this.resolveContextHubWorkspaceCwd(request.workspaceId));
+      if (!cwd) {
+        throw new Error("Workspace directory is required to install a marketplace skill");
+      }
+      const result = await this.contextHubService.installMarketplaceSkill({
+        workspaceId: request.workspaceId,
+        cwd,
+        skillId: request.skillId,
+        name: request.name,
+        version: request.version,
+        overwrite: request.overwrite,
+      });
+      this.emit({
+        type: "skills/marketplace/install/response",
+        payload: {
+          requestId: request.requestId,
+          skill: result.skill,
+          installed: result.installed,
+          conflict: result.conflict,
+          error: null,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.emit({
+        type: "skills/marketplace/install/response",
+        payload: {
+          requestId: request.requestId,
+          skill: null,
+          installed: false,
+          conflict: /already exists with different content/i.test(message),
+          error: message,
+        },
+      });
     }
   }
 

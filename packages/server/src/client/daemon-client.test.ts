@@ -213,6 +213,102 @@ describe("DaemonClient", () => {
     expect(client.getConnectionState().status).toBe("disposed");
   });
 
+  test("sends skill marketplace list and install requests", async () => {
+    const logger = createMockLogger();
+    const mock = createMockTransport();
+
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_unit_test",
+      logger,
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
+
+    const connectPromise = client.connect();
+    mock.triggerOpen();
+    await connectPromise;
+
+    const listPromise = client.skillsMarketplaceList({
+      query: "search",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+    });
+    const listRequest = JSON.parse(mock.sent[0] as string) as {
+      type: "session";
+      message: {
+        type: "skills/marketplace/list";
+        requestId: string;
+        query: string;
+        workspaceId: string;
+        cwd: string;
+      };
+    };
+    expect(listRequest.message).toMatchObject({
+      type: "skills/marketplace/list",
+      query: "search",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+    });
+
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "skills/marketplace/list/response",
+        payload: {
+          requestId: listRequest.message.requestId,
+          skills: [],
+          error: null,
+        },
+      }),
+    );
+    await expect(listPromise).resolves.toMatchObject({ skills: [], error: null });
+
+    const installPromise = client.skillsMarketplaceInstall({
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+      skillId: "skill-1",
+      name: "google-search",
+    });
+    const installRequest = JSON.parse(mock.sent[1] as string) as {
+      type: "session";
+      message: {
+        type: "skills/marketplace/install";
+        requestId: string;
+        workspaceId: string;
+        cwd: string;
+        skillId: string;
+        name: string;
+      };
+    };
+    expect(installRequest.message).toMatchObject({
+      type: "skills/marketplace/install",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+      skillId: "skill-1",
+      name: "google-search",
+    });
+
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "skills/marketplace/install/response",
+        payload: {
+          requestId: installRequest.message.requestId,
+          skill: null,
+          installed: false,
+          conflict: false,
+          error: null,
+        },
+      }),
+    );
+    await expect(installPromise).resolves.toMatchObject({
+      skill: null,
+      installed: false,
+      conflict: false,
+      error: null,
+    });
+  });
+
   test("normalizes workspace_setup_progress into a workspace-scoped daemon event", async () => {
     const logger = createMockLogger();
     const mock = createMockTransport();

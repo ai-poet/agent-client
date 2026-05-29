@@ -57,6 +57,8 @@ import {
   SkillsListRequestSchema,
   SkillsImportRequestSchema,
   SkillsExportRequestSchema,
+  SkillsMarketplaceListRequestSchema,
+  SkillsMarketplaceInstallRequestSchema,
   PromptsListRequestSchema,
   PromptsCreateRequestSchema,
   PromptsUpdateRequestSchema,
@@ -74,6 +76,8 @@ import {
   SkillsListResponseSchema,
   SkillsImportResponseSchema,
   SkillsExportResponseSchema,
+  SkillsMarketplaceListResponseSchema,
+  SkillsMarketplaceInstallResponseSchema,
   PromptsListResponseSchema,
   PromptsCreateResponseSchema,
   PromptsUpdateResponseSchema,
@@ -87,6 +91,7 @@ import {
   type ProjectMemoryKind,
   type PromptTemplate,
   type ManagedSkillEntry,
+  type MarketplaceSkillEntry,
   type McpServerProfile,
   type ContextHubMcpServerConfig,
 } from "../server/context-hub/rpc-schemas.js";
@@ -1714,6 +1719,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   SkillsListRequestSchema,
   SkillsImportRequestSchema,
   SkillsExportRequestSchema,
+  SkillsMarketplaceListRequestSchema,
+  SkillsMarketplaceInstallRequestSchema,
   PromptsListRequestSchema,
   PromptsCreateRequestSchema,
   PromptsUpdateRequestSchema,
@@ -3342,6 +3349,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SkillsListResponseSchema,
   SkillsImportResponseSchema,
   SkillsExportResponseSchema,
+  SkillsMarketplaceListResponseSchema,
+  SkillsMarketplaceInstallResponseSchema,
   PromptsListResponseSchema,
   PromptsCreateResponseSchema,
   PromptsUpdateResponseSchema,
@@ -3460,6 +3469,7 @@ export type ContextHubProjectMemoryItem = ProjectMemoryItem;
 export type ContextHubProjectMemoryKind = ProjectMemoryKind;
 export type ContextHubPromptTemplate = PromptTemplate;
 export type ContextHubManagedSkillEntry = ManagedSkillEntry;
+export type ContextHubMarketplaceSkillEntry = MarketplaceSkillEntry;
 export type ContextHubMcpServerProfile = McpServerProfile;
 export type ContextHubMcpServerConfigPayload = ContextHubMcpServerConfig;
 export type MemoryListResponse = z.infer<typeof MemoryListResponseSchema>;
@@ -3470,6 +3480,10 @@ export type MemoryDeleteResponse = z.infer<typeof MemoryDeleteResponseSchema>;
 export type SkillsListResponse = z.infer<typeof SkillsListResponseSchema>;
 export type SkillsImportResponse = z.infer<typeof SkillsImportResponseSchema>;
 export type SkillsExportResponse = z.infer<typeof SkillsExportResponseSchema>;
+export type SkillsMarketplaceListResponse = z.infer<typeof SkillsMarketplaceListResponseSchema>;
+export type SkillsMarketplaceInstallResponse = z.infer<
+  typeof SkillsMarketplaceInstallResponseSchema
+>;
 export type PromptsListResponse = z.infer<typeof PromptsListResponseSchema>;
 export type PromptsCreateResponse = z.infer<typeof PromptsCreateResponseSchema>;
 export type PromptsUpdateResponse = z.infer<typeof PromptsUpdateResponseSchema>;
