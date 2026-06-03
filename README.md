@@ -2,7 +2,7 @@
   <img src="packages/website/public/logo.svg" width="64" height="64" alt="Paseo logo">
 </p>
 
-<h1 align="center">Paseo</h1>
+<h1 align="center">Paseo 深度定制版</h1>
 
 <p align="center">
   <a href="https://github.com/getpaseo/paseo/stargazers">
@@ -11,137 +11,131 @@
   <a href="https://github.com/getpaseo/paseo/releases">
     <img src="https://img.shields.io/github/v/release/getpaseo/paseo?style=flat&logo=github" alt="GitHub release">
   </a>
-  <a href="https://x.com/moboudra">
-    <img src="https://img.shields.io/badge/%40moboudra-555?logo=x" alt="X">
-  </a>
-  <a href="https://discord.gg/jz8T2uahpH">
-    <img src="https://img.shields.io/badge/Discord-555?logo=discord" alt="Discord">
-  </a>
 </p>
 
-<p align="center">One interface for all your Claude Code, Codex and OpenCode agents.</p>
+<p align="center">基于 Paseo 深度定制的 AI Agent 客户端 —— 专为 Claude Code CLI 与 Codex CLI 打造</p>
 
 <p align="center">
   <img src="https://paseo.sh/hero-mockup.png" alt="Paseo app screenshot" width="100%">
 </p>
 
-<p align="center">
-  <img src="https://paseo.sh/mobile-mockup.png" alt="Paseo mobile app" width="100%">
-</p>
-
 ---
 
-Run agents in parallel on your own machines. Ship from your phone or your desk.
+本项目是 [Paseo](https://github.com/getpaseo/paseo) 的二次开发版本，针对 **Claude Code CLI** 和 **Codex CLI** 进行了深度定制与优化，提供更强大的 Agent 管理、编排和远程控制能力。
 
-- **Self-hosted:** Agents run on your machine with your full dev environment. Use your tools, your configs, and your skills.
-- **Multi-provider:** Claude Code, Codex, and OpenCode through the same interface. Pick the right model for each job.
-- **Voice control:** Dictate tasks or talk through problems in voice mode. Hands-free when you need it.
-- **Cross-device:** iOS, Android, desktop, web, and CLI. Start work at your desk, check in from your phone, script it from the terminal.
-- **Privacy-first:** Paseo doesn't have any telemetry, tracking, or forced log-ins.
+## 核心特性
 
-## Getting Started
+- **深度集成 Claude Code & Codex**: 针对两大主流 AI 编码 Agent 进行专项优化，支持高级参数配置、自定义工作流和深度交互
+- **多 Agent 并行编排**: 在本地机器上并行运行多个 Agent，支持跨 Agent 任务协调与结果聚合
+- **自托管架构**: Agent 运行在您的本地环境中，使用您的工具、配置和技能，代码始终留在您的机器上
+- **全平台覆盖**: iOS、Android、桌面端、Web 和 CLI，随时随地管理您的 Agent
+- **隐私优先**: 无遥测、无追踪、无强制登录，您的数据完全由您掌控
+- **语音控制**: 语音模式下达任务指令，解放双手
 
-Paseo runs a local server called the daemon that manages your coding agents. Clients like the desktop app, mobile app, web app, and CLI connect to it.
+## 快速开始
 
-### Prerequisites
+Paseo 运行一个本地守护进程（daemon）来管理您的编码 Agent。桌面应用、移动应用、Web 应用和 CLI 都通过它进行连接。
 
-You need at least one agent CLI installed and configured with your credentials:
+### 前置要求
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-- [Codex](https://github.com/openai/codex)
-- [OpenCode](https://github.com/anomalyco/opencode)
+您需要至少安装并配置好一个 Agent CLI：
 
-### Desktop app (recommended)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — Anthropic 的 Claude 编码助手
+- [Codex](https://github.com/openai/codex) — OpenAI 的 Codex 编码 Agent
 
-Download it from [paseo.sh/download](https://paseo.sh/download) or the [GitHub releases page](https://github.com/getpaseo/paseo/releases). Open the app and the daemon starts automatically. Nothing else to install.
+### 桌面应用（推荐）
 
-To connect from your phone, scan the QR code shown in Settings.
+从 [GitHub releases 页面](https://github.com/getpaseo/paseo/releases) 下载。打开应用后守护进程自动启动，无需额外安装。
 
-### CLI / headless
+手机连接：在设置中扫描二维码即可配对。
 
-Install the CLI and start Paseo:
+### CLI / 无头模式
+
+安装 CLI 并启动 Paseo：
 
 ```bash
 npm install -g @getpaseo/cli
 paseo
 ```
 
-This shows a QR code in the terminal. Connect from any client. This path is useful for servers and remote machines.
+终端会显示二维码，使用任意客户端扫描连接。适用于服务器和远程机器场景。
 
-For full setup and configuration, see:
-- [Docs](https://paseo.sh/docs)
-- [Configuration reference](https://paseo.sh/docs/configuration)
+## CLI 使用示例
 
-## CLI
-
-Everything you can do in the app, you can do from the terminal.
+应用中的所有操作都可以通过终端完成：
 
 ```bash
-paseo run --provider claude/opus-4.6 "implement user authentication"
-paseo run --provider codex/gpt-5.4 --worktree feature-x "implement feature X"
+# 使用 Claude Code 运行任务
+paseo run --provider claude/opus-4.6 "实现用户认证系统"
 
-paseo ls                           # list running agents
-paseo attach abc123                # stream live output
-paseo send abc123 "also add tests" # follow-up task
+# 使用 Codex 在独立工作区运行
+paseo run --provider codex/gpt-5.4 --worktree feature-x "实现功能 X"
 
-# run on a remote daemon
-paseo --host workstation.local:6767 run "run the full test suite"
+# 列出运行中的 Agent
+paseo ls
+
+# 实时连接 Agent 输出流
+paseo attach abc123
+
+# 向运行中的 Agent 追加指令
+paseo send abc123 "顺便加上单元测试"
+
+# 连接远程守护进程
+paseo --host workstation.local:6767 run "运行完整测试套件"
 ```
 
-See the [full CLI reference](https://paseo.sh/docs/cli) for more.
+## Agent 编排技能（实验性）
 
-## Orchestration skills (Unstable)
-
-Experimental skills that teach agents how to use the Paseo CLI to orchestrate other agents. I am updating these very frequently as I learn new things, expect changes without notice, might be coupled to my own setup, use at your own risk.
+通过技能系统教 Agent 如何使用 Paseo CLI 编排其他 Agent：
 
 ```bash
 npx skills add getpaseo/paseo
 ```
 
-Then use them in any agent conversation:
+在任意 Agent 对话中使用：
 
 ```bash
-# Use handoff when you discuss something with an agent but want another one to implement.
-# I use this to plan with Claude and then handoff to Codex to implement.
-/paseo-handoff hand off the authentication fix to codex 5.4 in a worktree
+# 任务交接：与 Claude 讨论方案后，交给 Codex 实现
+/paseo-handoff 将认证修复任务交给 codex 5.4，在独立工作区执行
 
-# Use loops when you have clear acceptance criteria (aka Ralph loops).
-/paseo-loop loop a codex agent to fix the backend tests, use sonnet to verify, max 10 iterations
+# 循环验证：设定验收条件，自动迭代优化
+/paseo-loop 循环运行 codex 修复后端测试，使用 sonnet 验证，最多 10 轮
 
-# Orchestrator teaches the agent how to create teams and manage them via a chat room.
-# Very opinionated and expects both Codex and Claude to work.
-/paseo-orchestrator spin up a team to implement the database refactor, use chat to coordinate. use claude to plan and codex to implement and review
+# 多 Agent 协调：创建团队并通过聊天室管理
+/paseo-orchestrator 组建团队实现数据库重构，Claude 负责规划，Codex 负责实现和审查
 ```
 
-## Development
+## 开发
 
-Quick monorepo package map:
-- `packages/server`: Paseo daemon (agent process orchestration, WebSocket API, MCP server)
-- `packages/app`: Expo client (iOS, Android, web)
-- `packages/cli`: `paseo` CLI for daemon and agent workflows
-- `packages/desktop`: Electron desktop app
-- `packages/relay`: Relay package for remote connectivity
-- `packages/website`: Marketing site and documentation (`paseo.sh`)
+Monorepo 包结构：
 
-Common commands:
+| 包 | 说明 |
+|---|---|
+| `packages/server` | Paseo 守护进程（Agent 进程编排、WebSocket API、MCP 服务器） |
+| `packages/app` | Expo 客户端（iOS、Android、Web） |
+| `packages/cli` | `paseo` CLI（守护进程与 Agent 工作流） |
+| `packages/desktop` | Electron 桌面应用 |
+| `packages/relay` | 远程连接中继包 |
+| `packages/website` | 官网与文档 |
+
+常用命令：
 
 ```bash
-# run all local dev services
+# 启动所有本地开发服务
 npm run dev
 
-# run individual surfaces
+# 单独启动各端
 npm run dev:server
 npm run dev:app
 npm run dev:desktop
-npm run dev:website
 
-# build the daemon
+# 构建守护进程
 npm run build:daemon
 
-# repo-wide checks
+# 全仓库类型检查
 npm run typecheck
 ```
 
-## License
+## 许可证
 
 AGPL-3.0
