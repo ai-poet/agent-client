@@ -19,7 +19,7 @@ import { openExternalUrl } from "@/utils/open-external-url";
 import { resolveWorkspaceScriptLink } from "@/utils/workspace-script-links";
 import { getAppMessages } from "@/i18n/sub2api";
 
-type ScriptActionIcon = "start" | "view";
+type ScriptActionIcon = "preview" | "start" | "view";
 
 interface WorkspaceScriptsButtonProps {
   serverId: string;
@@ -28,6 +28,7 @@ interface WorkspaceScriptsButtonProps {
   liveTerminalIds?: readonly string[];
   onScriptTerminalStarted?: (terminalId: string) => void;
   onViewTerminal?: (terminalId: string) => void;
+  onPreviewService?: (scriptName: string) => void;
   hideLabels?: boolean;
 }
 
@@ -69,6 +70,8 @@ function ScriptActionButton({
         let iconElement: ReactElement;
         if (icon === "view") {
           iconElement = <SquareTerminal {...iconProps} />;
+        } else if (icon === "preview") {
+          iconElement = <Globe {...iconProps} />;
         } else {
           iconElement = <Play {...iconProps} fill="transparent" />;
         }
@@ -158,6 +161,7 @@ export function WorkspaceScriptsButton({
   liveTerminalIds = [],
   onScriptTerminalStarted,
   onViewTerminal,
+  onPreviewService,
   hideLabels,
 }: WorkspaceScriptsButtonProps): ReactElement | null {
   const { theme } = useUnistyles();
@@ -279,27 +283,41 @@ export function WorkspaceScriptsButton({
                 const ScriptIcon = isService ? Globe : SquareTerminal;
                 const showExitBadge = !isRunning && exitCode !== null;
 
-                let primaryAction: ReactElement | null = null;
-                if (isRunning && liveTerminalId) {
-                  primaryAction = (
+                const actions: ReactElement[] = [];
+                if (!isNative && isRunning && isService && serviceOpenUrl && onPreviewService) {
+                  actions.push(
                     <ScriptActionButton
+                      key="preview"
+                      accessibilityLabel={text.previewScript(script.scriptName)}
+                      testID={`workspace-scripts-preview-${script.scriptName}`}
+                      icon="preview"
+                      label={text.preview}
+                      onPress={() => onPreviewService(script.scriptName)}
+                    />,
+                  );
+                }
+                if (isRunning && liveTerminalId) {
+                  actions.push(
+                    <ScriptActionButton
+                      key="view"
                       accessibilityLabel={text.viewScriptTerminal(script.scriptName)}
                       testID={`workspace-scripts-view-${script.scriptName}`}
                       icon="view"
                       label={text.view}
                       onPress={() => onViewTerminal?.(liveTerminalId)}
-                    />
+                    />,
                   );
                 } else if (!isRunning) {
-                  primaryAction = (
+                  actions.push(
                     <ScriptActionButton
+                      key="start"
                       accessibilityLabel={text.runScript(script.scriptName)}
                       testID={`workspace-scripts-start-${script.scriptName}`}
                       disabled={startScriptMutation.isPending}
                       icon="start"
                       label={text.run}
                       onPress={() => startScriptMutation.mutate(script.scriptName)}
-                    />
+                    />,
                   );
                 }
 
@@ -328,7 +346,9 @@ export function WorkspaceScriptsButton({
                         </Text>
                         {showExitBadge ? <ExitCodeBadge code={exitCode} text={text} /> : null}
                         <View style={styles.spacer} />
-                        {primaryAction}
+                        {actions.length > 0 ? (
+                          <View style={styles.actionGroup}>{actions}</View>
+                        ) : null}
                       </View>
                       {hostLinks.length > 0 ? (
                         <View style={styles.hostList}>
@@ -416,6 +436,12 @@ const styles = StyleSheet.create((theme) => ({
   spacer: {
     flex: 1,
     minWidth: 0,
+  },
+  actionGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    flexShrink: 0,
   },
   hostList: {
     marginTop: 2,

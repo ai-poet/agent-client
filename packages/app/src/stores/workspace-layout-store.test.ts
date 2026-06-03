@@ -34,10 +34,10 @@ import {
 const SERVER_ID = "server-1";
 const WORKSPACE_ID = "ws-main";
 
-function createTab(tabId: string): WorkspaceTab {
+function createTab(tabId: string, target?: WorkspaceTab["target"]): WorkspaceTab {
   return {
     tabId,
-    target: { kind: "draft", draftId: tabId },
+    target: target ?? { kind: "draft", draftId: tabId },
     createdAt: 1,
   };
 }
@@ -310,6 +310,171 @@ describe("workspace-layout-store actions", () => {
     expect(duplicateTabId).toBe(firstTabId);
     expect(pane.tabIds).toEqual([firstTabId, secondTabId]);
     expect(pane.focusedTabId).toBe(secondTabId);
+  });
+
+  it("openTabInAdjacentRightPane focuses an existing preview tab instead of duplicating it", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = useWorkspaceLayoutStore.getState();
+
+    const previewTabId = store.openTabFocused(workspaceKey, {
+      kind: "preview",
+      scriptName: "web",
+    });
+    store.openTabFocused(workspaceKey, {
+      kind: "file",
+      path: "/repo/worktree/a.ts",
+    });
+
+    const duplicateTabId = store.openTabInAdjacentRightPane(workspaceKey, {
+      target: { kind: "preview", scriptName: "web" },
+      adjacentPaneId: null,
+    });
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const pane = findPaneById(layout.root, "main")!;
+
+    expect(previewTabId).toBe("preview_web");
+    expect(duplicateTabId).toBe(previewTabId);
+    expect(collectAllTabs(layout.root).map((tab) => tab.tabId)).toEqual([
+      "preview_web",
+      "file_/repo/worktree/a.ts",
+    ]);
+    expect(pane.focusedTabId).toBe("preview_web");
+    expect(layout.focusedPaneId).toBe("main");
+  });
+
+  it("openTabInAdjacentRightPane reuses the right adjacent pane when one exists", () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "23232323-2323-2323-2323-232323232323",
+    );
+    const workspaceKey = createWorkspaceKey();
+    const store = useWorkspaceLayoutStore.getState();
+
+    store.openTabFocused(workspaceKey, {
+      kind: "file",
+      path: "/repo/worktree/a.ts",
+    });
+    const rightFileTabId = store.openTabFocused(workspaceKey, {
+      kind: "file",
+      path: "/repo/worktree/b.ts",
+    });
+    const rightPaneId = store.splitPane(workspaceKey, {
+      tabId: rightFileTabId!,
+      targetPaneId: "main",
+      position: "right",
+    });
+    store.focusPane(workspaceKey, "main");
+
+    const previewTabId = store.openTabInAdjacentRightPane(workspaceKey, {
+      target: { kind: "preview", scriptName: "web" },
+      adjacentPaneId: rightPaneId,
+    });
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+
+    expect(rightPaneId).toBe("pane_23232323-2323-2323-2323-232323232323");
+    expect(previewTabId).toBe("preview_web");
+    expect(collectAllPanes(layout.root).map((pane) => pane.id)).toEqual(["main", rightPaneId]);
+    expect(layout.focusedPaneId).toBe(rightPaneId);
+    expect(findPaneById(layout.root, "main")?.tabIds).toEqual(["file_/repo/worktree/a.ts"]);
+    expect(findPaneById(layout.root, rightPaneId!)?.tabIds).toEqual([
+      "file_/repo/worktree/b.ts",
+      "preview_web",
+    ]);
+    expect(findPaneById(layout.root, rightPaneId!)?.focusedTabId).toBe("preview_web");
+  });
+
+  it("openTabInAdjacentRightPane creates a right split when no adjacent pane exists", () => {
+    vi.spyOn(globalThis.crypto, "randomUUID")
+      .mockReturnValueOnce("45454545-4545-4545-4545-454545454545")
+      .mockReturnValueOnce("56565656-5656-5656-5656-565656565656");
+    const workspaceKey = createWorkspaceKey();
+    const store = useWorkspaceLayoutStore.getState();
+
+    store.openTabFocused(workspaceKey, {
+      kind: "file",
+      path: "/repo/worktree/a.ts",
+    });
+    const previewTabId = store.openTabInAdjacentRightPane(workspaceKey, {
+      target: { kind: "preview", scriptName: "web" },
+      adjacentPaneId: null,
+    });
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+    const newPaneId = "pane_45454545-4545-4545-4545-454545454545";
+
+    expect(previewTabId).toBe("preview_web");
+    expect(collectAllPanes(layout.root).map((pane) => pane.id)).toEqual(["main", newPaneId]);
+    expect(layout.focusedPaneId).toBe(newPaneId);
+    expect(findPaneById(layout.root, "main")?.tabIds).toEqual(["file_/repo/worktree/a.ts"]);
+    expect(findPaneById(layout.root, newPaneId)?.tabIds).toEqual(["preview_web"]);
+  });
+
+  it("openTabInAdjacentRightPane falls back to the focused pane when splitting is too deep", () => {
+    vi.spyOn(globalThis.crypto, "randomUUID")
+      .mockReturnValueOnce("abababab-abab-abab-abab-abababababab")
+      .mockReturnValueOnce("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd");
+    const workspaceKey = createWorkspaceKey();
+    const deepRoot: SplitNode = {
+      kind: "group",
+      group: {
+        id: "group-root",
+        direction: "horizontal",
+        sizes: [0.5, 0.5],
+        children: [
+          createPane({ id: "side-1", tabIds: ["side-1-tab"] }),
+          {
+            kind: "group",
+            group: {
+              id: "group-middle",
+              direction: "vertical",
+              sizes: [0.5, 0.5],
+              children: [
+                createPane({ id: "side-2", tabIds: ["side-2-tab"] }),
+                {
+                  kind: "group",
+                  group: {
+                    id: "group-deep",
+                    direction: "vertical",
+                    sizes: [0.5, 0.5],
+                    children: [
+                      createPane({ id: "side-3", tabIds: ["side-3-tab"] }),
+                      createPane({ id: "deep", tabIds: ["deep-tab"] }),
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
+
+    useWorkspaceLayoutStore.setState({
+      layoutByWorkspace: {
+        [workspaceKey]: {
+          root: deepRoot,
+          focusedPaneId: "deep",
+        },
+      },
+    });
+
+    const previewTabId = useWorkspaceLayoutStore
+      .getState()
+      .openTabInAdjacentRightPane(workspaceKey, {
+        target: { kind: "preview", scriptName: "web" },
+        adjacentPaneId: null,
+      });
+    const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]!;
+
+    expect(previewTabId).toBe("preview_web");
+    expect(getTreeDepth(layout.root)).toBe(4);
+    expect(collectAllPanes(layout.root).map((pane) => pane.id)).toEqual([
+      "side-1",
+      "side-2",
+      "side-3",
+      "deep",
+    ]);
+    expect(layout.focusedPaneId).toBe("deep");
+    expect(findPaneById(layout.root, "deep")?.tabIds).toEqual(["deep-tab", "preview_web"]);
+    expect(findPaneById(layout.root, "deep")?.focusedTabId).toBe("preview_web");
   });
 
   it("openTab creates distinct draft tabs for repeated Cmd+T/new-tab opens", () => {

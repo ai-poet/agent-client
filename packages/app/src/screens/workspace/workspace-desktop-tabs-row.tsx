@@ -107,6 +107,9 @@ function getFallbackTabLabel(
   if (tab.target.kind === "terminal") {
     return text.tabLabels.terminal;
   }
+  if (tab.target.kind === "preview") {
+    return tab.target.scriptName;
+  }
   if (tab.target.kind === "file") {
     return tab.target.path.split("/").filter(Boolean).pop() ?? tab.target.path;
   }

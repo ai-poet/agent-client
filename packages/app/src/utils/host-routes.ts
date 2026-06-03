@@ -105,7 +105,8 @@ export type WorkspaceOpenIntent =
   | { kind: "terminal"; terminalId: string }
   | { kind: "file"; path: string }
   | { kind: "draft"; draftId: string }
-  | { kind: "setup"; workspaceId: string };
+  | { kind: "setup"; workspaceId: string }
+  | { kind: "preview"; scriptName: string };
 
 export function parseWorkspaceOpenIntent(
   value: string | null | undefined,
@@ -148,6 +149,9 @@ export function parseWorkspaceOpenIntent(
       return null;
     }
     return { kind: "setup", workspaceId };
+  }
+  if (kind === "preview") {
+    return { kind: "preview", scriptName: payload };
   }
 
   return null;

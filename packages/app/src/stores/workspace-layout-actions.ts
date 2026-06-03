@@ -164,6 +164,16 @@ interface SplitPaneEmptyInLayoutInput {
   maxTreeDepth: number;
 }
 
+interface OpenTabInAdjacentPaneInput {
+  layout: WorkspaceLayout;
+  target: WorkspaceTabTarget;
+  adjacentPaneId: string | null;
+  position: "left" | "right" | "top" | "bottom";
+  now: number;
+  createNodeId: (prefix: "pane" | "group") => string;
+  maxTreeDepth: number;
+}
+
 interface MoveTabToPaneInLayoutInput {
   layout: WorkspaceLayout;
   tabId: string;
@@ -1051,6 +1061,37 @@ function insertNewTabIntoFocusedPane(input: {
   };
 }
 
+function insertNewTabIntoPane(input: {
+  layout: WorkspaceLayout;
+  target: WorkspaceTabTarget;
+  paneId: string;
+  now: number;
+}): OpenTabInLayoutResult | null {
+  const layout = asInternalLayout(input.layout);
+  if (!findPaneById(layout.root, input.paneId)) {
+    return null;
+  }
+
+  const tabId = buildDeterministicWorkspaceTabId(input.target);
+  const nextTab: WorkspaceTab = {
+    tabId,
+    target: input.target,
+    createdAt: input.now,
+  };
+
+  return {
+    tabId,
+    layout: {
+      root: insertTabIntoPane(layout.root, {
+        paneId: input.paneId,
+        tab: nextTab,
+        focusTabId: tabId,
+      }),
+      focusedPaneId: input.paneId,
+    },
+  };
+}
+
 export function openTabInLayoutFocused(input: OpenTabInLayoutInput): OpenTabInLayoutResult {
   const layout = asInternalLayout(input.layout);
   const existingTab = collectAllTabs(layout.root).find((tab) =>
@@ -1080,6 +1121,62 @@ export function openTabInLayoutBackground(input: OpenTabInLayoutInput): OpenTabI
   }
 
   return insertNewTabIntoFocusedPane({ ...input, focus: false });
+}
+
+export function openTabInAdjacentPane(input: OpenTabInAdjacentPaneInput): OpenTabInLayoutResult {
+  const layout = asInternalLayout(input.layout);
+  const existingTab = collectAllTabs(layout.root).find((tab) =>
+    workspaceTabTargetsEqual(tab.target, input.target),
+  );
+  if (existingTab) {
+    return {
+      tabId: existingTab.tabId,
+      layout:
+        focusTabInLayout({
+          layout,
+          tabId: existingTab.tabId,
+        }) ?? input.layout,
+    };
+  }
+
+  if (input.adjacentPaneId && findPaneById(layout.root, input.adjacentPaneId)) {
+    const adjacentResult = insertNewTabIntoPane({
+      layout,
+      target: input.target,
+      paneId: input.adjacentPaneId,
+      now: input.now,
+    });
+    if (adjacentResult) {
+      return adjacentResult;
+    }
+  }
+
+  const targetPane =
+    findPaneById(layout.root, layout.focusedPaneId) ?? collectAllPanes(layout.root)[0] ?? null;
+  if (!targetPane) {
+    return insertNewTabIntoFocusedPane({ ...input, focus: true });
+  }
+
+  const emptySplit = splitPaneEmptyInLayout({
+    layout,
+    targetPaneId: targetPane.id,
+    position: input.position,
+    createNodeId: input.createNodeId,
+    maxTreeDepth: input.maxTreeDepth,
+  });
+  if (emptySplit) {
+    const splitResult = insertNewTabIntoPane({
+      layout: emptySplit.layout,
+      target: input.target,
+      paneId: emptySplit.paneId,
+      now: input.now,
+    });
+    if (splitResult) {
+      return splitResult;
+    }
+  }
+
+  return insertNewTabIntoFocusedPane({ ...input, focus: true });
 }
 
 export function closeTabInLayout(input: CloseTabInLayoutInput): WorkspaceLayout | null {

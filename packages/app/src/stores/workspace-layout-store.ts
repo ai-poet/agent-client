@@ -22,6 +22,7 @@ import {
   moveTabToPaneInLayout,
   normalizeLayout,
   openTabInLayoutBackground,
+  openTabInAdjacentPane,
   openTabInLayoutFocused,
   reconcileWorkspaceTabs,
   removePaneFromTree,
@@ -69,6 +70,10 @@ interface WorkspaceLayoutStore {
   hiddenAgentIdsByWorkspace: Record<string, Set<string>>;
   openTabFocused: (workspaceKey: string, target: WorkspaceTabTarget) => string | null;
   openTabInBackground: (workspaceKey: string, target: WorkspaceTabTarget) => string | null;
+  openTabInAdjacentRightPane: (
+    workspaceKey: string,
+    input: { target: WorkspaceTabTarget; adjacentPaneId?: string | null },
+  ) => string | null;
   closeTab: (workspaceKey: string, tabId: string) => void;
   focusTab: (workspaceKey: string, tabId: string) => void;
   retargetTab: (workspaceKey: string, tabId: string, target: WorkspaceTabTarget) => string | null;
@@ -210,6 +215,46 @@ export const useWorkspaceLayoutStore = create<WorkspaceLayoutStore>()(
           layout: getWorkspaceLayout(get().layoutByWorkspace, normalizedWorkspaceKey),
           target: normalizedTarget,
           now: Date.now(),
+        });
+
+        set((state) => ({
+          hiddenAgentIdsByWorkspace:
+            normalizedTarget.kind !== "agent"
+              ? state.hiddenAgentIdsByWorkspace
+              : removeAgentIdFromWorkspaceSet(
+                  state.hiddenAgentIdsByWorkspace,
+                  normalizedWorkspaceKey,
+                  normalizedTarget.agentId,
+                ),
+          layoutByWorkspace: {
+            ...state.layoutByWorkspace,
+            [normalizedWorkspaceKey]: result.layout,
+          },
+        }));
+
+        return result.tabId;
+      },
+      openTabInAdjacentRightPane: (workspaceKey, input) => {
+        const normalizedWorkspaceKey = trimNonEmpty(workspaceKey);
+        const normalizedTarget = normalizeWorkspaceTabTarget(input.target);
+        if (!normalizedWorkspaceKey || !normalizedTarget) {
+          return null;
+        }
+
+        const result = openTabInAdjacentPane({
+          layout: getWorkspaceLayout(get().layoutByWorkspace, normalizedWorkspaceKey),
+          target: normalizedTarget,
+          adjacentPaneId: trimNonEmpty(input.adjacentPaneId) ?? null,
+          position: "right",
+          now: Date.now(),
+          maxTreeDepth: MAX_TREE_DEPTH,
+          createNodeId: (prefix) => {
+            const randomValue =
+              typeof globalThis.crypto?.randomUUID === "function"
+                ? globalThis.crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            return `${prefix}_${randomValue}`;
+          },
         });
 
         set((state) => ({

@@ -188,6 +188,9 @@ function getFallbackTabOptionLabel(
   if (tab.target.kind === "terminal") {
     return text.tabLabels.terminal;
   }
+  if (tab.target.kind === "preview") {
+    return tab.target.scriptName;
+  }
   if (tab.target.kind === "file") {
     return tab.target.path.split("/").filter(Boolean).pop() ?? tab.target.path;
   }
@@ -209,6 +212,9 @@ function getFallbackTabOptionDescription(
   }
   if (tab.target.kind === "terminal") {
     return text.tabSubtitles.terminal;
+  }
+  if (tab.target.kind === "preview") {
+    return text.tabSubtitles.preview;
   }
   return tab.target.path;
 }
@@ -1044,6 +1050,9 @@ function WorkspaceScreenContent({
   const openWorkspaceTabInBackground = useWorkspaceLayoutStore(
     (state) => state.openTabInBackground,
   );
+  const openWorkspaceTabInAdjacentRightPane = useWorkspaceLayoutStore(
+    (state) => state.openTabInAdjacentRightPane,
+  );
   const focusWorkspaceTab = useWorkspaceLayoutStore((state) => state.focusTab);
   const closeWorkspaceTab = useWorkspaceLayoutStore((state) => state.closeTab);
   const unpinWorkspaceAgent = useWorkspaceLayoutStore((state) => state.unpinAgent);
@@ -1088,6 +1097,24 @@ function WorkspaceScreenContent({
       openWorkspaceTabFocused(persistenceKey, { kind: "terminal", terminalId });
     },
     [openWorkspaceTabFocused, persistenceKey],
+  );
+  const handlePreviewService = useCallback(
+    (scriptName: string) => {
+      if (!persistenceKey || !workspaceLayout) {
+        return;
+      }
+      const target = normalizeWorkspaceTabTarget({ kind: "preview", scriptName });
+      if (!target) {
+        return;
+      }
+      const adjacentPaneId = findAdjacentPane(
+        workspaceLayout.root,
+        workspaceLayout.focusedPaneId,
+        "right",
+      );
+      openWorkspaceTabInAdjacentRightPane(persistenceKey, { target, adjacentPaneId });
+    },
+    [openWorkspaceTabInAdjacentRightPane, persistenceKey, workspaceLayout],
   );
   const paneFocusSuppressedRef = useRef(false);
   const resizeWorkspaceSplit = useWorkspaceLayoutStore((state) => state.resizeSplit);
@@ -2465,6 +2492,7 @@ function WorkspaceScreenContent({
                       liveTerminalIds={liveTerminalIds}
                       onScriptTerminalStarted={handleScriptTerminalStarted}
                       onViewTerminal={handleViewScriptTerminal}
+                      onPreviewService={handlePreviewService}
                       hideLabels={showCompactButtonLabels}
                     />
                   ) : null}
