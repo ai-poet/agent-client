@@ -16,6 +16,7 @@ const cyberAiCodingEnv = {
   EXPO_PUBLIC_PASEO_APP_NAME: "CyberAICoding",
   EXPO_PUBLIC_PASEO_CLOUD_NAME: "CyberAICoding Cloud",
   EXPO_PUBLIC_PASEO_LOGO_VARIANT: "cybercode",
+  EXPO_PUBLIC_MANAGED_SERVICE_URL: "https://ai-coding.cyberspirit.io",
   PASEO_EXPO_ICON: "./assets/images/cybercode-icon.png",
   PASEO_EXPO_ANDROID_FOREGROUND_ICON: "./assets/images/cybercode-android-icon-foreground.png",
   PASEO_EXPO_SPLASH_ICON: "./assets/images/cybercode-splash-icon.png",
