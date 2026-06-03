@@ -13,6 +13,9 @@ import {
 } from "@/components/onboarding-guide-target";
 
 const SPOTLIGHT_PADDING = 8;
+const SPOTLIGHT_SOFT_EDGE_OUTSET = 6;
+const SPOTLIGHT_BORDER_COLOR = "rgba(255, 255, 255, 0.34)";
+const SPOTLIGHT_SOFT_EDGE_COLOR = "rgba(255, 255, 255, 0.12)";
 const PANEL_WIDTH = 360;
 const PANEL_MARGIN = 16;
 const FALLBACK_PANEL_TOP = 96;
@@ -62,6 +65,24 @@ function expandRect(
   };
 }
 
+function toAbsoluteRectStyle(rect: OnboardingGuideTargetRect) {
+  return {
+    left: rect.x,
+    top: rect.y,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+function toSoftEdgeRectStyle(rect: OnboardingGuideTargetRect) {
+  return {
+    left: rect.x - SPOTLIGHT_SOFT_EDGE_OUTSET,
+    top: rect.y - SPOTLIGHT_SOFT_EDGE_OUTSET,
+    width: rect.width + SPOTLIGHT_SOFT_EDGE_OUTSET * 2,
+    height: rect.height + SPOTLIGHT_SOFT_EDGE_OUTSET * 2,
+  };
+}
+
 function computePanelPosition(input: {
   rect: OnboardingGuideTargetRect | null;
   screen: { width: number; height: number };
@@ -106,9 +127,15 @@ const styles = StyleSheet.create((theme) => ({
   spotlightBorder: {
     position: "absolute",
     borderRadius: theme.borderRadius.lg,
-    borderWidth: 2,
-    borderColor: theme.colors.accent,
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderWidth: 1,
+    borderColor: SPOTLIGHT_BORDER_COLOR,
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+  },
+  spotlightSoftEdge: {
+    position: "absolute",
+    borderRadius: theme.borderRadius.lg + SPOTLIGHT_SOFT_EDGE_OUTSET,
+    borderWidth: SPOTLIGHT_SOFT_EDGE_OUTSET,
+    borderColor: SPOTLIGHT_SOFT_EDGE_COLOR,
   },
   panel: {
     position: "absolute",
@@ -291,7 +318,20 @@ export function OnboardingGuideDialog() {
       ) : (
         <View style={[styles.dim, styles.fallbackDim, StyleSheet.absoluteFillObject]} />
       )}
-      {rect ? <View pointerEvents="none" style={[styles.spotlightBorder, rect] as any} /> : null}
+      {rect ? (
+        <>
+          <View
+            pointerEvents="none"
+            style={[styles.spotlightSoftEdge, toSoftEdgeRectStyle(rect)] as any}
+            testID="onboarding-guide-spotlight-soft-edge"
+          />
+          <View
+            pointerEvents="none"
+            style={[styles.spotlightBorder, toAbsoluteRectStyle(rect)] as any}
+            testID="onboarding-guide-spotlight"
+          />
+        </>
+      ) : null}
 
       <View style={[styles.panel, panel] as any} testID="onboarding-guide-content">
         <Text style={styles.guideTitle}>{text.title}</Text>

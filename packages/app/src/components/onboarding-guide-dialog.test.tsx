@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OnboardingGuideDialog } from "./onboarding-guide-dialog";
 import { useOnboardingGuideStore } from "@/stores/onboarding-guide-store";
 
-const { theme, updateSettingsMock } = vi.hoisted(() => ({
+const { onboardingTargetRegistryMock, theme, updateSettingsMock } = vi.hoisted(() => ({
+  onboardingTargetRegistryMock: { current: null as unknown },
   updateSettingsMock: vi.fn(),
   theme: {
     spacing: { 1: 4, 2: 8, 3: 12, 4: 16, 6: 24 },
@@ -102,7 +103,7 @@ vi.mock("react-native-unistyles", () => ({
 }));
 
 vi.mock("@/components/onboarding-guide-target", () => ({
-  useOnboardingGuideTargetRegistry: () => null,
+  useOnboardingGuideTargetRegistry: () => onboardingTargetRegistryMock.current,
 }));
 
 vi.mock("@/hooks/use-sub2api-locale", () => ({
@@ -129,6 +130,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   updateSettingsMock.mockReset();
+  onboardingTargetRegistryMock.current = null;
   useOnboardingGuideStore.setState({
     open: true,
     source: "manual",
@@ -147,6 +149,7 @@ afterEach(() => {
   root = null;
   container = null;
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 function renderDialog() {
@@ -161,6 +164,35 @@ describe("OnboardingGuideDialog", () => {
 
     expect(container?.textContent).toContain("Quick start");
     expect(container?.textContent).toContain("Add or open a project");
+  });
+
+  it("uses neutral soft spotlight styles for a measured target", async () => {
+    vi.useFakeTimers();
+    onboardingTargetRegistryMock.current = {
+      measure: vi.fn().mockResolvedValue({ x: 80, y: 120, width: 160, height: 48 }),
+      reveal: vi.fn().mockResolvedValue(true),
+    };
+
+    renderDialog();
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    const spotlight = container?.querySelector(
+      '[data-testid="onboarding-guide-spotlight"]',
+    ) as HTMLElement | null;
+    const softEdge = container?.querySelector(
+      '[data-testid="onboarding-guide-spotlight-soft-edge"]',
+    ) as HTMLElement | null;
+
+    expect(spotlight).not.toBeNull();
+    expect(softEdge).not.toBeNull();
+    expect(spotlight?.style.borderColor).toBe("rgba(255, 255, 255, 0.34)");
+    expect(spotlight?.style.borderColor).not.toBe(theme.colors.accent);
+    expect(spotlight?.style.borderWidth).toBe("1px");
+    expect(softEdge?.style.borderColor).toBe("rgba(255, 255, 255, 0.12)");
+    expect(softEdge?.style.borderWidth).toBe("6px");
   });
 
   it("moves forward and backward through steps", () => {
