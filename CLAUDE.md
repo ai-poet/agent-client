@@ -55,6 +55,9 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for full setup, build sync requir
   - For full suite verification, push to CI and check GitHub Actions instead.
 - **Always run typecheck after every change.**
 - **Run `npm run format` before committing.** This repo uses Biome for formatting. Do not manually fix formatting — let the formatter handle it.
+- **Brand builds MUST set and verify the managed cloud login endpoint.** When building any branded/white-label app, do not stop at app name, icon, bundle/app id, or update URL. The brand wrapper script must also set `EXPO_PUBLIC_MANAGED_SERVICE_URL`, and the built web bundle must be checked for the expected login/service domain before packaging is considered correct. Known branded endpoints:
+  - CyberAICoding: `https://ai-coding.cyberspirit.io`
+  - CheapRouter: `https://cheaprouter.org`
 - **NEVER make breaking changes to WebSocket or message schemas.** The primary compatibility path is old mobile app clients talking to newly updated daemons. Users update desktop and daemon first, then keep running the old app for a while. Every schema change MUST be backward-compatible for old clients against new daemons:
   - New fields: always `.optional()` with a sensible default or `.transform()` fallback.
   - Never change a field from optional to required.
