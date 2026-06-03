@@ -8,6 +8,7 @@ import { useStoreWithEqualityFn } from "zustand/traditional";
 import invariant from "tiny-invariant";
 import { AgentStreamView, type AgentStreamViewHandle } from "@/components/agent-stream-view";
 import { Composer } from "@/components/composer";
+import { DesktopAgentLoadingState } from "@/components/desktop-agent-loading-state";
 import { ArchivedAgentCallout } from "@/components/archived-agent-callout";
 import { FileDropZone } from "@/components/file-drop-zone";
 import { getProviderIcon } from "@/components/provider-icons";
@@ -47,7 +48,7 @@ import {
   deriveRouteBottomAnchorIntent,
   deriveRouteBottomAnchorRequest,
 } from "@/screens/agent/agent-ready-screen-bottom-anchor";
-import { isNative } from "@/constants/platform";
+import { getIsElectron, isNative } from "@/constants/platform";
 
 function formatProviderLabel(provider: Agent["provider"]): string {
   if (!provider) {
@@ -279,6 +280,7 @@ function AgentPanelBody({
   simpleMode?: boolean;
 }) {
   const { theme } = useUnistyles();
+  const shouldUseDesktopLoadingState = getIsElectron();
   const { isArchivingAgent } = useArchiveAgent();
   const hasSession = useSessionStore((state) => Boolean(state.sessions[serverId]));
   const setAgents = useSessionStore((state) => state.setAgents);
@@ -429,7 +431,11 @@ function AgentPanelBody({
     return (
       <View style={styles.container} testID="agent-loading">
         <View style={styles.errorContainer}>
-          <ActivityIndicator size="large" color={theme.colors.foregroundMuted} />
+          {shouldUseDesktopLoadingState ? (
+            <DesktopAgentLoadingState title="Loading agent" subtitle="Preparing this session." />
+          ) : (
+            <ActivityIndicator size="large" color={theme.colors.foregroundMuted} />
+          )}
         </View>
       </View>
     );
@@ -471,6 +477,7 @@ function ChatAgentContent({
   simpleMode?: boolean;
 }) {
   const { theme } = useUnistyles();
+  const shouldUseDesktopLoadingState = getIsElectron();
   const panelToast = useToastHost();
   const { isArchivingAgent } = useArchiveAgent();
   const streamViewRef = useRef<AgentStreamViewHandle>(null);
@@ -890,7 +897,11 @@ function ChatAgentContent({
     return (
       <View style={styles.container} testID="agent-loading">
         <View style={styles.errorContainer}>
-          <ActivityIndicator size="large" color={theme.colors.foregroundMuted} />
+          {shouldUseDesktopLoadingState ? (
+            <DesktopAgentLoadingState title="Loading agent" subtitle="Preparing this session." />
+          ) : (
+            <ActivityIndicator size="large" color={theme.colors.foregroundMuted} />
+          )}
         </View>
       </View>
     );
@@ -937,7 +948,14 @@ function ChatAgentContent({
           viewState.sync.status === "catching_up" &&
           viewState.sync.ui === "overlay" ? (
             <View style={styles.historySyncOverlay} testID="agent-history-overlay">
-              <ActivityIndicator size="large" color={theme.colors.foregroundMuted} />
+              {shouldUseDesktopLoadingState ? (
+                <DesktopAgentLoadingState
+                  title="Syncing history"
+                  subtitle="Catching up with the latest agent output."
+                />
+              ) : (
+                <ActivityIndicator size="large" color={theme.colors.foregroundMuted} />
+              )}
             </View>
           ) : null}
 
@@ -951,9 +969,19 @@ function ChatAgentContent({
 
       {isArchivingCurrentAgent ? (
         <View style={styles.archivingOverlay} testID="agent-archiving-overlay">
-          <ActivityIndicator size="large" color={theme.colors.foreground} />
-          <Text style={styles.archivingTitle}>Archiving agent...</Text>
-          <Text style={styles.archivingSubtitle}>Please wait while we archive this agent.</Text>
+          {shouldUseDesktopLoadingState ? (
+            <DesktopAgentLoadingState
+              title="Archiving agent..."
+              subtitle="Please wait while we archive this agent."
+              tone="blocking"
+            />
+          ) : (
+            <>
+              <ActivityIndicator size="large" color={theme.colors.foreground} />
+              <Text style={styles.archivingTitle}>Archiving agent...</Text>
+              <Text style={styles.archivingSubtitle}>Please wait while we archive this agent.</Text>
+            </>
+          )}
         </View>
       ) : null}
     </View>
@@ -1236,6 +1264,8 @@ function AgentSessionUnavailableState({
   lastError: string | null;
   isUnknownDaemon?: boolean;
 }) {
+  const shouldUseDesktopLoadingState = getIsElectron();
+
   if (isUnknownDaemon) {
     return (
       <View style={styles.container}>
@@ -1259,17 +1289,34 @@ function AgentSessionUnavailableState({
       <View style={styles.centerState}>
         {isConnecting || isPreparingSession ? (
           <>
-            <ActivityIndicator size="large" />
-            <Text style={styles.loadingText}>
-              {isPreparingSession
-                ? `Preparing ${serverLabel} session...`
-                : `Connecting to ${serverLabel}...`}
-            </Text>
-            <Text style={styles.statusText}>
-              {isPreparingSession
-                ? "We will show this agent in a moment."
-                : "We will show this agent once the host is online."}
-            </Text>
+            {shouldUseDesktopLoadingState ? (
+              <DesktopAgentLoadingState
+                title={
+                  isPreparingSession
+                    ? `Preparing ${serverLabel} session...`
+                    : `Connecting to ${serverLabel}...`
+                }
+                subtitle={
+                  isPreparingSession
+                    ? "We will show this agent in a moment."
+                    : "We will show this agent once the host is online."
+                }
+              />
+            ) : (
+              <>
+                <ActivityIndicator size="large" />
+                <Text style={styles.loadingText}>
+                  {isPreparingSession
+                    ? `Preparing ${serverLabel} session...`
+                    : `Connecting to ${serverLabel}...`}
+                </Text>
+                <Text style={styles.statusText}>
+                  {isPreparingSession
+                    ? "We will show this agent in a moment."
+                    : "We will show this agent once the host is online."}
+                </Text>
+              </>
+            )}
           </>
         ) : (
           <>

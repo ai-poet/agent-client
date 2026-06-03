@@ -261,7 +261,11 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
             const isInstalling = installingSkillId === skill.id;
             const canInstall = Boolean(client && workspace) && !isInstalling;
             return (
-              <View key={skill.id} style={styles.skillRow} testID={`skill-marketplace-row-${skill.id}`}>
+              <View
+                key={skill.id}
+                style={styles.skillRow}
+                testID={`skill-marketplace-row-${skill.id}`}
+              >
                 <View style={styles.skillIcon}>
                   <Box size={22} color={theme.colors.accentBright} />
                 </View>
@@ -478,7 +482,7 @@ const styles = StyleSheet.create((theme) => ({
   skillGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    columnGap: theme.spacing[10],
+    columnGap: 40,
     rowGap: theme.spacing[8],
   },
   skillRow: {
@@ -490,7 +494,7 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[4],
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.borderAccent,
-    paddingBottom: theme.spacing[5],
+    paddingBottom: 20,
   },
   skillIcon: {
     width: 52,

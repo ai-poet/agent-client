@@ -29,7 +29,9 @@ describe("CheapRouter brand script", () => {
       'EXPO_PUBLIC_MANAGED_SERVICE_URL: "https://cheaprouter.org"',
     );
     expect(cheapRouterScript).toContain('PASEO_EXPO_ICON: "./assets/images/cheaprouter-icon.png"');
-    expect(cheapRouterScript).toContain('PASEO_WEB_FAVICON: "./assets/images/cheaprouter-icon.png"');
+    expect(cheapRouterScript).toContain(
+      'PASEO_WEB_FAVICON: "./assets/images/cheaprouter-icon.png"',
+    );
     expect(cheapRouterScript).toContain('PASEO_DESKTOP_APP_ID: "org.cheaprouter.desktop"');
     expect(cheapRouterScript).toContain('PASEO_DESKTOP_ICON_PNG: "assets/cheaprouter-icon.png"');
     expect(cheapRouterScript).toContain('PASEO_DESKTOP_ICON_MAC: "assets/cheaprouter-icon.icns"');
@@ -53,7 +55,9 @@ describe("CyberAICoding brand script", () => {
       'EXPO_PUBLIC_MANAGED_SERVICE_URL: "https://ai-coding.cyberspirit.io"',
     );
     expect(cyberAiCodingScript).toContain('PASEO_EXPO_ICON: "./assets/images/cybercode-icon.png"');
-    expect(cyberAiCodingScript).toContain('PASEO_WEB_FAVICON: "./assets/images/cybercode-favicon.png"');
+    expect(cyberAiCodingScript).toContain(
+      'PASEO_WEB_FAVICON: "./assets/images/cybercode-favicon.png"',
+    );
     expect(cyberAiCodingScript).toContain('PASEO_DESKTOP_APP_ID: "com.cyberaicoding.desktop"');
     expect(cyberAiCodingScript).toContain('PASEO_DESKTOP_ICON_PNG: "assets/cybercode-icon.png"');
     expect(cyberAiCodingScript).toContain('PASEO_DESKTOP_ICON_MAC: "assets/cybercode-icon.icns"');

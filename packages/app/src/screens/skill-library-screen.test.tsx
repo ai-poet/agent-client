@@ -8,88 +8,88 @@ import { SkillLibraryScreen } from "./skill-library-screen";
 
 const { theme, defaultWorkspace, mockClient, mockSessionState, toastSuccessMock, toastErrorMock } =
   vi.hoisted(() => {
-  const theme = {
-    spacing: { 1: 4, 2: 8, 3: 12, 4: 16, 5: 20, 8: 32, 10: 40, 16: 64 },
-    borderRadius: { sm: 4, md: 6 },
-    fontSize: { xs: 11, sm: 13, base: 15, lg: 18, "4xl": 32 },
-    fontWeight: { normal: "400", semibold: "600" },
-    colors: {
-      surface0: "#000",
-      surface1: "#111",
-      surface2: "#222",
-      foreground: "#fff",
-      foregroundMuted: "#aaa",
-      border: "#555",
-      borderAccent: "#444",
-      accentBright: "#0a84ff",
-      success: "#30d158",
-      palette: { black: "#000" },
-    },
-  };
-
-  const marketplaceSkill: ContextHubMarketplaceSkillEntry = {
-    id: "skill-code-review",
-    name: "Code Review",
-    description: "Review code changes with repo context.",
-    version: "1.2.3",
-    trustLevel: "verified",
-    vettingStatus: "approved",
-    capabilities: ["review"],
-    permissions: {
-      network: true,
-      filesystem: true,
-      subprocess: false,
-      envVars: ["GITHUB_TOKEN"],
-    },
-    platformCompatibility: ["CodexCLI"],
-    downloadCount: 42,
-    downloads7d: 7,
-    daysSinceUpdate: 3,
-    installed: false,
-  };
-
-  const mockClient = {
-    isConnected: true,
-    skillsMarketplaceList: vi.fn(async () => ({ skills: [marketplaceSkill], error: null })),
-    skillsMarketplaceInstall: vi.fn(async () => ({
-      skill: null,
-      installed: true,
-      conflict: false,
-      error: null,
-    })),
-  };
-
-  const defaultWorkspace = {
-    id: "workspace-1",
-    projectId: "project-1",
-    projectDisplayName: "Paseo",
-    projectRootPath: "/repo",
-    workspaceDirectory: "/repo",
-    projectKind: "repository",
-    workspaceKind: "main",
-    name: "main",
-    status: "active",
-    diffStat: null,
-    scripts: [],
-  };
-
-  const mockSessionState = {
-    sessions: {
-      server: {
-        workspaces: new Map([["workspace-1", defaultWorkspace]]),
+    const theme = {
+      spacing: { 1: 4, 2: 8, 3: 12, 4: 16, 5: 20, 8: 32, 10: 40, 16: 64 },
+      borderRadius: { sm: 4, md: 6 },
+      fontSize: { xs: 11, sm: 13, base: 15, lg: 18, "4xl": 32 },
+      fontWeight: { normal: "400", semibold: "600" },
+      colors: {
+        surface0: "#000",
+        surface1: "#111",
+        surface2: "#222",
+        foreground: "#fff",
+        foregroundMuted: "#aaa",
+        border: "#555",
+        borderAccent: "#444",
+        accentBright: "#0a84ff",
+        success: "#30d158",
+        palette: { black: "#000" },
       },
-    },
-  };
+    };
 
-  return {
-    theme,
-    defaultWorkspace,
-    mockClient,
-    mockSessionState,
-    toastSuccessMock: vi.fn(),
-    toastErrorMock: vi.fn(),
-  };
-});
+    const marketplaceSkill: ContextHubMarketplaceSkillEntry = {
+      id: "skill-code-review",
+      name: "Code Review",
+      description: "Review code changes with repo context.",
+      version: "1.2.3",
+      trustLevel: "verified",
+      vettingStatus: "approved",
+      capabilities: ["review"],
+      permissions: {
+        network: true,
+        filesystem: true,
+        subprocess: false,
+        envVars: ["GITHUB_TOKEN"],
+      },
+      platformCompatibility: ["CodexCLI"],
+      downloadCount: 42,
+      downloads7d: 7,
+      daysSinceUpdate: 3,
+      installed: false,
+    };
+
+    const mockClient = {
+      isConnected: true,
+      skillsMarketplaceList: vi.fn(async () => ({ skills: [marketplaceSkill], error: null })),
+      skillsMarketplaceInstall: vi.fn(async () => ({
+        skill: null,
+        installed: true,
+        conflict: false,
+        error: null,
+      })),
+    };
+
+    const defaultWorkspace = {
+      id: "workspace-1",
+      projectId: "project-1",
+      projectDisplayName: "Paseo",
+      projectRootPath: "/repo",
+      workspaceDirectory: "/repo",
+      projectKind: "repository",
+      workspaceKind: "main",
+      name: "main",
+      status: "active",
+      diffStat: null,
+      scripts: [],
+    };
+
+    const mockSessionState = {
+      sessions: {
+        server: {
+          workspaces: new Map([["workspace-1", defaultWorkspace]]),
+        },
+      },
+    };
+
+    return {
+      theme,
+      defaultWorkspace,
+      mockClient,
+      mockSessionState,
+      toastSuccessMock: vi.fn(),
+      toastErrorMock: vi.fn(),
+    };
+  });
 
 vi.mock("react-native-unistyles", () => ({
   StyleSheet: {

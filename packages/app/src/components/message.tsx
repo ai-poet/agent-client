@@ -85,6 +85,7 @@ import { ToolCallDetailsContent } from "./tool-call-details";
 import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-url";
 import type { DaemonClient } from "@server/client/daemon-client";
 import { isWeb, isNative } from "@/constants/platform";
+import { RichMarkdown } from "./rich-markdown";
 
 interface UserMessageProps {
   message: string;
@@ -1186,15 +1187,8 @@ export const AssistantMessage = memo(function AssistantMessage({
   }, [client, handleLinkPress, markdownParser, onInlinePathPress, serverId, workspaceRoot]);
 
   const blocks = useMemo(() => splitMarkdownBlocks(message), [message]);
-
-  return (
-    <View
-      testID="assistant-message"
-      style={[
-        assistantMessageStylesheet.container,
-        !resolvedDisableOuterSpacing && assistantMessageStylesheet.containerSpacing,
-      ]}
-    >
+  const fallbackMarkdown = (
+    <>
       {blocks.map((block, index) => (
         <View
           key={index}
@@ -1209,6 +1203,27 @@ export const AssistantMessage = memo(function AssistantMessage({
           />
         </View>
       ))}
+    </>
+  );
+
+  return (
+    <View
+      testID="assistant-message"
+      style={[
+        assistantMessageStylesheet.container,
+        !resolvedDisableOuterSpacing && assistantMessageStylesheet.containerSpacing,
+      ]}
+    >
+      <RichMarkdown
+        text={message}
+        variant="assistant"
+        onLinkPress={handleLinkPress}
+        onInlinePathPress={onInlinePathPress}
+        workspaceRoot={workspaceRoot}
+        serverId={serverId}
+        client={client}
+        fallback={fallbackMarkdown}
+      />
     </View>
   );
 });
