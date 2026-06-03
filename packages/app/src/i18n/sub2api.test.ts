@@ -56,13 +56,14 @@ describe("sub2api i18n helpers", () => {
     expect(getSub2APIPaymentLabel("alipay", "en")).toBe("Alipay");
     expect(getSub2APIPaymentLabel("wxpay_direct", "en")).toBe("WeChat Pay");
     expect(getSub2APIPaymentLabel("usdt.polygon", "en")).toBe("USDT (Polygon)");
+    expect(getSub2APIPaymentLabel("usdc.polygon", "en")).toBe("USDC (Polygon)");
   });
 
   it("filters payment methods by locale like the Sub2API pay center", () => {
-    const allTypes = ["alipay", "wxpay_direct", "bank", "stripe", "usdt.plasma"];
+    const allTypes = ["alipay", "wxpay_direct", "bank", "stripe", "usdt.plasma", "usdc.polygon"];
 
     expect(filterSub2APIPaymentTypesByLocale(allTypes, "zh")).toEqual(["alipay", "wxpay_direct"]);
-    expect(filterSub2APIPaymentTypesByLocale(allTypes, "en")).toEqual(["bank"]);
+    expect(filterSub2APIPaymentTypesByLocale(allTypes, "en")).toEqual(["usdc.polygon"]);
   });
 
   it("exposes Chinese and English UI copy", () => {

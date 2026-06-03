@@ -97,7 +97,7 @@ export function filterSub2APIPaymentTypesByLocale(
     if (normalizedLocale === "zh") {
       return normalizedType === "alipay" || normalizedType.startsWith("wxpay");
     }
-    return normalizedType.startsWith("bank");
+    return normalizedType.startsWith("usdc");
   });
 }
 
