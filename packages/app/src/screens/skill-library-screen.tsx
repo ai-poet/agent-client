@@ -547,7 +547,7 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[3],
-    marginTop: theme.spacing[5],
+    marginTop: theme.spacing[6],
     paddingHorizontal: theme.spacing[4],
     borderRadius: theme.borderRadius.md,
     borderWidth: 1,
