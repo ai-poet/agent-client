@@ -3442,5 +3442,3 @@ export const appMessages = sub2apiMessages;
 export function getAppMessages(locale: string | null | undefined = DEFAULT_LOCALE) {
   return getSub2APIMessages(locale);
 }
-  return getSub2APIMessages(locale);
-}

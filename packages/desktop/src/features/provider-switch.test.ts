@@ -267,7 +267,7 @@ wire_api = "responses"
   it("builds BYOK Codex provider with empty endpoint when base_url is missing", () => {
     const provider = buildByokCodexProviderFromDisk({
       apiKey: "sk-openai-test",
-      configToml: "model_provider = \"OpenAI\"\n",
+      configToml: 'model_provider = "OpenAI"\n',
     });
 
     expect(provider.id).toBe("byok-local-codex");

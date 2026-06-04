@@ -383,9 +383,12 @@ export function useSub2APIPaymentConfig() {
       }
 
       try {
-        const response = await fetch(buildPayCenterUserConfigUrl({ endpoint, userId, accessToken }), {
-          method: "GET",
-        });
+        const response = await fetch(
+          buildPayCenterUserConfigUrl({ endpoint, userId, accessToken }),
+          {
+            method: "GET",
+          },
+        );
         if (!response.ok) {
           return { balanceCreditCnyPerUsd: null, usdExchangeRate: null };
         }

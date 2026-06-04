@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getWorkingIndicatorDotStrength, WORKING_INDICATOR_OFFSETS } from "./working-indicator";
+import {
+  getWorkingIndicatorDotStrength,
+  shouldShowAgentWorkingIndicator,
+  WORKING_INDICATOR_OFFSETS,
+} from "./working-indicator";
 
 describe("getWorkingIndicatorDotStrength", () => {
   it("returns a stable triangular pulse over one cycle", () => {
@@ -26,5 +30,26 @@ describe("getWorkingIndicatorDotStrength", () => {
     expect(getWorkingIndicatorDotStrength(-0.1, 0)).toBeCloseTo(
       getWorkingIndicatorDotStrength(0.9, 0),
     );
+  });
+
+  it("hides the live working indicator while waiting for user permission", () => {
+    expect(
+      shouldShowAgentWorkingIndicator({
+        agentStatus: "running",
+        pendingPermissionCount: 0,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowAgentWorkingIndicator({
+        agentStatus: "running",
+        pendingPermissionCount: 1,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowAgentWorkingIndicator({
+        agentStatus: "idle",
+        pendingPermissionCount: 0,
+      }),
+    ).toBe(false);
   });
 });

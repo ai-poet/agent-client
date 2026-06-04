@@ -71,6 +71,7 @@ import { resolveWorkspaceIdByExecutionDirectory } from "@/utils/workspace-execut
 import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { WorkingDots } from "@/components/working-dots";
+import { shouldShowAgentWorkingIndicator } from "@/utils/working-indicator";
 import { isWeb } from "@/constants/platform";
 import { useAppLocale } from "@/hooks/use-app-locale";
 import { getAppMessages } from "@/i18n/sub2api";
@@ -490,21 +491,23 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
 
     const hasPendingPermissions = pendingPermissionItems.length > 0;
-    const showWorkingIndicator = agent.status === "running" && !hasPendingPermissions;
+    const showWorkingIndicator = shouldShowAgentWorkingIndicator({
+      agentStatus: agent.status,
+      pendingPermissionCount: pendingPermissionItems.length,
+    });
     const renderModel = useMemo<AgentStreamRenderModel>(() => {
-      const pendingPermissionsNode =
-        hasPendingPermissions ? (
-          <View style={stylesheet.permissionsContainer}>
-            {pendingPermissionItems.map((permission) => (
-              <PermissionRequestCard
-                key={permission.key}
-                permission={permission}
-                client={client}
-                simpleMode={simpleMode}
-              />
-            ))}
-          </View>
-        ) : null;
+      const pendingPermissionsNode = hasPendingPermissions ? (
+        <View style={stylesheet.permissionsContainer}>
+          {pendingPermissionItems.map((permission) => (
+            <PermissionRequestCard
+              key={permission.key}
+              permission={permission}
+              client={client}
+              simpleMode={simpleMode}
+            />
+          ))}
+        </View>
+      ) : null;
       const workingIndicatorNode = showWorkingIndicator ? (
         <View style={stylesheet.bottomBarWrapper}>
           <WorkingIndicator />

@@ -14,11 +14,7 @@ import {
 } from "@/screens/settings/sub2api-pay-url";
 import { resolveSub2APIPaymentOrderFlow } from "@/screens/settings/sub2api-pay-flow";
 import { openExternalUrl } from "@/utils/open-external-url";
-import {
-  getSub2APIMessages,
-  getSub2APIPaymentLabel,
-  type Sub2APILocale,
-} from "@/i18n/sub2api";
+import { getSub2APIMessages, getSub2APIPaymentLabel, type Sub2APILocale } from "@/i18n/sub2api";
 import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 
 export interface Sub2APIPayModalProps {

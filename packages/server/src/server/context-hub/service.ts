@@ -15,6 +15,7 @@ import {
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import AdmZip from "adm-zip";
 import type pino from "pino";
 import { z } from "zod";
@@ -50,6 +51,7 @@ const MCP_STORE_SCHEMA = z.object({
 });
 const AI_SKILL_STORE_BASE_URL = "https://aiskillstore.io";
 const AI_SKILL_STORE_PLATFORM = "CodexCLI";
+const BUNDLED_SKILLS_ENV = "PASEO_BUNDLED_SKILLS_DIR";
 const SKILL_PACKAGE_MAX_FILES = 100;
 const SKILL_PACKAGE_MAX_FILE_BYTES = 5 * 1024 * 1024;
 const SKILL_PACKAGE_MAX_TOTAL_BYTES = 20 * 1024 * 1024;
@@ -65,6 +67,7 @@ type Logger = Pick<pino.Logger, "debug" | "warn" | "error">;
 type ContextHubServiceOptions = {
   paseoHome: string;
   logger?: Logger;
+  bundledSkillsRoots?: string[];
 };
 
 type ListMemoryOptions = {
@@ -213,6 +216,45 @@ function nowIso(): string {
 
 function hashText(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function uniquePaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const rawPath of paths) {
+    const trimmed = rawPath.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const resolved = path.resolve(trimmed);
+    if (seen.has(resolved)) {
+      continue;
+    }
+    seen.add(resolved);
+    unique.push(resolved);
+  }
+  return unique;
+}
+
+function splitPathList(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+  return value
+    .split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function resolveBundledSkillsRoots(extraRoots: string[] = []): string[] {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  return uniquePaths([
+    ...extraRoots,
+    ...splitPathList(process.env[BUNDLED_SKILLS_ENV]),
+    path.join(process.cwd(), "skills"),
+    path.resolve(moduleDir, "../../../../../skills"),
+    path.resolve(moduleDir, "../../../../../../skills"),
+  ]);
 }
 
 function safeSegment(value: string): string {
@@ -435,10 +477,12 @@ async function writeJsonFile(filePath: string, payload: unknown): Promise<void> 
 export class ContextHubService {
   private readonly paseoHome: string;
   private readonly logger?: Logger;
+  private readonly bundledSkillsRoots: string[];
 
   constructor(options: ContextHubServiceOptions) {
     this.paseoHome = options.paseoHome;
     this.logger = options.logger;
+    this.bundledSkillsRoots = resolveBundledSkillsRoots(options.bundledSkillsRoots);
   }
 
   async listMemory(options: ListMemoryOptions): Promise<ListMemoryResult> {
