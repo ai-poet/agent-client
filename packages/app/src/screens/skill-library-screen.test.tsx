@@ -279,13 +279,19 @@ describe("SkillLibraryScreen marketplace", () => {
     expect(row.textContent).toContain("no elevated permissions");
     expect(row.textContent).toContain("88313 downloads");
     expect(row.textContent).toContain("0/7d");
+    const section = await findByTestId("skill-marketplace-letter-section-C");
+    const rail = await findByTestId("skill-marketplace-alphabet-rail");
+    const letterC = await findByTestId("skill-marketplace-letter-C");
+    expect(section.textContent).toContain("C");
+    expect(rail.textContent).toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    expect(letterC.getAttribute("aria-disabled")).not.toBe("true");
     expect(mockClient.skillsList).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
       cwd: "/repo",
     });
     expect(mockClient.skillsMarketplaceList).toHaveBeenCalledWith({
       query: undefined,
-      limit: 30,
+      limit: 260,
       minTrust: "verified",
       workspaceId: "workspace-1",
       cwd: "/repo",

@@ -751,7 +751,7 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
   },
   marketplaceGroups: {
-    gap: theme.spacing[10],
+    gap: theme.spacing[8],
   },
   marketplaceLetterSection: {
     gap: theme.spacing[4],
