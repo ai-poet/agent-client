@@ -10,6 +10,8 @@ import { LeftSidebar } from "./left-sidebar";
 const {
   panelState,
   useSidebarWorkspacesListMock,
+  useNavigationRecentWorkspaceSelectionMock,
+  openProjectPickerMock,
   navigateToPreparedWorkspaceTabMock,
   resolveNewChatTargetMock,
   routerPushMock,
@@ -22,12 +24,14 @@ const {
     showMobileAgent: vi.fn(),
   };
 
-  return {
-    panelState,
-    useSidebarWorkspacesListMock: vi.fn(),
-    navigateToPreparedWorkspaceTabMock: vi.fn(),
-    resolveNewChatTargetMock: vi.fn(),
-    routerPushMock: vi.fn(),
+    return {
+      panelState,
+      useSidebarWorkspacesListMock: vi.fn(),
+      useNavigationRecentWorkspaceSelectionMock: vi.fn(),
+      openProjectPickerMock: vi.fn(),
+      navigateToPreparedWorkspaceTabMock: vi.fn(),
+      resolveNewChatTargetMock: vi.fn(),
+      routerPushMock: vi.fn(),
     theme: {
       spacing: { 0: 0, 0.5: 2, 1: 4, 1.5: 6, 2: 8, 3: 12, 4: 16, 5: 20 },
       iconSize: { sm: 14, md: 18, lg: 22 },
@@ -305,7 +309,11 @@ vi.mock("@/hooks/use-sub2api-locale", () => ({
 }));
 
 vi.mock("@/hooks/use-open-project-picker", () => ({
-  useOpenProjectPicker: () => vi.fn(),
+  useOpenProjectPicker: () => openProjectPickerMock,
+}));
+
+vi.mock("@/stores/navigation-active-workspace-store", () => ({
+  useNavigationRecentWorkspaceSelection: useNavigationRecentWorkspaceSelectionMock,
 }));
 
 vi.mock("@/components/sidebar/sidebar-header-row", () => ({
@@ -372,8 +380,11 @@ describe("LeftSidebar", () => {
     panelState.isOpen = false;
     panelState.showMobileAgent.mockReset();
     routerPushMock.mockReset();
+    openProjectPickerMock.mockReset();
     navigateToPreparedWorkspaceTabMock.mockReset();
     resolveNewChatTargetMock.mockReset();
+    useNavigationRecentWorkspaceSelectionMock.mockReset();
+    useNavigationRecentWorkspaceSelectionMock.mockReturnValue(null);
     resolveNewChatTargetMock.mockReturnValue({
       kind: "workspace",
       serverId: "srv",
@@ -381,7 +392,18 @@ describe("LeftSidebar", () => {
     });
     useSidebarWorkspacesListMock.mockReset();
     useSidebarWorkspacesListMock.mockReturnValue({
-      projects: [{ projectKey: "project-1", projectName: "Project 1", workspaces: [] }],
+      projects: [
+        {
+          projectKey: "project-1",
+          projectName: "Project 1",
+          workspaces: [
+            {
+              serverId: "srv",
+              workspaceId: "workspace-visible",
+            },
+          ],
+        },
+      ],
       isInitialLoad: false,
       isRevalidating: false,
       refreshAll: vi.fn(),
@@ -455,6 +477,14 @@ describe("LeftSidebar", () => {
       target: { kind: "draft", draftId: "draft-test" },
       navigationMethod: "navigate",
     });
+    expect(resolveNewChatTargetMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fallbackWorkspace: {
+          serverId: "srv",
+          workspaceId: "workspace-visible",
+        },
+      }),
+    );
   });
 
   it("falls back to the new-agent route when no current workspace is available", async () => {
@@ -476,5 +506,27 @@ describe("LeftSidebar", () => {
 
     expect(navigateToPreparedWorkspaceTabMock).not.toHaveBeenCalled();
     expect(routerPushMock).toHaveBeenCalledWith("/h/srv/workspace//repo/other");
+  });
+
+  it("opens the project picker instead of routing to a placeholder when no workspace exists", async () => {
+    resolveNewChatTargetMock.mockReturnValue({
+      kind: "fallback",
+      serverId: "srv",
+      workingDir: null,
+    });
+
+    await act(async () => {
+      root?.render(<LeftSidebar />);
+    });
+
+    await act(async () => {
+      container
+        ?.querySelector<HTMLButtonElement>('[data-testid="sidebar-new-chat"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(navigateToPreparedWorkspaceTabMock).not.toHaveBeenCalled();
+    expect(routerPushMock).not.toHaveBeenCalled();
+    expect(openProjectPickerMock).toHaveBeenCalledTimes(1);
   });
 });

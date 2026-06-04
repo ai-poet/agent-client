@@ -10,9 +10,9 @@ import {
 } from "./new-agent-routing";
 
 describe("buildNewAgentRoute", () => {
-  it("falls back to server workspace route with dot workspace when no working directory is provided", () => {
-    expect(buildNewAgentRoute("srv-1", undefined)).toBe("/h/srv-1/workspace/.");
-    expect(buildNewAgentRoute("srv-1", "   ")).toBe("/h/srv-1/workspace/.");
+  it("falls back to the open project route when no working directory is provided", () => {
+    expect(buildNewAgentRoute("srv-1", undefined)).toBe("/h/srv-1/open-project");
+    expect(buildNewAgentRoute("srv-1", "   ")).toBe("/h/srv-1/open-project");
   });
 
   it("encodes the working directory as a workspace path segment", () => {
@@ -182,6 +182,39 @@ describe("resolveNewChatTarget", () => {
       kind: "fallback",
       serverId: "srv-1",
       workingDir: null,
+    });
+  });
+
+  it("uses the recent workspace when navigating from a non-project route", () => {
+    expect(
+      resolveNewChatTarget({
+        pathname: "/h/srv-1/skills",
+        activeServerId: "srv-1",
+        recentWorkspace: { serverId: "srv-1", workspaceId: "recent-workspace" },
+        fallbackWorkspace: { serverId: "srv-1", workspaceId: "fallback-workspace" },
+        getAgent,
+        getWorkspaces,
+      }),
+    ).toEqual({
+      kind: "workspace",
+      serverId: "srv-1",
+      workspaceId: "recent-workspace",
+    });
+  });
+
+  it("uses the visible sidebar workspace when there is no recent workspace", () => {
+    expect(
+      resolveNewChatTarget({
+        pathname: "/h/srv-1/skills",
+        activeServerId: "srv-1",
+        fallbackWorkspace: { serverId: "srv-1", workspaceId: "fallback-workspace" },
+        getAgent,
+        getWorkspaces,
+      }),
+    ).toEqual({
+      kind: "workspace",
+      serverId: "srv-1",
+      workspaceId: "fallback-workspace",
     });
   });
 });

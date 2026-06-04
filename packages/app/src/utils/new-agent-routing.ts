@@ -1,6 +1,7 @@
 import type { CheckoutStatusPayload } from "@/hooks/use-checkout-status-query";
 import {
   parseHostWorkspaceOpenIntentFromPathname,
+  buildHostOpenProjectRoute,
   buildHostWorkspaceRoute,
   parseHostAgentRouteFromPathname,
   parseHostWorkspaceRouteFromPathname,
@@ -99,7 +100,7 @@ export function resolveNewAgentWorkingDir(
 export function buildNewAgentRoute(serverId: string, workingDir?: string | null) {
   const trimmedWorkingDir = workingDir?.trim();
   if (!trimmedWorkingDir) {
-    return buildHostWorkspaceRoute(serverId, "__new__");
+    return buildHostOpenProjectRoute(serverId);
   }
   return buildHostWorkspaceRoute(serverId, trimmedWorkingDir);
 }
