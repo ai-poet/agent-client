@@ -832,7 +832,7 @@ describe("paseo worktree manager", () => {
     expect(repoBWorktrees.map((entry) => entry.path)).toEqual([fromRepoB.worktreePath]);
   });
 
-  it("lists and deletes paseo worktrees under ~/.paseo/worktrees/{hash}", async () => {
+  it("lists and deletes agent-client worktrees under ~/.agent-client/worktrees/{hash}", async () => {
     const first = await createLegacyWorktreeForTest({
       branchName: "main",
       cwd: repoDir,

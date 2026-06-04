@@ -104,7 +104,7 @@ describe("speech models (download E2E)", () => {
       const set = getModelSet();
 
       const paseoHomeRoot = mkdtempSync(path.join(tmpdir(), "paseo-speech-download-"));
-      const modelsDir = path.join(paseoHomeRoot, ".paseo", "models", "local-speech");
+      const modelsDir = path.join(paseoHomeRoot, ".agent-client", "models", "local-speech");
 
       const modelIds: SherpaOnnxModelId[] =
         set === "parakeet-pocket"

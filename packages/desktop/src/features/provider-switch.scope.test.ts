@@ -43,7 +43,7 @@ describe("setupDefaultProvider scoped writes", () => {
     const claudePath = join(mockedHome.dir, ".claude", "settings.json");
     const codexConfigPath = join(mockedHome.dir, ".codex", "config.toml");
     const codexAuthPath = join(mockedHome.dir, ".codex", "auth.json");
-    const storePath = join(mockedHome.dir, ".paseo", "providers.json");
+    const storePath = join(mockedHome.dir, ".agent-client", "providers.json");
 
     expect(existsSync(claudePath)).toBe(true);
     expect(existsSync(codexConfigPath)).toBe(false);
@@ -158,7 +158,7 @@ describe("setupDefaultProvider scoped writes", () => {
     const claudePath = join(mockedHome.dir, ".claude", "settings.json");
     const codexConfigPath = join(mockedHome.dir, ".codex", "config.toml");
     const codexAuthPath = join(mockedHome.dir, ".codex", "auth.json");
-    const storePath = join(mockedHome.dir, ".paseo", "providers.json");
+    const storePath = join(mockedHome.dir, ".agent-client", "providers.json");
 
     expect(existsSync(claudePath)).toBe(false);
     expect(existsSync(codexConfigPath)).toBe(true);
@@ -207,8 +207,8 @@ describe("setupDefaultProvider scoped writes", () => {
 
   it("migrates legacy unscoped default rows into scoped Claude/Codex rows", async () => {
     const mod = await import("./provider-switch");
-    const storePath = join(mockedHome.dir, ".paseo", "providers.json");
-    await mkdir(join(mockedHome.dir, ".paseo"), { recursive: true });
+    const storePath = join(mockedHome.dir, ".agent-client", "providers.json");
+    await mkdir(join(mockedHome.dir, ".agent-client"), { recursive: true });
     await writeFile(
       storePath,
       JSON.stringify(
@@ -247,8 +247,8 @@ describe("setupDefaultProvider scoped writes", () => {
 
   it("deduplicates duplicated managed scoped rows into one row per CLI", async () => {
     const mod = await import("./provider-switch");
-    const storePath = join(mockedHome.dir, ".paseo", "providers.json");
-    await mkdir(join(mockedHome.dir, ".paseo"), { recursive: true });
+    const storePath = join(mockedHome.dir, ".agent-client", "providers.json");
+    await mkdir(join(mockedHome.dir, ".agent-client"), { recursive: true });
     await writeFile(
       storePath,
       JSON.stringify(

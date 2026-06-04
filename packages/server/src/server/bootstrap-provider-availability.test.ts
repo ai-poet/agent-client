@@ -32,7 +32,7 @@ describe("bootstrap provider availability", () => {
     if (process.platform === "win32") {
       process.env.PATHEXT = ".CMD";
     }
-    const paseoHome = path.join(root, ".paseo");
+    const paseoHome = path.join(root, ".agent-client");
     const staticDir = path.join(root, "static");
     const agentStoragePath = path.join(paseoHome, "agents");
     const now = new Date("2026-04-16T00:00:00.000Z").toISOString();

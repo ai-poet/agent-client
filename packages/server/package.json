@@ -1,7 +1,7 @@
 {
   "name": "@getpaseo/server",
   "version": "0.1.78",
-  "description": "Paseo backend server",
+  "description": "Agent Client backend server",
   "type": "module",
   "publishConfig": {
     "access": "public"

@@ -42,7 +42,7 @@ describe("paseo daemon bootstrap", () => {
 
   test("fails fast when OpenAI speech provider is configured without credentials", async () => {
     const paseoHomeRoot = await mkdtemp(path.join(os.tmpdir(), "paseo-openai-config-"));
-    const paseoHome = path.join(paseoHomeRoot, ".paseo");
+    const paseoHome = path.join(paseoHomeRoot, ".agent-client");
     const staticDir = await mkdtemp(path.join(os.tmpdir(), "paseo-static-"));
     await mkdir(paseoHome, { recursive: true });
 
@@ -152,7 +152,7 @@ describe("paseo daemon bootstrap", () => {
 
   test("generates a relay pairing offer for unix socket listeners", async () => {
     const paseoHomeRoot = await mkdtemp(path.join(os.tmpdir(), "paseo-socket-relay-"));
-    const paseoHome = path.join(paseoHomeRoot, ".paseo");
+    const paseoHome = path.join(paseoHomeRoot, ".agent-client");
     const staticDir = await mkdtemp(path.join(os.tmpdir(), "paseo-static-"));
     const socketPath = path.join(paseoHomeRoot, "run", "paseo.sock");
     await mkdir(path.dirname(socketPath), { recursive: true });

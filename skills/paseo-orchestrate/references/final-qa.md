@@ -7,7 +7,7 @@ After all phases are implemented, verified, and cleaned up, run one final pass a
 ### 1. Re-read the plan
 
 ```bash
-cat ~/.paseo/plans/<task-slug>.md
+cat ~/.agent-client/plans/<task-slug>.md
 ```
 
 Re-ground yourself in the acceptance criteria. This is what you're checking against.
@@ -32,7 +32,7 @@ One agent reviews the entire diff against the acceptance criteria. Launch via th
 title: "qa-<scope>-review"
 initialPrompt: "You are a final reviewer.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for the objective and acceptance criteria.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for the objective and acceptance criteria.
 
 Review the entire git diff for this task. For each acceptance criterion, report:
 - YES — met, with evidence (file, line, test that proves it)
@@ -47,7 +47,7 @@ Do NOT edit files."
 title: "qa-<scope>-overeng"
 initialPrompt: "You are a final quality auditor.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 Audit the entire git diff for this task:
 - Unnecessary abstractions or helpers
@@ -67,7 +67,7 @@ If the task involves UI changes, deploy a browser QA agent:
 title: "qa-<scope>-browser"
 initialPrompt: "You are a QA engineer. Load the e2e-playwright skill.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 Test all affected user flows end-to-end in the browser. For each flow:
 - What you tested

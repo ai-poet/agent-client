@@ -77,7 +77,7 @@ export async function createTestPaseoDaemon(
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const paseoHomeRoot =
       options.paseoHomeRoot ?? (await mkdtemp(path.join(os.tmpdir(), "paseo-home-")));
-    const paseoHome = path.join(paseoHomeRoot, ".paseo");
+    const paseoHome = path.join(paseoHomeRoot, ".agent-client");
     await mkdir(paseoHome, { recursive: true });
     const staticDir = options.staticDir ?? (await mkdtemp(path.join(os.tmpdir(), "paseo-static-")));
     const listenHost = options.listen ?? "127.0.0.1";

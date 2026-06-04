@@ -1,7 +1,7 @@
 {
   "name": "@getpaseo/cli",
   "version": "0.1.78",
-  "description": "Paseo CLI - control your AI coding agents from the command line",
+  "description": "Agent Client CLI - control your AI coding agents from the command line",
   "type": "module",
   "files": [
     "bin",
@@ -11,7 +11,8 @@
     "access": "public"
   },
   "bin": {
-    "paseo": "bin/paseo"
+    "paseo": "bin/paseo",
+    "agent-client": "bin/paseo"
   },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{ recursive: true, force: true })\" && tsc -p tsconfig.json --incremental false",

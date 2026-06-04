@@ -38,7 +38,7 @@ If no `--auto` flag, you're in **default mode** — conversational with grill an
 Read user preferences:
 
 ```bash
-cat ~/.paseo/orchestrate.json 2>/dev/null || echo '{}'
+cat ~/.agent-client/orchestrate.json 2>/dev/null || echo '{}'
 ```
 
 Merge with defaults for any missing fields. The file maps role categories to `<agent-type>/<model>` strings:
@@ -67,7 +67,7 @@ The file also has a `preferences` array of freeform natural language strings. Re
 - **Never stop to ask the user during implementation.** Once past the approval gate, you are fully autonomous. Hit a blocker? Solve it — spin up agents, investigate, fix.
 - **Never trust implementation agents at face value.** Always verify with separate auditor agents.
 - **Never classify failures as "pre-existing."** If a test is failing, fix it or delete it.
-- **The plan file on disk is the source of truth.** Re-read `~/.paseo/plans/<task-slug>.md` before every verification and QA phase. It survives compaction.
+- **The plan file on disk is the source of truth.** Re-read `~/.agent-client/plans/<task-slug>.md` before every verification and QA phase. It survives compaction.
 - **Never micromanage agents.** Describe the **problem** (what's broken, how it fails, the error output), not the **solution** (which line to change, what to change it to). Agents are smart — give them context and let them figure out the fix. If you find yourself writing specific line numbers or code snippets in an agent prompt, you're doing it wrong. Say "this test fails with this error" not "change line 47 to use X instead of Y."
 - **Any task that touches tests MUST run those tests.** This is non-negotiable. If an agent modifies, fixes, or writes a test file, the prompt MUST explicitly say "run the test(s) and confirm they pass." Typecheck alone is never sufficient for test changes. An agent that changes a test without running it has not completed its task.
 
@@ -226,7 +226,7 @@ background: true
 notifyOnFinish: true
 initialPrompt: "You are a researcher.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for the objective.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for the objective.
 
 <specific research mandate>
 
@@ -280,7 +280,7 @@ For each phase, specify:
 - Tests to write (failing test first — TDD)
 - Acceptance criteria for the phase
 
-Write the plan to ~/.paseo/plans/<task-slug>.md"
+Write the plan to ~/.agent-client/plans/<task-slug>.md"
 ```
 
 ### Launching Plan-Reviewers
@@ -293,7 +293,7 @@ background: true
 notifyOnFinish: true
 initialPrompt: "You are a plan-reviewer.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md.
+Read the plan at ~/.agent-client/plans/<task-slug>.md.
 
 Challenge the plan:
 - Is it bolting new code on top, or reshaping existing code first?
@@ -327,7 +327,7 @@ The final plan must follow:
 ...
 ```
 
-Persist to `~/.paseo/plans/<task-slug>.md`. Archive all planners and plan-reviewers.
+Persist to `~/.agent-client/plans/<task-slug>.md`. Archive all planners and plan-reviewers.
 
 ---
 
@@ -358,7 +358,7 @@ HEARTBEAT — periodic self-check.
 Do the following steps in order:
 
 1. Re-read the plan:
-   cat ~/.paseo/plans/<task-slug>.md
+   cat ~/.agent-client/plans/<task-slug>.md
 
 2. WORKTREE CHECK (if in worktree mode):
    ⚠️ REMINDER: You are orchestrating in worktree mode.
@@ -424,7 +424,7 @@ background: true
 notifyOnFinish: true
 initialPrompt: "You are an implementation engineer. [Load the e2e-playwright skill if frontend/E2E work.]
 
-Read the plan at ~/.paseo/plans/<task-slug>.md to understand the objective and your specific phase.
+Read the plan at ~/.agent-client/plans/<task-slug>.md to understand the objective and your specific phase.
 
 Do not bolt new code on top of existing code. If the existing code isn't shaped to accommodate your work, reshape it first. The goal is code that looks like this feature always existed.
 
@@ -446,7 +446,7 @@ background: true
 notifyOnFinish: true
 initialPrompt: "You are a UI engineer. [Load the e2e-playwright skill.]
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 The functionality is implemented. Your job is the styling pass:
 - Study existing components and styles in nearby screens
@@ -497,7 +497,7 @@ All auditors are launched via the Paseo **create agent** tool with `background: 
 title: "auditor-<scope>-overeng"
 initialPrompt: "You are an anti-over-engineering auditor.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 Check the recent changes (use git diff) for:
 - Unnecessary abstractions, helpers, or utility functions
@@ -518,7 +518,7 @@ Do NOT edit files."
 title: "auditor-<scope>-dry"
 initialPrompt: "You are a DRY auditor.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 Check the recent changes (use git diff) for:
 - Duplicated logic across files
@@ -537,7 +537,7 @@ Do NOT edit files."
 title: "auditor-<scope>-tests"
 initialPrompt: "You are a test coverage auditor. [Load the e2e-playwright skill if E2E tests are in scope.]
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 Check:
 - Does every new behavior have a test?
@@ -557,7 +557,7 @@ Do NOT edit files."
 title: "auditor-<scope>-regression"
 initialPrompt: "You are a regression auditor.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 Run the full test suite. Report:
 - Total tests, passed, failed, skipped
@@ -575,7 +575,7 @@ Do NOT edit files."
 title: "auditor-<scope>-types"
 initialPrompt: "You are a type auditor.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 Run typecheck (npm run typecheck). Report:
 - Pass/fail
@@ -591,7 +591,7 @@ Do NOT edit files."
 title: "auditor-<scope>-browser"
 initialPrompt: "You are a browser QA auditor. Load the e2e-playwright skill.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 Test the affected user flows in a browser:
 - Navigate to the relevant screens
@@ -608,7 +608,7 @@ Report what works and what doesn't with evidence. Do NOT edit files."
 title: "auditor-<scope>-parity"
 initialPrompt: "You are a parity auditor.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 This was a refactoring phase — behavior must be identical before and after. Check:
 - All existing tests still pass (run them)
@@ -645,7 +645,7 @@ All refactorers launched via the Paseo **create agent** tool with `background: t
 title: "refactorer-<scope>-dry"
 initialPrompt: "You are a cleanup engineer specializing in DRY.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 Look at the full diff of changes in this task (use git diff). Consolidate:
 - Duplicated logic — extract shared functions or reuse existing ones
@@ -663,7 +663,7 @@ Do NOT commit."
 title: "refactorer-<scope>-dead-code"
 initialPrompt: "You are a cleanup engineer specializing in dead code.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 Look at the full diff of changes (use git diff). Remove:
 - Unused imports
@@ -682,7 +682,7 @@ Do NOT commit."
 title: "refactorer-<scope>-naming"
 initialPrompt: "You are a cleanup engineer specializing in naming.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 Look at all new names introduced by this task (functions, variables, types, files). Fix:
 - Overly literal or verbose names
@@ -708,7 +708,7 @@ After all phases are implemented, verified, and cleaned up, run one final pass.
 ### 1. Re-read the plan
 
 ```bash
-cat ~/.paseo/plans/<task-slug>.md
+cat ~/.agent-client/plans/<task-slug>.md
 ```
 
 ### 2. Run typecheck yourself
@@ -729,7 +729,7 @@ Run all relevant tests. Must be 100% green. No skipped tests, no "known failures
 title: "qa-<scope>-review"
 initialPrompt: "You are a final reviewer.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for the objective and acceptance criteria.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for the objective and acceptance criteria.
 
 Review the entire git diff for this task. For each acceptance criterion, report:
 - YES — met, with evidence (file, line, test that proves it)
@@ -744,7 +744,7 @@ Do NOT edit files."
 title: "qa-<scope>-overeng"
 initialPrompt: "You are a final quality auditor.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 Audit the entire git diff for this task:
 - Unnecessary abstractions or helpers
@@ -764,7 +764,7 @@ If the task involves UI changes:
 title: "qa-<scope>-browser"
 initialPrompt: "You are a QA engineer. Load the e2e-playwright skill.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 Test all affected user flows end-to-end in the browser. For each flow:
 - What you tested
