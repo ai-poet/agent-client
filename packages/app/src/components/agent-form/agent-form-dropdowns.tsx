@@ -47,6 +47,7 @@ import { useAppLocale } from "@/hooks/use-app-locale";
 import { getAppMessages, type Sub2APILocale } from "@/i18n/sub2api";
 import { baseColors } from "@/styles/theme";
 import { isNative } from "@/constants/platform";
+import { localizeAgentMode } from "@/utils/agent-mode-localization";
 
 const MODE_ICON_MAP: Record<AgentModeIcon, typeof ShieldCheck> = {
   ShieldCheck,
@@ -676,11 +677,15 @@ export function AgentConfigRow({
     if (modeOptions.length === 0) {
       return [{ id: "", label: text.default }];
     }
-    return modeOptions.map((mode) => ({
-      id: mode.id,
-      label: mode.label,
-    }));
-  }, [modeOptions, text.default]);
+    return modeOptions.map((mode) => {
+      const localizedMode = localizeAgentMode(mode, locale);
+      return {
+        id: localizedMode.id,
+        label: localizedMode.label,
+        description: localizedMode.description,
+      };
+    });
+  }, [locale, modeOptions, text.default]);
 
   const modelSelectOptions: ComboSelectOption[] = useMemo(() => {
     return models.map((model) => ({
@@ -852,20 +857,24 @@ export function PermissionsDropdown({
   const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
 
   const hasOptions = modeOptions.length > 0;
+  const localizedModeOptions = useMemo(
+    () => modeOptions.map((mode) => localizeAgentMode(mode, locale)),
+    [locale, modeOptions],
+  );
   const selectedModeLabel = hasOptions
-    ? (modeOptions.find((mode) => mode.id === selectedMode)?.label ??
-      modeOptions[0]?.label ??
+    ? (localizedModeOptions.find((mode) => mode.id === selectedMode)?.label ??
+      localizedModeOptions[0]?.label ??
       text.default)
     : text.automatic;
 
   const options = useMemo(
     () =>
-      modeOptions.map((mode) => ({
+      localizedModeOptions.map((mode) => ({
         id: mode.id,
         label: mode.label,
         description: mode.description,
       })),
-    [modeOptions],
+    [localizedModeOptions],
   );
 
   const handleOpen = useCallback(() => {

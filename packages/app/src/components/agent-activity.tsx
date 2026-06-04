@@ -2,6 +2,8 @@ import { useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { Fonts } from "@/constants/theme";
+import { useAppLocale } from "@/hooks/use-app-locale";
+import { localizeAgentModeLabel } from "@/utils/agent-mode-localization";
 import type {
   AgentActivity,
   GroupedTextMessage,
@@ -175,6 +177,8 @@ function UnknownActivityItem({ update, timestamp }: { update: SessionUpdate; tim
 }
 
 export function AgentActivityItem({ item }: AgentActivityItemProps) {
+  const locale = useAppLocale();
+
   // Grouped text message
   if ("kind" in item && item.kind === "grouped_text") {
     return <GroupedTextItem item={item} />;
@@ -211,7 +215,13 @@ export function AgentActivityItem({ item }: AgentActivityItemProps) {
     return (
       <View style={stylesheet.card}>
         <Text style={stylesheet.timestamp}>{formatTimestamp(activity.timestamp)}</Text>
-        <Text style={stylesheet.infoText}>Mode changed to: {update.currentModeId}</Text>
+        <Text style={stylesheet.infoText}>
+          Mode changed to:{" "}
+          {localizeAgentModeLabel(
+            { id: update.currentModeId, label: update.currentModeId },
+            locale,
+          )}
+        </Text>
       </View>
     );
   }

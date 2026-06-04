@@ -308,8 +308,8 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
           <Text style={styles.title}>{text.skills}</Text>
           <Text style={styles.subtitle}>
             {locale === "zh"
-              ? "本地技能 · Claude / Codex / OpenCode · AI Skill Store"
-              : "Local skills · Claude / Codex / OpenCode · AI Skill Store"}
+              ? "本地技能 · Claude / Codex / OpenCode · SkillsMP + AI Skill Store"
+              : "Local skills · Claude / Codex / OpenCode · SkillsMP + AI Skill Store"}
           </Text>
           <View style={styles.workspacePickerWrap}>
             <Pressable

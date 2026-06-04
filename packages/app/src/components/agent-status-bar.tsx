@@ -60,6 +60,7 @@ import { isWeb as platformIsWeb } from "@/constants/platform";
 import { useToast } from "@/contexts/toast-context";
 import { toErrorMessage } from "@/utils/error-messages";
 import { getAppMessages } from "@/i18n/sub2api";
+import { localizeAgentMode, localizeAgentModeLabel } from "@/utils/agent-mode-localization";
 
 type StatusOption = {
   id: string;
@@ -938,6 +939,7 @@ export const AgentStatusBar = memo(function AgentStatusBar({
   );
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
   const toast = useToast();
+  const locale = useAppLocale();
 
   const {
     entries: snapshotEntries,
@@ -975,10 +977,17 @@ export const AgentStatusBar = memo(function AgentStatusBar({
     return map;
   }, [agent?.provider, models]);
 
-  const displayMode =
-    availableModes.find((mode) => mode.id === agent?.currentModeId)?.label ||
-    agent?.currentModeId ||
-    "default";
+  const displayMode = agent?.currentModeId
+    ? localizeAgentModeLabel(
+        {
+          id: agent.currentModeId,
+          label:
+            availableModes.find((mode) => mode.id === agent.currentModeId)?.label ||
+            agent.currentModeId,
+        },
+        locale,
+      )
+    : localizeAgentModeLabel({ id: "default", label: "default" }, locale);
 
   const modelSelection = resolveAgentModelSelection({
     models,
@@ -988,11 +997,14 @@ export const AgentStatusBar = memo(function AgentStatusBar({
   });
 
   const modeOptions = useMemo<StatusOption[]>(() => {
-    return availableModes.map((mode) => ({
-      id: mode.id,
-      label: mode.label,
-    }));
-  }, [availableModes]);
+    return availableModes.map((mode) => {
+      const localizedMode = localizeAgentMode(mode, locale);
+      return {
+        id: localizedMode.id,
+        label: localizedMode.label,
+      };
+    });
+  }, [availableModes, locale]);
 
   const modelOptions = useMemo<StatusOption[]>(() => {
     return (models ?? []).map((model) => ({
@@ -1173,11 +1185,14 @@ export function DraftAgentStatusBar({
     if (modeOptions.length === 0) {
       return [{ id: "", label: text.defaultMode }];
     }
-    return modeOptions.map((mode) => ({
-      id: mode.id,
-      label: mode.label,
-    }));
-  }, [modeOptions, text.defaultMode]);
+    return modeOptions.map((mode) => {
+      const localizedMode = localizeAgentMode(mode, locale);
+      return {
+        id: localizedMode.id,
+        label: localizedMode.label,
+      };
+    });
+  }, [locale, modeOptions, text.defaultMode]);
 
   const mappedThinkingOptions = useMemo<StatusOption[]>(() => {
     return thinkingOptions.map((option) => ({

@@ -156,6 +156,52 @@ export const sub2apiMessages = {
         noTasksYet: "暂无任务。",
       },
     },
+    agentModes: {
+      alwaysAsk: {
+        label: "始终询问",
+        description: "首次使用工具时请求权限",
+      },
+      acceptEdits: {
+        label: "接受文件编辑",
+        description: "自动批准以文件编辑为主的工具，无需提示",
+      },
+      plan: {
+        label: "计划模式",
+        description: "分析代码库，不执行工具或编辑",
+      },
+      bypassPermissions: {
+        label: "绕过权限",
+        description: "跳过所有权限提示（请谨慎使用）",
+      },
+      defaultPermissions: {
+        label: "默认权限",
+        description: "使用 Codex 默认审批流程编辑文件和运行命令。",
+      },
+      fullAccess: {
+        label: "完全访问",
+        description: "无需额外提示即可编辑文件、运行命令并访问网络。",
+      },
+      readOnly: {
+        label: "只读",
+        description: "仅查看和分析，不修改文件。",
+      },
+      build: {
+        label: "构建",
+        description: "允许编辑和执行工具以完成实现工作",
+      },
+      agent: {
+        label: "代理",
+        description: "用于对话交互的默认代理模式",
+      },
+      autopilot: {
+        label: "自动执行",
+        description: "无需用户交互持续运行直到任务完成",
+      },
+      loadTest: {
+        label: "负载测试",
+        description: "流式输出重复内容、推理和工具调用，用于压力测试",
+      },
+    },
     pay: {
       addBalance: "充值余额",
       loadingRechargeOptions: "正在加载充值选项…",
@@ -1781,6 +1827,52 @@ export const sub2apiMessages = {
         subAgentActivity: "Sub-agent activity",
         noAdditionalDetails: "No additional details available",
         noTasksYet: "No tasks yet.",
+      },
+    },
+    agentModes: {
+      alwaysAsk: {
+        label: "Always Ask",
+        description: "Prompts for permission the first time a tool is used",
+      },
+      acceptEdits: {
+        label: "Accept File Edits",
+        description: "Automatically approves edit-focused tools without prompting",
+      },
+      plan: {
+        label: "Plan Mode",
+        description: "Analyze the codebase without executing tools or edits",
+      },
+      bypassPermissions: {
+        label: "Bypass",
+        description: "Skip all permission prompts (use with caution)",
+      },
+      defaultPermissions: {
+        label: "Default Permissions",
+        description: "Edit files and run commands with Codex's default approval flow.",
+      },
+      fullAccess: {
+        label: "Full Access",
+        description: "Edit files, run commands, and access the network without additional prompts.",
+      },
+      readOnly: {
+        label: "Read Only",
+        description: "Inspect and analyze without changing files.",
+      },
+      build: {
+        label: "Build",
+        description: "Allows edits and tool execution for implementation work",
+      },
+      agent: {
+        label: "Agent",
+        description: "Default agent mode for conversational interactions",
+      },
+      autopilot: {
+        label: "Autopilot",
+        description: "Autonomous mode that runs until task completion without user interaction",
+      },
+      loadTest: {
+        label: "Load Test",
+        description: "Streams repeated markdown, reasoning, and tool calls for app stress testing",
       },
     },
     pay: {

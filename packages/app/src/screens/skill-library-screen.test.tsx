@@ -38,22 +38,22 @@ const {
   };
 
   const marketplaceSkill: ContextHubMarketplaceSkillEntry = {
-    id: "skill-code-review",
+    id: "skillsmp:openai-codex-codex-skills-code-review-skill-md",
     name: "Code Review",
     description: "Review code changes with repo context.",
-    version: "1.2.3",
+    version: null,
     trustLevel: "verified",
-    vettingStatus: "approved",
+    vettingStatus: "trusted-source",
     capabilities: ["review"],
     permissions: {
-      network: true,
-      filesystem: true,
+      network: false,
+      filesystem: false,
       subprocess: false,
-      envVars: ["GITHUB_TOKEN"],
+      envVars: [],
     },
-    platformCompatibility: ["CodexCLI"],
-    downloadCount: 42,
-    downloads7d: 7,
+    platformCompatibility: ["Claude", "Codex"],
+    downloadCount: 88313,
+    downloads7d: 0,
     daysSinceUpdate: 3,
     installed: false,
   };
@@ -269,16 +269,16 @@ describe("SkillLibraryScreen marketplace", () => {
   it("renders marketplace search results with trust, permissions, and install state", async () => {
     renderScreen();
 
-    const row = await findByTestId("skill-marketplace-row-skill-code-review");
+    const row = await findByTestId(
+      "skill-marketplace-row-skillsmp:openai-codex-codex-skills-code-review-skill-md",
+    );
 
     expect(row.textContent).toContain("Code Review");
     expect(row.textContent).toContain("Review code changes with repo context.");
     expect(row.textContent).toContain("verified");
-    expect(row.textContent).toContain("network");
-    expect(row.textContent).toContain("filesystem");
-    expect(row.textContent).toContain("env 1");
-    expect(row.textContent).toContain("42 downloads");
-    expect(row.textContent).toContain("7/7d");
+    expect(row.textContent).toContain("no elevated permissions");
+    expect(row.textContent).toContain("88313 downloads");
+    expect(row.textContent).toContain("0/7d");
     expect(mockClient.skillsList).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
       cwd: "/repo",
@@ -308,7 +308,9 @@ describe("SkillLibraryScreen marketplace", () => {
     mockSessionState.sessions.server.workspaces = new Map();
     renderScreen();
 
-    const installButton = await findByTestId("skill-marketplace-install-skill-code-review");
+    const installButton = await findByTestId(
+      "skill-marketplace-install-skillsmp:openai-codex-codex-skills-code-review-skill-md",
+    );
 
     expect(installButton.getAttribute("aria-disabled")).toBe("true");
     expect(installButton.textContent).toContain("Install");
@@ -316,7 +318,9 @@ describe("SkillLibraryScreen marketplace", () => {
 
   it("installs into the selected workspace and refreshes the marketplace", async () => {
     renderScreen();
-    const installButton = await findByTestId("skill-marketplace-install-skill-code-review");
+    const installButton = await findByTestId(
+      "skill-marketplace-install-skillsmp:openai-codex-codex-skills-code-review-skill-md",
+    );
 
     click(installButton);
     await flush();
@@ -324,9 +328,9 @@ describe("SkillLibraryScreen marketplace", () => {
     expect(mockClient.skillsMarketplaceInstall).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
       cwd: "/repo",
-      skillId: "skill-code-review",
+      skillId: "skillsmp:openai-codex-codex-skills-code-review-skill-md",
       name: "Code Review",
-      version: "1.2.3",
+      version: undefined,
       overwrite: false,
     });
     expect(toastSuccessMock).toHaveBeenCalledWith(

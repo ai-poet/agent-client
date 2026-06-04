@@ -51,16 +51,27 @@ const MCP_STORE_SCHEMA = z.object({
 });
 const AI_SKILL_STORE_BASE_URL = "https://aiskillstore.io";
 const AI_SKILL_STORE_PLATFORM = "CodexCLI";
+const SKILLSMP_BASE_URL = "https://skillsmp.com";
+const SKILLSMP_SKILL_ID_PREFIX = "skillsmp:";
 const BUNDLED_SKILLS_ENV = "PASEO_BUNDLED_SKILLS_DIR";
 const SKILL_PACKAGE_MAX_FILES = 100;
 const SKILL_PACKAGE_MAX_FILE_BYTES = 5 * 1024 * 1024;
 const SKILL_PACKAGE_MAX_TOTAL_BYTES = 20 * 1024 * 1024;
+const SKILL_MARKDOWN_MAX_BYTES = 512 * 1024;
 const WORKSPACE_SKILL_EXCLUDE_ENTRIES = [
   "# Paseo workspace skills",
   ".agents/skills/",
   ".codex/skills/",
   ".claude/skills/",
 ] as const;
+const TRUSTED_SKILLSMP_AUTHORS = new Set([
+  "anthropics",
+  "github",
+  "google-gemini",
+  "microsoft",
+  "openai",
+  "supabase",
+]);
 
 type Logger = Pick<pino.Logger, "debug" | "warn" | "error">;
 
@@ -145,6 +156,17 @@ type ValidSkillZipEntry = {
   relativePath: string;
   isDirectory: boolean;
   size: number;
+};
+
+type SkillsMpSkill = {
+  id: string;
+  name: string;
+  author: string;
+  description: string;
+  githubUrl: string;
+  skillUrl: string;
+  stars: number;
+  updatedAt: number;
 };
 
 class SkillMarketplaceConflictError extends Error {
@@ -384,6 +406,23 @@ function parseSkillDescription(content: string): string | null {
   return heading || null;
 }
 
+function parseSimpleFrontMatter(content: string): { lines: string[]; body: string } | null {
+  const lines = content.split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") {
+    return null;
+  }
+  const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+  if (end === -1) {
+    return null;
+  }
+  return { lines: lines.slice(1, end), body: lines.slice(end + 1).join("\n") };
+}
+
+function hasFrontMatterKey(lines: string[], key: string): boolean {
+  const pattern = new RegExp(`^\\s*${key}\\s*:`);
+  return lines.some((line) => pattern.test(line));
+}
+
 function ensureSkillMarkdown(
   name: string,
   description: string | undefined,
@@ -394,6 +433,93 @@ function ensureSkillMarkdown(
     return `${body}\n`;
   }
   return `---\ndescription: ${description.replace(/\r?\n/g, " ")}\n---\n\n# ${name}\n\n${body}\n`;
+}
+
+function ensureInvocableSkillMarkdown(input: {
+  name: string;
+  description: string;
+  content: string;
+}): string {
+  const safeName = safeSkillName(input.name);
+  const description = normalizeWhitespace(input.description || "Skill");
+  const content = input.content.trimEnd();
+  const parsed = parseSimpleFrontMatter(content);
+  const frontMatterLines = parsed?.lines ?? [];
+  const body = (parsed?.body ?? content).trimStart();
+  if (!hasFrontMatterKey(frontMatterLines, "name")) {
+    frontMatterLines.push(`name: ${safeName}`);
+  }
+  if (!hasFrontMatterKey(frontMatterLines, "description")) {
+    frontMatterLines.push(`description: ${description}`);
+  }
+  const frontMatterText = frontMatterLines.join("\n");
+  return `---\n${frontMatterText}\n---\n\n${body || `# ${safeName}`}\n`;
+}
+
+function parseUnixTimestampSeconds(value: number | string): number | null {
+  const timestamp =
+    typeof value === "number" ? value : Number.parseInt(String(value).trim(), 10);
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+}
+
+function daysSinceUnixTimestampSeconds(value: number | string): number | null {
+  const timestamp = parseUnixTimestampSeconds(value);
+  if (!timestamp) {
+    return null;
+  }
+  return Math.max(0, Math.floor((Date.now() - timestamp * 1000) / 86_400_000));
+}
+
+function inferSkillCapabilities(description: string): string[] {
+  const normalized = description.toLowerCase();
+  const capabilities: string[] = [];
+  const rules: Array<[RegExp, string]> = [
+    [/\breview|pull request|pr\b/, "review"],
+    [/\btest|testing|qa\b/, "testing"],
+    [/\bsecurity|vulnerab|audit\b/, "security"],
+    [/\bfrontend|ui|design\b/, "frontend"],
+    [/\bdeploy|devops|ci\/cd|workflow\b/, "devops"],
+    [/\bdoc|documentation|write\b/, "documentation"],
+  ];
+  for (const [pattern, capability] of rules) {
+    if (pattern.test(normalized)) {
+      capabilities.push(capability);
+    }
+  }
+  return capabilities;
+}
+
+function compareMarketplaceSkillPriority(
+  left: MarketplaceSkillEntry,
+  right: MarketplaceSkillEntry,
+): number {
+  const leftTrusted = left.vettingStatus === "trusted-source" || left.trustLevel === "verified";
+  const rightTrusted = right.vettingStatus === "trusted-source" || right.trustLevel === "verified";
+  if (leftTrusted !== rightTrusted) {
+    return leftTrusted ? -1 : 1;
+  }
+  if (left.downloadCount !== right.downloadCount) {
+    return right.downloadCount - left.downloadCount;
+  }
+  return left.name.localeCompare(right.name);
+}
+
+function parseGithubTreeRawSkillUrl(githubUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(githubUrl);
+  } catch {
+    throw new Error(`SkillsMP skill has an invalid GitHub URL: ${githubUrl}`);
+  }
+  if (url.hostname !== "github.com") {
+    throw new Error(`SkillsMP installs require a github.com tree URL: ${githubUrl}`);
+  }
+  const parts = url.pathname.split("/").filter(Boolean);
+  const [owner, repo, marker, branch, ...dirParts] = parts;
+  if (!owner || !repo || marker !== "tree" || !branch || dirParts.length === 0) {
+    throw new Error(`SkillsMP installs require a GitHub tree URL: ${githubUrl}`);
+  }
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${dirParts.join("/")}/SKILL.md`;
 }
 
 async function exists(filePath: string): Promise<boolean> {
@@ -478,6 +604,7 @@ export class ContextHubService {
   private readonly paseoHome: string;
   private readonly logger?: Logger;
   private readonly bundledSkillsRoots: string[];
+  private readonly skillsMpSkillCache = new Map<string, SkillsMpSkill>();
 
   constructor(options: ContextHubServiceOptions) {
     this.paseoHome = options.paseoHome;
@@ -804,36 +931,19 @@ export class ContextHubService {
   async listMarketplaceSkills(
     options: ListMarketplaceSkillsOptions = {},
   ): Promise<MarketplaceSkillEntry[]> {
-    const url = new URL("/v1/agent/search", AI_SKILL_STORE_BASE_URL);
-    const query = options.query?.trim();
-    const capability = options.capability?.trim();
-    if (query) {
-      url.searchParams.set("q", query);
-    }
-    if (capability) {
-      url.searchParams.set("capability", capability);
-    }
-    url.searchParams.set("platform", AI_SKILL_STORE_PLATFORM);
-    url.searchParams.set("usk_v3", "true");
-    url.searchParams.set("min_trust", options.minTrust ?? "verified");
-    url.searchParams.set("limit", String(Math.min(Math.max(options.limit ?? 20, 1), 50)));
-
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`AI Skill Store search failed: ${response.status} ${response.statusText}`);
-    }
-    const payload = z
-      .object({
-        skills: z.array(z.unknown()).default([]),
-      })
-      .parse(await response.json());
     const installedNames = await this.getInstalledWorkspaceSkillNames({
       workspaceId: options.workspaceId,
       cwd: options.cwd,
     });
-    return payload.skills
-      .map((raw) => this.mapAiSkillStoreSkill(raw, installedNames))
-      .filter((skill): skill is MarketplaceSkillEntry => skill !== null);
+    try {
+      const skillsMpSkills = await this.listSkillsMpSkills(options, installedNames);
+      if (skillsMpSkills.length > 0) {
+        return skillsMpSkills;
+      }
+    } catch (error) {
+      this.logger?.warn({ err: error }, "SkillsMP search failed; falling back to AI Skill Store");
+    }
+    return this.listAiSkillStoreSkills(options, installedNames);
   }
 
   async installMarketplaceSkill(
@@ -842,6 +952,13 @@ export class ContextHubService {
     const workspaceRoot = options.cwd.trim();
     if (!workspaceRoot) {
       throw new Error("cwd is required to install a marketplace skill");
+    }
+    if (options.skillId.startsWith(SKILLSMP_SKILL_ID_PREFIX)) {
+      const packageBuffer = await this.downloadSkillsMpSkillPackage(options);
+      return this.installMarketplaceSkillPackage({
+        ...options,
+        packageBuffer,
+      });
     }
     const packageBuffer = await this.downloadMarketplaceSkillPackage(options.skillId);
     return this.installMarketplaceSkillPackage({
@@ -1102,6 +1219,141 @@ export class ContextHubService {
     return path.join(this.paseoHome, "mcp", "servers.json");
   }
 
+  private async listSkillsMpSkills(
+    options: ListMarketplaceSkillsOptions,
+    installedNames: Set<string>,
+  ): Promise<MarketplaceSkillEntry[]> {
+    const query = options.query?.trim() || options.capability?.trim() || "agent";
+    const url = new URL("/api/v1/skills/search", SKILLSMP_BASE_URL);
+    url.searchParams.set("q", query);
+    url.searchParams.set("limit", String(Math.min(Math.max(options.limit ?? 20, 1), 50)));
+    url.searchParams.set("sortBy", "stars");
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`SkillsMP search failed: ${response.status} ${response.statusText}`);
+    }
+    const payload = z
+      .object({
+        success: z.boolean(),
+        data: z
+          .object({
+            skills: z.array(z.unknown()).default([]),
+          })
+          .optional(),
+      })
+      .parse(await response.json());
+    if (!payload.success) {
+      throw new Error("SkillsMP search failed");
+    }
+    const mapped = payload.data?.skills
+      .map((raw) => this.mapSkillsMpSkill(raw, installedNames))
+      .filter((skill): skill is MarketplaceSkillEntry => skill !== null) ?? [];
+    return this.dedupeMarketplaceSkills(mapped);
+  }
+
+  private async listAiSkillStoreSkills(
+    options: ListMarketplaceSkillsOptions,
+    installedNames: Set<string>,
+  ): Promise<MarketplaceSkillEntry[]> {
+    const url = new URL("/v1/agent/search", AI_SKILL_STORE_BASE_URL);
+    const query = options.query?.trim();
+    const capability = options.capability?.trim();
+    if (query) {
+      url.searchParams.set("q", query);
+    }
+    if (capability) {
+      url.searchParams.set("capability", capability);
+    }
+    url.searchParams.set("platform", AI_SKILL_STORE_PLATFORM);
+    url.searchParams.set("usk_v3", "true");
+    url.searchParams.set("min_trust", options.minTrust ?? "verified");
+    url.searchParams.set("limit", String(Math.min(Math.max(options.limit ?? 20, 1), 50)));
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`AI Skill Store search failed: ${response.status} ${response.statusText}`);
+    }
+    const payload = z
+      .object({
+        skills: z.array(z.unknown()).default([]),
+      })
+      .parse(await response.json());
+    return payload.skills
+      .map((raw) => this.mapAiSkillStoreSkill(raw, installedNames))
+      .filter((skill): skill is MarketplaceSkillEntry => skill !== null);
+  }
+
+  private mapSkillsMpSkill(
+    raw: unknown,
+    installedNames: Set<string>,
+  ): MarketplaceSkillEntry | null {
+    const parsed = z
+      .object({
+        id: z.string(),
+        name: z.string(),
+        author: z.string(),
+        description: z.string(),
+        githubUrl: z.string(),
+        skillUrl: z.string().optional(),
+        stars: z.number().int().nonnegative().default(0),
+        updatedAt: z.union([z.number(), z.string()]),
+      })
+      .safeParse(raw);
+    if (!parsed.success) {
+      return null;
+    }
+    const cacheEntry: SkillsMpSkill = {
+      id: parsed.data.id,
+      name: parsed.data.name,
+      author: parsed.data.author,
+      description: parsed.data.description,
+      githubUrl: parsed.data.githubUrl,
+      skillUrl: parsed.data.skillUrl ?? "",
+      stars: parsed.data.stars,
+      updatedAt: parseUnixTimestampSeconds(parsed.data.updatedAt) ?? 0,
+    };
+    this.skillsMpSkillCache.set(`${SKILLSMP_SKILL_ID_PREFIX}${parsed.data.id}`, cacheEntry);
+    const skillName = safeSkillName(parsed.data.name);
+    const trusted = TRUSTED_SKILLSMP_AUTHORS.has(parsed.data.author.toLowerCase());
+    return MarketplaceSkillEntrySchema.parse({
+      id: `${SKILLSMP_SKILL_ID_PREFIX}${parsed.data.id}`,
+      name: parsed.data.name,
+      description: parsed.data.description || "SkillsMP skill",
+      version: null,
+      trustLevel: trusted ? "verified" : "community",
+      vettingStatus: trusted ? "trusted-source" : null,
+      capabilities: inferSkillCapabilities(parsed.data.description),
+      permissions: {
+        network: false,
+        filesystem: false,
+        subprocess: false,
+        envVars: [],
+      },
+      platformCompatibility: ["Claude", "Codex"],
+      downloadCount: parsed.data.stars,
+      downloads7d: 0,
+      daysSinceUpdate: daysSinceUnixTimestampSeconds(parsed.data.updatedAt),
+      installed: installedNames.has(skillName),
+    });
+  }
+
+  private dedupeMarketplaceSkills(skills: MarketplaceSkillEntry[]): MarketplaceSkillEntry[] {
+    const byName = new Map<string, MarketplaceSkillEntry>();
+    for (const skill of skills) {
+      const key = safeSkillName(skill.name);
+      const existing = byName.get(key);
+      if (!existing) {
+        byName.set(key, skill);
+        continue;
+      }
+      if (compareMarketplaceSkillPriority(skill, existing) < 0) {
+        byName.set(key, skill);
+      }
+    }
+    return Array.from(byName.values()).sort(compareMarketplaceSkillPriority);
+  }
+
   private mapAiSkillStoreSkill(
     raw: unknown,
     installedNames: Set<string>,
@@ -1163,15 +1415,24 @@ export class ContextHubService {
     if (!cwd) {
       return new Set();
     }
-    const skills = await this.listSkills({
-      workspaceId: options.workspaceId,
-      cwd,
-    });
-    return new Set(
-      skills
-        .filter((skill) => skill.scope === "workspace")
-        .map((skill) => safeSkillName(skill.name)),
-    );
+    const roots = [path.join(cwd, ".codex", "skills"), path.join(cwd, ".claude", "skills")];
+    const providerNames: Array<Set<string>> = [];
+    for (const root of roots) {
+      const entries = await this.scanSkillRoot(
+        {
+          root,
+          source: "provider_ready",
+          scope: "workspace",
+          readOnly: true,
+          workspaceId: options.workspaceId ?? null,
+        },
+        false,
+      );
+      providerNames.push(new Set(entries.map((skill) => safeSkillName(skill.name))));
+    }
+    const codexNames = providerNames[0] ?? new Set<string>();
+    const claudeNames = providerNames[1] ?? new Set<string>();
+    return new Set([...codexNames].filter((name) => claudeNames.has(name)));
   }
 
   private async downloadMarketplaceSkillPackage(skillId: string): Promise<Buffer> {
@@ -1186,6 +1447,95 @@ export class ContextHubService {
     }
     const arrayBuffer = await response.arrayBuffer();
     return Buffer.from(arrayBuffer);
+  }
+
+  private async downloadSkillsMpSkillPackage(options: InstallMarketplaceSkillOptions): Promise<Buffer> {
+    const skill = await this.resolveSkillsMpSkill(options.skillId, options.name);
+    const rawUrl = parseGithubTreeRawSkillUrl(skill.githubUrl);
+    const response = await fetch(rawUrl);
+    if (!response.ok) {
+      throw new Error(`SkillsMP SKILL.md download failed: ${response.status} ${response.statusText}`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength > SKILL_MARKDOWN_MAX_BYTES) {
+      throw new Error("SkillsMP SKILL.md is too large");
+    }
+    const rawContent = Buffer.from(arrayBuffer).toString("utf8");
+    if (!rawContent.trim()) {
+      throw new Error("SkillsMP SKILL.md is empty");
+    }
+    const zip = new AdmZip();
+    zip.addFile(
+      "SKILL.md",
+      Buffer.from(
+        ensureInvocableSkillMarkdown({
+          name: options.name || skill.name,
+          description: skill.description,
+          content: rawContent,
+        }),
+        "utf8",
+      ),
+    );
+    return zip.toBuffer();
+  }
+
+  private async resolveSkillsMpSkill(skillId: string, name: string): Promise<SkillsMpSkill> {
+    const cached = this.skillsMpSkillCache.get(skillId);
+    if (cached) {
+      return cached;
+    }
+    const skillsMpId = skillId.slice(SKILLSMP_SKILL_ID_PREFIX.length);
+    const url = new URL("/api/v1/skills/search", SKILLSMP_BASE_URL);
+    url.searchParams.set("q", name.trim() || skillsMpId);
+    url.searchParams.set("limit", "50");
+    url.searchParams.set("sortBy", "stars");
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`SkillsMP lookup failed: ${response.status} ${response.statusText}`);
+    }
+    const payload = z
+      .object({
+        success: z.boolean(),
+        data: z
+          .object({
+            skills: z.array(z.unknown()).default([]),
+          })
+          .optional(),
+      })
+      .parse(await response.json());
+    if (!payload.success) {
+      throw new Error("SkillsMP lookup failed");
+    }
+    for (const raw of payload.data?.skills ?? []) {
+      const parsed = z
+        .object({
+          id: z.string(),
+          name: z.string(),
+          author: z.string(),
+          description: z.string(),
+          githubUrl: z.string(),
+          skillUrl: z.string().optional(),
+          stars: z.number().int().nonnegative().default(0),
+          updatedAt: z.union([z.number(), z.string()]),
+        })
+        .safeParse(raw);
+      if (!parsed.success || parsed.data.id !== skillsMpId) {
+        continue;
+      }
+      const skill: SkillsMpSkill = {
+        id: parsed.data.id,
+        name: parsed.data.name,
+        author: parsed.data.author,
+        description: parsed.data.description,
+        githubUrl: parsed.data.githubUrl,
+        skillUrl: parsed.data.skillUrl ?? "",
+        stars: parsed.data.stars,
+        updatedAt: parseUnixTimestampSeconds(parsed.data.updatedAt) ?? 0,
+      };
+      this.skillsMpSkillCache.set(skillId, skill);
+      return skill;
+    }
+    throw new Error(`SkillsMP skill not found: ${skillId}`);
   }
 
   private validateSkillZipEntries(zip: AdmZip): ValidSkillZipEntry[] {
@@ -1271,6 +1621,10 @@ export class ContextHubService {
       const destDir = path.join(workspaceRoot, root, skillName);
       assertPathInside(workspaceRoot, destDir);
       await copyOrSymlinkSkillDirectory(sourceDir, destDir);
+      const skillPath = path.join(destDir, "SKILL.md");
+      if (!(await exists(skillPath))) {
+        throw new Error(`Failed to sync skill into provider directory: ${skillPath}`);
+      }
     }
   }
 

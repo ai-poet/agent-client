@@ -14,8 +14,6 @@ import { getDesktopMessage } from "../i18n/desktop-i18n.js";
 export const DEFAULT_PROVIDER_ID = "default";
 const LEGACY_DEFAULT_PROVIDER_ID = "sub2api-default";
 export const DEFAULT_PROVIDER_NAME = "Default";
-export const DEFAULT_CLAUDE_MODEL = "claude-opus-4-7";
-
 /** Paseo Cloud–managed rows: one per CLI so keys/endpoints can differ. */
 export const PASEO_MANAGED_CLAUDE_PROVIDER_ID = "paseo-managed-claude";
 export const PASEO_MANAGED_CODEX_PROVIDER_ID = "paseo-managed-codex";
@@ -30,7 +28,6 @@ export type ClaudeApiFormat = "anthropic";
 /** Codex config uses OpenAI Responses wire only until chat support is added. */
 export type CodexWireApi = "responses";
 
-const PASEO_UPSTREAM_FORMAT_KEY = "PASEO_ANTHROPIC_UPSTREAM_FORMAT";
 const CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_KEY = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";
 const CLAUDE_CODE_ATTRIBUTION_HEADER_KEY = "CLAUDE_CODE_ATTRIBUTION_HEADER";
 const CLAUDE_CODE_GIT_BASH_PATH_KEY = "CLAUDE_CODE_GIT_BASH_PATH";
@@ -313,22 +310,44 @@ async function atomicWriteText(filePath: string, content: string): Promise<void>
   await rename(tempPath, filePath);
 }
 
-async function readJsonObject(filePath: string): Promise<Record<string, unknown>> {
-  try {
-    const raw = await readFile(filePath, "utf-8");
-    const parsed: unknown = JSON.parse(raw);
-    return isRecord(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
 async function readFileOrNull(filePath: string): Promise<string | null> {
   try {
     return await readFile(filePath, "utf-8");
   } catch {
     return null;
   }
+}
+
+function parseJsonObjectForMerge(
+  raw: string | null,
+  label: string,
+): Record<string, unknown> {
+  if (raw === null || raw.trim().length === 0) {
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`${label} contains invalid JSON and was not overwritten.`);
+  }
+  if (!isRecord(parsed)) {
+    throw new Error(`${label} must contain a JSON object and was not overwritten.`);
+  }
+  return parsed;
+}
+
+function deepMergeRecords(
+  base: Record<string, unknown>,
+  overrides: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(overrides)) {
+    const current = merged[key];
+    merged[key] =
+      isRecord(current) && isRecord(value) ? deepMergeRecords(current, value) : value;
+  }
+  return merged;
 }
 
 async function restoreFile(filePath: string, contents: string | null): Promise<void> {
@@ -794,63 +813,54 @@ function readString(value: unknown): string | null {
 export function buildClaudeSettings(
   provider: StoredProvider,
   existing: Record<string, unknown>,
-  options: { platform?: NodeJS.Platform; gitBashPath?: string | null } = {},
 ): Record<string, unknown> {
   const shouldUseMinimalClaudeEnv =
     provider.id === PASEO_MANAGED_CLAUDE_PROVIDER_ID ||
     (provider.isDefault && (provider.target === undefined || provider.target === "claude"));
   const existingEnv = isRecord(existing.env) ? existing.env : {};
-  const windowsGitBashPath =
-    options.platform === "win32"
-      ? (readString(options.gitBashPath) ?? readString(existingEnv[CLAUDE_CODE_GIT_BASH_PATH_KEY]))
-      : null;
-  const windowsGitBashEnv =
-    windowsGitBashPath !== null ? { [CLAUDE_CODE_GIT_BASH_PATH_KEY]: windowsGitBashPath } : {};
 
   if (shouldUseMinimalClaudeEnv) {
     return {
+      ...existing,
       env: {
+        ...existingEnv,
         ANTHROPIC_BASE_URL: normalizeProviderEndpoint(provider.endpoint),
         ANTHROPIC_AUTH_TOKEN: provider.apiKey,
         [CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_KEY]: "1",
         [CLAUDE_CODE_ATTRIBUTION_HEADER_KEY]: "0",
-        ...windowsGitBashEnv,
       },
     };
   }
 
   const providerConfig = isRecord(provider.claudeConfig) ? provider.claudeConfig : {};
-  const providerEnv = isRecord(providerConfig.env) ? providerConfig.env : {};
-  const defaultClaudeModel = readString(providerEnv.ANTHROPIC_MODEL) ?? DEFAULT_CLAUDE_MODEL;
-  const defaultOpusModel =
-    readString(providerEnv.ANTHROPIC_DEFAULT_OPUS_MODEL) ?? defaultClaudeModel;
+  const mergedConfig = deepMergeRecords(existing, providerConfig);
+  const mergedEnv = isRecord(mergedConfig.env) ? mergedConfig.env : {};
 
   const env: Record<string, unknown> = {
-    ...existingEnv,
-    ...providerEnv,
+    ...mergedEnv,
     ANTHROPIC_BASE_URL: normalizeProviderEndpoint(provider.endpoint),
     ANTHROPIC_AUTH_TOKEN: provider.apiKey,
-    ANTHROPIC_MODEL: defaultClaudeModel,
-    ANTHROPIC_DEFAULT_OPUS_MODEL: defaultOpusModel,
     [CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_KEY]: "1",
     [CLAUDE_CODE_ATTRIBUTION_HEADER_KEY]: "0",
-    ...windowsGitBashEnv,
   };
-  delete env[PASEO_UPSTREAM_FORMAT_KEY];
 
   return {
-    ...existing,
-    ...providerConfig,
+    ...mergedConfig,
     env,
   };
 }
 
-export function buildCodexAuth(provider: StoredProvider): Record<string, unknown> {
-  return (provider.codexAuth as Record<string, unknown>) ?? { OPENAI_API_KEY: provider.apiKey };
+export function buildCodexAuth(
+  provider: StoredProvider,
+  existing: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const desiredAuth = isRecord(provider.codexAuth)
+    ? provider.codexAuth
+    : { OPENAI_API_KEY: provider.apiKey };
+  return deepMergeRecords(existing, desiredAuth);
 }
 
-export function buildCodexConfig(provider: StoredProvider): string {
-  // Managed Codex row should always follow the integration-guide template.
+function buildDefaultCodexConfig(provider: StoredProvider): string {
   if (provider.codexConfig && provider.id !== PASEO_MANAGED_CODEX_PROVIDER_ID) {
     return provider.codexConfig;
   }
@@ -872,14 +882,263 @@ requires_openai_auth = true
 `;
 }
 
-async function writeClaudeSettings(
-  provider: StoredProvider,
-  options: { platform?: NodeJS.Platform; gitBashPath?: string | null } = {},
-): Promise<void> {
-  const merged = buildClaudeSettings(provider, await readJsonObject(claudeSettingsPath()), {
-    platform: options.platform ?? process.platform,
-    gitBashPath: options.gitBashPath,
+function quoteTomlString(value: string): string {
+  return JSON.stringify(value);
+}
+
+function formatTomlValue(value: string | boolean): string {
+  return typeof value === "boolean" ? String(value) : quoteTomlString(value);
+}
+
+function splitTomlDottedName(raw: string): string[] | null {
+  const parts: string[] = [];
+  let i = 0;
+  while (i < raw.length) {
+    while (/\s/u.test(raw[i] ?? "")) {
+      i += 1;
+    }
+    if (i >= raw.length) {
+      break;
+    }
+
+    let part = "";
+    const quote = raw[i];
+    if (quote === '"' || quote === "'") {
+      i += 1;
+      while (i < raw.length) {
+        const ch = raw[i]!;
+        if (quote === '"' && ch === "\\") {
+          part += ch;
+          i += 1;
+          if (i < raw.length) {
+            part += raw[i]!;
+            i += 1;
+          }
+          continue;
+        }
+        if (ch === quote) {
+          i += 1;
+          break;
+        }
+        part += ch;
+        i += 1;
+      }
+    } else {
+      while (i < raw.length && raw[i] !== ".") {
+        part += raw[i]!;
+        i += 1;
+      }
+      part = part.trim();
+    }
+    if (!part) {
+      return null;
+    }
+    parts.push(part);
+
+    while (/\s/u.test(raw[i] ?? "")) {
+      i += 1;
+    }
+    if (i >= raw.length) {
+      break;
+    }
+    if (raw[i] !== ".") {
+      return null;
+    }
+    i += 1;
+  }
+  return parts.length > 0 ? parts : null;
+}
+
+function normalizeTomlDottedName(raw: string): string | null {
+  const parts = splitTomlDottedName(raw);
+  return parts ? parts.join(".") : null;
+}
+
+function parseTomlHeader(line: string): { name: string; isArray: boolean } | null {
+  const arrayMatch = /^\s*\[\[\s*(.+?)\s*\]\]\s*(?:#.*)?$/u.exec(line);
+  if (arrayMatch) {
+    const name = normalizeTomlDottedName(arrayMatch[1]!);
+    return name ? { name, isArray: true } : null;
+  }
+  const match = /^\s*\[\s*(.+?)\s*\]\s*(?:#.*)?$/u.exec(line);
+  if (!match) {
+    return null;
+  }
+  const name = normalizeTomlDottedName(match[1]!);
+  return name ? { name, isArray: false } : null;
+}
+
+function findTomlAssignmentKey(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("[")) {
+    return null;
+  }
+
+  let quote: string | null = null;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i]!;
+    if (quote !== null) {
+      if (quote === '"' && ch === "\\") {
+        i += 1;
+        continue;
+      }
+      if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "=") {
+      return normalizeTomlDottedName(line.slice(0, i).trim());
+    }
+  }
+  return null;
+}
+
+function formatTomlAssignment(key: string, value: string | boolean): string {
+  return `${key} = ${formatTomlValue(value)}`;
+}
+
+function upsertTopLevelTomlKey(toml: string, key: string, value: string | boolean): string {
+  const lines = toml.split(/\r?\n/u);
+  const matches: number[] = [];
+  let firstSectionIndex = lines.length;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    if (parseTomlHeader(lines[i]!)) {
+      firstSectionIndex = i;
+      break;
+    }
+    if (findTomlAssignmentKey(lines[i]!) === key) {
+      matches.push(i);
+    }
+  }
+
+  if (matches.length > 1) {
+    throw new Error(`Codex config has duplicate top-level ${key} entries.`);
+  }
+
+  const assignment = formatTomlAssignment(key, value);
+  if (matches.length === 1) {
+    lines[matches[0]!] = assignment;
+    return lines.join("\n");
+  }
+
+  let insertIndex = firstSectionIndex;
+  while (insertIndex > 0 && lines[insertIndex - 1]!.trim() === "") {
+    insertIndex -= 1;
+  }
+  lines.splice(insertIndex, 0, assignment);
+  return lines.join("\n");
+}
+
+function upsertTomlSection(
+  toml: string,
+  sectionName: string,
+  entries: Record<string, string | boolean>,
+): string {
+  const lines = toml.split(/\r?\n/u);
+  const sectionIndexes: number[] = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const header = parseTomlHeader(lines[i]!);
+    if (header?.name === sectionName) {
+      if (header.isArray) {
+        throw new Error(`Codex config section [[${sectionName}]] cannot be safely patched.`);
+      }
+      sectionIndexes.push(i);
+    }
+  }
+
+  if (sectionIndexes.length > 1) {
+    throw new Error(`Codex config has duplicate [${sectionName}] sections.`);
+  }
+
+  const assignmentLines = Object.entries(entries).map(([key, value]) =>
+    formatTomlAssignment(key, value),
+  );
+
+  if (sectionIndexes.length === 0) {
+    while (lines.length > 0 && lines[lines.length - 1]!.trim() === "") {
+      lines.pop();
+    }
+    if (lines.length > 0) {
+      lines.push("");
+    }
+    lines.push(`[${sectionName}]`, ...assignmentLines);
+    return `${lines.join("\n")}\n`;
+  }
+
+  const sectionStart = sectionIndexes[0]!;
+  let sectionEnd = lines.length;
+  for (let i = sectionStart + 1; i < lines.length; i += 1) {
+    if (parseTomlHeader(lines[i]!)) {
+      sectionEnd = i;
+      break;
+    }
+  }
+
+  const existingEntryIndexes = new Map<string, number>();
+  for (let i = sectionStart + 1; i < sectionEnd; i += 1) {
+    const key = findTomlAssignmentKey(lines[i]!);
+    if (!key || !(key in entries)) {
+      continue;
+    }
+    if (existingEntryIndexes.has(key)) {
+      throw new Error(`Codex config has duplicate ${key} entries in [${sectionName}].`);
+    }
+    existingEntryIndexes.set(key, i);
+  }
+
+  const missingLines: string[] = [];
+  for (const [key, value] of Object.entries(entries)) {
+    const assignment = formatTomlAssignment(key, value);
+    const existingIndex = existingEntryIndexes.get(key);
+    if (existingIndex === undefined) {
+      missingLines.push(assignment);
+    } else {
+      lines[existingIndex] = assignment;
+    }
+  }
+
+  if (missingLines.length > 0) {
+    let insertIndex = sectionEnd;
+    while (insertIndex > sectionStart + 1 && lines[insertIndex - 1]!.trim() === "") {
+      insertIndex -= 1;
+    }
+    lines.splice(insertIndex, 0, ...missingLines);
+  }
+
+  return lines.join("\n");
+}
+
+function patchCodexConfigToml(provider: StoredProvider, existingToml: string): string {
+  const withProvider = upsertTopLevelTomlKey(existingToml, "model_provider", "OpenAI");
+  const patched = upsertTomlSection(withProvider, "model_providers.OpenAI", {
+    name: "OpenAI",
+    base_url: providerEndpointBaseUrl(provider.endpoint),
+    wire_api: "responses",
+    requires_openai_auth: true,
   });
+  return patched.endsWith("\n") ? patched : `${patched}\n`;
+}
+
+export function buildCodexConfig(provider: StoredProvider, existingToml?: string | null): string {
+  if (existingToml?.trim()) {
+    return patchCodexConfigToml(provider, existingToml);
+  }
+  return buildDefaultCodexConfig(provider);
+}
+
+async function writeClaudeSettings(provider: StoredProvider): Promise<void> {
+  const existing = parseJsonObjectForMerge(
+    await readFileOrNull(claudeSettingsPath()),
+    "Claude Code settings.json",
+  );
+  const merged = buildClaudeSettings(provider, existing);
   await atomicWriteText(claudeSettingsPath(), JSON.stringify(merged, null, 2));
   log.info("[provider-switch] wrote claude settings for provider:", provider.name);
 }
@@ -896,7 +1155,10 @@ export async function patchClaudeCodeGitBashPathForWindows(
   if (!trimmed) {
     return;
   }
-  const existing = await readJsonObject(claudeSettingsPath());
+  const existing = parseJsonObjectForMerge(
+    await readFileOrNull(claudeSettingsPath()),
+    "Claude Code settings.json",
+  );
   const existingEnv = isRecord(existing.env) ? existing.env : {};
   const next = {
     ...existing,
@@ -913,9 +1175,12 @@ async function writeCodexSettings(provider: StoredProvider): Promise<void> {
   const authPath = codexAuthPath();
   const configPath = codexConfigPath();
   const oldAuth = await readFileOrNull(authPath);
-  await atomicWriteText(authPath, JSON.stringify(buildCodexAuth(provider), null, 2));
+  const existingAuth = parseJsonObjectForMerge(oldAuth, "Codex auth.json");
+  const nextAuth = JSON.stringify(buildCodexAuth(provider, existingAuth), null, 2);
+  const nextConfig = buildCodexConfig(provider, await readFileOrNull(configPath));
+  await atomicWriteText(authPath, nextAuth);
   try {
-    await atomicWriteText(configPath, buildCodexConfig(provider));
+    await atomicWriteText(configPath, nextConfig);
   } catch (error) {
     await restoreFile(authPath, oldAuth);
     throw error;
@@ -1134,10 +1399,7 @@ export async function setupDefaultProvider(params: {
       });
       upsertProviderRow(store, claudeP);
       upsertProviderRow(store, codexP);
-      await writeClaudeSettings(claudeP, {
-        platform: params.platform,
-        gitBashPath: params.gitBashPath,
-      });
+      await writeClaudeSettings(claudeP);
       await writeCodexSettings(codexP);
       store.activeClaudeProviderId = PASEO_MANAGED_CLAUDE_PROVIDER_ID;
       store.activeCodexProviderId = PASEO_MANAGED_CODEX_PROVIDER_ID;
@@ -1148,10 +1410,7 @@ export async function setupDefaultProvider(params: {
         name: claudeDisplayName,
       });
       upsertProviderRow(store, claudeP);
-      await writeClaudeSettings(claudeP, {
-        platform: params.platform,
-        gitBashPath: params.gitBashPath,
-      });
+      await writeClaudeSettings(claudeP);
       store.activeClaudeProviderId = PASEO_MANAGED_CLAUDE_PROVIDER_ID;
     } else {
       const codexP = buildPaseoManagedCodexProvider({

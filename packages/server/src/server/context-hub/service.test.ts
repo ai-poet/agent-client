@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import AdmZip from "adm-zip";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextHubService } from "./service.js";
 
 function createSkillPackage(files: Record<string, string>): Buffer {
@@ -25,16 +25,51 @@ function createUnsafeSkillPackage(): Buffer {
   return zip.toBuffer();
 }
 
+function createJsonResponse(payload: unknown, init: ResponseInit = {}): Response {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+    ...init,
+  });
+}
+
+function createSkillsMpPayload(skills: unknown[]): unknown {
+  return {
+    success: true,
+    data: {
+      skills,
+    },
+  };
+}
+
+function createSkillsMpSkill(overrides: Record<string, unknown> = {}): unknown {
+  return {
+    id: "openai-codex-codex-skills-code-review-skill-md",
+    name: "Code Review",
+    author: "openai",
+    description: "Review code changes with repo context.",
+    githubUrl: "https://github.com/openai/codex/tree/main/.codex/skills/code-review",
+    skillUrl: "https://skillsmp.com/skills/openai-codex-codex-skills-code-review-skill-md",
+    stars: 88313,
+    updatedAt: "1776755044",
+    ...overrides,
+  };
+}
+
 describe("ContextHubService", () => {
   let paseoHome: string;
   let service: ContextHubService;
+  let originalFetch: typeof globalThis.fetch;
 
   beforeEach(async () => {
+    originalFetch = globalThis.fetch;
     paseoHome = await mkdtemp(path.join(tmpdir(), "paseo-context-hub-"));
     service = new ContextHubService({ paseoHome });
   });
 
   afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
     await rm(paseoHome, { recursive: true, force: true });
   });
 
@@ -173,6 +208,265 @@ describe("ContextHubService", () => {
           "utf8",
         ),
       ).resolves.toContain("Search Google");
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("maps SkillsMP search results before falling back to AI Skill Store", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      expect(url.origin).toBe("https://skillsmp.com");
+      expect(url.pathname).toBe("/api/v1/skills/search");
+      expect(url.searchParams.get("q")).toBe("code review");
+      expect(url.searchParams.get("sortBy")).toBe("stars");
+      return createJsonResponse(createSkillsMpPayload([createSkillsMpSkill()]));
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const skills = await service.listMarketplaceSkills({
+      query: "code review",
+      limit: 10,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(skills).toHaveLength(1);
+    expect(skills[0]).toMatchObject({
+      id: "skillsmp:openai-codex-codex-skills-code-review-skill-md",
+      name: "Code Review",
+      description: "Review code changes with repo context.",
+      trustLevel: "verified",
+      vettingStatus: "trusted-source",
+      platformCompatibility: ["Claude", "Codex"],
+      downloadCount: 88313,
+      downloads7d: 0,
+      installed: false,
+    });
+  });
+
+  it("falls back to AI Skill Store when SkillsMP returns no results", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.origin === "https://skillsmp.com") {
+        return createJsonResponse(createSkillsMpPayload([]));
+      }
+      expect(url.origin).toBe("https://aiskillstore.io");
+      expect(url.pathname).toBe("/v1/agent/search");
+      return createJsonResponse({
+        skills: [
+          {
+            skill_id: "ai-store-review",
+            name: "AI Store Review",
+            description: "Review from AI Skill Store.",
+            trust_level: "verified",
+            vetting_status: "approved",
+            platform_compatibility: ["CodexCLI"],
+            download_count: 12,
+            downloads_7d: 2,
+          },
+        ],
+      });
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const skills = await service.listMarketplaceSkills({ query: "review" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(skills).toEqual([
+      expect.objectContaining({
+        id: "ai-store-review",
+        name: "AI Store Review",
+        platformCompatibility: ["CodexCLI"],
+      }),
+    ]);
+  });
+
+  it("falls back to AI Skill Store when SkillsMP search fails", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.origin === "https://skillsmp.com") {
+        return new Response("nope", { status: 503, statusText: "Service Unavailable" });
+      }
+      return createJsonResponse({
+        skills: [
+          {
+            skill_id: "ai-store-fallback",
+            name: "Fallback Skill",
+            description: "Fallback skill.",
+            trust_level: "community",
+            platform_compatibility: ["CodexCLI"],
+          },
+        ],
+      });
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const skills = await service.listMarketplaceSkills({ query: "fallback" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(skills[0]).toMatchObject({
+      id: "ai-store-fallback",
+      name: "Fallback Skill",
+    });
+  });
+
+  it("requires both Claude and Codex provider skill directories for installed state", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "paseo-skill-workspace-"));
+    const fetchMock = vi.fn(async () =>
+      createJsonResponse(createSkillsMpPayload([createSkillsMpSkill()])),
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+    try {
+      await mkdir(path.join(workspaceRoot, ".agents", "skills", "code-review"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(workspaceRoot, ".agents", "skills", "code-review", "SKILL.md"),
+        "---\nname: code-review\ndescription: Agent cache only.\n---\n",
+        "utf8",
+      );
+
+      const agentOnly = await service.listMarketplaceSkills({
+        workspaceId: "workspace-1",
+        cwd: workspaceRoot,
+        query: "code review",
+      });
+      expect(agentOnly[0].installed).toBe(false);
+
+      await mkdir(path.join(workspaceRoot, ".codex", "skills", "code-review"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(workspaceRoot, ".codex", "skills", "code-review", "SKILL.md"),
+        "---\nname: code-review\ndescription: Codex only.\n---\n",
+        "utf8",
+      );
+      const codexOnly = await service.listMarketplaceSkills({
+        workspaceId: "workspace-1",
+        cwd: workspaceRoot,
+        query: "code review",
+      });
+      expect(codexOnly[0].installed).toBe(false);
+
+      await mkdir(path.join(workspaceRoot, ".claude", "skills", "code-review"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(workspaceRoot, ".claude", "skills", "code-review", "SKILL.md"),
+        "---\nname: code-review\ndescription: Claude and Codex.\n---\n",
+        "utf8",
+      );
+      const providerReady = await service.listMarketplaceSkills({
+        workspaceId: "workspace-1",
+        cwd: workspaceRoot,
+        query: "code review",
+      });
+      expect(providerReady[0].installed).toBe(true);
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("installs SkillsMP raw SKILL.md into agents, Codex, and Claude skill directories", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "paseo-skill-workspace-"));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.origin === "https://skillsmp.com") {
+        return createJsonResponse(createSkillsMpPayload([createSkillsMpSkill()]));
+      }
+      expect(String(input)).toBe(
+        "https://raw.githubusercontent.com/openai/codex/main/.codex/skills/code-review/SKILL.md",
+      );
+      return new Response("# Code Review\n\nUse the repository context.\n", { status: 200 });
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+    try {
+      const result = await service.installMarketplaceSkill({
+        workspaceId: "workspace-1",
+        cwd: workspaceRoot,
+        skillId: "skillsmp:openai-codex-codex-skills-code-review-skill-md",
+        name: "Code Review",
+      });
+
+      expect(result.installed).toBe(true);
+      expect(result.skill.name).toBe("code-review");
+      for (const root of [".agents/skills", ".codex/skills", ".claude/skills"] as const) {
+        const content = await readFile(
+          path.join(workspaceRoot, root, "code-review", "SKILL.md"),
+          "utf8",
+        );
+        expect(content).toContain("name: code-review");
+        expect(content).toContain("description: Review code changes with repo context.");
+        expect(content).toContain("Use the repository context.");
+      }
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects SkillsMP installs without GitHub tree URLs or downloadable SKILL.md", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "paseo-skill-workspace-"));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.origin === "https://skillsmp.com") {
+        return createJsonResponse(
+          createSkillsMpPayload([
+            createSkillsMpSkill({
+              id: "bad-url",
+              name: "Bad URL",
+              githubUrl: "https://example.com/not-github",
+            }),
+            createSkillsMpSkill({
+              id: "missing-raw",
+              name: "Missing Raw",
+              githubUrl: "https://github.com/openai/codex/tree/main/.codex/skills/missing",
+            }),
+          ]),
+        );
+      }
+      return new Response("missing", { status: 404, statusText: "Not Found" });
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+    try {
+      await expect(
+        service.installMarketplaceSkill({
+          workspaceId: "workspace-1",
+          cwd: workspaceRoot,
+          skillId: "skillsmp:bad-url",
+          name: "Bad URL",
+        }),
+      ).rejects.toThrow(/github\.com tree URL/);
+
+      await expect(
+        service.installMarketplaceSkill({
+          workspaceId: "workspace-1",
+          cwd: workspaceRoot,
+          skillId: "skillsmp:missing-raw",
+          name: "Missing Raw",
+        }),
+      ).rejects.toThrow(/SKILL\.md download failed: 404 Not Found/);
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails marketplace installs when provider skill sync cannot complete", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "paseo-skill-workspace-"));
+    try {
+      await mkdir(path.join(workspaceRoot, ".codex"), { recursive: true });
+      await writeFile(path.join(workspaceRoot, ".codex", "skills"), "blocked", "utf8");
+
+      await expect(
+        service.installMarketplaceSkillPackage({
+          workspaceId: "workspace-1",
+          cwd: workspaceRoot,
+          skillId: "skill-1",
+          name: "blocked-sync",
+          packageBuffer: createSkillPackage({
+            "SKILL.md": "---\nname: blocked-sync\ndescription: Blocked sync.\n---\n",
+          }),
+        }),
+      ).rejects.toThrow();
     } finally {
       await rm(workspaceRoot, { recursive: true, force: true });
     }
