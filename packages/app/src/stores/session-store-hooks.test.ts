@@ -185,9 +185,9 @@ describe("useWorkspaceList", () => {
     expect(result.current).toBe(before);
 
     act(() => {
-      useSessionStore.getState().mergeWorkspaces(SERVER_ID, [
-        createWorkspace({ id: "workspace-b", name: "B" }),
-      ]);
+      useSessionStore
+        .getState()
+        .mergeWorkspaces(SERVER_ID, [createWorkspace({ id: "workspace-b", name: "B" })]);
     });
     expect(result.current).not.toBe(before);
     expect(result.current.map((entry) => entry.id)).toEqual(["workspace-a", "workspace-b"]);

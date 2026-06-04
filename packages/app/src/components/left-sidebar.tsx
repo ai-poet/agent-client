@@ -1145,7 +1145,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingHorizontal: theme.spacing[2],
     paddingTop: theme.spacing[2],
     paddingBottom: theme.spacing[1],
-    gap: theme.spacing[0.5],
+    gap: 2,
   },
   sidebarPrimaryAction: {
     minHeight: 28,

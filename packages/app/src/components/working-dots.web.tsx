@@ -1,10 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import {
-  WORKING_INDICATOR_CYCLE_MS,
-  WORKING_INDICATOR_OFFSETS,
-} from "@/utils/working-indicator";
+import { WORKING_INDICATOR_CYCLE_MS, WORKING_INDICATOR_OFFSETS } from "@/utils/working-indicator";
 
 const WEB_WORKING_DOTS_KEYFRAME_ID = "paseo-working-dots-keyframes";
 const WEB_WORKING_DOTS_ANIMATION_NAME = "paseo-working-dot-bounce";
