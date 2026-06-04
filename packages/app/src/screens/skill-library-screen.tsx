@@ -56,7 +56,9 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
     activeWorkspaceSelection?.serverId === serverId ? activeWorkspaceSelection.workspaceId : "";
   const client = useHostRuntimeClient(serverId);
   const workspaces = useWorkspaceList(serverId);
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(activeWorkspaceId);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(
+    () => activeWorkspaceId || workspaces[0]?.id || "",
+  );
   const [isWorkspacePickerOpen, setIsWorkspacePickerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
