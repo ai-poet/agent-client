@@ -6147,14 +6147,23 @@ export class Session {
         continue;
       }
       const projectRecord = activeProjects.get(workspace.projectId) ?? null;
-      descriptorsByWorkspaceId.set(
-        workspace.workspaceId,
-        await this.buildWorkspaceDescriptor({
-          workspace,
-          projectRecord,
-          includeGitData: options.includeGitData,
-        }),
-      );
+      try {
+        descriptorsByWorkspaceId.set(
+          workspace.workspaceId,
+          await this.buildWorkspaceDescriptor({
+            workspace,
+            projectRecord,
+            includeGitData: options.includeGitData,
+          }),
+        );
+      } catch (error) {
+        this.sessionLogger.warn(
+          { err: error, workspaceId: workspace.workspaceId, cwd: workspace.cwd },
+          "Skipping workspace descriptor after failed hydration",
+        );
+        this.removeWorkspaceGitSubscription(workspace.cwd);
+        continue;
+      }
     }
 
     for (const agent of agents) {
