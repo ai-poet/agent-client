@@ -49,8 +49,6 @@ const PROMPT_STORE_SCHEMA = z.object({
 const MCP_STORE_SCHEMA = z.object({
   profiles: z.array(McpServerProfileSchema),
 });
-const AI_SKILL_STORE_BASE_URL = "https://aiskillstore.io";
-const AI_SKILL_STORE_PLATFORM = "CodexCLI";
 const SKILLSMP_BASE_URL = "https://skillsmp.com";
 const SKILLSMP_SKILL_ID_PREFIX = "skillsmp:";
 const BUNDLED_SKILLS_ENV = "PASEO_BUNDLED_SKILLS_DIR";
@@ -934,15 +932,7 @@ export class ContextHubService {
       workspaceId: options.workspaceId,
       cwd: options.cwd,
     });
-    try {
-      const skillsMpSkills = await this.listSkillsMpSkills(options, installedNames);
-      if (skillsMpSkills.length > 0) {
-        return skillsMpSkills;
-      }
-    } catch (error) {
-      this.logger?.warn({ err: error }, "SkillsMP search failed; falling back to AI Skill Store");
-    }
-    return this.listAiSkillStoreSkills(options, installedNames);
+    return this.listSkillsMpSkills(options, installedNames);
   }
 
   async installMarketplaceSkill(
@@ -959,11 +949,7 @@ export class ContextHubService {
         packageBuffer,
       });
     }
-    const packageBuffer = await this.downloadMarketplaceSkillPackage(options.skillId);
-    return this.installMarketplaceSkillPackage({
-      ...options,
-      packageBuffer,
-    });
+    throw new Error(`Unsupported marketplace skill id: ${options.skillId}`);
   }
 
   async installMarketplaceSkillPackage(
@@ -1252,38 +1238,6 @@ export class ContextHubService {
     return this.dedupeMarketplaceSkills(mapped);
   }
 
-  private async listAiSkillStoreSkills(
-    options: ListMarketplaceSkillsOptions,
-    installedNames: Set<string>,
-  ): Promise<MarketplaceSkillEntry[]> {
-    const url = new URL("/v1/agent/search", AI_SKILL_STORE_BASE_URL);
-    const query = options.query?.trim();
-    const capability = options.capability?.trim();
-    if (query) {
-      url.searchParams.set("q", query);
-    }
-    if (capability) {
-      url.searchParams.set("capability", capability);
-    }
-    url.searchParams.set("platform", AI_SKILL_STORE_PLATFORM);
-    url.searchParams.set("usk_v3", "true");
-    url.searchParams.set("min_trust", options.minTrust ?? "verified");
-    url.searchParams.set("limit", String(Math.min(Math.max(options.limit ?? 20, 1), 50)));
-
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`AI Skill Store search failed: ${response.status} ${response.statusText}`);
-    }
-    const payload = z
-      .object({
-        skills: z.array(z.unknown()).default([]),
-      })
-      .parse(await response.json());
-    return payload.skills
-      .map((raw) => this.mapAiSkillStoreSkill(raw, installedNames))
-      .filter((skill): skill is MarketplaceSkillEntry => skill !== null);
-  }
-
   private mapSkillsMpSkill(
     raw: unknown,
     installedNames: Set<string>,
@@ -1354,59 +1308,6 @@ export class ContextHubService {
     return Array.from(byName.values()).sort(compareMarketplaceSkillPriority);
   }
 
-  private mapAiSkillStoreSkill(
-    raw: unknown,
-    installedNames: Set<string>,
-  ): MarketplaceSkillEntry | null {
-    const parsed = z
-      .object({
-        capabilities: z.array(z.string()).optional(),
-        days_since_update: z.number().int().nonnegative().nullable().optional(),
-        description: z.string().optional(),
-        download_count: z.number().int().nonnegative().optional(),
-        downloads_7d: z.number().int().nonnegative().optional(),
-        name: z.string().optional(),
-        permissions: z
-          .object({
-            network: z.boolean().optional(),
-            filesystem: z.boolean().optional(),
-            subprocess: z.boolean().optional(),
-            env_vars: z.array(z.string()).optional(),
-          })
-          .optional(),
-        platform_compatibility: z.array(z.string()).optional(),
-        skill_id: z.string().optional(),
-        trust_level: z.enum(["verified", "community", "sandbox"]).optional(),
-        version: z.string().optional(),
-        vetting_status: z.string().nullable().optional(),
-      })
-      .safeParse(raw);
-    if (!parsed.success || !parsed.data.skill_id || !parsed.data.name) {
-      return null;
-    }
-    const skillName = safeSkillName(parsed.data.name);
-    return MarketplaceSkillEntrySchema.parse({
-      id: parsed.data.skill_id,
-      name: parsed.data.name,
-      description: parsed.data.description ?? "AI Skill Store skill",
-      version: parsed.data.version ?? null,
-      trustLevel: parsed.data.trust_level ?? "sandbox",
-      vettingStatus: parsed.data.vetting_status ?? null,
-      capabilities: parsed.data.capabilities ?? [],
-      permissions: {
-        network: parsed.data.permissions?.network,
-        filesystem: parsed.data.permissions?.filesystem,
-        subprocess: parsed.data.permissions?.subprocess,
-        envVars: parsed.data.permissions?.env_vars ?? [],
-      },
-      platformCompatibility: parsed.data.platform_compatibility ?? [],
-      downloadCount: parsed.data.download_count ?? 0,
-      downloads7d: parsed.data.downloads_7d ?? 0,
-      daysSinceUpdate: parsed.data.days_since_update ?? null,
-      installed: installedNames.has(skillName),
-    });
-  }
-
   private async getInstalledWorkspaceSkillNames(options: {
     workspaceId?: string;
     cwd?: string | null;
@@ -1433,20 +1334,6 @@ export class ContextHubService {
     const codexNames = providerNames[0] ?? new Set<string>();
     const claudeNames = providerNames[1] ?? new Set<string>();
     return new Set([...codexNames].filter((name) => claudeNames.has(name)));
-  }
-
-  private async downloadMarketplaceSkillPackage(skillId: string): Promise<Buffer> {
-    const url = new URL(
-      `/v1/agent/skills/${encodeURIComponent(skillId)}/download`,
-      AI_SKILL_STORE_BASE_URL,
-    );
-    url.searchParams.set("platform", AI_SKILL_STORE_PLATFORM);
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`AI Skill Store download failed: ${response.status} ${response.statusText}`);
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer);
   }
 
   private async downloadSkillsMpSkillPackage(

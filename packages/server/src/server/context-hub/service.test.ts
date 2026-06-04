@@ -213,7 +213,7 @@ describe("ContextHubService", () => {
     }
   });
 
-  it("maps SkillsMP search results before falling back to AI Skill Store", async () => {
+  it("maps SkillsMP search results", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
       expect(url.origin).toBe("https://skillsmp.com");
@@ -244,70 +244,45 @@ describe("ContextHubService", () => {
     });
   });
 
-  it("falls back to AI Skill Store when SkillsMP returns no results", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = new URL(String(input));
-      if (url.origin === "https://skillsmp.com") {
-        return createJsonResponse(createSkillsMpPayload([]));
-      }
-      expect(url.origin).toBe("https://aiskillstore.io");
-      expect(url.pathname).toBe("/v1/agent/search");
-      return createJsonResponse({
-        skills: [
-          {
-            skill_id: "ai-store-review",
-            name: "AI Store Review",
-            description: "Review from AI Skill Store.",
-            trust_level: "verified",
-            vetting_status: "approved",
-            platform_compatibility: ["CodexCLI"],
-            download_count: 12,
-            downloads_7d: 2,
-          },
-        ],
-      });
-    });
+  it("returns an empty marketplace list when SkillsMP has no results", async () => {
+    const fetchMock = vi.fn(async () => createJsonResponse(createSkillsMpPayload([])));
     globalThis.fetch = fetchMock as typeof fetch;
 
     const skills = await service.listMarketplaceSkills({ query: "review" });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(skills).toEqual([
-      expect.objectContaining({
-        id: "ai-store-review",
-        name: "AI Store Review",
-        platformCompatibility: ["CodexCLI"],
-      }),
-    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(skills).toEqual([]);
   });
 
-  it("falls back to AI Skill Store when SkillsMP search fails", async () => {
+  it("surfaces SkillsMP search failures without falling back", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
-      if (url.origin === "https://skillsmp.com") {
-        return new Response("nope", { status: 503, statusText: "Service Unavailable" });
-      }
-      return createJsonResponse({
-        skills: [
-          {
-            skill_id: "ai-store-fallback",
-            name: "Fallback Skill",
-            description: "Fallback skill.",
-            trust_level: "community",
-            platform_compatibility: ["CodexCLI"],
-          },
-        ],
-      });
+      expect(url.origin).toBe("https://skillsmp.com");
+      return new Response("nope", { status: 503, statusText: "Service Unavailable" });
     });
     globalThis.fetch = fetchMock as typeof fetch;
 
-    const skills = await service.listMarketplaceSkills({ query: "fallback" });
+    await expect(service.listMarketplaceSkills({ query: "fallback" })).rejects.toThrow(
+      /SkillsMP search failed: 503 Service Unavailable/,
+    );
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(skills[0]).toMatchObject({
-      id: "ai-store-fallback",
-      name: "Fallback Skill",
-    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects non-SkillsMP marketplace installs", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "paseo-skill-workspace-"));
+    try {
+      await expect(
+        service.installMarketplaceSkill({
+          workspaceId: "workspace-1",
+          cwd: workspaceRoot,
+          skillId: "legacy-review",
+          name: "Legacy Review",
+        }),
+      ).rejects.toThrow(/Unsupported marketplace skill id: legacy-review/);
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
   });
 
   it("requires both Claude and Codex provider skill directories for installed state", async () => {
