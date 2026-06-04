@@ -10,7 +10,10 @@ import {
   ShieldCheck,
 } from "lucide-react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import type { ContextHubMarketplaceSkillEntry } from "@server/shared/messages";
+import type {
+  ContextHubManagedSkillEntry,
+  ContextHubMarketplaceSkillEntry,
+} from "@server/shared/messages";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { isWeb } from "@/constants/platform";
 import { useToast } from "@/contexts/toast-context";
@@ -42,6 +45,83 @@ function skillStats(skill: ContextHubMarketplaceSkillEntry): string {
   return `${skill.trustLevel} · ${skill.downloadCount} downloads · ${skill.downloads7d}/7d · ${age}`;
 }
 
+type LocalSkillSummary = {
+  key: string;
+  name: string;
+  description: string | null;
+  path: string;
+  readOnly: boolean;
+  sources: string[];
+  scope: "global" | "workspace";
+};
+
+function localSkillSourceLabel(source: string, locale: string): string {
+  const isZh = locale === "zh";
+  switch (source) {
+    case "bundled":
+      return isZh ? "内置" : "Built-in";
+    case "managed":
+      return isZh ? "Paseo 管理" : "Paseo managed";
+    case "global_agents":
+      return isZh ? "全局 Agents" : "Global Agents";
+    case "global_claude":
+      return isZh ? "全局 Claude" : "Global Claude";
+    case "global_codex":
+      return isZh ? "全局 Codex" : "Global Codex";
+    case "project_agents":
+      return isZh ? "工作区 Agents" : "Workspace Agents";
+    case "project_claude":
+      return isZh ? "工作区 Claude" : "Workspace Claude";
+    case "project_codex":
+      return isZh ? "工作区 Codex" : "Workspace Codex";
+    default:
+      return source.replace(/_/g, " ");
+  }
+}
+
+function summarizeLocalSkills(
+  skills: ContextHubManagedSkillEntry[],
+  query: string,
+): LocalSkillSummary[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  const summaries = new Map<string, LocalSkillSummary>();
+  for (const skill of skills) {
+    const haystack = [skill.name, skill.description, skill.source, skill.path]
+      .filter(Boolean)
+      .join("\n")
+      .toLowerCase();
+    if (normalizedQuery && !haystack.includes(normalizedQuery)) {
+      continue;
+    }
+    const key = skill.name.trim().toLowerCase();
+    const existing = summaries.get(key);
+    if (!existing) {
+      summaries.set(key, {
+        key,
+        name: skill.name,
+        description: skill.description,
+        path: skill.path,
+        readOnly: skill.readOnly,
+        sources: [skill.source],
+        scope: skill.scope,
+      });
+      continue;
+    }
+    if (!existing.description && skill.description) {
+      existing.description = skill.description;
+    }
+    if (!existing.sources.includes(skill.source)) {
+      existing.sources.push(skill.source);
+    }
+    if (existing.scope !== "workspace" && skill.scope === "workspace") {
+      existing.scope = "workspace";
+      existing.path = skill.path;
+    }
+    existing.readOnly = existing.readOnly && skill.readOnly;
+  }
+  return Array.from(summaries.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 interface SkillLibraryScreenProps {
   serverId: string;
 }
@@ -62,7 +142,8 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
   const [isWorkspacePickerOpen, setIsWorkspacePickerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [skills, setSkills] = useState<ContextHubMarketplaceSkillEntry[]>([]);
+  const [localSkills, setLocalSkills] = useState<ContextHubManagedSkillEntry[]>([]);
+  const [marketplaceSkills, setMarketplaceSkills] = useState<ContextHubMarketplaceSkillEntry[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [installingSkillId, setInstallingSkillId] = useState<string | null>(null);
@@ -91,22 +172,43 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
 
   const refresh = useCallback(async () => {
     if (!client) {
-      setSkills([]);
+      setLocalSkills([]);
+      setMarketplaceSkills([]);
       setErrorMessage("Host is not connected.");
       return;
     }
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const result = await client.skillsMarketplaceList({
-        query: debouncedQuery || undefined,
-        limit: 30,
-        minTrust: "verified",
-        workspaceId: workspace?.id,
-        cwd: workspace?.workspaceDirectory,
-      });
-      setSkills(result.skills);
-      setErrorMessage(result.error);
+      const [localResult, marketplaceResult] = await Promise.allSettled([
+        client.skillsList({
+          workspaceId: workspace?.id,
+          cwd: workspace?.workspaceDirectory,
+        }),
+        client.skillsMarketplaceList({
+          query: debouncedQuery || undefined,
+          limit: 30,
+          minTrust: "verified",
+          workspaceId: workspace?.id,
+          cwd: workspace?.workspaceDirectory,
+        }),
+      ]);
+      const errors: string[] = [];
+      if (localResult.status === "fulfilled") {
+        setLocalSkills(localResult.value.skills);
+        if (localResult.value.error) errors.push(localResult.value.error);
+      } else {
+        setLocalSkills([]);
+        errors.push(toErrorMessage(localResult.reason));
+      }
+      if (marketplaceResult.status === "fulfilled") {
+        setMarketplaceSkills(marketplaceResult.value.skills);
+        if (marketplaceResult.value.error) errors.push(marketplaceResult.value.error);
+      } else {
+        setMarketplaceSkills([]);
+        errors.push(toErrorMessage(marketplaceResult.reason));
+      }
+      setErrorMessage(errors[0] ?? null);
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     } finally {
@@ -155,6 +257,11 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
     [client, refresh, toast, workspace],
   );
 
+  const localSkillSummaries = useMemo(
+    () => summarizeLocalSkills(localSkills, debouncedQuery),
+    [debouncedQuery, localSkills],
+  );
+
   const headerActions = (
     <View style={styles.headerActions}>
       <Pressable
@@ -199,7 +306,11 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
       >
         <View style={styles.hero}>
           <Text style={styles.title}>{text.skills}</Text>
-          <Text style={styles.subtitle}>AI Skill Store · CodexCLI · verified</Text>
+          <Text style={styles.subtitle}>
+            {locale === "zh"
+              ? "本地技能 · Claude / Codex / OpenCode · AI Skill Store"
+              : "Local skills · Claude / Codex / OpenCode · AI Skill Store"}
+          </Text>
           <View style={styles.workspacePickerWrap}>
             <Pressable
               style={styles.workspacePicker}
@@ -250,14 +361,73 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
         ) : null}
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>
-            {locale === "zh" ? "市场技能" : "Marketplace skills"}
-          </Text>
-          <Text style={styles.sectionCount}>{skills.length}</Text>
+          <Text style={styles.sectionTitle}>{locale === "zh" ? "本地技能" : "Local skills"}</Text>
+          <Text style={styles.sectionCount}>{localSkillSummaries.length}</Text>
         </View>
 
         <View style={styles.skillGrid}>
-          {skills.map((skill) => {
+          {localSkillSummaries.map((skill) => (
+            <View key={skill.key} style={styles.skillRow} testID={`local-skill-row-${skill.key}`}>
+              <View style={styles.skillIcon}>
+                <Box size={22} color={theme.colors.accentBright} />
+              </View>
+              <View style={styles.skillCopy}>
+                <View style={styles.skillTitleRow}>
+                  <Text style={styles.skillName} numberOfLines={1}>
+                    {skill.name}
+                  </Text>
+                  <View style={styles.installedBadge}>
+                    <Check size={12} color={theme.colors.success} />
+                    <Text style={styles.installedText}>
+                      {skill.readOnly ? text.skillBuiltIn : text.skillInstalled}
+                    </Text>
+                  </View>
+                </View>
+                {skill.description ? (
+                  <Text style={styles.skillDescription} numberOfLines={2}>
+                    {skill.description}
+                  </Text>
+                ) : null}
+                <View style={styles.pills}>
+                  <View style={styles.pill}>
+                    <Text style={styles.pillText}>
+                      {skill.scope === "workspace"
+                        ? locale === "zh"
+                          ? "工作区"
+                          : "Workspace"
+                        : locale === "zh"
+                          ? "全局"
+                          : "Global"}
+                    </Text>
+                  </View>
+                  {skill.sources.map((source) => (
+                    <View key={source} style={styles.pill}>
+                      <Text style={styles.pillText}>{localSkillSourceLabel(source, locale)}</Text>
+                    </View>
+                  ))}
+                </View>
+                <Text style={styles.skillSource} numberOfLines={1}>
+                  {skill.path}
+                </Text>
+              </View>
+            </View>
+          ))}
+          {localSkillSummaries.length === 0 ? (
+            <Text style={styles.emptyText}>
+              {locale === "zh" ? "未找到本地技能" : "No local skills found"}
+            </Text>
+          ) : null}
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>
+            {locale === "zh" ? "市场技能" : "Marketplace skills"}
+          </Text>
+          <Text style={styles.sectionCount}>{marketplaceSkills.length}</Text>
+        </View>
+
+        <View style={styles.skillGrid}>
+          {marketplaceSkills.map((skill) => {
             const isInstalling = installingSkillId === skill.id;
             const canInstall = Boolean(client && workspace) && !isInstalling;
             return (
@@ -562,6 +732,10 @@ const styles = StyleSheet.create((theme) => ({
   skillSource: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.xs,
+  },
+  emptyText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
   },
   installAction: {
     minWidth: 96,

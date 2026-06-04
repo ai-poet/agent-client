@@ -699,6 +699,13 @@ export class ContextHubService {
         readOnly: false,
         workspaceId: null,
       },
+      ...this.bundledSkillsRoots.map((root) => ({
+        root,
+        source: "bundled",
+        scope: "global" as const,
+        readOnly: true,
+        workspaceId: null,
+      })),
       {
         root: path.join(homedir(), ".codex", "skills"),
         source: "global_codex",
@@ -1400,7 +1407,7 @@ export class ContextHubService {
     const entries = await readdir(rootInfo.root, { withFileTypes: true });
     const skills: ManagedSkillEntry[] = [];
     for (const entry of entries) {
-      if (!entry.isDirectory()) {
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) {
         continue;
       }
       const skillPath = path.join(rootInfo.root, entry.name, "SKILL.md");

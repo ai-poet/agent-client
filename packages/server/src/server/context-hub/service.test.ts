@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import AdmZip from "adm-zip";
@@ -107,6 +107,38 @@ describe("ContextHubService", () => {
 
     const exported = await service.exportSkill({ skillId: skill.id });
     expect(exported.content).toContain("Use rg before reading broad file trees.");
+  });
+
+  it("lists bundled skills as read-only local skills", async () => {
+    const bundledRoot = await mkdtemp(path.join(tmpdir(), "paseo-bundled-skills-"));
+    try {
+      const bundledService = new ContextHubService({
+        paseoHome,
+        bundledSkillsRoots: [bundledRoot],
+      });
+      const skillDir = path.join(bundledRoot, "paseo-chat");
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        path.join(skillDir, "SKILL.md"),
+        "---\nname: paseo-chat\ndescription: Use chat rooms through the Paseo CLI.\n---\n",
+        "utf8",
+      );
+
+      const skills = await bundledService.listSkills();
+      expect(skills).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "paseo-chat",
+            description: "Use chat rooms through the Paseo CLI.",
+            source: "bundled",
+            readOnly: true,
+            scope: "global",
+          }),
+        ]),
+      );
+    } finally {
+      await rm(bundledRoot, { recursive: true, force: true });
+    }
   });
 
   it("installs marketplace skill packages into workspace provider skill directories", async () => {

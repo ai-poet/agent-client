@@ -3,7 +3,10 @@ import { act } from "react";
 import { JSDOM } from "jsdom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ContextHubMarketplaceSkillEntry } from "@server/shared/messages";
+import type {
+  ContextHubManagedSkillEntry,
+  ContextHubMarketplaceSkillEntry,
+} from "@server/shared/messages";
 import { SkillLibraryScreen } from "./skill-library-screen";
 
 const {
@@ -55,8 +58,23 @@ const {
     installed: false,
   };
 
+  const localSkill: ContextHubManagedSkillEntry = {
+    id: "bundled:paseo-chat",
+    name: "paseo-chat",
+    description: "Use chat rooms through the Paseo CLI.",
+    source: "bundled",
+    scope: "global",
+    workspaceId: null,
+    path: "/repo/skills/paseo-chat/SKILL.md",
+    readOnly: true,
+    content: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
   const mockClient = {
     isConnected: true,
+    skillsList: vi.fn(async () => ({ skills: [localSkill], error: null })),
     skillsMarketplaceList: vi.fn(async () => ({ skills: [marketplaceSkill], error: null })),
     skillsMarketplaceInstall: vi.fn(async () => ({
       skill: null,
@@ -200,6 +218,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   mockSessionState.sessions.server.workspaces = new Map([["workspace-1", defaultWorkspace]]);
+  mockClient.skillsList.mockClear();
   mockClient.skillsMarketplaceList.mockClear();
   mockClient.skillsMarketplaceInstall.mockClear();
   toastSuccessMock.mockClear();
@@ -260,6 +279,10 @@ describe("SkillLibraryScreen marketplace", () => {
     expect(row.textContent).toContain("env 1");
     expect(row.textContent).toContain("42 downloads");
     expect(row.textContent).toContain("7/7d");
+    expect(mockClient.skillsList).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+    });
     expect(mockClient.skillsMarketplaceList).toHaveBeenCalledWith({
       query: undefined,
       limit: 30,
@@ -267,6 +290,18 @@ describe("SkillLibraryScreen marketplace", () => {
       workspaceId: "workspace-1",
       cwd: "/repo",
     });
+  });
+
+  it("renders local and bundled skills separately from marketplace results", async () => {
+    renderScreen();
+
+    const row = await findByTestId("local-skill-row-paseo-chat");
+
+    expect(row.textContent).toContain("paseo-chat");
+    expect(row.textContent).toContain("Use chat rooms through the Paseo CLI.");
+    expect(row.textContent).toContain("Built-in");
+    expect(row.textContent).toContain("Global");
+    expect(row.textContent).toContain("Built-in");
   });
 
   it("disables install when no workspace is selected", async () => {
@@ -298,6 +333,7 @@ describe("SkillLibraryScreen marketplace", () => {
       "Code Review installed. Reload running agents to pick it up.",
       { variant: "success" },
     );
+    expect(mockClient.skillsList).toHaveBeenCalledTimes(2);
     expect(mockClient.skillsMarketplaceList).toHaveBeenCalledTimes(2);
   });
 });
