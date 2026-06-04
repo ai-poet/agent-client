@@ -38,7 +38,11 @@ import { isWeb } from "@/constants/platform";
 import { Fonts } from "@/constants/theme";
 import { useToast } from "@/contexts/toast-context";
 import { useCommitGraphQuery } from "@/hooks/use-commit-graph-query";
+import { useAppLocale } from "@/hooks/use-app-locale";
+import { getAppMessages } from "@/i18n/sub2api";
 import { type GraphLayout, type GraphNode, layoutGitGraph } from "@/utils/git-graph-layout";
+
+type CommitGraphText = ReturnType<typeof getAppMessages>["workspace"]["commitGraph"];
 
 interface CommitGraphPaneProps {
   serverId: string;
@@ -180,11 +184,13 @@ function CommitCard({
   compareCommit,
   onClearCompare,
   graphWidth,
+  text,
 }: {
   commit: GitGraphCommit;
   compareCommit: GitGraphCommit | null;
   onClearCompare: () => void;
   graphWidth: number;
+  text: CommitGraphText;
 }) {
   const { theme } = useUnistyles();
   return (
@@ -244,10 +250,8 @@ function CommitCard({
             ) : null}
           </View>
           <View style={styles.changedFilesStub}>
-            <Text style={styles.changedFilesTitle}>Changed files</Text>
-            <Text style={styles.changedFilesText}>
-              File list is not available from this daemon yet.
-            </Text>
+            <Text style={styles.changedFilesTitle}>{text.changedFiles}</Text>
+            <Text style={styles.changedFilesText}>{text.fileListUnavailable}</Text>
           </View>
         </View>
       </View>
@@ -426,6 +430,7 @@ interface CommitRowProps {
   onPress: (commit: GitGraphCommit, event: GestureResponderEvent) => void;
   onCopyHash: (commit: GitGraphCommit) => void;
   onCopyRefs: (commit: GitGraphCommit) => void;
+  text: CommitGraphText;
 }
 
 function CommitRow({
@@ -441,6 +446,7 @@ function CommitRow({
   onPress,
   onCopyHash,
   onCopyRefs,
+  text,
 }: CommitRowProps) {
   const { theme } = useUnistyles();
   const isHead = graph.headCommit === node.commit.fullHash;
@@ -525,7 +531,7 @@ function CommitRow({
           leading={<Copy size={15} color={theme.colors.foregroundMuted} />}
           onSelect={() => onCopyHash(node.commit)}
         >
-          Copy commit hash
+          {text.copyCommitHash}
         </ContextMenuItem>
         <ContextMenuItem
           testID={`commit-graph-copy-refs-${node.commit.hash}`}
@@ -533,16 +539,16 @@ function CommitRow({
           disabled={node.commit.branchTips.length === 0 && node.commit.tags.length === 0}
           onSelect={() => onCopyRefs(node.commit)}
         >
-          Copy refs
+          {text.copyRefs}
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
           testID={`commit-graph-open-files-${node.commit.hash}`}
           leading={<GitCommitHorizontal size={15} color={theme.colors.foregroundMuted} />}
           disabled
-          tooltip="Commit file list needs daemon support"
+          tooltip={text.fileListNeedsDaemon}
         >
-          Open changed files
+          {text.openChangedFiles}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
@@ -560,6 +566,8 @@ export const CommitGraphPane = memo(function CommitGraphPane({
     limit: COMMIT_LIMIT,
   });
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).workspace.commitGraph, [locale]);
   const toast = useToast();
   const scrollRef = useRef<ScrollViewInstance | null>(null);
   const [selectedCommit, setSelectedCommit] = useState<GitGraphCommit | null>(null);
@@ -681,7 +689,7 @@ export const CommitGraphPane = memo(function CommitGraphPane({
   }
 
   if (isError || !graph) {
-    const errorMessage = error instanceof Error ? error.message : "Failed to load commit graph";
+    const errorMessage = error instanceof Error ? error.message : text.failedLoad;
     return (
       <View style={styles.center} testID="commit-graph-error">
         <Text style={styles.errorText}>{errorMessage}</Text>
@@ -697,7 +705,7 @@ export const CommitGraphPane = memo(function CommitGraphPane({
       <View style={styles.toolbar}>
         <View style={styles.titleGroup}>
           <GitCommitHorizontal size={16} color={theme.colors.foregroundMuted} />
-          <Text style={styles.title}>Git Graph</Text>
+          <Text style={styles.title}>{text.title}</Text>
           {isFetching ? (
             <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
           ) : null}
@@ -708,7 +716,7 @@ export const CommitGraphPane = memo(function CommitGraphPane({
           <TextInput
             value={searchQuery}
             onChangeText={setSearchQuery}
-            placeholder="Search commits"
+            placeholder={text.searchPlaceholder}
             placeholderTextColor={theme.colors.foregroundMuted}
             style={styles.searchInput}
             testID="commit-graph-search"
@@ -716,7 +724,7 @@ export const CommitGraphPane = memo(function CommitGraphPane({
           {searchQuery ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Clear commit graph search"
+              accessibilityLabel={text.clearSearch}
               onPress={handleClearSearch}
               style={styles.clearSearchButton}
             >
@@ -726,14 +734,14 @@ export const CommitGraphPane = memo(function CommitGraphPane({
         </View>
 
         <View style={styles.toolbarActions}>
-          <ToolbarButton label="Refresh" onPress={handleRefresh}>
+          <ToolbarButton label={text.refresh} onPress={handleRefresh}>
             <RefreshCcw size={15} color={theme.colors.foregroundMuted} />
           </ToolbarButton>
-          <ToolbarButton label="Locate HEAD" onPress={handleLocateHead}>
+          <ToolbarButton label={text.locateHead} onPress={handleLocateHead}>
             <Crosshair size={15} color={theme.colors.foregroundMuted} />
           </ToolbarButton>
           <ToolbarButton
-            label={showRefs ? "Hide refs" : "Show refs"}
+            label={showRefs ? text.hideRefs : text.showRefs}
             onPress={() => setShowRefs((value) => !value)}
             active={showRefs}
           >
@@ -744,7 +752,7 @@ export const CommitGraphPane = memo(function CommitGraphPane({
             )}
           </ToolbarButton>
           {onClose ? (
-            <ToolbarButton label="Close" onPress={onClose}>
+            <ToolbarButton label={getAppMessages(locale).common.close} onPress={onClose}>
               <X size={15} color={theme.colors.foregroundMuted} />
             </ToolbarButton>
           ) : null}
@@ -754,26 +762,28 @@ export const CommitGraphPane = memo(function CommitGraphPane({
       {!hasCommits ? (
         <View style={styles.center} testID="commit-graph-empty">
           <GitCommitHorizontal size={42} color={theme.colors.foregroundMuted} />
-          <Text style={styles.emptyText}>No commits found</Text>
+          <Text style={styles.emptyText}>{text.noCommits}</Text>
         </View>
       ) : !layout || !filteredGraph || visibleCommits.length === 0 ? (
         <View style={styles.center} testID="commit-graph-no-search-results">
           <Search size={36} color={theme.colors.foregroundMuted} />
-          <Text style={styles.emptyText}>No matching commits</Text>
+          <Text style={styles.emptyText}>{text.noMatchingCommits}</Text>
         </View>
       ) : (
         <>
           <View style={styles.tableHeader}>
             <View style={{ width: graphWidth }} />
-            <Text style={[styles.columnHeader, styles.descriptionHeader]}>Description</Text>
+            <Text style={[styles.columnHeader, styles.descriptionHeader]}>{text.description}</Text>
             {showMetadata ? (
-              <Text style={[styles.columnHeader, { width: DATE_COLUMN_WIDTH }]}>Date</Text>
+              <Text style={[styles.columnHeader, { width: DATE_COLUMN_WIDTH }]}>{text.date}</Text>
             ) : null}
             {showAuthor ? (
-              <Text style={[styles.columnHeader, { width: AUTHOR_COLUMN_WIDTH }]}>Author</Text>
+              <Text style={[styles.columnHeader, { width: AUTHOR_COLUMN_WIDTH }]}>
+                {text.author}
+              </Text>
             ) : null}
             {showMetadata ? (
-              <Text style={[styles.columnHeader, { width: HASH_COLUMN_WIDTH }]}>Commit</Text>
+              <Text style={[styles.columnHeader, { width: HASH_COLUMN_WIDTH }]}>{text.commit}</Text>
             ) : null}
           </View>
           <ScrollView
@@ -806,6 +816,7 @@ export const CommitGraphPane = memo(function CommitGraphPane({
                     onPress={handleCommitPress}
                     onCopyHash={handleCopyHash}
                     onCopyRefs={handleCopyRefs}
+                    text={text}
                   />
                   {selectedCommit?.fullHash === node.commit.fullHash ? (
                     <CommitCard
@@ -817,6 +828,7 @@ export const CommitGraphPane = memo(function CommitGraphPane({
                       }
                       onClearCompare={() => setCompareCommit(null)}
                       graphWidth={graphWidth}
+                      text={text}
                     />
                   ) : null}
                 </View>

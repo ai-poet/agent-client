@@ -217,6 +217,10 @@ vi.mock("@/hooks/use-commit-graph-query", () => ({
   useCommitGraphQuery: () => graphState,
 }));
 
+vi.mock("@/hooks/use-app-locale", () => ({
+  useAppLocale: () => "en",
+}));
+
 vi.mock("@/contexts/toast-context", () => ({
   useToast: () => toast,
 }));

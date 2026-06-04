@@ -276,7 +276,7 @@ describe("SkillLibraryScreen marketplace", () => {
     expect(row.textContent).toContain("Code Review");
     expect(row.textContent).toContain("Review code changes with repo context.");
     expect(row.textContent).toContain("verified");
-    expect(row.textContent).toContain("no elevated permissions");
+    expect(row.textContent).toContain("No elevated permissions");
     expect(row.textContent).toContain("88313 downloads");
     expect(row.textContent).toContain("0/7d");
     const section = await findByTestId("skill-marketplace-letter-section-C");
