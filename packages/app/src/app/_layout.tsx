@@ -15,7 +15,7 @@ import { VoiceProvider } from "@/contexts/voice-context";
 import { useAppSettings } from "@/hooks/use-settings";
 import { THEME_TO_UNISTYLES, type ThemeName } from "@/styles/theme";
 import { useFaviconStatus } from "@/hooks/use-favicon-status";
-import { View, Text } from "react-native";
+import { InteractionManager, View, Text } from "react-native";
 import { UnistylesRuntime, useUnistyles } from "react-native-unistyles";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -102,6 +102,7 @@ import { isWeb, isNative } from "@/constants/platform";
 import { useSub2APIAuth } from "@/hooks/use-sub2api-auth";
 import { Sub2apiDesktopAuthBridge } from "@/hooks/sub2api-desktop-auth-bridge";
 import { useOnboardingGuideStore } from "@/stores/onboarding-guide-store";
+import { isOnboardingAutoPromptRoute } from "@/utils/onboarding-auto-prompt";
 
 polyfillCrypto();
 
@@ -425,6 +426,7 @@ interface AppContainerProps {
 }
 
 const THEME_CYCLE_ORDER: ThemeName[] = ["dark", "zinc", "midnight", "claude", "ghostty", "light"];
+const ONBOARDING_AUTO_PROMPT_DELAY_MS = 300;
 
 function AppContainer({
   children,
@@ -481,11 +483,11 @@ function AppContainer({
   // global concerns like keyboard shortcuts. Split those out so settings (and
   // other non-workspace routes) don't need a special-case to keep shortcuts alive.
   const keyboardShortcutsEnabled = chromeEnabled || pathname.startsWith("/settings");
-  const isWorkspaceRoute = /^\/h\/[^/]+\/workspace\/[^/]+(?:\/|$)/.test(pathname);
+  const shouldAutoPromptOnboarding = isOnboardingAutoPromptRoute({ pathname, chromeEnabled });
 
   useEffect(() => {
     if (
-      !isWorkspaceRoute ||
+      !shouldAutoPromptOnboarding ||
       settingsLoading ||
       settings.onboardingGuideCompleted ||
       onboardingAutoPrompted ||
@@ -493,14 +495,27 @@ function AppContainer({
     ) {
       return;
     }
-    openOnboardingGuide({ source: "auto" });
+
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      timeout = setTimeout(() => {
+        openOnboardingGuide({ source: "auto" });
+      }, ONBOARDING_AUTO_PROMPT_DELAY_MS);
+    });
+
+    return () => {
+      interaction.cancel();
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    };
   }, [
-    isWorkspaceRoute,
     onboardingAutoPrompted,
     onboardingGuideOpen,
     openOnboardingGuide,
     settings.onboardingGuideCompleted,
     settingsLoading,
+    shouldAutoPromptOnboarding,
   ]);
 
   useEffect(() => {
