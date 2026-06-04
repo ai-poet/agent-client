@@ -142,6 +142,44 @@ function findOptionLabel(
   return selected?.label ?? fallback;
 }
 
+type WorkspaceText = ReturnType<typeof getAppMessages>["workspace"];
+
+function normalizeThinkingEffortKey(option: Pick<StatusOption, "id" | "label">):
+  | "low"
+  | "medium"
+  | "high"
+  | "extraHigh"
+  | null {
+  const normalized = `${option.id} ${option.label}`
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+  if (!normalized) {
+    return null;
+  }
+  if (normalized.includes("extrahigh") || normalized.includes("xhigh")) {
+    return "extraHigh";
+  }
+  if (normalized.includes("medium") || normalized === "med") {
+    return "medium";
+  }
+  if (normalized.includes("high")) {
+    return "high";
+  }
+  if (normalized.includes("low")) {
+    return "low";
+  }
+  return null;
+}
+
+function localizeThinkingOption(option: StatusOption, text: WorkspaceText): StatusOption {
+  const key = normalizeThinkingEffortKey(option);
+  return {
+    ...option,
+    label: key ? text.thinkingEffortLabels[key] : option.label,
+  };
+}
+
 const FEATURE_ICONS: Record<string, typeof Zap> = {
   "list-todo": ListTodo,
   zap: Zap,
@@ -263,10 +301,14 @@ function ControlledStatusBar({
     isModelLoading && (!modelOptions || modelOptions.length === 0)
       ? text.loadingModels
       : findOptionLabel(modelOptions, selectedModelId, appText.modelSelector.selectModel);
+  const localizedThinkingOptions = useMemo(
+    () => (thinkingOptions ?? []).map((option) => localizeThinkingOption(option, text)),
+    [text, thinkingOptions],
+  );
   const displayThinking = findOptionLabel(
-    thinkingOptions,
+    localizedThinkingOptions,
     selectedThinkingOptionId,
-    thinkingOptions?.[0]?.label ?? text.unknown,
+    localizedThinkingOptions[0]?.label ?? text.unknown,
   );
 
   const modeVisuals = selectedModeId
@@ -325,8 +367,8 @@ function ControlledStatusBar({
   const effectiveAllProviderModels = allProviderModels ?? fallbackAllProviderModels;
   const canSelectProviderInModelMenu = canSelectModelProvider ?? (() => true);
   const comboboxThinkingOptions = useMemo<ComboboxOption[]>(
-    () => (thinkingOptions ?? []).map((o) => ({ id: o.id, label: o.label })),
-    [thinkingOptions],
+    () => localizedThinkingOptions.map((o) => ({ id: o.id, label: o.label })),
+    [localizedThinkingOptions],
   );
 
   const renderModeOption = useCallback(
@@ -767,7 +809,7 @@ function ControlledStatusBar({
                     <ChevronDown size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="top" align="start">
-                    {thinkingOptions.map((thinking) => (
+                    {localizedThinkingOptions.map((thinking) => (
                       <DropdownMenuItem
                         key={thinking.id}
                         selected={thinking.id === selectedThinkingOptionId}
@@ -1023,9 +1065,9 @@ export const AgentStatusBar = memo(function AgentStatusBar({
   const thinkingOptions = useMemo<StatusOption[]>(() => {
     return (modelSelection.thinkingOptions ?? []).map((option) => ({
       id: option.id,
-      label: option.label,
+      label: localizeThinkingOption(option, getAppMessages(locale).workspace).label,
     }));
-  }, [modelSelection.thinkingOptions]);
+  }, [locale, modelSelection.thinkingOptions]);
 
   const handleSelectGlobalModel = useCallback(
     (modelId: string) => {
@@ -1197,9 +1239,9 @@ export function DraftAgentStatusBar({
   const mappedThinkingOptions = useMemo<StatusOption[]>(() => {
     return thinkingOptions.map((option) => ({
       id: option.id,
-      label: option.label,
+      label: localizeThinkingOption(option, text).label,
     }));
-  }, [thinkingOptions]);
+  }, [text, thinkingOptions]);
   const favoriteKeys = useMemo(
     () =>
       new Set(

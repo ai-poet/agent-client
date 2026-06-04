@@ -30,21 +30,25 @@ function normalizeSearch(value: string): string {
 
 const MARKETPLACE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
-function permissionLabels(skill: ContextHubMarketplaceSkillEntry): string[] {
+type SkillLibraryText = ReturnType<typeof getSub2APIMessages>["sidebar"];
+
+function permissionLabels(skill: ContextHubMarketplaceSkillEntry, text: SkillLibraryText): string[] {
   const labels: string[] = [];
-  if (skill.permissions.network) labels.push("network");
-  if (skill.permissions.filesystem) labels.push("filesystem");
-  if (skill.permissions.subprocess) labels.push("subprocess");
+  if (skill.permissions.network) labels.push(text.skillPermissions.network);
+  if (skill.permissions.filesystem) labels.push(text.skillPermissions.filesystem);
+  if (skill.permissions.subprocess) labels.push(text.skillPermissions.subprocess);
   if (skill.permissions.envVars.length > 0) {
-    labels.push(`env ${skill.permissions.envVars.length}`);
+    labels.push(text.skillPermissions.envVars(skill.permissions.envVars.length));
   }
-  return labels.length > 0 ? labels : ["no elevated permissions"];
+  return labels.length > 0 ? labels : [text.skillPermissions.none];
 }
 
-function skillStats(skill: ContextHubMarketplaceSkillEntry): string {
+function skillStats(skill: ContextHubMarketplaceSkillEntry, text: SkillLibraryText): string {
   const age =
-    skill.daysSinceUpdate === null ? "updated recently" : `${skill.daysSinceUpdate}d since update`;
-  return `${skill.trustLevel} · ${skill.downloadCount} downloads · ${skill.downloads7d}/7d · ${age}`;
+    skill.daysSinceUpdate === null
+      ? text.skillStats.updatedRecently
+      : text.skillStats.daysSinceUpdate(skill.daysSinceUpdate);
+  return text.skillStats.summary(skill.trustLevel, skill.downloadCount, skill.downloads7d, age);
 }
 
 type LocalSkillSummary = {
@@ -79,6 +83,34 @@ function localSkillSourceLabel(source: string, locale: string): string {
     default:
       return source.replace(/_/g, " ");
   }
+}
+
+function SkillSkeletonRow({ width = "47%" as const }: { width?: "47%" | "100%" }) {
+  return (
+    <View style={[styles.skillRow, { width }]} testID="skill-library-skeleton-row">
+      <View style={[styles.skillIcon, styles.skeletonBlock]} />
+      <View style={styles.skillCopy}>
+        <View style={[styles.skeletonLine, styles.skeletonTitle]} />
+        <View style={[styles.skeletonLine, styles.skeletonDescription]} />
+        <View style={styles.pills}>
+          <View style={[styles.skeletonPill, styles.skeletonBlock]} />
+          <View style={[styles.skeletonPill, styles.skeletonBlock]} />
+        </View>
+        <View style={[styles.skeletonLine, styles.skeletonMeta]} />
+      </View>
+    </View>
+  );
+}
+
+function SkillSectionSkeleton() {
+  return (
+    <View style={styles.skillGrid} testID="skill-library-skeleton">
+      <SkillSkeletonRow />
+      <SkillSkeletonRow />
+      <SkillSkeletonRow />
+      <SkillSkeletonRow />
+    </View>
+  );
 }
 
 function summarizeLocalSkills(
@@ -163,7 +195,8 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
   const scrollRef = useRef<ScrollView>(null);
   const marketplaceLetterOffsetsRef = useRef(new Map<string, number>());
   const locale = useSub2APILocale();
-  const text = useMemo(() => getSub2APIMessages(locale).sidebar, [locale]);
+  const messages = useMemo(() => getSub2APIMessages(locale), [locale]);
+  const text = messages.sidebar;
   const activeWorkspaceSelection = useNavigationActiveWorkspaceSelection();
   const activeWorkspaceId =
     activeWorkspaceSelection?.serverId === serverId ? activeWorkspaceSelection.workspaceId : "";
@@ -207,7 +240,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
     if (!client) {
       setLocalSkills([]);
       setMarketplaceSkills([]);
-      setErrorMessage("Host is not connected.");
+      setErrorMessage(messages.common.hostNotConnected);
       return;
     }
     setIsLoading(true);
@@ -247,7 +280,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [client, debouncedQuery, workspace?.id, workspace?.workspaceDirectory]);
+  }, [client, debouncedQuery, messages.common.hostNotConnected, workspace?.id, workspace?.workspaceDirectory]);
 
   useEffect(() => {
     void refresh();
@@ -256,7 +289,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
   const installSkill = useCallback(
     async (skill: ContextHubMarketplaceSkillEntry, overwrite = false) => {
       if (!client || !workspace) {
-        toast.error("Open a workspace before installing skills.");
+        toast.error(text.skillInstallWorkspaceRequired);
         return;
       }
       setInstallingSkillId(skill.id);
@@ -271,13 +304,13 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
         });
         if (result.error) {
           if (result.conflict && !overwrite) {
-            toast.error(`${skill.name} already exists with different content.`);
+            toast.error(text.skillInstallConflict(skill.name));
           } else {
             toast.error(result.error);
           }
           return;
         }
-        toast.show(`${skill.name} installed. Reload running agents to pick it up.`, {
+        toast.show(text.skillInstallSuccess(skill.name), {
           variant: "success",
         });
         await refresh();
@@ -287,7 +320,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
         setInstallingSkillId(null);
       }
     },
-    [client, refresh, toast, workspace],
+    [client, refresh, text, toast, workspace],
   );
 
   const localSkillSummaries = useMemo(
@@ -304,7 +337,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
   );
   const showMarketplaceAlphabet = !debouncedQuery && marketplaceGroups.length > 0;
   const marketplaceCountLabel = showMarketplaceAlphabet
-    ? `${marketplaceSkills.length} · A-Z`
+    ? text.skillMarketplaceAtoZ(marketplaceSkills.length)
     : String(marketplaceSkills.length);
 
   const renderMarketplaceSkillRow = useCallback(
@@ -336,14 +369,14 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
                 <ShieldCheck size={12} color={theme.colors.foregroundMuted} />
                 <Text style={styles.pillText}>{skill.trustLevel}</Text>
               </View>
-              {permissionLabels(skill).map((label) => (
+              {permissionLabels(skill, text).map((label) => (
                 <View key={label} style={styles.pill}>
                   <Text style={styles.pillText}>{label}</Text>
                 </View>
               ))}
             </View>
             <Text style={styles.skillSource} numberOfLines={1}>
-              {skillStats(skill)}
+              {skillStats(skill, text)}
             </Text>
           </View>
           <Pressable
@@ -363,20 +396,16 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
             )}
             <Text style={[styles.installActionText, !canInstall ? styles.disabledText : null]}>
               {isInstalling
-                ? locale === "zh"
-                  ? "安装中"
-                  : "Installing"
+                ? text.skillInstalling
                 : skill.installed
                   ? text.skillInstalled
-                  : locale === "zh"
-                    ? "安装"
-                    : "Install"}
+                  : text.skillInstall}
             </Text>
           </Pressable>
         </View>
       );
     },
-    [client, installSkill, installingSkillId, locale, text.skillInstalled, theme, workspace],
+    [client, installSkill, installingSkillId, text, theme, workspace],
   );
 
   const scrollToMarketplaceLetter = useCallback((letter: string) => {
@@ -397,7 +426,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
       >
         <RefreshCcw size={16} color={theme.colors.foregroundMuted} />
         <Text style={styles.ghostActionText}>
-          {isLoading ? (locale === "zh" ? "正在刷新" : "Refreshing") : text.skillRefresh}
+          {isLoading ? text.skillRefreshing : text.skillRefresh}
         </Text>
       </Pressable>
     </View>
@@ -405,9 +434,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
 
   const workspaceLabel = workspace
     ? `${workspace.projectDisplayName || workspace.name} · ${workspace.name}`
-    : locale === "zh"
-      ? "选择一个工作区后即可安装技能"
-      : "Choose a workspace to install skills";
+    : text.skillNoWorkspace;
 
   return (
     <View style={styles.container}>
@@ -421,11 +448,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
       >
         <View style={styles.hero}>
           <Text style={styles.title}>{text.skills}</Text>
-          <Text style={styles.subtitle}>
-            {locale === "zh"
-              ? "本地技能 · Claude / Codex · SkillsMP"
-              : "Local skills · Claude / Codex · SkillsMP"}
-          </Text>
+          <Text style={styles.subtitle}>{text.skillLibraryContentSubtitle}</Text>
           <View style={styles.heroSearchBox}>
             <Search size={20} color={theme.colors.foregroundMuted} />
             <TextInput
@@ -471,9 +494,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
                   </Pressable>
                 ))}
                 {workspaces.length === 0 ? (
-                  <Text style={styles.workspacePickerEmpty}>
-                    {locale === "zh" ? "暂无工作区" : "No workspaces"}
-                  </Text>
+                  <Text style={styles.workspacePickerEmpty}>{text.skillNoWorkspaces}</Text>
                 ) : null}
               </View>
             ) : null}
@@ -487,72 +508,72 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
         ) : null}
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>{locale === "zh" ? "本地技能" : "Local skills"}</Text>
+          <Text style={styles.sectionTitle}>{text.skillLocalSkills}</Text>
           <Text style={styles.sectionCount}>{localSkillSummaries.length}</Text>
         </View>
 
-        <View style={styles.skillGrid}>
-          {localSkillSummaries.map((skill) => (
-            <View key={skill.key} style={styles.skillRow} testID={`local-skill-row-${skill.key}`}>
-              <View style={styles.skillIcon}>
-                <Box size={22} color={theme.colors.accentBright} />
-              </View>
-              <View style={styles.skillCopy}>
-                <View style={styles.skillTitleRow}>
-                  <Text style={styles.skillName} numberOfLines={1}>
-                    {skill.name}
-                  </Text>
-                  <View style={styles.installedBadge}>
-                    <Check size={12} color={theme.colors.success} />
-                    <Text style={styles.installedText}>
-                      {skill.readOnly ? text.skillBuiltIn : text.skillInstalled}
-                    </Text>
-                  </View>
+        {isLoading && localSkillSummaries.length === 0 ? (
+          <SkillSectionSkeleton />
+        ) : (
+          <View style={styles.skillGrid}>
+            {localSkillSummaries.map((skill) => (
+              <View key={skill.key} style={styles.skillRow} testID={`local-skill-row-${skill.key}`}>
+                <View style={styles.skillIcon}>
+                  <Box size={22} color={theme.colors.accentBright} />
                 </View>
-                {skill.description ? (
-                  <Text style={styles.skillDescription} numberOfLines={2}>
-                    {skill.description}
-                  </Text>
-                ) : null}
-                <View style={styles.pills}>
-                  <View style={styles.pill}>
-                    <Text style={styles.pillText}>
-                      {skill.scope === "workspace"
-                        ? locale === "zh"
-                          ? "工作区"
-                          : "Workspace"
-                        : locale === "zh"
-                          ? "全局"
-                          : "Global"}
+                <View style={styles.skillCopy}>
+                  <View style={styles.skillTitleRow}>
+                    <Text style={styles.skillName} numberOfLines={1}>
+                      {skill.name}
                     </Text>
-                  </View>
-                  {skill.sources.map((source) => (
-                    <View key={source} style={styles.pill}>
-                      <Text style={styles.pillText}>{localSkillSourceLabel(source, locale)}</Text>
+                    <View style={styles.installedBadge}>
+                      <Check size={12} color={theme.colors.success} />
+                      <Text style={styles.installedText}>
+                        {skill.readOnly ? text.skillBuiltIn : text.skillInstalled}
+                      </Text>
                     </View>
-                  ))}
+                  </View>
+                  {skill.description ? (
+                    <Text style={styles.skillDescription} numberOfLines={2}>
+                      {skill.description}
+                    </Text>
+                  ) : null}
+                  <View style={styles.pills}>
+                    <View style={styles.pill}>
+                      <Text style={styles.pillText}>
+                        {skill.scope === "workspace"
+                          ? text.skillScopeWorkspace
+                          : text.skillScopeGlobal}
+                      </Text>
+                    </View>
+                    {skill.sources.map((source) => (
+                      <View key={source} style={styles.pill}>
+                        <Text style={styles.pillText}>
+                          {localSkillSourceLabel(source, locale)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                  <Text style={styles.skillSource} numberOfLines={1}>
+                    {skill.path}
+                  </Text>
                 </View>
-                <Text style={styles.skillSource} numberOfLines={1}>
-                  {skill.path}
-                </Text>
               </View>
-            </View>
-          ))}
-          {localSkillSummaries.length === 0 ? (
-            <Text style={styles.emptyText}>
-              {locale === "zh" ? "未找到本地技能" : "No local skills found"}
-            </Text>
-          ) : null}
-        </View>
+            ))}
+            {localSkillSummaries.length === 0 ? (
+              <Text style={styles.emptyText}>{text.skillNoLocalSkills}</Text>
+            ) : null}
+          </View>
+        )}
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>
-            {locale === "zh" ? "市场技能" : "Marketplace skills"}
-          </Text>
+          <Text style={styles.sectionTitle}>{text.skillMarketplaceSkills}</Text>
           <Text style={styles.sectionCount}>{marketplaceCountLabel}</Text>
         </View>
 
-        {showMarketplaceAlphabet ? (
+        {isLoading && marketplaceSkills.length === 0 ? (
+          <SkillSectionSkeleton />
+        ) : showMarketplaceAlphabet ? (
           <View style={styles.marketplaceGroups}>
             {marketplaceGroups.map((group) => (
               <View
@@ -788,6 +809,30 @@ const styles = StyleSheet.create((theme) => ({
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.borderAccent,
     paddingBottom: 20,
+  },
+  skeletonBlock: {
+    backgroundColor: theme.colors.surface2,
+  },
+  skeletonLine: {
+    height: 12,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.surface2,
+  },
+  skeletonTitle: {
+    width: "48%",
+    height: 16,
+  },
+  skeletonDescription: {
+    width: "86%",
+  },
+  skeletonMeta: {
+    width: "64%",
+    height: 10,
+  },
+  skeletonPill: {
+    width: 76,
+    height: 24,
+    borderRadius: theme.borderRadius.sm,
   },
   skillIcon: {
     width: 52,

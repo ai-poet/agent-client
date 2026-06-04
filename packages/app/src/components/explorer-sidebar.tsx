@@ -18,7 +18,9 @@ import { HEADER_INNER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout"
 import { isWeb } from "@/constants/platform";
 import { useExplorerSidebarAnimation } from "@/contexts/explorer-sidebar-animation-context";
 import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
+import { useAppLocale } from "@/hooks/use-app-locale";
 import { usePrPaneData } from "@/hooks/use-pr-pane-data";
+import { getAppMessages } from "@/i18n/sub2api";
 import {
   type ExplorerTab,
   MAX_EXPLORER_SIDEBAR_WIDTH,
@@ -51,6 +53,8 @@ export function ExplorerSidebar({
   onOpenFile,
 }: ExplorerSidebarProps) {
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).workspace.explorerTabs, [locale]);
   const isScreenFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const isMobile = useIsCompactFormFactor();
@@ -390,7 +394,7 @@ function SidebarContent({
               onPress={() => onTabPress("changes")}
             >
               <Text style={[styles.tabText, resolvedTab === "changes" && styles.tabTextActive]}>
-                Changes
+                {text.changes}
               </Text>
             </Pressable>
           )}
@@ -400,7 +404,7 @@ function SidebarContent({
             onPress={() => onTabPress("files")}
           >
             <Text style={[styles.tabText, resolvedTab === "files" && styles.tabTextActive]}>
-              Files
+              {text.files}
             </Text>
           </Pressable>
           {isGit && (
@@ -410,7 +414,7 @@ function SidebarContent({
               onPress={() => onTabPress("gitGraph")}
             >
               <Text style={[styles.tabText, resolvedTab === "gitGraph" && styles.tabTextActive]}>
-                Git Graph
+                {text.gitGraph}
               </Text>
             </Pressable>
           )}

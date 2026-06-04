@@ -24,14 +24,14 @@ const {
     showMobileAgent: vi.fn(),
   };
 
-    return {
-      panelState,
-      useSidebarWorkspacesListMock: vi.fn(),
-      useNavigationRecentWorkspaceSelectionMock: vi.fn(),
-      openProjectPickerMock: vi.fn(),
-      navigateToPreparedWorkspaceTabMock: vi.fn(),
-      resolveNewChatTargetMock: vi.fn(),
-      routerPushMock: vi.fn(),
+  return {
+    panelState,
+    useSidebarWorkspacesListMock: vi.fn(),
+    useNavigationRecentWorkspaceSelectionMock: vi.fn(),
+    openProjectPickerMock: vi.fn(),
+    navigateToPreparedWorkspaceTabMock: vi.fn(),
+    resolveNewChatTargetMock: vi.fn(),
+    routerPushMock: vi.fn(),
     theme: {
       spacing: { 0: 0, 0.5: 2, 1: 4, 1.5: 6, 2: 8, 3: 12, 4: 16, 5: 20 },
       iconSize: { sm: 14, md: 18, lg: 22 },
