@@ -275,17 +275,6 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
           {isLoading ? (locale === "zh" ? "正在刷新" : "Refreshing") : text.skillRefresh}
         </Text>
       </Pressable>
-      <View style={styles.searchBox}>
-        <Search size={16} color={theme.colors.foregroundMuted} />
-        <TextInput
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder={text.skillSearchPlaceholder}
-          placeholderTextColor={theme.colors.foregroundMuted}
-          style={[styles.searchInput, isWeb && ({ outlineStyle: "none" } as any)]}
-          testID="skill-library-search"
-        />
-      </View>
     </View>
   );
 
@@ -308,9 +297,20 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
           <Text style={styles.title}>{text.skills}</Text>
           <Text style={styles.subtitle}>
             {locale === "zh"
-              ? "本地技能 · Claude / Codex / OpenCode · SkillsMP"
-              : "Local skills · Claude / Codex / OpenCode · SkillsMP"}
+              ? "本地技能 · Claude / Codex · SkillsMP"
+              : "Local skills · Claude / Codex · SkillsMP"}
           </Text>
+          <View style={styles.heroSearchBox}>
+            <Search size={20} color={theme.colors.foregroundMuted} />
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder={text.skillSearchPlaceholder}
+              placeholderTextColor={theme.colors.foregroundMuted}
+              style={[styles.searchInput, isWeb && ({ outlineStyle: "none" } as any)]}
+              testID="skill-library-search"
+            />
+          </View>
           <View style={styles.workspacePickerWrap}>
             <Pressable
               style={styles.workspacePicker}
@@ -539,13 +539,16 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
   },
-  searchBox: {
-    minWidth: 260,
-    height: 40,
+  heroSearchBox: {
+    width: "100%",
+    maxWidth: 680,
+    minHeight: 50,
+    alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
+    gap: theme.spacing[3],
+    marginTop: theme.spacing[5],
+    paddingHorizontal: theme.spacing[4],
     borderRadius: theme.borderRadius.md,
     borderWidth: 1,
     borderColor: theme.colors.border,
@@ -560,16 +563,19 @@ const styles = StyleSheet.create((theme) => ({
   },
   hero: {
     paddingTop: theme.spacing[16],
+    alignItems: "center",
     gap: theme.spacing[2],
   },
   title: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize["4xl"],
     fontWeight: theme.fontWeight.normal,
+    textAlign: "center",
   },
   subtitle: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.lg,
+    textAlign: "center",
   },
   workspaceHint: {
     color: theme.colors.foregroundMuted,
@@ -579,6 +585,8 @@ const styles = StyleSheet.create((theme) => ({
   },
   workspacePickerWrap: {
     position: "relative",
+    alignSelf: "center",
+    width: "100%",
     maxWidth: 420,
   },
   workspacePicker: {
