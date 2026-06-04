@@ -125,7 +125,10 @@ function summarizeLocalSkills(
 }
 
 function marketplaceSkillInitial(name: string): string | null {
-  const initial = name.trim().match(/[A-Za-z]/)?.[0]?.toUpperCase();
+  const initial = name
+    .trim()
+    .match(/[A-Za-z]/)?.[0]
+    ?.toUpperCase();
   return initial && /^[A-Z]$/.test(initial) ? initial : null;
 }
 
