@@ -220,7 +220,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
         }),
         client.skillsMarketplaceList({
           query: debouncedQuery || undefined,
-          limit: 260,
+          limit: 50,
           minTrust: "verified",
           workspaceId: workspace?.id,
           cwd: workspace?.workspaceDirectory,

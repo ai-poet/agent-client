@@ -291,7 +291,7 @@ describe("SkillLibraryScreen marketplace", () => {
     });
     expect(mockClient.skillsMarketplaceList).toHaveBeenCalledWith({
       query: undefined,
-      limit: 260,
+      limit: 50,
       minTrust: "verified",
       workspaceId: "workspace-1",
       cwd: "/repo",
