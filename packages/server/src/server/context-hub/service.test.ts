@@ -244,6 +244,36 @@ describe("ContextHubService", () => {
     });
   });
 
+  it("loads default marketplace results from A-Z SkillsMP batches", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      const query = url.searchParams.get("q");
+      expect(url.origin).toBe("https://skillsmp.com");
+      expect(url.pathname).toBe("/api/v1/skills/search");
+      expect(url.searchParams.get("limit")).toBe("50");
+      expect(url.searchParams.get("sortBy")).toBe("stars");
+      expect(query).toMatch(/^[A-Z]$/);
+      return createJsonResponse(
+        createSkillsMpPayload([
+          createSkillsMpSkill({
+            id: `${query?.toLowerCase()}-helper`,
+            name: `${query} Helper`,
+            stars: query?.charCodeAt(0) ?? 0,
+          }),
+        ]),
+      );
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const skills = await service.listMarketplaceSkills();
+
+    expect(fetchMock).toHaveBeenCalledTimes(26);
+    expect(skills).toHaveLength(26);
+    expect(skills.map((skill) => skill.name)).toEqual(
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((letter) => `${letter} Helper`),
+    );
+  });
+
   it("returns an empty marketplace list when SkillsMP has no results", async () => {
     const fetchMock = vi.fn(async () => createJsonResponse(createSkillsMpPayload([])));
     globalThis.fetch = fetchMock as typeof fetch;

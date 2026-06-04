@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import {
   Box,
@@ -27,6 +27,8 @@ import { toErrorMessage } from "@/utils/error-messages";
 function normalizeSearch(value: string): string {
   return value.trim();
 }
+
+const MARKETPLACE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
 function permissionLabels(skill: ContextHubMarketplaceSkillEntry): string[] {
   const labels: string[] = [];
@@ -122,6 +124,32 @@ function summarizeLocalSkills(
   return Array.from(summaries.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function marketplaceSkillInitial(name: string): string | null {
+  const initial = name.trim().match(/[A-Za-z]/)?.[0]?.toUpperCase();
+  return initial && /^[A-Z]$/.test(initial) ? initial : null;
+}
+
+function groupMarketplaceSkills(skills: ContextHubMarketplaceSkillEntry[]): Array<{
+  letter: string;
+  skills: ContextHubMarketplaceSkillEntry[];
+}> {
+  const buckets = new Map<string, ContextHubMarketplaceSkillEntry[]>();
+  for (const letter of MARKETPLACE_ALPHABET) {
+    buckets.set(letter, []);
+  }
+  for (const skill of skills) {
+    const initial = marketplaceSkillInitial(skill.name);
+    if (!initial) {
+      continue;
+    }
+    buckets.get(initial)?.push(skill);
+  }
+  return MARKETPLACE_ALPHABET.map((letter) => ({
+    letter,
+    skills: buckets.get(letter) ?? [],
+  })).filter((group) => group.skills.length > 0);
+}
+
 interface SkillLibraryScreenProps {
   serverId: string;
 }
@@ -129,6 +157,8 @@ interface SkillLibraryScreenProps {
 export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
   const { theme } = useUnistyles();
   const toast = useToast();
+  const scrollRef = useRef<ScrollView>(null);
+  const marketplaceLetterOffsetsRef = useRef(new Map<string, number>());
   const locale = useSub2APILocale();
   const text = useMemo(() => getSub2APIMessages(locale).sidebar, [locale]);
   const activeWorkspaceSelection = useNavigationActiveWorkspaceSelection();
@@ -187,7 +217,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
         }),
         client.skillsMarketplaceList({
           query: debouncedQuery || undefined,
-          limit: 30,
+          limit: 260,
           minTrust: "verified",
           workspaceId: workspace?.id,
           cwd: workspace?.workspaceDirectory,
@@ -261,6 +291,98 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
     () => summarizeLocalSkills(localSkills, debouncedQuery),
     [debouncedQuery, localSkills],
   );
+  const marketplaceGroups = useMemo(
+    () => groupMarketplaceSkills(marketplaceSkills),
+    [marketplaceSkills],
+  );
+  const marketplaceLettersWithResults = useMemo(
+    () => new Set(marketplaceGroups.map((group) => group.letter)),
+    [marketplaceGroups],
+  );
+  const showMarketplaceAlphabet = !debouncedQuery && marketplaceGroups.length > 0;
+  const marketplaceCountLabel = showMarketplaceAlphabet
+    ? `${marketplaceSkills.length} · A-Z`
+    : String(marketplaceSkills.length);
+
+  const renderMarketplaceSkillRow = useCallback(
+    (skill: ContextHubMarketplaceSkillEntry) => {
+      const isInstalling = installingSkillId === skill.id;
+      const canInstall = Boolean(client && workspace) && !isInstalling;
+      return (
+        <View key={skill.id} style={styles.skillRow} testID={`skill-marketplace-row-${skill.id}`}>
+          <View style={styles.skillIcon}>
+            <Box size={22} color={theme.colors.accentBright} />
+          </View>
+          <View style={styles.skillCopy}>
+            <View style={styles.skillTitleRow}>
+              <Text style={styles.skillName} numberOfLines={1}>
+                {skill.name}
+              </Text>
+              {skill.installed ? (
+                <View style={styles.installedBadge}>
+                  <Check size={12} color={theme.colors.success} />
+                  <Text style={styles.installedText}>{text.skillInstalled}</Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.skillDescription} numberOfLines={2}>
+              {skill.description}
+            </Text>
+            <View style={styles.pills}>
+              <View style={styles.pill}>
+                <ShieldCheck size={12} color={theme.colors.foregroundMuted} />
+                <Text style={styles.pillText}>{skill.trustLevel}</Text>
+              </View>
+              {permissionLabels(skill).map((label) => (
+                <View key={label} style={styles.pill}>
+                  <Text style={styles.pillText}>{label}</Text>
+                </View>
+              ))}
+            </View>
+            <Text style={styles.skillSource} numberOfLines={1}>
+              {skillStats(skill)}
+            </Text>
+          </View>
+          <Pressable
+            style={[styles.installAction, !canInstall ? styles.installActionDisabled : null]}
+            accessibilityRole="button"
+            testID={`skill-marketplace-install-${skill.id}`}
+            onPress={() => void installSkill(skill)}
+            disabled={!canInstall}
+          >
+            {skill.installed ? (
+              <Check size={18} color={theme.colors.foregroundMuted} />
+            ) : (
+              <Download
+                size={18}
+                color={canInstall ? theme.colors.palette.black : theme.colors.foregroundMuted}
+              />
+            )}
+            <Text style={[styles.installActionText, !canInstall ? styles.disabledText : null]}>
+              {isInstalling
+                ? locale === "zh"
+                  ? "安装中"
+                  : "Installing"
+                : skill.installed
+                  ? text.skillInstalled
+                  : locale === "zh"
+                    ? "安装"
+                    : "Install"}
+            </Text>
+          </Pressable>
+        </View>
+      );
+    },
+    [client, installSkill, installingSkillId, locale, text.skillInstalled, theme, workspace],
+  );
+
+  const scrollToMarketplaceLetter = useCallback((letter: string) => {
+    const y = marketplaceLetterOffsetsRef.current.get(letter);
+    if (typeof y !== "number") {
+      return;
+    }
+    scrollRef.current?.scrollTo({ y: Math.max(0, y - 16), animated: true });
+  }, []);
 
   const headerActions = (
     <View style={styles.headerActions}>
@@ -288,6 +410,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
     <View style={styles.container}>
       <MenuHeader rightContent={headerActions} borderless />
       <ScrollView
+        ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator
@@ -423,86 +546,56 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
           <Text style={styles.sectionTitle}>
             {locale === "zh" ? "市场技能" : "Marketplace skills"}
           </Text>
-          <Text style={styles.sectionCount}>{marketplaceSkills.length}</Text>
+          <Text style={styles.sectionCount}>{marketplaceCountLabel}</Text>
         </View>
 
-        <View style={styles.skillGrid}>
-          {marketplaceSkills.map((skill) => {
-            const isInstalling = installingSkillId === skill.id;
-            const canInstall = Boolean(client && workspace) && !isInstalling;
-            return (
+        {showMarketplaceAlphabet ? (
+          <View style={styles.marketplaceGroups}>
+            {marketplaceGroups.map((group) => (
               <View
-                key={skill.id}
-                style={styles.skillRow}
-                testID={`skill-marketplace-row-${skill.id}`}
+                key={group.letter}
+                style={styles.marketplaceLetterSection}
+                testID={`skill-marketplace-letter-section-${group.letter}`}
+                onLayout={(event) => {
+                  marketplaceLetterOffsetsRef.current.set(group.letter, event.nativeEvent.layout.y);
+                }}
               >
-                <View style={styles.skillIcon}>
-                  <Box size={22} color={theme.colors.accentBright} />
+                <View style={styles.marketplaceLetterHeader}>
+                  <Text style={styles.marketplaceLetterText}>{group.letter}</Text>
+                  <Text style={styles.sectionCount}>{group.skills.length}</Text>
                 </View>
-                <View style={styles.skillCopy}>
-                  <View style={styles.skillTitleRow}>
-                    <Text style={styles.skillName} numberOfLines={1}>
-                      {skill.name}
-                    </Text>
-                    {skill.installed ? (
-                      <View style={styles.installedBadge}>
-                        <Check size={12} color={theme.colors.success} />
-                        <Text style={styles.installedText}>{text.skillInstalled}</Text>
-                      </View>
-                    ) : null}
-                  </View>
-                  <Text style={styles.skillDescription} numberOfLines={2}>
-                    {skill.description}
-                  </Text>
-                  <View style={styles.pills}>
-                    <View style={styles.pill}>
-                      <ShieldCheck size={12} color={theme.colors.foregroundMuted} />
-                      <Text style={styles.pillText}>{skill.trustLevel}</Text>
-                    </View>
-                    {permissionLabels(skill).map((label) => (
-                      <View key={label} style={styles.pill}>
-                        <Text style={styles.pillText}>{label}</Text>
-                      </View>
-                    ))}
-                  </View>
-                  <Text style={styles.skillSource} numberOfLines={1}>
-                    {skillStats(skill)}
-                  </Text>
-                </View>
-                <Pressable
-                  style={[styles.installAction, !canInstall ? styles.installActionDisabled : null]}
-                  accessibilityRole="button"
-                  testID={`skill-marketplace-install-${skill.id}`}
-                  onPress={() => void installSkill(skill)}
-                  disabled={!canInstall}
-                >
-                  {skill.installed ? (
-                    <Check size={18} color={theme.colors.foregroundMuted} />
-                  ) : (
-                    <Download
-                      size={18}
-                      color={canInstall ? theme.colors.palette.black : theme.colors.foregroundMuted}
-                    />
-                  )}
-                  <Text
-                    style={[styles.installActionText, !canInstall ? styles.disabledText : null]}
-                  >
-                    {isInstalling
-                      ? locale === "zh"
-                        ? "安装中"
-                        : "Installing"
-                      : skill.installed
-                        ? text.skillInstalled
-                        : locale === "zh"
-                          ? "安装"
-                          : "Install"}
-                  </Text>
-                </Pressable>
+                <View style={styles.skillGrid}>{group.skills.map(renderMarketplaceSkillRow)}</View>
               </View>
+            ))}
+          </View>
+        ) : (
+          <View style={styles.skillGrid}>{marketplaceSkills.map(renderMarketplaceSkillRow)}</View>
+        )}
+      </ScrollView>
+      {showMarketplaceAlphabet ? (
+        <View style={styles.alphabetRail} testID="skill-marketplace-alphabet-rail">
+          {MARKETPLACE_ALPHABET.map((letter) => {
+            const enabled = marketplaceLettersWithResults.has(letter);
+            return (
+              <Pressable
+                key={letter}
+                style={[styles.alphabetButton, !enabled ? styles.alphabetButtonDisabled : null]}
+                accessibilityRole="button"
+                disabled={!enabled}
+                testID={`skill-marketplace-letter-${letter}`}
+                onPress={() => scrollToMarketplaceLetter(letter)}
+              >
+                <Text
+                  style={[styles.alphabetButtonText, !enabled ? styles.disabledText : null]}
+                  numberOfLines={1}
+                >
+                  {letter}
+                </Text>
+              </Pressable>
             );
           })}
         </View>
-      </ScrollView>
+      ) : null}
     </View>
   );
 }
@@ -657,6 +750,25 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
   },
+  marketplaceGroups: {
+    gap: theme.spacing[10],
+  },
+  marketplaceLetterSection: {
+    gap: theme.spacing[4],
+  },
+  marketplaceLetterHeader: {
+    minHeight: 30,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[3],
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+  },
+  marketplaceLetterText: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.lg,
+    fontWeight: theme.fontWeight.semibold,
+  },
   skillGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -766,5 +878,34 @@ const styles = StyleSheet.create((theme) => ({
   },
   disabledText: {
     color: theme.colors.foregroundMuted,
+  },
+  alphabetRail: {
+    position: "absolute",
+    right: theme.spacing[2],
+    top: 112,
+    bottom: theme.spacing[8],
+    width: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 1,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  alphabetButton: {
+    width: 24,
+    minHeight: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: theme.borderRadius.sm,
+  },
+  alphabetButtonDisabled: {
+    opacity: 0.35,
+  },
+  alphabetButtonText: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
   },
 }));

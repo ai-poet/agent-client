@@ -51,6 +51,10 @@ const MCP_STORE_SCHEMA = z.object({
 });
 const SKILLSMP_BASE_URL = "https://skillsmp.com";
 const SKILLSMP_SKILL_ID_PREFIX = "skillsmp:";
+const SKILLSMP_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const SKILLSMP_ALPHABET_FETCH_LIMIT = 50;
+const SKILLSMP_ALPHABET_PER_LETTER_LIMIT = 10;
+const SKILLSMP_SEARCH_MAX_LIMIT = 50;
 const BUNDLED_SKILLS_ENV = "PASEO_BUNDLED_SKILLS_DIR";
 const SKILL_PACKAGE_MAX_FILES = 100;
 const SKILL_PACKAGE_MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -517,6 +521,11 @@ function parseGithubTreeRawSkillUrl(githubUrl: string): string {
     throw new Error(`SkillsMP installs require a GitHub tree URL: ${githubUrl}`);
   }
   return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${dirParts.join("/")}/SKILL.md`;
+}
+
+function marketplaceSkillInitial(name: string): string | null {
+  const initial = name.trim().match(/[A-Za-z]/)?.[0]?.toUpperCase();
+  return initial && /^[A-Z]$/.test(initial) ? initial : null;
 }
 
 async function exists(filePath: string): Promise<boolean> {
@@ -1208,10 +1217,56 @@ export class ContextHubService {
     options: ListMarketplaceSkillsOptions,
     installedNames: Set<string>,
   ): Promise<MarketplaceSkillEntry[]> {
-    const query = options.query?.trim() || options.capability?.trim() || "agent";
+    const query = options.query?.trim() || options.capability?.trim();
+    if (!query) {
+      return this.listSkillsMpAlphabetSkills(installedNames);
+    }
+    const skills = await this.fetchSkillsMpSearch({
+      query,
+      limit: Math.min(Math.max(options.limit ?? SKILLSMP_SEARCH_MAX_LIMIT, 1), 50),
+      installedNames,
+    });
+    return this.dedupeMarketplaceSkills(skills);
+  }
+
+  private async listSkillsMpAlphabetSkills(
+    installedNames: Set<string>,
+  ): Promise<MarketplaceSkillEntry[]> {
+    const batches = await Promise.all(
+      SKILLSMP_ALPHABET.map((letter) =>
+        this.fetchSkillsMpSearch({
+          query: letter,
+          limit: SKILLSMP_ALPHABET_FETCH_LIMIT,
+          installedNames,
+        }),
+      ),
+    );
+    const byLetter = new Map<string, MarketplaceSkillEntry[]>();
+    for (const letter of SKILLSMP_ALPHABET) {
+      byLetter.set(letter, []);
+    }
+    for (const skill of this.dedupeMarketplaceSkills(batches.flat())) {
+      const initial = marketplaceSkillInitial(skill.name);
+      if (!initial) {
+        continue;
+      }
+      const bucket = byLetter.get(initial);
+      if (!bucket || bucket.length >= SKILLSMP_ALPHABET_PER_LETTER_LIMIT) {
+        continue;
+      }
+      bucket.push(skill);
+    }
+    return Array.from(byLetter.values()).flat();
+  }
+
+  private async fetchSkillsMpSearch(options: {
+    query: string;
+    limit: number;
+    installedNames: Set<string>;
+  }): Promise<MarketplaceSkillEntry[]> {
     const url = new URL("/api/v1/skills/search", SKILLSMP_BASE_URL);
-    url.searchParams.set("q", query);
-    url.searchParams.set("limit", String(Math.min(Math.max(options.limit ?? 20, 1), 50)));
+    url.searchParams.set("q", options.query);
+    url.searchParams.set("limit", String(Math.min(Math.max(options.limit, 1), 50)));
     url.searchParams.set("sortBy", "stars");
 
     const response = await fetch(url);
@@ -1233,9 +1288,9 @@ export class ContextHubService {
     }
     const mapped =
       payload.data?.skills
-        .map((raw) => this.mapSkillsMpSkill(raw, installedNames))
+        .map((raw) => this.mapSkillsMpSkill(raw, options.installedNames))
         .filter((skill): skill is MarketplaceSkillEntry => skill !== null) ?? [];
-    return this.dedupeMarketplaceSkills(mapped);
+    return mapped;
   }
 
   private mapSkillsMpSkill(
