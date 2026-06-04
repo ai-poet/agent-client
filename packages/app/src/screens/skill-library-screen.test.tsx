@@ -6,8 +6,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContextHubMarketplaceSkillEntry } from "@server/shared/messages";
 import { SkillLibraryScreen } from "./skill-library-screen";
 
-const { theme, defaultWorkspace, mockClient, mockSessionState, toastSuccessMock, toastErrorMock } =
-  vi.hoisted(() => {
+const {
+  theme,
+  defaultWorkspace,
+  mockClient,
+  mockSessionState,
+  getMockWorkspaceList,
+  toastSuccessMock,
+  toastErrorMock,
+} = vi.hoisted(() => {
     const theme = {
       spacing: { 1: 4, 2: 8, 3: 12, 4: 16, 5: 20, 8: 32, 10: 40, 16: 64 },
       borderRadius: { sm: 4, md: 6 },
@@ -81,11 +88,30 @@ const { theme, defaultWorkspace, mockClient, mockSessionState, toastSuccessMock,
       },
     };
 
+    const workspaceListCache = new Map<
+      string,
+      {
+        workspaces: Map<string, typeof defaultWorkspace> | undefined;
+        list: Array<typeof defaultWorkspace>;
+      }
+    >();
+    const getMockWorkspaceList = (serverId: string) => {
+      const workspaces = mockSessionState.sessions[serverId]?.workspaces;
+      const cached = workspaceListCache.get(serverId);
+      if (cached?.workspaces === workspaces) {
+        return cached.list;
+      }
+      const list = Array.from(workspaces?.values() ?? []);
+      workspaceListCache.set(serverId, { workspaces, list });
+      return list;
+    };
+
     return {
       theme,
       defaultWorkspace,
       mockClient,
       mockSessionState,
+      getMockWorkspaceList,
       toastSuccessMock: vi.fn(),
       toastErrorMock: vi.fn(),
     };
@@ -142,8 +168,7 @@ vi.mock("@/stores/navigation-active-workspace-store", () => ({
 }));
 
 vi.mock("@/stores/session-store-hooks", () => ({
-  useWorkspaceList: (serverId: string) =>
-    Array.from(mockSessionState.sessions[serverId]?.workspaces.values() ?? []),
+  useWorkspaceList: (serverId: string) => getMockWorkspaceList(serverId),
 }));
 
 vi.mock("@/utils/error-messages", () => ({
