@@ -68,6 +68,7 @@ const styles = StyleSheet.create((theme) => ({
     borderWidth: 1,
     borderColor: theme.colors.border,
     gap: theme.spacing[3],
+    justifyContent: "space-between",
   },
   cardRecommended: {
     borderColor: theme.colors.accent,
@@ -113,6 +114,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
     lineHeight: theme.fontSize.sm * 1.5,
+    flex: 1,
   },
   cardFooter: {
     flexDirection: "row",
@@ -215,11 +217,10 @@ export function ModeSelectScreen() {
                   onPress={() => void pickExperience("developer")}
                 />
                 <ModeCard
-                  icon={<Sparkles size={20} color={theme.colors.accent} />}
+                  icon={<Sparkles size={20} color={theme.colors.foreground} />}
                   title={text.simpleTitle}
                   description={text.simpleDescription}
                   metaText={text.simpleMeta}
-                  metaAccent
                   disabled={pendingExperience !== null && pendingExperience !== "simple"}
                   loading={pendingExperience === "simple"}
                   testID="mode-select-simple"
