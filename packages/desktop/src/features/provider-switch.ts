@@ -318,10 +318,7 @@ async function readFileOrNull(filePath: string): Promise<string | null> {
   }
 }
 
-function parseJsonObjectForMerge(
-  raw: string | null,
-  label: string,
-): Record<string, unknown> {
+function parseJsonObjectForMerge(raw: string | null, label: string): Record<string, unknown> {
   if (raw === null || raw.trim().length === 0) {
     return {};
   }
@@ -344,8 +341,7 @@ function deepMergeRecords(
   const merged: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(overrides)) {
     const current = merged[key];
-    merged[key] =
-      isRecord(current) && isRecord(value) ? deepMergeRecords(current, value) : value;
+    merged[key] = isRecord(current) && isRecord(value) ? deepMergeRecords(current, value) : value;
   }
   return merged;
 }

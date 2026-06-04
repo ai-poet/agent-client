@@ -278,8 +278,8 @@ model = "custom-profile-model"
     expect(config).toContain('model = "gpt-5.2-codex"');
     expect(config).toContain('review_model = "gpt-5.2-codex"');
     expect(config).toContain('model_reasoning_effort = "medium"');
-    expect(config).toContain('[model_providers.Local]');
-    expect(config).toContain('[profiles.work]');
+    expect(config).toContain("[model_providers.Local]");
+    expect(config).toContain("[profiles.work]");
     expect(config).toContain('model = "custom-profile-model"');
     expect(config).toContain('name = "OpenAI"');
     expect(config).toContain('base_url = "https://gateway.example.com/v1"');
