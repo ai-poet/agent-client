@@ -671,6 +671,10 @@ export const AgentStreamView = memo(AgentStreamViewComponent);
 AgentStreamView.displayName = "AgentStreamView";
 
 function WorkingIndicator() {
+  const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const appText = useMemo(() => getAppMessages(locale), [locale]);
+  const label = appText.agentTools.labels.thinking;
   const progress = useSharedValue(0);
 
   useEffect(() => {
@@ -715,6 +719,36 @@ function WorkingIndicator() {
     };
   });
 
+  // ChatGPT-style text shimmer animation
+  const shimmerProgress = useSharedValue(0);
+  useEffect(() => {
+    shimmerProgress.value = 0;
+    shimmerProgress.value = withRepeat(
+      withTiming(1, {
+        duration: 2000,
+        easing: Easing.linear,
+      }),
+      -1,
+      false,
+    );
+    return () => {
+      cancelAnimation(shimmerProgress);
+      shimmerProgress.value = 0;
+    };
+  }, [shimmerProgress]);
+
+  const textShimmerStyle = useAnimatedStyle(() => {
+    const phase = shimmerProgress.value;
+    // Create a sweeping glow effect: opacity pulses from 0.5 to 1.0 and back
+    const glow = 0.5 + Math.sin(phase * Math.PI * 2) * 0.5;
+    return {
+      opacity: 0.5 + glow * 0.5,
+      textShadowColor: `rgba(255, 255, 255, ${glow * 0.3})`,
+      textShadowOffset: { width: 0, height: 0 },
+      textShadowRadius: glow * 4,
+    };
+  });
+
   return (
     <View style={stylesheet.workingIndicatorBubble}>
       <View style={stylesheet.workingDotsRow}>
@@ -722,6 +756,15 @@ function WorkingIndicator() {
         <Animated.View style={[stylesheet.workingDot, dotTwoStyle]} />
         <Animated.View style={[stylesheet.workingDot, dotThreeStyle]} />
       </View>
+      <Animated.Text
+        style={[
+          stylesheet.workingIndicatorText,
+          { color: theme.colors.foregroundMuted },
+          textShimmerStyle,
+        ]}
+      >
+        {label}
+      </Animated.Text>
     </View>
   );
 }
@@ -1080,6 +1123,11 @@ const stylesheet = StyleSheet.create((theme) => ({
     height: 6,
     borderRadius: 3,
     backgroundColor: theme.colors.foregroundMuted,
+  },
+  workingIndicatorText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    marginLeft: theme.spacing[1],
   },
   syncingIndicator: {
     flexDirection: "row",
