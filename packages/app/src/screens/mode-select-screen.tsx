@@ -220,8 +220,6 @@ export function ModeSelectScreen() {
                   description={text.simpleDescription}
                   metaText={text.simpleMeta}
                   metaAccent
-                  recommendedLabel={text.recommended}
-                  recommended
                   disabled={pendingExperience !== null && pendingExperience !== "simple"}
                   loading={pendingExperience === "simple"}
                   testID="mode-select-simple"
