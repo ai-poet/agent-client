@@ -147,7 +147,6 @@ export const cloudServiceQueryKeys = {
     endpoint: string | null | undefined,
     sessionKey: string | null | undefined,
     userId: number | null | undefined,
-    locale: string | null | undefined,
   ) =>
     [
       CLOUD_SERVICE_QUERY_ROOT,
@@ -155,7 +154,6 @@ export const cloudServiceQueryKeys = {
       normalizeEndpointKey(endpoint),
       "paymentConfig",
       userId ?? "none",
-      normalizeSub2APILocale(locale),
     ] as const,
   groupStatuses: (endpoint: string | null | undefined, sessionKey: string | null | undefined) =>
     [
@@ -357,13 +355,11 @@ function buildPayCenterUserConfigUrl(input: {
   endpoint: string;
   userId: number;
   accessToken: string;
-  locale: string;
 }): string {
   const base = normalizeSub2APIEndpoint(input.endpoint);
   const url = new URL(`${base}/pay/api/user`);
   url.searchParams.set("user_id", String(input.userId));
   url.searchParams.set("token", input.accessToken);
-  url.searchParams.set("lang", normalizeSub2APILocale(input.locale));
   return url.toString();
 }
 
@@ -373,10 +369,9 @@ export function useSub2APIPaymentConfig() {
   const endpoint = auth?.endpoint ?? null;
   const sessionKey = auth?.sessionKey ?? null;
   const userId = meQuery.data?.id ?? null;
-  const locale = useSub2APILocale();
 
   return useQuery({
-    queryKey: cloudServiceQueryKeys.paymentConfig(endpoint, sessionKey, userId, locale),
+    queryKey: cloudServiceQueryKeys.paymentConfig(endpoint, sessionKey, userId),
     enabled: isLoggedIn && Boolean(endpoint) && typeof userId === "number",
     staleTime: 5 * 60_000,
     queryFn: async (): Promise<Sub2APIPaymentConfig> => {
@@ -389,13 +384,9 @@ export function useSub2APIPaymentConfig() {
       }
 
       try {
-        const response = await fetch(
-          buildPayCenterUserConfigUrl({ endpoint, userId, accessToken, locale }),
-          {
-            method: "GET",
-            headers: { "Accept-Language": normalizeSub2APILocale(locale) },
-          },
-        );
+        const response = await fetch(buildPayCenterUserConfigUrl({ endpoint, userId, accessToken }), {
+          method: "GET",
+        });
         if (!response.ok) {
           return { balanceCreditCnyPerUsd: null, usdExchangeRate: null };
         }

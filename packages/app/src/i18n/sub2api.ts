@@ -87,20 +87,6 @@ export function isSub2APIEnglish(locale: string | null | undefined): boolean {
   return normalizeSub2APILocale(locale) === "en";
 }
 
-export function filterSub2APIPaymentTypesByLocale(
-  types: readonly string[],
-  locale: string | null | undefined,
-): string[] {
-  const normalizedLocale = normalizeSub2APILocale(locale);
-  return types.filter((type) => {
-    const normalizedType = type.trim().toLowerCase();
-    if (normalizedLocale === "zh") {
-      return normalizedType === "alipay" || normalizedType.startsWith("wxpay");
-    }
-    return normalizedType.startsWith("usdc");
-  });
-}
-
 function stablecoinLabel(type: string, base: "USDT" | "USDC"): string {
   const [, network] = type.split(".");
   if (!network) {
