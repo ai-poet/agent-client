@@ -92,7 +92,7 @@ function DesktopWorkingDot({
     const strength = getWorkingIndicatorDotStrength(progress.value, offset);
     return {
       opacity: 0.35 + strength * 0.55,
-      transform: [{ translateY: strength * -1.5 }],
+      transform: [{ translateY: strength * -5 }],
     };
   });
 

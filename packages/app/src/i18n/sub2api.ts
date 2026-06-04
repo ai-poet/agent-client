@@ -142,7 +142,7 @@ export const sub2apiMessages = {
         task: "任务",
         tasks: "任务",
         plan: "计划",
-        thinking: "思考",
+        thinking: "思考中",
         terminal: "终端",
       },
       details: {
@@ -748,7 +748,7 @@ export const sub2apiMessages = {
       mode: "模式",
       selectMode: "选择模式",
       default: "默认",
-      thinking: "思考",
+      thinking: "思考中",
       selectThinking: "选择思考强度",
       agent: "代理",
       selectAssistant: "选择助手",
@@ -1318,7 +1318,8 @@ export const sub2apiMessages = {
       general: "通用",
       theme: "主题",
       experienceMode: "使用模式",
-      experienceModeHint: "编码模式保留完整开发工作区；通用模式适合处理各种普通工作，并聚焦任务、进度和结果。",
+      experienceModeHint:
+        "编码模式保留完整开发工作区；通用模式适合处理各种普通工作，并聚焦任务、进度和结果。",
       language: "语言",
       languageHint: "用于客户端界面、云服务、支付和模型广场",
       defaultSend: "默认发送",

@@ -285,7 +285,7 @@ describe("tool-call-display", () => {
           detail: { type: "unknown", input: "Thinking...", output: null },
         },
         en: "Thinking",
-        zh: "思考",
+        zh: "思考中",
       },
       {
         input: {

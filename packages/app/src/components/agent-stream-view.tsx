@@ -690,7 +690,7 @@ function WorkingIndicator() {
     };
   }, [progress]);
 
-  const translateDistance = -2;
+  const translateDistance = -6;
   const dotOneStyle = useAnimatedStyle(() => {
     const strength = getWorkingIndicatorDotStrength(progress.value, WORKING_INDICATOR_OFFSETS[0]);
     return {

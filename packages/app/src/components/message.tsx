@@ -2169,14 +2169,17 @@ export const ToolCall = memo(function ToolCall({
 
   const displayModel = useMemo(
     () =>
-      buildToolCallDisplayModel({
-        name: toolName,
-        status: status === "executing" ? "running" : status,
-        error: error ?? null,
-        detail: displayDetail,
-        metadata,
-        cwd,
-      }, { locale: locale ?? "en" }),
+      buildToolCallDisplayModel(
+        {
+          name: toolName,
+          status: status === "executing" ? "running" : status,
+          error: error ?? null,
+          detail: displayDetail,
+          metadata,
+          cwd,
+        },
+        { locale: locale ?? "en" },
+      ),
     [toolName, status, error, displayDetail, metadata, cwd, locale],
   );
   const displayName = displayModel.displayName;
