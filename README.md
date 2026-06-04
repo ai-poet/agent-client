@@ -1,27 +1,10 @@
-<p align="center">
-  <img src="packages/website/public/logo.svg" width="64" height="64" alt="Paseo logo">
-</p>
+<h1 align="center">Agent Client</h1>
 
-<h1 align="center">Paseo 深度定制版</h1>
-
-<p align="center">
-  <a href="https://github.com/getpaseo/paseo/stargazers">
-    <img src="https://img.shields.io/github/stars/getpaseo/paseo?style=flat&logo=github" alt="GitHub stars">
-  </a>
-  <a href="https://github.com/getpaseo/paseo/releases">
-    <img src="https://img.shields.io/github/v/release/getpaseo/paseo?style=flat&logo=github" alt="GitHub release">
-  </a>
-</p>
-
-<p align="center">基于 Paseo 深度定制的 AI Agent 客户端 —— 专为 Claude Code CLI 与 Codex CLI 打造</p>
-
-<p align="center">
-  <img src="https://paseo.sh/hero-mockup.png" alt="Paseo app screenshot" width="100%">
-</p>
+<p align="center">AI Agent 客户端 —— 专为 Claude Code CLI 与 Codex CLI 打造</p>
 
 ---
 
-本项目是 [Paseo](https://github.com/getpaseo/paseo) 的二次开发版本，针对 **Claude Code CLI** 和 **Codex CLI** 进行了深度定制与优化，提供更强大的 Agent 管理、编排和远程控制能力。
+Agent Client 是一个针对 **Claude Code CLI** 和 **Codex CLI** 深度定制的 AI Agent 客户端，提供更强大的 Agent 管理、编排和远程控制能力。
 
 ## 核心特性
 
@@ -34,7 +17,7 @@
 
 ## 快速开始
 
-Paseo 运行一个本地守护进程（daemon）来管理您的编码 Agent。桌面应用、移动应用、Web 应用和 CLI 都通过它进行连接。
+Agent Client 运行一个本地守护进程（daemon）来管理您的编码 Agent。桌面应用、移动应用、Web 应用和 CLI 都通过它进行连接。
 
 ### 前置要求
 
@@ -45,17 +28,17 @@ Paseo 运行一个本地守护进程（daemon）来管理您的编码 Agent。�
 
 ### 桌面应用（推荐）
 
-从 [GitHub releases 页面](https://github.com/getpaseo/paseo/releases) 下载。打开应用后守护进程自动启动，无需额外安装。
+从 releases 页面下载。打开应用后守护进程自动启动，无需额外安装。
 
 手机连接：在设置中扫描二维码即可配对。
 
 ### CLI / 无头模式
 
-安装 CLI 并启动 Paseo：
+安装 CLI 并启动 Agent Client：
 
 ```bash
 npm install -g @getpaseo/cli
-paseo
+agent-client
 ```
 
 终端会显示二维码，使用任意客户端扫描连接。适用于服务器和远程机器场景。
@@ -66,44 +49,27 @@ paseo
 
 ```bash
 # 使用 Claude Code 运行任务
-paseo run --provider claude/opus-4.6 "实现用户认证系统"
+agent-client run --provider claude/opus-4.6 "实现用户认证系统"
 
 # 使用 Codex 在独立工作区运行
-paseo run --provider codex/gpt-5.4 --worktree feature-x "实现功能 X"
+agent-client run --provider codex/gpt-5.4 --worktree feature-x "实现功能 X"
 
 # 列出运行中的 Agent
-paseo ls
+agent-client ls
 
 # 实时连接 Agent 输出流
-paseo attach abc123
+agent-client attach abc123
 
 # 向运行中的 Agent 追加指令
-paseo send abc123 "顺便加上单元测试"
+agent-client send abc123 "顺便加上单元测试"
 
 # 连接远程守护进程
-paseo --host workstation.local:6767 run "运行完整测试套件"
+agent-client --host workstation.local:6767 run "运行完整测试套件"
 ```
 
 ## Agent 编排技能（实验性）
 
-通过技能系统教 Agent 如何使用 Paseo CLI 编排其他 Agent：
-
-```bash
-npx skills add getpaseo/paseo
-```
-
-在任意 Agent 对话中使用：
-
-```bash
-# 任务交接：与 Claude 讨论方案后，交给 Codex 实现
-/paseo-handoff 将认证修复任务交给 codex 5.4，在独立工作区执行
-
-# 循环验证：设定验收条件，自动迭代优化
-/paseo-loop 循环运行 codex 修复后端测试，使用 sonnet 验证，最多 10 轮
-
-# 多 Agent 协调：创建团队并通过聊天室管理
-/paseo-orchestrator 组建团队实现数据库重构，Claude 负责规划，Codex 负责实现和审查
-```
+通过技能系统教 Agent 如何使用 CLI 编排其他 Agent。
 
 ## 开发
 
@@ -111,9 +77,9 @@ Monorepo 包结构：
 
 | 包 | 说明 |
 |---|---|
-| `packages/server` | Paseo 守护进程（Agent 进程编排、WebSocket API、MCP 服务器） |
+| `packages/server` | 守护进程（Agent 进程编排、WebSocket API、MCP 服务器） |
 | `packages/app` | Expo 客户端（iOS、Android、Web） |
-| `packages/cli` | `paseo` CLI（守护进程与 Agent 工作流） |
+| `packages/cli` | CLI（守护进程与 Agent 工作流） |
 | `packages/desktop` | Electron 桌面应用 |
 | `packages/relay` | 远程连接中继包 |
 | `packages/website` | 官网与文档 |

@@ -521,7 +521,7 @@ describe("create_agent MCP tool", () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     const tempDir = await mkdtemp(join(tmpdir(), "paseo-mcp-worktree-"));
     const repoDir = join(tempDir, "repo");
-    const paseoHome = join(tempDir, ".paseo");
+    const paseoHome = join(tempDir, ".agent-client");
     const broadcasts: string[] = [];
     const createdWorkspaceIds: string[] = [];
 
@@ -585,7 +585,7 @@ describe("create_agent MCP tool", () => {
     const { agentManager, agentStorage } = createTestDeps();
     const tempDir = await mkdtemp(join(tmpdir(), "paseo-mcp-create-worktree-"));
     const repoDir = join(tempDir, "repo");
-    const paseoHome = join(tempDir, ".paseo");
+    const paseoHome = join(tempDir, ".agent-client");
     const broadcasts: string[] = [];
 
     try {
@@ -640,7 +640,7 @@ describe("create_agent MCP tool", () => {
     const { agentManager, agentStorage } = createTestDeps();
     const tempDir = await mkdtemp(join(tmpdir(), "paseo-mcp-archive-worktree-"));
     const repoDir = join(tempDir, "repo");
-    const paseoHome = join(tempDir, ".paseo");
+    const paseoHome = join(tempDir, ".agent-client");
 
     try {
       execSync(`git init ${JSON.stringify(repoDir)}`, { stdio: "pipe" });

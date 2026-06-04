@@ -25,7 +25,7 @@ background: true
 notifyOnFinish: true
 initialPrompt: "You are a researcher.
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for the objective.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for the objective.
 
 <specific research mandate>
 

@@ -100,14 +100,14 @@ describe("model-cli-manager", () => {
     expect(isWindowsGitBashPath("C:\\Windows\\SysWOW64\\bash.exe")).toBe(false);
     expect(isWindowsGitBashPath("C:/Windows/System32/wsl.exe")).toBe(false);
     expect(
-      isWindowsGitBashPath("C:/Users/alice/.paseo/toolchains/mingit-2.54.0/bin/bash.exe"),
+      isWindowsGitBashPath("C:/Users/alice/.agent-client/toolchains/mingit-2.54.0/bin/bash.exe"),
     ).toBe(false);
   });
 
   it("accepts Git for Windows and Scoop Git Bash paths", () => {
     expect(isWindowsGitBashPath("C:/Program Files/Git/bin/bash.exe")).toBe(true);
     expect(isWindowsGitBashPath("C:/Program Files/Git/usr/bin/bash.exe")).toBe(true);
-    expect(isWindowsGitBashPath("C:/Users/alice/.paseo/toolchains/PortableGit/bin/bash.exe")).toBe(
+    expect(isWindowsGitBashPath("C:/Users/alice/.agent-client/toolchains/PortableGit/bin/bash.exe")).toBe(
       true,
     );
     expect(isWindowsGitBashPath("C:/Users/alice/scoop/apps/git/current/bin/bash.exe")).toBe(true);
@@ -156,18 +156,18 @@ describe("model-cli-manager", () => {
       APPDATA: "C:\\Users\\alice\\AppData\\Roaming",
       ProgramFiles: "C:\\Program Files",
       "ProgramFiles(x86)": "C:\\Program Files (x86)",
-      PASEO_HOME: "C:\\Users\\alice\\.paseo",
+      PASEO_HOME: "C:\\Users\\alice\\.agent-client",
       LOCALAPPDATA: "C:\\Users\\alice\\AppData\\Local",
       USERPROFILE: "C:\\Users\\alice",
     });
 
     expect(searchPath.split(";")).toEqual([
       "C:\\Users\\alice\\AppData\\Roaming\\npm",
-      "C:\\Users\\alice\\.paseo\\toolchains\\node22-win-x64",
+      "C:\\Users\\alice\\.agent-client\\toolchains\\node22-win-x64",
       "C:\\Program Files\\nodejs",
-      "C:\\Users\\alice\\.paseo\\toolchains\\PortableGit\\cmd",
-      "C:\\Users\\alice\\.paseo\\toolchains\\PortableGit\\bin",
-      "C:\\Users\\alice\\.paseo\\toolchains\\PortableGit\\usr\\bin",
+      "C:\\Users\\alice\\.agent-client\\toolchains\\PortableGit\\cmd",
+      "C:\\Users\\alice\\.agent-client\\toolchains\\PortableGit\\bin",
+      "C:\\Users\\alice\\.agent-client\\toolchains\\PortableGit\\usr\\bin",
       "C:\\Program Files\\Git\\cmd",
       "C:\\Program Files\\Git\\bin",
       "C:\\Program Files\\Git\\usr\\bin",
@@ -188,17 +188,17 @@ describe("model-cli-manager", () => {
     const value = buildWindowsUserPathValue(
       "C:\\Windows\\System32;C:\\Users\\alice\\AppData\\Roaming\\npm",
       [
-        "C:\\Users\\alice\\.paseo\\toolchains\\node22-win-x64",
+        "C:\\Users\\alice\\.agent-client\\toolchains\\node22-win-x64",
         "C:\\Users\\alice\\AppData\\Roaming\\npm",
-        "C:\\Users\\alice\\.paseo\\toolchains\\PortableGit\\bin",
+        "C:\\Users\\alice\\.agent-client\\toolchains\\PortableGit\\bin",
       ],
     );
 
     expect(value.split(";")).toEqual([
       "C:\\Windows\\System32",
       "C:\\Users\\alice\\AppData\\Roaming\\npm",
-      "C:\\Users\\alice\\.paseo\\toolchains\\node22-win-x64",
-      "C:\\Users\\alice\\.paseo\\toolchains\\PortableGit\\bin",
+      "C:\\Users\\alice\\.agent-client\\toolchains\\node22-win-x64",
+      "C:\\Users\\alice\\.agent-client\\toolchains\\PortableGit\\bin",
     ]);
   });
 
@@ -322,8 +322,8 @@ describe("model-cli-manager", () => {
   });
 
   it("resolves the app-managed Windows Node directory under Paseo home", () => {
-    expect(resolveWindowsManagedNodeDir({ PASEO_HOME: "C:\\Users\\alice\\.paseo" })).toBe(
-      "C:\\Users\\alice\\.paseo\\toolchains\\node22-win-x64",
+    expect(resolveWindowsManagedNodeDir({ PASEO_HOME: "C:\\Users\\alice\\.agent-client" })).toBe(
+      "C:\\Users\\alice\\.agent-client\\toolchains\\node22-win-x64",
     );
   });
 
@@ -445,13 +445,13 @@ describe("model-cli-manager", () => {
 
   it("builds native PortableGit extractor arguments without shell wrappers", () => {
     const args = buildWindowsGitBashPortableExtractArgs(
-      "C:\\Users\\alice\\.paseo\\toolchains\\PortableGit",
+      "C:\\Users\\alice\\.agent-client\\toolchains\\PortableGit",
     );
 
     expect(args).toEqual([
       "-y",
       "-gm2",
-      "-InstallPath=C:\\\\Users\\\\alice\\\\.paseo\\\\toolchains\\\\PortableGit",
+      "-InstallPath=C:\\\\Users\\\\alice\\\\.agent-client\\\\toolchains\\\\PortableGit",
     ]);
   });
 

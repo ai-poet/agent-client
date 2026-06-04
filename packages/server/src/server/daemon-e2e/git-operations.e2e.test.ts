@@ -413,7 +413,7 @@ describe("daemon E2E", () => {
         label: "createAgent should not block on setup",
       });
 
-      expect(agent.cwd).toContain(path.join(".paseo", "worktrees"));
+      expect(agent.cwd).toContain(path.join(".agent-client", "worktrees"));
       expect(existsSync(path.join(agent.cwd, "setup-done.txt"))).toBe(false);
 
       writeFileSync(path.join(agent.cwd, "allow-setup"), "ok\n");
@@ -501,7 +501,7 @@ describe("daemon E2E", () => {
           label: "createAgent should not block on setup",
         });
 
-        expect(agent.cwd).toContain(path.join(".paseo", "worktrees"));
+        expect(agent.cwd).toContain(path.join(".agent-client", "worktrees"));
         expect(existsSync(path.join(agent.cwd, "setup-done.txt"))).toBe(false);
         expect(existsSync(path.join(agent.cwd, "dev-terminal.txt"))).toBe(false);
         expect(existsSync(path.join(agent.cwd, "lint-terminal.txt"))).toBe(false);
@@ -630,7 +630,7 @@ describe("daemon E2E", () => {
         label: "createAgent should not block on failing setup",
       });
 
-      expect(agent.cwd).toContain(path.join(".paseo", "worktrees"));
+      expect(agent.cwd).toContain(path.join(".agent-client", "worktrees"));
       expect(existsSync(agent.cwd)).toBe(true);
 
       const started = await waitForTimelineToolCall(

@@ -31,7 +31,7 @@ describe("createPaseoWorktree", () => {
         cwd: repoDir,
         worktreeSlug: "feature-one",
         runSetup: false,
-        paseoHome: path.join(tempDir, ".paseo"),
+        paseoHome: path.join(tempDir, ".agent-client"),
       },
       deps,
     );
@@ -50,7 +50,7 @@ describe("createPaseoWorktree", () => {
   test("reuses an existing worktree and still upserts and broadcasts", async () => {
     const { repoDir, tempDir } = createGitRepo();
     cleanupPaths.push(tempDir);
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const firstDeps = createDeps();
     const first = await createPaseoWorktree(
       {
@@ -95,7 +95,7 @@ describe("createPaseoWorktree", () => {
           cwd: tempDir,
           worktreeSlug: "not-git",
           runSetup: false,
-          paseoHome: path.join(tempDir, ".paseo"),
+          paseoHome: path.join(tempDir, ".agent-client"),
         },
         deps,
       ),

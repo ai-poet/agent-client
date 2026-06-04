@@ -62,7 +62,7 @@ export interface ProviderStore {
   activeCodexProviderId: string | null;
 }
 
-const PROVIDERS_FILE = join(homedir(), ".paseo", "providers.json");
+const PROVIDERS_FILE = join(homedir(), ".agent-client", "providers.json");
 
 function claudeSettingsPath(): string {
   return join(homedir(), ".claude", "settings.json");

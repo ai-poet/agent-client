@@ -760,9 +760,9 @@ export type GitWorktreeEntry = {
   isBare?: boolean;
 };
 
-/** Check whether a path contains a `.paseo/worktrees/` segment (both `/` and `\`). */
+/** Check whether a path contains a `.agent-client/worktrees/` segment (both `/` and `\`). */
 export function isPaseoWorktreePath(p: string): boolean {
-  return /[/\\]\.paseo[/\\]worktrees[/\\]/.test(p);
+  return /[/\\]\.(?:agent-client|paseo)[/\\]worktrees[/\\]/.test(p);
 }
 
 /** True when `child` is strictly inside `parent` (handles both `/` and `\`). */

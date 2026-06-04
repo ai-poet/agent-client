@@ -38,7 +38,7 @@ describe("file explorer service", () => {
 
   it("returns an empty listing when a pending workspace root disappears", async () => {
     const root = await createTempDir("paseo-file-explorer-");
-    const pendingRoot = path.join(root, ".paseo", "pending", "exciting-fox");
+    const pendingRoot = path.join(root, ".agent-client", "pending", "exciting-fox");
 
     try {
       const result = await listDirectoryEntries({

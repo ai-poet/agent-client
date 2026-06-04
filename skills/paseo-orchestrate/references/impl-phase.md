@@ -55,7 +55,7 @@ background: true
 notifyOnFinish: true
 initialPrompt: "You are an implementation engineer. [Load the e2e-playwright skill if frontend/E2E work.]
 
-Read the plan at ~/.paseo/plans/<task-slug>.md to understand the objective and your specific phase.
+Read the plan at ~/.agent-client/plans/<task-slug>.md to understand the objective and your specific phase.
 
 Do not bolt new code on top of existing code. If the existing code isn't shaped to accommodate your work, reshape it first. The goal is code that looks like this feature always existed.
 
@@ -79,7 +79,7 @@ background: true
 notifyOnFinish: true
 initialPrompt: "You are a UI engineer. [Load the e2e-playwright skill.]
 
-Read the plan at ~/.paseo/plans/<task-slug>.md for context.
+Read the plan at ~/.agent-client/plans/<task-slug>.md for context.
 
 The functionality is implemented. Your job is the styling pass:
 - Study existing components and styles in nearby screens

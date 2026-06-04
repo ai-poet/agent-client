@@ -82,7 +82,7 @@ describe("bootstrapWorkspaceRegistries", () => {
 
   beforeEach(() => {
     tmpDir = mkdtempSync(path.join(os.tmpdir(), "workspace-bootstrap-"));
-    paseoHome = path.join(tmpDir, ".paseo");
+    paseoHome = path.join(tmpDir, ".agent-client");
     agentStorage = new AgentStorage(path.join(paseoHome, "agents"), logger);
     projectRegistry = new FileBackedProjectRegistry(
       path.join(paseoHome, "projects", "projects.json"),

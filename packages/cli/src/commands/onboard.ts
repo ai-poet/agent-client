@@ -297,7 +297,7 @@ export function onboardCommand(): Command {
     .description("Run first-time setup, start daemon, and print pairing instructions")
     .option("--listen <listen>", "Listen target (host:port, port, or unix socket path)")
     .option("--port <port>", "Port to listen on (default: 6767)")
-    .option("--home <path>", "Paseo home directory (default: ~/.paseo)")
+    .option("--home <path>", "Agent Client home directory (default: ~/.agent-client)")
     .option("--no-relay", "Disable relay connection")
     .option("--no-mcp", "Disable the Agent MCP HTTP endpoint")
     .option(
@@ -318,7 +318,7 @@ export function onboardCommand(): Command {
 export async function runOnboard(options: OnboardOptions): Promise<void> {
   const richUi = process.stdin.isTTY && process.stdout.isTTY;
   if (richUi) {
-    intro("Welcome to Paseo");
+    intro("Welcome to Agent Client");
   }
 
   if (options.listen && options.port) {
@@ -337,7 +337,7 @@ export async function runOnboard(options: OnboardOptions): Promise<void> {
 
   const paseoHome = resolveLocalPaseoHome(options.home);
   if (richUi) {
-    renderNote(paseoHome, "Paseo home");
+    renderNote(paseoHome, "Agent Client home");
   }
 
   let persisted = loadPersistedConfig(paseoHome) as OnboardPersistedConfig;

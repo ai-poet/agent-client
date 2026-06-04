@@ -1687,7 +1687,7 @@ const x = 1;
         "worktree /home/user/repo",
         "branch refs/heads/main",
         "",
-        "worktree /home/user/.paseo/worktrees/feature",
+        "worktree /home/user/.agent-client/worktrees/feature",
         "branch refs/heads/feature",
         "",
       ].join("\n");
@@ -1696,7 +1696,7 @@ const x = 1;
       expect(entries).toHaveLength(2);
       expect(entries[0]).toEqual({ path: "/home/user/repo", branchRef: "refs/heads/main" });
       expect(entries[1]).toEqual({
-        path: "/home/user/.paseo/worktrees/feature",
+        path: "/home/user/.agent-client/worktrees/feature",
         branchRef: "refs/heads/feature",
       });
     });
@@ -1710,15 +1710,23 @@ const x = 1;
   });
 
   describe("isPaseoWorktreePath", () => {
-    it("matches Unix .paseo/worktrees/ paths", () => {
+    it("matches Unix .agent-client/worktrees/ paths", () => {
+      expect(isPaseoWorktreePath("/home/user/.agent-client/worktrees/feature")).toBe(true);
+    });
+
+    it("matches legacy Unix .paseo/worktrees/ paths", () => {
       expect(isPaseoWorktreePath("/home/user/.paseo/worktrees/feature")).toBe(true);
     });
 
-    it("matches Windows .paseo\\worktrees\\ paths", () => {
+    it("matches Windows .agent-client\\worktrees\\ paths", () => {
+      expect(isPaseoWorktreePath("C:\\Users\\dev\\.agent-client\\worktrees\\feature")).toBe(true);
+    });
+
+    it("matches legacy Windows .paseo\\worktrees\\ paths", () => {
       expect(isPaseoWorktreePath("C:\\Users\\dev\\.paseo\\worktrees\\feature")).toBe(true);
     });
 
-    it("rejects paths without .paseo/worktrees segment", () => {
+    it("rejects paths without .agent-client/worktrees segment", () => {
       expect(isPaseoWorktreePath("/home/user/repo")).toBe(false);
       expect(isPaseoWorktreePath("C:\\Users\\dev\\repo")).toBe(false);
     });

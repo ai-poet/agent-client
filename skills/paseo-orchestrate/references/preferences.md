@@ -1,6 +1,6 @@
 # Preferences
 
-The orchestrator reads user preferences from `~/.paseo/orchestrate.json` at startup. If the file doesn't exist, use the defaults below.
+The orchestrator reads user preferences from `~/.agent-client/orchestrate.json` at startup. If the file doesn't exist, use the defaults below.
 
 ## Schema
 
@@ -54,7 +54,7 @@ Examples:
 At the start of every orchestration:
 
 ```bash
-cat ~/.paseo/orchestrate.json 2>/dev/null || echo '{}'
+cat ~/.agent-client/orchestrate.json 2>/dev/null || echo '{}'
 ```
 
 Parse the JSON. Merge with defaults for any missing fields.

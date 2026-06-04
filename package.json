@@ -1,5 +1,5 @@
 {
-  "name": "paseo",
+  "name": "agent-client",
   "version": "0.1.78",
   "private": true,
   "workspaces": [
@@ -84,8 +84,8 @@
     "react-dom": "19.1.0",
     "typescript": "^5.9.3"
   },
-  "description": "Paseo: voice-controlled development environment with OpenAI Realtime API",
-  "homepage": "https://paseo.sh",
+  "description": "Agent Client: AI agent management and orchestration for Claude Code CLI and Codex CLI",
+  "homepage": "https://github.com/sub2api/agent-client",
   "keywords": [
     "openai",
     "realtime",
@@ -95,12 +95,11 @@
     "mcp"
   ],
   "author": {
-    "name": "Mohamed Boudra",
-    "email": "hello@moboudra.com"
+    "name": "sub2api"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/getpaseo/paseo.git"
+    "url": "https://github.com/sub2api/agent-client.git"
   },
   "license": "AGPL-3.0-or-later",
   "overrides": {

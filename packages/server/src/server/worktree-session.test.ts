@@ -429,7 +429,7 @@ describe("runWorktreeSetupInBackground", () => {
     });
     cleanupPaths.push(tempDir);
 
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const createdWorktree = await createLegacyWorktreeForTest({
       branchName: "feature-no-setup",
       cwd: repoDir,
@@ -528,7 +528,7 @@ describe("runWorktreeSetupInBackground", () => {
       stdio: "pipe",
     });
 
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const createdWorktree = await createLegacyWorktreeForTest({
       branchName: "broken-feature",
       cwd: repoDir,
@@ -598,7 +598,7 @@ describe("runWorktreeSetupInBackground", () => {
     });
     cleanupPaths.push(tempDir);
 
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const createdWorktree = await createLegacyWorktreeForTest({
       branchName: "feature-running-setup",
       cwd: repoDir,
@@ -716,7 +716,7 @@ describe("runWorktreeSetupInBackground", () => {
     });
     cleanupPaths.push(tempDir);
 
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const existingWorktree = await createLegacyWorktreeForTest({
       branchName: "reused-worktree",
       cwd: repoDir,
@@ -807,7 +807,7 @@ describe("runWorktreeSetupInBackground", () => {
     });
     cleanupPaths.push(tempDir);
 
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const createdWorktree = await createLegacyWorktreeForTest({
       branchName: "feature-service-failure",
       cwd: repoDir,
@@ -893,7 +893,7 @@ describe("runWorktreeSetupInBackground", () => {
     });
     cleanupPaths.push(tempDir);
 
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const createdWorktree = await createLegacyWorktreeForTest({
       branchName: "feature-socket-mode",
       cwd: repoDir,
@@ -1036,7 +1036,7 @@ describe("handleCreatePaseoWorktreeRequest", () => {
 
     const emitted: SessionOutboundMessage[] = [];
     const logger = createLogger();
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
 
     await handleCreatePaseoWorktreeRequest(
       {
@@ -1099,10 +1099,10 @@ describe("handleCreatePaseoWorktreeRequest", () => {
 
     const result = await buildAgentSessionConfig(
       {
-        paseoHome: path.join(tempDir, ".paseo"),
+        paseoHome: path.join(tempDir, ".agent-client"),
         sessionLogger: createLogger(),
         createPaseoWorktree: createPaseoWorktreeForTest({
-          paseoHome: path.join(tempDir, ".paseo"),
+          paseoHome: path.join(tempDir, ".agent-client"),
           events,
         }),
         checkoutExistingBranch: async () => {
@@ -1151,7 +1151,7 @@ describe("handleCreatePaseoWorktreeRequest", () => {
   test("buildAgentSessionConfig uses the normalized new branch name as the worktree slug fallback", async () => {
     const { tempDir, repoDir } = createGitRepo();
     cleanupPaths.push(tempDir);
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
 
     const result = await buildAgentSessionConfig(
       {
@@ -1244,7 +1244,7 @@ describe("handleCreatePaseoWorktreeRequest", () => {
   test("createPaseoWorktreeForTest forwards the default branch resolver for branch-off intents", async () => {
     const { tempDir, repoDir } = createGitRepo();
     cleanupPaths.push(tempDir);
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const resolveDefaultBranch = vi.fn(async () => "main");
 
     const result = await createPaseoWorktreeForTest({ paseoHome })(
@@ -1270,7 +1270,7 @@ describe("handleCreatePaseoWorktreeRequest", () => {
 describe("handleCreatePaseoWorktreeRequest", () => {
   test("registers a pending workspace and emits a successful create response", async () => {
     const { tempDir, repoDir } = createGitRepo();
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const emitted: SessionOutboundMessage[] = [];
     const events: string[] = [];
 
@@ -1318,7 +1318,7 @@ describe("handleCreatePaseoWorktreeRequest", () => {
 
   test("creates the worktree before emitting the response", async () => {
     const { tempDir, repoDir } = createGitRepo();
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const emitted: SessionOutboundMessage[] = [];
     const backgroundWork = vi.fn(async () => {});
     let registeredWorktreePath: string | null = null;
@@ -1376,7 +1376,7 @@ describe("handleCreatePaseoWorktreeRequest", () => {
 
   test("emits a machine-readable error code for invalid worktree intent", async () => {
     const { tempDir, repoDir } = createGitRepo();
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const emitted: SessionOutboundMessage[] = [];
 
     try {
@@ -1416,7 +1416,7 @@ describe("handleCreatePaseoWorktreeRequest", () => {
 
   test("emits a machine-readable error code for unknown checkout branches", async () => {
     const { tempDir, repoDir } = createGitRepo();
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const emitted: SessionOutboundMessage[] = [];
 
     try {
@@ -1480,7 +1480,7 @@ describe("archivePaseoWorktree", () => {
     const { tempDir, repoDir } = createGitRepo();
     cleanupPaths.push(tempDir);
 
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const created = await createLegacyWorktreeForTest({
       branchName: "archive-parallel",
       cwd: repoDir,
@@ -1547,7 +1547,7 @@ describe("archivePaseoWorktree", () => {
     const { tempDir, repoDir } = createGitRepo();
     cleanupPaths.push(tempDir);
 
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const created = await createLegacyWorktreeForTest({
       branchName: "archive-terminal-throws",
       cwd: repoDir,
@@ -1592,7 +1592,7 @@ describe("archivePaseoWorktree", () => {
     const { tempDir, repoDir } = createGitRepo();
     cleanupPaths.push(tempDir);
 
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const created = await createLegacyWorktreeForTest({
       branchName: "archive-refresh",
       cwd: repoDir,
@@ -1639,7 +1639,7 @@ describe("archivePaseoWorktree", () => {
     const { tempDir, repoDir } = createGitRepo();
     cleanupPaths.push(tempDir);
 
-    const paseoHome = path.join(tempDir, ".paseo");
+    const paseoHome = path.join(tempDir, ".agent-client");
     const created = await createLegacyWorktreeForTest({
       branchName: "archive-orphan",
       cwd: repoDir,

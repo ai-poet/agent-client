@@ -99,7 +99,7 @@ function findDirectCreateWorktreeCallSites(serverSrc: string): string[] {
 function createGitRepo(): { tempDir: string; repoDir: string; paseoHome: string } {
   const tempDir = realpathSync(mkdtempSync(path.join(tmpdir(), "worktree-core-test-")));
   const repoDir = path.join(tempDir, "repo");
-  const paseoHome = path.join(tempDir, ".paseo");
+  const paseoHome = path.join(tempDir, ".agent-client");
   execSync(`mkdir -p ${JSON.stringify(repoDir)}`);
   execSync("git init -b main", { cwd: repoDir, stdio: "pipe" });
   execSync("git config user.email 'test@test.com'", { cwd: repoDir, stdio: "pipe" });

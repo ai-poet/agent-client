@@ -2,7 +2,7 @@
   "name": "@getpaseo/desktop",
   "version": "0.1.78",
   "private": true,
-  "description": "Paseo desktop app (Electron wrapper)",
+  "description": "Agent Client desktop app (Electron wrapper)",
   "main": "dist/main.js",
   "scripts": {
     "build": "npm --prefix ../.. run build:daemon && npm run build:main && electron-builder --config electron-builder.config.cjs",
@@ -28,14 +28,13 @@
     "unzip-crx-3": "^0.2.0",
     "wait-on": "8.0.5"
   },
-  "homepage": "https://paseo.sh",
+  "homepage": "https://github.com/sub2api/agent-client",
   "repository": {
     "type": "git",
-    "url": "https://github.com/getpaseo/paseo.git"
+    "url": "https://github.com/sub2api/agent-client.git"
   },
   "author": {
-    "name": "Mohamed Boudra",
-    "email": "hello@moboudra.com"
+    "name": "sub2api"
   },
   "license": "AGPL-3.0-or-later"
 }

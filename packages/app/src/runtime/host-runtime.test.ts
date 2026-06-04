@@ -627,7 +627,7 @@ describe("HostRuntimeController", () => {
         listen: "127.0.0.1:6767",
         hostname: null,
         pid: 1234,
-        home: "C:\\Users\\test\\.paseo",
+        home: "C:\\Users\\test\\.agent-client",
         version: null,
         desktopManaged: true,
         error: null,

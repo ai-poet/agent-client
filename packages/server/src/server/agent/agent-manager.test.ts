@@ -803,7 +803,7 @@ describe("AgentManager", () => {
     await expect(
       manager.listDraftFeatures({
         provider: "codex",
-        cwd: join(workdir, ".paseo", "pending", "rugged-kiwi"),
+        cwd: join(workdir, ".agent-client", "pending", "rugged-kiwi"),
       }),
     ).resolves.toEqual([]);
   });

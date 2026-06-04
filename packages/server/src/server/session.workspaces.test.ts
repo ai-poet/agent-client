@@ -1849,7 +1849,7 @@ describe("workspace aggregation", () => {
 
     const tempDir = realpathSync(mkdtempSync(path.join(tmpdir(), "session-workspace-reconcile-")));
     const mainWorkspaceId = path.join(tempDir, "inkwell");
-    const worktreeWorkspaceId = path.join(mainWorkspaceId, ".paseo", "worktrees", "feature-a");
+    const worktreeWorkspaceId = path.join(mainWorkspaceId, ".agent-client", "worktrees", "feature-a");
     const localProjectId = mainWorkspaceId;
     const remoteProjectId = "remote:github.com/zimakki/inkwell";
 
@@ -1954,7 +1954,7 @@ describe("workspace aggregation", () => {
 
     const tempDir = realpathSync(mkdtempSync(path.join(tmpdir(), "session-workspace-fetch-")));
     const mainWorkspaceId = path.join(tempDir, "inkwell");
-    const worktreeWorkspaceId = path.join(mainWorkspaceId, ".paseo", "worktrees", "feature-a");
+    const worktreeWorkspaceId = path.join(mainWorkspaceId, ".agent-client", "worktrees", "feature-a");
     const oldProjectId = "remote:github.com/old-owner/inkwell";
     const newProjectId = "remote:github.com/new-owner/inkwell";
 
