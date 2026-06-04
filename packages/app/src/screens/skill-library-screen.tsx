@@ -32,7 +32,10 @@ const MARKETPLACE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
 type SkillLibraryText = ReturnType<typeof getSub2APIMessages>["sidebar"];
 
-function permissionLabels(skill: ContextHubMarketplaceSkillEntry, text: SkillLibraryText): string[] {
+function permissionLabels(
+  skill: ContextHubMarketplaceSkillEntry,
+  text: SkillLibraryText,
+): string[] {
   const labels: string[] = [];
   if (skill.permissions.network) labels.push(text.skillPermissions.network);
   if (skill.permissions.filesystem) labels.push(text.skillPermissions.filesystem);
@@ -280,7 +283,13 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [client, debouncedQuery, messages.common.hostNotConnected, workspace?.id, workspace?.workspaceDirectory]);
+  }, [
+    client,
+    debouncedQuery,
+    messages.common.hostNotConnected,
+    workspace?.id,
+    workspace?.workspaceDirectory,
+  ]);
 
   useEffect(() => {
     void refresh();
@@ -548,9 +557,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
                     </View>
                     {skill.sources.map((source) => (
                       <View key={source} style={styles.pill}>
-                        <Text style={styles.pillText}>
-                          {localSkillSourceLabel(source, locale)}
-                        </Text>
+                        <Text style={styles.pillText}>{localSkillSourceLabel(source, locale)}</Text>
                       </View>
                     ))}
                   </View>

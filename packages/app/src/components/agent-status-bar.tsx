@@ -144,12 +144,9 @@ function findOptionLabel(
 
 type WorkspaceText = ReturnType<typeof getAppMessages>["workspace"];
 
-function normalizeThinkingEffortKey(option: Pick<StatusOption, "id" | "label">):
-  | "low"
-  | "medium"
-  | "high"
-  | "extraHigh"
-  | null {
+function normalizeThinkingEffortKey(
+  option: Pick<StatusOption, "id" | "label">,
+): "low" | "medium" | "high" | "extraHigh" | null {
   const normalized = `${option.id} ${option.label}`
     .trim()
     .toLowerCase()

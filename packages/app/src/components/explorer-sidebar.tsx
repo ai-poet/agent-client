@@ -53,8 +53,6 @@ export function ExplorerSidebar({
   onOpenFile,
 }: ExplorerSidebarProps) {
   const { theme } = useUnistyles();
-  const locale = useAppLocale();
-  const text = useMemo(() => getAppMessages(locale).workspace.explorerTabs, [locale]);
   const isScreenFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const isMobile = useIsCompactFormFactor();
@@ -364,6 +362,8 @@ function SidebarContent({
   onOpenFile,
 }: SidebarContentProps) {
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).workspace.explorerTabs, [locale]);
   const padding = useWindowControlsPadding("explorerSidebar");
   const canQueryPullRequest = isGit && Boolean(workspaceRoot);
   const prPane = usePrPaneData({
