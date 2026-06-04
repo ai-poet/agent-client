@@ -482,6 +482,8 @@ export const sub2apiMessages = {
       allow: "允许",
       start: "开始执行",
       question: "是否允许助手继续？",
+      proceedQuestion: "你希望如何处理？",
+      implement: "执行",
     },
     startupSplash: {
       startingDaemon: "正在启动本地服务…",
@@ -2133,6 +2135,8 @@ export const sub2apiMessages = {
       allow: "Allow",
       start: "Start",
       question: "Allow the assistant to continue?",
+      proceedQuestion: "How would you like to proceed?",
+      implement: "Implement",
     },
     startupSplash: {
       startingDaemon: "Starting local server...",
@@ -3436,5 +3440,7 @@ export function getSub2APIMessages(locale: string | null | undefined = DEFAULT_L
 export const appMessages = sub2apiMessages;
 
 export function getAppMessages(locale: string | null | undefined = DEFAULT_LOCALE) {
+  return getSub2APIMessages(locale);
+}
   return getSub2APIMessages(locale);
 }

@@ -489,10 +489,11 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [pendingPermissions, agentId],
     );
 
-    const showWorkingIndicator = agent.status === "running";
+    const hasPendingPermissions = pendingPermissionItems.length > 0;
+    const showWorkingIndicator = agent.status === "running" && !hasPendingPermissions;
     const renderModel = useMemo<AgentStreamRenderModel>(() => {
       const pendingPermissionsNode =
-        pendingPermissionItems.length > 0 ? (
+        hasPendingPermissions ? (
           <View style={stylesheet.permissionsContainer}>
             {pendingPermissionItems.map((permission) => (
               <PermissionRequestCard
@@ -524,7 +525,14 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           workingIndicator: workingIndicatorNode,
         },
       };
-    }, [baseRenderModel, client, getGapBetween, pendingPermissionItems, showWorkingIndicator]);
+    }, [
+      baseRenderModel,
+      client,
+      getGapBetween,
+      hasPendingPermissions,
+      pendingPermissionItems,
+      showWorkingIndicator,
+    ]);
 
     const listEmptyComponent = useMemo(() => {
       if (
@@ -778,7 +786,7 @@ function PermissionRequestCard({
     return [
       {
         id: "reject",
-        label: simpleMode ? simplePermissionText.deny : "Deny",
+        label: simplePermissionText.deny,
         behavior: "deny",
         variant: "danger",
         intent: "dismiss",
@@ -790,8 +798,8 @@ function PermissionRequestCard({
             ? simplePermissionText.start
             : simplePermissionText.allow
           : isPlanRequest
-            ? "Implement"
-            : "Accept",
+            ? simplePermissionText.implement
+            : simplePermissionText.allow,
         behavior: "allow",
         variant: "primary",
       },
@@ -890,7 +898,7 @@ function PermissionRequestCard({
         testID="permission-request-question"
         style={[permissionStyles.question, { color: theme.colors.foregroundMuted }]}
       >
-        {simpleMode ? simplePermissionText.question : "How would you like to proceed?"}
+        {simpleMode ? simplePermissionText.question : simplePermissionText.proceedQuestion}
       </Text>
 
       <View
