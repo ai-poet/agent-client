@@ -457,8 +457,7 @@ function ensureInvocableSkillMarkdown(input: {
 }
 
 function parseUnixTimestampSeconds(value: number | string): number | null {
-  const timestamp =
-    typeof value === "number" ? value : Number.parseInt(String(value).trim(), 10);
+  const timestamp = typeof value === "number" ? value : Number.parseInt(String(value).trim(), 10);
   return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
 }
 
@@ -1246,9 +1245,10 @@ export class ContextHubService {
     if (!payload.success) {
       throw new Error("SkillsMP search failed");
     }
-    const mapped = payload.data?.skills
-      .map((raw) => this.mapSkillsMpSkill(raw, installedNames))
-      .filter((skill): skill is MarketplaceSkillEntry => skill !== null) ?? [];
+    const mapped =
+      payload.data?.skills
+        .map((raw) => this.mapSkillsMpSkill(raw, installedNames))
+        .filter((skill): skill is MarketplaceSkillEntry => skill !== null) ?? [];
     return this.dedupeMarketplaceSkills(mapped);
   }
 
@@ -1449,12 +1449,16 @@ export class ContextHubService {
     return Buffer.from(arrayBuffer);
   }
 
-  private async downloadSkillsMpSkillPackage(options: InstallMarketplaceSkillOptions): Promise<Buffer> {
+  private async downloadSkillsMpSkillPackage(
+    options: InstallMarketplaceSkillOptions,
+  ): Promise<Buffer> {
     const skill = await this.resolveSkillsMpSkill(options.skillId, options.name);
     const rawUrl = parseGithubTreeRawSkillUrl(skill.githubUrl);
     const response = await fetch(rawUrl);
     if (!response.ok) {
-      throw new Error(`SkillsMP SKILL.md download failed: ${response.status} ${response.statusText}`);
+      throw new Error(
+        `SkillsMP SKILL.md download failed: ${response.status} ${response.statusText}`,
+      );
     }
     const arrayBuffer = await response.arrayBuffer();
     if (arrayBuffer.byteLength > SKILL_MARKDOWN_MAX_BYTES) {
