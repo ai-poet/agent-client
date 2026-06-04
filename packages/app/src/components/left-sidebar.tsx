@@ -506,7 +506,7 @@ function SidebarTopAction({
         return (
           <>
             <Icon
-              size={theme.iconSize.md}
+              size={theme.iconSize.sm}
               color={active ? theme.colors.foreground : theme.colors.foregroundMuted}
             />
             <Text style={styles.sidebarPrimaryActionText} numberOfLines={1}>
@@ -1142,18 +1142,18 @@ const styles = StyleSheet.create((theme) => ({
     position: "relative",
   },
   sidebarTopActions: {
-    paddingHorizontal: theme.spacing[3],
-    paddingTop: theme.spacing[3],
-    paddingBottom: theme.spacing[2],
-    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
+    paddingTop: theme.spacing[2],
+    paddingBottom: theme.spacing[1],
+    gap: theme.spacing[0.5],
   },
   sidebarPrimaryAction: {
-    minHeight: 34,
+    minHeight: 28,
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[3],
+    gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
     borderRadius: theme.borderRadius.md,
     userSelect: "none",
   },
@@ -1162,8 +1162,8 @@ const styles = StyleSheet.create((theme) => ({
   },
   sidebarPrimaryActionText: {
     color: theme.colors.foreground,
-    fontSize: theme.fontSize.base,
-    fontWeight: theme.fontWeight.semibold,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
     flexShrink: 1,
     minWidth: 0,
   },

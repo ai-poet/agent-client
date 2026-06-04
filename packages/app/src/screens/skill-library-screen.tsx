@@ -18,7 +18,7 @@ import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 import { getSub2APIMessages } from "@/i18n/sub2api";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useNavigationActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import { useSessionStore } from "@/stores/session-store";
+import { useWorkspaceList } from "@/stores/session-store-hooks";
 import { toErrorMessage } from "@/utils/error-messages";
 
 function normalizeSearch(value: string): string {
@@ -55,9 +55,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
   const activeWorkspaceId =
     activeWorkspaceSelection?.serverId === serverId ? activeWorkspaceSelection.workspaceId : "";
   const client = useHostRuntimeClient(serverId);
-  const workspaces = useSessionStore((state) =>
-    Array.from(state.sessions[serverId]?.workspaces.values() ?? []),
-  );
+  const workspaces = useWorkspaceList(serverId);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(activeWorkspaceId);
   const [isWorkspacePickerOpen, setIsWorkspacePickerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");

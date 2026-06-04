@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import log from "electron-log/main";
 import { execCommand, resolvePaseoHome } from "@getpaseo/server";
 import { patchClaudeCodeGitBashPathForWindows } from "../features/provider-switch.js";
+import { getDesktopMessage } from "../i18n/desktop-i18n.js";
 
 export const REQUIRED_NODE_MAJOR = 22;
 export const CODEX_PACKAGE_NAME = "@openai/codex";
@@ -93,7 +94,11 @@ function getErrorMessage(error: unknown): string {
 
 function simplifyInstallErrorMessage(message: string): string {
   const normalized = message.replace(/\s+/g, " ").trim();
-  if (normalized.startsWith("Git Bash setup failed.") && normalized.length <= 900) {
+  if (
+    (normalized.startsWith("Git Bash setup failed.") ||
+      normalized.startsWith("Git Bash 设置失败。")) &&
+    normalized.length <= 900
+  ) {
     return normalized;
   }
   if (normalized.length <= 220) {
@@ -115,8 +120,12 @@ async function buildInstallFailureError(error: unknown): Promise<Error> {
   const status = await getModelCliRuntimeStatus().catch(() => null);
   const missing = status ? getMissingRuntimeDependencyNames(status) : [];
   const message = simplifyInstallErrorMessage(getErrorMessage(error));
-  const missingText = missing.length > 0 ? ` Missing: ${missing.join(", ")}` : "";
-  return new Error(`Install failed: ${message}${missingText}`);
+  return new Error(
+    getDesktopMessage("cli.installFailed", {
+      message,
+      missingText: missing.length > 0 ? missing.join(", ") : "",
+    }),
+  );
 }
 
 function simplifyAttemptMessage(message: string): string {
@@ -139,12 +148,14 @@ export function buildWindowsGitInstallFailureMessage(
   errors: string[],
   status: GitRuntimeStatus,
 ): string {
-  const validation = status.error ?? "Git Bash was not detected after installation.";
+  const validation = status.error ?? getDesktopMessage("cli.gitBashNotDetected");
   const attempts = errors
     .map((entry) => simplifyAttemptMessage(entry))
     .filter((entry) => entry.length > 0);
-  const attemptsText = attempts.length > 0 ? ` Attempts: ${attempts.join(" | ")}` : "";
-  return `Git Bash setup failed. ${validation}${attemptsText}`;
+  return getDesktopMessage("cli.gitBashSetupFailed", {
+    validation,
+    attemptsText: attempts.length > 0 ? attempts.join(" | ") : "",
+  });
 }
 
 function trimToNull(value: string | null | undefined): string | null {
@@ -759,7 +770,7 @@ export function buildWindowsGitBashDirectInstallCommand(): string {
 async function downloadFileWithFetch(url: string, destination: string): Promise<void> {
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Download failed with HTTP ${response.status}: ${url}`);
+    throw new Error(getDesktopMessage("cli.downloadFailed", { status: response.status, url }));
   }
   await mkdir(path.dirname(destination), { recursive: true });
   await writeFile(destination, Buffer.from(await response.arrayBuffer()));
@@ -802,7 +813,9 @@ async function ensureWindowsUserPathEntries(entriesToAdd: string[]): Promise<voi
       added: filtered,
       error: getErrorMessage(error),
     });
-    throw new Error(`Windows user PATH read failed: ${getErrorMessage(error)}`);
+    throw new Error(
+      getDesktopMessage("cli.windowsPathReadFailed", { message: getErrorMessage(error) }),
+    );
   });
   const before = readResult.stdout ?? "";
   const after = buildWindowsUserPathValue(before, filtered);
@@ -827,7 +840,9 @@ async function ensureWindowsUserPathEntries(entriesToAdd: string[]): Promise<voi
       afterLength: after.length,
       error: getErrorMessage(error),
     });
-    throw new Error(`Windows user PATH write failed: ${getErrorMessage(error)}`);
+    throw new Error(
+      getDesktopMessage("cli.windowsPathWriteFailed", { message: getErrorMessage(error) }),
+    );
   });
   const verifyResult = await execFileForInstall(
     "powershell.exe",
@@ -840,7 +855,9 @@ async function ensureWindowsUserPathEntries(entriesToAdd: string[]): Promise<voi
       afterLength: after.length,
       error: getErrorMessage(error),
     });
-    throw new Error(`Windows user PATH verification failed: ${getErrorMessage(error)}`);
+    throw new Error(
+      getDesktopMessage("cli.windowsPathVerificationFailed", { message: getErrorMessage(error) }),
+    );
   });
   const missingAfterWrite = findMissingWindowsUserPathEntries(verifyResult.stdout ?? "", filtered);
   if (missingAfterWrite.length > 0) {
@@ -852,7 +869,9 @@ async function ensureWindowsUserPathEntries(entriesToAdd: string[]): Promise<voi
       persistedLength: verifyResult.stdout?.length ?? 0,
     });
     throw new Error(
-      `Windows user PATH verification failed. Missing persisted entries: ${missingAfterWrite.join(", ")}`,
+      getDesktopMessage("cli.windowsPathMissingEntries", {
+        entries: missingAfterWrite.join(", "),
+      }),
     );
   }
   try {
@@ -955,7 +974,9 @@ async function installWindowsNodeZipFromUrl(zipUrl: string): Promise<string> {
         zipPath,
         error: getErrorMessage(error),
       });
-      throw new Error(`Node zip download failed: ${getErrorMessage(error)}`);
+      throw new Error(
+        getDesktopMessage("cli.nodeZipDownloadFailed", { message: getErrorMessage(error) }),
+      );
     }
 
     try {
@@ -971,7 +992,9 @@ async function installWindowsNodeZipFromUrl(zipUrl: string): Promise<string> {
         stagingDir,
         error: getErrorMessage(error),
       });
-      throw new Error(`Node zip extract failed: ${getErrorMessage(error)}`);
+      throw new Error(
+        getDesktopMessage("cli.nodeZipExtractFailed", { message: getErrorMessage(error) }),
+      );
     }
 
     const extractedCandidates = [
@@ -989,7 +1012,7 @@ async function installWindowsNodeZipFromUrl(zipUrl: string): Promise<string> {
       "";
 
     if (!existsSync(path.win32.join(extractedDir, "node.exe"))) {
-      throw new Error("Node zip verify failed: extracted archive did not contain node.exe");
+      throw new Error(getDesktopMessage("cli.nodeZipVerifyFailed"));
     }
 
     await rm(installDir, { recursive: true, force: true });
@@ -1071,7 +1094,9 @@ async function installPortableGitFromUrl(
         installerPath,
         error: getErrorMessage(error),
       });
-      throw new Error(`PortableGit download: ${getErrorMessage(error)}`);
+      throw new Error(
+        getDesktopMessage("cli.portableGitDownloadFailed", { message: getErrorMessage(error) }),
+      );
     }
 
     await rm(installDir, { recursive: true, force: true });
@@ -1095,7 +1120,9 @@ async function installPortableGitFromUrl(
         snapshot,
         error: getErrorMessage(error),
       });
-      throw new Error(`PortableGit extract: ${getErrorMessage(error)}`);
+      throw new Error(
+        getDesktopMessage("cli.portableGitExtractFailed", { message: getErrorMessage(error) }),
+      );
     }
 
     let snapshot = createWindowsGitPathSnapshot(installDir);
@@ -1137,7 +1164,10 @@ async function installPortableGitFromUrl(
           stderrTail: commandOutputTail(extractResult.stderr),
         });
         throw new Error(
-          "PortableGit verify: PortableGit extraction did not create git.exe or bash.exe in the target or temporary extraction directories",
+          getDesktopMessage("cli.portableGitVerifyFailed", {
+            message:
+              "PortableGit extraction did not create git.exe or bash.exe in the target or temporary extraction directories",
+          }),
         );
       }
     }
@@ -1158,7 +1188,9 @@ async function installPortableGitFromUrl(
         bashPath: executables.bashPath,
         error: getErrorMessage(error),
       });
-      throw new Error(`PortableGit verify: ${getErrorMessage(error)}`);
+      throw new Error(
+        getDesktopMessage("cli.portableGitVerifyFailed", { message: getErrorMessage(error) }),
+      );
     }
 
     log.info("[model-cli-manager] PortableGit is ready", {
@@ -1338,11 +1370,11 @@ export function resolveLatestGitForWindowsPortableUrlFromMirror(
 async function fetchMirrorEntries(url: string): Promise<MirrorDirectoryEntry[]> {
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Mirror request failed with HTTP ${response.status}: ${url}`);
+    throw new Error(getDesktopMessage("cli.mirrorRequestFailed", { status: response.status, url }));
   }
   const json = (await response.json()) as unknown;
   if (!Array.isArray(json)) {
-    throw new Error(`Mirror response was not a directory listing: ${url}`);
+    throw new Error(getDesktopMessage("cli.mirrorDirectoryInvalid", { url }));
   }
   return json.filter((entry): entry is MirrorDirectoryEntry => {
     return typeof entry === "object" && entry !== null;
@@ -1487,7 +1519,7 @@ async function readNodeStatus(
           ? null
           : (trimToNull(nodeProbe?.stderr) ??
             trimToNull(npmProbe?.stderr) ??
-            "Node.js and npm were not found in the Windows PATH. Install Node.js 22+ or add Node's install directory and %APPDATA%\\npm to PATH."),
+            getDesktopMessage("cli.nodeMissingFromWindowsPath")),
     };
   }
 
@@ -1602,7 +1634,7 @@ async function readCliStatus(
       error: version
         ? null
         : (trimToNull(result.stderr) ??
-          `${command} did not report a version. Ensure %APPDATA%\\npm is available in PATH.`),
+          getDesktopMessage("cli.commandNoVersion", { command })),
     };
   } catch (error) {
     return {
@@ -1612,7 +1644,7 @@ async function readCliStatus(
       version: null,
       error:
         process.platform === "win32" && manager === "shell"
-          ? `${getErrorMessage(error)} Ensure %APPDATA%\\npm is available in PATH.`
+          ? getDesktopMessage("cli.ensureNpmPath", { message: getErrorMessage(error) })
           : getErrorMessage(error),
     };
   }
@@ -1674,7 +1706,7 @@ async function installNode22IntoManager(
     try {
       const zipUrl = await resolveLatestNode22WindowsZipUrl();
       if (!zipUrl) {
-        throw new Error("No Node.js 22 win-x64 zip was found on npmmirror.");
+        throw new Error(getDesktopMessage("cli.noNodeZip"));
       }
       outputs.push(await installWindowsNodeZipFromUrl(zipUrl));
     } catch (error) {
@@ -1690,7 +1722,7 @@ async function installNode22IntoManager(
       try {
         const installerUrl = await resolveLatestNode22WindowsMsiUrl();
         if (!installerUrl) {
-          throw new Error("No Node.js 22 x64 MSI was found on npmmirror.");
+          throw new Error(getDesktopMessage("cli.noNodeMsi"));
         }
         const mirrorResult = await runShell(buildWindowsNodeDirectInstallCommand(installerUrl), {
           ...options,
@@ -1728,7 +1760,10 @@ async function installNode22IntoManager(
 
     if (!status.satisfies) {
       throw new Error(
-        `Automatic Node.js 22 installation failed. ${errors.join(" ")} Detected runtime: ${status.version ?? "unknown"}.`,
+        getDesktopMessage("cli.automaticNodeInstallFailed", {
+          errors: errors.join(" "),
+          version: status.version ?? "unknown",
+        }),
       );
     }
 
@@ -1748,7 +1783,7 @@ async function installNode22IntoManager(
     try {
       const tarballUrl = await resolveLatestNode22DarwinTarballUrl();
       if (!tarballUrl) {
-        throw new Error(`No Node.js 22 macOS ${arch} tarball was found on npmmirror.`);
+        throw new Error(getDesktopMessage("cli.noMacNodeTarball", { arch }));
       }
       const installDir = resolveManagedNodeDir();
       const mirrorResult = await runShell(
@@ -1765,9 +1800,7 @@ async function installNode22IntoManager(
 
     const status = await readNodeStatus("managed", options);
     if (!status.satisfies) {
-      throw new Error(
-        `Automatic Node.js 22 installation failed via npmmirror${mirrorError ? `: ${mirrorError}` : ""}.`,
-      );
+      throw new Error(getDesktopMessage("cli.automaticNodeMirrorInstallFailed", { mirrorError }));
     }
 
     const verifyResult = await runShell("node -v && npm -v", {
@@ -1778,9 +1811,7 @@ async function installNode22IntoManager(
     return outputs.filter(Boolean).join("\n").trim();
   }
 
-  throw new Error(
-    "Automatic Node.js 22 installation currently requires nvm or Homebrew in this environment.",
-  );
+  throw new Error(getDesktopMessage("cli.automaticNodeUnsupported", { platform: process.platform }));
 }
 
 async function installWindowsGitBash(): Promise<string> {
@@ -1801,7 +1832,7 @@ async function installWindowsGitBash(): Promise<string> {
   try {
     const portableUrl = await resolveLatestGitForWindowsPortableUrl();
     if (!portableUrl) {
-      throw new Error("No PortableGit 64-bit full distribution was found on npmmirror.");
+      throw new Error(getDesktopMessage("cli.noPortableGit"));
     }
     const installDir = resolveWindowsPortableGitDir(process.env);
     outputs.push(await installPortableGitFromUrl(portableUrl, installDir));
@@ -1827,7 +1858,7 @@ async function installWindowsGitBash(): Promise<string> {
   try {
     const installerUrl = await resolveLatestGitForWindowsInstallerUrl();
     if (!installerUrl) {
-      throw new Error("No Git for Windows 64-bit installer was found on npmmirror.");
+      throw new Error(getDesktopMessage("cli.noGitInstaller"));
     }
     const mirrorResult = await runShell(buildWindowsGitBashMirrorInstallCommand(installerUrl), {
       forceWindowsCmd: true,
@@ -1956,7 +1987,12 @@ async function installPackageIntoRuntime(
         });
       }
     }
-    throw new Error(`Failed to install ${packageName}. ${errors.join(" ")}`);
+    throw new Error(
+      getDesktopMessage("cli.packageInstallFailed", {
+        packageName,
+        errors: errors.join(" "),
+      }),
+    );
   }
 
   const result = await runShell(

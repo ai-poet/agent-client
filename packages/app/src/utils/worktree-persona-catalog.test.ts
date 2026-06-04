@@ -24,4 +24,13 @@ describe("worktree persona catalog", () => {
       "paseo-product-manager",
     ]);
   });
+
+  it("keeps localized role labels available for app screens", () => {
+    for (const role of WORKTREE_PERSONA_ROLES) {
+      expect(role.label).not.toHaveLength(0);
+      expect(role.labelZh).not.toHaveLength(0);
+      expect(role.description).not.toHaveLength(0);
+      expect(role.descriptionZh).not.toHaveLength(0);
+    }
+  });
 });

@@ -9,6 +9,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import log from "electron-log/main";
+import { getDesktopMessage } from "../i18n/desktop-i18n.js";
 
 export const DEFAULT_PROVIDER_ID = "default";
 const LEGACY_DEFAULT_PROVIDER_ID = "sub2api-default";
@@ -995,20 +996,20 @@ export async function switchProvider(
   const store = await loadStore();
   const provider = store.providers.find((entry) => entry.id === id);
   if (!provider) {
-    throw new Error(`Provider not found: ${id}`);
+    throw new Error(getDesktopMessage("provider.notFound", { id }));
   }
 
   let writeClaude: boolean;
   let writeCodex: boolean;
   if (explicitScope === "claude") {
     if (!shouldWriteClaude(provider)) {
-      throw new Error("This endpoint does not apply to Claude Code.");
+      throw new Error(getDesktopMessage("provider.notForClaude"));
     }
     writeClaude = true;
     writeCodex = false;
   } else if (explicitScope === "codex") {
     if (!shouldWriteCodex(provider)) {
-      throw new Error("This endpoint does not apply to Codex.");
+      throw new Error(getDesktopMessage("provider.notForCodex"));
     }
     writeClaude = false;
     writeCodex = true;

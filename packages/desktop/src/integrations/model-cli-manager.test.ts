@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { __setDesktopLocaleForTests } from "../i18n/desktop-i18n";
 import {
   buildWindowsGitBashChocolateyInstallCommand,
   buildWindowsGitBashDirectInstallCommand,
@@ -39,6 +40,10 @@ import {
 } from "./model-cli-manager";
 
 describe("model-cli-manager", () => {
+  afterEach(() => {
+    __setDesktopLocaleForTests(null);
+  });
+
   it("extracts semantic versions from common CLI outputs", () => {
     expect(parseSemanticVersion("codex-cli 0.118.0")).toBe("0.118.0");
     expect(parseSemanticVersion("2.1.89 (Claude Code)")).toBe("2.1.89");
@@ -135,6 +140,19 @@ describe("model-cli-manager", () => {
     expect(buildWindowsCliVersionCommand("codex")).toBe(
       "codex.cmd --version || codex.exe --version || codex --version",
     );
+  });
+
+  it("localizes Git Bash install failure summaries", () => {
+    __setDesktopLocaleForTests("zh");
+
+    const message = buildWindowsGitInstallFailureMessage(["winget failed"], {
+      installed: false,
+      version: null,
+      bashPath: null,
+      error: null,
+    });
+
+    expect(message).toBe("Git Bash 设置失败。安装后未检测到 Git Bash。 尝试记录：winget failed");
   });
 
   it("builds Windows CLI executable candidates with cmd and exe suffixes", () => {

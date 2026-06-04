@@ -25,9 +25,21 @@ describe("setupDefaultProvider scoped writes", () => {
   });
 
   afterEach(async () => {
+    const i18n = await import("../i18n/desktop-i18n");
+    i18n.__setDesktopLocaleForTests(null);
     if (mockedHome.dir) {
       await rm(mockedHome.dir, { recursive: true, force: true });
     }
+  });
+
+  it("localizes missing provider errors", async () => {
+    const i18n = await import("../i18n/desktop-i18n");
+    i18n.__setDesktopLocaleForTests("zh");
+    const mod = await import("./provider-switch");
+
+    await expect(mod.switchProvider("missing-provider")).rejects.toThrow(
+      "未找到提供商：missing-provider",
+    );
   });
 
   it("writes only Claude config when scope is claude", async () => {

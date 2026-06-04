@@ -16,6 +16,7 @@ type AlertButton = {
 
 async function loadModuleForPlatform(platform: MockPlatform): Promise<{
   confirmDialog: typeof import("./confirm-dialog").confirmDialog;
+  privateApi: typeof import("./confirm-dialog").__private__;
   alertMock: ReturnType<typeof vi.fn>;
 }> {
   vi.resetModules();
@@ -32,7 +33,7 @@ async function loadModuleForPlatform(platform: MockPlatform): Promise<{
   }));
 
   const module = await import("./confirm-dialog");
-  return { confirmDialog: module.confirmDialog, alertMock };
+  return { confirmDialog: module.confirmDialog, privateApi: module.__private__, alertMock };
 }
 
 function clearDialogGlobals(): void {
@@ -90,6 +91,8 @@ describe("confirmDialog", () => {
     const confirmed = await confirmDialog({
       title: "Restart host",
       message: "This will restart the daemon.",
+      confirmLabel: "Restart",
+      cancelLabel: "Cancel",
     });
 
     expect(confirmed).toBe(true);
@@ -104,6 +107,8 @@ describe("confirmDialog", () => {
       confirmDialog({
         title: "Restart host",
         message: "This will restart the daemon.",
+        confirmLabel: "Restart",
+        cancelLabel: "Cancel",
       }),
     ).rejects.toThrow("[ConfirmDialog] No web confirmation backend is available.");
   });
@@ -125,5 +130,23 @@ describe("confirmDialog", () => {
 
     expect(confirmed).toBe(true);
     expect(alertMock).toHaveBeenCalled();
+  });
+
+  it("requires callers to pass localized desktop button labels", async () => {
+    const { privateApi } = await loadModuleForPlatform("web");
+
+    expect(
+      privateApi.buildDesktopAskOptions({
+        title: "确认重启",
+        message: "这会重启守护进程。",
+        confirmLabel: "重启",
+        cancelLabel: "取消",
+      }),
+    ).toEqual({
+      title: "确认重启",
+      okLabel: "重启",
+      cancelLabel: "取消",
+      kind: "info",
+    });
   });
 });

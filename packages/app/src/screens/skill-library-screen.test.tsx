@@ -141,9 +141,9 @@ vi.mock("@/stores/navigation-active-workspace-store", () => ({
   useNavigationActiveWorkspaceSelection: () => null,
 }));
 
-vi.mock("@/stores/session-store", () => ({
-  useSessionStore: (selector: (state: typeof mockSessionState) => unknown) =>
-    selector(mockSessionState),
+vi.mock("@/stores/session-store-hooks", () => ({
+  useWorkspaceList: (serverId: string) =>
+    Array.from(mockSessionState.sessions[serverId]?.workspaces.values() ?? []),
 }));
 
 vi.mock("@/utils/error-messages", () => ({

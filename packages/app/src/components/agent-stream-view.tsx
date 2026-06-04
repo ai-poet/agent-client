@@ -70,11 +70,7 @@ import { normalizeInlinePathTarget } from "@/utils/inline-path";
 import { resolveWorkspaceIdByExecutionDirectory } from "@/utils/workspace-execution";
 import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
 import { useStableEvent } from "@/hooks/use-stable-event";
-import {
-  getWorkingIndicatorDotStrength,
-  WORKING_INDICATOR_CYCLE_MS,
-  WORKING_INDICATOR_OFFSETS,
-} from "@/utils/working-indicator";
+import { WorkingDots } from "@/components/working-dots";
 import { isWeb } from "@/constants/platform";
 import { useAppLocale } from "@/hooks/use-app-locale";
 import { getAppMessages } from "@/i18n/sub2api";
@@ -675,49 +671,6 @@ function WorkingIndicator() {
   const locale = useAppLocale();
   const appText = useMemo(() => getAppMessages(locale), [locale]);
   const label = appText.agentTools.labels.thinking;
-  const progress = useSharedValue(0);
-
-  useEffect(() => {
-    progress.value = 0;
-    progress.value = withRepeat(
-      withTiming(1, {
-        duration: WORKING_INDICATOR_CYCLE_MS,
-        easing: Easing.linear,
-      }),
-      -1,
-      false,
-    );
-
-    return () => {
-      cancelAnimation(progress);
-      progress.value = 0;
-    };
-  }, [progress]);
-
-  const translateDistance = -6;
-  const dotOneStyle = useAnimatedStyle(() => {
-    const strength = getWorkingIndicatorDotStrength(progress.value, WORKING_INDICATOR_OFFSETS[0]);
-    return {
-      opacity: 0.3 + strength * 0.7,
-      transform: [{ translateY: strength * translateDistance }],
-    };
-  });
-
-  const dotTwoStyle = useAnimatedStyle(() => {
-    const strength = getWorkingIndicatorDotStrength(progress.value, WORKING_INDICATOR_OFFSETS[1]);
-    return {
-      opacity: 0.3 + strength * 0.7,
-      transform: [{ translateY: strength * translateDistance }],
-    };
-  });
-
-  const dotThreeStyle = useAnimatedStyle(() => {
-    const strength = getWorkingIndicatorDotStrength(progress.value, WORKING_INDICATOR_OFFSETS[2]);
-    return {
-      opacity: 0.3 + strength * 0.7,
-      transform: [{ translateY: strength * translateDistance }],
-    };
-  });
 
   // ChatGPT-style text shimmer animation
   const shimmerProgress = useSharedValue(0);
@@ -751,11 +704,7 @@ function WorkingIndicator() {
 
   return (
     <View style={stylesheet.workingIndicatorBubble}>
-      <View style={stylesheet.workingDotsRow}>
-        <Animated.View style={[stylesheet.workingDot, dotOneStyle]} />
-        <Animated.View style={[stylesheet.workingDot, dotTwoStyle]} />
-        <Animated.View style={[stylesheet.workingDot, dotThreeStyle]} />
-      </View>
+      <WorkingDots color={theme.colors.foregroundMuted} />
       <Animated.Text
         style={[
           stylesheet.workingIndicatorText,

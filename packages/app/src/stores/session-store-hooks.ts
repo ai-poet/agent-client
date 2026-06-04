@@ -41,6 +41,7 @@ export interface WorkspaceStructureWorkspace {
 type SessionStoreSnapshot = ReturnType<typeof useSessionStore.getState>;
 
 const EMPTY_WORKSPACE_KEYS: string[] = [];
+const EMPTY_WORKSPACE_LIST: WorkspaceDescriptor[] = [];
 const EMPTY_WORKSPACE_STRUCTURE: WorkspaceStructure = { projects: [] };
 
 function getWorkspaceOrderScopeKey(serverId: string, projectKey: string): string {
@@ -158,6 +159,20 @@ export function useWorkspaceFields<T>(
     (state) => {
       const workspace = selectWorkspace(state, serverId, workspaceId);
       return workspace ? project(workspace) : null;
+    },
+    equal,
+  );
+}
+
+export function useWorkspaceList(serverId: string | null): WorkspaceDescriptor[] {
+  return useStoreWithEqualityFn(
+    useSessionStore,
+    (state) => {
+      if (!serverId) {
+        return EMPTY_WORKSPACE_LIST;
+      }
+      const workspaces = state.sessions[serverId]?.workspaces;
+      return workspaces ? Array.from(workspaces.values()) : EMPTY_WORKSPACE_LIST;
     },
     equal,
   );
