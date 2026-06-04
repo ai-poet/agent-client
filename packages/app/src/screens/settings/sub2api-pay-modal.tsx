@@ -15,7 +15,6 @@ import {
 import { resolveSub2APIPaymentOrderFlow } from "@/screens/settings/sub2api-pay-flow";
 import { openExternalUrl } from "@/utils/open-external-url";
 import {
-  filterSub2APIPaymentTypesByLocale,
   getSub2APIMessages,
   getSub2APIPaymentLabel,
   type Sub2APILocale,
@@ -473,11 +472,9 @@ export function Sub2APIPayModal({
       const userUrl = buildPayCenterApiUrl(
         endpoint,
         `/api/user?user_id=${userId}&token=${encodeURIComponent(accessToken)}`,
-        { lang: clientLocale },
       );
       const userResponse = await fetch(userUrl, {
         method: "GET",
-        headers: { "Accept-Language": clientLocale },
       });
       const userPayload = readJsonSafe(await userResponse.text());
       if (!userResponse.ok) {
@@ -491,10 +488,6 @@ export function Sub2APIPayModal({
             (entry): entry is string => typeof entry === "string",
           )
         : [];
-      const enabledPaymentTypes = filterSub2APIPaymentTypesByLocale(
-        rawEnabledPaymentTypes,
-        clientLocale,
-      );
       const methodLimits =
         typeof configPayload.methodLimits === "object" && configPayload.methodLimits !== null
           ? (configPayload.methodLimits as Record<string, PaymentCenterMethodLimit>)
@@ -503,7 +496,7 @@ export function Sub2APIPayModal({
       const nextConfig: PaymentCenterConfig = {
         userDisplayName,
         userBalance,
-        enabledPaymentTypes,
+        enabledPaymentTypes: rawEnabledPaymentTypes,
         methodLimits,
         minAmount: readNumber(configPayload.minAmount) ?? 1,
         maxAmount: readNumber(configPayload.maxAmount) ?? 1000,

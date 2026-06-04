@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   appMessages,
-  filterSub2APIPaymentTypesByLocale,
   getAppMessages,
   getSub2APIMessages,
   getSub2APIPaymentLabel,
@@ -56,13 +55,6 @@ describe("sub2api i18n helpers", () => {
     expect(getSub2APIPaymentLabel("alipay", "en")).toBe("Alipay");
     expect(getSub2APIPaymentLabel("wxpay_direct", "en")).toBe("WeChat Pay");
     expect(getSub2APIPaymentLabel("usdt.polygon", "en")).toBe("USDT (Polygon)");
-  });
-
-  it("filters payment methods by locale like the Sub2API pay center", () => {
-    const allTypes = ["alipay", "wxpay_direct", "bank", "stripe", "usdt.plasma"];
-
-    expect(filterSub2APIPaymentTypesByLocale(allTypes, "zh")).toEqual(["alipay", "wxpay_direct"]);
-    expect(filterSub2APIPaymentTypesByLocale(allTypes, "en")).toEqual(["bank"]);
   });
 
   it("exposes Chinese and English UI copy", () => {
