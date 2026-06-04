@@ -118,6 +118,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const { theme } = useUnistyles();
     const router = useRouter();
     const isMobile = useIsCompactFormFactor();
+    const locale = useAppLocale();
     const streamRenderStrategy = useMemo(
       () =>
         resolveStreamRenderStrategy({
@@ -365,6 +366,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                 args={item.text}
                 status={item.status === "ready" ? "completed" : "executing"}
                 isLastInSequence={isLastInSequence}
+                locale={locale}
                 onInlineDetailsExpandedChange={handleInlineDetailsExpandedChange}
               />
             );
@@ -403,6 +405,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                   cwd={agent.cwd}
                   metadata={data.metadata}
                   isLastInSequence={isLastInSequence}
+                  locale={locale}
                   onInlineDetailsExpandedChange={handleInlineDetailsExpandedChange}
                 />
               );
@@ -416,6 +419,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                 result={data.result}
                 status={data.status}
                 isLastInSequence={isLastInSequence}
+                locale={locale}
                 onInlineDetailsExpandedChange={handleInlineDetailsExpandedChange}
               />
             );
@@ -432,7 +436,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             );
 
           case "todo_list":
-            return <TodoListCard items={item.items} />;
+            return <TodoListCard items={item.items} locale={locale} />;
 
           case "compaction":
             return <CompactionMarker status={item.status} preTokens={item.preTokens} />;
@@ -441,7 +445,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             return null;
         }
       },
-      [handleInlinePathPress, agent.cwd, streamRenderStrategy],
+      [handleInlinePathPress, agent.cwd, streamRenderStrategy, locale],
     );
 
     const renderStreamItem = useCallback(
@@ -760,14 +764,16 @@ function PermissionRequestCard({
   const { theme } = useUnistyles();
   const isMobile = useIsCompactFormFactor();
   const locale = useAppLocale();
-  const simplePermissionText = useMemo(() => getAppMessages(locale).simplePermissions, [locale]);
+  const appText = useMemo(() => getAppMessages(locale), [locale]);
+  const simplePermissionText = appText.simplePermissions;
+  const agentToolsText = appText.agentTools;
 
   const { request } = permission;
   const isPlanRequest = request.kind === "plan";
   const title = simpleMode
     ? resolveSimplePermissionTitle(request, simplePermissionText)
     : isPlanRequest
-      ? "Plan"
+      ? agentToolsText.labels.plan
       : (request.title ?? request.name ?? "Permission Required");
   const description = request.description ?? "";
   const resolvedActions = useMemo((): AgentPermissionAction[] => {
@@ -978,7 +984,7 @@ function PermissionRequestCard({
       ) : null}
 
       {planMarkdown ? (
-        <PlanCard title="Proposed plan" text={planMarkdown} disableOuterSpacing />
+        <PlanCard title={agentToolsText.labels.plan} text={planMarkdown} disableOuterSpacing />
       ) : null}
 
       {!isPlanRequest ? (
@@ -991,6 +997,7 @@ function PermissionRequestCard({
             }
           }
           maxHeight={200}
+          detailsText={agentToolsText.details}
         />
       ) : null}
 

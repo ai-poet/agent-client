@@ -14,7 +14,7 @@ import {
   type IsolatedBottomSheetModalRef,
 } from "@/components/ui/isolated-bottom-sheet-modal";
 import { resolveToolCallIcon } from "@/utils/tool-call-icon";
-import { ToolCallDetailsContent } from "./tool-call-details";
+import { ToolCallDetailsContent, type AgentToolDetailsText } from "./tool-call-details";
 
 // ----- Types -----
 
@@ -25,6 +25,7 @@ export type ToolCallSheetData = {
   detail?: ToolCallDetail;
   errorText?: string;
   showLoadingSkeleton?: boolean;
+  detailsText?: AgentToolDetailsText;
 };
 
 interface ToolCallSheetContextValue {
@@ -131,7 +132,7 @@ interface ToolCallSheetContentProps {
 
 function ToolCallSheetContent({ data, onClose }: ToolCallSheetContentProps) {
   const { theme } = useUnistyles();
-  const { toolName, displayName, detail, errorText, showLoadingSkeleton } = data;
+  const { toolName, displayName, detail, errorText, showLoadingSkeleton, detailsText } = data;
 
   const IconComponent = resolveToolCallIcon(toolName, detail);
 
@@ -157,6 +158,7 @@ function ToolCallSheetContent({ data, onClose }: ToolCallSheetContentProps) {
           errorText={errorText}
           fillAvailableHeight
           showLoadingSkeleton={showLoadingSkeleton}
+          detailsText={detailsText}
         />
       </BottomSheetScrollView>
     </View>
