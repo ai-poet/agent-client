@@ -403,15 +403,15 @@ export const sub2apiMessages = {
     },
     modeSelect: {
       experienceTitle: "先选择你的使用方式",
-      experienceSubtitle: "Paseo 可以作为开发者客户端，也可以作为更简单的通用任务助手。",
-      developerTitle: "我是程序员",
+      experienceSubtitle: "Paseo 既可以作为编码工作区，也可以作为处理各种普通工作的通用 AI 助手。",
+      developerTitle: "编码模式",
       developerDescription:
-        "保留完整开发者体验：项目、分支、终端、diff、worktree 和 agent 控制都照常可见。",
-      developerMeta: "进入现有 Paseo 开发者模式",
-      simpleTitle: "普通用户",
+        "适合写代码和管理开发项目：项目、分支、终端、diff、worktree 和 agent 控制都照常可见。",
+      developerMeta: "进入编码模式",
+      simpleTitle: "通用模式",
       simpleDescription:
-        "进入极简任务客户端：用任务列表和大输入框管理 Claude / Codex，不展示开发术语。",
-      simpleMeta: "进入极简模式",
+        "适合处理各种普通工作：写作、整理、分析、计划、总结、查资料等，用自然语言提交任务并查看进度和结果。",
+      simpleMeta: "进入通用模式",
       title: "你想如何连接？",
       subtitle: (cloudName: string) => `使用 ${cloudName}，或自带 API 密钥（BYOK）访问模型。`,
       cloudDescription: "登录后使用托管 Claude Code / Codex 路由、按量计费和快速配置。",
@@ -1306,7 +1306,7 @@ export const sub2apiMessages = {
       general: "通用",
       theme: "主题",
       experienceMode: "使用模式",
-      experienceModeHint: "程序员模式保留完整开发者界面；普通用户模式只显示任务、进度和结果。",
+      experienceModeHint: "编码模式保留完整开发工作区；通用模式适合处理各种普通工作，并聚焦任务、进度和结果。",
       language: "语言",
       languageHint: "用于客户端界面、云服务、支付和模型广场",
       defaultSend: "默认发送",
@@ -1318,8 +1318,8 @@ export const sub2apiMessages = {
       interrupt: "中断",
       queue: "排队",
       experienceModes: {
-        developer: "程序员",
-        simple: "普通用户",
+        developer: "编码模式",
+        simple: "通用模式",
       },
       themes: {
         light: "浅色",
@@ -2021,15 +2021,15 @@ export const sub2apiMessages = {
     modeSelect: {
       experienceTitle: "Choose how you want to use Paseo",
       experienceSubtitle:
-        "Paseo can stay a developer client or become a simpler general task assistant.",
-      developerTitle: "I am a programmer",
+        "Paseo can be a coding workspace or a general AI assistant for everyday work.",
+      developerTitle: "Coding mode",
       developerDescription:
-        "Keep the full developer experience: projects, branches, terminal, diffs, worktrees, and agent controls.",
-      developerMeta: "Use the current developer mode",
-      simpleTitle: "General user",
+        "Best for writing code and managing development projects: projects, branches, terminal, diffs, worktrees, and agent controls stay visible.",
+      developerMeta: "Enter coding mode",
+      simpleTitle: "General mode",
       simpleDescription:
-        "Use a minimal task client with a task list and large prompt box for Claude / Codex.",
-      simpleMeta: "Use simple mode",
+        "Best for everyday work: writing, organizing, analysis, planning, summaries, research, and more. Describe tasks naturally and track progress and results.",
+      simpleMeta: "Enter general mode",
       title: "How do you want to connect?",
       subtitle: (cloudName: string) =>
         `Use ${cloudName}, or bring your own API keys (BYOK) for model access.`,
@@ -2950,7 +2950,7 @@ export const sub2apiMessages = {
       theme: "Theme",
       experienceMode: "Experience",
       experienceModeHint:
-        "Developer mode keeps the full coding UI; simple mode shows tasks, progress, and results.",
+        "Coding mode keeps the full development workspace; general mode is for everyday work and focuses on tasks, progress, and results.",
       language: "Language",
       languageHint: "Used for the client UI, cloud service, payments, and the model catalog",
       defaultSend: "Default send",
@@ -2962,8 +2962,8 @@ export const sub2apiMessages = {
       interrupt: "Interrupt",
       queue: "Queue",
       experienceModes: {
-        developer: "Programmer",
-        simple: "General user",
+        developer: "Coding mode",
+        simple: "General mode",
       },
       themes: {
         light: "Light",
