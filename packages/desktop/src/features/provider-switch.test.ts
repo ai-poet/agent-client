@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildByokClaudeProviderFromDisk,
+  buildByokCodexProviderFromDisk,
   buildClaudeSettings,
   buildCodexConfig,
   DEFAULT_PROVIDER_ID,
@@ -220,5 +222,56 @@ describe("provider-switch", () => {
     expect(config).toContain('model = "gpt-5.4"');
     expect(config).toContain('review_model = "gpt-5.4"');
     expect(config).not.toContain('model = "claude-opus-4-7"');
+  });
+
+  it("builds BYOK Claude provider from disk config with correct target and format", () => {
+    const provider = buildByokClaudeProviderFromDisk({
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "sk-ant-test",
+    });
+
+    expect(provider).toEqual({
+      id: "byok-local-claude",
+      name: "Local Claude Code",
+      type: "custom",
+      endpoint: "https://api.anthropic.com",
+      apiKey: "sk-ant-test",
+      isDefault: false,
+      target: "claude",
+      claudeApiFormat: "anthropic",
+    });
+  });
+
+  it("builds BYOK Codex provider from disk config with resolved base_url", () => {
+    const provider = buildByokCodexProviderFromDisk({
+      apiKey: "sk-openai-test",
+      configToml: `model_provider = "OpenAI"
+[model_providers.OpenAI]
+base_url = "https://api.openai.com/v1"
+wire_api = "responses"
+`,
+    });
+
+    expect(provider).toMatchObject({
+      id: "byok-local-codex",
+      name: "Local Codex",
+      type: "custom",
+      endpoint: "https://api.openai.com",
+      apiKey: "sk-openai-test",
+      isDefault: false,
+      target: "codex",
+      codexWireApi: "responses",
+    });
+  });
+
+  it("builds BYOK Codex provider with empty endpoint when base_url is missing", () => {
+    const provider = buildByokCodexProviderFromDisk({
+      apiKey: "sk-openai-test",
+      configToml: "model_provider = \"OpenAI\"\n",
+    });
+
+    expect(provider.id).toBe("byok-local-codex");
+    expect(provider.endpoint).toBe("");
+    expect(provider.target).toBe("codex");
   });
 });

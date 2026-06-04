@@ -482,30 +482,15 @@ async function inferActiveClaudeProviderIdFromDisk(
   providers: StoredProvider[],
   preferId: string | null,
 ): Promise<string | null | undefined> {
-  const raw = await readFileOrNull(claudeSettingsPath());
-  if (!raw?.trim()) {
+  const config = await readClaudeDiskConfig();
+  if (!config) {
     return undefined;
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-  if (!isRecord(parsed)) {
-    return undefined;
-  }
-  const env = isRecord(parsed.env) ? parsed.env : {};
-  const baseUrl = readString(env.ANTHROPIC_BASE_URL);
-  const token = readString(env.ANTHROPIC_AUTH_TOKEN);
-  if (!baseUrl || !token) {
-    return undefined;
-  }
-  const diskEp = normalizeProviderEndpoint(baseUrl);
+  const diskEp = normalizeProviderEndpoint(config.baseUrl);
 
   const candidates = providers.filter(shouldWriteClaude);
   const matches = candidates.filter(
-    (p) => normalizeProviderEndpoint(p.endpoint) === diskEp && p.apiKey.trim() === token.trim(),
+    (p) => normalizeProviderEndpoint(p.endpoint) === diskEp && p.apiKey.trim() === config.apiKey.trim(),
   );
   if (matches.length === 0) {
     return null;
@@ -519,21 +504,135 @@ async function inferActiveClaudeProviderIdFromDisk(
   return matches[0]!.id;
 }
 
+/** Read Claude Code CLI config from disk. Returns null if missing or invalid. */
+async function readClaudeDiskConfig(): Promise<{ baseUrl: string; apiKey: string } | null> {
+  const raw = await readFileOrNull(claudeSettingsPath());
+  if (!raw?.trim()) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  const env = isRecord(parsed.env) ? parsed.env : {};
+  const baseUrl = readString(env.ANTHROPIC_BASE_URL);
+  const apiKey = readString(env.ANTHROPIC_AUTH_TOKEN);
+  if (!baseUrl || !apiKey) {
+    return null;
+  }
+  return { baseUrl, apiKey };
+}
+
 async function inferActiveCodexProviderIdFromDisk(
   providers: StoredProvider[],
   preferId: string | null,
 ): Promise<string | null | undefined> {
+  const config = await readCodexDiskConfig();
+  if (!config) {
+    return undefined;
+  }
+  return resolveActiveCodexIdFromDiskState(
+    JSON.stringify({ OPENAI_API_KEY: config.apiKey }),
+    config.configToml,
+    providers,
+    preferId,
+  );
+}
+
+/** Read Codex CLI config from disk. Returns null if missing or invalid. */
+async function readCodexDiskConfig(): Promise<{ apiKey: string; configToml: string } | null> {
   const authRaw = await readFileOrNull(codexAuthPath());
   const configRaw = await readFileOrNull(codexConfigPath());
   if (!authRaw?.trim() || !configRaw?.trim()) {
-    return undefined;
+    return null;
   }
-  return resolveActiveCodexIdFromDiskState(authRaw, configRaw, providers, preferId);
+  const apiKey = parseCodexAuthOpenAiKey(authRaw);
+  if (!apiKey) {
+    return null;
+  }
+  return { apiKey, configToml: configRaw };
+}
+
+/** Build a BYOK provider from local Claude Code CLI config. */
+export function buildByokClaudeProviderFromDisk(config: { baseUrl: string; apiKey: string }): StoredProvider {
+  return normalizeProvider({
+    id: "byok-local-claude",
+    name: "Local Claude Code",
+    type: "custom",
+    endpoint: config.baseUrl,
+    apiKey: config.apiKey,
+    isDefault: false,
+    target: "claude",
+    claudeApiFormat: "anthropic",
+  });
+}
+
+/** Build a BYOK provider from local Codex CLI config. */
+export function buildByokCodexProviderFromDisk(config: { apiKey: string; configToml: string }): StoredProvider {
+  const baseUrl = resolveCodexDiskBaseUrl(config.configToml);
+  return normalizeProvider({
+    id: "byok-local-codex",
+    name: "Local Codex",
+    type: "custom",
+    endpoint: baseUrl ?? "",
+    apiKey: config.apiKey,
+    isDefault: false,
+    target: "codex",
+    codexWireApi: "responses",
+  });
+}
+
+/** Import providers from local CLI configs when store is empty. */
+async function importProvidersFromDisk(): Promise<{
+  providers: StoredProvider[];
+  activeClaudeProviderId: string | null;
+  activeCodexProviderId: string | null;
+}> {
+  const providers: StoredProvider[] = [];
+  let activeClaudeProviderId: string | null = null;
+  let activeCodexProviderId: string | null = null;
+
+  const claudeConfig = await readClaudeDiskConfig();
+  if (claudeConfig) {
+    const provider = buildByokClaudeProviderFromDisk(claudeConfig);
+    providers.push(provider);
+    activeClaudeProviderId = provider.id;
+  }
+
+  const codexConfig = await readCodexDiskConfig();
+  if (codexConfig) {
+    const provider = buildByokCodexProviderFromDisk(codexConfig);
+    providers.push(provider);
+    activeCodexProviderId = provider.id;
+  }
+
+  return { providers, activeClaudeProviderId, activeCodexProviderId };
 }
 
 async function loadStore(): Promise<ProviderStore> {
   try {
     if (!existsSync(PROVIDERS_FILE)) {
+      const imported = await importProvidersFromDisk();
+      if (imported.providers.length > 0) {
+        const store: ProviderStore = {
+          providers: imported.providers,
+          activeProviderId:
+            imported.activeClaudeProviderId !== null &&
+            imported.activeClaudeProviderId === imported.activeCodexProviderId
+              ? imported.activeClaudeProviderId
+              : (imported.activeClaudeProviderId ?? imported.activeCodexProviderId ?? null),
+          activeClaudeProviderId: imported.activeClaudeProviderId,
+          activeCodexProviderId: imported.activeCodexProviderId,
+        };
+        await saveStore(store);
+        log.info("[provider-switch] auto-imported providers from local CLI configs");
+        return store;
+      }
       return {
         providers: [],
         activeProviderId: null,
@@ -545,6 +644,27 @@ async function loadStore(): Promise<ProviderStore> {
     const parsed: unknown = JSON.parse(raw);
     const parsedRecord = isRecord(parsed) ? parsed : {};
     const providersInput = Array.isArray(parsedRecord.providers) ? parsedRecord.providers : [];
+
+    // If providers.json exists but has no providers, try importing from local CLI configs
+    if (providersInput.length === 0) {
+      const imported = await importProvidersFromDisk();
+      if (imported.providers.length > 0) {
+        const store: ProviderStore = {
+          providers: imported.providers,
+          activeProviderId:
+            imported.activeClaudeProviderId !== null &&
+            imported.activeClaudeProviderId === imported.activeCodexProviderId
+              ? imported.activeClaudeProviderId
+              : (imported.activeClaudeProviderId ?? imported.activeCodexProviderId ?? null),
+          activeClaudeProviderId: imported.activeClaudeProviderId,
+          activeCodexProviderId: imported.activeCodexProviderId,
+        };
+        await saveStore(store);
+        log.info("[provider-switch] auto-imported providers from local CLI configs (empty store)");
+        return store;
+      }
+    }
+
     const normalizedProviders = providersInput.map((p) => normalizeProvider(p as StoredProvider));
     const migration = migrateLegacyDualTargetProviders(normalizedProviders);
     const deduped = dedupeManagedScopedProviders(migration.providers);
