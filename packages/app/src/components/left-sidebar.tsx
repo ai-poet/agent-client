@@ -89,6 +89,7 @@ import { generateDraftId } from "@/stores/draft-keys";
 import { useSessionStore } from "@/stores/session-store";
 import { buildNewAgentRoute, resolveNewChatTarget } from "@/utils/new-agent-routing";
 import { navigateToPreparedWorkspaceTab } from "@/utils/workspace-navigation";
+import { useNavigationRecentWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 
 const MIN_CHAT_WIDTH = 400;
 
@@ -216,6 +217,17 @@ export const LeftSidebar = memo(function LeftSidebar({ selectedAgentId }: LeftSi
     serverId: activeServerId,
     enabled: isCompactLayout || isOpen,
   });
+  const recentWorkspace = useNavigationRecentWorkspaceSelection();
+  const fallbackWorkspace = useMemo(() => {
+    const workspace = projects.flatMap((project) => project.workspaces)[0];
+    if (!workspace) {
+      return null;
+    }
+    return {
+      serverId: workspace.serverId,
+      workspaceId: workspace.workspaceId,
+    };
+  }, [projects]);
   const { collapsedProjectKeys, shortcutIndexByWorkspaceKey, toggleProjectCollapsed } =
     useSidebarShortcutModel({ projects, isInitialLoad });
 
@@ -266,6 +278,8 @@ export const LeftSidebar = memo(function LeftSidebar({ selectedAgentId }: LeftSi
       pathname,
       selectedAgentId,
       activeServerId,
+      recentWorkspace,
+      fallbackWorkspace,
       getAgent: (serverId, agentId) =>
         useSessionStore.getState().sessions[serverId]?.agents.get(agentId) ?? null,
       getWorkspaces: (serverId) =>
@@ -283,12 +297,23 @@ export const LeftSidebar = memo(function LeftSidebar({ selectedAgentId }: LeftSi
     }
 
     if (target.serverId) {
-      router.push(buildNewAgentRoute(target.serverId, target.workingDir) as any);
+      if (target.workingDir) {
+        router.push(buildNewAgentRoute(target.serverId, target.workingDir) as any);
+        return;
+      }
+      void openProjectPicker();
       return;
     }
 
     void openProjectPicker();
-  }, [activeServerId, openProjectPicker, pathname, selectedAgentId]);
+  }, [
+    activeServerId,
+    fallbackWorkspace,
+    openProjectPicker,
+    pathname,
+    recentWorkspace,
+    selectedAgentId,
+  ]);
 
   const handleNewChatMobile = useCallback(() => {
     showMobileAgent();

@@ -40,6 +40,7 @@ interface NavigationObserverRef {
 }
 
 let snapshot: ActiveWorkspaceSelection | null = null;
+let recentSnapshot: ActiveWorkspaceSelection | null = null;
 const listeners = new Set<() => void>();
 
 function subscribe(listener: () => void): () => void {
@@ -53,11 +54,25 @@ function getSnapshot(): ActiveWorkspaceSelection | null {
   return snapshot;
 }
 
+function getRecentSnapshot(): ActiveWorkspaceSelection | null {
+  return recentSnapshot;
+}
+
 function emitIfChanged(next: ActiveWorkspaceSelection | null) {
-  if (snapshot?.serverId === next?.serverId && snapshot?.workspaceId === next?.workspaceId) {
+  const activeChanged =
+    snapshot?.serverId !== next?.serverId || snapshot?.workspaceId !== next?.workspaceId;
+  const recentChanged =
+    next !== null &&
+    (recentSnapshot?.serverId !== next.serverId || recentSnapshot.workspaceId !== next.workspaceId);
+
+  if (!activeChanged && !recentChanged) {
     return;
   }
+
   snapshot = next;
+  if (next !== null) {
+    recentSnapshot = next;
+  }
   for (const listener of listeners) {
     listener();
   }
@@ -188,6 +203,10 @@ export function getNavigationActiveWorkspaceSelection(): ActiveWorkspaceSelectio
   return getSnapshot();
 }
 
+export function getNavigationRecentWorkspaceSelection(): ActiveWorkspaceSelection | null {
+  return getRecentSnapshot();
+}
+
 export function syncBrowserActiveWorkspaceFromLocation() {
   emitIfChanged(getBrowserLocationWorkspace());
 }
@@ -208,6 +227,10 @@ export function addBrowserActiveWorkspaceLocationListener(): () => void {
 
 export function useNavigationActiveWorkspaceSelection(): ActiveWorkspaceSelection | null {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+export function useNavigationRecentWorkspaceSelection(): ActiveWorkspaceSelection | null {
+  return useSyncExternalStore(subscribe, getRecentSnapshot, getRecentSnapshot);
 }
 
 export function useIsNavigationWorkspaceSelected(input: {
