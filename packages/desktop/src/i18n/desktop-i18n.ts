@@ -15,7 +15,8 @@ const DESKTOP_MESSAGES = {
     "cli.gitBashSetupFailed": ({ validation, attemptsText }) =>
       `Git Bash setup failed. ${validation ?? ""}${attemptsText ? ` Attempts: ${attemptsText}` : ""}`,
     "cli.gitBashNotDetected": () => "Git Bash was not detected after installation.",
-    "cli.downloadFailed": ({ status, url }) => `Download failed with HTTP ${status ?? ""}: ${url ?? ""}`,
+    "cli.downloadFailed": ({ status, url }) =>
+      `Download failed with HTTP ${status ?? ""}: ${url ?? ""}`,
     "cli.windowsPathReadFailed": ({ message }) => `Windows user PATH read failed: ${message ?? ""}`,
     "cli.windowsPathWriteFailed": ({ message }) =>
       `Windows user PATH write failed: ${message ?? ""}`,
@@ -78,7 +79,8 @@ const DESKTOP_MESSAGES = {
     "cli.portableGitDownloadFailed": ({ message }) => `下载 PortableGit 失败：${message ?? ""}`,
     "cli.portableGitExtractFailed": ({ message }) => `解压 PortableGit 失败：${message ?? ""}`,
     "cli.portableGitVerifyFailed": ({ message }) => `验证 PortableGit 失败：${message ?? ""}`,
-    "cli.mirrorRequestFailed": ({ status, url }) => `镜像请求失败，HTTP ${status ?? ""}：${url ?? ""}`,
+    "cli.mirrorRequestFailed": ({ status, url }) =>
+      `镜像请求失败，HTTP ${status ?? ""}：${url ?? ""}`,
     "cli.mirrorDirectoryInvalid": ({ url }) => `镜像响应不是目录列表：${url ?? ""}`,
     "cli.nodeMissingFromWindowsPath": () =>
       "Windows PATH 中未找到 Node.js 和 npm。请安装 Node.js 22+，或将 Node 安装目录和 %APPDATA%\\npm 添加到 PATH。",

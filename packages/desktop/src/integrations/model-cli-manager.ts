@@ -1633,8 +1633,7 @@ async function readCliStatus(
       version,
       error: version
         ? null
-        : (trimToNull(result.stderr) ??
-          getDesktopMessage("cli.commandNoVersion", { command })),
+        : (trimToNull(result.stderr) ?? getDesktopMessage("cli.commandNoVersion", { command })),
     };
   } catch (error) {
     return {
@@ -1811,7 +1810,9 @@ async function installNode22IntoManager(
     return outputs.filter(Boolean).join("\n").trim();
   }
 
-  throw new Error(getDesktopMessage("cli.automaticNodeUnsupported", { platform: process.platform }));
+  throw new Error(
+    getDesktopMessage("cli.automaticNodeUnsupported", { platform: process.platform }),
+  );
 }
 
 async function installWindowsGitBash(): Promise<string> {

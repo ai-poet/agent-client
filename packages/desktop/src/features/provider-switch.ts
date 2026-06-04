@@ -491,7 +491,8 @@ async function inferActiveClaudeProviderIdFromDisk(
 
   const candidates = providers.filter(shouldWriteClaude);
   const matches = candidates.filter(
-    (p) => normalizeProviderEndpoint(p.endpoint) === diskEp && p.apiKey.trim() === config.apiKey.trim(),
+    (p) =>
+      normalizeProviderEndpoint(p.endpoint) === diskEp && p.apiKey.trim() === config.apiKey.trim(),
   );
   if (matches.length === 0) {
     return null;
@@ -560,7 +561,10 @@ async function readCodexDiskConfig(): Promise<{ apiKey: string; configToml: stri
 }
 
 /** Build a BYOK provider from local Claude Code CLI config. */
-export function buildByokClaudeProviderFromDisk(config: { baseUrl: string; apiKey: string }): StoredProvider {
+export function buildByokClaudeProviderFromDisk(config: {
+  baseUrl: string;
+  apiKey: string;
+}): StoredProvider {
   return normalizeProvider({
     id: "byok-local-claude",
     name: "Local Claude Code",
@@ -574,7 +578,10 @@ export function buildByokClaudeProviderFromDisk(config: { baseUrl: string; apiKe
 }
 
 /** Build a BYOK provider from local Codex CLI config. */
-export function buildByokCodexProviderFromDisk(config: { apiKey: string; configToml: string }): StoredProvider {
+export function buildByokCodexProviderFromDisk(config: {
+  apiKey: string;
+  configToml: string;
+}): StoredProvider {
   const baseUrl = resolveCodexDiskBaseUrl(config.configToml);
   return normalizeProvider({
     id: "byok-local-codex",

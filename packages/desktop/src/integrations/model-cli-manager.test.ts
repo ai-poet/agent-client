@@ -112,9 +112,9 @@ describe("model-cli-manager", () => {
   it("accepts Git for Windows and Scoop Git Bash paths", () => {
     expect(isWindowsGitBashPath("C:/Program Files/Git/bin/bash.exe")).toBe(true);
     expect(isWindowsGitBashPath("C:/Program Files/Git/usr/bin/bash.exe")).toBe(true);
-    expect(isWindowsGitBashPath("C:/Users/alice/.agent-client/toolchains/PortableGit/bin/bash.exe")).toBe(
-      true,
-    );
+    expect(
+      isWindowsGitBashPath("C:/Users/alice/.agent-client/toolchains/PortableGit/bin/bash.exe"),
+    ).toBe(true);
     expect(isWindowsGitBashPath("C:/Users/alice/scoop/apps/git/current/bin/bash.exe")).toBe(true);
   });
 
