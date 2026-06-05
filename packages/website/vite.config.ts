@@ -37,6 +37,18 @@ export default defineConfig((): UserConfig => {
         allow: [repoRoot],
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            "vendor-react": ["react", "react-dom"],
+            "vendor-router": ["@tanstack/react-router", "@tanstack/react-start"],
+            "vendor-ui": ["framer-motion", "lucide-react"],
+            "vendor-markdown": ["react-markdown"],
+          },
+        },
+      },
+    },
     plugins: [
       cloudflare({ viteEnvironment: { name: "ssr" } }),
       tsConfigPaths(),

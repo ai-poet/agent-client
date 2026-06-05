@@ -343,46 +343,77 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
   }, [sessionAgents]);
 
   // -------------------------------------------------------------------------
-  // Workspace hydration
+  // Workspace hydration (optimised: first-page fast, rest in background)
   // -------------------------------------------------------------------------
+  const hydrationCursorRef = useRef<string | null>(null);
+  const hydrationRunningRef = useRef(false);
+
   const hydrateWorkspaces = useCallback(
-    async (options?: { subscribe?: boolean; isCancelled?: () => boolean }) => {
+    async (options?: {
+      subscribe?: boolean;
+      isCancelled?: () => boolean;
+      firstPageOnly?: boolean;
+    }) => {
       if (!client || !isConnected) {
         return;
       }
 
-      const workspaces = new Map<string, WorkspaceDescriptor>();
-      let cursor: string | null = null;
+      const firstPageOnly = options?.firstPageOnly ?? false;
+      const workspaces = new Map<string, WorkspaceDescriptor>(
+        store.getState().sessions[serverId]?.workspaces,
+      );
+      let cursor = firstPageOnly ? null : hydrationCursorRef.current;
       let includeSubscribe = options?.subscribe ?? false;
+      let pageCount = 0;
 
-      while (true) {
-        const payload = await client.fetchWorkspaces({
-          sort: [{ key: "activity_at", direction: "desc" }],
-          ...(includeSubscribe ? { subscribe: {} } : {}),
-          page: cursor ? { limit: 200, cursor } : { limit: 200 },
-        });
+      hydrationRunningRef.current = true;
+
+      try {
+        while (true) {
+          const payload = await client.fetchWorkspaces({
+            sort: [{ key: "activity_at", direction: "desc" }],
+            ...(includeSubscribe ? { subscribe: {} } : {}),
+            page: cursor ? { limit: 200, cursor } : { limit: 200 },
+          });
+          if (options?.isCancelled?.()) {
+            return;
+          }
+
+          for (const entry of payload.entries) {
+            const workspace = normalizeWorkspaceDescriptor(entry);
+            workspaces.set(workspace.id, workspace);
+          }
+
+          pageCount += 1;
+
+          // After first page: immediately make workspaces available for UI
+          if (pageCount === 1) {
+            store.getState().setWorkspaces(serverId, workspaces);
+            store.getState().setHasHydratedWorkspaces(serverId, true);
+
+            if (firstPageOnly) {
+              hydrationCursorRef.current = payload.pageInfo.nextCursor ?? null;
+              return;
+            }
+          }
+
+          if (!payload.pageInfo.hasMore || !payload.pageInfo.nextCursor) {
+            hydrationCursorRef.current = null;
+            break;
+          }
+          cursor = payload.pageInfo.nextCursor;
+          includeSubscribe = false;
+        }
+
         if (options?.isCancelled?.()) {
           return;
         }
 
-        for (const entry of payload.entries) {
-          const workspace = normalizeWorkspaceDescriptor(entry);
-          workspaces.set(workspace.id, workspace);
-        }
-
-        if (!payload.pageInfo.hasMore || !payload.pageInfo.nextCursor) {
-          break;
-        }
-        cursor = payload.pageInfo.nextCursor;
-        includeSubscribe = false;
+        // Final write with all accumulated pages
+        store.getState().setWorkspaces(serverId, workspaces);
+      } finally {
+        hydrationRunningRef.current = false;
       }
-
-      if (options?.isCancelled?.()) {
-        return;
-      }
-
-      store.getState().setWorkspaces(serverId, workspaces);
-      store.getState().setHasHydratedWorkspaces(serverId, true);
     },
     [client, isConnected, serverId],
   );
@@ -757,15 +788,36 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     }
 
     let cancelled = false;
+
+    // Phase 1: Load first page immediately for fast first paint
     void (async () => {
       try {
         await hydrateWorkspaces({
           subscribe: true,
           isCancelled: () => cancelled,
+          firstPageOnly: true,
         });
       } catch (error) {
-        console.error("[Session] Failed to hydrate workspaces:", error);
+        console.error("[Session] Failed to hydrate first page:", error);
+        return;
       }
+
+      // Phase 2: Defer remaining pages to avoid blocking UI
+      if (cancelled) return;
+      if (!hydrationCursorRef.current) return; // All fit in one page
+
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        void (async () => {
+          try {
+            await hydrateWorkspaces({
+              isCancelled: () => cancelled,
+            });
+          } catch (error) {
+            console.error("[Session] Failed to hydrate remaining pages:", error);
+          }
+        })();
+      });
     })();
 
     return () => {
