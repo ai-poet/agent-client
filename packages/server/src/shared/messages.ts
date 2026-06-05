@@ -57,6 +57,9 @@ import {
   SkillsListRequestSchema,
   SkillsImportRequestSchema,
   SkillsExportRequestSchema,
+  SkillsSaveRequestSchema,
+  SkillsImportPackageRequestSchema,
+  SkillsDeleteRequestSchema,
   SkillsMarketplaceListRequestSchema,
   SkillsMarketplaceInstallRequestSchema,
   PromptsListRequestSchema,
@@ -76,6 +79,9 @@ import {
   SkillsListResponseSchema,
   SkillsImportResponseSchema,
   SkillsExportResponseSchema,
+  SkillsSaveResponseSchema,
+  SkillsImportPackageResponseSchema,
+  SkillsDeleteResponseSchema,
   SkillsMarketplaceListResponseSchema,
   SkillsMarketplaceInstallResponseSchema,
   PromptsListResponseSchema,
@@ -92,6 +98,8 @@ import {
   type PromptTemplate,
   type ManagedSkillEntry,
   type MarketplaceSkillEntry,
+  type SkillScope,
+  type SkillWritableTarget,
   type McpServerProfile,
   type ContextHubMcpServerConfig,
 } from "../server/context-hub/rpc-schemas.js";
@@ -1719,6 +1727,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   SkillsListRequestSchema,
   SkillsImportRequestSchema,
   SkillsExportRequestSchema,
+  SkillsSaveRequestSchema,
+  SkillsImportPackageRequestSchema,
+  SkillsDeleteRequestSchema,
   SkillsMarketplaceListRequestSchema,
   SkillsMarketplaceInstallRequestSchema,
   PromptsListRequestSchema,
@@ -3349,6 +3360,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SkillsListResponseSchema,
   SkillsImportResponseSchema,
   SkillsExportResponseSchema,
+  SkillsSaveResponseSchema,
+  SkillsImportPackageResponseSchema,
+  SkillsDeleteResponseSchema,
   SkillsMarketplaceListResponseSchema,
   SkillsMarketplaceInstallResponseSchema,
   PromptsListResponseSchema,
@@ -3470,6 +3484,8 @@ export type ContextHubProjectMemoryKind = ProjectMemoryKind;
 export type ContextHubPromptTemplate = PromptTemplate;
 export type ContextHubManagedSkillEntry = ManagedSkillEntry;
 export type ContextHubMarketplaceSkillEntry = MarketplaceSkillEntry;
+export type ContextHubSkillScope = SkillScope;
+export type ContextHubSkillWritableTarget = SkillWritableTarget;
 export type ContextHubMcpServerProfile = McpServerProfile;
 export type ContextHubMcpServerConfigPayload = ContextHubMcpServerConfig;
 export type MemoryListResponse = z.infer<typeof MemoryListResponseSchema>;

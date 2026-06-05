@@ -2018,6 +2018,18 @@ export class Session {
             await this.handleSkillsExportRequest(msg);
             break;
 
+          case "skills/save":
+            await this.handleSkillsSaveRequest(msg);
+            break;
+
+          case "skills/import-package":
+            await this.handleSkillsImportPackageRequest(msg);
+            break;
+
+          case "skills/delete":
+            await this.handleSkillsDeleteRequest(msg);
+            break;
+
           case "skills/marketplace/list":
             await this.handleSkillsMarketplaceListRequest(msg);
             break;
@@ -8895,6 +8907,104 @@ export class Session {
           requestId: request.requestId,
           skill: result.skill,
           content: result.content,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleSkillsSaveRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/save" }>,
+  ): Promise<void> {
+    try {
+      const cwd = request.cwd ?? (await this.resolveContextHubWorkspaceCwd(request.workspaceId));
+      const result = await this.contextHubService.saveSkill({
+        target: request.target,
+        scope: request.scope,
+        skillId: request.skillId,
+        name: request.name,
+        content: request.content,
+        workspaceId: request.workspaceId,
+        cwd,
+        overwrite: request.overwrite,
+      });
+      this.emit({
+        type: "skills/save/response",
+        payload: {
+          requestId: request.requestId,
+          skill: result.skill,
+          conflict: result.conflict,
+          error: null,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.emit({
+        type: "skills/save/response",
+        payload: {
+          requestId: request.requestId,
+          skill: null,
+          conflict: /already exists/i.test(message),
+          error: message,
+        },
+      });
+    }
+  }
+
+  private async handleSkillsImportPackageRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/import-package" }>,
+  ): Promise<void> {
+    try {
+      const cwd = request.cwd ?? (await this.resolveContextHubWorkspaceCwd(request.workspaceId));
+      const result = await this.contextHubService.importSkillPackage({
+        target: request.target,
+        scope: request.scope,
+        name: request.name,
+        packageBuffer: Buffer.from(request.packageBase64, "base64"),
+        workspaceId: request.workspaceId,
+        cwd,
+        overwrite: request.overwrite,
+      });
+      this.emit({
+        type: "skills/import-package/response",
+        payload: {
+          requestId: request.requestId,
+          skill: result.skill,
+          conflict: result.conflict,
+          error: null,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.emit({
+        type: "skills/import-package/response",
+        payload: {
+          requestId: request.requestId,
+          skill: null,
+          conflict: /already exists/i.test(message),
+          error: message,
+        },
+      });
+    }
+  }
+
+  private async handleSkillsDeleteRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/delete" }>,
+  ): Promise<void> {
+    try {
+      const cwd = request.cwd ?? (await this.resolveContextHubWorkspaceCwd(request.workspaceId));
+      const skillId = await this.contextHubService.deleteSkill({
+        skillId: request.skillId,
+        workspaceId: request.workspaceId,
+        cwd,
+      });
+      this.emit({
+        type: "skills/delete/response",
+        payload: {
+          requestId: request.requestId,
+          skillId,
           error: null,
         },
       });

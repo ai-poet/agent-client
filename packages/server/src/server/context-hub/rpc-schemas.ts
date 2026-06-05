@@ -143,6 +143,18 @@ export const ManagedSkillEntrySchema = z.object({
   updatedAt: z.string().nullable(),
 });
 
+export const SkillWritableTargetSchema = z.enum([
+  "managed",
+  "global_codex",
+  "global_claude",
+  "global_agents",
+  "project_codex",
+  "project_claude",
+  "project_agents",
+]);
+
+export const SkillScopeSchema = z.enum(["global", "workspace"]);
+
 export const SkillMarketplaceTrustLevelSchema = z.enum(["verified", "community", "sandbox"]);
 
 export const MarketplaceSkillPermissionsSchema = z.object({
@@ -249,6 +261,39 @@ export const SkillsImportRequestSchema = z.object({
 
 export const SkillsExportRequestSchema = z.object({
   type: z.literal("skills/export"),
+  requestId: RequestIdSchema,
+  skillId: z.string().min(1),
+  workspaceId: z.string().optional(),
+  cwd: z.string().optional(),
+});
+
+export const SkillsSaveRequestSchema = z.object({
+  type: z.literal("skills/save"),
+  requestId: RequestIdSchema,
+  target: SkillWritableTargetSchema,
+  scope: SkillScopeSchema,
+  skillId: z.string().optional(),
+  name: z.string().min(1),
+  content: z.string().min(1),
+  workspaceId: z.string().optional(),
+  cwd: z.string().optional(),
+  overwrite: z.boolean().optional(),
+});
+
+export const SkillsImportPackageRequestSchema = z.object({
+  type: z.literal("skills/import-package"),
+  requestId: RequestIdSchema,
+  target: SkillWritableTargetSchema,
+  scope: SkillScopeSchema,
+  name: z.string().min(1),
+  packageBase64: z.string().min(1),
+  workspaceId: z.string().optional(),
+  cwd: z.string().optional(),
+  overwrite: z.boolean().optional(),
+});
+
+export const SkillsDeleteRequestSchema = z.object({
+  type: z.literal("skills/delete"),
   requestId: RequestIdSchema,
   skillId: z.string().min(1),
   workspaceId: z.string().optional(),
@@ -410,6 +455,35 @@ export const SkillsExportResponseSchema = z.object({
   }),
 });
 
+export const SkillsSaveResponseSchema = z.object({
+  type: z.literal("skills/save/response"),
+  payload: z.object({
+    requestId: z.string(),
+    skill: ManagedSkillEntrySchema.nullable(),
+    conflict: z.boolean(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const SkillsImportPackageResponseSchema = z.object({
+  type: z.literal("skills/import-package/response"),
+  payload: z.object({
+    requestId: z.string(),
+    skill: ManagedSkillEntrySchema.nullable(),
+    conflict: z.boolean(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const SkillsDeleteResponseSchema = z.object({
+  type: z.literal("skills/delete/response"),
+  payload: z.object({
+    requestId: z.string(),
+    skillId: z.string(),
+    error: z.string().nullable(),
+  }),
+});
+
 export const SkillsMarketplaceListResponseSchema = z.object({
   type: z.literal("skills/marketplace/list/response"),
   payload: z.object({
@@ -522,6 +596,8 @@ export type PromptTemplate = z.infer<typeof PromptTemplateSchema>;
 export type PromptTemplateCreateInput = z.infer<typeof PromptTemplateCreateInputSchema>;
 export type PromptTemplateUpdateInput = z.infer<typeof PromptTemplateUpdateInputSchema>;
 export type ManagedSkillEntry = z.infer<typeof ManagedSkillEntrySchema>;
+export type SkillWritableTarget = z.infer<typeof SkillWritableTargetSchema>;
+export type SkillScope = z.infer<typeof SkillScopeSchema>;
 export type SkillMarketplaceTrustLevel = z.infer<typeof SkillMarketplaceTrustLevelSchema>;
 export type MarketplaceSkillEntry = z.infer<typeof MarketplaceSkillEntrySchema>;
 export type McpServerProfile = z.infer<typeof McpServerProfileSchema>;

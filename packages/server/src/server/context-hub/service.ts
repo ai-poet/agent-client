@@ -39,6 +39,8 @@ import {
   type PromptTemplate,
   type PromptTemplateCreateInput,
   type PromptTemplateUpdateInput,
+  type SkillScope,
+  type SkillWritableTarget,
 } from "./rpc-schemas.js";
 
 const MEMORY_CONTEXT_LIMIT = 8;
@@ -117,6 +119,33 @@ type ExportSkillOptions = {
   cwd?: string | null;
 };
 
+type SaveSkillOptions = {
+  target: SkillWritableTarget;
+  scope: SkillScope;
+  skillId?: string;
+  name: string;
+  content: string;
+  workspaceId?: string;
+  cwd?: string | null;
+  overwrite?: boolean;
+};
+
+type ImportSkillPackageOptions = {
+  target: SkillWritableTarget;
+  scope: SkillScope;
+  name: string;
+  packageBuffer: Buffer;
+  workspaceId?: string;
+  cwd?: string | null;
+  overwrite?: boolean;
+};
+
+type DeleteSkillOptions = {
+  skillId: string;
+  workspaceId?: string;
+  cwd?: string | null;
+};
+
 type ListMarketplaceSkillsOptions = {
   query?: string;
   capability?: string;
@@ -160,6 +189,18 @@ type ValidSkillZipEntry = {
   size: number;
 };
 
+type NormalizedSkillZipEntry = ValidSkillZipEntry & {
+  normalizedRelativePath: string;
+};
+
+type WritableSkillRoot = {
+  root: string;
+  source: SkillWritableTarget;
+  scope: SkillScope;
+  readOnly: false;
+  workspaceId: string | null;
+};
+
 type SkillsMpSkill = {
   id: string;
   name: string;
@@ -175,6 +216,13 @@ class SkillMarketplaceConflictError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "SkillMarketplaceConflictError";
+  }
+}
+
+class SkillConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SkillConflictError";
   }
 }
 
@@ -299,6 +347,14 @@ function safeSkillName(value: string): string {
       .replace(/^-+|-+$/g, "")
       .slice(0, 80) || "skill"
   );
+}
+
+function ensureSkillMarkdownContent(content: string): string {
+  const trimmed = content.trimEnd();
+  if (!trimmed) {
+    throw new Error("Skill content is required");
+  }
+  return `${trimmed}\n`;
 }
 
 function normalizeWhitespace(value: string): string {
@@ -574,10 +630,22 @@ async function directoryDigest(dir: string): Promise<string | null> {
 }
 
 function assertPathInside(parent: string, candidate: string): void {
-  const relative = path.relative(parent, candidate);
+  const relative = path.relative(path.resolve(parent), path.resolve(candidate));
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error(`Refusing to write outside workspace: ${candidate}`);
   }
+}
+
+function isWritableSkillSource(source: string): source is SkillWritableTarget {
+  return (
+    source === "managed" ||
+    source === "global_codex" ||
+    source === "global_claude" ||
+    source === "global_agents" ||
+    source === "project_codex" ||
+    source === "project_claude" ||
+    source === "project_agents"
+  );
 }
 
 async function copyOrSymlinkSkillDirectory(sourceDir: string, destDir: string): Promise<void> {
@@ -846,21 +914,21 @@ export class ContextHubService {
         root: path.join(homedir(), ".codex", "skills"),
         source: "global_codex",
         scope: "global",
-        readOnly: true,
+        readOnly: false,
         workspaceId: null,
       },
       {
         root: path.join(homedir(), ".claude", "skills"),
         source: "global_claude",
         scope: "global",
-        readOnly: true,
+        readOnly: false,
         workspaceId: null,
       },
       {
         root: path.join(homedir(), ".agents", "skills"),
         source: "global_agents",
         scope: "global",
-        readOnly: true,
+        readOnly: false,
         workspaceId: null,
       },
     ];
@@ -872,21 +940,21 @@ export class ContextHubService {
           root: path.join(cwd, ".codex", "skills"),
           source: "project_codex",
           scope: "workspace",
-          readOnly: true,
+          readOnly: false,
           workspaceId: options.workspaceId ?? null,
         },
         {
           root: path.join(cwd, ".claude", "skills"),
           source: "project_claude",
           scope: "workspace",
-          readOnly: true,
+          readOnly: false,
           workspaceId: options.workspaceId ?? null,
         },
         {
           root: path.join(cwd, ".agents", "skills"),
           source: "project_agents",
           scope: "workspace",
-          readOnly: true,
+          readOnly: false,
           workspaceId: options.workspaceId ?? null,
         },
       );
@@ -935,6 +1003,138 @@ export class ContextHubService {
     }
     const content = skill.content ?? (await readFile(skill.path, "utf8"));
     return { skill, content };
+  }
+
+  async saveSkill(
+    options: SaveSkillOptions,
+  ): Promise<{ skill: ManagedSkillEntry; conflict: boolean }> {
+    const rootInfo = this.resolveWritableSkillRoot({
+      target: options.target,
+      scope: options.scope,
+      workspaceId: options.workspaceId,
+      cwd: options.cwd,
+    });
+    const content = ensureSkillMarkdownContent(options.content);
+    const existingSkill = options.skillId
+      ? await this.getWritableSkillForMutation({
+          skillId: options.skillId,
+          rootInfo,
+          workspaceId: options.workspaceId,
+          cwd: options.cwd,
+        })
+      : null;
+
+    if (existingSkill) {
+      await writeFile(existingSkill.path, content, "utf8");
+      return {
+        skill: await this.readSkillFromPath(rootInfo, existingSkill.path, true),
+        conflict: false,
+      };
+    }
+
+    const safeName = safeSkillName(options.name);
+    const skillDir = path.join(rootInfo.root, safeName);
+    const skillPath = path.join(skillDir, "SKILL.md");
+    assertPathInside(rootInfo.root, skillDir);
+    if ((await exists(skillDir)) && options.overwrite !== true) {
+      throw new SkillConflictError(`Skill already exists: ${safeName}`);
+    }
+    if (options.overwrite === true) {
+      await rm(skillDir, { recursive: true, force: true });
+    }
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(skillPath, content, "utf8");
+    return {
+      skill: await this.readSkillFromPath(rootInfo, skillPath, true),
+      conflict: false,
+    };
+  }
+
+  async importSkillPackage(
+    options: ImportSkillPackageOptions,
+  ): Promise<{ skill: ManagedSkillEntry; conflict: boolean }> {
+    if (options.packageBuffer.byteLength > SKILL_PACKAGE_MAX_TOTAL_BYTES) {
+      throw new Error("Skill package is too large");
+    }
+    const rootInfo = this.resolveWritableSkillRoot({
+      target: options.target,
+      scope: options.scope,
+      workspaceId: options.workspaceId,
+      cwd: options.cwd,
+    });
+    const safeName = safeSkillName(options.name);
+    const tempRoot = path.join(rootInfo.root, `.paseo-import-${safeName}-${randomUUID()}`);
+    const sourceDir = path.join(tempRoot, safeName);
+    const targetDir = path.join(rootInfo.root, safeName);
+    assertPathInside(rootInfo.root, tempRoot);
+    assertPathInside(rootInfo.root, targetDir);
+
+    await rm(tempRoot, { recursive: true, force: true });
+    try {
+      await this.extractSkillPackage(options.packageBuffer, sourceDir);
+      const existingDigest = await directoryDigest(targetDir);
+      const nextDigest = await directoryDigest(sourceDir);
+      if (!nextDigest) {
+        throw new Error("Skill package did not produce an installable directory");
+      }
+      if (existingDigest && existingDigest !== nextDigest && options.overwrite !== true) {
+        throw new SkillConflictError(`Skill already exists with different content: ${safeName}`);
+      }
+      if (existingDigest === nextDigest) {
+        const skill = await this.findSkillByPath({
+          rootInfo,
+          skillPath: path.join(targetDir, "SKILL.md"),
+          includeContent: true,
+        });
+        if (!skill) {
+          throw new Error(`Imported skill was not found: ${safeName}`);
+        }
+        return { skill, conflict: false };
+      }
+
+      await rm(targetDir, { recursive: true, force: true });
+      await mkdir(path.dirname(targetDir), { recursive: true });
+      await rename(sourceDir, targetDir);
+      const skill = await this.findSkillByPath({
+        rootInfo,
+        skillPath: path.join(targetDir, "SKILL.md"),
+        includeContent: true,
+      });
+      if (!skill) {
+        throw new Error(`Imported skill was not found: ${safeName}`);
+      }
+      return { skill, conflict: false };
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  }
+
+  async deleteSkill(options: DeleteSkillOptions): Promise<string> {
+    const skill = (
+      await this.listSkills({
+        workspaceId: options.workspaceId,
+        cwd: options.cwd,
+      })
+    ).find((entry) => entry.id === options.skillId);
+    if (!skill) {
+      throw new Error(`Skill not found: ${options.skillId}`);
+    }
+    if (skill.readOnly || !isWritableSkillSource(skill.source)) {
+      throw new Error(`Skill is read-only: ${skill.name}`);
+    }
+    const rootInfo = this.resolveWritableSkillRoot({
+      target: skill.source,
+      scope: skill.scope,
+      workspaceId: options.workspaceId,
+      cwd: options.cwd,
+    });
+    const skillDir = path.dirname(skill.path);
+    assertPathInside(rootInfo.root, skillDir);
+    if (path.resolve(skillDir) === path.resolve(rootInfo.root)) {
+      throw new Error(`Refusing to delete skills root: ${skillDir}`);
+    }
+    await rm(skillDir, { recursive: true, force: true });
+    return skill.id;
   }
 
   async listMarketplaceSkills(
@@ -1216,6 +1416,101 @@ export class ContextHubService {
     return path.join(this.paseoHome, "mcp", "servers.json");
   }
 
+  private resolveWritableSkillRoot(options: {
+    target: SkillWritableTarget;
+    scope: SkillScope;
+    workspaceId?: string;
+    cwd?: string | null;
+  }): WritableSkillRoot {
+    const targetScope: SkillScope = options.target.startsWith("project_") ? "workspace" : "global";
+    if (targetScope !== options.scope) {
+      throw new Error(`Skill target ${options.target} does not match ${options.scope} scope`);
+    }
+    if (options.scope === "workspace") {
+      const workspaceRoot = options.cwd?.trim();
+      if (!workspaceRoot) {
+        throw new Error("cwd is required for workspace skills");
+      }
+      const root =
+        options.target === "project_codex"
+          ? path.join(workspaceRoot, ".codex", "skills")
+          : options.target === "project_claude"
+            ? path.join(workspaceRoot, ".claude", "skills")
+            : path.join(workspaceRoot, ".agents", "skills");
+      assertPathInside(workspaceRoot, root);
+      return {
+        root,
+        source: options.target,
+        scope: "workspace",
+        readOnly: false,
+        workspaceId: options.workspaceId ?? null,
+      };
+    }
+    const root =
+      options.target === "managed"
+        ? this.skillsRoot
+        : options.target === "global_codex"
+          ? path.join(homedir(), ".codex", "skills")
+          : options.target === "global_claude"
+            ? path.join(homedir(), ".claude", "skills")
+            : path.join(homedir(), ".agents", "skills");
+    return {
+      root,
+      source: options.target,
+      scope: "global",
+      readOnly: false,
+      workspaceId: null,
+    };
+  }
+
+  private async readSkillFromPath(
+    rootInfo: WritableSkillRoot,
+    skillPath: string,
+    includeContent: boolean,
+  ): Promise<ManagedSkillEntry> {
+    const skill = await this.findSkillByPath({ rootInfo, skillPath, includeContent });
+    if (!skill) {
+      throw new Error(`Skill was not found at ${skillPath}`);
+    }
+    return skill;
+  }
+
+  private async findSkillByPath(options: {
+    rootInfo: WritableSkillRoot;
+    skillPath: string;
+    includeContent: boolean;
+  }): Promise<ManagedSkillEntry | null> {
+    const normalizedPath = path.resolve(options.skillPath);
+    const entries = await this.scanSkillRoot(options.rootInfo, options.includeContent);
+    return entries.find((entry) => path.resolve(entry.path) === normalizedPath) ?? null;
+  }
+
+  private async getWritableSkillForMutation(options: {
+    skillId: string;
+    rootInfo: WritableSkillRoot;
+    workspaceId?: string;
+    cwd?: string | null;
+  }): Promise<ManagedSkillEntry> {
+    const skill = (
+      await this.listSkills({
+        workspaceId: options.workspaceId,
+        cwd: options.cwd,
+        includeContent: true,
+      })
+    ).find((entry) => entry.id === options.skillId);
+    if (!skill) {
+      throw new Error(`Skill not found: ${options.skillId}`);
+    }
+    if (skill.readOnly || !isWritableSkillSource(skill.source)) {
+      throw new Error(`Skill is read-only: ${skill.name}`);
+    }
+    if (skill.source !== options.rootInfo.source || skill.scope !== options.rootInfo.scope) {
+      throw new Error(`Skill target mismatch for ${skill.name}`);
+    }
+    assertPathInside(options.rootInfo.root, skill.path);
+    return skill;
+  }
+
   private async listSkillsMpSkills(
     options: ListMarketplaceSkillsOptions,
     installedNames: Set<string>,
@@ -1487,17 +1782,16 @@ export class ContextHubService {
     throw new Error(`SkillsMP skill not found: ${skillId}`);
   }
 
-  private validateSkillZipEntries(zip: AdmZip): ValidSkillZipEntry[] {
+  private validateSkillZipEntries(zip: AdmZip): NormalizedSkillZipEntry[] {
     const entries = zip.getEntries();
     if (entries.length === 0) {
-      throw new Error("Downloaded skill package is empty");
+      throw new Error("Skill package is empty");
     }
     if (entries.length > SKILL_PACKAGE_MAX_FILES) {
       throw new Error(`Skill package has too many files: ${entries.length}`);
     }
 
     let totalBytes = 0;
-    let hasTopLevelSkillFile = false;
     const validated: ValidSkillZipEntry[] = [];
     for (const entry of entries) {
       const entryName = entry.entryName.replace(/\\/g, "/");
@@ -1524,9 +1818,6 @@ export class ContextHubService {
         throw new Error("Skill package is too large");
       }
       const relativePath = parts.join("/");
-      if (relativePath === "SKILL.md") {
-        hasTopLevelSkillFile = true;
-      }
       validated.push({
         entryName: entry.entryName,
         relativePath,
@@ -1535,18 +1826,58 @@ export class ContextHubService {
       });
     }
 
-    if (!hasTopLevelSkillFile) {
-      throw new Error("Skill package must contain a top-level SKILL.md");
+    const fileEntries = validated.filter((entry) => !entry.isDirectory);
+    const hasRootSkillFile = fileEntries.some((entry) => entry.relativePath === "SKILL.md");
+    if (hasRootSkillFile) {
+      return validated.map((entry) => ({
+        ...entry,
+        normalizedRelativePath: entry.relativePath,
+      }));
     }
-    return validated;
+
+    const topLevelNames = new Set(
+      validated
+        .map((entry) => entry.relativePath.split("/").filter(Boolean)[0])
+        .filter((part): part is string => Boolean(part)),
+    );
+    if (topLevelNames.size === 1) {
+      const [topLevelName] = topLevelNames;
+      const prefix = `${topLevelName}/`;
+      const normalized = validated
+        .map((entry): NormalizedSkillZipEntry | null => {
+          if (entry.relativePath === topLevelName) {
+            return null;
+          }
+          if (!entry.relativePath.startsWith(prefix)) {
+            throw new Error(`Unsafe skill package path: ${entry.entryName}`);
+          }
+          return {
+            ...entry,
+            normalizedRelativePath: entry.relativePath.slice(prefix.length),
+          };
+        })
+        .filter((entry): entry is NormalizedSkillZipEntry =>
+          Boolean(entry?.normalizedRelativePath),
+        );
+      if (normalized.some((entry) => entry.normalizedRelativePath === "SKILL.md")) {
+        return normalized;
+      }
+    }
+
+    throw new Error(
+      "Skill package must contain SKILL.md at the root or inside one top-level directory",
+    );
   }
 
-  private async extractMarketplaceSkillPackage(buffer: Buffer, targetDir: string): Promise<void> {
+  private async extractSkillPackage(buffer: Buffer, targetDir: string): Promise<void> {
     const zip = new AdmZip(buffer);
     const entries = this.validateSkillZipEntries(zip);
     await mkdir(targetDir, { recursive: true });
     for (const entryInfo of entries) {
-      const destPath = path.join(targetDir, entryInfo.relativePath);
+      if (!entryInfo.normalizedRelativePath) {
+        continue;
+      }
+      const destPath = path.join(targetDir, entryInfo.normalizedRelativePath);
       assertPathInside(targetDir, destPath);
       if (entryInfo.isDirectory) {
         await mkdir(destPath, { recursive: true });
@@ -1559,6 +1890,10 @@ export class ContextHubService {
       await mkdir(path.dirname(destPath), { recursive: true });
       await writeFile(destPath, entry.getData());
     }
+  }
+
+  private async extractMarketplaceSkillPackage(buffer: Buffer, targetDir: string): Promise<void> {
+    await this.extractSkillPackage(buffer, targetDir);
   }
 
   private async syncWorkspaceSkillProviderDirs(

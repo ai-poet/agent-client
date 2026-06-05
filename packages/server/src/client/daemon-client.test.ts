@@ -381,6 +381,127 @@ describe("DaemonClient", () => {
     }
   });
 
+  test("sends local skill save, package import, and delete requests", async () => {
+    const logger = createMockLogger();
+    const mock = createMockTransport();
+
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_unit_test",
+      logger,
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
+
+    const connectPromise = client.connect();
+    mock.triggerOpen();
+    await connectPromise;
+
+    const savePromise = client.skillsSave({
+      target: "project_codex",
+      scope: "workspace",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+      name: "review-helper",
+      content: "# Review\n",
+    });
+    const saveRequest = JSON.parse(mock.sent[0] as string) as {
+      type: "session";
+      message: {
+        type: "skills/save";
+        requestId: string;
+      };
+    };
+    expect(saveRequest.message).toMatchObject({
+      type: "skills/save",
+      target: "project_codex",
+      scope: "workspace",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+      name: "review-helper",
+      content: "# Review\n",
+    });
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "skills/save/response",
+        payload: {
+          requestId: saveRequest.message.requestId,
+          skill: null,
+          conflict: false,
+          error: null,
+        },
+      }),
+    );
+    await expect(savePromise).resolves.toMatchObject({ conflict: false, error: null });
+
+    const importPromise = client.skillsImportPackage({
+      target: "managed",
+      scope: "global",
+      name: "skill-creator",
+      packageBase64: "UEsDBAo=",
+    });
+    const importRequest = JSON.parse(mock.sent[1] as string) as {
+      type: "session";
+      message: {
+        type: "skills/import-package";
+        requestId: string;
+      };
+    };
+    expect(importRequest.message).toMatchObject({
+      type: "skills/import-package",
+      target: "managed",
+      scope: "global",
+      name: "skill-creator",
+      packageBase64: "UEsDBAo=",
+    });
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "skills/import-package/response",
+        payload: {
+          requestId: importRequest.message.requestId,
+          skill: null,
+          conflict: false,
+          error: null,
+        },
+      }),
+    );
+    await expect(importPromise).resolves.toMatchObject({ conflict: false, error: null });
+
+    const deletePromise = client.skillsDelete({
+      skillId: "managed:skill-creator",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+    });
+    const deleteRequest = JSON.parse(mock.sent[2] as string) as {
+      type: "session";
+      message: {
+        type: "skills/delete";
+        requestId: string;
+      };
+    };
+    expect(deleteRequest.message).toMatchObject({
+      type: "skills/delete",
+      skillId: "managed:skill-creator",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+    });
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "skills/delete/response",
+        payload: {
+          requestId: deleteRequest.message.requestId,
+          skillId: "managed:skill-creator",
+          error: null,
+        },
+      }),
+    );
+    await expect(deletePromise).resolves.toMatchObject({
+      skillId: "managed:skill-creator",
+      error: null,
+    });
+  });
+
   test("normalizes workspace_setup_progress into a workspace-scoped daemon event", async () => {
     const logger = createMockLogger();
     const mock = createMockTransport();

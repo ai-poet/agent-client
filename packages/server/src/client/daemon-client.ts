@@ -387,6 +387,18 @@ type SkillsExportPayload = Extract<
   SessionOutboundMessage,
   { type: "skills/export/response" }
 >["payload"];
+type SkillsSavePayload = Extract<
+  SessionOutboundMessage,
+  { type: "skills/save/response" }
+>["payload"];
+type SkillsImportPackagePayload = Extract<
+  SessionOutboundMessage,
+  { type: "skills/import-package/response" }
+>["payload"];
+type SkillsDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "skills/delete/response" }
+>["payload"];
 type SkillsMarketplaceListPayload = Extract<
   SessionOutboundMessage,
   { type: "skills/marketplace/list/response" }
@@ -568,6 +580,24 @@ export type SkillsImportOptions = Omit<
 };
 export type SkillsExportOptions = Omit<
   Extract<SessionInboundMessage, { type: "skills/export" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type SkillsSaveOptions = Omit<
+  Extract<SessionInboundMessage, { type: "skills/save" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type SkillsImportPackageOptions = Omit<
+  Extract<SessionInboundMessage, { type: "skills/import-package" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type SkillsDeleteOptions = Omit<
+  Extract<SessionInboundMessage, { type: "skills/delete" }>,
   "type" | "requestId"
 > & {
   requestId?: string;
@@ -3820,6 +3850,47 @@ export class DaemonClient {
         ...message,
       },
       responseType: "skills/export/response",
+      timeout: 10000,
+    });
+  }
+
+  async skillsSave(options: SkillsSaveOptions): Promise<SkillsSavePayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "skills/save",
+        ...message,
+      },
+      responseType: "skills/save/response",
+      timeout: 10000,
+    });
+  }
+
+  async skillsImportPackage(
+    options: SkillsImportPackageOptions,
+  ): Promise<SkillsImportPackagePayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "skills/import-package",
+        ...message,
+      },
+      responseType: "skills/import-package/response",
+      timeout: 30000,
+    });
+  }
+
+  async skillsDelete(options: SkillsDeleteOptions): Promise<SkillsDeletePayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "skills/delete",
+        ...message,
+      },
+      responseType: "skills/delete/response",
       timeout: 10000,
     });
   }

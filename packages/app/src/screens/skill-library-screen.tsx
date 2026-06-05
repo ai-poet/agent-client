@@ -1,18 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import {
   Box,
   Check,
   ChevronDown,
-  Download,
+  Edit3,
+  Eye,
+  ExternalLink,
+  FileArchive,
+  Plus,
   RefreshCcw,
+  Save,
   Search,
   ShieldCheck,
+  Trash2,
+  X,
 } from "lucide-react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import type {
   ContextHubManagedSkillEntry,
   ContextHubMarketplaceSkillEntry,
+  ContextHubSkillScope,
+  ContextHubSkillWritableTarget,
 } from "@server/shared/messages";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { isWeb } from "@/constants/platform";
@@ -22,47 +31,64 @@ import { getSub2APIMessages } from "@/i18n/sub2api";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useNavigationActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useWorkspaceList } from "@/stores/session-store-hooks";
+import { confirmDialog } from "@/utils/confirm-dialog";
 import { toErrorMessage } from "@/utils/error-messages";
+import { openExternalUrl } from "@/utils/open-external-url";
+import { pickSkillZipBase64 } from "@/utils/pick-skill-zip";
 
 function normalizeSearch(value: string): string {
   return value.trim();
 }
 
 const MARKETPLACE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const DEFAULT_SKILL_CONTENT =
+  "---\nname: my-skill\ndescription: Describe when to use this skill.\n---\n\n# My skill\n\nUse this skill when...\n";
 
 type SkillLibraryText = ReturnType<typeof getSub2APIMessages>["sidebar"];
 
-function permissionLabels(
-  skill: ContextHubMarketplaceSkillEntry,
-  text: SkillLibraryText,
-): string[] {
-  const labels: string[] = [];
-  if (skill.permissions.network) labels.push(text.skillPermissions.network);
-  if (skill.permissions.filesystem) labels.push(text.skillPermissions.filesystem);
-  if (skill.permissions.subprocess) labels.push(text.skillPermissions.subprocess);
-  if (skill.permissions.envVars.length > 0) {
-    labels.push(text.skillPermissions.envVars(skill.permissions.envVars.length));
-  }
-  return labels.length > 0 ? labels : [text.skillPermissions.none];
-}
-
-function skillStats(skill: ContextHubMarketplaceSkillEntry, text: SkillLibraryText): string {
-  const age =
-    skill.daysSinceUpdate === null
-      ? text.skillStats.updatedRecently
-      : text.skillStats.daysSinceUpdate(skill.daysSinceUpdate);
-  return text.skillStats.summary(skill.trustLevel, skill.downloadCount, skill.downloads7d, age);
-}
-
-type LocalSkillSummary = {
-  key: string;
-  name: string;
-  description: string | null;
-  path: string;
-  readOnly: boolean;
-  sources: string[];
-  scope: "global" | "workspace";
+type SkillTargetOption = {
+  value: ContextHubSkillWritableTarget;
+  scope: ContextHubSkillScope;
+  label: string;
 };
+
+type LocalSkillSelection =
+  | {
+      mode: "existing";
+      skillId: string;
+    }
+  | {
+      mode: "new";
+    };
+
+function skillTargetOptions(locale: string, hasWorkspace: boolean): SkillTargetOption[] {
+  const isZh = locale === "zh";
+  return [
+    { value: "managed", scope: "global", label: isZh ? "Paseo 管理" : "Paseo managed" },
+    { value: "global_codex", scope: "global", label: isZh ? "全局 Codex" : "Global Codex" },
+    { value: "global_claude", scope: "global", label: isZh ? "全局 Claude" : "Global Claude" },
+    { value: "global_agents", scope: "global", label: isZh ? "全局 Agents" : "Global Agents" },
+    ...(hasWorkspace
+      ? [
+          {
+            value: "project_codex" as const,
+            scope: "workspace" as const,
+            label: isZh ? "工作区 Codex" : "Workspace Codex",
+          },
+          {
+            value: "project_claude" as const,
+            scope: "workspace" as const,
+            label: isZh ? "工作区 Claude" : "Workspace Claude",
+          },
+          {
+            value: "project_agents" as const,
+            scope: "workspace" as const,
+            label: isZh ? "工作区 Agents" : "Workspace Agents",
+          },
+        ]
+      : []),
+  ];
+}
 
 function localSkillSourceLabel(source: string, locale: string): string {
   const isZh = locale === "zh";
@@ -86,6 +112,80 @@ function localSkillSourceLabel(source: string, locale: string): string {
     default:
       return source.replace(/_/g, " ");
   }
+}
+
+function permissionLabels(
+  skill: ContextHubMarketplaceSkillEntry,
+  text: SkillLibraryText,
+): string[] {
+  const labels: string[] = [];
+  if (skill.permissions.network) labels.push(text.skillPermissions.network);
+  if (skill.permissions.filesystem) labels.push(text.skillPermissions.filesystem);
+  if (skill.permissions.subprocess) labels.push(text.skillPermissions.subprocess);
+  if (skill.permissions.envVars.length > 0) {
+    labels.push(text.skillPermissions.envVars(skill.permissions.envVars.length));
+  }
+  return labels.length > 0 ? labels : [text.skillPermissions.none];
+}
+
+function skillStats(skill: ContextHubMarketplaceSkillEntry, text: SkillLibraryText): string {
+  const age =
+    skill.daysSinceUpdate === null
+      ? text.skillStats.updatedRecently
+      : text.skillStats.daysSinceUpdate(skill.daysSinceUpdate);
+  return text.skillStats.summary(skill.trustLevel, skill.downloadCount, skill.downloads7d, age);
+}
+
+function marketplaceSkillInitial(name: string): string | null {
+  const initial = name
+    .trim()
+    .match(/[A-Za-z]/)?.[0]
+    ?.toUpperCase();
+  return initial && /^[A-Z]$/.test(initial) ? initial : null;
+}
+
+function groupMarketplaceSkills(skills: ContextHubMarketplaceSkillEntry[]): Array<{
+  letter: string;
+  skills: ContextHubMarketplaceSkillEntry[];
+}> {
+  const buckets = new Map<string, ContextHubMarketplaceSkillEntry[]>();
+  for (const letter of MARKETPLACE_ALPHABET) buckets.set(letter, []);
+  for (const skill of skills) {
+    const initial = marketplaceSkillInitial(skill.name);
+    if (!initial) continue;
+    buckets.get(initial)?.push(skill);
+  }
+  return MARKETPLACE_ALPHABET.map((letter) => ({
+    letter,
+    skills: buckets.get(letter) ?? [],
+  })).filter((group) => group.skills.length > 0);
+}
+
+function marketplaceSkillUrl(skill: ContextHubMarketplaceSkillEntry): string | null {
+  const prefix = "skillsmp:";
+  if (!skill.id.startsWith(prefix)) return null;
+  const slug = skill.id.slice(prefix.length).trim();
+  if (!slug || slug.includes("/") || slug.includes("..")) return null;
+  return `https://skillsmp.com/skills/${encodeURIComponent(slug)}`;
+}
+
+function skillNameFromContent(content: string): string | null {
+  const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  const fromFrontMatter = frontmatter?.[1].match(/^name:\s*(.+)$/m)?.[1]?.trim();
+  if (fromFrontMatter) return fromFrontMatter.replace(/^["']|["']$/g, "");
+  const heading = content.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  return heading || null;
+}
+
+function safeDraftName(value: string): string {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "skill"
+  );
 }
 
 function SkillSkeletonRow({ width = "47%" as const }: { width?: "47%" | "100%" }) {
@@ -116,82 +216,6 @@ function SkillSectionSkeleton() {
   );
 }
 
-function summarizeLocalSkills(
-  skills: ContextHubManagedSkillEntry[],
-  query: string,
-): LocalSkillSummary[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  const summaries = new Map<string, LocalSkillSummary>();
-  for (const skill of skills) {
-    const haystack = [skill.name, skill.description, skill.source, skill.path]
-      .filter(Boolean)
-      .join("\n")
-      .toLowerCase();
-    if (normalizedQuery && !haystack.includes(normalizedQuery)) {
-      continue;
-    }
-    const key = skill.name.trim().toLowerCase();
-    const existing = summaries.get(key);
-    if (!existing) {
-      summaries.set(key, {
-        key,
-        name: skill.name,
-        description: skill.description,
-        path: skill.path,
-        readOnly: skill.readOnly,
-        sources: [skill.source],
-        scope: skill.scope,
-      });
-      continue;
-    }
-    if (!existing.description && skill.description) {
-      existing.description = skill.description;
-    }
-    if (!existing.sources.includes(skill.source)) {
-      existing.sources.push(skill.source);
-    }
-    if (existing.scope !== "workspace" && skill.scope === "workspace") {
-      existing.scope = "workspace";
-      existing.path = skill.path;
-    }
-    existing.readOnly = existing.readOnly && skill.readOnly;
-  }
-  return Array.from(summaries.values()).sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function marketplaceSkillInitial(name: string): string | null {
-  const initial = name
-    .trim()
-    .match(/[A-Za-z]/)?.[0]
-    ?.toUpperCase();
-  return initial && /^[A-Z]$/.test(initial) ? initial : null;
-}
-
-function groupMarketplaceSkills(skills: ContextHubMarketplaceSkillEntry[]): Array<{
-  letter: string;
-  skills: ContextHubMarketplaceSkillEntry[];
-}> {
-  const buckets = new Map<string, ContextHubMarketplaceSkillEntry[]>();
-  for (const letter of MARKETPLACE_ALPHABET) {
-    buckets.set(letter, []);
-  }
-  for (const skill of skills) {
-    const initial = marketplaceSkillInitial(skill.name);
-    if (!initial) {
-      continue;
-    }
-    buckets.get(initial)?.push(skill);
-  }
-  return MARKETPLACE_ALPHABET.map((letter) => ({
-    letter,
-    skills: buckets.get(letter) ?? [],
-  })).filter((group) => group.skills.length > 0);
-}
-
-function installedSkillKey(workspaceId: string | undefined, skillId: string): string {
-  return `${workspaceId ?? "global"}:${skillId}`;
-}
-
 interface SkillLibraryScreenProps {
   serverId: string;
 }
@@ -219,32 +243,38 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
   const [marketplaceSkills, setMarketplaceSkills] = useState<ContextHubMarketplaceSkillEntry[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [installingSkillId, setInstallingSkillId] = useState<string | null>(null);
-  const [confirmedInstalledSkillKeys, setConfirmedInstalledSkillKeys] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const confirmedInstalledSkillKeysRef = useRef(confirmedInstalledSkillKeys);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [selection, setSelection] = useState<LocalSkillSelection | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const [draftContent, setDraftContent] = useState(DEFAULT_SKILL_CONTENT);
+  const [selectedTarget, setSelectedTarget] = useState<ContextHubSkillWritableTarget>("managed");
 
   useEffect(() => {
-    confirmedInstalledSkillKeysRef.current = confirmedInstalledSkillKeys;
-  }, [confirmedInstalledSkillKeys]);
-
-  useEffect(() => {
-    if (activeWorkspaceId) {
-      setSelectedWorkspaceId(activeWorkspaceId);
-    }
+    if (activeWorkspaceId) setSelectedWorkspaceId(activeWorkspaceId);
   }, [activeWorkspaceId]);
 
   useEffect(() => {
-    if (!selectedWorkspaceId && workspaces[0]) {
-      setSelectedWorkspaceId(workspaces[0].id);
-    }
+    if (!selectedWorkspaceId && workspaces[0]) setSelectedWorkspaceId(workspaces[0].id);
   }, [selectedWorkspaceId, workspaces]);
 
   const workspace = useMemo(
     () => workspaces.find((entry) => entry.id === selectedWorkspaceId) ?? null,
     [selectedWorkspaceId, workspaces],
   );
+
+  const targetOptions = useMemo(
+    () => skillTargetOptions(locale, Boolean(workspace)),
+    [locale, workspace],
+  );
+  const selectedTargetOption =
+    targetOptions.find((option) => option.value === selectedTarget) ?? targetOptions[0];
+
+  useEffect(() => {
+    if (!targetOptions.some((option) => option.value === selectedTarget)) {
+      setSelectedTarget(targetOptions[0]?.value ?? "managed");
+    }
+  }, [selectedTarget, targetOptions]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(normalizeSearch(searchQuery)), 250);
@@ -265,6 +295,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
         client.skillsList({
           workspaceId: workspace?.id,
           cwd: workspace?.workspaceDirectory,
+          includeContent: true,
         }),
         client.skillsMarketplaceList({
           query: debouncedQuery || undefined,
@@ -283,13 +314,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
         errors.push(toErrorMessage(localResult.reason));
       }
       if (marketplaceResult.status === "fulfilled") {
-        setMarketplaceSkills(
-          marketplaceResult.value.skills.map((skill) =>
-            confirmedInstalledSkillKeysRef.current.has(installedSkillKey(workspace?.id, skill.id))
-              ? { ...skill, installed: true }
-              : skill,
-          ),
-        );
+        setMarketplaceSkills(marketplaceResult.value.skills);
         if (marketplaceResult.value.error) errors.push(marketplaceResult.value.error);
       } else {
         setMarketplaceSkills([]);
@@ -313,57 +338,29 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
     void refresh();
   }, [refresh]);
 
-  const installSkill = useCallback(
-    async (skill: ContextHubMarketplaceSkillEntry, overwrite = false) => {
-      if (!client || !workspace) {
-        toast.error(text.skillInstallWorkspaceRequired);
-        return;
-      }
-      setInstallingSkillId(skill.id);
-      try {
-        const result = await client.skillsMarketplaceInstall({
-          workspaceId: workspace.id,
-          cwd: workspace.workspaceDirectory,
-          skillId: skill.id,
-          name: skill.name,
-          version: skill.version ?? undefined,
-          overwrite,
-        });
-        if (result.error) {
-          if (result.conflict && !overwrite) {
-            toast.error(text.skillInstallConflict(skill.name));
-          } else {
-            toast.error(result.error);
-          }
-          return;
-        }
-        setConfirmedInstalledSkillKeys((current) => {
-          const next = new Set(current);
-          next.add(installedSkillKey(workspace.id, skill.id));
-          return next;
-        });
-        setMarketplaceSkills((current) =>
-          current.map((entry) => (entry.id === skill.id ? { ...entry, installed: true } : entry)),
-        );
-        toast.show(text.skillInstallSuccess(skill.name), {
-          variant: "success",
-        });
-        await refresh();
-      } catch (error) {
-        const message = toErrorMessage(error);
-        toast.error(/timeout/i.test(message) ? text.skillInstallTimeout(skill.name) : message);
-        void refresh();
-      } finally {
-        setInstallingSkillId(null);
-      }
-    },
-    [client, refresh, text, toast, workspace],
-  );
+  const filteredLocalSkills = useMemo(() => {
+    const query = debouncedQuery.toLowerCase();
+    return localSkills
+      .filter((skill) => {
+        if (!query) return true;
+        return [skill.name, skill.description, skill.source, skill.path]
+          .filter(Boolean)
+          .join("\n")
+          .toLowerCase()
+          .includes(query);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [debouncedQuery, localSkills]);
 
-  const localSkillSummaries = useMemo(
-    () => summarizeLocalSkills(localSkills, debouncedQuery),
-    [debouncedQuery, localSkills],
-  );
+  const selectedSkill =
+    selection?.mode === "existing"
+      ? (localSkills.find((skill) => skill.id === selection.skillId) ?? null)
+      : null;
+  const canMutateSelectedSkill =
+    Boolean(selectedSkill) &&
+    selectedSkill?.readOnly === false &&
+    selectedSkill.source !== "bundled";
+
   const marketplaceGroups = useMemo(
     () => groupMarketplaceSkills(marketplaceSkills),
     [marketplaceSkills],
@@ -377,23 +374,190 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
     ? text.skillMarketplaceAtoZ(marketplaceSkills.length)
     : String(marketplaceSkills.length);
 
+  const openLocalSkill = useCallback(
+    (skill: ContextHubManagedSkillEntry, edit = false) => {
+      setSelection({ mode: "existing", skillId: skill.id });
+      setDraftName(skill.name);
+      setDraftContent(skill.content ?? "");
+      if (skill.source !== "bundled" && skill.source !== selectedTarget) {
+        setSelectedTarget(skill.source as ContextHubSkillWritableTarget);
+      }
+      setIsEditing(edit && !skill.readOnly);
+    },
+    [selectedTarget],
+  );
+
+  const createNewSkill = useCallback(() => {
+    const defaultName = "my-skill";
+    setSelection({ mode: "new" });
+    setDraftName(defaultName);
+    setDraftContent(DEFAULT_SKILL_CONTENT);
+    setIsEditing(true);
+  }, []);
+
+  const saveSkill = useCallback(
+    async (overwrite = false) => {
+      if (!client || !selectedTargetOption) return;
+      if (selectedTargetOption.scope === "workspace" && !workspace) {
+        toast.error(text.skillWorkspaceRequired);
+        return;
+      }
+      const name = safeDraftName(draftName || skillNameFromContent(draftContent) || "skill");
+      setIsSaving(true);
+      try {
+        const result = await client.skillsSave({
+          target: selectedTargetOption.value,
+          scope: selectedTargetOption.scope,
+          skillId: selection?.mode === "existing" ? selection.skillId : undefined,
+          name,
+          content: draftContent,
+          workspaceId: workspace?.id,
+          cwd: workspace?.workspaceDirectory,
+          overwrite,
+        });
+        if (result.error) {
+          if (result.conflict && !overwrite) {
+            toast.error(text.skillSaveConflict(name));
+          } else {
+            toast.error(result.error);
+          }
+          return;
+        }
+        if (result.skill) {
+          setSelection({ mode: "existing", skillId: result.skill.id });
+          setDraftName(result.skill.name);
+          setDraftContent(result.skill.content ?? draftContent);
+        }
+        setIsEditing(false);
+        toast.show(text.skillSaveSuccess(name), { variant: "success" });
+        await refresh();
+      } catch (error) {
+        toast.error(toErrorMessage(error));
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [
+      client,
+      draftContent,
+      draftName,
+      refresh,
+      selectedTargetOption,
+      selection,
+      text,
+      toast,
+      workspace,
+    ],
+  );
+
+  const importZip = useCallback(
+    async (overwrite = false) => {
+      if (!client || !selectedTargetOption) return;
+      if (selectedTargetOption.scope === "workspace" && !workspace) {
+        toast.error(text.skillWorkspaceRequired);
+        return;
+      }
+      setIsSaving(true);
+      try {
+        const picked = await pickSkillZipBase64();
+        if (!picked) return;
+        const name = safeDraftName(picked.name || draftName || "skill");
+        const result = await client.skillsImportPackage({
+          target: selectedTargetOption.value,
+          scope: selectedTargetOption.scope,
+          name,
+          packageBase64: picked.base64,
+          workspaceId: workspace?.id,
+          cwd: workspace?.workspaceDirectory,
+          overwrite,
+        });
+        if (result.error) {
+          if (result.conflict && !overwrite) {
+            toast.error(text.skillSaveConflict(name));
+          } else {
+            toast.error(result.error);
+          }
+          return;
+        }
+        if (result.skill) {
+          setSelection({ mode: "existing", skillId: result.skill.id });
+          setDraftName(result.skill.name);
+          setDraftContent(result.skill.content ?? "");
+          setIsEditing(false);
+        }
+        toast.show(text.skillImportZipSuccess(name), { variant: "success" });
+        await refresh();
+      } catch (error) {
+        toast.error(toErrorMessage(error));
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [client, draftName, refresh, selectedTargetOption, text, toast, workspace],
+  );
+
+  const closeEditor = useCallback(() => {
+    setSelection(null);
+    setDraftName("");
+    setDraftContent("");
+    setIsEditing(false);
+  }, []);
+
+  const deleteSkill = useCallback(async () => {
+    if (!client || !selectedSkill) return;
+    const confirmed = await confirmDialog({
+      title: text.skillDeleteConfirmTitle,
+      message: text.skillDeleteConfirmMessage(selectedSkill.name),
+      confirmLabel: text.skillDelete,
+      cancelLabel: messages.common.cancel,
+      destructive: true,
+    });
+    if (!confirmed) return;
+    setIsSaving(true);
+    try {
+      await client.skillsDelete({
+        skillId: selectedSkill.id,
+        workspaceId: workspace?.id,
+        cwd: workspace?.workspaceDirectory,
+      });
+      toast.show(text.skillDeleteSuccess(selectedSkill.name), { variant: "success" });
+      closeEditor();
+      setDraftName("");
+      setDraftContent("");
+      setIsEditing(false);
+      await refresh();
+    } catch (error) {
+      toast.error(toErrorMessage(error));
+    } finally {
+      setIsSaving(false);
+    }
+  }, [client, closeEditor, messages.common.cancel, refresh, selectedSkill, text, toast, workspace]);
+
+  const openMarketplaceSkill = useCallback(
+    async (skill: ContextHubMarketplaceSkillEntry) => {
+      const url = marketplaceSkillUrl(skill);
+      if (!url) {
+        toast.error(text.skillOpenFailed);
+        return;
+      }
+      try {
+        await openExternalUrl(url);
+      } catch (error) {
+        toast.error(toErrorMessage(error));
+      }
+    },
+    [text.skillOpenFailed, toast],
+  );
+
+  const scrollToMarketplaceLetter = useCallback((letter: string) => {
+    const y = marketplaceLetterOffsetsRef.current.get(letter);
+    if (typeof y !== "number") return;
+    scrollRef.current?.scrollTo({ y: Math.max(0, y - 16), animated: true });
+  }, []);
+
   const renderMarketplaceSkillRow = useCallback(
     (skill: ContextHubMarketplaceSkillEntry) => {
-      const isInstalling = installingSkillId === skill.id;
-      const isInstalled =
-        skill.installed ||
-        confirmedInstalledSkillKeys.has(installedSkillKey(workspace?.id, skill.id));
-      const canInstall = Boolean(client && workspace) && !isInstalling && !isInstalled;
-      const installActionState = isInstalled
-        ? styles.installActionInstalled
-        : isInstalling || !canInstall
-          ? styles.installActionDisabled
-          : null;
-      const installActionForeground = isInstalled
-        ? theme.colors.success
-        : isInstalling || !canInstall
-          ? theme.colors.foregroundMuted
-          : theme.colors.accentForeground;
+      const canOpen = Boolean(marketplaceSkillUrl(skill));
       return (
         <View key={skill.id} style={styles.skillRow} testID={`skill-marketplace-row-${skill.id}`}>
           <View style={styles.skillIcon}>
@@ -404,7 +568,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
               <Text style={styles.skillName} numberOfLines={1}>
                 {skill.name}
               </Text>
-              {isInstalled ? (
+              {skill.installed ? (
                 <View style={styles.installedBadge}>
                   <Check size={12} color={theme.colors.success} />
                   <Text style={styles.installedText}>{text.skillInstalled}</Text>
@@ -430,38 +594,30 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
             </Text>
           </View>
           <Pressable
-            style={[styles.installAction, installActionState]}
+            style={[styles.installAction, !canOpen ? styles.installActionDisabled : null]}
             accessibilityRole="button"
             testID={`skill-marketplace-install-${skill.id}`}
-            onPress={() => void installSkill(skill)}
-            disabled={!canInstall}
+            onPress={() => void openMarketplaceSkill(skill)}
+            disabled={!canOpen}
           >
-            {isInstalled ? (
-              <Check size={18} color={installActionForeground} />
-            ) : (
-              <Download size={18} color={installActionForeground} />
-            )}
-            <Text style={[styles.installActionText, { color: installActionForeground }]}>
-              {isInstalling
-                ? text.skillInstalling
-                : isInstalled
-                  ? text.skillInstalled
-                  : text.skillInstall}
+            <ExternalLink
+              size={18}
+              color={canOpen ? theme.colors.accentForeground : theme.colors.foregroundMuted}
+            />
+            <Text
+              style={[
+                styles.installActionText,
+                { color: canOpen ? theme.colors.accentForeground : theme.colors.foregroundMuted },
+              ]}
+            >
+              {text.skillOpen}
             </Text>
           </Pressable>
         </View>
       );
     },
-    [client, confirmedInstalledSkillKeys, installSkill, installingSkillId, text, theme, workspace],
+    [openMarketplaceSkill, text, theme],
   );
-
-  const scrollToMarketplaceLetter = useCallback((letter: string) => {
-    const y = marketplaceLetterOffsetsRef.current.get(letter);
-    if (typeof y !== "number") {
-      return;
-    }
-    scrollRef.current?.scrollTo({ y: Math.max(0, y - 16), animated: true });
-  }, []);
 
   const headerActions = (
     <View style={styles.headerActions}>
@@ -482,6 +638,12 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
   const workspaceLabel = workspace
     ? `${workspace.projectDisplayName || workspace.name} · ${workspace.name}`
     : text.skillNoWorkspace;
+  const editorTitle =
+    selection?.mode === "new"
+      ? text.skillNew
+      : selectedSkill?.name
+        ? selectedSkill.name
+        : text.skillSelectSkill;
 
   return (
     <View style={styles.container}>
@@ -554,62 +716,123 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
           </View>
         ) : null}
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>{text.skillLocalSkills}</Text>
-          <Text style={styles.sectionCount}>{localSkillSummaries.length}</Text>
-        </View>
-
-        {isLoading && localSkillSummaries.length === 0 ? (
-          <SkillSectionSkeleton />
-        ) : (
-          <View style={styles.skillGrid}>
-            {localSkillSummaries.map((skill) => (
-              <View key={skill.key} style={styles.skillRow} testID={`local-skill-row-${skill.key}`}>
-                <View style={styles.skillIcon}>
-                  <Box size={22} color={theme.colors.accentBright} />
-                </View>
-                <View style={styles.skillCopy}>
-                  <View style={styles.skillTitleRow}>
-                    <Text style={styles.skillName} numberOfLines={1}>
-                      {skill.name}
-                    </Text>
-                    <View style={styles.installedBadge}>
-                      <Check size={12} color={theme.colors.success} />
-                      <Text style={styles.installedText}>
-                        {skill.readOnly ? text.skillBuiltIn : text.skillInstalled}
-                      </Text>
-                    </View>
-                  </View>
-                  {skill.description ? (
-                    <Text style={styles.skillDescription} numberOfLines={2}>
-                      {skill.description}
-                    </Text>
-                  ) : null}
-                  <View style={styles.pills}>
-                    <View style={styles.pill}>
-                      <Text style={styles.pillText}>
-                        {skill.scope === "workspace"
-                          ? text.skillScopeWorkspace
-                          : text.skillScopeGlobal}
-                      </Text>
-                    </View>
-                    {skill.sources.map((source) => (
-                      <View key={source} style={styles.pill}>
-                        <Text style={styles.pillText}>{localSkillSourceLabel(source, locale)}</Text>
-                      </View>
-                    ))}
-                  </View>
-                  <Text style={styles.skillSource} numberOfLines={1}>
-                    {skill.path}
+        <View style={styles.localManager} testID="skill-local-manager">
+          <View style={styles.localListPane}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>{text.skillLocalSkills}</Text>
+              <Text style={styles.sectionCount}>{filteredLocalSkills.length}</Text>
+            </View>
+            <View style={styles.targetWrap}>
+              {targetOptions.map((option) => (
+                <Pressable
+                  key={option.value}
+                  style={[
+                    styles.targetButton,
+                    selectedTarget === option.value ? styles.targetButtonActive : null,
+                  ]}
+                  accessibilityRole="button"
+                  testID={`skill-target-${option.value}`}
+                  onPress={() => setSelectedTarget(option.value)}
+                >
+                  <Text
+                    style={[
+                      styles.targetButtonText,
+                      selectedTarget === option.value ? styles.targetButtonTextActive : null,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {option.label}
                   </Text>
-                </View>
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.localActions}>
+              <Pressable
+                style={styles.secondaryAction}
+                accessibilityRole="button"
+                testID="skill-new-button"
+                onPress={createNewSkill}
+              >
+                <Plus size={16} color={theme.colors.foreground} />
+                <Text style={styles.secondaryActionText}>{text.skillNew}</Text>
+              </Pressable>
+              <Pressable
+                style={styles.secondaryAction}
+                accessibilityRole="button"
+                testID="skill-import-zip-button"
+                disabled={isSaving}
+                onPress={() => void importZip()}
+              >
+                <FileArchive size={16} color={theme.colors.foreground} />
+                <Text style={styles.secondaryActionText}>{text.skillImportZip}</Text>
+              </Pressable>
+            </View>
+            {isLoading && filteredLocalSkills.length === 0 ? (
+              <SkillSectionSkeleton />
+            ) : (
+              <View style={styles.localSkillList}>
+                {filteredLocalSkills.map((skill) => (
+                  <View
+                    key={skill.id}
+                    style={styles.localSkillItem}
+                    testID={`local-skill-row-${skill.name.toLowerCase()}`}
+                  >
+                    <View style={styles.localSkillHeader}>
+                      <View style={styles.localSkillHeading}>
+                        <Text style={styles.skillName} numberOfLines={1}>
+                          {skill.name}
+                        </Text>
+                        <View style={styles.installedBadge}>
+                          {skill.readOnly ? null : <Check size={12} color={theme.colors.success} />}
+                          <Text style={styles.installedText}>
+                            {skill.readOnly ? text.skillBuiltIn : text.skillEditable}
+                          </Text>
+                        </View>
+                      </View>
+                      <Pressable
+                        style={styles.iconAction}
+                        accessibilityRole="button"
+                        testID={`local-skill-edit-${skill.id}`}
+                        onPress={() => openLocalSkill(skill, !skill.readOnly)}
+                      >
+                        {skill.readOnly ? (
+                          <Eye size={16} color={theme.colors.foreground} />
+                        ) : (
+                          <Edit3 size={16} color={theme.colors.foreground} />
+                        )}
+                      </Pressable>
+                    </View>
+                    {skill.description ? (
+                      <Text style={styles.skillDescription} numberOfLines={2}>
+                        {skill.description}
+                      </Text>
+                    ) : null}
+                    <View style={styles.pills}>
+                      <View style={styles.pill}>
+                        <Text style={styles.pillText}>
+                          {skill.scope === "workspace"
+                            ? text.skillScopeWorkspace
+                            : text.skillScopeGlobal}
+                        </Text>
+                      </View>
+                      <View style={styles.pill}>
+                        <Text style={styles.pillText}>
+                          {localSkillSourceLabel(skill.source, locale)}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.skillSource} numberOfLines={1}>
+                      {skill.path}
+                    </Text>
+                  </View>
+                ))}
+                {filteredLocalSkills.length === 0 ? (
+                  <Text style={styles.emptyText}>{text.skillNoLocalSkills}</Text>
+                ) : null}
               </View>
-            ))}
-            {localSkillSummaries.length === 0 ? (
-              <Text style={styles.emptyText}>{text.skillNoLocalSkills}</Text>
-            ) : null}
+            )}
           </View>
-        )}
+        </View>
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>{text.skillMarketplaceSkills}</Text>
@@ -665,6 +888,120 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
           })}
         </View>
       ) : null}
+      <Modal
+        transparent
+        animationType="fade"
+        visible={selection !== null}
+        onRequestClose={closeEditor}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.editorPane} testID="skill-editor-pane">
+            <View style={styles.editorHeader}>
+              <View style={styles.editorTitleWrap}>
+                <Text style={styles.sectionTitle} numberOfLines={1}>
+                  {editorTitle}
+                </Text>
+                {selectedSkill ? (
+                  <Text style={styles.skillSource} numberOfLines={1}>
+                    {selectedSkill.path}
+                  </Text>
+                ) : null}
+              </View>
+              <View style={styles.editorActions}>
+                {selection && selectedSkill?.readOnly !== true ? (
+                  <Pressable
+                    style={styles.iconAction}
+                    accessibilityRole="button"
+                    testID="skill-edit-toggle"
+                    onPress={() => setIsEditing((value) => !value)}
+                  >
+                    {isEditing ? (
+                      <X size={16} color={theme.colors.foregroundMuted} />
+                    ) : (
+                      <Edit3 size={16} color={theme.colors.foreground} />
+                    )}
+                  </Pressable>
+                ) : null}
+                {canMutateSelectedSkill ? (
+                  <Pressable
+                    style={styles.iconAction}
+                    accessibilityRole="button"
+                    testID="skill-delete-button"
+                    disabled={isSaving}
+                    onPress={() => void deleteSkill()}
+                  >
+                    <Trash2 size={16} color={theme.colors.foreground} />
+                  </Pressable>
+                ) : null}
+                <Pressable
+                  style={styles.iconAction}
+                  accessibilityRole="button"
+                  testID="skill-editor-close"
+                  onPress={closeEditor}
+                >
+                  <X size={16} color={theme.colors.foregroundMuted} />
+                </Pressable>
+              </View>
+            </View>
+            {selection ? (
+              <View style={styles.editorBody}>
+                <Text style={styles.fieldLabel}>{text.skillNameLabel}</Text>
+                <TextInput
+                  value={draftName}
+                  onChangeText={setDraftName}
+                  editable={isEditing && selection.mode === "new"}
+                  placeholder="my-skill"
+                  placeholderTextColor={theme.colors.foregroundMuted}
+                  style={[styles.fieldInput, isWeb && ({ outlineStyle: "none" } as any)]}
+                  testID="skill-name-input"
+                />
+                <Text style={styles.fieldLabel}>SKILL.md</Text>
+                <TextInput
+                  value={draftContent}
+                  onChangeText={setDraftContent}
+                  editable={isEditing && (selection.mode === "new" || canMutateSelectedSkill)}
+                  multiline
+                  textAlignVertical="top"
+                  placeholder={DEFAULT_SKILL_CONTENT}
+                  placeholderTextColor={theme.colors.foregroundMuted}
+                  style={[styles.codeInput, isWeb && ({ outlineStyle: "none" } as any)]}
+                  testID="skill-content-input"
+                />
+                {isEditing ? (
+                  <View style={styles.editorFooter}>
+                    <Pressable
+                      style={[styles.installAction, isSaving ? styles.installActionDisabled : null]}
+                      accessibilityRole="button"
+                      testID="skill-save-button"
+                      disabled={isSaving}
+                      onPress={() => void saveSkill()}
+                    >
+                      <Save
+                        size={18}
+                        color={
+                          isSaving ? theme.colors.foregroundMuted : theme.colors.accentForeground
+                        }
+                      />
+                      <Text
+                        style={[
+                          styles.installActionText,
+                          {
+                            color: isSaving
+                              ? theme.colors.foregroundMuted
+                              : theme.colors.accentForeground,
+                          },
+                        ]}
+                      >
+                        {isSaving ? text.skillSaving : text.skillSave}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -819,6 +1156,170 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
   },
+  localManager: {
+    gap: theme.spacing[4],
+  },
+  localListPane: {
+    gap: theme.spacing[4],
+  },
+  modalBackdrop: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: theme.spacing[6],
+    backgroundColor: "rgba(0, 0, 0, 0.44)",
+  },
+  editorPane: {
+    width: "100%",
+    maxWidth: 920,
+    maxHeight: "88%",
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface1,
+    overflow: "hidden",
+  },
+  targetWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[2],
+  },
+  targetButton: {
+    minHeight: 30,
+    maxWidth: 180,
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing[3],
+    backgroundColor: theme.colors.surface1,
+  },
+  targetButtonActive: {
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.accent,
+  },
+  targetButtonText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+  },
+  targetButtonTextActive: {
+    color: theme.colors.accentForeground,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  localActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[2],
+  },
+  secondaryAction: {
+    minHeight: 34,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: theme.spacing[2],
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing[3],
+    backgroundColor: theme.colors.surface1,
+  },
+  secondaryActionText: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  localSkillList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    columnGap: theme.spacing[4],
+    rowGap: theme.spacing[4],
+  },
+  localSkillHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: theme.spacing[3],
+  },
+  localSkillHeading: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  localSkillItem: {
+    width: "47%",
+    minWidth: 360,
+    minHeight: 118,
+    gap: theme.spacing[2],
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing[3],
+    backgroundColor: theme.colors.surface1,
+  },
+  editorHeader: {
+    minHeight: 58,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[3],
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+    paddingHorizontal: theme.spacing[4],
+  },
+  editorTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  editorActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  iconAction: {
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface2,
+  },
+  editorBody: {
+    flex: 1,
+    gap: theme.spacing[3],
+    padding: theme.spacing[4],
+  },
+  editorFooter: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+  fieldLabel: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  fieldInput: {
+    minHeight: 40,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing[3],
+    color: theme.colors.foreground,
+    backgroundColor: theme.colors.surface0,
+    fontSize: theme.fontSize.sm,
+  },
+  codeInput: {
+    minHeight: 320,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing[3],
+    color: theme.colors.foreground,
+    backgroundColor: theme.colors.surface0,
+    fontSize: theme.fontSize.sm,
+    lineHeight: 20,
+  },
   marketplaceGroups: {
     gap: theme.spacing[8],
   },
@@ -964,9 +1465,6 @@ const styles = StyleSheet.create((theme) => ({
   installActionDisabled: {
     backgroundColor: theme.colors.surface1,
   },
-  installActionInstalled: {
-    backgroundColor: theme.colors.surface1,
-  },
   installActionText: {
     color: theme.colors.accentForeground,
     fontSize: theme.fontSize.sm,
@@ -978,20 +1476,14 @@ const styles = StyleSheet.create((theme) => ({
   alphabetRail: {
     position: "absolute",
     right: theme.spacing[2],
-    top: 112,
+    top: 132,
     bottom: theme.spacing[8],
-    width: 28,
-    alignItems: "center",
     justifyContent: "center",
     gap: 1,
-    borderRadius: theme.borderRadius.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface1,
   },
   alphabetButton: {
     width: 24,
-    minHeight: 18,
+    height: 20,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: theme.borderRadius.sm,

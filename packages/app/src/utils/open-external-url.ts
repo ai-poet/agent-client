@@ -1,4 +1,3 @@
-import * as Linking from "expo-linking";
 import { getDesktopHost } from "@/desktop/host";
 import { isWeb } from "@/constants/platform";
 
@@ -14,5 +13,6 @@ export async function openExternalUrl(url: string): Promise<void> {
     return;
   }
 
+  const Linking = await import("expo-linking");
   await Linking.openURL(url);
 }

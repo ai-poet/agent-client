@@ -14,11 +14,15 @@ const {
   defaultWorkspace,
   marketplaceSkill,
   localSkill,
+  editableSkill,
   mockClient,
   mockSessionState,
   getMockWorkspaceList,
   toastSuccessMock,
   toastErrorMock,
+  openExternalUrlMock,
+  pickSkillZipBase64Mock,
+  confirmDialogMock,
 } = vi.hoisted(() => {
   const theme = {
     spacing: { 1: 4, 2: 8, 3: 12, 4: 16, 5: 20, 8: 32, 10: 40, 16: 64 },
@@ -76,14 +80,43 @@ const {
     updatedAt: "2026-01-01T00:00:00.000Z",
   };
 
+  const editableSkill: ContextHubManagedSkillEntry = {
+    id: "managed:review-helper",
+    name: "review-helper",
+    description: "Review code with local conventions.",
+    source: "managed",
+    scope: "global",
+    workspaceId: null,
+    path: "/home/.agent-client/skills/review-helper/SKILL.md",
+    readOnly: false,
+    content:
+      "---\nname: review-helper\ndescription: Review code with local conventions.\n---\n\n# Review helper\n",
+    createdAt: "2026-01-02T00:00:00.000Z",
+    updatedAt: "2026-01-02T00:00:00.000Z",
+  };
+
   const mockClient = {
     isConnected: true,
-    skillsList: vi.fn(async () => ({ skills: [localSkill], error: null })),
+    skillsList: vi.fn(async () => ({ skills: [localSkill, editableSkill], error: null })),
     skillsMarketplaceList: vi.fn(async () => ({ skills: [marketplaceSkill], error: null })),
     skillsMarketplaceInstall: vi.fn(async () => ({
       skill: null,
       installed: true,
       conflict: false,
+      error: null,
+    })),
+    skillsSave: vi.fn(async () => ({
+      skill: editableSkill,
+      conflict: false,
+      error: null,
+    })),
+    skillsImportPackage: vi.fn(async () => ({
+      skill: editableSkill,
+      conflict: false,
+      error: null,
+    })),
+    skillsDelete: vi.fn(async () => ({
+      skillId: editableSkill.id,
       error: null,
     })),
   };
@@ -136,11 +169,18 @@ const {
     defaultWorkspace,
     marketplaceSkill,
     localSkill,
+    editableSkill,
     mockClient,
     mockSessionState,
     getMockWorkspaceList,
     toastSuccessMock: vi.fn(),
     toastErrorMock: vi.fn(),
+    openExternalUrlMock: vi.fn(async () => undefined),
+    pickSkillZipBase64Mock: vi.fn(async () => ({
+      name: "skill-creator",
+      base64: "UEsDBAo=",
+    })),
+    confirmDialogMock: vi.fn(async () => true),
   };
 });
 
@@ -163,9 +203,17 @@ vi.mock("lucide-react-native", () => {
     Check: createIcon("Check"),
     ChevronDown: createIcon("ChevronDown"),
     Download: createIcon("Download"),
+    Edit3: createIcon("Edit3"),
+    Eye: createIcon("Eye"),
+    ExternalLink: createIcon("ExternalLink"),
+    FileArchive: createIcon("FileArchive"),
+    Plus: createIcon("Plus"),
     RefreshCcw: createIcon("RefreshCcw"),
+    Save: createIcon("Save"),
     Search: createIcon("Search"),
     ShieldCheck: createIcon("ShieldCheck"),
+    Trash2: createIcon("Trash2"),
+    X: createIcon("X"),
   };
 });
 
@@ -202,9 +250,23 @@ vi.mock("@/utils/error-messages", () => ({
   toErrorMessage: (error: unknown) => (error instanceof Error ? error.message : String(error)),
 }));
 
+vi.mock("@/utils/open-external-url", () => ({
+  openExternalUrl: openExternalUrlMock,
+}));
+
+vi.mock("@/utils/pick-skill-zip", () => ({
+  pickSkillZipBase64: pickSkillZipBase64Mock,
+}));
+
+vi.mock("@/utils/confirm-dialog", () => ({
+  confirmDialog: confirmDialogMock,
+}));
+
 vi.mock("react-native", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("react-native");
-  return actual;
+  const Modal = ({ children, visible }: { children?: React.ReactNode; visible?: boolean }) =>
+    visible ? React.createElement("div", { "data-testid": "mock-modal" }, children) : null;
+  return { ...actual, Modal };
 });
 
 let root: Root | null = null;
@@ -227,7 +289,13 @@ beforeEach(() => {
   mockClient.skillsList.mockClear();
   mockClient.skillsMarketplaceList.mockClear();
   mockClient.skillsMarketplaceInstall.mockClear();
-  mockClient.skillsList.mockImplementation(async () => ({ skills: [localSkill], error: null }));
+  mockClient.skillsSave.mockClear();
+  mockClient.skillsImportPackage.mockClear();
+  mockClient.skillsDelete.mockClear();
+  mockClient.skillsList.mockImplementation(async () => ({
+    skills: [localSkill, editableSkill],
+    error: null,
+  }));
   mockClient.skillsMarketplaceList.mockImplementation(async () => ({
     skills: [marketplaceSkill],
     error: null,
@@ -240,6 +308,10 @@ beforeEach(() => {
   }));
   toastSuccessMock.mockClear();
   toastErrorMock.mockClear();
+  openExternalUrlMock.mockClear();
+  pickSkillZipBase64Mock.mockClear();
+  confirmDialogMock.mockClear();
+  confirmDialogMock.mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -281,16 +353,6 @@ function getIcon(element: Element, name: string): HTMLElement {
   return icon;
 }
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((promiseResolve, promiseReject) => {
-    resolve = promiseResolve;
-    reject = promiseReject;
-  });
-  return { promise, resolve, reject };
-}
-
 async function findByTestId(testID: string): Promise<HTMLElement> {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     await flush();
@@ -324,13 +386,14 @@ describe("SkillLibraryScreen marketplace", () => {
     expect(rail.textContent).toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
     expect(letterC.getAttribute("aria-disabled")).not.toBe("true");
     expect(installButton.style.backgroundColor).toBe("rgb(32, 116, 74)");
-    expect(installButton.textContent).toContain("Install");
-    expect(getIcon(installButton, "Download").getAttribute("color")).toBe(
+    expect(installButton.textContent).toContain("Open");
+    expect(getIcon(installButton, "ExternalLink").getAttribute("color")).toBe(
       theme.colors.accentForeground,
     );
     expect(mockClient.skillsList).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
       cwd: "/repo",
+      includeContent: true,
     });
     expect(mockClient.skillsMarketplaceList).toHaveBeenCalledWith({
       query: undefined,
@@ -353,7 +416,7 @@ describe("SkillLibraryScreen marketplace", () => {
     expect(row.textContent).toContain("Built-in");
   });
 
-  it("disables install when no workspace is selected", async () => {
+  it("opens marketplace skills even when no workspace is selected", async () => {
     mockSessionState.sessions.server.workspaces = new Map();
     renderScreen();
 
@@ -361,100 +424,99 @@ describe("SkillLibraryScreen marketplace", () => {
       "skill-marketplace-install-skillsmp:openai-codex-codex-skills-code-review-skill-md",
     );
 
-    expect(installButton.getAttribute("aria-disabled")).toBe("true");
-    expect(installButton.textContent).toContain("Install");
-    expect(installButton.style.backgroundColor).toBe("rgb(17, 17, 17)");
-    expect(getIcon(installButton, "Download").getAttribute("color")).toBe(
-      theme.colors.foregroundMuted,
-    );
-  });
-
-  it("shows a themed disabled installing state while installation is pending", async () => {
-    const pendingInstall = deferred<{
-      skill: null;
-      installed: boolean;
-      conflict: boolean;
-      error: null;
-    }>();
-    mockClient.skillsMarketplaceInstall.mockImplementationOnce(() => pendingInstall.promise);
-    renderScreen();
-    const installButton = await findByTestId(
-      "skill-marketplace-install-skillsmp:openai-codex-codex-skills-code-review-skill-md",
-    );
-
+    expect(installButton.getAttribute("aria-disabled")).not.toBe("true");
     click(installButton);
     await flush();
 
-    expect(installButton.getAttribute("aria-disabled")).toBe("true");
-    expect(installButton.textContent).toContain("Installing");
-    expect(installButton.style.backgroundColor).toBe("rgb(17, 17, 17)");
-    expect(getIcon(installButton, "Download").getAttribute("color")).toBe(
-      theme.colors.foregroundMuted,
+    expect(openExternalUrlMock).toHaveBeenCalledWith(
+      "https://skillsmp.com/skills/openai-codex-codex-skills-code-review-skill-md",
     );
-
-    pendingInstall.resolve({ skill: null, installed: true, conflict: false, error: null });
-    await flush();
+    expect(mockClient.skillsMarketplaceInstall).not.toHaveBeenCalled();
   });
 
-  it("installs into the selected workspace and refreshes the marketplace", async () => {
+  it("creates a local skill from the editor", async () => {
     renderScreen();
-    const installButton = await findByTestId(
-      "skill-marketplace-install-skillsmp:openai-codex-codex-skills-code-review-skill-md",
-    );
+    const newButton = await findByTestId("skill-new-button");
 
-    click(installButton);
+    click(newButton);
+    await flush();
+    const nameInput = await findByTestId("skill-name-input");
+    const saveButton = await findByTestId("skill-save-button");
+
+    act(() => {
+      nameInput.dispatchEvent(new window.Event("input", { bubbles: true }));
+    });
+    click(saveButton);
     await flush();
 
-    expect(mockClient.skillsMarketplaceInstall).toHaveBeenCalledWith({
+    expect(mockClient.skillsSave).toHaveBeenCalledWith({
+      target: "managed",
+      scope: "global",
+      skillId: undefined,
+      name: "my-skill",
+      content: expect.stringContaining("name: my-skill"),
       workspaceId: "workspace-1",
       cwd: "/repo",
-      skillId: "skillsmp:openai-codex-codex-skills-code-review-skill-md",
-      name: "Code Review",
-      version: undefined,
       overwrite: false,
     });
     expect(toastSuccessMock).toHaveBeenCalledWith(
-      "Code Review installed. Reload running agents to pick it up.",
+      "my-skill saved. Reload running agents to pick it up.",
       { variant: "success" },
     );
-    expect(mockClient.skillsList).toHaveBeenCalledTimes(2);
-    expect(mockClient.skillsMarketplaceList).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the installed state when refresh has not caught up yet", async () => {
-    mockClient.skillsMarketplaceList.mockImplementation(async () => ({
-      skills: [{ ...marketplaceSkill, installed: false }],
-      error: null,
-    }));
+  it("edits and deletes a writable local skill", async () => {
     renderScreen();
-    const installButton = await findByTestId(
-      "skill-marketplace-install-skillsmp:openai-codex-codex-skills-code-review-skill-md",
-    );
+    const editCardButton = await findByTestId("local-skill-edit-managed:review-helper");
 
-    click(installButton);
+    click(editCardButton);
+    await flush();
+    const saveButton = await findByTestId("skill-save-button");
+    click(saveButton);
     await flush();
 
-    expect(installButton.getAttribute("aria-disabled")).toBe("true");
-    expect(installButton.textContent).toContain("Installed");
-    expect(getIcon(installButton, "Check").getAttribute("color")).toBe(theme.colors.success);
-    expect(mockClient.skillsMarketplaceList).toHaveBeenCalledTimes(2);
+    expect(mockClient.skillsSave).toHaveBeenCalledWith({
+      target: "managed",
+      scope: "global",
+      skillId: "managed:review-helper",
+      name: "review-helper",
+      content: expect.stringContaining("Review helper"),
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+      overwrite: false,
+    });
+
+    const deleteButton = await findByTestId("skill-delete-button");
+    click(deleteButton);
+    await flush();
+
+    expect(confirmDialogMock).toHaveBeenCalled();
+    expect(mockClient.skillsDelete).toHaveBeenCalledWith({
+      skillId: "managed:review-helper",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+    });
   });
 
-  it("shows a timeout message and refreshes when installation exceeds the client wait", async () => {
-    mockClient.skillsMarketplaceInstall.mockRejectedValueOnce(
-      new Error("Timeout waiting for message (30000ms)"),
-    );
+  it("imports a zip package into the selected skill target", async () => {
     renderScreen();
-    const installButton = await findByTestId(
-      "skill-marketplace-install-skillsmp:openai-codex-codex-skills-code-review-skill-md",
-    );
+    const target = await findByTestId("skill-target-project_codex");
+    click(target);
+    await flush();
+    const importButton = await findByTestId("skill-import-zip-button");
 
-    click(installButton);
+    click(importButton);
     await flush();
 
-    expect(toastErrorMock).toHaveBeenCalledWith(
-      "Code Review may still be installing or the network is slow. Refreshed the skill list; check again shortly.",
-    );
-    expect(mockClient.skillsMarketplaceList).toHaveBeenCalledTimes(2);
+    expect(pickSkillZipBase64Mock).toHaveBeenCalled();
+    expect(mockClient.skillsImportPackage).toHaveBeenCalledWith({
+      target: "project_codex",
+      scope: "workspace",
+      name: "skill-creator",
+      packageBase64: "UEsDBAo=",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+      overwrite: false,
+    });
   });
 });

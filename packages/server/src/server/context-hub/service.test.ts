@@ -144,6 +144,91 @@ describe("ContextHubService", () => {
     expect(exported.content).toContain("Use rg before reading broad file trees.");
   });
 
+  it("saves, updates, imports zip packages, and deletes writable skills", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "paseo-skill-crud-"));
+    try {
+      const created = await service.saveSkill({
+        target: "project_codex",
+        scope: "workspace",
+        workspaceId: "workspace-1",
+        cwd: workspaceRoot,
+        name: "Review Helper",
+        content: "---\nname: review-helper\ndescription: First.\n---\n",
+      });
+      expect(created.skill.source).toBe("project_codex");
+      expect(created.skill.readOnly).toBe(false);
+      expect(await readFile(created.skill.path, "utf8")).toContain("First");
+
+      const updated = await service.saveSkill({
+        target: "project_codex",
+        scope: "workspace",
+        workspaceId: "workspace-1",
+        cwd: workspaceRoot,
+        skillId: created.skill.id,
+        name: "ignored-name",
+        content: "---\nname: review-helper\ndescription: Second.\n---\n",
+      });
+      expect(updated.skill.id).toBe(created.skill.id);
+      expect(await readFile(created.skill.path, "utf8")).toContain("Second");
+
+      const imported = await service.importSkillPackage({
+        target: "project_agents",
+        scope: "workspace",
+        workspaceId: "workspace-1",
+        cwd: workspaceRoot,
+        name: "Skill Creator",
+        packageBuffer: createSkillPackage({
+          "skill-creator/SKILL.md": "---\nname: skill-creator\ndescription: Make skills.\n---\n",
+          "skill-creator/scripts/create.js": "console.log('create');\n",
+        }),
+      });
+      expect(imported.skill.source).toBe("project_agents");
+      await expect(
+        readFile(
+          path.join(workspaceRoot, ".agents", "skills", "skill-creator", "scripts", "create.js"),
+          "utf8",
+        ),
+      ).resolves.toContain("create");
+
+      await service.deleteSkill({
+        skillId: imported.skill.id,
+        workspaceId: "workspace-1",
+        cwd: workspaceRoot,
+      });
+      await expect(readFile(imported.skill.path, "utf8")).rejects.toThrow();
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects writable skill conflicts unless overwrite is explicit", async () => {
+    await service.saveSkill({
+      target: "managed",
+      scope: "global",
+      name: "Conflicting Skill",
+      content: "---\nname: conflicting-skill\ndescription: First.\n---\n",
+    });
+
+    await expect(
+      service.saveSkill({
+        target: "managed",
+        scope: "global",
+        name: "Conflicting Skill",
+        content: "---\nname: conflicting-skill\ndescription: Second.\n---\n",
+      }),
+    ).rejects.toThrow(/already exists/);
+
+    await expect(
+      service.saveSkill({
+        target: "managed",
+        scope: "global",
+        name: "Conflicting Skill",
+        content: "---\nname: conflicting-skill\ndescription: Second.\n---\n",
+        overwrite: true,
+      }),
+    ).resolves.toMatchObject({ conflict: false });
+  });
+
   it("lists bundled skills as read-only local skills", async () => {
     const bundledRoot = await mkdtemp(path.join(tmpdir(), "paseo-bundled-skills-"));
     try {
@@ -552,7 +637,7 @@ describe("ContextHubService", () => {
     }
   });
 
-  it("rejects marketplace packages without top-level SKILL.md or with unsafe paths", async () => {
+  it("rejects marketplace packages without SKILL.md or with unsafe paths", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "paseo-skill-workspace-"));
     try {
       await expect(
@@ -561,9 +646,9 @@ describe("ContextHubService", () => {
           cwd: workspaceRoot,
           skillId: "skill-1",
           name: "bad-skill",
-          packageBuffer: createSkillPackage({ "nested/SKILL.md": "# Bad\n" }),
+          packageBuffer: createSkillPackage({ "nested/README.md": "# Bad\n" }),
         }),
-      ).rejects.toThrow(/top-level SKILL\.md/);
+      ).rejects.toThrow(/contain SKILL\.md/);
 
       await expect(
         service.installMarketplaceSkillPackage({
