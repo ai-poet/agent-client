@@ -309,6 +309,78 @@ describe("DaemonClient", () => {
     });
   });
 
+  test("waits up to two minutes for skill marketplace installs", async () => {
+    vi.useFakeTimers();
+    try {
+      const logger = createMockLogger();
+      const mock = createMockTransport();
+
+      const client = new DaemonClient({
+        url: "ws://test",
+        clientId: "clsk_unit_test",
+        logger,
+        reconnect: { enabled: false },
+        transportFactory: () => mock.transport,
+      });
+      clients.push(client);
+
+      const connectPromise = client.connect();
+      mock.triggerOpen();
+      await connectPromise;
+
+      const installPromise = client.skillsMarketplaceInstall({
+        workspaceId: "workspace-1",
+        cwd: "/repo",
+        skillId: "skill-1",
+        name: "google-search",
+      });
+      const installRequest = JSON.parse(mock.sent[0] as string) as {
+        type: "session";
+        message: {
+          type: "skills/marketplace/install";
+          requestId: string;
+        };
+      };
+
+      await vi.advanceTimersByTimeAsync(119_999);
+      mock.triggerMessage(
+        wrapSessionMessage({
+          type: "skills/marketplace/install/response",
+          payload: {
+            requestId: installRequest.message.requestId,
+            skill: null,
+            installed: true,
+            conflict: false,
+            error: null,
+          },
+        }),
+      );
+
+      await expect(installPromise).resolves.toMatchObject({
+        installed: true,
+        error: null,
+      });
+
+      const timedOutInstall = client
+        .skillsMarketplaceInstall({
+          workspaceId: "workspace-1",
+          cwd: "/repo",
+          skillId: "skill-2",
+          name: "slow-skill",
+        })
+        .then(
+          () => null,
+          (error) => error,
+        );
+      await vi.advanceTimersByTimeAsync(120_000);
+      const timeoutError = await timedOutInstall;
+      expect(timeoutError).toBeInstanceOf(Error);
+      expect((timeoutError as Error).message).toBe("Timeout waiting for message (120000ms)");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("normalizes workspace_setup_progress into a workspace-scoped daemon event", async () => {
     const logger = createMockLogger();
     const mock = createMockTransport();

@@ -3,7 +3,7 @@ import { ArrowLeft, GitGraph } from "lucide-react-native";
 import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { CommitGraphPane } from "@/components/commit-graph-pane";
+import { CommitGraphPane } from "@/components/git-graph";
 import { useWorkspaceExecutionAuthority } from "@/stores/session-store-hooks";
 
 function getParamValue(value: string | string[] | undefined): string {

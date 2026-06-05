@@ -3850,7 +3850,7 @@ export class DaemonClient {
         ...message,
       },
       responseType: "skills/marketplace/install/response",
-      timeout: 30000,
+      timeout: 120000,
     });
   }
 

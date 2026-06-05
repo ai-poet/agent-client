@@ -12,11 +12,19 @@ export interface GraphEdge {
   to: string;
   path: string;
   color: string;
+  isMerge: boolean;
+}
+
+export interface BranchLane {
+  column: number;
+  branchName: string;
+  color: string;
 }
 
 export interface GraphLayout {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  branchLanes: BranchLane[];
   width: number;
   height: number;
   columnWidth: number;
@@ -26,7 +34,7 @@ export interface GraphLayout {
 
 const DEFAULT_COLUMN_WIDTH = 48;
 const DEFAULT_ROW_HEIGHT = 40;
-const DEFAULT_NODE_RADIUS = 6;
+const DEFAULT_NODE_RADIUS = 5;
 
 function hashString(str: string): number {
   let hash = 0;
@@ -48,6 +56,16 @@ function getThemeColors(isDark: boolean): string[] {
     : ["#0969da", "#1a7f37", "#bc4c00", "#8250df", "#cf222e", "#0969da", "#1a7f37", "#9a6700"];
 }
 
+/**
+ * Build a smooth cubic bezier path between two points.
+ */
+function buildEdgePath(fromX: number, fromY: number, toX: number, toY: number): string {
+  const deltaY = toY - fromY;
+  const controlOffset = Math.min(Math.abs(deltaY) * 0.4, 24);
+
+  return `M ${fromX} ${fromY} C ${fromX} ${fromY + controlOffset}, ${toX} ${toY - controlOffset}, ${toX} ${toY}`;
+}
+
 export function layoutGitGraph(
   graph: GitGraph,
   options?: { isDark?: boolean; columnWidth?: number; rowHeight?: number; nodeRadius?: number },
@@ -64,18 +82,15 @@ export function layoutGitGraph(
     commitIndex.set(commits[i].fullHash, i);
   }
 
-  // Column assignment
+  // ── Column assignment ──
   const columnMap = new Map<string, number>();
   const branchColumnMap = new Map<string, number>();
   let nextColumn = 0;
 
   // Assign main branch (containing HEAD) to column 0
-  const headCommit = graph.headCommit;
-  if (headCommit) {
-    const headBranch = graph.branches.find((b: GitGraphBranch) => b.isCurrent);
-    if (headBranch) {
-      branchColumnMap.set(headBranch.name, 0);
-    }
+  const headBranch = graph.branches.find((b: GitGraphBranch) => b.isCurrent);
+  if (headBranch) {
+    branchColumnMap.set(headBranch.name, 0);
   }
 
   // First pass: assign branch columns
@@ -98,24 +113,18 @@ export function layoutGitGraph(
       }
     }
 
-    // If no branch tip, try to inherit from children (commits that have this as parent)
-    if (col === -1) {
-      for (let j = 0; j < i; j++) {
-        const child = commits[j];
-        if (child.parents.includes(commit.fullHash)) {
-          const childCol = columnMap.get(child.fullHash);
-          if (childCol !== undefined) {
-            col = childCol;
-            break;
-          }
-        }
+    // If no branch tip, inherit from the first parent (primary lineage)
+    if (col === -1 && commit.parents.length > 0) {
+      const parentCol = columnMap.get(commit.parents[0]);
+      if (parentCol !== undefined) {
+        col = parentCol;
       }
     }
 
-    // If still no column, use the parent's column or create a new one
-    if (col === -1 && commit.parents.length > 0) {
-      for (const parentHash of commit.parents) {
-        const parentCol = columnMap.get(parentHash);
+    // Fallback: check other parents (merge commits)
+    if (col === -1 && commit.parents.length > 1) {
+      for (let p = 1; p < commit.parents.length; p++) {
+        const parentCol = columnMap.get(commit.parents[p]);
         if (parentCol !== undefined) {
           col = parentCol;
           break;
@@ -130,18 +139,27 @@ export function layoutGitGraph(
     columnMap.set(commit.fullHash, col);
   }
 
+  // Build branch lanes metadata
+  const branchLanes: BranchLane[] = [];
+  for (const [branchName, column] of branchColumnMap.entries()) {
+    branchLanes.push({
+      column,
+      branchName,
+      color: branchColor(branchName, themeColors),
+    });
+  }
+  branchLanes.sort((a, b) => a.column - b.column);
+
   // Build nodes
   const nodes: GraphNode[] = [];
   for (let i = 0; i < commits.length; i++) {
     const commit = commits[i];
     const col = columnMap.get(commit.fullHash) ?? 0;
 
-    // Determine color from first branch tip, or default
     let color = themeColors[0];
     if (commit.branchTips.length > 0) {
       color = branchColor(commit.branchTips[0], themeColors);
     } else if (commit.parents.length > 0) {
-      // Inherit color from first parent
       const parentCol = columnMap.get(commit.parents[0]);
       if (parentCol !== undefined) {
         const parentBranch = graph.branches.find(
@@ -161,7 +179,7 @@ export function layoutGitGraph(
     });
   }
 
-  // Build edges
+  // Build edges with proper bezier curves
   const edges: GraphEdge[] = [];
   for (let i = 0; i < commits.length; i++) {
     const commit = commits[i];
@@ -174,15 +192,14 @@ export function layoutGitGraph(
       const parentNode = nodes[parentIndex];
       const isMerge = commit.parents.length > 1 && parentHash !== commit.parents[0];
 
-      // Bezier curve from child to parent
-      const midY = (childNode.y + parentNode.y) / 2;
-      const path = `M ${childNode.x} ${childNode.y} C ${childNode.x} ${midY}, ${parentNode.x} ${midY}, ${parentNode.x} ${parentNode.y}`;
+      const path = buildEdgePath(childNode.x, childNode.y, parentNode.x, parentNode.y);
 
       edges.push({
         from: commit.fullHash,
         to: parentHash,
         path,
         color: isMerge ? themeColors[4] : childNode.color,
+        isMerge,
       });
     }
   }
@@ -191,5 +208,5 @@ export function layoutGitGraph(
   const width = (maxColumn + 1) * columnWidth;
   const height = commits.length * rowHeight;
 
-  return { nodes, edges, width, height, columnWidth, rowHeight, nodeRadius };
+  return { nodes, edges, branchLanes, width, height, columnWidth, rowHeight, nodeRadius };
 }

@@ -581,6 +581,8 @@ export const sub2apiMessages = {
       skillInstallWorkspaceRequired: "安装技能前请先打开一个工作区。",
       skillInstallConflict: (name: string) => `${name} 已存在且内容不同。`,
       skillInstallSuccess: (name: string) => `${name} 已安装。重新加载运行中的 agent 后即可使用。`,
+      skillInstallTimeout: (name: string) =>
+        `${name} 安装仍在进行或网络较慢。已刷新技能列表，请稍后再检查。`,
       skillBuiltIn: "内置",
       skillDefaultRoles: "默认角色",
       skillSource: "来源",
@@ -2342,6 +2344,8 @@ export const sub2apiMessages = {
       skillInstallConflict: (name: string) => `${name} already exists with different content.`,
       skillInstallSuccess: (name: string) =>
         `${name} installed. Reload running agents to pick it up.`,
+      skillInstallTimeout: (name: string) =>
+        `${name} may still be installing or the network is slow. Refreshed the skill list; check again shortly.`,
       skillBuiltIn: "Built-in",
       skillDefaultRoles: "Default roles",
       skillSource: "Source",

@@ -299,6 +299,16 @@ function scheduleQuitAndInstall(onBeforeQuit?: () => Promise<void>): void {
   }, 1500);
 }
 
+function toError(value: unknown, fallbackMessage: string): Error {
+  if (value instanceof Error) {
+    return value;
+  }
+
+  const message =
+    typeof value === "string" && value.trim().length > 0 ? value.trim() : fallbackMessage;
+  return new Error(message);
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -392,11 +402,7 @@ export async function checkForAppUpdate({
     });
   } catch (error) {
     console.error("[auto-updater] Failed to check for updates:", error);
-    return buildCheckResult({
-      currentVersion,
-      hasUpdate: false,
-      readyToInstall: false,
-    });
+    throw toError(error, "Failed to check for updates.");
   }
 }
 

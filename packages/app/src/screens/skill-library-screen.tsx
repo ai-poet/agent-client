@@ -188,6 +188,10 @@ function groupMarketplaceSkills(skills: ContextHubMarketplaceSkillEntry[]): Arra
   })).filter((group) => group.skills.length > 0);
 }
 
+function installedSkillKey(workspaceId: string | undefined, skillId: string): string {
+  return `${workspaceId ?? "global"}:${skillId}`;
+}
+
 interface SkillLibraryScreenProps {
   serverId: string;
 }
@@ -216,6 +220,14 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [installingSkillId, setInstallingSkillId] = useState<string | null>(null);
+  const [confirmedInstalledSkillKeys, setConfirmedInstalledSkillKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const confirmedInstalledSkillKeysRef = useRef(confirmedInstalledSkillKeys);
+
+  useEffect(() => {
+    confirmedInstalledSkillKeysRef.current = confirmedInstalledSkillKeys;
+  }, [confirmedInstalledSkillKeys]);
 
   useEffect(() => {
     if (activeWorkspaceId) {
@@ -271,7 +283,13 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
         errors.push(toErrorMessage(localResult.reason));
       }
       if (marketplaceResult.status === "fulfilled") {
-        setMarketplaceSkills(marketplaceResult.value.skills);
+        setMarketplaceSkills(
+          marketplaceResult.value.skills.map((skill) =>
+            confirmedInstalledSkillKeysRef.current.has(installedSkillKey(workspace?.id, skill.id))
+              ? { ...skill, installed: true }
+              : skill,
+          ),
+        );
         if (marketplaceResult.value.error) errors.push(marketplaceResult.value.error);
       } else {
         setMarketplaceSkills([]);
@@ -319,12 +337,22 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
           }
           return;
         }
+        setConfirmedInstalledSkillKeys((current) => {
+          const next = new Set(current);
+          next.add(installedSkillKey(workspace.id, skill.id));
+          return next;
+        });
+        setMarketplaceSkills((current) =>
+          current.map((entry) => (entry.id === skill.id ? { ...entry, installed: true } : entry)),
+        );
         toast.show(text.skillInstallSuccess(skill.name), {
           variant: "success",
         });
         await refresh();
       } catch (error) {
-        toast.error(toErrorMessage(error));
+        const message = toErrorMessage(error);
+        toast.error(/timeout/i.test(message) ? text.skillInstallTimeout(skill.name) : message);
+        void refresh();
       } finally {
         setInstallingSkillId(null);
       }
@@ -352,7 +380,20 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
   const renderMarketplaceSkillRow = useCallback(
     (skill: ContextHubMarketplaceSkillEntry) => {
       const isInstalling = installingSkillId === skill.id;
-      const canInstall = Boolean(client && workspace) && !isInstalling;
+      const isInstalled =
+        skill.installed ||
+        confirmedInstalledSkillKeys.has(installedSkillKey(workspace?.id, skill.id));
+      const canInstall = Boolean(client && workspace) && !isInstalling && !isInstalled;
+      const installActionState = isInstalled
+        ? styles.installActionInstalled
+        : isInstalling || !canInstall
+          ? styles.installActionDisabled
+          : null;
+      const installActionForeground = isInstalled
+        ? theme.colors.success
+        : isInstalling || !canInstall
+          ? theme.colors.foregroundMuted
+          : theme.colors.accentForeground;
       return (
         <View key={skill.id} style={styles.skillRow} testID={`skill-marketplace-row-${skill.id}`}>
           <View style={styles.skillIcon}>
@@ -363,7 +404,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
               <Text style={styles.skillName} numberOfLines={1}>
                 {skill.name}
               </Text>
-              {skill.installed ? (
+              {isInstalled ? (
                 <View style={styles.installedBadge}>
                   <Check size={12} color={theme.colors.success} />
                   <Text style={styles.installedText}>{text.skillInstalled}</Text>
@@ -389,24 +430,21 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
             </Text>
           </View>
           <Pressable
-            style={[styles.installAction, !canInstall ? styles.installActionDisabled : null]}
+            style={[styles.installAction, installActionState]}
             accessibilityRole="button"
             testID={`skill-marketplace-install-${skill.id}`}
             onPress={() => void installSkill(skill)}
             disabled={!canInstall}
           >
-            {skill.installed ? (
-              <Check size={18} color={theme.colors.foregroundMuted} />
+            {isInstalled ? (
+              <Check size={18} color={installActionForeground} />
             ) : (
-              <Download
-                size={18}
-                color={canInstall ? theme.colors.palette.black : theme.colors.foregroundMuted}
-              />
+              <Download size={18} color={installActionForeground} />
             )}
-            <Text style={[styles.installActionText, !canInstall ? styles.disabledText : null]}>
+            <Text style={[styles.installActionText, { color: installActionForeground }]}>
               {isInstalling
                 ? text.skillInstalling
-                : skill.installed
+                : isInstalled
                   ? text.skillInstalled
                   : text.skillInstall}
             </Text>
@@ -414,7 +452,7 @@ export function SkillLibraryScreen({ serverId }: SkillLibraryScreenProps) {
         </View>
       );
     },
-    [client, installSkill, installingSkillId, text, theme, workspace],
+    [client, confirmedInstalledSkillKeys, installSkill, installingSkillId, text, theme, workspace],
   );
 
   const scrollToMarketplaceLetter = useCallback((letter: string) => {
@@ -921,13 +959,16 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],
     borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.foreground,
+    backgroundColor: theme.colors.accent,
   },
   installActionDisabled: {
     backgroundColor: theme.colors.surface1,
   },
+  installActionInstalled: {
+    backgroundColor: theme.colors.surface1,
+  },
   installActionText: {
-    color: theme.colors.palette.black,
+    color: theme.colors.accentForeground,
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.semibold,
   },

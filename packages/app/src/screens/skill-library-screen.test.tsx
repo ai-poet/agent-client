@@ -12,6 +12,8 @@ import { SkillLibraryScreen } from "./skill-library-screen";
 const {
   theme,
   defaultWorkspace,
+  marketplaceSkill,
+  localSkill,
   mockClient,
   mockSessionState,
   getMockWorkspaceList,
@@ -31,7 +33,9 @@ const {
       foregroundMuted: "#aaa",
       border: "#555",
       borderAccent: "#444",
+      accent: "#20744a",
       accentBright: "#0a84ff",
+      accentForeground: "#f6fff9",
       success: "#30d158",
       palette: { black: "#000" },
     },
@@ -130,6 +134,8 @@ const {
   return {
     theme,
     defaultWorkspace,
+    marketplaceSkill,
+    localSkill,
     mockClient,
     mockSessionState,
     getMockWorkspaceList,
@@ -221,6 +227,17 @@ beforeEach(() => {
   mockClient.skillsList.mockClear();
   mockClient.skillsMarketplaceList.mockClear();
   mockClient.skillsMarketplaceInstall.mockClear();
+  mockClient.skillsList.mockImplementation(async () => ({ skills: [localSkill], error: null }));
+  mockClient.skillsMarketplaceList.mockImplementation(async () => ({
+    skills: [marketplaceSkill],
+    error: null,
+  }));
+  mockClient.skillsMarketplaceInstall.mockImplementation(async () => ({
+    skill: null,
+    installed: true,
+    conflict: false,
+    error: null,
+  }));
   toastSuccessMock.mockClear();
   toastErrorMock.mockClear();
 });
@@ -256,6 +273,24 @@ function click(element: Element) {
   });
 }
 
+function getIcon(element: Element, name: string): HTMLElement {
+  const icon = element.querySelector(`[data-icon="${name}"]`) as HTMLElement | null;
+  if (!icon) {
+    throw new Error(`Missing ${name} icon`);
+  }
+  return icon;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 async function findByTestId(testID: string): Promise<HTMLElement> {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     await flush();
@@ -282,9 +317,17 @@ describe("SkillLibraryScreen marketplace", () => {
     const section = await findByTestId("skill-marketplace-letter-section-C");
     const rail = await findByTestId("skill-marketplace-alphabet-rail");
     const letterC = await findByTestId("skill-marketplace-letter-C");
+    const installButton = await findByTestId(
+      "skill-marketplace-install-skillsmp:openai-codex-codex-skills-code-review-skill-md",
+    );
     expect(section.textContent).toContain("C");
     expect(rail.textContent).toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
     expect(letterC.getAttribute("aria-disabled")).not.toBe("true");
+    expect(installButton.style.backgroundColor).toBe("rgb(32, 116, 74)");
+    expect(installButton.textContent).toContain("Install");
+    expect(getIcon(installButton, "Download").getAttribute("color")).toBe(
+      theme.colors.accentForeground,
+    );
     expect(mockClient.skillsList).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
       cwd: "/repo",
@@ -320,6 +363,37 @@ describe("SkillLibraryScreen marketplace", () => {
 
     expect(installButton.getAttribute("aria-disabled")).toBe("true");
     expect(installButton.textContent).toContain("Install");
+    expect(installButton.style.backgroundColor).toBe("rgb(17, 17, 17)");
+    expect(getIcon(installButton, "Download").getAttribute("color")).toBe(
+      theme.colors.foregroundMuted,
+    );
+  });
+
+  it("shows a themed disabled installing state while installation is pending", async () => {
+    const pendingInstall = deferred<{
+      skill: null;
+      installed: boolean;
+      conflict: boolean;
+      error: null;
+    }>();
+    mockClient.skillsMarketplaceInstall.mockImplementationOnce(() => pendingInstall.promise);
+    renderScreen();
+    const installButton = await findByTestId(
+      "skill-marketplace-install-skillsmp:openai-codex-codex-skills-code-review-skill-md",
+    );
+
+    click(installButton);
+    await flush();
+
+    expect(installButton.getAttribute("aria-disabled")).toBe("true");
+    expect(installButton.textContent).toContain("Installing");
+    expect(installButton.style.backgroundColor).toBe("rgb(17, 17, 17)");
+    expect(getIcon(installButton, "Download").getAttribute("color")).toBe(
+      theme.colors.foregroundMuted,
+    );
+
+    pendingInstall.resolve({ skill: null, installed: true, conflict: false, error: null });
+    await flush();
   });
 
   it("installs into the selected workspace and refreshes the marketplace", async () => {
@@ -344,6 +418,43 @@ describe("SkillLibraryScreen marketplace", () => {
       { variant: "success" },
     );
     expect(mockClient.skillsList).toHaveBeenCalledTimes(2);
+    expect(mockClient.skillsMarketplaceList).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the installed state when refresh has not caught up yet", async () => {
+    mockClient.skillsMarketplaceList.mockImplementation(async () => ({
+      skills: [{ ...marketplaceSkill, installed: false }],
+      error: null,
+    }));
+    renderScreen();
+    const installButton = await findByTestId(
+      "skill-marketplace-install-skillsmp:openai-codex-codex-skills-code-review-skill-md",
+    );
+
+    click(installButton);
+    await flush();
+
+    expect(installButton.getAttribute("aria-disabled")).toBe("true");
+    expect(installButton.textContent).toContain("Installed");
+    expect(getIcon(installButton, "Check").getAttribute("color")).toBe(theme.colors.success);
+    expect(mockClient.skillsMarketplaceList).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a timeout message and refreshes when installation exceeds the client wait", async () => {
+    mockClient.skillsMarketplaceInstall.mockRejectedValueOnce(
+      new Error("Timeout waiting for message (30000ms)"),
+    );
+    renderScreen();
+    const installButton = await findByTestId(
+      "skill-marketplace-install-skillsmp:openai-codex-codex-skills-code-review-skill-md",
+    );
+
+    click(installButton);
+    await flush();
+
+    expect(toastErrorMock).toHaveBeenCalledWith(
+      "Code Review may still be installing or the network is slow. Refreshed the skill list; check again shortly.",
+    );
     expect(mockClient.skillsMarketplaceList).toHaveBeenCalledTimes(2);
   });
 });

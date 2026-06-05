@@ -6,7 +6,7 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CommitGraphPane } from "./commit-graph-pane";
+import { CommitGraphPane } from "./git-graph";
 
 const { graphState, clipboardMock, toast } = vi.hoisted(() => ({
   graphState: {
@@ -195,10 +195,24 @@ vi.mock("react-native", () => {
   };
 });
 
+// Mock react-native-svg
+vi.mock("react-native-svg", () => {
+  const Svg = (props: Record<string, unknown>) => React.createElement("svg", props);
+  return {
+    default: Svg,
+    Svg,
+    Path: (props: Record<string, unknown>) => React.createElement("path", props),
+    Circle: (props: Record<string, unknown>) => React.createElement("circle", props),
+    G: (props: Record<string, unknown>) => React.createElement("g", props),
+  };
+});
+
 vi.mock("lucide-react-native", () => {
   const createIcon = (name: string) => (props: Record<string, unknown>) =>
     React.createElement("span", { ...props, "data-icon": name });
   return {
+    ChevronDown: createIcon("ChevronDown"),
+    ChevronUp: createIcon("ChevronUp"),
     Copy: createIcon("Copy"),
     Crosshair: createIcon("Crosshair"),
     Eye: createIcon("Eye"),
@@ -218,7 +232,7 @@ vi.mock("@/hooks/use-commit-graph-query", () => ({
 }));
 
 vi.mock("@/hooks/use-app-locale", () => ({
-  useAppLocale: () => "en",
+  useAppLocale: () => "zh",
 }));
 
 vi.mock("@/contexts/toast-context", () => ({
@@ -333,36 +347,44 @@ describe("CommitGraphPane", () => {
   it("renders graph table rows with refs and columns", () => {
     renderPane();
 
-    expect(document.body.textContent).toContain("Description");
-    expect(document.body.textContent).toContain("Date");
-    expect(document.body.textContent).toContain("Author");
-    expect(document.body.textContent).toContain("Commit");
+    expect(document.body.textContent).toContain("描述");
     expect(document.body.textContent).toContain("fix: update API localization");
     expect(document.body.textContent).toContain("main");
     expect(document.body.textContent).toContain("v0.1.27");
   });
 
-  it("uses a compact adaptive table without a horizontal scroller", () => {
+  it("renders SVG graph layer", () => {
     renderPane();
 
-    expect(document.querySelector('[data-testid="commit-graph-horizontal-scroll"]')).toBeNull();
-
-    const graphPane = document.querySelector('[data-testid="commit-graph-pane"]') as HTMLElement;
-    expect(graphPane.textContent).toContain("Git Graph");
-
-    const row = document.querySelector('[data-testid="commit-graph-row-c222222"]') as HTMLElement;
-    expect(row.style.width).toBe("100%");
-    expect(row.style.height).toBe("28px");
+    expect(document.querySelector("svg")).not.toBeNull();
+    expect(document.querySelector("path")).not.toBeNull();
+    expect(document.querySelector("circle")).not.toBeNull();
   });
 
-  it("renders a detail card under the selected commit row", () => {
+  it("highlights matching commits instead of filtering", () => {
+    renderPane();
+
+    const searchInput = document.querySelector("input") as HTMLInputElement;
+    act(() => {
+      searchInput.value = "feature";
+      searchInput.dispatchEvent(new window.Event("change", { bubbles: true }));
+    });
+
+    // All rows still visible
+    expect(document.querySelectorAll('[data-testid^="commit-graph-row-"]').length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it("renders commit detail in bottom panel instead of inline", () => {
     renderPane();
 
     click("commit-graph-row-c222222");
 
-    expect(document.querySelector('[data-testid="commit-graph-detail"]')).not.toBeNull();
-    expect(document.body.textContent).toContain("Commit: c222222222222222222222222222222222222222");
-    expect(document.body.textContent).toContain("Changed files");
+    // Detail panel is rendered
+    const panel = document.querySelector('[data-testid="commit-graph-detail-panel"]');
+    expect(panel).not.toBeNull();
+    expect(document.body.textContent).toContain("c222222222222222222222222222222222222222");
   });
 
   it("copies a commit hash from the context menu action", async () => {

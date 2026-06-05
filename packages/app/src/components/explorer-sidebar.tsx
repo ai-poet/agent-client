@@ -29,7 +29,7 @@ import {
   usePanelStore,
 } from "@/stores/panel-store";
 import { useWindowControlsPadding } from "@/utils/desktop-window";
-import { CommitGraphPane } from "./commit-graph-pane";
+import { CommitGraphPane } from "./git-graph";
 import { FileExplorerPane } from "./file-explorer-pane";
 import { GitDiffPane } from "./git-diff-pane";
 import { PrPane } from "./pr-pane";
