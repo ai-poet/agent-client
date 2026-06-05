@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { DictationStreamSender } from "@/dictation/dictation-stream-sender";
 import { useDictationAudioSource } from "@/hooks/use-dictation-audio-source";
+import { useLatest } from "@/hooks/use-latest";
 import { generateMessageId } from "@/types/stream";
 import { AttemptGuard } from "@/utils/attempt-guard";
 import {
@@ -34,35 +35,12 @@ export function useDictation(options: UseDictationOptions): UseDictationResult {
   const [status, setStatus] = useState<DictationStatus>("idle");
   const latestPartialTranscriptRef = useRef("");
 
-  const onTranscriptRef = useRef(onTranscript);
-  useEffect(() => {
-    onTranscriptRef.current = onTranscript;
-  }, [onTranscript]);
-
-  const onPartialTranscriptRef = useRef(onPartialTranscript);
-  useEffect(() => {
-    onPartialTranscriptRef.current = onPartialTranscript;
-  }, [onPartialTranscript]);
-
-  const onErrorRef = useRef(onError);
-  useEffect(() => {
-    onErrorRef.current = onError;
-  }, [onError]);
-
-  const onPermanentFailureRef = useRef(onPermanentFailure);
-  useEffect(() => {
-    onPermanentFailureRef.current = onPermanentFailure;
-  }, [onPermanentFailure]);
-
-  const isRecordingRef = useRef(isRecording);
-  useEffect(() => {
-    isRecordingRef.current = isRecording;
-  }, [isRecording]);
-
-  const isProcessingRef = useRef(isProcessing);
-  useEffect(() => {
-    isProcessingRef.current = isProcessing;
-  }, [isProcessing]);
+  const onTranscriptRef = useLatest(onTranscript);
+  const onPartialTranscriptRef = useLatest(onPartialTranscript);
+  const onErrorRef = useLatest(onError);
+  const onPermanentFailureRef = useLatest(onPermanentFailure);
+  const isRecordingRef = useLatest(isRecording);
+  const isProcessingRef = useLatest(isProcessing);
 
   // duration is used for UI only; no need to mirror into a ref.
 

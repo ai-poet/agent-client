@@ -9,7 +9,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import React, { useCallback, useMemo, useState, type ReactElement } from "react";
+import React, { useCallback, useMemo, useState, type ReactElement, memo } from "react";
 import { router } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -50,6 +50,20 @@ const desktopBadgeTransitionStyle = {
   transitionDuration: "120ms",
   transitionTimingFunction: "ease-out",
 } as unknown as ViewStyle;
+
+const ROW_HEIGHT_ESTIMATE = 56;
+const HEADER_HEIGHT = 40;
+
+function getItemLayout(_data: ArrayLike<FlatListItem> | null | undefined, index: number) {
+  const item = _data?.[index];
+  const length = item?.type === "header" ? HEADER_HEIGHT : ROW_HEIGHT_ESTIMATE;
+  let offset = 0;
+  for (let i = 0; i < index; i++) {
+    const d = _data?.[i];
+    offset += d?.type === "header" ? HEADER_HEIGHT : ROW_HEIGHT_ESTIMATE;
+  }
+  return { length, offset, index };
+}
 
 function deriveDateSectionLabel(lastActivityAt: Date): string {
   const now = new Date();
@@ -130,7 +144,7 @@ function SessionBadge({
   );
 }
 
-function SessionRow({
+const SessionRow = memo(function SessionRowFn({
   agent,
   isMobile,
   selectedAgentId,
@@ -243,7 +257,7 @@ function SessionRow({
       ) : null}
     </Pressable>
   );
-}
+});
 
 export function AgentList({
   agents,
@@ -394,6 +408,12 @@ export function AgentList({
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         ListFooterComponent={listFooterComponent}
+        maxToRenderPerBatch={15}
+        updateCellsBatchingPeriod={50}
+        windowSize={11}
+        removeClippedSubviews={true}
+        initialNumToRender={20}
+        getItemLayout={getItemLayout}
         refreshControl={
           onRefresh ? (
             <RefreshControl

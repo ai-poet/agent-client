@@ -252,6 +252,16 @@ function PushNotificationRouter() {
 
     return () => {
       subscription.remove();
+      // Reset notification handler to default when unmounting
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldShowBanner: true,
+          shouldShowList: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+        }),
+      });
     };
   }, [openNotification]);
 
