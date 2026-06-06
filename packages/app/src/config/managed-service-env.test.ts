@@ -16,12 +16,12 @@ describe("managed-service-env", () => {
     }
   });
 
-  it("uses CheapRouter as the shipped managed service endpoint", () => {
+  it("has no shipped managed service endpoint without an explicit build env", () => {
     delete process.env.EXPO_PUBLIC_MANAGED_SERVICE_URL;
 
-    expect(getManagedServiceUrlFromEnv()).toBe("https://cheaprouter.org");
+    expect(getManagedServiceUrlFromEnv()).toBe("");
     expect(hasExplicitManagedServiceUrlEnv()).toBe(false);
-    expect(isManagedServiceUrlEnvValid()).toBe(true);
+    expect(isManagedServiceUrlEnvValid()).toBe(false);
   });
 
   it("allows explicit managed service endpoint overrides", () => {

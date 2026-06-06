@@ -1,10 +1,10 @@
 import { isValidSub2APIEndpoint } from "@/screens/settings/sub2api-auth-bridge";
 
-/** Shipped default when `EXPO_PUBLIC_MANAGED_SERVICE_URL` is unset (override for staging via env). */
-const DEFAULT_MANAGED_SERVICE_URL = "https://cheaprouter.org";
+/** Product builds must set `EXPO_PUBLIC_MANAGED_SERVICE_URL` via their brand wrapper. */
+const DEFAULT_MANAGED_SERVICE_URL = "";
 
 /**
- * Managed cloud service base URL: `EXPO_PUBLIC_MANAGED_SERVICE_URL` at bundle time, else default above.
+ * Managed cloud service base URL: `EXPO_PUBLIC_MANAGED_SERVICE_URL` at bundle time.
  *
  * Staging example: `EXPO_PUBLIC_MANAGED_SERVICE_URL=https://staging.example.com npm run dev:desktop`
  */
@@ -24,7 +24,7 @@ export function hasExplicitManagedServiceUrlEnv(): boolean {
 
 /**
  * Product builds never show a service-URL field in the UI; set `EXPO_PUBLIC_MANAGED_SERVICE_URL`
- * at build time (or rely on the shipped default) instead.
+ * at build time instead.
  */
 export function shouldShowManagedServiceUrlEditor(): boolean {
   return false;
