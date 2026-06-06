@@ -4,14 +4,15 @@ import type { CheckoutStatusPayload } from "@/hooks/use-checkout-status-query";
 import {
   buildNewAgentRoute,
   parseAgentKey,
+  resolveNewChatTarget,
   resolveNewAgentWorkingDir,
   resolveSelectedAgentForNewAgent,
 } from "./new-agent-routing";
 
 describe("buildNewAgentRoute", () => {
-  it("falls back to server workspace route with dot workspace when no working directory is provided", () => {
-    expect(buildNewAgentRoute("srv-1", undefined)).toBe("/h/srv-1/workspace/.");
-    expect(buildNewAgentRoute("srv-1", "   ")).toBe("/h/srv-1/workspace/.");
+  it("falls back to the open project route when no working directory is provided", () => {
+    expect(buildNewAgentRoute("srv-1", undefined)).toBe("/h/srv-1/open-project");
+    expect(buildNewAgentRoute("srv-1", "   ")).toBe("/h/srv-1/open-project");
   });
 
   it("encodes the working directory as a workspace path segment", () => {
@@ -103,5 +104,117 @@ describe("resolveSelectedAgentForNewAgent", () => {
         pathname: "/h/srv-1/settings",
       }),
     ).toBeNull();
+  });
+});
+
+describe("resolveNewChatTarget", () => {
+  const getAgent = (serverId: string, agentId: string) => {
+    if (serverId === "srv-1" && agentId === "agent-1") {
+      return { cwd: "/repo/main" };
+    }
+    if (serverId === "srv-1" && agentId === "agent-missing-workspace") {
+      return { cwd: "/repo/unknown" };
+    }
+    return null;
+  };
+  const getWorkspaces = (serverId: string) =>
+    serverId === "srv-1"
+      ? [
+          {
+            id: "workspace-1",
+            workspaceDirectory: "/repo/main",
+          },
+        ]
+      : [];
+
+  it("uses the current workspace route", () => {
+    expect(
+      resolveNewChatTarget({
+        pathname: "/h/srv-1/workspace/workspace-1",
+        activeServerId: "srv-9",
+        getAgent,
+        getWorkspaces,
+      }),
+    ).toEqual({
+      kind: "workspace",
+      serverId: "srv-1",
+      workspaceId: "workspace-1",
+    });
+  });
+
+  it("maps an agent route to the workspace with the same cwd", () => {
+    expect(
+      resolveNewChatTarget({
+        pathname: "/h/srv-1/agent/agent-1",
+        getAgent,
+        getWorkspaces,
+      }),
+    ).toEqual({
+      kind: "workspace",
+      serverId: "srv-1",
+      workspaceId: "workspace-1",
+    });
+  });
+
+  it("falls back to the agent working directory when no workspace matches", () => {
+    expect(
+      resolveNewChatTarget({
+        pathname: "/h/srv-1/agent/agent-missing-workspace",
+        getAgent,
+        getWorkspaces,
+      }),
+    ).toEqual({
+      kind: "fallback",
+      serverId: "srv-1",
+      workingDir: "/repo/unknown",
+    });
+  });
+
+  it("falls back to the active server when no current project is available", () => {
+    expect(
+      resolveNewChatTarget({
+        pathname: "/settings",
+        activeServerId: "srv-1",
+        getAgent,
+        getWorkspaces,
+      }),
+    ).toEqual({
+      kind: "fallback",
+      serverId: "srv-1",
+      workingDir: null,
+    });
+  });
+
+  it("uses the recent workspace when navigating from a non-project route", () => {
+    expect(
+      resolveNewChatTarget({
+        pathname: "/h/srv-1/skills",
+        activeServerId: "srv-1",
+        recentWorkspace: { serverId: "srv-1", workspaceId: "recent-workspace" },
+        fallbackWorkspace: { serverId: "srv-1", workspaceId: "fallback-workspace" },
+        getAgent,
+        getWorkspaces,
+      }),
+    ).toEqual({
+      kind: "workspace",
+      serverId: "srv-1",
+      workspaceId: "recent-workspace",
+    });
+  });
+
+  it("uses the visible sidebar workspace when there is no recent workspace", () => {
+    expect(
+      resolveNewChatTarget({
+        pathname: "/h/srv-1/skills",
+        activeServerId: "srv-1",
+        fallbackWorkspace: { serverId: "srv-1", workspaceId: "fallback-workspace" },
+        getAgent,
+        getWorkspaces,
+      }),
+    ).toEqual({
+      kind: "workspace",
+      serverId: "srv-1",
+      workspaceId: "fallback-workspace",
+    });
   });
 });

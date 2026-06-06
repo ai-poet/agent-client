@@ -10,8 +10,12 @@ import { useWebScrollbarStyle } from "@/hooks/use-web-scrollbar-style";
 import { DiffViewer } from "./diff-viewer";
 import { getCodeInsets } from "./code-insets";
 import { isWeb } from "@/constants/platform";
+import { getAppMessages } from "@/i18n/sub2api";
 
 const ScrollView = isWeb ? RNScrollView : GHScrollView;
+const DEFAULT_DETAILS_TEXT = getAppMessages("en").agentTools.details;
+
+export type AgentToolDetailsText = ReturnType<typeof getAppMessages>["agentTools"]["details"];
 
 // ---- Content Component ----
 
@@ -21,6 +25,7 @@ interface ToolCallDetailsContentProps {
   maxHeight?: number;
   fillAvailableHeight?: boolean;
   showLoadingSkeleton?: boolean;
+  detailsText?: AgentToolDetailsText;
 }
 
 export function ToolCallDetailsContent({
@@ -29,6 +34,7 @@ export function ToolCallDetailsContent({
   maxHeight,
   fillAvailableHeight = false,
   showLoadingSkeleton = false,
+  detailsText = DEFAULT_DETAILS_TEXT,
 }: ToolCallDetailsContentProps) {
   const resolvedMaxHeight = fillAvailableHeight ? undefined : (maxHeight ?? 300);
   const webScrollbarStyle = useWebScrollbarStyle();
@@ -120,7 +126,7 @@ export function ToolCallDetailsContent({
                 <Text selectable style={styles.scrollText}>
                   {hasLog
                     ? setupLog
-                    : `Preparing worktree ${detail.branchName} at ${detail.worktreePath}`}
+                    : detailsText.preparingWorktree(detail.branchName, detail.worktreePath)}
                 </Text>
               </View>
             </ScrollView>
@@ -134,7 +140,7 @@ export function ToolCallDetailsContent({
     const fallbackHeader =
       detail.subAgentType && detail.description
         ? `${detail.subAgentType}: ${detail.description}`
-        : (detail.subAgentType ?? detail.description ?? "Sub-agent activity");
+        : (detail.subAgentType ?? detail.description ?? detailsText.subAgentActivity);
     sections.push(
       <View key="sub-agent" style={[styles.section, shouldFill && styles.fillHeight]}>
         <View style={[codeBlockStyle, shouldFill && styles.fillHeight]}>
@@ -355,8 +361,8 @@ export function ToolCallDetailsContent({
       );
     } else {
       const sectionsFromTopLevel = [
-        { title: "Input", value: detail.input },
-        { title: "Output", value: detail.output },
+        { key: "input", title: detailsText.input, value: detail.input },
+        { key: "output", title: detailsText.output, value: detail.output },
       ].filter((entry) =>
         hasMeaningfulToolCallDetail({
           type: "unknown",
@@ -379,12 +385,12 @@ export function ToolCallDetailsContent({
           continue;
         }
         sections.push(
-          <View key={`${section.title}-header`} style={styles.groupHeader}>
+          <View key={`${section.key}-header`} style={styles.groupHeader}>
             <Text style={styles.groupHeaderText}>{section.title}</Text>
           </View>,
         );
         sections.push(
-          <View key={`${section.title}-value`} style={styles.section}>
+          <View key={`${section.key}-value`} style={styles.section}>
             <ScrollView
               horizontal
               nestedScrollEnabled
@@ -406,7 +412,7 @@ export function ToolCallDetailsContent({
   if (errorText) {
     sections.push(
       <View key="error" style={styles.section}>
-        <Text style={[styles.sectionTitle, styles.errorText]}>Error</Text>
+        <Text style={[styles.sectionTitle, styles.errorText]}>{detailsText.error}</Text>
         <ScrollView
           horizontal
           nestedScrollEnabled
@@ -432,7 +438,7 @@ export function ToolCallDetailsContent({
         </View>
       );
     }
-    return <Text style={styles.emptyStateText}>No additional details available</Text>;
+    return <Text style={styles.emptyStateText}>{detailsText.noAdditionalDetails}</Text>;
   }
 
   return (

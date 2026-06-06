@@ -222,4 +222,29 @@ describe("MinIO auto updater flow", () => {
       disabledReason: null,
     });
   });
+
+  it("rejects when electron-updater fails after metadata preflight", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        text: async () => "version: 1.0.1\n",
+      })),
+    );
+    updaterMock.checkForUpdates.mockRejectedValue(new Error("net::ERR_CONNECTION_CLOSED"));
+    const { checkForAppUpdate } = await loadModule({
+      PASEO_DESKTOP_UPDATE_URL: "https://updates.example.com/app/",
+    });
+
+    await expect(
+      checkForAppUpdate({
+        currentVersion: "1.0.0",
+        releaseChannel: "stable",
+      }),
+    ).rejects.toThrow("net::ERR_CONNECTION_CLOSED");
+
+    expect(updaterMock.checkForUpdates).toHaveBeenCalled();
+  });
 });

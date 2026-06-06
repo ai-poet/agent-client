@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSub2APIAuth } from "@/hooks/use-sub2api-auth";
-import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 import { normalizeSub2APILocale } from "@/i18n/sub2api";
 import {
   createSub2APIClient,
@@ -384,9 +383,12 @@ export function useSub2APIPaymentConfig() {
       }
 
       try {
-        const response = await fetch(buildPayCenterUserConfigUrl({ endpoint, userId, accessToken }), {
-          method: "GET",
-        });
+        const response = await fetch(
+          buildPayCenterUserConfigUrl({ endpoint, userId, accessToken }),
+          {
+            method: "GET",
+          },
+        );
         if (!response.ok) {
           return { balanceCreditCnyPerUsd: null, usdExchangeRate: null };
         }

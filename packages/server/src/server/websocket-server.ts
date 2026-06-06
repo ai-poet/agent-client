@@ -9,6 +9,7 @@ import type { TerminalManager } from "../terminal/terminal-manager.js";
 import type pino from "pino";
 import type { ProjectRegistry, WorkspaceRegistry } from "./workspace-registry.js";
 import type { FileBackedChatService } from "./chat/chat-service.js";
+import type { ContextHubService } from "./context-hub/service.js";
 import type { LoopService } from "./loop-service.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
@@ -295,6 +296,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly projectRegistry: ProjectRegistry;
   private readonly workspaceRegistry: WorkspaceRegistry;
   private readonly chatService: FileBackedChatService;
+  private readonly contextHubService: ContextHubService | null;
   private readonly loopService: LoopService;
   private readonly scheduleService: ScheduleService;
   private readonly checkoutDiffManager: CheckoutDiffManager;
@@ -383,6 +385,7 @@ export class VoiceAssistantWebSocketServer {
     projectRegistry?: ProjectRegistry,
     workspaceRegistry?: WorkspaceRegistry,
     chatService?: FileBackedChatService,
+    contextHubService?: ContextHubService,
     loopService?: LoopService,
     scheduleService?: ScheduleService,
     checkoutDiffManager?: CheckoutDiffManager,
@@ -413,6 +416,7 @@ export class VoiceAssistantWebSocketServer {
       throw new Error("VoiceAssistantWebSocketServer requires a chat service.");
     }
     this.chatService = chatService;
+    this.contextHubService = contextHubService ?? null;
     if (!loopService) {
       throw new Error("VoiceAssistantWebSocketServer requires a loop service.");
     }
@@ -755,6 +759,7 @@ export class VoiceAssistantWebSocketServer {
       projectRegistry: this.projectRegistry,
       workspaceRegistry: this.workspaceRegistry,
       chatService: this.chatService,
+      contextHubService: this.contextHubService ?? undefined,
       loopService: this.loopService,
       scheduleService: this.scheduleService,
       checkoutDiffManager: this.checkoutDiffManager,
@@ -921,6 +926,7 @@ export class VoiceAssistantWebSocketServer {
       features: {
         // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
         providersSnapshot: true,
+        hiddenAgentMessages: true,
       },
     };
   }

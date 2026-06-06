@@ -63,6 +63,10 @@ export function WorkspaceDraftAgentTab({
   const workspaceAuthority = useWorkspaceExecutionAuthority(serverId, workspaceId);
   const workspaceExecutionAuthority = workspaceAuthority?.ok ? workspaceAuthority.authority : null;
   const workspaceDirectory = workspaceExecutionAuthority?.workspaceDirectory ?? null;
+  const workspaceDisplayName =
+    workspaceExecutionAuthority?.workspace.projectDisplayName ||
+    workspaceExecutionAuthority?.workspace.name ||
+    workspaceId;
   const workspaceSetupKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId });
   const workspaceSetupSnapshot = useWorkspaceSetupStore((state) =>
     workspaceSetupKey ? (state.snapshots[workspaceSetupKey] ?? null) : null,
@@ -203,6 +207,9 @@ export function WorkspaceDraftAgentTab({
         clientMessageId: attempt.clientMessageId,
         ...(imagesData && imagesData.length > 0 ? { images: imagesData } : {}),
         ...(attachments && attachments.length > 0 ? { attachments } : {}),
+        ...(workspaceExecutionAuthority.workspace.worktreePersona
+          ? { worktreePersona: workspaceExecutionAuthority.workspace.worktreePersona }
+          : {}),
       });
 
       return {
@@ -283,8 +290,8 @@ export function WorkspaceDraftAgentTab({
   return (
     <FileDropZone onFilesDropped={handleFilesDropped}>
       <View style={styles.container}>
-        <View style={styles.contentContainer}>
-          {isSubmitting && draftAgent ? (
+        {isSubmitting && draftAgent ? (
+          <View style={styles.contentContainer}>
             <View style={styles.streamContainer}>
               <AgentStreamView
                 agentId={tabId}
@@ -295,11 +302,57 @@ export function WorkspaceDraftAgentTab({
                 onOpenWorkspaceFile={onOpenWorkspaceFile}
               />
             </View>
-          ) : (
-            <ScrollView
-              style={styles.scrollView}
-              contentContainerStyle={styles.configScrollContent}
-            >
+          </View>
+        ) : (
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={[
+              styles.configScrollContent,
+              { paddingBottom: theme.spacing[8] + insets.bottom },
+            ]}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.heroSection}>
+              <Text style={styles.heroTitle} testID="workspace-draft-hero-title">
+                {messages.heroTitle(workspaceDisplayName)}
+              </Text>
+
+              <View style={styles.heroComposer}>
+                <Composer
+                  agentId={tabId}
+                  serverId={serverId}
+                  isPaneFocused={isPaneFocused}
+                  onSubmitMessage={handleCreateFromInput}
+                  isSubmitLoading={isSubmitting || shouldShowSetupLoading}
+                  blurOnSubmit={true}
+                  value={draftInput.text}
+                  onChangeText={draftInput.setText}
+                  attachments={draftInput.attachments}
+                  onChangeAttachments={draftInput.setAttachments}
+                  cwd={draftInput.cwd}
+                  clearDraft={draftInput.clear}
+                  autoFocus={shouldAutoFocusWorkspaceDraftComposer({
+                    isPaneFocused,
+                    isSubmitting,
+                  })}
+                  onAddImages={handleAddImagesCallback}
+                  onFocusInput={handleFocusInputCallback}
+                  commandDraftConfig={composerState.commandDraftConfig}
+                  inputWrapperStyle={styles.heroComposerInput}
+                  statusControls={{
+                    ...composerState.statusControls,
+                    onSelectProvider: handleProviderSelectWithFocus,
+                    onSelectMode: handleModeSelectWithFocus,
+                    onSelectModel: handleModelSelectWithFocus,
+                    onSelectProviderAndModel: handleProviderAndModelSelectWithFocus,
+                    onSelectThinkingOption: handleThinkingOptionSelectWithFocus,
+                    onSetFeature: handleSetFeatureWithFocus,
+                    onDropdownClose: () => focusInputRef.current?.(),
+                    disabled: isSubmitting || shouldShowSetupLoading,
+                  }}
+                />
+              </View>
+
               <View style={styles.configSection}>
                 {shouldShowSetupLoading ? (
                   <View style={styles.setupLoadingRow} testID="workspace-draft-setup-loading">
@@ -316,41 +369,9 @@ export function WorkspaceDraftAgentTab({
                   </View>
                 ) : null}
               </View>
-            </ScrollView>
-          )}
-        </View>
-
-        <View style={[styles.inputAreaWrapper, { paddingBottom: insets.bottom }]}>
-          <Composer
-            agentId={tabId}
-            serverId={serverId}
-            isPaneFocused={isPaneFocused}
-            onSubmitMessage={handleCreateFromInput}
-            isSubmitLoading={isSubmitting || shouldShowSetupLoading}
-            blurOnSubmit={true}
-            value={draftInput.text}
-            onChangeText={draftInput.setText}
-            attachments={draftInput.attachments}
-            onChangeAttachments={draftInput.setAttachments}
-            cwd={draftInput.cwd}
-            clearDraft={draftInput.clear}
-            autoFocus={shouldAutoFocusWorkspaceDraftComposer({ isPaneFocused, isSubmitting })}
-            onAddImages={handleAddImagesCallback}
-            onFocusInput={handleFocusInputCallback}
-            commandDraftConfig={composerState.commandDraftConfig}
-            statusControls={{
-              ...composerState.statusControls,
-              onSelectProvider: handleProviderSelectWithFocus,
-              onSelectMode: handleModeSelectWithFocus,
-              onSelectModel: handleModelSelectWithFocus,
-              onSelectProviderAndModel: handleProviderAndModelSelectWithFocus,
-              onSelectThinkingOption: handleThinkingOptionSelectWithFocus,
-              onSetFeature: handleSetFeatureWithFocus,
-              onDropdownClose: () => focusInputRef.current?.(),
-              disabled: isSubmitting || shouldShowSetupLoading,
-            }}
-          />
-        </View>
+            </View>
+          </ScrollView>
+        )}
       </View>
     </FileDropZone>
   );
@@ -372,9 +393,42 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
   },
   configScrollContent: {
-    paddingHorizontal: theme.spacing[4],
-    paddingTop: theme.spacing[4],
-    paddingBottom: theme.spacing[6],
+    flexGrow: 1,
+    justifyContent: "center",
+    paddingHorizontal: {
+      xs: theme.spacing[3],
+      md: theme.spacing[6],
+    },
+    paddingTop: theme.spacing[8],
+    paddingBottom: theme.spacing[8],
+  },
+  heroSection: {
+    width: "100%",
+    maxWidth: 980,
+    alignSelf: "center",
+    gap: theme.spacing[6],
+  },
+  heroTitle: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize["4xl"],
+    lineHeight: 42,
+    fontWeight: theme.fontWeight.medium,
+    textAlign: "center",
+  },
+  heroComposer: {
+    width: "100%",
+    alignSelf: "center",
+    position: "relative",
+    zIndex: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface0,
+    overflow: "visible",
+    ...theme.shadow.md,
+  },
+  heroComposerInput: {
+    borderWidth: 0,
   },
   configSection: {
     gap: theme.spacing[3],
@@ -403,10 +457,6 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.xs,
     lineHeight: theme.fontSize.xs * 1.5,
-  },
-  inputAreaWrapper: {
-    width: "100%",
-    backgroundColor: theme.colors.surface0,
   },
   errorContainer: {
     marginTop: theme.spacing[2],

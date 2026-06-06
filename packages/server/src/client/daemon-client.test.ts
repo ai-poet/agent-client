@@ -213,6 +213,295 @@ describe("DaemonClient", () => {
     expect(client.getConnectionState().status).toBe("disposed");
   });
 
+  test("sends skill marketplace list and install requests", async () => {
+    const logger = createMockLogger();
+    const mock = createMockTransport();
+
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_unit_test",
+      logger,
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
+
+    const connectPromise = client.connect();
+    mock.triggerOpen();
+    await connectPromise;
+
+    const listPromise = client.skillsMarketplaceList({
+      query: "search",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+    });
+    const listRequest = JSON.parse(mock.sent[0] as string) as {
+      type: "session";
+      message: {
+        type: "skills/marketplace/list";
+        requestId: string;
+        query: string;
+        workspaceId: string;
+        cwd: string;
+      };
+    };
+    expect(listRequest.message).toMatchObject({
+      type: "skills/marketplace/list",
+      query: "search",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+    });
+
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "skills/marketplace/list/response",
+        payload: {
+          requestId: listRequest.message.requestId,
+          skills: [],
+          error: null,
+        },
+      }),
+    );
+    await expect(listPromise).resolves.toMatchObject({ skills: [], error: null });
+
+    const installPromise = client.skillsMarketplaceInstall({
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+      skillId: "skill-1",
+      name: "google-search",
+    });
+    const installRequest = JSON.parse(mock.sent[1] as string) as {
+      type: "session";
+      message: {
+        type: "skills/marketplace/install";
+        requestId: string;
+        workspaceId: string;
+        cwd: string;
+        skillId: string;
+        name: string;
+      };
+    };
+    expect(installRequest.message).toMatchObject({
+      type: "skills/marketplace/install",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+      skillId: "skill-1",
+      name: "google-search",
+    });
+
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "skills/marketplace/install/response",
+        payload: {
+          requestId: installRequest.message.requestId,
+          skill: null,
+          installed: false,
+          conflict: false,
+          error: null,
+        },
+      }),
+    );
+    await expect(installPromise).resolves.toMatchObject({
+      skill: null,
+      installed: false,
+      conflict: false,
+      error: null,
+    });
+  });
+
+  test("waits up to two minutes for skill marketplace installs", async () => {
+    vi.useFakeTimers();
+    try {
+      const logger = createMockLogger();
+      const mock = createMockTransport();
+
+      const client = new DaemonClient({
+        url: "ws://test",
+        clientId: "clsk_unit_test",
+        logger,
+        reconnect: { enabled: false },
+        transportFactory: () => mock.transport,
+      });
+      clients.push(client);
+
+      const connectPromise = client.connect();
+      mock.triggerOpen();
+      await connectPromise;
+
+      const installPromise = client.skillsMarketplaceInstall({
+        workspaceId: "workspace-1",
+        cwd: "/repo",
+        skillId: "skill-1",
+        name: "google-search",
+      });
+      const installRequest = JSON.parse(mock.sent[0] as string) as {
+        type: "session";
+        message: {
+          type: "skills/marketplace/install";
+          requestId: string;
+        };
+      };
+
+      await vi.advanceTimersByTimeAsync(119_999);
+      mock.triggerMessage(
+        wrapSessionMessage({
+          type: "skills/marketplace/install/response",
+          payload: {
+            requestId: installRequest.message.requestId,
+            skill: null,
+            installed: true,
+            conflict: false,
+            error: null,
+          },
+        }),
+      );
+
+      await expect(installPromise).resolves.toMatchObject({
+        installed: true,
+        error: null,
+      });
+
+      const timedOutInstall = client
+        .skillsMarketplaceInstall({
+          workspaceId: "workspace-1",
+          cwd: "/repo",
+          skillId: "skill-2",
+          name: "slow-skill",
+        })
+        .then(
+          () => null,
+          (error) => error,
+        );
+      await vi.advanceTimersByTimeAsync(120_000);
+      const timeoutError = await timedOutInstall;
+      expect(timeoutError).toBeInstanceOf(Error);
+      expect((timeoutError as Error).message).toBe("Timeout waiting for message (120000ms)");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("sends local skill save, package import, and delete requests", async () => {
+    const logger = createMockLogger();
+    const mock = createMockTransport();
+
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_unit_test",
+      logger,
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
+
+    const connectPromise = client.connect();
+    mock.triggerOpen();
+    await connectPromise;
+
+    const savePromise = client.skillsSave({
+      target: "project_codex",
+      scope: "workspace",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+      name: "review-helper",
+      content: "# Review\n",
+    });
+    const saveRequest = JSON.parse(mock.sent[0] as string) as {
+      type: "session";
+      message: {
+        type: "skills/save";
+        requestId: string;
+      };
+    };
+    expect(saveRequest.message).toMatchObject({
+      type: "skills/save",
+      target: "project_codex",
+      scope: "workspace",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+      name: "review-helper",
+      content: "# Review\n",
+    });
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "skills/save/response",
+        payload: {
+          requestId: saveRequest.message.requestId,
+          skill: null,
+          conflict: false,
+          error: null,
+        },
+      }),
+    );
+    await expect(savePromise).resolves.toMatchObject({ conflict: false, error: null });
+
+    const importPromise = client.skillsImportPackage({
+      target: "managed",
+      scope: "global",
+      name: "skill-creator",
+      packageBase64: "UEsDBAo=",
+    });
+    const importRequest = JSON.parse(mock.sent[1] as string) as {
+      type: "session";
+      message: {
+        type: "skills/import-package";
+        requestId: string;
+      };
+    };
+    expect(importRequest.message).toMatchObject({
+      type: "skills/import-package",
+      target: "managed",
+      scope: "global",
+      name: "skill-creator",
+      packageBase64: "UEsDBAo=",
+    });
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "skills/import-package/response",
+        payload: {
+          requestId: importRequest.message.requestId,
+          skill: null,
+          conflict: false,
+          error: null,
+        },
+      }),
+    );
+    await expect(importPromise).resolves.toMatchObject({ conflict: false, error: null });
+
+    const deletePromise = client.skillsDelete({
+      skillId: "managed:skill-creator",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+    });
+    const deleteRequest = JSON.parse(mock.sent[2] as string) as {
+      type: "session";
+      message: {
+        type: "skills/delete";
+        requestId: string;
+      };
+    };
+    expect(deleteRequest.message).toMatchObject({
+      type: "skills/delete",
+      skillId: "managed:skill-creator",
+      workspaceId: "workspace-1",
+      cwd: "/repo",
+    });
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "skills/delete/response",
+        payload: {
+          requestId: deleteRequest.message.requestId,
+          skillId: "managed:skill-creator",
+          error: null,
+        },
+      }),
+    );
+    await expect(deletePromise).resolves.toMatchObject({
+      skillId: "managed:skill-creator",
+      error: null,
+    });
+  });
+
   test("normalizes workspace_setup_progress into a workspace-scoped daemon event", async () => {
     const logger = createMockLogger();
     const mock = createMockTransport();
@@ -1675,6 +1964,58 @@ describe("DaemonClient", () => {
 
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
+  });
+
+  test("sends hidden agent message flag", async () => {
+    const logger = createMockLogger();
+    const mock = createMockTransport();
+
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_unit_test",
+      logger,
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
+
+    const connectPromise = client.connect();
+    mock.triggerOpen();
+    await connectPromise;
+
+    const sendPromise = client.sendAgentMessage("agent-1", "Commit selected files", {
+      hidden: true,
+      messageId: "client-message-1",
+    });
+
+    expect(mock.sent).toHaveLength(1);
+    const request = JSON.parse(mock.sent[0] as string) as {
+      message: {
+        type: string;
+        requestId: string;
+        hidden?: boolean;
+        messageId?: string;
+      };
+    };
+    expect(request.message).toMatchObject({
+      type: "send_agent_message_request",
+      hidden: true,
+      messageId: "client-message-1",
+    });
+
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "send_agent_message_response",
+        payload: {
+          requestId: request.message.requestId,
+          agentId: "agent-1",
+          accepted: true,
+          error: null,
+        },
+      }),
+    );
+
+    await expect(sendPromise).resolves.toBeUndefined();
   });
 
   test("lists available providers via RPC", async () => {

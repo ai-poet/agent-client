@@ -1,6 +1,8 @@
 import { View, Text, Modal, Pressable } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import type { Agent } from "@/contexts/session-context";
+import { useAppLocale } from "@/hooks/use-app-locale";
+import { localizeAgentMode } from "@/utils/agent-mode-localization";
 
 interface ModeSelectorModalProps {
   visible: boolean;
@@ -16,12 +18,14 @@ export function ModeSelectorModal({
   onClose,
 }: ModeSelectorModalProps) {
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
 
   return (
     <Modal visible={visible} animationType="fade" transparent={true} onRequestClose={onClose}>
       <Pressable style={styles.modalOverlay} onPress={onClose}>
         <View style={styles.modeSelectorContent}>
           {agent?.availableModes?.map((mode) => {
+            const localizedMode = localizeAgentMode(mode, locale);
             const isActive = mode.id === agent.currentModeId;
             return (
               <Pressable
@@ -33,11 +37,11 @@ export function ModeSelectorModal({
                 style={[styles.modeItem, isActive && styles.modeItemActive]}
               >
                 <Text style={[styles.modeName, isActive && styles.modeNameActive]}>
-                  {mode.label}
+                  {localizedMode.label}
                 </Text>
-                {mode.description && (
+                {localizedMode.description && (
                   <Text style={[styles.modeDescription, isActive && styles.modeDescriptionActive]}>
-                    {mode.description}
+                    {localizedMode.description}
                   </Text>
                 )}
               </Pressable>

@@ -6,6 +6,7 @@ import { createNameId } from "mnemonic-id";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, GitBranch, GitPullRequest } from "lucide-react-native";
 import { Composer } from "@/components/composer";
+import { WorktreePersonaSection } from "@/components/agent-form/agent-form-dropdowns";
 import { splitComposerAttachmentsForSubmit } from "@/components/composer-attachments";
 import { Combobox, ComboboxItem } from "@/components/ui/combobox";
 import type { ComboboxOption as ComboboxOptionType } from "@/components/ui/combobox";
@@ -28,6 +29,10 @@ import { navigateToPreparedWorkspaceTab } from "@/utils/workspace-navigation";
 import type { ComposerAttachment } from "@/attachments/types";
 import type { ImageAttachment, MessagePayload } from "@/components/message-input";
 import type { AgentAttachment, GitHubSearchItem } from "@server/shared/messages";
+import {
+  createDefaultWorktreePersona,
+  type WorktreePersona,
+} from "@server/shared/worktree-persona";
 import { pickerItemToCheckoutRequest, type PickerItem } from "./new-workspace-picker-item";
 
 interface NewWorkspaceScreenProps {
@@ -118,6 +123,9 @@ export function NewWorkspaceScreen({
   > | null>(null);
   const [pendingAction, setPendingAction] = useState<"chat" | null>(null);
   const [pickerSelection, setPickerSelection] = useState<PickerSelection | null>(null);
+  const [worktreePersona, setWorktreePersona] = useState<WorktreePersona>(() =>
+    createDefaultWorktreePersona(),
+  );
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearchQuery, setPickerSearchQuery] = useState("");
   const [debouncedPickerSearchQuery, setDebouncedPickerSearchQuery] = useState("");
@@ -290,11 +298,12 @@ export function NewWorkspaceScreen({
       return {
         cwd: input.cwd,
         worktreeSlug: createNameId(),
+        worktreePersona,
         ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
         ...(checkoutRequest ?? {}),
       };
     },
-    [selectedItem],
+    [selectedItem, worktreePersona],
   );
 
   const ensureWorkspace = useCallback(
@@ -580,6 +589,14 @@ export function NewWorkspaceScreen({
               />
             </View>
           </View>
+          <View style={styles.personaPanel}>
+            <WorktreePersonaSection
+              persona={worktreePersona}
+              onPersonaChange={setWorktreePersona}
+              locale={locale}
+              disabled={isPending}
+            />
+          </View>
           {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
         </View>
       </View>
@@ -645,6 +662,11 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[4] + theme.spacing[4] - 6,
     marginTop: -theme.spacing[2],
+  },
+  personaPanel: {
+    width: "100%",
+    marginTop: theme.spacing[4],
+    paddingHorizontal: theme.spacing[4],
   },
   badge: {
     flexDirection: "row",

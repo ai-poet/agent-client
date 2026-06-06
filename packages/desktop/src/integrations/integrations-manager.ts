@@ -21,7 +21,7 @@ const SKILL_NAMES = [
   "paseo",
   "paseo-loop",
   "paseo-handoff",
-  "paseo-orchestrator",
+  "paseo-orchestrate",
   "paseo-chat",
   "paseo-committee",
 ];

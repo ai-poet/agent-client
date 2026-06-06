@@ -8,8 +8,24 @@ import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitDiffPane } from "./git-diff-pane";
 
-const { commitMock } = vi.hoisted(() => ({
+const {
+  commitMock,
+  sendAgentMessageMock,
+  waitForFinishMock,
+  toastShowMock,
+  toastErrorMock,
+  storeHiddenAgentMessagesMock,
+  clientHiddenAgentMessagesMock,
+  focusedAgentIdMock,
+} = vi.hoisted(() => ({
   commitMock: vi.fn(),
+  sendAgentMessageMock: vi.fn(),
+  waitForFinishMock: vi.fn(),
+  toastShowMock: vi.fn(),
+  toastErrorMock: vi.fn(),
+  storeHiddenAgentMessagesMock: vi.fn(() => true),
+  clientHiddenAgentMessagesMock: vi.fn(() => true),
+  focusedAgentIdMock: vi.fn(() => "agent-1" as string | null),
 }));
 
 const { diffFiles } = vi.hoisted(() => ({
@@ -184,6 +200,7 @@ vi.mock("lucide-react-native", () => {
     RefreshCcw: createIcon("RefreshCcw"),
     Square: createIcon("Square"),
     Upload: createIcon("Upload"),
+    WandSparkles: createIcon("WandSparkles"),
     WrapText: createIcon("WrapText"),
   };
 });
@@ -276,11 +293,36 @@ vi.mock("@/stores/panel-store", () => ({
 }));
 
 vi.mock("@/contexts/toast-context", () => ({
-  useToast: () => ({ error: vi.fn(), show: vi.fn() }),
+  useToast: () => ({ error: toastErrorMock, show: toastShowMock }),
 }));
 
 vi.mock("@/contexts/git-commit-dialog-context", () => ({
   useGitCommitDialog: () => ({ openCommitDialog: vi.fn() }),
+}));
+
+vi.mock("@/stores/session-store", () => ({
+  useSessionStore: (selector: (state: any) => unknown) =>
+    selector({
+      sessions: {
+        "server-1": {
+          focusedAgentId: focusedAgentIdMock(),
+          agents: new Map([
+            ["agent-1", { id: "agent-1", cwd: "/repo" }],
+            ["agent-2", { id: "agent-2", cwd: "/repo" }],
+          ]),
+          client: {
+            getLastServerInfoMessage: () => ({
+              features: { hiddenAgentMessages: clientHiddenAgentMessagesMock() },
+            }),
+            sendAgentMessage: sendAgentMessageMock,
+            waitForFinish: waitForFinishMock,
+          },
+          serverInfo: {
+            features: { hiddenAgentMessages: storeHiddenAgentMessagesMock() },
+          },
+        },
+      },
+    }),
 }));
 
 vi.mock("@/components/diff-scroll", () => ({
@@ -361,6 +403,11 @@ beforeEach(() => {
   vi.stubGlobal("navigator", dom.window.navigator);
 
   commitMock.mockResolvedValue(undefined);
+  sendAgentMessageMock.mockResolvedValue(undefined);
+  waitForFinishMock.mockResolvedValue({ status: "idle", final: null, error: null });
+  storeHiddenAgentMessagesMock.mockReturnValue(true);
+  clientHiddenAgentMessagesMock.mockReturnValue(true);
+  focusedAgentIdMock.mockReturnValue("agent-1");
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -375,12 +422,26 @@ afterEach(() => {
   root = null;
   container = null;
   commitMock.mockReset();
+  sendAgentMessageMock.mockReset();
+  waitForFinishMock.mockReset();
+  toastShowMock.mockReset();
+  toastErrorMock.mockReset();
+  storeHiddenAgentMessagesMock.mockReset();
+  clientHiddenAgentMessagesMock.mockReset();
+  focusedAgentIdMock.mockReset();
   vi.unstubAllGlobals();
 });
 
-function renderPane() {
+function renderPane(props?: { activeAgentId?: string | null }) {
   act(() => {
-    root?.render(<GitDiffPane serverId="server-1" cwd="/repo" hideHeaderRow />);
+    root?.render(
+      <GitDiffPane
+        serverId="server-1"
+        cwd="/repo"
+        activeAgentId={props?.activeAgentId}
+        hideHeaderRow
+      />,
+    );
   });
 }
 
@@ -455,5 +516,91 @@ describe("GitDiffPane inline commit", () => {
 
     expect(commitMock).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("Select at least one file");
+  });
+
+  it("asks the focused agent to commit selected files with a hidden prompt", async () => {
+    renderPane();
+
+    changeMessage("Manual text stays put");
+    click("diff-file-1-select");
+    click("changes-inline-magic-commit");
+
+    await vi.waitFor(() => {
+      expect(sendAgentMessageMock).toHaveBeenCalledWith(
+        "agent-1",
+        expect.stringContaining('"src/app.ts"'),
+        expect.objectContaining({ hidden: true, attachments: [] }),
+      );
+    });
+    expect(sendAgentMessageMock.mock.calls[0]?.[1]).not.toContain('"README.md"');
+    expect(waitForFinishMock).toHaveBeenCalledWith("agent-1");
+    expect(commitMock).not.toHaveBeenCalled();
+    expect(
+      (document.querySelector('[data-testid="changes-inline-commit-message"]') as HTMLInputElement)
+        .value,
+    ).toBe("Manual text stays put");
+  });
+
+  it("uses the active tab agent when the session focused agent is cleared", async () => {
+    focusedAgentIdMock.mockReturnValue(null);
+    renderPane({ activeAgentId: "agent-2" });
+
+    click("changes-inline-magic-commit");
+
+    await vi.waitFor(() => {
+      expect(sendAgentMessageMock).toHaveBeenCalledWith(
+        "agent-2",
+        expect.stringContaining('"src/app.ts"'),
+        expect.objectContaining({ hidden: true, attachments: [] }),
+      );
+    });
+    expect(waitForFinishMock).toHaveBeenCalledWith("agent-2");
+    expect(document.body.textContent).not.toContain("Focus an agent in this workspace first");
+  });
+
+  it("uses the client's latest server info when store feature metadata is stale", async () => {
+    storeHiddenAgentMessagesMock.mockReturnValue(false);
+    clientHiddenAgentMessagesMock.mockReturnValue(true);
+    renderPane();
+
+    click("changes-inline-magic-commit");
+
+    await vi.waitFor(() => {
+      expect(sendAgentMessageMock).toHaveBeenCalledWith(
+        "agent-1",
+        expect.any(String),
+        expect.objectContaining({ hidden: true }),
+      );
+    });
+    expect(document.body.textContent).not.toContain(
+      "This host version does not support hidden sends",
+    );
+  });
+
+  it("keeps the manual submit button loading while the agent commit is running", async () => {
+    let resolveWaitForFinish!: () => void;
+    const waitForFinishPromise = new Promise((resolve) => {
+      resolveWaitForFinish = () => resolve({ status: "idle", final: null, error: null });
+    });
+    waitForFinishMock.mockReturnValue(waitForFinishPromise);
+    renderPane();
+
+    click("changes-inline-magic-commit");
+
+    await vi.waitFor(() => {
+      expect(waitForFinishMock).toHaveBeenCalledWith("agent-1");
+    });
+    expect(document.body.textContent).toContain("Committing...");
+    expect(
+      document
+        .querySelector('[data-testid="changes-inline-commit-submit"]')
+        ?.getAttribute("disabled"),
+    ).not.toBeNull();
+
+    resolveWaitForFinish();
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("Commit");
+    });
   });
 });

@@ -27,6 +27,16 @@ interface UseBranchSwitcherResult {
   invalidateStashAndCheckout: () => Promise<void>;
 }
 
+function getCheckoutSwitchErrorMessage(
+  error: { code: string; message: string; reason?: string },
+  text: ReturnType<typeof getAppMessages>["workspace"],
+): string {
+  if (error.reason === "BRANCH_ALREADY_CHECKED_OUT") {
+    return text.branchAlreadyCheckedOut;
+  }
+  return error.message;
+}
+
 export function useBranchSwitcher({
   client,
   normalizedServerId,
@@ -102,7 +112,7 @@ export function useBranchSwitcher({
         await invalidateStashAndCheckout();
         const switchPayload = await client.checkoutSwitchBranch(normalizedWorkspaceId, branchId);
         if (switchPayload.error) {
-          toast.error(switchPayload.error.message);
+          toast.error(getCheckoutSwitchErrorMessage(switchPayload.error, text));
           return;
         }
         await invalidateStashAndCheckout();
@@ -138,7 +148,7 @@ export function useBranchSwitcher({
               await stashAndSwitch(branchId);
               return;
             }
-            toast.error(payload.error.message);
+            toast.error(getCheckoutSwitchErrorMessage(payload.error, text));
             return;
           }
           // Success — refresh and check for stashes on the target branch
@@ -179,6 +189,7 @@ export function useBranchSwitcher({
       stashAndSwitch,
       text.failedSwitchBranch,
       text.later,
+      text.branchAlreadyCheckedOut,
       text.restore,
       text.restoreStashedChangesMessage,
       text.restoreStashedChangesTitle,

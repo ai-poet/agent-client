@@ -7,14 +7,16 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Pressable, Text, View } from "react-native";
-import { CheckSquare, GitCommitHorizontal, Square } from "lucide-react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { CheckSquare, GitCommitHorizontal, Square, WandSparkles } from "lucide-react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { AdaptiveModalSheet, AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
 import { DiffStat } from "@/components/diff-stat";
 import { Button } from "@/components/ui/button";
 import { useAppLocale } from "@/hooks/use-app-locale";
 import { getAppMessages } from "@/i18n/sub2api";
+import { useSessionStore } from "@/stores/session-store";
+import { buildMagicCommitPrompt } from "@/utils/magic-commit-prompt";
 
 export type GitCommitDialogFile = {
   path: string;
@@ -28,6 +30,7 @@ export type GitCommitDialogFile = {
 type GitCommitDialogInput = {
   serverId: string;
   cwd: string;
+  activeAgentId?: string | null;
   files?: GitCommitDialogFile[];
   onCommit: (message: string, options?: { paths?: string[]; addAll?: boolean }) => Promise<void>;
 };
@@ -55,22 +58,39 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isMagicSending, setIsMagicSending] = useState(false);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
   const files = pendingInputRef.current?.files ?? [];
   const hasFilePicker = files.length > 0;
   const selectedCount = hasFilePicker ? selectedPaths.size : 0;
   const allFilesSelected = hasFilePicker && selectedCount === files.length;
+  const currentServerId = pendingInputRef.current?.serverId ?? "";
+  const focusedAgentId = useSessionStore(
+    (state) => state.sessions[currentServerId]?.focusedAgentId ?? null,
+  );
+  const focusedAgent = useSessionStore((state) =>
+    focusedAgentId ? (state.sessions[currentServerId]?.agents.get(focusedAgentId) ?? null) : null,
+  );
+  const activeAgent = useSessionStore((state) => {
+    const agentId = pendingInputRef.current?.activeAgentId;
+    return agentId ? (state.sessions[currentServerId]?.agents.get(agentId) ?? null) : null;
+  });
+  const client = useSessionStore((state) => state.sessions[currentServerId]?.client ?? null);
+  const storeSupportsHiddenAgentMessages = useSessionStore(
+    (state) => state.sessions[currentServerId]?.serverInfo?.features?.hiddenAgentMessages === true,
+  );
 
   const close = useCallback(() => {
-    if (isSaving) {
+    if (isSaving || isMagicSending) {
       return;
     }
     setIsOpen(false);
     setMessage("");
     setError(null);
+    setIsMagicSending(false);
     setSelectedPaths(new Set());
     pendingInputRef.current = null;
-  }, [isSaving]);
+  }, [isMagicSending, isSaving]);
 
   const handleMessageChange = useCallback(
     (next: string) => {
@@ -87,6 +107,7 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
     setMessage("");
     setError(null);
     setSelectedPaths(new Set(input.files?.map((file) => file.path) ?? []));
+    setIsMagicSending(false);
     setIsOpen(true);
   }, []);
 
@@ -121,6 +142,83 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
       setError(null);
     }
   }, [error]);
+
+  const sendMagicCommitPrompt = useCallback(async () => {
+    if (isSaving || isMagicSending) {
+      return;
+    }
+    const input = pendingInputRef.current;
+    if (!input) {
+      return;
+    }
+    const selectedFilePaths = hasFilePicker
+      ? files.filter((file) => selectedPaths.has(file.path)).map((file) => file.path)
+      : [];
+    if (selectedFilePaths.length === 0) {
+      setError(text.commitFilesRequired);
+      return;
+    }
+    if (!client) {
+      setError(text.hostNotConnected);
+      return;
+    }
+    const supportsHiddenAgentMessages =
+      storeSupportsHiddenAgentMessages ||
+      client.getLastServerInfoMessage()?.features?.hiddenAgentMessages === true;
+    if (!supportsHiddenAgentMessages) {
+      setError(text.magicCommitUnsupported);
+      return;
+    }
+    const targetAgent =
+      activeAgent && activeAgent.cwd === input.cwd
+        ? activeAgent
+        : focusedAgent && focusedAgent.cwd === input.cwd
+          ? focusedAgent
+          : null;
+    if (!targetAgent) {
+      setError(text.magicCommitNoFocusedAgent);
+      return;
+    }
+
+    setIsMagicSending(true);
+    setError(null);
+    try {
+      await client.sendAgentMessage(
+        targetAgent.id,
+        buildMagicCommitPrompt(selectedFilePaths, locale),
+        {
+          hidden: true,
+          attachments: [],
+        },
+      );
+      const result = await client.waitForFinish(targetAgent.id);
+      if (result.status === "timeout") {
+        setError(result.error ?? text.magicCommitFailed);
+      } else if (result.error) {
+        setError(result.error);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : text.magicCommitFailed);
+    } finally {
+      setIsMagicSending(false);
+    }
+  }, [
+    client,
+    activeAgent,
+    files,
+    focusedAgent,
+    hasFilePicker,
+    isMagicSending,
+    isSaving,
+    locale,
+    selectedPaths,
+    storeSupportsHiddenAgentMessages,
+    text.commitFilesRequired,
+    text.hostNotConnected,
+    text.magicCommitFailed,
+    text.magicCommitNoFocusedAgent,
+    text.magicCommitUnsupported,
+  ]);
 
   const submit = useCallback(async () => {
     if (isSaving) {
@@ -186,19 +284,36 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
       >
         <View style={styles.field}>
           <Text style={styles.label}>{text.commitMessageLabel}</Text>
-          <AdaptiveTextInput
-            testID="git-commit-message-input"
-            value={message}
-            onChangeText={handleMessageChange}
-            placeholder={text.commitMessagePlaceholder}
-            placeholderTextColor={theme.colors.foregroundMuted}
-            style={styles.input}
-            editable={!isSaving}
-            autoCapitalize="sentences"
-            autoCorrect
-            returnKeyType="done"
-            onSubmitEditing={() => void submit()}
-          />
+          <View style={styles.inputRow}>
+            <AdaptiveTextInput
+              testID="git-commit-message-input"
+              value={message}
+              onChangeText={handleMessageChange}
+              placeholder={text.commitMessagePlaceholder}
+              placeholderTextColor={theme.colors.foregroundMuted}
+              style={styles.input}
+              editable={!isSaving}
+              autoCapitalize="sentences"
+              autoCorrect
+              returnKeyType="done"
+              onSubmitEditing={() => void submit()}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={text.magicCommitAction}
+              accessibilityState={{ disabled: isSaving || isMagicSending }}
+              onPress={() => void sendMagicCommitPrompt()}
+              disabled={isSaving || isMagicSending}
+              style={({ hovered, pressed }) => [
+                styles.magicButton,
+                (hovered || pressed) && !isSaving && !isMagicSending && styles.magicButtonHovered,
+                (isSaving || isMagicSending) && styles.magicButtonDisabled,
+              ]}
+              testID="git-commit-magic"
+            >
+              <WandSparkles size={18} color={theme.colors.foregroundMuted} />
+            </Pressable>
+          </View>
           {error ? <Text style={styles.error}>{error}</Text> : null}
         </View>
         {hasFilePicker ? (
@@ -295,11 +410,17 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
             style={styles.actionButton}
             variant="default"
             onPress={() => void submit()}
-            disabled={isSaving}
-            leftIcon={<GitCommitHorizontal size={16} color={theme.colors.palette.white} />}
+            disabled={isSaving || isMagicSending}
+            leftIcon={
+              isMagicSending ? (
+                <ActivityIndicator size="small" color={theme.colors.palette.white} />
+              ) : (
+                <GitCommitHorizontal size={16} color={theme.colors.palette.white} />
+              )
+            }
             testID="git-commit-submit"
           >
-            {isSaving ? text.committing : text.commitAction}
+            {isSaving || isMagicSending ? text.committing : text.commitAction}
           </Button>
         </View>
       </AdaptiveModalSheet>
@@ -317,13 +438,35 @@ const styles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.medium,
   },
   input: {
+    flex: 1,
+    minWidth: 0,
     backgroundColor: theme.colors.surface2,
-    borderRadius: theme.borderRadius.lg,
-    paddingHorizontal: theme.spacing[4],
+    paddingLeft: theme.spacing[4],
+    paddingRight: theme.spacing[2],
     paddingVertical: theme.spacing[3],
     color: theme.colors.foreground,
+  },
+  inputRow: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    overflow: "hidden",
+    backgroundColor: theme.colors.surface2,
+    borderRadius: theme.borderRadius.lg,
     borderWidth: 1,
     borderColor: theme.colors.border,
+  },
+  magicButton: {
+    width: 40,
+    alignSelf: "stretch",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  magicButtonHovered: {
+    backgroundColor: theme.colors.surface3,
+  },
+  magicButtonDisabled: {
+    opacity: theme.opacity[50],
   },
   error: {
     color: theme.colors.destructive,

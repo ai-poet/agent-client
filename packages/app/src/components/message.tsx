@@ -85,6 +85,8 @@ import { ToolCallDetailsContent } from "./tool-call-details";
 import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-url";
 import type { DaemonClient } from "@server/client/daemon-client";
 import { isWeb, isNative } from "@/constants/platform";
+import { RichMarkdown } from "./rich-markdown";
+import { getAppMessages } from "@/i18n/sub2api";
 
 interface UserMessageProps {
   message: string;
@@ -1186,15 +1188,8 @@ export const AssistantMessage = memo(function AssistantMessage({
   }, [client, handleLinkPress, markdownParser, onInlinePathPress, serverId, workspaceRoot]);
 
   const blocks = useMemo(() => splitMarkdownBlocks(message), [message]);
-
-  return (
-    <View
-      testID="assistant-message"
-      style={[
-        assistantMessageStylesheet.container,
-        !resolvedDisableOuterSpacing && assistantMessageStylesheet.containerSpacing,
-      ]}
-    >
+  const fallbackMarkdown = (
+    <>
       {blocks.map((block, index) => (
         <View
           key={index}
@@ -1209,6 +1204,27 @@ export const AssistantMessage = memo(function AssistantMessage({
           />
         </View>
       ))}
+    </>
+  );
+
+  return (
+    <View
+      testID="assistant-message"
+      style={[
+        assistantMessageStylesheet.container,
+        !resolvedDisableOuterSpacing && assistantMessageStylesheet.containerSpacing,
+      ]}
+    >
+      <RichMarkdown
+        text={message}
+        variant="assistant"
+        onLinkPress={handleLinkPress}
+        onInlinePathPress={onInlinePathPress}
+        workspaceRoot={workspaceRoot}
+        serverId={serverId}
+        client={client}
+        fallback={fallbackMarkdown}
+      />
     </View>
   );
 });
@@ -1514,6 +1530,7 @@ export const CompactionMarker = memo(function CompactionMarker({
 interface TodoListCardProps {
   items: TodoEntry[];
   disableOuterSpacing?: boolean;
+  locale?: string | null;
 }
 
 const todoListCardStylesheet = StyleSheet.create((theme) => ({
@@ -1560,9 +1577,11 @@ const todoListCardStylesheet = StyleSheet.create((theme) => ({
 export const TodoListCard = memo(function TodoListCard({
   items,
   disableOuterSpacing,
+  locale,
 }: TodoListCardProps) {
   const { theme: unistylesTheme } = useUnistyles();
   const [isExpanded, setIsExpanded] = useState(false);
+  const agentToolsText = useMemo(() => getAppMessages(locale ?? "en").agentTools, [locale]);
 
   const nextTask = useMemo(() => items.find((item) => !item.completed)?.text, [items]);
 
@@ -1575,7 +1594,9 @@ export const TodoListCard = memo(function TodoListCard({
       <View style={todoListCardStylesheet.detailsWrapper}>
         <View style={todoListCardStylesheet.list}>
           {items.length === 0 ? (
-            <Text style={todoListCardStylesheet.emptyText}>No tasks yet.</Text>
+            <Text style={todoListCardStylesheet.emptyText}>
+              {agentToolsText.details.noTasksYet}
+            </Text>
           ) : (
             items.map((item, idx) => (
               <View key={`${item.text}-${idx}`} style={todoListCardStylesheet.itemRow}>
@@ -1605,11 +1626,11 @@ export const TodoListCard = memo(function TodoListCard({
         </View>
       </View>
     );
-  }, [items]);
+  }, [agentToolsText.details.noTasksYet, items]);
 
   return (
     <ExpandableBadge
-      label="Tasks"
+      label={agentToolsText.labels.tasks}
       secondaryLabel={nextTask}
       icon={CheckSquare}
       isExpanded={isExpanded}
@@ -2099,6 +2120,7 @@ interface ToolCallProps {
   metadata?: Record<string, unknown>;
   isLastInSequence?: boolean;
   disableOuterSpacing?: boolean;
+  locale?: string | null;
   onInlineDetailsHoverChange?: (hovered: boolean) => void;
   onInlineDetailsExpandedChange?: (expanded: boolean) => void;
 }
@@ -2114,11 +2136,13 @@ export const ToolCall = memo(function ToolCall({
   metadata,
   isLastInSequence = false,
   disableOuterSpacing,
+  locale,
   onInlineDetailsHoverChange,
   onInlineDetailsExpandedChange,
 }: ToolCallProps) {
   const { openToolCall } = useToolCallSheet();
   const [isExpanded, setIsExpanded] = useState(false);
+  const agentToolsText = useMemo(() => getAppMessages(locale ?? "en").agentTools, [locale]);
 
   // Check if we're on mobile (use bottom sheet) or desktop (inline expand)
   const isMobile = useIsCompactFormFactor();
@@ -2145,15 +2169,18 @@ export const ToolCall = memo(function ToolCall({
 
   const displayModel = useMemo(
     () =>
-      buildToolCallDisplayModel({
-        name: toolName,
-        status: status === "executing" ? "running" : status,
-        error: error ?? null,
-        detail: displayDetail,
-        metadata,
-        cwd,
-      }),
-    [toolName, status, error, displayDetail, metadata, cwd],
+      buildToolCallDisplayModel(
+        {
+          name: toolName,
+          status: status === "executing" ? "running" : status,
+          error: error ?? null,
+          detail: displayDetail,
+          metadata,
+          cwd,
+        },
+        { locale: locale ?? "en" },
+      ),
+    [toolName, status, error, displayDetail, metadata, cwd, locale],
   );
   const displayName = displayModel.displayName;
   const summary = displayModel.summary;
@@ -2179,6 +2206,7 @@ export const ToolCall = memo(function ToolCall({
         detail: effectiveDetail,
         errorText,
         showLoadingSkeleton: isLoadingDetails,
+        detailsText: agentToolsText.details,
       });
     } else {
       setIsExpanded((prev) => !prev);
@@ -2192,6 +2220,7 @@ export const ToolCall = memo(function ToolCall({
     effectiveDetail,
     errorText,
     isLoadingDetails,
+    agentToolsText.details,
   ]);
 
   useEffect(() => {
@@ -2230,14 +2259,15 @@ export const ToolCall = memo(function ToolCall({
         errorText={errorText}
         maxHeight={400}
         showLoadingSkeleton={isLoadingDetails}
+        detailsText={agentToolsText.details}
       />
     );
-  }, [isMobile, effectiveDetail, errorText, isLoadingDetails]);
+  }, [isMobile, effectiveDetail, errorText, isLoadingDetails, agentToolsText.details]);
 
   if (effectiveDetail?.type === "plan") {
     return (
       <PlanCard
-        title="Plan"
+        title={agentToolsText.labels.plan}
         text={effectiveDetail.text}
         disableOuterSpacing={disableOuterSpacing}
       />
@@ -2273,5 +2303,6 @@ function areToolCallPropsEqual(previous: ToolCallProps, next: ToolCallProps) {
   if (previous.metadata !== next.metadata) return false;
   if (previous.isLastInSequence !== next.isLastInSequence) return false;
   if (previous.disableOuterSpacing !== next.disableOuterSpacing) return false;
+  if (previous.locale !== next.locale) return false;
   return true;
 }

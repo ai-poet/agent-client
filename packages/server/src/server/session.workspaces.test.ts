@@ -1058,6 +1058,75 @@ describe("workspace aggregation", () => {
     });
   });
 
+  test("fetch_workspaces skips stale invalid workspace descriptors instead of failing hydration", async () => {
+    const emitted: Array<{ type: string; payload: any }> = [];
+    const workspaceGitService = createNoopWorkspaceGitService();
+    workspaceGitService.peekSnapshot = vi.fn((cwd: string) => {
+      if (cwd === "/tmp/stale-worktree") {
+        throw new Error("Not a git repository: /tmp/stale-worktree");
+      }
+      return null;
+    });
+    const session = createSessionForWorkspaceTests({
+      onMessage: (message) => emitted.push(message as any),
+      workspaceGitService,
+    }) as any;
+    const goodProject = createPersistedProjectRecord({
+      projectId: "proj-good",
+      rootPath: "/tmp/good",
+      kind: "non_git",
+      displayName: "good",
+      createdAt: "2026-03-01T12:00:00.000Z",
+      updatedAt: "2026-03-01T12:00:00.000Z",
+    });
+    const staleProject = createPersistedProjectRecord({
+      projectId: "proj-stale",
+      rootPath: "/tmp/stale-worktree",
+      kind: "git",
+      displayName: "stale",
+      createdAt: "2026-03-01T12:00:00.000Z",
+      updatedAt: "2026-03-01T12:00:00.000Z",
+    });
+    const goodWorkspace = createPersistedWorkspaceRecord({
+      workspaceId: "ws-good",
+      projectId: goodProject.projectId,
+      cwd: "/tmp/good",
+      kind: "directory",
+      displayName: "good",
+      createdAt: "2026-03-01T12:00:00.000Z",
+      updatedAt: "2026-03-01T12:00:00.000Z",
+    });
+    const staleWorkspace = createPersistedWorkspaceRecord({
+      workspaceId: "ws-stale",
+      projectId: staleProject.projectId,
+      cwd: "/tmp/stale-worktree",
+      kind: "worktree",
+      displayName: "stale",
+      createdAt: "2026-03-01T12:00:00.000Z",
+      updatedAt: "2026-03-01T12:00:00.000Z",
+    });
+
+    session.listAgentPayloads = async () => [];
+    session.projectRegistry.list = async () => [goodProject, staleProject];
+    session.workspaceRegistry.list = async () => [goodWorkspace, staleWorkspace];
+
+    await session.handleMessage({
+      type: "fetch_workspaces_request",
+      requestId: "req-stale-workspace",
+    });
+
+    const response = emitted.find((message) => message.type === "fetch_workspaces_response") as
+      | { type: "fetch_workspaces_response"; payload: any }
+      | undefined;
+    expect(response?.payload.entries).toEqual([
+      expect.objectContaining({
+        id: "ws-good",
+        workspaceDirectory: "/tmp/good",
+      }),
+    ]);
+    expect(emitted.some((message) => message.type === "rpc_error")).toBe(false);
+  });
+
   test("workspace update stream keeps persisted workspace visible after agents stop", async () => {
     const emitted: Array<{ type: string; payload: unknown }> = [];
     const logger = {
@@ -1849,7 +1918,12 @@ describe("workspace aggregation", () => {
 
     const tempDir = realpathSync(mkdtempSync(path.join(tmpdir(), "session-workspace-reconcile-")));
     const mainWorkspaceId = path.join(tempDir, "inkwell");
-    const worktreeWorkspaceId = path.join(mainWorkspaceId, ".agent-client", "worktrees", "feature-a");
+    const worktreeWorkspaceId = path.join(
+      mainWorkspaceId,
+      ".agent-client",
+      "worktrees",
+      "feature-a",
+    );
     const localProjectId = mainWorkspaceId;
     const remoteProjectId = "remote:github.com/zimakki/inkwell";
 
@@ -1954,7 +2028,12 @@ describe("workspace aggregation", () => {
 
     const tempDir = realpathSync(mkdtempSync(path.join(tmpdir(), "session-workspace-fetch-")));
     const mainWorkspaceId = path.join(tempDir, "inkwell");
-    const worktreeWorkspaceId = path.join(mainWorkspaceId, ".agent-client", "worktrees", "feature-a");
+    const worktreeWorkspaceId = path.join(
+      mainWorkspaceId,
+      ".agent-client",
+      "worktrees",
+      "feature-a",
+    );
     const oldProjectId = "remote:github.com/old-owner/inkwell";
     const newProjectId = "remote:github.com/new-owner/inkwell";
 
@@ -2398,6 +2477,144 @@ describe("workspace aggregation", () => {
             }),
             refreshedAt: "2026-04-12T00:10:00.000Z",
           }),
+        }),
+      },
+    });
+  });
+
+  test("workspace descriptors prefer live git snapshots over stale non-git records", async () => {
+    const runtimeSnapshot = createWorkspaceRuntimeSnapshot("/tmp/repo", {
+      git: {
+        currentBranch: "feature/live-git",
+        remoteUrl: null,
+        diffStat: null,
+      },
+      github: {
+        featuresEnabled: false,
+        pullRequest: null,
+      },
+    });
+    const workspaceGitService = createNoopWorkspaceGitService();
+    workspaceGitService.peekSnapshot = vi.fn(() => runtimeSnapshot);
+
+    const session = createSessionForWorkspaceTests({ workspaceGitService }) as any;
+    const project = createPersistedProjectRecord({
+      projectId: "proj-stale-non-git",
+      rootPath: "/tmp/repo",
+      kind: "non_git",
+      displayName: "repo",
+      createdAt: "2026-03-01T12:00:00.000Z",
+      updatedAt: "2026-03-01T12:00:00.000Z",
+    });
+    const workspace = createPersistedWorkspaceRecord({
+      workspaceId: "ws-stale-non-git",
+      projectId: project.projectId,
+      cwd: "/tmp/repo",
+      kind: "directory",
+      displayName: "repo",
+      createdAt: "2026-03-01T12:00:00.000Z",
+      updatedAt: "2026-03-01T12:00:00.000Z",
+    });
+    session.listAgentPayloads = async () => [];
+    session.projectRegistry.list = async () => [project];
+    session.workspaceRegistry.list = async () => [workspace];
+
+    const result = await session.listFetchWorkspacesEntries({
+      type: "fetch_workspaces_request",
+      requestId: "req-live-git",
+    });
+
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]).toMatchObject({
+      id: "ws-stale-non-git",
+      projectKind: "git",
+      workspaceKind: "local_checkout",
+      name: "feature/live-git",
+      gitRuntime: expect.objectContaining({
+        currentBranch: "feature/live-git",
+      }),
+    });
+  });
+
+  test("reconciles stale non-git workspace records into git records and emits updates", async () => {
+    const emitted: Array<{ type: string; payload: any }> = [];
+    const runtimeSnapshot = createWorkspaceRuntimeSnapshot("/tmp/repo", {
+      git: {
+        currentBranch: "feature/reconciled",
+        remoteUrl: null,
+        diffStat: null,
+      },
+      github: {
+        featuresEnabled: false,
+        pullRequest: null,
+      },
+    });
+    const workspaceGitService = createNoopWorkspaceGitService();
+    workspaceGitService.getSnapshot = vi.fn(async () => runtimeSnapshot);
+    workspaceGitService.peekSnapshot = vi.fn(() => runtimeSnapshot);
+
+    const project = createPersistedProjectRecord({
+      projectId: "proj-reconcile-non-git",
+      rootPath: "/tmp/repo",
+      kind: "non_git",
+      displayName: "repo",
+      createdAt: "2026-03-01T12:00:00.000Z",
+      updatedAt: "2026-03-01T12:00:00.000Z",
+    });
+    const workspace = createPersistedWorkspaceRecord({
+      workspaceId: "ws-reconcile-non-git",
+      projectId: project.projectId,
+      cwd: "/tmp/repo",
+      kind: "directory",
+      displayName: "repo",
+      createdAt: "2026-03-01T12:00:00.000Z",
+      updatedAt: "2026-03-01T12:00:00.000Z",
+    });
+    const projects = new Map([[project.projectId, project]]);
+    const workspaces = new Map([[workspace.workspaceId, workspace]]);
+
+    const session = createSessionForWorkspaceTests({ workspaceGitService }) as any;
+    session.emit = (message: any) => emitted.push(message);
+    session.workspaceUpdatesSubscription = {
+      subscriptionId: "sub-reconcile",
+      filter: undefined,
+      isBootstrapping: false,
+      pendingUpdatesByWorkspaceId: new Map(),
+      lastEmittedByWorkspaceId: new Map(),
+    };
+    session.listAgentPayloads = async () => [];
+    session.projectRegistry.list = async () => Array.from(projects.values());
+    session.projectRegistry.upsert = async (
+      record: ReturnType<typeof createPersistedProjectRecord>,
+    ) => {
+      projects.set(record.projectId, record);
+    };
+    session.workspaceRegistry.list = async () => Array.from(workspaces.values());
+    session.workspaceRegistry.upsert = async (
+      record: ReturnType<typeof createPersistedWorkspaceRecord>,
+    ) => {
+      workspaces.set(record.workspaceId, record);
+    };
+
+    await session.reconcileAndEmitWorkspaceUpdates();
+
+    expect(projects.get(project.projectId)).toMatchObject({
+      kind: "git",
+      rootPath: "/tmp/repo",
+    });
+    expect(workspaces.get(workspace.workspaceId)).toMatchObject({
+      kind: "local_checkout",
+      displayName: "feature/reconciled",
+    });
+    expect(emitted).toContainEqual({
+      type: "workspace_update",
+      payload: {
+        kind: "upsert",
+        workspace: expect.objectContaining({
+          id: "ws-reconcile-non-git",
+          projectKind: "git",
+          workspaceKind: "local_checkout",
+          name: "feature/reconciled",
         }),
       },
     });

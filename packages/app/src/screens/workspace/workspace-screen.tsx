@@ -1,16 +1,15 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useIsFocused } from "@react-navigation/native";
-import { ActivityIndicator, BackHandler, Keyboard, Pressable, Text, View } from "react-native";
+import type { ListTerminalsResponse } from "@server/shared/messages";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
-import { DiffStat } from "@/components/diff-stat";
+import { useRouter } from "expo-router";
 import {
-  CopyX,
   ArrowLeftToLine,
   ArrowRightToLine,
+  Brain,
   ChevronDown,
   Copy,
+  CopyX,
   Ellipsis,
   EllipsisVertical,
   PanelRight,
@@ -20,17 +19,24 @@ import {
   SquareTerminal,
   X,
 } from "lucide-react-native";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, BackHandler, Keyboard, Pressable, Text, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import invariant from "tiny-invariant";
-import { SidebarMenuToggle } from "@/components/headers/menu-header";
-import { HeaderToggleButton } from "@/components/headers/header-toggle-button";
-import { ScreenHeader } from "@/components/headers/screen-header";
+import { useStoreWithEqualityFn } from "zustand/traditional";
 import { BranchSwitcher } from "@/components/branch-switcher";
+import { DiffStat } from "@/components/diff-stat";
+import { ExplorerSidebar } from "@/components/explorer-sidebar";
+import { HeaderBalanceBadge } from "@/components/header-balance-badge";
+import { HeaderToggleButton } from "@/components/headers/header-toggle-button";
+import { SidebarMenuToggle } from "@/components/headers/menu-header";
+import { ScreenHeader } from "@/components/headers/screen-header";
+import { SourceControlPanelIcon } from "@/components/icons/source-control-panel-icon";
+import { SplitContainer } from "@/components/split-container";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import { Shortcut } from "@/components/ui/shortcut";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,96 +44,93 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Shortcut } from "@/components/ui/shortcut";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ExplorerSidebar } from "@/components/explorer-sidebar";
-import { SplitContainer } from "@/components/split-container";
-import { SourceControlPanelIcon } from "@/components/icons/source-control-panel-icon";
-import { WorkspaceGitActions } from "@/screens/workspace/workspace-git-actions";
-import { WorkspaceOpenInEditorButton } from "@/screens/workspace/workspace-open-in-editor-button";
-import { WorkspaceScriptsButton } from "@/screens/workspace/workspace-scripts-button";
+import { supportsDesktopPaneSplits, useIsCompactFormFactor } from "@/constants/layout";
+import { isNative, isWeb } from "@/constants/platform";
 import { ExplorerSidebarAnimationProvider } from "@/contexts/explorer-sidebar-animation-context";
 import { useToast } from "@/contexts/toast-context";
-import { useExplorerOpenGesture } from "@/hooks/use-explorer-open-gesture";
-import { selectIsFileExplorerOpen, usePanelStore } from "@/stores/panel-store";
-import { type ExplorerCheckoutContext } from "@/stores/explorer-checkout-context";
-import { useSessionStore } from "@/stores/session-store";
-import {
-  buildWorkspaceTabPersistenceKey,
-  collectAllTabs,
-  useWorkspaceLayoutStore,
-} from "@/stores/workspace-layout-store";
-import type { WorkspaceTab, WorkspaceTabTarget } from "@/stores/workspace-tabs-store";
-import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
-import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
-import { useCreateFlowStore } from "@/stores/create-flow-store";
-import {
-  normalizeWorkspaceTabTarget,
-  workspaceTabTargetsEqual,
-} from "@/utils/workspace-tab-identity";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { shouldShowWorkspaceSetup, useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
-import { useWorkspace } from "@/stores/session-store-hooks";
-import { useWorkspaceTerminalSessionRetention } from "@/terminal/hooks/use-workspace-terminal-session-retention";
-import {
-  checkoutStatusQueryKey,
-  type CheckoutStatusPayload,
-} from "@/hooks/use-checkout-status-query";
-import type { ListTerminalsResponse } from "@server/shared/messages";
-import { upsertTerminalListEntry } from "@/utils/terminal-list";
-import { confirmDialog } from "@/utils/confirm-dialog";
-import { useArchiveAgent } from "@/hooks/use-archive-agent";
 import { useAppLocale } from "@/hooks/use-app-locale";
+import { useArchiveAgent } from "@/hooks/use-archive-agent";
+import {
+  type CheckoutStatusPayload,
+  checkoutStatusQueryKey,
+} from "@/hooks/use-checkout-status-query";
+import { useContainerWidth } from "@/hooks/use-container-width";
+import { useExplorerOpenGesture } from "@/hooks/use-explorer-open-gesture";
+import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
+import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useStableEvent } from "@/hooks/use-stable-event";
-import { HeaderBalanceBadge } from "@/components/header-balance-badge";
-import { buildProviderCommand } from "@/utils/provider-command-templates";
-import { generateDraftId } from "@/stores/draft-keys";
-import {
-  getWorkspaceExecutionAuthority,
-  resolveWorkspaceRouteId,
-} from "@/utils/workspace-execution";
-import {
-  createWorktreeQuickly,
-  isCreatingWorktreePlaceholderId,
-} from "@/utils/quick-create-worktree";
-import { navigateToPreparedWorkspaceTab } from "@/utils/workspace-navigation";
-import {
-  WorkspaceTabPresentationResolver,
-  WorkspaceTabIcon,
-  WorkspaceTabOptionRow,
-} from "@/screens/workspace/workspace-tab-presentation";
-import {
-  WorkspaceDesktopTabsRow,
-  type WorkspaceDesktopTabRowItem,
-} from "@/screens/workspace/workspace-desktop-tabs-row";
-import { buildWorkspaceTabMenuEntries } from "@/screens/workspace/workspace-tab-menu";
-import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
-import {
-  resolveWorkspaceHeader,
-  shouldRenderMissingWorkspaceDescriptor,
-} from "@/screens/workspace/workspace-header-source";
+import { getAppMessages } from "@/i18n/sub2api";
+import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
+import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+import { useMountedTabSet } from "@/screens/workspace/use-mounted-tab-set";
 import {
   deriveWorkspaceAgentVisibility,
   workspaceAgentVisibilityEqual,
 } from "@/screens/workspace/workspace-agent-visibility";
-import { deriveWorkspacePaneState } from "@/screens/workspace/workspace-pane-state";
-import {
-  buildWorkspacePaneContentModel,
-  WorkspacePaneContent,
-  type WorkspacePaneContentModel,
-} from "@/screens/workspace/workspace-pane-content";
-import { useMountedTabSet } from "@/screens/workspace/use-mounted-tab-set";
 import {
   buildBulkCloseConfirmationMessage,
   classifyBulkClosableTabs,
   closeBulkWorkspaceTabs,
 } from "@/screens/workspace/workspace-bulk-close";
-import { findAdjacentPane } from "@/utils/split-navigation";
+import {
+  type WorkspaceDesktopTabRowItem,
+  WorkspaceDesktopTabsRow,
+} from "@/screens/workspace/workspace-desktop-tabs-row";
+import { WorkspaceGitActions } from "@/screens/workspace/workspace-git-actions";
+import {
+  resolveWorkspaceHeader,
+  shouldRenderMissingWorkspaceDescriptor,
+} from "@/screens/workspace/workspace-header-source";
+import { WorkspaceOpenInEditorButton } from "@/screens/workspace/workspace-open-in-editor-button";
+import {
+  buildWorkspacePaneContentModel,
+  WorkspacePaneContent,
+  type WorkspacePaneContentModel,
+} from "@/screens/workspace/workspace-pane-content";
+import { deriveWorkspacePaneState } from "@/screens/workspace/workspace-pane-state";
+import { WorkspaceScriptsButton } from "@/screens/workspace/workspace-scripts-button";
+import { buildWorkspaceTabMenuEntries } from "@/screens/workspace/workspace-tab-menu";
+import {
+  WorkspaceTabIcon,
+  WorkspaceTabOptionRow,
+  WorkspaceTabPresentationResolver,
+} from "@/screens/workspace/workspace-tab-presentation";
+import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
+import { useCreateFlowStore } from "@/stores/create-flow-store";
+import { generateDraftId } from "@/stores/draft-keys";
+import { type ExplorerCheckoutContext } from "@/stores/explorer-checkout-context";
+import { selectIsFileExplorerOpen, usePanelStore } from "@/stores/panel-store";
+import { useSessionStore } from "@/stores/session-store";
+import { useWorkspace } from "@/stores/session-store-hooks";
+import {
+  buildWorkspaceTabPersistenceKey,
+  collectAllTabs,
+  useWorkspaceLayoutStore,
+} from "@/stores/workspace-layout-store";
+import { shouldShowWorkspaceSetup, useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
+import type { WorkspaceTab, WorkspaceTabTarget } from "@/stores/workspace-tabs-store";
+import { useWorkspaceTerminalSessionRetention } from "@/terminal/hooks/use-workspace-terminal-session-retention";
+import { confirmDialog } from "@/utils/confirm-dialog";
+import { buildSettingsSectionRoute } from "@/utils/host-routes";
 import { isAbsolutePath } from "@/utils/path";
-import { useIsCompactFormFactor, supportsDesktopPaneSplits } from "@/constants/layout";
-import { isWeb, isNative } from "@/constants/platform";
-import { useContainerWidth } from "@/hooks/use-container-width";
-import { getAppMessages } from "@/i18n/sub2api";
+import { buildProviderCommand } from "@/utils/provider-command-templates";
+import {
+  createWorktreeQuickly,
+  isCreatingWorktreePlaceholderId,
+} from "@/utils/quick-create-worktree";
+import { findAdjacentPane } from "@/utils/split-navigation";
+import { upsertTerminalListEntry } from "@/utils/terminal-list";
+import {
+  getWorkspaceExecutionAuthority,
+  resolveWorkspaceRouteId,
+} from "@/utils/workspace-execution";
+import { navigateToPreparedWorkspaceTab } from "@/utils/workspace-navigation";
+import {
+  normalizeWorkspaceTabTarget,
+  workspaceTabTargetsEqual,
+} from "@/utils/workspace-tab-identity";
 
 const TERMINALS_QUERY_STALE_TIME = 5_000;
 const EMPTY_UI_TABS: WorkspaceTab[] = [];
@@ -185,6 +188,9 @@ function getFallbackTabOptionLabel(
   if (tab.target.kind === "terminal") {
     return text.tabLabels.terminal;
   }
+  if (tab.target.kind === "preview") {
+    return tab.target.scriptName;
+  }
   if (tab.target.kind === "file") {
     return tab.target.path.split("/").filter(Boolean).pop() ?? tab.target.path;
   }
@@ -206,6 +212,9 @@ function getFallbackTabOptionDescription(
   }
   if (tab.target.kind === "terminal") {
     return text.tabSubtitles.terminal;
+  }
+  if (tab.target.kind === "preview") {
+    return text.tabSubtitles.preview;
   }
   return tab.target.path;
 }
@@ -647,6 +656,7 @@ function WorkspaceScreenContent({
   isRouteFocused,
 }: WorkspaceScreenContentProps) {
   const { theme } = useUnistyles();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const mainBackgroundColor = theme.colors.surfaceWorkspace;
   const toast = useToast();
@@ -700,6 +710,9 @@ function WorkspaceScreenContent({
   const canCreateTerminalNow = Boolean(
     isRouteFocused && client && isConnected && workspaceDirectory,
   );
+  const handleOpenAIContextHub = useCallback(() => {
+    router.push(buildSettingsSectionRoute("ai-context"));
+  }, [router]);
 
   const workspaceAgentVisibility = useStoreWithEqualityFn(
     useSessionStore,
@@ -1037,6 +1050,9 @@ function WorkspaceScreenContent({
   const openWorkspaceTabInBackground = useWorkspaceLayoutStore(
     (state) => state.openTabInBackground,
   );
+  const openWorkspaceTabInAdjacentRightPane = useWorkspaceLayoutStore(
+    (state) => state.openTabInAdjacentRightPane,
+  );
   const focusWorkspaceTab = useWorkspaceLayoutStore((state) => state.focusTab);
   const closeWorkspaceTab = useWorkspaceLayoutStore((state) => state.closeTab);
   const unpinWorkspaceAgent = useWorkspaceLayoutStore((state) => state.unpinAgent);
@@ -1081,6 +1097,24 @@ function WorkspaceScreenContent({
       openWorkspaceTabFocused(persistenceKey, { kind: "terminal", terminalId });
     },
     [openWorkspaceTabFocused, persistenceKey],
+  );
+  const handlePreviewService = useCallback(
+    (scriptName: string) => {
+      if (!persistenceKey || !workspaceLayout) {
+        return;
+      }
+      const target = normalizeWorkspaceTabTarget({ kind: "preview", scriptName });
+      if (!target) {
+        return;
+      }
+      const adjacentPaneId = findAdjacentPane(
+        workspaceLayout.root,
+        workspaceLayout.focusedPaneId,
+        "right",
+      );
+      openWorkspaceTabInAdjacentRightPane(persistenceKey, { target, adjacentPaneId });
+    },
+    [openWorkspaceTabInAdjacentRightPane, persistenceKey, workspaceLayout],
   );
   const paneFocusSuppressedRef = useRef(false);
   const resizeWorkspaceSplit = useWorkspaceLayoutStore((state) => state.resizeSplit);
@@ -2407,6 +2441,13 @@ function WorkspaceScreenContent({
                           {text.newTerminal}
                         </DropdownMenuItem>
                         <DropdownMenuItem
+                          testID="workspace-header-ai-context"
+                          leading={<Brain size={16} color={theme.colors.foregroundMuted} />}
+                          onSelect={handleOpenAIContextHub}
+                        >
+                          AI Context Hub
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           testID="workspace-header-copy-path"
                           leading={<Copy size={16} color={theme.colors.foregroundMuted} />}
                           disabled={!isAbsolutePath(normalizedWorkspaceId)}
@@ -2451,6 +2492,7 @@ function WorkspaceScreenContent({
                       liveTerminalIds={liveTerminalIds}
                       onScriptTerminalStarted={handleScriptTerminalStarted}
                       onViewTerminal={handleViewScriptTerminal}
+                      onPreviewService={handlePreviewService}
                       hideLabels={showCompactButtonLabels}
                     />
                   ) : null}
@@ -2682,6 +2724,7 @@ function WorkspaceScreenContent({
               serverId={normalizedServerId}
               workspaceId={normalizedWorkspaceId}
               workspaceRoot={workspaceDirectory}
+              activeAgentId={focusedPaneAgentId}
               isGit={isGitCheckout}
               onOpenFile={handleOpenFileFromExplorer}
             />
@@ -2829,6 +2872,10 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
+  },
+  tooltipText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.popoverForeground,
   },
   explorerTooltipText: {
     fontSize: theme.fontSize.sm,

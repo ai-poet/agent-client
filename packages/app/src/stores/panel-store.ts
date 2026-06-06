@@ -1,17 +1,18 @@
-import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { isWeb } from "@/constants/platform";
+import { type ExplorerCheckoutContext } from "./explorer-checkout-context";
 import {
   buildExplorerCheckoutKey,
   coerceExplorerTabForCheckout,
+  type ExplorerTab,
   isExplorerTab,
   resolveExplorerTabForCheckout,
-  type ExplorerTab,
 } from "./explorer-tab-memory";
-import { type ExplorerCheckoutContext } from "./explorer-checkout-context";
-import { isWeb } from "@/constants/platform";
-export type { ExplorerTab } from "./explorer-tab-memory";
+
 export type { ExplorerCheckoutContext } from "./explorer-checkout-context";
+export type { ExplorerTab } from "./explorer-tab-memory";
 
 /**
  * Mobile panel state machine.
@@ -375,7 +376,7 @@ export const usePanelStore = create<PanelState>()(
     }),
     {
       name: "panel-state",
-      version: 10,
+      version: 11,
       storage: createJSONStorage(() => AsyncStorage),
       migrate: (persistedState, version) => {
         const state = persistedState as Partial<PanelState> & Record<string, unknown>;

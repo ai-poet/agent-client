@@ -153,6 +153,11 @@ type ForegroundTurnWaiter = {
   resolveSettled: () => void;
 };
 
+type HiddenForegroundTurn = {
+  text: string;
+  messageId?: string;
+};
+
 type PendingForegroundRun = {
   token: string;
   started: boolean;
@@ -187,6 +192,7 @@ type ManagedAgentBase = {
   lastError?: string;
   attention: AttentionState;
   foregroundTurnWaiters: Set<ForegroundTurnWaiter>;
+  hiddenForegroundTurns: Map<string, HiddenForegroundTurn>;
   unsubscribeSession: (() => void) | null;
   /**
    * Internal agents are hidden from listings and don't trigger notifications.
@@ -330,6 +336,10 @@ export class AgentManager {
   private readonly agentsAwaitingInitialSnapshotPersist = new Set<string>();
   private readonly sessionEventTails = new Map<string, Promise<void>>();
   private readonly pendingForegroundRuns = new Map<string, PendingForegroundRun>();
+  private readonly pendingHiddenForegroundRuns = new WeakMap<
+    PendingForegroundRun,
+    HiddenForegroundTurn
+  >();
   private readonly subscribers = new Set<SubscriptionRecord>();
   private readonly idFactory: () => string;
   private readonly registry?: AgentStorage;
@@ -764,6 +774,7 @@ export class AgentManager {
       this.settleForegroundTurnWaiter(waiter);
     }
     existing.foregroundTurnWaiters.clear();
+    existing.hiddenForegroundTurns.clear();
     this.settlePendingForegroundRun(agentId);
     await this.closeReloadedSession(existing.session, agentId);
 
@@ -1227,10 +1238,16 @@ export class AgentManager {
 
     const self = this;
     const pendingRun = self.createPendingForegroundRun();
+    if (options?.hiddenUserMessage) {
+      self.pendingHiddenForegroundRuns.set(pendingRun, {
+        text: options.hiddenUserMessage.text,
+        messageId: normalizeMessageId(options.hiddenUserMessage.messageId),
+      });
+    }
     self.pendingForegroundRuns.set(agentId, pendingRun);
 
     const streamForwarder = (async function* streamForwarder() {
-      let turnId: string;
+      let turnId: string | null = null;
       let waiter: ForegroundTurnWaiter | null = null;
       try {
         const result = await agent.session.startTurn(prompt, options);
@@ -1248,6 +1265,10 @@ export class AgentManager {
 
       pendingRun.started = true;
       agent.activeForegroundTurnId = turnId;
+      const hiddenTurn = self.pendingHiddenForegroundRuns.get(pendingRun);
+      if (hiddenTurn) {
+        agent.hiddenForegroundTurns.set(turnId, hiddenTurn);
+      }
       agent.lifecycle = "running";
       self.touchUpdatedAt(agent);
       self.emitState(agent);
@@ -1308,6 +1329,10 @@ export class AgentManager {
           agent.foregroundTurnWaiters.delete(waiter);
           self.settleForegroundTurnWaiter(waiter);
         }
+        if (turnId) {
+          agent.hiddenForegroundTurns.delete(turnId);
+        }
+        self.pendingHiddenForegroundRuns.delete(pendingRun);
         self.settlePendingForegroundRun(agentId, pendingRun.token);
         if (!agent.activeForegroundTurnId) {
           await self.refreshRuntimeInfo(agent);
@@ -2006,6 +2031,7 @@ export class AgentManager {
       pendingReplacement: false,
       activeForegroundTurnId: null,
       foregroundTurnWaiters: new Set<ForegroundTurnWaiter>(),
+      hiddenForegroundTurns: new Map<string, HiddenForegroundTurn>(),
       unsubscribeSession: null,
       persistence: attachPersistenceCwd(session.describePersistence(), config.cwd),
       historyPrimed: options?.historyPrimed ?? durableTimelineHasRows,
@@ -2398,6 +2424,19 @@ export class AgentManager {
 
           // Suppress user_message echoes for the active foreground turn.
           if (!options?.fromHistory && event.item.type === "user_message" && isForegroundEvent) {
+            const hiddenTurn = eventTurnId ? agent.hiddenForegroundTurns.get(eventTurnId) : null;
+            if (hiddenTurn) {
+              const eventMessageId = normalizeMessageId(event.item.messageId);
+              const messageIdMatches =
+                hiddenTurn.messageId && eventMessageId
+                  ? hiddenTurn.messageId === eventMessageId
+                  : false;
+              if (messageIdMatches || event.item.text === hiddenTurn.text) {
+                shouldDispatchEvent = false;
+                shouldNotifyWaiters = false;
+                break;
+              }
+            }
             const eventMessageId = normalizeMessageId(event.item.messageId);
             if (
               eventMessageId &&

@@ -19,6 +19,7 @@ import {
   Info,
   Shield,
   Puzzle,
+  Brain,
   Plus,
   Cloud,
   RotateCcw,
@@ -32,6 +33,7 @@ import {
   useAppSettings,
   type AppLanguage,
   type AppSettings,
+  type ExperienceMode,
   type SendBehavior,
 } from "@/hooks/use-settings";
 import { THEME_SWATCHES } from "@/styles/theme";
@@ -56,6 +58,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { DesktopPermissionsSection } from "@/desktop/components/desktop-permissions-section";
+import { AIContextHubSection } from "@/desktop/components/ai-context-hub-section";
 import { IntegrationsSection } from "@/desktop/components/integrations-section";
 import { isElectronRuntime } from "@/desktop/host";
 import { useDesktopAppUpdater } from "@/desktop/updates/use-desktop-app-updater";
@@ -75,6 +78,7 @@ import { APP_NAME, CLOUD_NAME } from "@/config/branding";
 import { getSub2APIMessages, resolveSub2APILocaleFromPreference } from "@/i18n/sub2api";
 import {
   buildHostRootRoute,
+  buildHostSimpleRoute,
   buildHostWorkspaceRoute,
   buildHostOpenProjectRoute,
   buildSettingsHostRoute,
@@ -105,6 +109,7 @@ const SIDEBAR_SECTION_ITEMS: SidebarSectionItem[] = [
   { id: "managed-provider", icon: Server, desktopOnly: true },
   { id: "shortcuts", icon: Keyboard, desktopOnly: true },
   { id: "integrations", icon: Puzzle, desktopOnly: true },
+  { id: "ai-context", icon: Brain, desktopOnly: true },
   { id: "permissions", icon: Shield, desktopOnly: true },
   { id: "diagnostics", icon: Stethoscope },
   { id: "about", icon: Info },
@@ -124,6 +129,8 @@ function getSettingsSectionLabel(section: SettingsSectionSlug, text: SettingsTex
       return text.sections.shortcuts;
     case "integrations":
       return text.sections.integrations;
+    case "ai-context":
+      return text.sections.aiContext;
     case "permissions":
       return text.sections.permissions;
     case "diagnostics":
@@ -174,6 +181,7 @@ function ThemeSwatch({ color, size }: { color: string; size: number }) {
 }
 
 const LANGUAGE_VALUES: AppLanguage[] = ["auto", "zh", "en"];
+const EXPERIENCE_MODE_VALUES: ExperienceMode[] = ["developer", "simple"];
 
 // ---------------------------------------------------------------------------
 // Section components
@@ -184,6 +192,7 @@ interface GeneralSectionProps {
   text: SettingsText;
   handleThemeChange: (theme: AppSettings["theme"]) => void;
   handleLanguageChange: (language: AppLanguage) => void;
+  handleExperienceModeChange: (mode: ExperienceMode) => void;
   handleSendBehaviorChange: (behavior: SendBehavior) => void;
   handleReplayOnboardingGuide: () => void;
 }
@@ -193,6 +202,7 @@ function GeneralSection({
   text,
   handleThemeChange,
   handleLanguageChange,
+  handleExperienceModeChange,
   handleSendBehaviorChange,
   handleReplayOnboardingGuide,
 }: GeneralSectionProps) {
@@ -239,6 +249,21 @@ function GeneralSection({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+        </View>
+        <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
+          <View style={settingsStyles.rowContent}>
+            <Text style={settingsStyles.rowTitle}>{text.experienceMode}</Text>
+            <Text style={settingsStyles.rowHint}>{text.experienceModeHint}</Text>
+          </View>
+          <SegmentedControl
+            size="sm"
+            value={settings.experienceMode ?? "developer"}
+            onValueChange={handleExperienceModeChange}
+            options={EXPERIENCE_MODE_VALUES.map((value) => ({
+              value,
+              label: text.experienceModes[value],
+            }))}
+          />
         </View>
         <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
           <View style={settingsStyles.rowContent}>
@@ -739,6 +764,26 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
     [updateSettings],
   );
 
+  const handleExperienceModeChange = useCallback(
+    (experienceMode: ExperienceMode) => {
+      void (async () => {
+        await updateSettings({ experienceMode });
+        if (!anyOnlineServerId) {
+          router.replace("/");
+          return;
+        }
+        router.replace(
+          experienceMode === "simple"
+            ? buildHostSimpleRoute(anyOnlineServerId)
+            : buildHostOpenProjectRoute(anyOnlineServerId),
+        );
+      })().catch((error) => {
+        console.error("[settings] failed to switch experience mode", error);
+      });
+    },
+    [anyOnlineServerId, router, updateSettings],
+  );
+
   const handleSendBehaviorChange = useCallback(
     (behavior: SendBehavior) => {
       void updateSettings({ sendBehavior: behavior });
@@ -916,6 +961,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
               text={settingsText}
               handleThemeChange={handleThemeChange}
               handleLanguageChange={handleLanguageChange}
+              handleExperienceModeChange={handleExperienceModeChange}
               handleSendBehaviorChange={handleSendBehaviorChange}
               handleReplayOnboardingGuide={handleReplayOnboardingGuide}
             />
@@ -928,6 +974,8 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
           return isDesktopApp ? <KeyboardShortcutsSection /> : null;
         case "integrations":
           return isDesktopApp ? <IntegrationsSection /> : null;
+        case "ai-context":
+          return isDesktopApp ? <AIContextHubSection /> : null;
         case "permissions":
           return isDesktopApp ? <DesktopPermissionsSection /> : null;
         case "diagnostics":

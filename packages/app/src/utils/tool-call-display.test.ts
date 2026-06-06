@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildToolCallDisplayModel } from "./tool-call-display";
+import type { ToolCallDisplayInput } from "./tool-call-display";
 
 describe("tool-call-display", () => {
   it("builds display model from canonical shell detail", () => {
@@ -174,5 +175,171 @@ describe("tool-call-display", () => {
       displayName: "Terminal",
       summary: "npm run test",
     });
+  });
+
+  it("localizes canonical tool labels when locale is provided", () => {
+    const cases: Array<{
+      input: ToolCallDisplayInput;
+      en: string;
+      zh: string;
+    }> = [
+      {
+        input: {
+          name: "shell",
+          status: "running",
+          error: null,
+          detail: { type: "shell", command: "npm test" },
+        },
+        en: "Shell",
+        zh: "终端",
+      },
+      {
+        input: {
+          name: "read_file",
+          status: "completed",
+          error: null,
+          detail: { type: "read", filePath: "/tmp/repo/README.md" },
+          cwd: "/tmp/repo",
+        },
+        en: "Read",
+        zh: "读取",
+      },
+      {
+        input: {
+          name: "apply_patch",
+          status: "completed",
+          error: null,
+          detail: { type: "edit", filePath: "/tmp/repo/src/index.ts" },
+          cwd: "/tmp/repo",
+        },
+        en: "Edit",
+        zh: "编辑",
+      },
+      {
+        input: {
+          name: "write_file",
+          status: "completed",
+          error: null,
+          detail: { type: "write", filePath: "/tmp/repo/src/index.ts" },
+          cwd: "/tmp/repo",
+        },
+        en: "Write",
+        zh: "写入",
+      },
+      {
+        input: {
+          name: "grep",
+          status: "completed",
+          error: null,
+          detail: { type: "search", query: "TODO" },
+        },
+        en: "Search",
+        zh: "搜索",
+      },
+      {
+        input: {
+          name: "web_fetch",
+          status: "completed",
+          error: null,
+          detail: { type: "fetch", url: "https://example.com" },
+        },
+        en: "Fetch",
+        zh: "获取",
+      },
+      {
+        input: {
+          name: "paseo_worktree_setup",
+          status: "running",
+          error: null,
+          detail: {
+            type: "worktree_setup",
+            worktreePath: "/tmp/repo/.paseo/worktrees/repo/branch",
+            branchName: "feature-branch",
+            log: "",
+            commands: [],
+          },
+        },
+        en: "Worktree Setup",
+        zh: "工作区准备",
+      },
+      {
+        input: {
+          name: "task",
+          status: "running",
+          error: null,
+          detail: {
+            type: "sub_agent",
+            description: "Inspect repository structure",
+            log: "",
+            actions: [],
+          },
+        },
+        en: "Task",
+        zh: "任务",
+      },
+      {
+        input: {
+          name: "thinking",
+          status: "running",
+          error: null,
+          detail: { type: "unknown", input: "Thinking...", output: null },
+        },
+        en: "Thinking",
+        zh: "思考中",
+      },
+      {
+        input: {
+          name: "terminal",
+          status: "completed",
+          error: null,
+          detail: { type: "plain_text", icon: "square_terminal" },
+        },
+        en: "Terminal",
+        zh: "终端",
+      },
+      {
+        input: {
+          name: "plan",
+          status: "completed",
+          error: null,
+          detail: { type: "plan", text: "Build it" },
+        },
+        en: "Plan",
+        zh: "计划",
+      },
+    ];
+
+    for (const { input, en, zh } of cases) {
+      expect(buildToolCallDisplayModel(input, { locale: "en" }).displayName).toBe(en);
+      expect(buildToolCallDisplayModel(input, { locale: "zh" }).displayName).toBe(zh);
+    }
+  });
+
+  it("keeps summaries and custom tool names unchanged while localizing labels", () => {
+    const readDisplay = buildToolCallDisplayModel(
+      {
+        name: "read_file",
+        status: "completed",
+        error: null,
+        detail: { type: "read", filePath: "/tmp/repo/src/index.ts" },
+        cwd: "/tmp/repo",
+      },
+      { locale: "zh" },
+    );
+    expect(readDisplay).toEqual({
+      displayName: "读取",
+      summary: "src/index.ts",
+    });
+
+    const customDisplay = buildToolCallDisplayModel(
+      {
+        name: "custom_tool_name",
+        status: "completed",
+        error: null,
+        detail: { type: "unknown", input: null, output: null },
+      },
+      { locale: "zh" },
+    );
+    expect(customDisplay.displayName).toBe("Custom Tool Name");
   });
 });

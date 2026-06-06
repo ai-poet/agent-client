@@ -1,5 +1,4 @@
-import { useRef, ReactNode, useCallback, useEffect, useMemo } from "react";
-import { Buffer } from "buffer";
+import { useRef, ReactNode, useCallback, useEffect } from "react";
 import { AppState } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { useClientActivity } from "@/hooks/use-client-activity";
@@ -59,151 +58,7 @@ import { isNative } from "@/constants/platform";
 import { useToast } from "@/contexts/toast-context";
 import { toErrorMessage } from "@/utils/error-messages";
 import { cloudServiceQueryKeys } from "@/hooks/use-sub2api-api";
-
-/** Throttled balance refresh — at most once per 10 seconds across all agents. */
-let _lastBalanceRefreshAt = 0;
-const BALANCE_REFRESH_THROTTLE_MS = 10_000;
-
-function throttledBalanceRefresh(queryClient: ReturnType<typeof useQueryClient>) {
-  const now = Date.now();
-  if (now - _lastBalanceRefreshAt < BALANCE_REFRESH_THROTTLE_MS) return;
-  _lastBalanceRefreshAt = now;
-  // `me(undefined)` resolves to a "none" segment that never matches the logged-in endpoint key.
-  // Invalidate the whole managed-cloud subtree (same as sub2api-desktop-auth-bridge).
-  void queryClient.invalidateQueries({ queryKey: cloudServiceQueryKeys.root });
-}
-
-// Re-export types from session-store and draft-store for backward compatibility
-export type { DraftInput } from "@/stores/draft-store";
-export type {
-  MessageEntry,
-  Agent,
-  ExplorerEntry,
-  ExplorerFile,
-  ExplorerEntryKind,
-  ExplorerFileKind,
-  ExplorerEncoding,
-  AgentFileExplorerState,
-} from "@/stores/session-store";
-
-const HISTORY_STALE_AFTER_MS = 60_000;
-const AUTHORITATIVE_REVALIDATION_DEBOUNCE_MS = 300;
-
-function hasAgentUsageChanged(
-  incomingUsage: Agent["lastUsage"] | undefined,
-  currentUsage: Agent["lastUsage"] | undefined,
-): boolean {
-  const keys: Array<keyof NonNullable<Agent["lastUsage"]>> = [
-    "inputTokens",
-    "outputTokens",
-    "cachedInputTokens",
-    "totalCostUsd",
-    "contextWindowMaxTokens",
-    "contextWindowUsedTokens",
-  ];
-
-  return keys.some((key) => incomingUsage?.[key] !== currentUsage?.[key]);
-}
-
-type AudioOutputPayload = Extract<SessionOutboundMessage, { type: "audio_output" }>["payload"];
-
-interface BufferedAudioChunk {
-  chunkIndex: number;
-  audio: string;
-  format: string;
-  id: string;
-}
-
-function decodeBase64Chunk(base64: string): Uint8Array {
-  return Buffer.from(base64, "base64");
-}
-
-function buildAudioPlaybackSource(chunks: BufferedAudioChunk[]): AudioPlaybackSource {
-  const decodedChunks = chunks.map((chunk) => decodeBase64Chunk(chunk.audio));
-  const totalSize = decodedChunks.reduce((sum, chunk) => sum + chunk.length, 0);
-  const output = new Uint8Array(totalSize);
-  let offset = 0;
-  for (const chunk of decodedChunks) {
-    output.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  const format = chunks[0]?.format ?? "pcm";
-  const mimeType =
-    format === "pcm"
-      ? "audio/pcm;rate=24000;bits=16"
-      : format === "mp3"
-        ? "audio/mpeg"
-        : `audio/${format}`;
-
-  const bytes = output.slice();
-  return {
-    size: bytes.byteLength,
-    type: mimeType,
-    async arrayBuffer() {
-      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-    },
-  };
-}
-
-const findLatestAssistantMessageText = (items: StreamItem[]): string | null => {
-  for (let i = items.length - 1; i >= 0; i -= 1) {
-    const item = items[i];
-    if (item.kind === "assistant_message") {
-      return item.text;
-    }
-  }
-  return null;
-};
-
-const getLatestPermissionRequest = (
-  session: SessionState | undefined,
-  agentId: string,
-): NotificationPermissionRequest | null => {
-  if (!session) {
-    return null;
-  }
-
-  let latest: NotificationPermissionRequest | null = null;
-  for (const pending of session.pendingPermissions.values()) {
-    if (pending.agentId === agentId) {
-      latest = pending.request;
-    }
-  }
-  if (latest) {
-    return latest;
-  }
-
-  const agentPending = session.agents.get(agentId)?.pendingPermissions;
-  if (agentPending && agentPending.length > 0) {
-    return agentPending[agentPending.length - 1] as NotificationPermissionRequest;
-  }
-
-  return null;
-};
-
-type FileExplorerPayload = Extract<
-  SessionOutboundMessage,
-  { type: "file_explorer_response" }
->["payload"];
-
-type FileDownloadTokenPayload = Extract<
-  SessionOutboundMessage,
-  { type: "file_download_token_response" }
->["payload"];
-
-type AgentUpdatePayload = Extract<SessionOutboundMessage, { type: "agent_update" }>["payload"];
-type WorkspaceUpdatePayload = Extract<
-  SessionOutboundMessage,
-  { type: "workspace_update" }
->["payload"];
-type WorkspaceSetupProgressPayload = Extract<
-  SessionOutboundMessage,
-  { type: "workspace_setup_progress" }
->["payload"];
-
-const getAgentIdFromUpdate = (update: AgentUpdatePayload): string =>
-  update.kind === "remove" ? update.agentId : update.agent.id;
+import { useStableEvent } from "@/hooks/use-stable-event";
 
 // ---------------------------------------------------------------------------
 // Module-level pending agent updates buffer (scoped by serverId)
@@ -244,6 +99,39 @@ export function clearPendingAgentUpdates(serverId: string): void {
   }
 }
 
+// Re-export types from session-store and draft-store for backward compatibility
+export type { DraftInput } from "@/stores/draft-store";
+export type {
+  MessageEntry,
+  Agent,
+  ExplorerEntry,
+  ExplorerFile,
+  ExplorerEntryKind,
+  ExplorerFileKind,
+  ExplorerEncoding,
+  AgentFileExplorerState,
+} from "@/stores/session-store";
+
+type AgentUpdatePayload = Extract<SessionOutboundMessage, { type: "agent_update" }>["payload"];
+
+type FileExplorerPayload = Extract<
+  SessionOutboundMessage,
+  { type: "file_explorer_response" }
+>["payload"];
+
+type FileDownloadTokenPayload = Extract<
+  SessionOutboundMessage,
+  { type: "file_download_token_response" }
+>["payload"];
+
+type WorkspaceSetupProgressPayload = Extract<
+  SessionOutboundMessage,
+  { type: "workspace_setup_progress" }
+>["payload"];
+
+// ---------------------------------------------------------------------------
+// Provider Props
+// ---------------------------------------------------------------------------
 interface SessionProviderSharedProps {
   children: ReactNode;
   serverId: string;
@@ -263,11 +151,135 @@ function SessionProviderWithClient({ children, serverId, client }: SessionProvid
   );
 }
 
-// SessionProvider: Daemon client message handler that updates Zustand store
 export function SessionProvider(props: SessionProviderProps) {
   return <SessionProviderWithClient {...props} />;
 }
 
+// ---------------------------------------------------------------------------
+// Audio helpers (kept at module level for use in daemon event handlers)
+// ---------------------------------------------------------------------------
+interface BufferedAudioChunk {
+  chunkIndex: number;
+  audio: string;
+  format: string;
+  id: string;
+}
+
+function decodeBase64Chunk(base64: string): Uint8Array {
+  return Buffer.from(base64, "base64");
+}
+
+function buildAudioPlaybackSource(chunks: BufferedAudioChunk[]): AudioPlaybackSource {
+  const decodedChunks = chunks.map((chunk) => decodeBase64Chunk(chunk.audio));
+  const totalSize = decodedChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const output = new Uint8Array(totalSize);
+  let offset = 0;
+  for (const chunk of decodedChunks) {
+    output.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  const format = chunks[0]?.format ?? "pcm";
+  const mimeType =
+    format === "pcm"
+      ? "audio/pcm;rate=24000;bits=16"
+      : format === "mp3"
+        ? "audio/mpeg"
+        : `audio/${format}`;
+
+  const bytes = output.slice();
+  return {
+    size: bytes.byteLength,
+    type: mimeType,
+    async arrayBuffer() {
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Helper: find latest assistant message text for attention notifications
+// ---------------------------------------------------------------------------
+const findLatestAssistantMessageText = (items: StreamItem[]): string | null => {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const item = items[i];
+    if (item.kind === "assistant_message") {
+      return item.text;
+    }
+  }
+  return null;
+};
+
+// ---------------------------------------------------------------------------
+// Helper: get latest permission request for an agent
+// ---------------------------------------------------------------------------
+const getLatestPermissionRequest = (
+  session: SessionState | undefined,
+  agentId: string,
+): NotificationPermissionRequest | null => {
+  if (!session) {
+    return null;
+  }
+
+  let latest: NotificationPermissionRequest | null = null;
+  for (const pending of session.pendingPermissions.values()) {
+    if (pending.agentId === agentId) {
+      latest = pending.request;
+    }
+  }
+  if (latest) {
+    return latest;
+  }
+
+  const agentPending = session.agents.get(agentId)?.pendingPermissions;
+  if (agentPending && agentPending.length > 0) {
+    return agentPending[agentPending.length - 1] as NotificationPermissionRequest;
+  }
+
+  return null;
+};
+
+// ---------------------------------------------------------------------------
+// Helper: check if agent usage has changed
+// ---------------------------------------------------------------------------
+function hasAgentUsageChanged(
+  incomingUsage: Agent["lastUsage"] | undefined,
+  currentUsage: Agent["lastUsage"] | undefined,
+): boolean {
+  const keys: Array<keyof NonNullable<Agent["lastUsage"]>> = [
+    "inputTokens",
+    "outputTokens",
+    "cachedInputTokens",
+    "totalCostUsd",
+    "contextWindowMaxTokens",
+    "contextWindowUsedTokens",
+  ];
+
+  return keys.some((key) => incomingUsage?.[key] !== currentUsage?.[key]);
+}
+
+// ---------------------------------------------------------------------------
+// Throttled balance refresh
+// ---------------------------------------------------------------------------
+let _lastBalanceRefreshAt = 0;
+const BALANCE_REFRESH_THROTTLE_MS = 10_000;
+
+function throttledBalanceRefresh(queryClient: ReturnType<typeof useQueryClient>) {
+  const now = Date.now();
+  if (now - _lastBalanceRefreshAt < BALANCE_REFRESH_THROTTLE_MS) return;
+  _lastBalanceRefreshAt = now;
+  void queryClient.invalidateQueries({ queryKey: cloudServiceQueryKeys.root });
+}
+
+const HISTORY_STALE_AFTER_MS = 60_000;
+const AUTHORITATIVE_REVALIDATION_DEBOUNCE_MS = 300;
+
+const getAgentIdFromUpdate = (update: AgentUpdatePayload): string =>
+  update.kind === "remove" ? update.agentId : update.agent.id;
+
+// ---------------------------------------------------------------------------
+// Internal Provider
+// ---------------------------------------------------------------------------
 function SessionProviderInternal({ children, serverId, client }: SessionProviderClientProps) {
   const voiceRuntime = useVoiceRuntimeOptional();
   const voiceAudioEngine = useVoiceAudioEngineOptional();
@@ -275,48 +287,18 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
   const isConnected = useHostRuntimeIsConnected(serverId);
   const toast = useToast();
 
-  // Zustand store actions
-  const initializeSession = useSessionStore((state) => state.initializeSession);
-  const clearSession = useSessionStore((state) => state.clearSession);
-  const setIsPlayingAudio = useSessionStore((state) => state.setIsPlayingAudio);
-  const setMessages = useSessionStore((state) => state.setMessages);
-  const setCurrentAssistantMessage = useSessionStore((state) => state.setCurrentAssistantMessage);
-  const setAgentStreamTail = useSessionStore((state) => state.setAgentStreamTail);
-  const setAgentStreamHead = useSessionStore((state) => state.setAgentStreamHead);
-  const setAgentStreamState = useSessionStore((state) => state.setAgentStreamState);
-  const clearAgentStreamHead = useSessionStore((state) => state.clearAgentStreamHead);
-  const setAgentTimelineCursor = useSessionStore((state) => state.setAgentTimelineCursor);
-  const setInitializingAgents = useSessionStore((state) => state.setInitializingAgents);
-  const bumpHistorySyncGeneration = useSessionStore((state) => state.bumpHistorySyncGeneration);
-  const markAgentHistorySynchronized = useSessionStore(
-    (state) => state.markAgentHistorySynchronized,
-  );
-  const setAgentAuthoritativeHistoryApplied = useSessionStore(
-    (state) => state.setAgentAuthoritativeHistoryApplied,
-  );
-  const setHasHydratedAgents = useSessionStore((state) => state.setHasHydratedAgents);
-  const setHasHydratedWorkspaces = useSessionStore((state) => state.setHasHydratedWorkspaces);
-  const setAgents = useSessionStore((state) => state.setAgents);
-  const setWorkspaces = useSessionStore((state) => state.setWorkspaces);
-  const mergeWorkspaces = useSessionStore((state) => state.mergeWorkspaces);
-  const removeWorkspace = useSessionStore((state) => state.removeWorkspace);
-  const setAgentLastActivity = useSessionStore((state) => state.setAgentLastActivity);
-  const flushAgentLastActivity = useSessionStore((state) => state.flushAgentLastActivity);
-  const setPendingPermissions = useSessionStore((state) => state.setPendingPermissions);
-  const clearDraftInput = useDraftStore((state) => state.clearDraftInput);
-  const setQueuedMessages = useSessionStore((state) => state.setQueuedMessages);
-  const updateSessionClient = useSessionStore((state) => state.updateSessionClient);
-  const updateSessionServerInfo = useSessionStore((state) => state.updateSessionServerInfo);
-  const upsertWorkspaceSetupProgress = useWorkspaceSetupStore((state) => state.upsertProgress);
-  const removeWorkspaceSetup = useWorkspaceSetupStore((state) => state.removeWorkspace);
-  const clearWorkspaceSetupServer = useWorkspaceSetupStore((state) => state.clearServer);
+  // Direct store access — actions are stable references, no subscription needed.
+  const store = useSessionStore;
+  const draftStore = useDraftStore;
+  const workspaceSetupStore = useWorkspaceSetupStore;
 
-  // Track focused agent for heartbeat
+  // State selectors (these need subscription)
   const focusedAgentId = useSessionStore(
     (state) => state.sessions[serverId]?.focusedAgentId ?? null,
   );
   const sessionAgents = useSessionStore((state) => state.sessions[serverId]?.agents);
 
+  // Refs
   const previousAgentStatusRef = useRef<Map<string, AgentLifecycleStatus>>(new Map());
   const sendAgentMessageRef = useRef<
     | ((
@@ -324,6 +306,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         message: string,
         images?: AttachmentMetadata[],
         attachments?: AgentAttachment[],
+        options?: { hidden?: boolean },
       ) => Promise<void>)
     | null
   >(null);
@@ -337,16 +320,21 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
   const audioOutputBuffersRef = useRef<Map<string, BufferedAudioChunk[]>>(new Map());
   const activeAudioGroupsRef = useRef<Set<string>>(new Set());
 
+  // -------------------------------------------------------------------------
+  // AppState tracking
+  // -------------------------------------------------------------------------
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
       appStateRef.current = nextState;
     });
-
     return () => {
       subscription.remove();
     };
   }, []);
 
+  // -------------------------------------------------------------------------
+  // Reconcile previous agent statuses when agents change
+  // -------------------------------------------------------------------------
   useEffect(() => {
     previousAgentStatusRef.current = reconcilePreviousAgentStatuses(
       previousAgentStatusRef.current,
@@ -354,51 +342,88 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     );
   }, [sessionAgents]);
 
+  // -------------------------------------------------------------------------
+  // Workspace hydration (optimised: first-page fast, rest in background)
+  // -------------------------------------------------------------------------
+  const hydrationCursorRef = useRef<string | null>(null);
+  const hydrationRunningRef = useRef(false);
+
   const hydrateWorkspaces = useCallback(
-    async (options?: { subscribe?: boolean; isCancelled?: () => boolean }) => {
+    async (options?: {
+      subscribe?: boolean;
+      isCancelled?: () => boolean;
+      firstPageOnly?: boolean;
+    }) => {
       if (!client || !isConnected) {
         return;
       }
 
-      const workspaces = new Map<string, WorkspaceDescriptor>();
-      let cursor: string | null = null;
+      const firstPageOnly = options?.firstPageOnly ?? false;
+      const workspaces = new Map<string, WorkspaceDescriptor>(
+        store.getState().sessions[serverId]?.workspaces,
+      );
+      let cursor = firstPageOnly ? null : hydrationCursorRef.current;
       let includeSubscribe = options?.subscribe ?? false;
+      let pageCount = 0;
 
-      while (true) {
-        const payload = await client.fetchWorkspaces({
-          sort: [{ key: "activity_at", direction: "desc" }],
-          ...(includeSubscribe ? { subscribe: {} } : {}),
-          page: cursor ? { limit: 200, cursor } : { limit: 200 },
-        });
+      hydrationRunningRef.current = true;
+
+      try {
+        while (true) {
+          const payload = await client.fetchWorkspaces({
+            sort: [{ key: "activity_at", direction: "desc" }],
+            ...(includeSubscribe ? { subscribe: {} } : {}),
+            page: cursor ? { limit: 200, cursor } : { limit: 200 },
+          });
+          if (options?.isCancelled?.()) {
+            return;
+          }
+
+          for (const entry of payload.entries) {
+            const workspace = normalizeWorkspaceDescriptor(entry);
+            workspaces.set(workspace.id, workspace);
+          }
+
+          pageCount += 1;
+
+          // After first page: immediately make workspaces available for UI
+          if (pageCount === 1) {
+            store.getState().setWorkspaces(serverId, workspaces);
+            store.getState().setHasHydratedWorkspaces(serverId, true);
+
+            if (firstPageOnly) {
+              hydrationCursorRef.current = payload.pageInfo.nextCursor ?? null;
+              return;
+            }
+          }
+
+          if (!payload.pageInfo.hasMore || !payload.pageInfo.nextCursor) {
+            hydrationCursorRef.current = null;
+            break;
+          }
+          cursor = payload.pageInfo.nextCursor;
+          includeSubscribe = false;
+        }
+
         if (options?.isCancelled?.()) {
           return;
         }
 
-        for (const entry of payload.entries) {
-          const workspace = normalizeWorkspaceDescriptor(entry);
-          workspaces.set(workspace.id, workspace);
-        }
-
-        if (!payload.pageInfo.hasMore || !payload.pageInfo.nextCursor) {
-          break;
-        }
-        cursor = payload.pageInfo.nextCursor;
-        includeSubscribe = false;
+        // Final write with all accumulated pages
+        store.getState().setWorkspaces(serverId, workspaces);
+      } finally {
+        hydrationRunningRef.current = false;
       }
-
-      if (options?.isCancelled?.()) {
-        return;
-      }
-
-      setWorkspaces(serverId, workspaces);
-      setHasHydratedWorkspaces(serverId, true);
     },
-    [client, isConnected, serverId, setHasHydratedWorkspaces, setWorkspaces],
+    [client, isConnected, serverId],
   );
 
+  // -------------------------------------------------------------------------
+  // Authoritative agent snapshot application
+  // -------------------------------------------------------------------------
   const applyAuthoritativeAgentSnapshot = useCallback(
     (agent: Agent) => {
-      setAgents(serverId, (prev) => {
+      store.getState().setAgents(serverId, (prev) => {
         const current = prev.get(agent.id);
         if (current && agent.updatedAt.getTime() < current.updatedAt.getTime()) {
           const hasUsageUpdate = hasAgentUsageChanged(agent.lastUsage, current.lastUsage);
@@ -425,9 +450,9 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         });
       }
 
-      setAgentLastActivity(agent.id, agent.lastActivityAt);
+      store.getState().setAgentLastActivity(agent.id, agent.lastActivityAt);
 
-      setPendingPermissions(serverId, (prev) => {
+      store.getState().setPendingPermissions(serverId, (prev) => {
         const existingKeysForAgent: string[] = [];
         for (const [key, pending] of prev.entries()) {
           if (pending.agentId === agent.id) {
@@ -481,7 +506,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
 
       const prevStatus = previousAgentStatusRef.current.get(agent.id);
       if (prevStatus === "running" && agent.status !== "running") {
-        const session = useSessionStore.getState().sessions[serverId];
+        const session = store.getState().sessions[serverId];
         const queue = session?.queuedMessages.get(agent.id);
         if (queue && queue.length > 0) {
           const [next, ...rest] = queue;
@@ -494,7 +519,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
               wirePayload.attachments,
             );
           }
-          setQueuedMessages(serverId, (prev) => {
+          store.getState().setQueuedMessages(serverId, (prev) => {
             const updated = new Map(prev);
             updated.set(agent.id, rest);
             return updated;
@@ -504,16 +529,12 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
 
       previousAgentStatusRef.current.set(agent.id, agent.status);
     },
-    [
-      queryClient,
-      serverId,
-      setAgentLastActivity,
-      setAgents,
-      setPendingPermissions,
-      setQueuedMessages,
-    ],
+    [queryClient, serverId],
   );
 
+  // -------------------------------------------------------------------------
+  // Authoritative revalidation
+  // -------------------------------------------------------------------------
   const runAuthoritativeRevalidation = useCallback(async () => {
     await Promise.all([
       getHostRuntimeStore().refreshAgentDirectory({ serverId }),
@@ -581,7 +602,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       scheduleAuthoritativeRevalidation();
 
       if (isNative) {
-        const session = useSessionStore.getState().sessions[serverId];
+        const session = store.getState().sessions[serverId];
         const agentId = session?.focusedAgentId;
         const cursor = agentId ? session?.agentTimelineCursor.get(agentId) : undefined;
         if (agentId && cursor) {
@@ -601,15 +622,20 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       if (awayMs < HISTORY_STALE_AFTER_MS) {
         return;
       }
-      bumpHistorySyncGeneration(serverId);
+      store.getState().bumpHistorySyncGeneration(serverId);
     },
-    [bumpHistorySyncGeneration, client, scheduleAuthoritativeRevalidation, serverId],
+    [client, scheduleAuthoritativeRevalidation, serverId],
   );
 
+  // -------------------------------------------------------------------------
   // Client activity tracking (heartbeat, push token registration)
+  // -------------------------------------------------------------------------
   useClientActivity({ client, focusedAgentId, onAppResumed: handleAppResumed });
   usePushTokenRegistration({ client, serverId });
 
+  // -------------------------------------------------------------------------
+  // Agent attention notification
+  // -------------------------------------------------------------------------
   const notifyAgentAttention = useCallback(
     (params: {
       agentId: string;
@@ -618,7 +644,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       notification?: AgentAttentionNotificationPayload;
     }) => {
       const appState = appStateRef.current;
-      const session = useSessionStore.getState().sessions[serverId];
+      const session = store.getState().sessions[serverId];
       const focusedAgentId = session?.focusedAgentId ?? null;
       if (params.reason === "error") {
         return;
@@ -661,14 +687,16 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     [serverId],
   );
 
-  // Initialize session in store
+  // -------------------------------------------------------------------------
+  // Initialize session
+  // -------------------------------------------------------------------------
   useEffect(() => {
-    initializeSession(serverId, client);
-  }, [serverId, client, initializeSession]);
+    store.getState().initializeSession(serverId, client);
+  }, [serverId, client]);
 
   useEffect(() => {
-    updateSessionClient(serverId, client);
-  }, [serverId, client, updateSessionClient]);
+    store.getState().updateSessionClient(serverId, client);
+  }, [serverId, client]);
 
   useEffect(() => {
     const serverInfo = client.getLastServerInfoMessage();
@@ -676,14 +704,14 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       return;
     }
 
-    updateSessionServerInfo(serverId, {
+    store.getState().updateSessionServerInfo(serverId, {
       serverId: serverInfo.serverId,
       hostname: serverInfo.hostname,
       version: serverInfo.version,
       ...(serverInfo.capabilities ? { capabilities: serverInfo.capabilities } : {}),
       ...(serverInfo.features ? { features: serverInfo.features } : {}),
     });
-  }, [client, serverId, updateSessionServerInfo]);
+  }, [client, serverId]);
 
   useEffect(() => {
     if (!isConnected) {
@@ -698,6 +726,9 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     prefetchProvidersSnapshot(serverId, client);
   }, [client, isConnected, serverId]);
 
+  // -------------------------------------------------------------------------
+  // Voice runtime
+  // -------------------------------------------------------------------------
   useEffect(() => {
     if (!voiceRuntime) {
       return;
@@ -730,10 +761,10 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         await client.abortRequest();
       },
       setAssistantAudioPlaying: (isPlaying) => {
-        setIsPlayingAudio(serverId, isPlaying);
+        store.getState().setIsPlayingAudio(serverId, isPlaying);
       },
     });
-  }, [client, serverId, setIsPlayingAudio, voiceRuntime]);
+  }, [client, serverId, voiceRuntime]);
 
   useEffect(() => {
     voiceRuntime?.updateSessionConnection(serverId, isConnected);
@@ -742,27 +773,51 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
   // If the client drops mid-initialization, clear pending flags
   useEffect(() => {
     if (!isConnected) {
-      flushAgentLastActivity();
+      store.getState().flushAgentLastActivity();
       clearPendingAgentUpdates(serverId);
-      setInitializingAgents(serverId, new Map());
+      store.getState().setInitializingAgents(serverId, new Map());
     }
-  }, [flushAgentLastActivity, serverId, isConnected, setInitializingAgents]);
+  }, [serverId, isConnected]);
 
+  // -------------------------------------------------------------------------
+  // Hydrate workspaces on connection
+  // -------------------------------------------------------------------------
   useEffect(() => {
     if (!client || !isConnected) {
       return;
     }
 
     let cancelled = false;
+
+    // Phase 1: Load first page immediately for fast first paint
     void (async () => {
       try {
         await hydrateWorkspaces({
           subscribe: true,
           isCancelled: () => cancelled,
+          firstPageOnly: true,
         });
       } catch (error) {
-        console.error("[Session] Failed to hydrate workspaces:", error);
+        console.error("[Session] Failed to hydrate first page:", error);
+        return;
       }
+
+      // Phase 2: Defer remaining pages to avoid blocking UI
+      if (cancelled) return;
+      if (!hydrationCursorRef.current) return; // All fit in one page
+
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        void (async () => {
+          try {
+            await hydrateWorkspaces({
+              isCancelled: () => cancelled,
+            });
+          } catch (error) {
+            console.error("[Session] Failed to hydrate remaining pages:", error);
+          }
+        })();
+      });
     })();
 
     return () => {
@@ -770,6 +825,9 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     };
   }, [client, hydrateWorkspaces, isConnected]);
 
+  // -------------------------------------------------------------------------
+  // Agent update payload handler
+  // -------------------------------------------------------------------------
   const applyAgentUpdatePayload = useCallback(
     (update: AgentUpdatePayload) => {
       if (update.kind === "remove") {
@@ -778,7 +836,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         deletePendingAgentUpdate(serverId, agentId);
         clearArchiveAgentPending({ queryClient, serverId, agentId });
 
-        setAgents(serverId, (prev) => {
+        store.getState().setAgents(serverId, (prev) => {
           if (!prev.has(agentId)) {
             return prev;
           }
@@ -787,7 +845,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           return next;
         });
 
-        setPendingPermissions(serverId, (prev) => {
+        store.getState().setPendingPermissions(serverId, (prev) => {
           if (prev.size === 0) {
             return prev;
           }
@@ -802,7 +860,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           return changed ? next : prev;
         });
 
-        setQueuedMessages(serverId, (prev) => {
+        store.getState().setQueuedMessages(serverId, (prev) => {
           if (!prev.has(agentId)) {
             return prev;
           }
@@ -811,7 +869,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           return next;
         });
 
-        setAgentTimelineCursor(serverId, (prev) => {
+        store.getState().setAgentTimelineCursor(serverId, (prev) => {
           if (!prev.has(agentId)) {
             return prev;
           }
@@ -819,7 +877,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           next.delete(agentId);
           return next;
         });
-        setAgentAuthoritativeHistoryApplied(serverId, agentId, false);
+        store.getState().setAgentAuthoritativeHistoryApplied(serverId, agentId, false);
         return;
       }
 
@@ -834,20 +892,14 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
 
       applyAuthoritativeAgentSnapshot(agent);
     },
-    [
-      applyAuthoritativeAgentSnapshot,
-      serverId,
-      setAgents,
-      setPendingPermissions,
-      setAgentTimelineCursor,
-    ],
+    [applyAuthoritativeAgentSnapshot, queryClient, serverId],
   );
 
   const applyWorkspaceSetupProgress = useCallback(
     (payload: WorkspaceSetupProgressPayload) => {
-      upsertWorkspaceSetupProgress({ serverId, payload });
+      workspaceSetupStore.getState().upsertProgress({ serverId, payload });
     },
-    [serverId, upsertWorkspaceSetupProgress],
+    [serverId],
   );
 
   const requestCanonicalCatchUp = useCallback(
@@ -878,8 +930,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       const shouldMarkAuthoritativeHistoryApplied =
         payload.direction === "tail" || payload.direction === "after";
 
-      // Read current store state
-      const session = useSessionStore.getState().sessions[serverId];
+      const session = store.getState().sessions[serverId];
       const isInitializing = session?.initializingAgents.get(agentId) === true;
       const activeInitDeferred = getInitDeferred(initKey);
       const hasActiveInitDeferred = Boolean(activeInitDeferred);
@@ -895,7 +946,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         });
       }
 
-      // Call pure reducer
       const result = processTimelineResponse({
         payload,
         currentTail,
@@ -906,10 +956,9 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         initRequestDirection: activeInitDeferred?.requestDirection ?? "tail",
       });
 
-      // Apply error path
       if (result.error) {
         if (result.clearInitializing) {
-          setInitializingAgents(serverId, (prev) => {
+          store.getState().setInitializingAgents(serverId, (prev) => {
             if (prev.get(agentId) !== true) {
               return prev;
             }
@@ -924,21 +973,19 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         return;
       }
 
-      // Apply tail patch
       if (result.tail !== currentTail) {
-        setAgentStreamTail(serverId, (prev) => {
+        store.getState().setAgentStreamTail(serverId, (prev) => {
           const next = new Map(prev);
           next.set(agentId, result.tail);
           return next;
         });
       }
 
-      // Apply head patch
       if (result.head !== currentHead) {
         if (result.head.length === 0) {
-          clearAgentStreamHead(serverId, agentId);
+          store.getState().clearAgentStreamHead(serverId, agentId);
         } else {
-          setAgentStreamHead(serverId, (prev) => {
+          store.getState().setAgentStreamHead(serverId, (prev) => {
             const next = new Map(prev);
             next.set(agentId, result.head);
             return next;
@@ -946,9 +993,8 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         }
       }
 
-      // Apply cursor patch
       if (result.cursorChanged) {
-        setAgentTimelineCursor(serverId, (prev) => {
+        store.getState().setAgentTimelineCursor(serverId, (prev) => {
           const current = prev.get(agentId);
           if (!result.cursor) {
             if (!current) {
@@ -972,7 +1018,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         });
       }
 
-      // Execute side effects
       for (const effect of result.sideEffects) {
         if (effect.type === "catch_up") {
           requestCanonicalCatchUp(agentId, effect.cursor);
@@ -984,9 +1029,8 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         }
       }
 
-      // Apply init resolution
       if (result.clearInitializing) {
-        setInitializingAgents(serverId, (prev) => {
+        store.getState().setInitializingAgents(serverId, (prev) => {
           if (prev.get(agentId) !== true) {
             return prev;
           }
@@ -997,27 +1041,16 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       }
 
       if (shouldMarkAuthoritativeHistoryApplied) {
-        setAgentAuthoritativeHistoryApplied(serverId, agentId, true);
+        store.getState().setAgentAuthoritativeHistoryApplied(serverId, agentId, true);
       }
       if (result.initResolution === "resolve") {
         resolveInitDeferred(initKey);
       }
       if (result.clearInitializing) {
-        markAgentHistorySynchronized(serverId, agentId);
+        store.getState().markAgentHistorySynchronized(serverId, agentId);
       }
     },
-    [
-      applyAuthoritativeAgentSnapshot,
-      applyAgentUpdatePayload,
-      clearAgentStreamHead,
-      markAgentHistorySynchronized,
-      requestCanonicalCatchUp,
-      serverId,
-      setAgentAuthoritativeHistoryApplied,
-      setAgentStreamTail,
-      setAgentTimelineCursor,
-      setInitializingAgents,
-    ],
+    [applyAuthoritativeAgentSnapshot, applyAgentUpdatePayload, requestCanonicalCatchUp, serverId],
   );
 
   useEffect(() => {
@@ -1043,14 +1076,16 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     };
   }, []);
 
-  // Daemon message handlers - directly update Zustand store
+  // -------------------------------------------------------------------------
+  // Daemon message handlers
+  // -------------------------------------------------------------------------
   useEffect(() => {
     const unsubAgentUpdate = client.on("agent_update", (message) => {
       if (message.type !== "agent_update") return;
       const update = message.payload;
       const agentId = getAgentIdFromUpdate(update);
       const initKey = getInitKey(serverId, agentId);
-      const session = useSessionStore.getState().sessions[serverId];
+      const session = store.getState().sessions[serverId];
       const isSyncingHistory =
         session?.initializingAgents.get(agentId) === true && Boolean(getInitDeferred(initKey));
 
@@ -1077,7 +1112,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         voiceRuntime?.onTurnEvent(serverId, agentId, event.type);
       }
 
-      // Refresh Sub2API balance / usage when a turn ends (completed, failed, or canceled).
       if (
         event.type === "turn_completed" ||
         event.type === "turn_failed" ||
@@ -1086,7 +1120,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         throttledBalanceRefresh(queryClient);
       }
 
-      // Attention notification stays in React (not extractable to pure reducer)
       if (event.type === "attention_required") {
         if (event.shouldNotify) {
           notifyAgentAttention({
@@ -1098,8 +1131,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         }
       }
 
-      // Read current store state
-      const session = useSessionStore.getState().sessions[serverId];
+      const session = store.getState().sessions[serverId];
       const currentTail = session?.agentStreamTail.get(agentId) ?? [];
       const currentHead = session?.agentStreamHead.get(agentId) ?? [];
       const currentCursor = session?.agentTimelineCursor.get(agentId);
@@ -1112,7 +1144,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           }
         : null;
 
-      // Call pure reducer
       const result = processAgentStreamEvent({
         event: streamEvent,
         seq,
@@ -1124,18 +1155,16 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         timestamp: parsedTimestamp,
       });
 
-      // Apply tail/head patches
       if (result.changedTail || result.changedHead) {
-        setAgentStreamState(serverId, agentId, {
+        store.getState().setAgentStreamState(serverId, agentId, {
           ...(result.changedTail ? { tail: result.tail } : {}),
           ...(result.changedHead ? { head: result.head } : {}),
         });
       }
 
-      // Apply cursor patch
       if (result.cursorChanged && result.cursor) {
         const nextCursor = result.cursor;
-        setAgentTimelineCursor(serverId, (prev) => {
+        store.getState().setAgentTimelineCursor(serverId, (prev) => {
           const current = prev.get(agentId);
           if (
             current &&
@@ -1145,7 +1174,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
             seq >= current.startSeq &&
             seq <= current.endSeq
           ) {
-            // Fast-path: seq stays inside the current range during streaming.
             return prev;
           }
           if (
@@ -1162,10 +1190,9 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         });
       }
 
-      // Apply agent patch (optimistic lifecycle)
       if (result.agentChanged && result.agent) {
         const nextAgent = result.agent;
-        setAgents(serverId, (prev) => {
+        store.getState().setAgents(serverId, (prev) => {
           const current = prev.get(agentId);
           if (!current) {
             return prev;
@@ -1181,16 +1208,11 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         });
       }
 
-      // Execute side effects
       for (const effect of result.sideEffects) {
         if (effect.type === "catch_up") {
           requestCanonicalCatchUp(agentId, effect.cursor);
         }
       }
-
-      // NOTE: We don't update lastActivityAt on every stream event to prevent
-      // cascading rerenders. The agent_update handler updates agent.lastActivityAt
-      // on status changes, which is sufficient for sorting and display purposes.
     });
 
     const unsubAgentTimeline = client.on("fetch_agent_timeline_response", (message) => {
@@ -1201,20 +1223,22 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     const unsubWorkspaceUpdate = client.on("workspace_update", (message) => {
       if (message.type !== "workspace_update") return;
       if (message.payload.kind === "remove") {
-        removeWorkspaceSetup({ serverId, workspaceId: String(message.payload.id) });
-        removeWorkspace(serverId, String(message.payload.id));
+        workspaceSetupStore.getState().removeWorkspace({
+          serverId,
+          workspaceId: String(message.payload.id),
+        });
+        store.getState().removeWorkspace(serverId, String(message.payload.id));
         return;
       }
       const workspace = normalizeWorkspaceDescriptor(message.payload.workspace);
-      const existingWorkspace = useSessionStore
-        .getState()
-        .sessions[serverId]?.workspaces.get(workspace.id);
-      mergeWorkspaces(serverId, [workspace]);
+      store.getState().mergeWorkspaces(serverId, [workspace]);
     });
 
     const unsubScriptStatusUpdate = client.on("script_status_update", (message) => {
       if (message.type !== "script_status_update") return;
-      setWorkspaces(serverId, (prev) => patchWorkspaceScripts(prev, message.payload));
+      store
+        .getState()
+        .setWorkspaces(serverId, (prev) => patchWorkspaceScripts(prev, message.payload));
     });
 
     const unsubWorkspaceSetupProgress = client.on("workspace_setup_progress", (message) => {
@@ -1237,7 +1261,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       if (message.type !== "status") return;
       const serverInfo = parseServerInfoStatusPayload(message.payload);
       if (serverInfo) {
-        updateSessionServerInfo(serverId, {
+        store.getState().updateSessionServerInfo(serverId, {
           serverId: serverInfo.serverId,
           hostname: serverInfo.hostname,
           version: serverInfo.version,
@@ -1252,7 +1276,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       if (message.type !== "agent_permission_request") return;
       const { agentId, request } = message.payload;
 
-      setPendingPermissions(serverId, (prev) => {
+      store.getState().setPendingPermissions(serverId, (prev) => {
         const next = new Map(prev);
         const key = derivePendingPermissionKey(agentId, request);
         next.set(key, { key, agentId, request });
@@ -1264,7 +1288,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       if (message.type !== "agent_permission_resolved") return;
       const { requestId, agentId } = message.payload;
 
-      setPendingPermissions(serverId, (prev) => {
+      store.getState().setPendingPermissions(serverId, (prev) => {
         const next = new Map(prev);
         const derivedKey = `${agentId}:${requestId}`;
         if (!next.delete(derivedKey)) {
@@ -1285,7 +1309,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         return;
       }
 
-      const payload: AudioOutputPayload = message.payload;
+      const payload = message.payload;
       if (payload.isVoiceMode && voiceRuntime) {
         voiceRuntime.handleAudioOutput(serverId, payload);
         return;
@@ -1308,7 +1332,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       });
 
       activeAudioGroupsRef.current.add(playbackGroupId);
-      setIsPlayingAudio(serverId, true);
+      store.getState().setIsPlayingAudio(serverId, true);
 
       if (!isFinalChunk) {
         return;
@@ -1345,7 +1369,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       } finally {
         audioOutputBuffersRef.current.delete(playbackGroupId);
         activeAudioGroupsRef.current.delete(playbackGroupId);
-        setIsPlayingAudio(serverId, activeAudioGroupsRef.current.size > 0);
+        store.getState().setIsPlayingAudio(serverId, activeAudioGroupsRef.current.size > 0);
 
         if (startedVoicePlayback) {
           voiceRuntime?.onAssistantAudioFinished(serverId);
@@ -1371,7 +1395,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           arguments: unknown;
         };
 
-        setMessages(serverId, (prev) => [
+        store.getState().setMessages(serverId, (prev) => [
           ...prev,
           {
             type: "tool_call",
@@ -1391,13 +1415,15 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           result: unknown;
         };
 
-        setMessages(serverId, (prev) =>
-          prev.map((msg) =>
-            msg.type === "tool_call" && msg.id === toolCallId
-              ? { ...msg, result, status: "completed" as const }
-              : msg,
-          ),
-        );
+        store
+          .getState()
+          .setMessages(serverId, (prev) =>
+            prev.map((msg) =>
+              msg.type === "tool_call" && msg.id === toolCallId
+                ? { ...msg, result, status: "completed" as const }
+                : msg,
+            ),
+          );
         return;
       }
 
@@ -1407,20 +1433,22 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           error: unknown;
         };
 
-        setMessages(serverId, (prev) =>
-          prev.map((msg) =>
-            msg.type === "tool_call" && msg.id === toolCallId
-              ? { ...msg, error, status: "failed" as const }
-              : msg,
-          ),
-        );
+        store
+          .getState()
+          .setMessages(serverId, (prev) =>
+            prev.map((msg) =>
+              msg.type === "tool_call" && msg.id === toolCallId
+                ? { ...msg, error, status: "failed" as const }
+                : msg,
+            ),
+          );
       }
 
       let activityType: "system" | "info" | "success" | "error" = "info";
       if (data.type === "error") activityType = "error";
 
       if (data.type === "transcript") {
-        setMessages(serverId, (prev) => [
+        store.getState().setMessages(serverId, (prev) => [
           ...prev,
           {
             type: "user",
@@ -1433,7 +1461,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       }
 
       if (data.type === "assistant") {
-        setMessages(serverId, (prev) => [
+        store.getState().setMessages(serverId, (prev) => [
           ...prev,
           {
             type: "assistant",
@@ -1442,11 +1470,11 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
             message: data.content,
           },
         ]);
-        setCurrentAssistantMessage(serverId, "");
+        store.getState().setCurrentAssistantMessage(serverId, "");
         return;
       }
 
-      setMessages(serverId, (prev) => [
+      store.getState().setMessages(serverId, (prev) => [
         ...prev,
         {
           type: "activity",
@@ -1461,7 +1489,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
 
     const unsubChunk = client.on("assistant_chunk", (message) => {
       if (message.type !== "assistant_chunk") return;
-      setCurrentAssistantMessage(serverId, (prev) => prev + message.payload.chunk);
+      store.getState().setCurrentAssistantMessage(serverId, (prev) => prev + message.payload.chunk);
     });
 
     const unsubTranscription = client.on("transcription_result", (message) => {
@@ -1473,7 +1501,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         return;
       }
 
-      setCurrentAssistantMessage(serverId, "");
+      store.getState().setCurrentAssistantMessage(serverId, "");
     });
 
     const unsubVoiceInputState = client.on("voice_input_state", (message) => {
@@ -1489,7 +1517,12 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       deletePendingAgentUpdate(serverId, agentId);
       clearArchiveAgentPending({ queryClient, serverId, agentId });
 
-      setAgents(serverId, (prev) => {
+      // Clean up module-level Map refs to prevent memory leak
+      previousAgentStatusRef.current.delete(agentId);
+      attentionNotifiedRef.current.delete(agentId);
+      audioOutputBuffersRef.current.delete(agentId);
+
+      store.getState().setAgents(serverId, (prev) => {
         if (!prev.has(agentId)) {
           return prev;
         }
@@ -1498,8 +1531,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         return next;
       });
 
-      // Remove from agentLastActivity slice (top-level)
-      useSessionStore.setState((state) => {
+      store.setState((state) => {
         if (!state.agentLastActivity.has(agentId)) {
           return state;
         }
@@ -1511,7 +1543,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         };
       });
 
-      setAgentStreamTail(serverId, (prev) => {
+      store.getState().setAgentStreamTail(serverId, (prev) => {
         if (!prev.has(agentId)) {
           return prev;
         }
@@ -1519,8 +1551,8 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         next.delete(agentId);
         return next;
       });
-      clearAgentStreamHead(serverId, agentId);
-      setAgentTimelineCursor(serverId, (prev) => {
+      store.getState().clearAgentStreamHead(serverId, agentId);
+      store.getState().setAgentTimelineCursor(serverId, (prev) => {
         if (!prev.has(agentId)) {
           return prev;
         }
@@ -1529,12 +1561,11 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         return next;
       });
 
-      // Remove draft input
-      clearDraftInput({
+      draftStore.getState().clearDraftInput({
         draftKey: buildDraftStoreKey({ serverId, agentId }),
       });
 
-      setPendingPermissions(serverId, (prev) => {
+      store.getState().setPendingPermissions(serverId, (prev) => {
         let changed = false;
         const next = new Map(prev);
         for (const [key, pending] of prev.entries()) {
@@ -1546,7 +1577,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         return changed ? next : prev;
       });
 
-      setInitializingAgents(serverId, (prev) => {
+      store.getState().setInitializingAgents(serverId, (prev) => {
         if (!prev.has(agentId)) {
           return prev;
         }
@@ -1563,7 +1594,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       const { agentId, archivedAt } = message.payload;
       clearArchiveAgentPending({ queryClient, serverId, agentId });
 
-      setAgents(serverId, (prev) => {
+      store.getState().setAgents(serverId, (prev) => {
         const existing = prev.get(agentId);
         if (!existing) {
           return prev;
@@ -1600,24 +1631,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     client,
     queryClient,
     serverId,
-    setIsPlayingAudio,
-    setMessages,
-    setCurrentAssistantMessage,
-    setAgentStreamTail,
-    setAgentStreamHead,
-    setAgentStreamState,
-    clearAgentStreamHead,
-    setAgentTimelineCursor,
-    setInitializingAgents,
-    setAgents,
-    setWorkspaces,
-    mergeWorkspaces,
-    removeWorkspace,
-    removeWorkspaceSetup,
-    setAgentLastActivity,
-    setPendingPermissions,
-    setHasHydratedAgents,
-    clearDraftInput,
     notifyAgentAttention,
     requestCanonicalCatchUp,
     applyAgentUpdatePayload,
@@ -1627,41 +1640,42 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     voiceAudioEngine,
   ]);
 
+  // -------------------------------------------------------------------------
+  // Agent actions (exported to consumers)
+  // -------------------------------------------------------------------------
   const sendAgentMessage = useCallback(
     async (
       agentId: string,
       message: string,
       images?: AttachmentMetadata[],
       attachments?: AgentAttachment[],
+      options?: { hidden?: boolean },
     ) => {
       const messageId = generateMessageId();
-      const userMessage: StreamItem = {
-        kind: "user_message",
-        id: messageId,
-        text: message,
-        timestamp: new Date(),
-      };
+      if (!options?.hidden) {
+        const userMessage: StreamItem = {
+          kind: "user_message",
+          id: messageId,
+          text: message,
+          timestamp: new Date(),
+        };
 
-      // Append to head if streaming (keeps the user message with the current
-      // turn so late text_deltas still find the existing assistant_message).
-      // Otherwise append to tail.
-      const currentHead = useSessionStore
-        .getState()
-        .sessions[serverId]?.agentStreamHead?.get(agentId);
-      if (currentHead && currentHead.length > 0) {
-        setAgentStreamHead(serverId, (prev) => {
-          const head = prev.get(agentId) || [];
-          const updated = new Map(prev);
-          updated.set(agentId, [...head, userMessage]);
-          return updated;
-        });
-      } else {
-        setAgentStreamTail(serverId, (prev) => {
-          const currentStream = prev.get(agentId) || [];
-          const updated = new Map(prev);
-          updated.set(agentId, [...currentStream, userMessage]);
-          return updated;
-        });
+        const currentHead = store.getState().sessions[serverId]?.agentStreamHead?.get(agentId);
+        if (currentHead && currentHead.length > 0) {
+          store.getState().setAgentStreamHead(serverId, (prev) => {
+            const head = prev.get(agentId) || [];
+            const updated = new Map(prev);
+            updated.set(agentId, [...head, userMessage]);
+            return updated;
+          });
+        } else {
+          store.getState().setAgentStreamTail(serverId, (prev) => {
+            const currentStream = prev.get(agentId) || [];
+            const updated = new Map(prev);
+            updated.set(agentId, [...currentStream, userMessage]);
+            return updated;
+          });
+        }
       }
 
       const imagesData = await encodeImages(images);
@@ -1672,6 +1686,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       void client
         .sendAgentMessage(agentId, message, {
           messageId,
+          ...(options?.hidden ? { hidden: true } : {}),
           ...(imagesData && imagesData.length > 0 ? { images: imagesData } : {}),
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
         })
@@ -1679,10 +1694,9 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           console.error("[Session] Failed to send agent message:", error);
         });
     },
-    [encodeImages, serverId, client, setAgentStreamTail, setAgentStreamHead],
+    [encodeImages, serverId, client],
   );
 
-  // Keep the ref updated so the agent_update handler can call it
   sendAgentMessageRef.current = sendAgentMessage;
 
   const cancelAgentRun = useCallback(
@@ -1834,13 +1848,24 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     [client],
   );
 
+  // -------------------------------------------------------------------------
   // Cleanup on unmount
+  // -------------------------------------------------------------------------
   useEffect(() => {
     return () => {
-      clearWorkspaceSetupServer(serverId);
-      clearSession(serverId);
+      // Clear all Map refs to prevent memory leaks
+      previousAgentStatusRef.current.clear();
+      attentionNotifiedRef.current.clear();
+      audioOutputBuffersRef.current.clear();
+      activeAudioGroupsRef.current.clear();
+      if (revalidationTimerRef.current) {
+        clearTimeout(revalidationTimerRef.current);
+        revalidationTimerRef.current = null;
+      }
+      workspaceSetupStore.getState().clearServer(serverId);
+      store.getState().clearSession(serverId);
     };
-  }, [clearSession, clearWorkspaceSetupServer, serverId]);
+  }, [serverId]);
 
   return children;
 }

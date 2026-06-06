@@ -16,7 +16,12 @@ import {
   type CreateWorktreeOptions,
   type WorktreeConfig,
 } from "./worktree";
-import { getPaseoWorktreeMetadataPath } from "./worktree-metadata.js";
+import {
+  getPaseoWorktreeMetadataPath,
+  readPaseoWorktreePersona,
+  writePaseoWorktreePersonaMetadata,
+} from "./worktree-metadata.js";
+import { installWorktreePersonaSkills } from "../server/worktree-persona-service.js";
 import { execSync } from "child_process";
 import {
   mkdtempSync,
@@ -101,7 +106,7 @@ describe.skipIf(process.platform === "win32")("createWorktree", () => {
     const metadataPath = getPaseoWorktreeMetadataPath(result.worktreePath);
     expect(existsSync(metadataPath)).toBe(true);
     const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
-    expect(metadata).toMatchObject({ version: 1, baseRefName: "main" });
+    expect(metadata).toMatchObject({ version: 3, baseRefName: "main" });
   });
 
   it.skip("detects paseo-owned worktrees across realpath differences (macOS /var vs /private/var)", async () => {
@@ -191,7 +196,7 @@ describe.skipIf(process.platform === "win32")("createWorktree", () => {
 
     const metadataPath = getPaseoWorktreeMetadataPath(result.worktreePath);
     const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
-    expect(metadata).toMatchObject({ version: 1, baseRefName: "main" });
+    expect(metadata).toMatchObject({ version: 3, baseRefName: "main" });
   });
 
   it("checks out an existing local branch that is not checked out elsewhere", async () => {
@@ -215,7 +220,65 @@ describe.skipIf(process.platform === "win32")("createWorktree", () => {
 
     const metadataPath = getPaseoWorktreeMetadataPath(result.worktreePath);
     const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
-    expect(metadata).toMatchObject({ version: 1, baseRefName: "dev" });
+    expect(metadata).toMatchObject({ version: 3, baseRefName: "dev" });
+  });
+
+  it("writes and reads v3 worktree persona metadata", async () => {
+    const result = await createLegacyWorktreeForTest({
+      branchName: "main",
+      cwd: repoDir,
+      baseBranch: "main",
+      worktreeSlug: "persona-metadata",
+      paseoHome,
+    });
+
+    writePaseoWorktreePersonaMetadata(result.worktreePath, {
+      roleId: "technical_director",
+      skillIds: ["paseo-technical-director"],
+    });
+
+    expect(readPaseoWorktreePersona(result.worktreePath)).toEqual({
+      roleId: "technical_director",
+      skillIds: ["paseo-technical-director"],
+    });
+  });
+
+  it("installs generated persona skills for agent providers and hides them from git status", async () => {
+    const result = await createLegacyWorktreeForTest({
+      branchName: "main",
+      cwd: repoDir,
+      baseBranch: "main",
+      worktreeSlug: "persona-skills",
+      paseoHome,
+    });
+
+    await installWorktreePersonaSkills({
+      worktreeRoot: result.worktreePath,
+      persona: {
+        roleId: "ui",
+        skillIds: ["paseo-ui"],
+      },
+    });
+
+    expect(existsSync(join(result.worktreePath, ".agents", "skills", "paseo-ui", "SKILL.md"))).toBe(
+      true,
+    );
+    expect(existsSync(join(result.worktreePath, ".codex", "skills", "paseo-ui", "SKILL.md"))).toBe(
+      true,
+    );
+    expect(existsSync(join(result.worktreePath, ".claude", "skills", "paseo-ui", "SKILL.md"))).toBe(
+      true,
+    );
+
+    const excludePath = join(
+      dirname(dirname(getPaseoWorktreeMetadataPath(result.worktreePath))),
+      "info",
+      "exclude",
+    );
+    const exclude = readFileSync(excludePath, "utf8");
+    expect(exclude).toContain(".agents/skills/");
+    expect(exclude).toContain(".codex/skills/");
+    expect(exclude).toContain(".claude/skills/");
   });
 
   it("throws a typed error when checking out a branch already checked out in the main repo", async () => {

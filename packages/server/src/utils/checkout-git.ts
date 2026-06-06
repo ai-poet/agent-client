@@ -362,6 +362,14 @@ export async function checkoutResolvedBranch(
         return { source: "local" };
       }
 
+      const checkedOutPath = await getWorktreePathForBranch(cwd, resolution.name);
+      if (checkedOutPath && resolve(checkedOutPath) !== resolve(cwd)) {
+        throw new BranchAlreadyCheckedOutError({
+          branchName: resolution.name,
+          worktreePath: checkedOutPath,
+        });
+      }
+
       await runGitCommand(["checkout", resolution.name], { cwd });
       return { source: "local" };
     }
@@ -616,6 +624,20 @@ export class MergeFromBaseConflictError extends Error {
     this.baseRef = options.baseRef;
     this.currentBranch = options.currentBranch;
     this.conflictFiles = options.conflictFiles;
+  }
+}
+
+export class BranchAlreadyCheckedOutError extends Error {
+  readonly branchName: string;
+  readonly worktreePath: string;
+
+  constructor(options: { branchName: string; worktreePath: string }) {
+    super(
+      `Branch "${options.branchName}" is already checked out in another worktree: ${options.worktreePath}`,
+    );
+    this.name = "BranchAlreadyCheckedOutError";
+    this.branchName = options.branchName;
+    this.worktreePath = options.worktreePath;
   }
 }
 

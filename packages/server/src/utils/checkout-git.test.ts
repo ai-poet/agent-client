@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync, realpathSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -15,6 +15,7 @@ import {
   getCheckoutShortstat,
   getPullRequestStatus,
   getCheckoutStatus,
+  BranchAlreadyCheckedOutError,
   checkoutResolvedBranch,
   listBranchSuggestions,
   mergeToBase,
@@ -1316,6 +1317,27 @@ const x = 1;
 
     expect(execSync("git symbolic-ref --short HEAD", { cwd: repoDir }).toString().trim()).toBe(
       "feature/shared",
+    );
+  });
+
+  it("throws a typed error before checking out a branch already used by another worktree", async () => {
+    execSync("git checkout -b feature/worktree", { cwd: repoDir });
+    writeFileSync(join(repoDir, "worktree.txt"), "worktree\n");
+    execSync("git add worktree.txt", { cwd: repoDir });
+    execSync("git -c commit.gpgsign=false commit -m 'worktree branch'", { cwd: repoDir });
+    execSync("git checkout main", { cwd: repoDir });
+
+    const worktreeDir = join(tempDir, "feature-worktree");
+    execFileSync("git", ["worktree", "add", worktreeDir, "feature/worktree"], { cwd: repoDir });
+
+    const resolution = await resolveBranchCheckout(repoDir, "feature/worktree");
+    await expect(checkoutResolvedBranch({ cwd: repoDir, resolution })).rejects.toMatchObject({
+      name: "BranchAlreadyCheckedOutError",
+      branchName: "feature/worktree",
+      worktreePath: worktreeDir,
+    } satisfies Partial<BranchAlreadyCheckedOutError>);
+    expect(execSync("git symbolic-ref --short HEAD", { cwd: repoDir }).toString().trim()).toBe(
+      "main",
     );
   });
 

@@ -20,11 +20,11 @@ import {
   resolveExplorerTabForCheckout,
 } from "@/stores/explorer-tab-memory";
 import {
+  type PanelState,
   selectIsAgentListOpen,
   selectIsFileExplorerOpen,
   selectPanelVisibility,
   usePanelStore,
-  type PanelState,
 } from "@/stores/panel-store";
 
 function resetPanelStore() {
@@ -100,6 +100,20 @@ describe("panel-store explorer tab resolution", () => {
     ).toBe("files");
   });
 
+  it("restores a stored Git Graph tab for git checkouts", () => {
+    const key = buildExplorerCheckoutKey(serverId, cwd)!;
+    expect(
+      resolveExplorerTabForCheckout({
+        serverId,
+        cwd,
+        isGit: true,
+        explorerTabByCheckout: {
+          [key]: "gitGraph",
+        },
+      }),
+    ).toBe("gitGraph");
+  });
+
   it("falls back to default when stored tab is invalid", () => {
     const key = buildExplorerCheckoutKey(serverId, cwd)!;
     expect(
@@ -123,6 +137,20 @@ describe("panel-store explorer tab resolution", () => {
         isGit: false,
         explorerTabByCheckout: {
           [key]: "changes",
+        },
+      }),
+    ).toBe("files");
+  });
+
+  it("coerces stored Git Graph to files for non-git checkouts", () => {
+    const key = buildExplorerCheckoutKey(serverId, cwd)!;
+    expect(
+      resolveExplorerTabForCheckout({
+        serverId,
+        cwd,
+        isGit: false,
+        explorerTabByCheckout: {
+          [key]: "gitGraph",
         },
       }),
     ).toBe("files");
@@ -243,5 +271,22 @@ describe("panel-store checkout-intent file explorer actions", () => {
 
     expect(usePanelStore.getState().desktop.fileExplorerOpen).toBe(true);
     expect(usePanelStore.getState().explorerTab).toBe("files");
+  });
+
+  it("opens the expanded explorer on a stored Git Graph tab", () => {
+    const checkout = { serverId: "server-1", cwd: "/tmp/repo", isGit: true };
+    const key = buildExplorerCheckoutKey(checkout.serverId, checkout.cwd)!;
+    usePanelStore.setState({
+      explorerTab: "changes",
+      explorerTabByCheckout: { [key]: "gitGraph" },
+    });
+
+    usePanelStore.getState().openFileExplorerForCheckout({
+      isCompact: false,
+      checkout,
+    });
+
+    expect(usePanelStore.getState().desktop.fileExplorerOpen).toBe(true);
+    expect(usePanelStore.getState().explorerTab).toBe("gitGraph");
   });
 });

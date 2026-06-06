@@ -6,9 +6,10 @@ import {
   RefreshControl,
   FlatList,
   type ListRenderItem,
+  type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import React, { useCallback, useMemo, useState, type ReactElement, memo } from "react";
 import { router } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -18,6 +19,7 @@ import { type AggregatedAgent } from "@/hooks/use-aggregated-agents";
 import { useSessionStore } from "@/stores/session-store";
 import { Archive } from "lucide-react-native";
 import { getProviderIcon } from "@/components/provider-icons";
+import { useDesktopAgentMotionEnabled } from "@/hooks/use-desktop-agent-motion-enabled";
 import { buildHostAgentDetailRoute } from "@/utils/host-routes";
 import { resolveWorkspaceIdByExecutionDirectory } from "@/utils/workspace-execution";
 import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
@@ -36,6 +38,32 @@ interface AgentListProps {
 type FlatListItem =
   | { type: "header"; key: string; title: string }
   | { type: "agent"; key: string; agent: AggregatedAgent };
+
+const desktopRowTransitionStyle = {
+  transitionProperty: "background-color, transform",
+  transitionDuration: "140ms",
+  transitionTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+} as unknown as ViewStyle;
+
+const desktopBadgeTransitionStyle = {
+  transitionProperty: "opacity, background-color",
+  transitionDuration: "120ms",
+  transitionTimingFunction: "ease-out",
+} as unknown as ViewStyle;
+
+const ROW_HEIGHT_ESTIMATE = 56;
+const HEADER_HEIGHT = 40;
+
+function getItemLayout(_data: ArrayLike<FlatListItem> | null | undefined, index: number) {
+  const item = _data?.[index];
+  const length = item?.type === "header" ? HEADER_HEIGHT : ROW_HEIGHT_ESTIMATE;
+  let offset = 0;
+  for (let i = 0; i < index; i++) {
+    const d = _data?.[i];
+    offset += d?.type === "header" ? HEADER_HEIGHT : ROW_HEIGHT_ESTIMATE;
+  }
+  return { length, offset, index };
+}
 
 function deriveDateSectionLabel(lastActivityAt: Date): string {
   const now = new Date();
@@ -86,15 +114,18 @@ function SessionBadge({
   label,
   icon,
   tone = "neutral",
+  desktopMotionEnabled,
 }: {
   label: string;
   icon?: ReactElement;
   tone?: "neutral" | "warning" | "danger";
+  desktopMotionEnabled?: boolean;
 }) {
   return (
     <View
       style={[
         styles.badge,
+        desktopMotionEnabled && desktopBadgeTransitionStyle,
         tone === "warning" && styles.badgeWarning,
         tone === "danger" && styles.badgeDanger,
       ]}
@@ -113,11 +144,12 @@ function SessionBadge({
   );
 }
 
-function SessionRow({
+const SessionRow = memo(function SessionRowFn({
   agent,
   isMobile,
   selectedAgentId,
   showAttentionIndicator,
+  desktopMotionEnabled,
   onPress,
   onLongPress,
 }: {
@@ -125,6 +157,7 @@ function SessionRow({
   isMobile: boolean;
   selectedAgentId?: string;
   showAttentionIndicator: boolean;
+  desktopMotionEnabled: boolean;
   onPress: (agent: AggregatedAgent) => void;
   onLongPress: (agent: AggregatedAgent) => void;
 }) {
@@ -140,9 +173,12 @@ function SessionRow({
     <Pressable
       style={({ pressed, hovered }) => [
         styles.row,
+        desktopMotionEnabled && desktopRowTransitionStyle,
         isSelected && styles.rowSelected,
         hovered && styles.rowHovered,
         pressed && styles.rowPressed,
+        desktopMotionEnabled && hovered && styles.rowDesktopHovered,
+        desktopMotionEnabled && pressed && styles.rowDesktopPressed,
       ]}
       onPress={() => onPress(agent)}
       onLongPress={() => onLongPress(agent)}
@@ -163,13 +199,22 @@ function SessionRow({
             <SessionBadge
               label="Archived"
               icon={<Archive size={theme.fontSize.xs} color={theme.colors.foregroundMuted} />}
+              desktopMotionEnabled={desktopMotionEnabled}
             />
           ) : null}
           {(agent.pendingPermissionCount ?? 0) > 0 ? (
-            <SessionBadge label={`${agent.pendingPermissionCount} pending`} tone="warning" />
+            <SessionBadge
+              label={`${agent.pendingPermissionCount} pending`}
+              tone="warning"
+              desktopMotionEnabled={desktopMotionEnabled}
+            />
           ) : null}
           {!isMobile && showAttentionIndicator && agent.requiresAttention ? (
-            <SessionBadge label="Attention" tone="danger" />
+            <SessionBadge
+              label="Attention"
+              tone="danger"
+              desktopMotionEnabled={desktopMotionEnabled}
+            />
           ) : null}
         </View>
         {isMobile && (
@@ -203,12 +248,16 @@ function SessionRow({
       )}
       {isMobile && showAttentionIndicator && agent.requiresAttention ? (
         <View style={styles.rowTrailing}>
-          <SessionBadge label="Attention" tone="danger" />
+          <SessionBadge
+            label="Attention"
+            tone="danger"
+            desktopMotionEnabled={desktopMotionEnabled}
+          />
         </View>
       ) : null}
     </Pressable>
   );
-}
+});
 
 export function AgentList({
   agents,
@@ -223,6 +272,7 @@ export function AgentList({
   const insets = useSafeAreaInsets();
   const [actionAgent, setActionAgent] = useState<AggregatedAgent | null>(null);
   const isMobile = useIsCompactFormFactor();
+  const desktopMotionEnabled = useDesktopAgentMotionEnabled();
 
   const actionClient = useSessionStore((state) =>
     actionAgent?.serverId ? (state.sessions[actionAgent.serverId]?.client ?? null) : null,
@@ -329,12 +379,20 @@ export function AgentList({
           isMobile={isMobile}
           selectedAgentId={selectedAgentId}
           showAttentionIndicator={showAttentionIndicator}
+          desktopMotionEnabled={desktopMotionEnabled}
           onPress={handleAgentPress}
           onLongPress={handleAgentLongPress}
         />
       );
     },
-    [handleAgentLongPress, handleAgentPress, isMobile, selectedAgentId, showAttentionIndicator],
+    [
+      desktopMotionEnabled,
+      handleAgentLongPress,
+      handleAgentPress,
+      isMobile,
+      selectedAgentId,
+      showAttentionIndicator,
+    ],
   );
 
   const keyExtractor = useCallback((item: FlatListItem) => item.key, []);
@@ -350,6 +408,12 @@ export function AgentList({
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         ListFooterComponent={listFooterComponent}
+        maxToRenderPerBatch={15}
+        updateCellsBatchingPeriod={50}
+        windowSize={11}
+        removeClippedSubviews={true}
+        initialNumToRender={20}
+        getItemLayout={getItemLayout}
         refreshControl={
           onRefresh ? (
             <RefreshControl
@@ -487,6 +551,12 @@ const styles = StyleSheet.create((theme) => ({
   },
   rowPressed: {
     backgroundColor: theme.colors.surface2,
+  },
+  rowDesktopHovered: {
+    transform: [{ translateY: -1 }],
+  },
+  rowDesktopPressed: {
+    transform: [{ translateY: 0 }, { scale: 0.995 }],
   },
   sessionTitle: {
     flexShrink: 1,

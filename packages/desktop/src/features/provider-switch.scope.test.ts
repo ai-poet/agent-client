@@ -25,9 +25,21 @@ describe("setupDefaultProvider scoped writes", () => {
   });
 
   afterEach(async () => {
+    const i18n = await import("../i18n/desktop-i18n");
+    i18n.__setDesktopLocaleForTests(null);
     if (mockedHome.dir) {
       await rm(mockedHome.dir, { recursive: true, force: true });
     }
+  });
+
+  it("localizes missing provider errors", async () => {
+    const i18n = await import("../i18n/desktop-i18n");
+    i18n.__setDesktopLocaleForTests("zh");
+    const mod = await import("./provider-switch");
+
+    await expect(mod.switchProvider("missing-provider")).rejects.toThrow(
+      "未找到提供商：missing-provider",
+    );
   });
 
   it("writes only Claude config when scope is claude", async () => {
@@ -97,6 +109,70 @@ describe("setupDefaultProvider scoped writes", () => {
     expect(claudeSettings.env?.CLAUDE_CODE_GIT_BASH_PATH).toBe(
       "C:\\Program Files\\Git\\bin\\bash.exe",
     );
+  });
+
+  it("merges existing Claude settings without changing model or permissions", async () => {
+    const mod = await import("./provider-switch");
+    const claudePath = join(mockedHome.dir, ".claude", "settings.json");
+    await mkdir(join(mockedHome.dir, ".claude"), { recursive: true });
+    await writeFile(
+      claudePath,
+      JSON.stringify(
+        {
+          env: {
+            ANTHROPIC_MODEL: "claude-sonnet-4-5",
+            SOME_OTHER_KEY: "keep-me",
+          },
+          permissions: {
+            allow: ["Bash(git status)"],
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    await mod.setupDefaultProvider({
+      endpoint: "https://api.example.com",
+      apiKey: "sk-new-claude",
+      name: "Claude switch",
+      scope: "claude",
+    });
+
+    const claudeSettings = JSON.parse(await readFile(claudePath, "utf8")) as {
+      env?: Record<string, unknown>;
+      permissions?: Record<string, unknown>;
+    };
+    expect(claudeSettings.env).toEqual({
+      ANTHROPIC_MODEL: "claude-sonnet-4-5",
+      SOME_OTHER_KEY: "keep-me",
+      ANTHROPIC_BASE_URL: "https://api.example.com",
+      ANTHROPIC_AUTH_TOKEN: "sk-new-claude",
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
+    });
+    expect(claudeSettings.permissions).toEqual({
+      allow: ["Bash(git status)"],
+    });
+  });
+
+  it("does not overwrite non-empty invalid Claude settings JSON", async () => {
+    const mod = await import("./provider-switch");
+    const claudePath = join(mockedHome.dir, ".claude", "settings.json");
+    await mkdir(join(mockedHome.dir, ".claude"), { recursive: true });
+    await writeFile(claudePath, "{ invalid json", "utf8");
+
+    await expect(
+      mod.setupDefaultProvider({
+        endpoint: "https://api.example.com",
+        apiKey: "sk-new-claude",
+        name: "Claude switch",
+        scope: "claude",
+      }),
+    ).rejects.toThrow("Claude Code settings.json contains invalid JSON");
+
+    expect(await readFile(claudePath, "utf8")).toBe("{ invalid json");
   });
 
   it("safely patches Claude Code Git Bash path without touching Claude auth env", async () => {
@@ -175,6 +251,100 @@ describe("setupDefaultProvider scoped writes", () => {
     };
     expect(store.activeClaudeProviderId).toBeNull();
     expect(store.activeCodexProviderId).toBe(mod.PASEO_MANAGED_CODEX_PROVIDER_ID);
+  });
+
+  it("merges existing Codex auth and config without changing model preferences", async () => {
+    const mod = await import("./provider-switch");
+    const codexDir = join(mockedHome.dir, ".codex");
+    const codexAuthPath = join(codexDir, "auth.json");
+    const codexConfigPath = join(codexDir, "config.toml");
+    await mkdir(codexDir, { recursive: true });
+    await writeFile(
+      codexAuthPath,
+      JSON.stringify(
+        {
+          OPENAI_API_KEY: "old-key",
+          tokens: {
+            refresh: "keep-me",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    await writeFile(
+      codexConfigPath,
+      `# preserve this comment
+model_provider = "Local"
+model = "gpt-5.2-codex"
+review_model = "gpt-5.2-codex"
+model_reasoning_effort = "medium"
+
+[model_providers.OpenAI]
+name = "Old"
+base_url = "https://old.example.com/v1"
+wire_api = "chat"
+requires_openai_auth = false
+
+[profiles.work]
+model = "profile-model"
+`,
+      "utf8",
+    );
+
+    await mod.setupDefaultProvider({
+      endpoint: "https://api.example.com",
+      apiKey: "sk-new-codex",
+      name: "Codex switch",
+      scope: "codex",
+    });
+
+    const codexAuth = JSON.parse(await readFile(codexAuthPath, "utf8")) as {
+      OPENAI_API_KEY?: string;
+      tokens?: Record<string, unknown>;
+    };
+    const codexConfig = await readFile(codexConfigPath, "utf8");
+
+    expect(codexAuth).toEqual({
+      OPENAI_API_KEY: "sk-new-codex",
+      tokens: {
+        refresh: "keep-me",
+      },
+    });
+    expect(codexConfig).toContain("# preserve this comment");
+    expect(codexConfig).toContain('model_provider = "OpenAI"');
+    expect(codexConfig).toContain('model = "gpt-5.2-codex"');
+    expect(codexConfig).toContain('review_model = "gpt-5.2-codex"');
+    expect(codexConfig).toContain('model_reasoning_effort = "medium"');
+    expect(codexConfig).toContain('base_url = "https://api.example.com/v1"');
+    expect(codexConfig).toContain('wire_api = "responses"');
+    expect(codexConfig).toContain("requires_openai_auth = true");
+    expect(codexConfig).toContain("[profiles.work]");
+    expect(codexConfig).toContain('model = "profile-model"');
+    expect(codexConfig).not.toContain("https://old.example.com/v1");
+  });
+
+  it("does not overwrite Codex config when auth JSON is invalid", async () => {
+    const mod = await import("./provider-switch");
+    const codexDir = join(mockedHome.dir, ".codex");
+    const codexAuthPath = join(codexDir, "auth.json");
+    const codexConfigPath = join(codexDir, "config.toml");
+    await mkdir(codexDir, { recursive: true });
+    await writeFile(codexAuthPath, "{ invalid json", "utf8");
+    await writeFile(codexConfigPath, 'model = "keep-me"\n', "utf8");
+
+    await expect(
+      mod.setupDefaultProvider({
+        endpoint: "https://api.example.com",
+        apiKey: "sk-new-codex",
+        name: "Codex switch",
+        scope: "codex",
+      }),
+    ).rejects.toThrow("Codex auth.json contains invalid JSON");
+
+    expect(await readFile(codexAuthPath, "utf8")).toBe("{ invalid json");
+    expect(await readFile(codexConfigPath, "utf8")).toBe('model = "keep-me"\n');
   });
 
   it("does not mirror Claude active id into Codex when only Claude has been set", async () => {

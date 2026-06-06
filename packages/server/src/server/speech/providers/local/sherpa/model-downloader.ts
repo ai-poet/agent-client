@@ -8,6 +8,8 @@ import type pino from "pino";
 
 import { getSherpaOnnxModelSpec, type SherpaOnnxModelId } from "./model-catalog.js";
 
+const PROCESS_OUTPUT_TAIL_LENGTH = 2000;
+
 export type EnsureSherpaOnnxModelOptions = {
   modelsDir: string;
   modelId: SherpaOnnxModelId;
@@ -71,11 +73,52 @@ async function extractTarArchive(archivePath: string, destDir: string): Promise<
   await mkdir(destDir, { recursive: true });
 
   await new Promise<void>((resolve, reject) => {
-    const child = spawn("tar", ["xf", archivePath, "-C", destDir], { stdio: "inherit" });
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`tar exited with code ${code}`));
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const appendOutput = (current: string, data: Buffer | string): string => {
+      const next = current + data.toString();
+      return next.length > PROCESS_OUTPUT_TAIL_LENGTH
+        ? next.slice(-PROCESS_OUTPUT_TAIL_LENGTH)
+        : next;
+    };
+    const formatOutput = (): string => {
+      const parts = [
+        stdout.trim() ? `stdout:\n${stdout.trim()}` : null,
+        stderr.trim() ? `stderr:\n${stderr.trim()}` : null,
+      ].filter((part): part is string => part !== null);
+      return parts.length > 0 ? `\n${parts.join("\n")}` : "";
+    };
+    const fail = (error: Error): void => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+
+    const child = spawn("tar", ["xf", archivePath, "-C", destDir], {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    child.stdout?.on("data", (data: Buffer | string) => {
+      stdout = appendOutput(stdout, data);
+    });
+    child.stderr?.on("data", (data: Buffer | string) => {
+      stderr = appendOutput(stderr, data);
+    });
+    child.on("error", (error) => {
+      fail(new Error(`${error.message}${formatOutput()}`));
+    });
+    child.on("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const reason = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
+      reject(new Error(`tar exited with ${reason}${formatOutput()}`));
     });
   });
 }

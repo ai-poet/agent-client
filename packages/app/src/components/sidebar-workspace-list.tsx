@@ -33,6 +33,7 @@ import {
   ChevronRight,
   Copy,
   ExternalLink,
+  Folder,
   FolderGit2,
   GitPullRequest,
   Globe,
@@ -42,6 +43,7 @@ import {
   Pencil,
   Plus,
   Trash2,
+  Users,
 } from "lucide-react-native";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
 import { DraggableList, type DraggableRenderItemInfo } from "./draggable-list";
@@ -54,7 +56,10 @@ import {
 } from "@/runtime/host-runtime";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { projectIconQueryKey } from "@/hooks/use-project-icon-query";
-import { parseHostWorkspaceRouteFromPathname } from "@/utils/host-routes";
+import {
+  buildHostWorkspaceColleagueRoute,
+  parseHostWorkspaceRouteFromPathname,
+} from "@/utils/host-routes";
 import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
 import {
   createSidebarWorkspaceEntry,
@@ -117,6 +122,11 @@ import {
 } from "@/utils/workspace-navigation";
 import { WorkspaceHoverCard } from "@/components/workspace-hover-card";
 import { GitHubIcon } from "@/components/icons/github-icon";
+import {
+  createDefaultWorktreePersona,
+  getWorktreePersonaRole,
+  type WorktreePersona,
+} from "@server/shared/worktree-persona";
 import { generateDraftId } from "@/stores/draft-keys";
 import { isWeb as platformIsWeb, isNative as platformIsNative } from "@/constants/platform";
 import {
@@ -146,6 +156,17 @@ const DEFAULT_STATUS_DOT_SIZE = 7;
 const EMPHASIZED_STATUS_DOT_SIZE = 9;
 const DEFAULT_STATUS_DOT_OFFSET = 0;
 const EMPHASIZED_STATUS_DOT_OFFSET = -1;
+
+function getCompositeRowDragHandleAttributes(
+  attributes: DraggableListDragHandleProps["attributes"] | undefined,
+): DraggableListDragHandleProps["attributes"] | undefined {
+  if (!platformIsWeb || !attributes || attributes.role !== "button") {
+    return attributes;
+  }
+  const { role: _role, ...rest } = attributes;
+  return rest;
+}
+
 function getWorkspacePrIconColor(
   theme: ReturnType<typeof useUnistyles>["theme"],
   state: PrHint["state"],
@@ -216,6 +237,7 @@ interface WorkspaceRowInnerProps {
   archiveStatus?: "idle" | "pending" | "success";
   archivePendingLabel?: string;
   onArchive?: () => void;
+  onConfigureColleague?: () => void;
   onCopyBranchName?: () => void;
   onCopyPath?: () => void;
   archiveShortcutKeys?: ShortcutKey[][] | null;
@@ -420,6 +442,7 @@ function ProjectLeadingVisual({
   const placeholderLabel = projectIconPlaceholderLabelFromDisplayName(displayName);
   const placeholderInitial = placeholderLabel.charAt(0).toUpperCase();
   const activeWorkspace = workspace;
+  const shouldUseFolderIcon = activeWorkspace === null;
   const shouldShowWorkspaceStatus =
     activeWorkspace !== null && (isArchiving || activeWorkspace.statusBucket !== "done");
   const shouldShowSyncedLoader = activeWorkspace
@@ -434,7 +457,9 @@ function ProjectLeadingVisual({
     );
   }
 
-  const projectIcon = iconDataUri ? (
+  const projectIcon = shouldUseFolderIcon ? (
+    <Folder size={15} color={theme.colors.foregroundMuted} />
+  ) : iconDataUri ? (
     <Image source={{ uri: iconDataUri }} style={styles.projectIcon} />
   ) : (
     <View style={styles.projectIconFallback}>
@@ -979,6 +1004,7 @@ function ProjectHeaderRow({
     drag,
     menuController,
   });
+  const dragHandleAttributes = getCompositeRowDragHandleAttributes(dragHandleProps?.attributes);
 
   const handlePress = useCallback(() => {
     if (interaction.didLongPressRef.current) {
@@ -1078,7 +1104,7 @@ function ProjectHeaderRow({
   if (menuController) {
     return (
       <View
-        {...(dragHandleProps?.attributes as any)}
+        {...(dragHandleAttributes as any)}
         {...(dragHandleProps?.listeners as any)}
         ref={dragHandleProps?.setActivatorNodeRef as any}
         onPointerEnter={() => setIsHovered(true)}
@@ -1107,7 +1133,7 @@ function ProjectHeaderRow({
 
   return (
     <View
-      {...(dragHandleProps?.attributes as any)}
+      {...(dragHandleAttributes as any)}
       {...(dragHandleProps?.listeners as any)}
       ref={dragHandleProps?.setActivatorNodeRef as any}
       onPointerEnter={() => setIsHovered(true)}
@@ -1133,6 +1159,13 @@ function ProjectHeaderRow({
   );
 }
 
+function resolveWorkspacePersona(workspace: SidebarWorkspaceEntry): WorktreePersona | null {
+  if (workspace.workspaceKind !== "worktree") {
+    return null;
+  }
+  return workspace.worktreePersona ?? createDefaultWorktreePersona();
+}
+
 function WorkspaceRowInner({
   workspace,
   selected,
@@ -1149,6 +1182,7 @@ function WorkspaceRowInner({
   archiveStatus = "idle",
   archivePendingLabel,
   onArchive,
+  onConfigureColleague,
   onCopyBranchName,
   onCopyPath,
   archiveShortcutKeys,
@@ -1171,6 +1205,7 @@ function WorkspaceRowInner({
     drag,
     menuController,
   });
+  const dragHandleAttributes = getCompositeRowDragHandleAttributes(dragHandleProps?.attributes);
 
   const handlePress = useCallback(() => {
     if (interaction.didLongPressRef.current) {
@@ -1185,11 +1220,15 @@ function WorkspaceRowInner({
   const hasRunningService = workspace.scripts.some(
     (s) => s.lifecycle === "running" && (s.type ?? "service") === "service",
   );
+  const persona = resolveWorkspacePersona(workspace);
+  const personaRole = persona ? getWorktreePersonaRole(persona.roleId) : null;
+  const personaLabel =
+    personaRole && locale === "zh" ? personaRole.labelZh : (personaRole?.label ?? null);
 
   return (
     <WorkspaceHoverCard workspace={workspace} prHint={prHint} isDragging={isDragging}>
       <View
-        {...(dragHandleProps?.attributes as any)}
+        {...(dragHandleAttributes as any)}
         {...(dragHandleProps?.listeners as any)}
         ref={dragHandleProps?.setActivatorNodeRef as any}
         style={styles.workspaceRowContainer}
@@ -1199,7 +1238,8 @@ function WorkspaceRowInner({
         <Pressable
           disabled={isArchiving}
           aria-selected={selected}
-          accessibilityRole="button"
+          accessibilityRole={platformIsWeb ? undefined : "button"}
+          role={platformIsWeb ? "group" : undefined}
           accessibilityState={{ selected }}
           style={({ pressed }) => [
             styles.workspaceRow,
@@ -1231,6 +1271,13 @@ function WorkspaceRowInner({
               >
                 {workspace.name}
               </Text>
+              {personaRole ? (
+                <View style={styles.personaBadge}>
+                  <Text style={styles.personaBadgeText} numberOfLines={1}>
+                    {personaLabel}
+                  </Text>
+                </View>
+              ) : null}
             </View>
             <View style={styles.workspaceRowRight}>
               {showScriptsIcon ? (
@@ -1283,6 +1330,15 @@ function WorkspaceRowInner({
                         {text.copyBranchName}
                       </DropdownMenuItem>
                     ) : null}
+                    {onConfigureColleague ? (
+                      <DropdownMenuItem
+                        testID={`sidebar-workspace-menu-configure-colleague-${workspace.workspaceKey}`}
+                        leading={<Users size={14} color={theme.colors.foregroundMuted} />}
+                        onSelect={onConfigureColleague}
+                      >
+                        {text.configureColleague}
+                      </DropdownMenuItem>
+                    ) : null}
                     <DropdownMenuItem
                       testID={`sidebar-workspace-menu-archive-${workspace.workspaceKey}`}
                       leading={<Archive size={14} color={theme.colors.foregroundMuted} />}
@@ -1314,6 +1370,12 @@ function WorkspaceRowInner({
             <View style={styles.workspacePrBadgeRow}>
               <PrBadge hint={prHint} />
               <ChecksBadge checks={prHint.checks} />
+            </View>
+          ) : persona ? (
+            <View style={styles.workspacePrBadgeRow}>
+              <Text style={styles.workspacePersonaSummary} numberOfLines={1}>
+                {persona.skillIds.length} skills
+              </Text>
             </View>
           ) : null}
         </Pressable>
@@ -1497,6 +1559,10 @@ function WorkspaceRowWithMenu({
     toast.copied(text.branchNameCopied);
   }, [text.branchNameCopied, toast, workspace.name]);
 
+  const handleConfigureColleague = useCallback(() => {
+    router.push(buildHostWorkspaceColleagueRoute(workspace.serverId, workspace.workspaceId));
+  }, [workspace]);
+
   const archiveShortcutKeys = useShortcutKeys("archive-worktree");
 
   useKeyboardActionHandler({
@@ -1541,6 +1607,9 @@ function WorkspaceRowWithMenu({
         canCopyBranchName && !isCreatingPlaceholder ? handleCopyBranchName : undefined
       }
       onCopyPath={isCreatingPlaceholder ? undefined : handleCopyPath}
+      onConfigureColleague={
+        isWorktree && !isCreatingPlaceholder ? handleConfigureColleague : undefined
+      }
       archiveShortcutKeys={selected && !isCreatingPlaceholder ? archiveShortcutKeys : null}
     />
   );
@@ -2383,15 +2452,15 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
   },
   listContent: {
-    paddingHorizontal: theme.spacing[2],
-    paddingTop: theme.spacing[2],
-    paddingBottom: theme.spacing[4],
+    paddingHorizontal: theme.spacing[3],
+    paddingTop: theme.spacing[1],
+    paddingBottom: theme.spacing[3],
   },
   projectListContainer: {
     width: "100%",
   },
   projectBlock: {
-    marginBottom: theme.spacing[1],
+    marginBottom: theme.spacing[2],
   },
   workspaceListContainer: {},
   emptyContainer: {
@@ -2417,15 +2486,15 @@ const styles = StyleSheet.create((theme) => ({
     textAlign: "center",
   },
   projectRow: {
-    minHeight: 36,
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[2],
-    borderRadius: theme.borderRadius.lg,
-    marginBottom: theme.spacing[1],
+    minHeight: 28,
+    paddingVertical: theme.spacing[1],
+    paddingHorizontal: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    marginBottom: 2,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: theme.spacing[2],
+    gap: theme.spacing[1],
     userSelect: "none",
   },
   projectRowHovered: {
@@ -2463,8 +2532,8 @@ const styles = StyleSheet.create((theme) => ({
   },
   projectLeadingVisualSlot: {
     position: "relative",
-    width: theme.iconSize.md,
-    height: theme.iconSize.md,
+    width: 18,
+    height: 18,
     flexShrink: 0,
     alignItems: "center",
     justifyContent: "center",
@@ -2483,9 +2552,9 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: 9,
   },
   projectTitle: {
-    color: theme.colors.foreground,
+    color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
-    fontWeight: "400",
+    fontWeight: "500",
     minWidth: 0,
     flexShrink: 1,
   },
@@ -2506,8 +2575,8 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
   },
   projectIconActionButton: {
-    width: 24,
-    height: 24,
+    width: 22,
+    height: 22,
     borderRadius: theme.borderRadius.md,
     alignItems: "center",
     justifyContent: "center",
@@ -2529,8 +2598,8 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 0,
   },
   projectKebabButton: {
-    width: 24,
-    height: 24,
+    width: 22,
+    height: 22,
     borderRadius: theme.borderRadius.md,
     alignItems: "center",
     justifyContent: "center",
@@ -2543,8 +2612,8 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface2,
   },
   projectTrailingControlSlot: {
-    width: 24,
-    height: 24,
+    width: 22,
+    height: 22,
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
@@ -2568,36 +2637,36 @@ const styles = StyleSheet.create((theme) => ({
     padding: theme.spacing[2],
   },
   workspaceRow: {
-    minHeight: 36,
-    marginBottom: theme.spacing[1],
-    paddingVertical: theme.spacing[2],
+    minHeight: 28,
+    marginBottom: 2,
+    paddingVertical: theme.spacing[1],
     paddingLeft: theme.spacing[3] + theme.spacing[3],
-    paddingRight: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
+    paddingRight: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
     flexDirection: "column",
     alignItems: "stretch",
     justifyContent: "center",
-    gap: theme.spacing[1],
+    gap: 2,
     userSelect: "none",
   },
   workspaceRowMain: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: theme.spacing[2],
+    gap: theme.spacing[1],
     width: "100%",
   },
   workspaceRowLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
+    gap: theme.spacing[1],
     flex: 1,
     minWidth: 0,
   },
   workspaceRowRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
+    gap: theme.spacing[1],
     flexShrink: 0,
   },
   workspaceRowHovered: {
@@ -2657,7 +2726,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,
     fontWeight: "400",
-    lineHeight: 20,
+    lineHeight: 18,
     opacity: 0.76,
     flex: 1,
     minWidth: 0,
@@ -2671,8 +2740,29 @@ const styles = StyleSheet.create((theme) => ({
   workspacePrBadgeRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
-    paddingLeft: WORKSPACE_STATUS_DOT_WIDTH + theme.spacing[2],
+    gap: theme.spacing[1],
+    paddingLeft: WORKSPACE_STATUS_DOT_WIDTH + theme.spacing[1],
+  },
+  personaBadge: {
+    maxWidth: 92,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.surface2,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    flexShrink: 0,
+  },
+  personaBadgeText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: theme.fontWeight.medium,
+  },
+  workspacePersonaSummary: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    lineHeight: 14,
   },
   workspaceCreatingText: {
     color: theme.colors.foregroundMuted,

@@ -37,11 +37,13 @@ import type {
   StashListResponse,
   ValidateBranchResponse,
   BranchSuggestionsResponse,
+  CommitGraphResponse,
   GitHubSearchResponse,
   GitHubSearchRequest,
   DirectorySuggestionsResponse,
   PaseoWorktreeListResponse,
   PaseoWorktreeArchiveResponse,
+  UpdateWorkspacePersonaRequest,
   ProjectIconResponse,
   ListAvailableEditorsResponseMessage,
   OpenInEditorResponseMessage,
@@ -69,6 +71,12 @@ import type {
   SessionOutboundMessage,
   SendAgentMessageRequest,
   EditorTargetId,
+  ContextHubProjectMemoryItem,
+  ContextHubProjectMemoryKind,
+  ContextHubPromptTemplate,
+  ContextHubManagedSkillEntry,
+  ContextHubMcpServerProfile,
+  ContextHubMcpServerConfigPayload,
 } from "../shared/messages.js";
 import type {
   AgentPermissionRequest,
@@ -222,8 +230,13 @@ export type DaemonClientConfig = {
 
 export type SendMessageOptions = {
   messageId?: string;
+  hidden?: boolean;
   images?: Array<{ data: string; mimeType: string }>;
   attachments?: SendAgentMessageRequest["attachments"];
+  memoryIds?: string[];
+  useWorkspaceMemory?: boolean;
+  promptTemplateId?: string;
+  mcpServerIds?: string[];
 };
 
 type AgentConfigOverrides = Partial<Omit<AgentSessionConfig, "provider" | "cwd">>;
@@ -240,15 +253,29 @@ export interface CreateAgentRequestOptions extends AgentConfigOverrides {
   attachments?: CreateAgentRequestMessage["attachments"];
   git?: GitSetupOptions;
   worktreeName?: string;
+  worktreePersona?: CreateAgentRequestMessage["worktreePersona"];
   requestId?: string;
   labels?: Record<string, string>;
+  memoryIds?: string[];
+  useWorkspaceMemory?: boolean;
+  promptTemplateId?: string;
+  mcpServerIds?: string[];
 }
 
 export interface CreatePaseoWorktreeInput
   extends Pick<
     CreatePaseoWorktreeRequest,
-    "cwd" | "worktreeSlug" | "attachments" | "refName" | "action" | "githubPrNumber"
+    | "cwd"
+    | "worktreeSlug"
+    | "worktreePersona"
+    | "attachments"
+    | "refName"
+    | "action"
+    | "githubPrNumber"
   > {}
+
+export interface UpdateWorkspacePersonaInput
+  extends Pick<UpdateWorkspacePersonaRequest, "workspaceId" | "worktreePersona"> {}
 
 type CheckoutStatusPayload = CheckoutStatusResponse["payload"];
 type SubscribeCheckoutDiffPayload = Extract<
@@ -277,6 +304,10 @@ type PaseoWorktreeArchivePayload = PaseoWorktreeArchiveResponse["payload"];
 type CreatePaseoWorktreePayload = Extract<
   SessionOutboundMessage,
   { type: "create_paseo_worktree_response" }
+>["payload"];
+type UpdateWorkspacePersonaPayload = Extract<
+  SessionOutboundMessage,
+  { type: "update_workspace_persona_response" }
 >["payload"];
 type FileExplorerPayload = FileExplorerResponse["payload"];
 type FileDownloadTokenPayload = FileDownloadTokenResponse["payload"];
@@ -327,6 +358,79 @@ type ChatDeletePayload = Extract<
 type ChatPostPayload = Extract<SessionOutboundMessage, { type: "chat/post/response" }>["payload"];
 type ChatReadPayload = Extract<SessionOutboundMessage, { type: "chat/read/response" }>["payload"];
 type ChatWaitPayload = Extract<SessionOutboundMessage, { type: "chat/wait/response" }>["payload"];
+type MemoryListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "memory/list/response" }
+>["payload"];
+type MemoryGetPayload = Extract<SessionOutboundMessage, { type: "memory/get/response" }>["payload"];
+type MemoryCreatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "memory/create/response" }
+>["payload"];
+type MemoryUpdatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "memory/update/response" }
+>["payload"];
+type MemoryDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "memory/delete/response" }
+>["payload"];
+type SkillsListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "skills/list/response" }
+>["payload"];
+type SkillsImportPayload = Extract<
+  SessionOutboundMessage,
+  { type: "skills/import/response" }
+>["payload"];
+type SkillsExportPayload = Extract<
+  SessionOutboundMessage,
+  { type: "skills/export/response" }
+>["payload"];
+type SkillsSavePayload = Extract<
+  SessionOutboundMessage,
+  { type: "skills/save/response" }
+>["payload"];
+type SkillsImportPackagePayload = Extract<
+  SessionOutboundMessage,
+  { type: "skills/import-package/response" }
+>["payload"];
+type SkillsDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "skills/delete/response" }
+>["payload"];
+type SkillsMarketplaceListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "skills/marketplace/list/response" }
+>["payload"];
+type SkillsMarketplaceInstallPayload = Extract<
+  SessionOutboundMessage,
+  { type: "skills/marketplace/install/response" }
+>["payload"];
+type PromptsListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "prompts/list/response" }
+>["payload"];
+type PromptsCreatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "prompts/create/response" }
+>["payload"];
+type PromptsUpdatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "prompts/update/response" }
+>["payload"];
+type PromptsDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "prompts/delete/response" }
+>["payload"];
+type PromptsRenderPayload = Extract<
+  SessionOutboundMessage,
+  { type: "prompts/render/response" }
+>["payload"];
+type McpListPayload = Extract<SessionOutboundMessage, { type: "mcp/list/response" }>["payload"];
+type McpUpsertPayload = Extract<SessionOutboundMessage, { type: "mcp/upsert/response" }>["payload"];
+type McpDeletePayload = Extract<SessionOutboundMessage, { type: "mcp/delete/response" }>["payload"];
+type McpTestPayload = Extract<SessionOutboundMessage, { type: "mcp/test/response" }>["payload"];
 type LoopRunPayload = Extract<SessionOutboundMessage, { type: "loop/run/response" }>["payload"];
 type LoopListPayload = Extract<SessionOutboundMessage, { type: "loop/list/response" }>["payload"];
 type LoopInspectPayload = Extract<
@@ -431,6 +535,146 @@ export type WaitForChatMessagesOptions = {
   afterMessageId?: string | null;
   timeoutMs?: number;
   requestId?: string;
+};
+export type MemoryListOptions = Omit<
+  Extract<SessionInboundMessage, { type: "memory/list" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type MemoryGetOptions = Omit<
+  Extract<SessionInboundMessage, { type: "memory/get" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type MemoryCreateOptions = Omit<
+  Extract<SessionInboundMessage, { type: "memory/create" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type MemoryUpdateOptions = Omit<
+  Extract<SessionInboundMessage, { type: "memory/update" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type MemoryDeleteOptions = Omit<
+  Extract<SessionInboundMessage, { type: "memory/delete" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type SkillsListOptions = Omit<
+  Extract<SessionInboundMessage, { type: "skills/list" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type SkillsImportOptions = Omit<
+  Extract<SessionInboundMessage, { type: "skills/import" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type SkillsExportOptions = Omit<
+  Extract<SessionInboundMessage, { type: "skills/export" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type SkillsSaveOptions = Omit<
+  Extract<SessionInboundMessage, { type: "skills/save" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type SkillsImportPackageOptions = Omit<
+  Extract<SessionInboundMessage, { type: "skills/import-package" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type SkillsDeleteOptions = Omit<
+  Extract<SessionInboundMessage, { type: "skills/delete" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type SkillsMarketplaceListOptions = Omit<
+  Extract<SessionInboundMessage, { type: "skills/marketplace/list" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type SkillsMarketplaceInstallOptions = Omit<
+  Extract<SessionInboundMessage, { type: "skills/marketplace/install" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type PromptsListOptions = Omit<
+  Extract<SessionInboundMessage, { type: "prompts/list" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type PromptsCreateOptions = Omit<
+  Extract<SessionInboundMessage, { type: "prompts/create" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type PromptsUpdateOptions = Omit<
+  Extract<SessionInboundMessage, { type: "prompts/update" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type PromptsDeleteOptions = Omit<
+  Extract<SessionInboundMessage, { type: "prompts/delete" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type PromptsRenderOptions = Omit<
+  Extract<SessionInboundMessage, { type: "prompts/render" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type McpListOptions = Omit<
+  Extract<SessionInboundMessage, { type: "mcp/list" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type McpUpsertOptions = Omit<
+  Extract<SessionInboundMessage, { type: "mcp/upsert" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type McpDeleteOptions = Omit<
+  Extract<SessionInboundMessage, { type: "mcp/delete" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type McpTestOptions = Omit<
+  Extract<SessionInboundMessage, { type: "mcp/test" }>,
+  "type" | "requestId"
+> & {
+  requestId?: string;
+};
+export type {
+  ContextHubProjectMemoryItem,
+  ContextHubProjectMemoryKind,
+  ContextHubPromptTemplate,
+  ContextHubManagedSkillEntry,
+  ContextHubMcpServerProfile,
+  ContextHubMcpServerConfigPayload,
 };
 export type RunLoopOptions = {
   prompt: string;
@@ -1593,8 +1837,19 @@ export class DaemonClient {
         : {}),
       ...(options.git ? { git: options.git } : {}),
       ...(options.worktreeName ? { worktreeName: options.worktreeName } : {}),
+      ...(options.worktreePersona ? { worktreePersona: options.worktreePersona } : {}),
       ...(options.labels && Object.keys(options.labels).length > 0
         ? { labels: options.labels }
+        : {}),
+      ...(options.memoryIds && options.memoryIds.length > 0
+        ? { memoryIds: options.memoryIds }
+        : {}),
+      ...(options.useWorkspaceMemory === undefined
+        ? {}
+        : { useWorkspaceMemory: options.useWorkspaceMemory }),
+      ...(options.promptTemplateId ? { promptTemplateId: options.promptTemplateId } : {}),
+      ...(options.mcpServerIds && options.mcpServerIds.length > 0
+        ? { mcpServerIds: options.mcpServerIds }
         : {}),
     });
 
@@ -1820,8 +2075,19 @@ export class DaemonClient {
       agentId,
       text,
       ...(messageId ? { messageId } : {}),
+      ...(options?.hidden ? { hidden: true } : {}),
       ...(options?.images ? { images: options.images } : {}),
       ...(options?.attachments ? { attachments: options.attachments } : {}),
+      ...(options?.memoryIds && options.memoryIds.length > 0
+        ? { memoryIds: options.memoryIds }
+        : {}),
+      ...(options?.useWorkspaceMemory === undefined
+        ? {}
+        : { useWorkspaceMemory: options.useWorkspaceMemory }),
+      ...(options?.promptTemplateId ? { promptTemplateId: options.promptTemplateId } : {}),
+      ...(options?.mcpServerIds && options.mcpServerIds.length > 0
+        ? { mcpServerIds: options.mcpServerIds }
+        : {}),
     });
     const payload = await this.sendRequest({
       requestId,
@@ -2687,6 +2953,7 @@ export class DaemonClient {
         type: "create_paseo_worktree_request",
         cwd: input.cwd,
         worktreeSlug: input.worktreeSlug,
+        ...(input.worktreePersona ? { worktreePersona: input.worktreePersona } : {}),
         ...(input.attachments && input.attachments.length > 0
           ? { attachments: input.attachments }
           : {}),
@@ -2696,6 +2963,22 @@ export class DaemonClient {
       },
       responseType: "create_paseo_worktree_response",
       timeout: 60000,
+    });
+  }
+
+  async updateWorkspacePersona(
+    input: UpdateWorkspacePersonaInput,
+    requestId?: string,
+  ): Promise<UpdateWorkspacePersonaPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "update_workspace_persona_request",
+        workspaceId: input.workspaceId,
+        worktreePersona: input.worktreePersona,
+      },
+      responseType: "update_workspace_persona_response",
+      timeout: 20000,
     });
   }
 
@@ -2729,6 +3012,22 @@ export class DaemonClient {
       },
       responseType: "branch_suggestions_response",
       timeout: 10000,
+    });
+  }
+
+  async getCommitGraph(
+    options: { cwd: string; limit?: number },
+    requestId?: string,
+  ): Promise<CommitGraphResponse["payload"]> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "commit_graph_request",
+        cwd: options.cwd,
+        limit: options.limit,
+      },
+      responseType: "commit_graph_response",
+      timeout: 15000,
     });
   }
 
@@ -3447,6 +3746,294 @@ export class DaemonClient {
       },
       responseType: "chat/wait/response",
       timeout: (options.timeoutMs ?? 0) + 10000,
+    });
+  }
+
+  async memoryList(options: MemoryListOptions): Promise<MemoryListPayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "memory/list",
+        ...message,
+      },
+      responseType: "memory/list/response",
+      timeout: 10000,
+    });
+  }
+
+  async memoryGet(options: MemoryGetOptions): Promise<MemoryGetPayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "memory/get",
+        ...message,
+      },
+      responseType: "memory/get/response",
+      timeout: 10000,
+    });
+  }
+
+  async memoryCreate(options: MemoryCreateOptions): Promise<MemoryCreatePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "memory/create",
+        input: options.input,
+      },
+      responseType: "memory/create/response",
+      timeout: 10000,
+    });
+  }
+
+  async memoryUpdate(options: MemoryUpdateOptions): Promise<MemoryUpdatePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "memory/update",
+        workspaceId: options.workspaceId,
+        memoryId: options.memoryId,
+        patch: options.patch,
+      },
+      responseType: "memory/update/response",
+      timeout: 10000,
+    });
+  }
+
+  async memoryDelete(options: MemoryDeleteOptions): Promise<MemoryDeletePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "memory/delete",
+        workspaceId: options.workspaceId,
+        memoryId: options.memoryId,
+      },
+      responseType: "memory/delete/response",
+      timeout: 10000,
+    });
+  }
+
+  async skillsList(options: SkillsListOptions = {}): Promise<SkillsListPayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "skills/list",
+        ...message,
+      },
+      responseType: "skills/list/response",
+      timeout: 10000,
+    });
+  }
+
+  async skillsImport(options: SkillsImportOptions): Promise<SkillsImportPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "skills/import",
+        name: options.name,
+        content: options.content,
+        ...(options.description ? { description: options.description } : {}),
+      },
+      responseType: "skills/import/response",
+      timeout: 10000,
+    });
+  }
+
+  async skillsExport(options: SkillsExportOptions): Promise<SkillsExportPayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "skills/export",
+        ...message,
+      },
+      responseType: "skills/export/response",
+      timeout: 10000,
+    });
+  }
+
+  async skillsSave(options: SkillsSaveOptions): Promise<SkillsSavePayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "skills/save",
+        ...message,
+      },
+      responseType: "skills/save/response",
+      timeout: 10000,
+    });
+  }
+
+  async skillsImportPackage(
+    options: SkillsImportPackageOptions,
+  ): Promise<SkillsImportPackagePayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "skills/import-package",
+        ...message,
+      },
+      responseType: "skills/import-package/response",
+      timeout: 30000,
+    });
+  }
+
+  async skillsDelete(options: SkillsDeleteOptions): Promise<SkillsDeletePayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "skills/delete",
+        ...message,
+      },
+      responseType: "skills/delete/response",
+      timeout: 10000,
+    });
+  }
+
+  async skillsMarketplaceList(
+    options: SkillsMarketplaceListOptions = {},
+  ): Promise<SkillsMarketplaceListPayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "skills/marketplace/list",
+        ...message,
+      },
+      responseType: "skills/marketplace/list/response",
+      timeout: 15000,
+    });
+  }
+
+  async skillsMarketplaceInstall(
+    options: SkillsMarketplaceInstallOptions,
+  ): Promise<SkillsMarketplaceInstallPayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "skills/marketplace/install",
+        ...message,
+      },
+      responseType: "skills/marketplace/install/response",
+      timeout: 120000,
+    });
+  }
+
+  async promptsList(options: PromptsListOptions = {}): Promise<PromptsListPayload> {
+    const { requestId, ...message } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "prompts/list",
+        ...message,
+      },
+      responseType: "prompts/list/response",
+      timeout: 10000,
+    });
+  }
+
+  async promptsCreate(options: PromptsCreateOptions): Promise<PromptsCreatePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "prompts/create",
+        input: options.input,
+      },
+      responseType: "prompts/create/response",
+      timeout: 10000,
+    });
+  }
+
+  async promptsUpdate(options: PromptsUpdateOptions): Promise<PromptsUpdatePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "prompts/update",
+        promptId: options.promptId,
+        patch: options.patch,
+      },
+      responseType: "prompts/update/response",
+      timeout: 10000,
+    });
+  }
+
+  async promptsDelete(options: PromptsDeleteOptions): Promise<PromptsDeletePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "prompts/delete",
+        promptId: options.promptId,
+      },
+      responseType: "prompts/delete/response",
+      timeout: 10000,
+    });
+  }
+
+  async promptsRender(options: PromptsRenderOptions): Promise<PromptsRenderPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "prompts/render",
+        promptId: options.promptId,
+        ...(options.variables ? { variables: options.variables } : {}),
+        ...(options.argumentsText ? { argumentsText: options.argumentsText } : {}),
+        ...(options.recordUsage === undefined ? {} : { recordUsage: options.recordUsage }),
+      },
+      responseType: "prompts/render/response",
+      timeout: 10000,
+    });
+  }
+
+  async mcpList(options: McpListOptions = {}): Promise<McpListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "mcp/list",
+      },
+      responseType: "mcp/list/response",
+      timeout: 10000,
+    });
+  }
+
+  async mcpUpsert(options: McpUpsertOptions): Promise<McpUpsertPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "mcp/upsert",
+        profile: options.profile,
+      },
+      responseType: "mcp/upsert/response",
+      timeout: 10000,
+    });
+  }
+
+  async mcpDelete(options: McpDeleteOptions): Promise<McpDeletePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "mcp/delete",
+        profileId: options.profileId,
+      },
+      responseType: "mcp/delete/response",
+      timeout: 10000,
+    });
+  }
+
+  async mcpTest(options: McpTestOptions): Promise<McpTestPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "mcp/test",
+        profile: options.profile,
+      },
+      responseType: "mcp/test/response",
+      timeout: 10000,
     });
   }
 
@@ -4196,11 +4783,19 @@ function resolveAgentConfig(options: CreateAgentRequestOptions): AgentSessionCon
     cwd,
     workspaceId: _workspaceId,
     initialPrompt: _initialPrompt,
+    clientMessageId: _clientMessageId,
+    outputSchema: _outputSchema,
     images: _images,
+    attachments: _attachments,
     git: _git,
     worktreeName: _worktreeName,
+    worktreePersona: _worktreePersona,
     requestId: _requestId,
     labels: _labels,
+    memoryIds: _memoryIds,
+    useWorkspaceMemory: _useWorkspaceMemory,
+    promptTemplateId: _promptTemplateId,
+    mcpServerIds: _mcpServerIds,
     ...overrides
   } = options;
 

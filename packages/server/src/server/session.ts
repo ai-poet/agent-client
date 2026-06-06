@@ -175,6 +175,7 @@ import {
   pushCurrentBranch,
   createPullRequest,
 } from "../utils/checkout-git.js";
+import { getCommitGraph } from "../utils/git-graph.js";
 import { getProjectIcon } from "../utils/project-icon.js";
 import { expandTilde } from "../utils/path.js";
 import { searchHomeDirectories, searchWorkspaceEntries } from "../utils/directory-suggestions.js";
@@ -187,6 +188,7 @@ import type pino from "pino";
 import { resolveClientMessageId } from "./client-message-id.js";
 import { ChatServiceError, FileBackedChatService } from "./chat/chat-service.js";
 import { notifyChatMentions } from "./chat/chat-mentions.js";
+import { ContextHubService } from "./context-hub/service.js";
 import { LoopService } from "./loop-service.js";
 import { ScheduleService } from "./schedule/service.js";
 import { execCommand } from "../utils/spawn.js";
@@ -212,6 +214,12 @@ import {
   killTerminalsUnderPath as killWorktreeTerminalsUnderPath,
 } from "./worktree-session.js";
 import { toWorktreeWireError } from "./worktree-errors.js";
+import type { WorktreePersona } from "../shared/worktree-persona.js";
+import { readPaseoWorktreePersona } from "../utils/worktree-metadata.js";
+import {
+  buildWorktreePersonaSystemPrompt,
+  persistWorktreePersona,
+} from "./worktree-persona-service.js";
 
 const MAX_INITIAL_AGENT_TITLE_CHARS = Math.min(60, MAX_EXPLICIT_AGENT_TITLE_CHARS);
 const WORKSPACE_GIT_WATCH_REMOVED_FINGERPRINT = "__removed__";
@@ -495,6 +503,7 @@ export type SessionOptions = {
   projectRegistry: ProjectRegistry;
   workspaceRegistry: WorkspaceRegistry;
   chatService: FileBackedChatService;
+  contextHubService?: ContextHubService;
   scheduleService: ScheduleService;
   loopService: LoopService;
   checkoutDiffManager: CheckoutDiffManager;
@@ -669,6 +678,7 @@ export class Session {
   private readonly projectRegistry: ProjectRegistry;
   private readonly workspaceRegistry: WorkspaceRegistry;
   private readonly chatService: FileBackedChatService;
+  private readonly contextHubService: ContextHubService;
   private readonly scheduleService: ScheduleService;
   private readonly loopService: LoopService;
   private readonly checkoutDiffManager: CheckoutDiffManager;
@@ -764,6 +774,7 @@ export class Session {
       projectRegistry,
       workspaceRegistry,
       chatService,
+      contextHubService,
       scheduleService,
       loopService,
       checkoutDiffManager,
@@ -808,6 +819,12 @@ export class Session {
     this.projectRegistry = projectRegistry;
     this.workspaceRegistry = workspaceRegistry;
     this.chatService = chatService;
+    this.contextHubService =
+      contextHubService ??
+      new ContextHubService({
+        paseoHome,
+        logger: this.sessionLogger.child({ module: "context-hub" }),
+      });
     this.scheduleService = scheduleService;
     this.loopService = loopService;
     this.checkoutDiffManager = checkoutDiffManager;
@@ -1360,6 +1377,67 @@ export class Session {
     return workspaces.find((workspace) => workspace.cwd === normalizedCwd) ?? null;
   }
 
+  private async resolveContextHubWorkspaceCwd(workspaceId?: string | null): Promise<string | null> {
+    if (!workspaceId) {
+      return null;
+    }
+    const workspace = await this.workspaceRegistry.get(workspaceId);
+    return workspace?.cwd ?? null;
+  }
+
+  private async resolveWorkspaceIdForAgent(agentId: string): Promise<string | null> {
+    const agent = this.agentManager.getAgent(agentId);
+    const cwd = agent?.config.cwd;
+    if (!cwd) {
+      return null;
+    }
+    const workspace =
+      (await this.findWorkspaceByDirectory(cwd)) ??
+      (await this.findOrCreateWorkspaceForDirectory(cwd));
+    return workspace.workspaceId;
+  }
+
+  private async buildContextHubPromptText(
+    text: string,
+    options: {
+      workspaceId?: string | null;
+      agentId?: string;
+      memoryIds?: string[];
+      useWorkspaceMemory?: boolean;
+      promptTemplateId?: string;
+    },
+  ): Promise<string> {
+    let promptText = text;
+    if (options.promptTemplateId?.trim()) {
+      const rendered = await this.contextHubService.renderPrompt({
+        promptId: options.promptTemplateId,
+        argumentsText: text,
+        recordUsage: true,
+      });
+      promptText = rendered.text;
+    }
+
+    const shouldRenderMemory =
+      (options.memoryIds?.length ?? 0) > 0 || options.useWorkspaceMemory === true;
+    if (!shouldRenderMemory) {
+      return promptText;
+    }
+
+    const workspaceId =
+      options.workspaceId ??
+      (options.agentId ? await this.resolveWorkspaceIdForAgent(options.agentId) : null);
+    if (!workspaceId) {
+      return promptText;
+    }
+
+    const memoryContext = await this.contextHubService.renderProjectMemoryContext({
+      workspaceId,
+      memoryIds: options.memoryIds,
+      useWorkspaceMemory: options.useWorkspaceMemory,
+    });
+    return memoryContext ? `${memoryContext}\n\n${promptText}` : promptText;
+  }
+
   private async resolveWorkspaceDirectory(cwd: string): Promise<string> {
     const normalizedCwd = normalizePersistedWorkspaceId(cwd);
     try {
@@ -1377,6 +1455,18 @@ export class Session {
     const project = projectRecord ?? (await this.projectRegistry.get(workspace.projectId));
     if (!project) {
       throw new Error(`Project not found for workspace ${workspace.workspaceId}`);
+    }
+    const snapshot = this.workspaceGitService.peekSnapshot(workspace.cwd);
+    if (
+      snapshot?.git.isGit &&
+      normalizePersistedWorkspaceId(snapshot.cwd) === normalizePersistedWorkspaceId(workspace.cwd)
+    ) {
+      const checkout = checkoutLiteFromGitSnapshot(workspace.cwd, snapshot.git);
+      return {
+        projectKey: project.projectId,
+        projectName: project.displayName,
+        checkout,
+      };
     }
     const checkout =
       project.kind !== "git"
@@ -1651,6 +1741,10 @@ export class Session {
             await this.handleBranchSuggestionsRequest(msg);
             break;
 
+          case "commit_graph_request":
+            await this.handleCommitGraphRequest(msg);
+            break;
+
           case "directory_suggestions_request":
             await this.handleDirectorySuggestionsRequest(msg);
             break;
@@ -1725,6 +1819,9 @@ export class Session {
 
           case "create_paseo_worktree_request":
             await this.handleCreatePaseoWorktreeRequest(msg);
+            break;
+          case "update_workspace_persona_request":
+            await this.handleUpdateWorkspacePersonaRequest(msg);
             break;
 
           case "workspace_setup_status_request":
@@ -1887,6 +1984,94 @@ export class Session {
 
           case "chat/wait":
             await this.handleChatWaitRequest(msg);
+            break;
+
+          case "memory/list":
+            await this.handleMemoryListRequest(msg);
+            break;
+
+          case "memory/get":
+            await this.handleMemoryGetRequest(msg);
+            break;
+
+          case "memory/create":
+            await this.handleMemoryCreateRequest(msg);
+            break;
+
+          case "memory/update":
+            await this.handleMemoryUpdateRequest(msg);
+            break;
+
+          case "memory/delete":
+            await this.handleMemoryDeleteRequest(msg);
+            break;
+
+          case "skills/list":
+            await this.handleSkillsListRequest(msg);
+            break;
+
+          case "skills/import":
+            await this.handleSkillsImportRequest(msg);
+            break;
+
+          case "skills/export":
+            await this.handleSkillsExportRequest(msg);
+            break;
+
+          case "skills/save":
+            await this.handleSkillsSaveRequest(msg);
+            break;
+
+          case "skills/import-package":
+            await this.handleSkillsImportPackageRequest(msg);
+            break;
+
+          case "skills/delete":
+            await this.handleSkillsDeleteRequest(msg);
+            break;
+
+          case "skills/marketplace/list":
+            await this.handleSkillsMarketplaceListRequest(msg);
+            break;
+
+          case "skills/marketplace/install":
+            await this.handleSkillsMarketplaceInstallRequest(msg);
+            break;
+
+          case "prompts/list":
+            await this.handlePromptsListRequest(msg);
+            break;
+
+          case "prompts/create":
+            await this.handlePromptsCreateRequest(msg);
+            break;
+
+          case "prompts/update":
+            await this.handlePromptsUpdateRequest(msg);
+            break;
+
+          case "prompts/delete":
+            await this.handlePromptsDeleteRequest(msg);
+            break;
+
+          case "prompts/render":
+            await this.handlePromptsRenderRequest(msg);
+            break;
+
+          case "mcp/list":
+            await this.handleMcpListRequest(msg);
+            break;
+
+          case "mcp/upsert":
+            await this.handleMcpUpsertRequest(msg);
+            break;
+
+          case "mcp/delete":
+            await this.handleMcpDeleteRequest(msg);
+            break;
+
+          case "mcp/test":
+            await this.handleMcpTestRequest(msg);
             break;
 
           case "schedule/create":
@@ -2735,7 +2920,14 @@ export class Session {
     images?: Array<{ data: string; mimeType: string }>,
     attachments?: AgentAttachment[],
     runOptions?: AgentRunOptions,
-    options?: { spokenInput?: boolean },
+    options?: {
+      spokenInput?: boolean;
+      hidden?: boolean;
+      workspaceId?: string | null;
+      memoryIds?: string[];
+      useWorkspaceMemory?: boolean;
+      promptTemplateId?: string;
+    },
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     this.sessionLogger.info(
       {
@@ -2743,6 +2935,7 @@ export class Session {
         textPreview: text.substring(0, 50),
         imageCount: images?.length ?? 0,
         attachmentCount: attachments?.length ?? 0,
+        hidden: options?.hidden === true,
       },
       `Sending text to agent ${agentId}${
         images && images.length > 0 ? ` with ${images.length} image attachment(s)` : ""
@@ -2753,7 +2946,14 @@ export class Session {
       }`,
     );
 
-    const promptText = options?.spokenInput ? wrapSpokenInput(text) : text;
+    const contextText = await this.buildContextHubPromptText(text, {
+      agentId,
+      workspaceId: options?.workspaceId,
+      memoryIds: options?.memoryIds,
+      useWorkspaceMemory: options?.useWorkspaceMemory,
+      promptTemplateId: options?.promptTemplateId,
+    });
+    const promptText = options?.spokenInput ? wrapSpokenInput(contextText) : contextText;
     const prompt = this.buildAgentPrompt(promptText, images, attachments);
 
     try {
@@ -2765,6 +2965,7 @@ export class Session {
         prompt,
         messageId,
         runOptions,
+        hidden: options?.hidden === true,
         logger: this.sessionLogger,
       });
       return { ok: true };
@@ -2794,6 +2995,11 @@ export class Session {
       images,
       attachments,
       labels,
+      worktreePersona,
+      memoryIds,
+      useWorkspaceMemory,
+      promptTemplateId,
+      mcpServerIds,
     } = msg;
     this.sessionLogger.info(
       { cwd: config.cwd, provider: config.provider, worktreeName },
@@ -2818,6 +3024,7 @@ export class Session {
         git,
         worktreeName,
         attachments,
+        worktreePersona,
       );
       const resolvedWorkspace = msg.workspaceId
         ? await this.workspaceRegistry.get(msg.workspaceId)
@@ -2826,10 +3033,34 @@ export class Session {
       if (!resolvedWorkspace) {
         throw new Error(`Workspace not found: ${msg.workspaceId}`);
       }
+      const persistedPersona =
+        resolvedWorkspace.kind === "worktree"
+          ? readPaseoWorktreePersona(resolvedWorkspace.cwd)
+          : null;
+      const personaSystemPrompt = buildWorktreePersonaSystemPrompt(
+        worktreePersona !== undefined ? worktreePersona : persistedPersona,
+      );
+      const systemPrompt = [personaSystemPrompt, sessionConfig.systemPrompt]
+        .filter((part): part is string => Boolean(part?.trim()))
+        .join("\n\n");
+      const selectedMcpServers = await this.contextHubService.resolveMcpServers({
+        ids: mcpServerIds,
+        workspaceId: resolvedWorkspace.workspaceId,
+        provider: sessionConfig.provider,
+      });
+      const mergedMcpServers =
+        Object.keys(selectedMcpServers).length > 0 || sessionConfig.mcpServers
+          ? {
+              ...selectedMcpServers,
+              ...sessionConfig.mcpServers,
+            }
+          : undefined;
       const snapshot = await this.agentManager.createAgent(
         {
           ...sessionConfig,
           cwd: resolvedWorkspace.cwd,
+          ...(systemPrompt ? { systemPrompt } : {}),
+          ...(mergedMcpServers ? { mcpServers: mergedMcpServers } : {}),
         },
         undefined,
         {
@@ -2861,6 +3092,12 @@ export class Session {
           images,
           attachments,
           outputSchema ? { outputSchema } : undefined,
+          {
+            workspaceId: resolvedWorkspace.workspaceId,
+            memoryIds,
+            useWorkspaceMemory,
+            promptTemplateId,
+          },
         );
         if (!started.ok) {
           throw new Error(started.error);
@@ -3075,6 +3312,7 @@ export class Session {
     gitOptions?: GitSetupOptions,
     legacyWorktreeName?: string,
     attachments?: AgentAttachment[],
+    worktreePersona?: WorktreePersona | null,
   ): Promise<{
     sessionConfig: AgentSessionConfig;
     worktreeBootstrap?: { worktree: WorktreeConfig; shouldBootstrap: boolean };
@@ -3094,6 +3332,7 @@ export class Session {
       gitOptions,
       legacyWorktreeName,
       attachments,
+      worktreePersona,
     );
   }
 
@@ -4086,6 +4325,40 @@ export class Session {
     }
   }
 
+  private async handleCommitGraphRequest(
+    msg: Extract<SessionInboundMessage, { type: "commit_graph_request" }>,
+  ): Promise<void> {
+    const { cwd, requestId } = msg;
+
+    try {
+      const graph = await getCommitGraph(cwd, { limit: msg.limit ?? undefined });
+      this.emit({
+        type: "commit_graph_response",
+        payload: {
+          cwd,
+          graph,
+          error: null,
+          requestId,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "commit_graph_response",
+        payload: {
+          cwd,
+          graph: {
+            commits: [],
+            branches: [],
+            headCommit: null,
+            rootCommits: [],
+          },
+          error: error instanceof Error ? error.message : "Unknown error",
+          requestId,
+        },
+      });
+    }
+  }
+
   private async handleValidateBranchRequest(
     msg: Extract<SessionInboundMessage, { type: "validate_branch_request" }>,
   ): Promise<void> {
@@ -5037,6 +5310,55 @@ export class Session {
     );
   }
 
+  private async handleUpdateWorkspacePersonaRequest(
+    msg: Extract<SessionInboundMessage, { type: "update_workspace_persona_request" }>,
+  ): Promise<void> {
+    try {
+      const workspace = await this.workspaceRegistry.get(msg.workspaceId);
+      if (!workspace) {
+        throw new Error(`Workspace not found: ${msg.workspaceId}`);
+      }
+      if (workspace.kind !== "worktree") {
+        throw new Error("Workspace persona can only be set on Paseo worktrees");
+      }
+
+      await persistWorktreePersona({
+        worktreeRoot: workspace.cwd,
+        persona: msg.worktreePersona,
+      });
+
+      const descriptor = await this.describeWorkspaceRecordWithGitData(workspace);
+      this.emit({
+        type: "update_workspace_persona_response",
+        payload: {
+          workspace: descriptor,
+          error: null,
+          requestId: msg.requestId,
+        },
+      });
+      this.emit({
+        type: "workspace_update",
+        payload: {
+          kind: "upsert",
+          workspace: descriptor,
+        },
+      });
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, workspaceId: msg.workspaceId },
+        "Failed to update workspace persona",
+      );
+      this.emit({
+        type: "update_workspace_persona_response",
+        payload: {
+          workspace: null,
+          error: error instanceof Error ? error.message : String(error),
+          requestId: msg.requestId,
+        },
+      });
+    }
+  }
+
   private async handlePaseoWorktreeArchiveRequest(
     msg: Extract<SessionInboundMessage, { type: "paseo_worktree_archive_request" }>,
   ): Promise<void> {
@@ -5691,6 +6013,8 @@ export class Session {
     if (snapshot?.git.diffStat) {
       diffStat = snapshot.git.diffStat;
     }
+    const worktreePersona =
+      workspace.kind === "worktree" ? readPaseoWorktreePersona(workspace.cwd) : null;
 
     return {
       id: workspace.workspaceId,
@@ -5716,6 +6040,7 @@ export class Session {
               resolveHealth: this.resolveScriptHealth ?? undefined,
             })
           : [],
+      ...(workspace.kind === "worktree" ? { worktreePersona } : {}),
     };
   }
 
@@ -5748,21 +6073,24 @@ export class Session {
     };
   }
 
-  private async describeWorkspaceRecordWithGitData(
+  private describeWorkspaceWithRuntimeSnapshot(
+    base: WorkspaceDescriptorPayload,
     workspace: PersistedWorkspaceRecord,
-    projectRecord?: PersistedProjectRecord | null,
-  ): Promise<WorkspaceDescriptorPayload> {
-    const base = await this.describeWorkspaceRecord(workspace, projectRecord);
-    const snapshot = this.workspaceGitService.peekSnapshot(workspace.cwd);
-    if (!snapshot) {
-      return base;
-    }
-
+    snapshot: WorkspaceGitRuntimeSnapshot,
+  ): WorkspaceDescriptorPayload {
     const checkout = checkoutLiteFromGitSnapshot(workspace.cwd, snapshot.git);
     const displayName = deriveWorkspaceDisplayName({ cwd: workspace.cwd, checkout });
+    const projectKind = checkout.isGit ? "git" : base.projectKind;
+    const workspaceKind = checkout.isGit ? deriveWorkspaceKind(checkout) : base.workspaceKind;
+    const projectRootPath = checkout.isGit
+      ? deriveProjectRootPath({ cwd: workspace.cwd, checkout })
+      : base.projectRootPath;
 
     return {
       ...base,
+      projectRootPath,
+      projectKind,
+      workspaceKind,
       name: displayName,
       diffStat: snapshot.git.diffStat ?? null,
       gitRuntime: this.buildWorkspaceGitRuntimePayload(snapshot) ?? undefined,
@@ -5770,12 +6098,35 @@ export class Session {
     };
   }
 
+  private async describeWorkspaceRecordWithGitData(
+    workspace: PersistedWorkspaceRecord,
+    projectRecord?: PersistedProjectRecord | null,
+  ): Promise<WorkspaceDescriptorPayload> {
+    const base = await this.describeWorkspaceRecord(workspace, projectRecord);
+    const snapshot = this.workspaceGitService.peekSnapshot(workspace.cwd);
+    if (
+      !snapshot ||
+      normalizePersistedWorkspaceId(snapshot.cwd) !== normalizePersistedWorkspaceId(workspace.cwd)
+    ) {
+      return base;
+    }
+
+    return this.describeWorkspaceWithRuntimeSnapshot(base, workspace, snapshot);
+  }
+
   private async buildWorkspaceDescriptor(input: {
     workspace: PersistedWorkspaceRecord;
     projectRecord?: PersistedProjectRecord | null;
     includeGitData: boolean;
   }): Promise<WorkspaceDescriptorPayload> {
-    if (input.includeGitData && input.projectRecord?.kind === "git") {
+    const snapshot = input.includeGitData
+      ? this.workspaceGitService.peekSnapshot(input.workspace.cwd)
+      : null;
+    const hasMatchingGitSnapshot =
+      snapshot?.git.isGit === true &&
+      normalizePersistedWorkspaceId(snapshot.cwd) ===
+        normalizePersistedWorkspaceId(input.workspace.cwd);
+    if (input.includeGitData && (input.projectRecord?.kind === "git" || hasMatchingGitSnapshot)) {
       return this.describeWorkspaceRecordWithGitData(input.workspace, input.projectRecord);
     }
     return this.describeWorkspaceRecord(input.workspace, input.projectRecord);
@@ -5808,14 +6159,23 @@ export class Session {
         continue;
       }
       const projectRecord = activeProjects.get(workspace.projectId) ?? null;
-      descriptorsByWorkspaceId.set(
-        workspace.workspaceId,
-        await this.buildWorkspaceDescriptor({
-          workspace,
-          projectRecord,
-          includeGitData: options.includeGitData,
-        }),
-      );
+      try {
+        descriptorsByWorkspaceId.set(
+          workspace.workspaceId,
+          await this.buildWorkspaceDescriptor({
+            workspace,
+            projectRecord,
+            includeGitData: options.includeGitData,
+          }),
+        );
+      } catch (error) {
+        this.sessionLogger.warn(
+          { err: error, workspaceId: workspace.workspaceId, cwd: workspace.cwd },
+          "Skipping workspace descriptor after failed hydration",
+        );
+        this.removeWorkspaceGitSubscription(workspace.cwd);
+        continue;
+      }
     }
 
     for (const agent of agents) {
@@ -6369,7 +6729,79 @@ export class Session {
   }
 
   private async reconcileActiveWorkspaceRecords(): Promise<Set<string>> {
-    return new Set();
+    const changedWorkspaceIds = new Set<string>();
+    const [projects, workspaces] = await Promise.all([
+      this.projectRegistry.list(),
+      this.workspaceRegistry.list(),
+    ]);
+    const projectsById = new Map(
+      projects
+        .filter((project) => !project.archivedAt)
+        .map((project) => [project.projectId, project] as const),
+    );
+
+    for (const workspace of workspaces) {
+      if (workspace.archivedAt) {
+        continue;
+      }
+
+      let placement: ProjectPlacementPayload;
+      try {
+        placement = await buildProjectPlacementForCwdStandalone({
+          cwd: workspace.cwd,
+          workspaceGitService: this.workspaceGitService,
+        });
+      } catch {
+        continue;
+      }
+      if (!placement.checkout.isGit) {
+        continue;
+      }
+
+      const project = projectsById.get(workspace.projectId);
+      const timestamp = new Date().toISOString();
+      const projectKind = deriveProjectKind(placement.checkout);
+      const projectRootPath = deriveProjectRootPath({
+        cwd: workspace.cwd,
+        checkout: placement.checkout,
+      });
+      const workspaceKind = deriveWorkspaceKind(placement.checkout);
+      const workspaceDisplayName = deriveWorkspaceDisplayName({
+        cwd: workspace.cwd,
+        checkout: placement.checkout,
+      });
+
+      if (
+        project &&
+        (project.kind !== projectKind ||
+          project.rootPath !== projectRootPath ||
+          project.displayName !== placement.projectName)
+      ) {
+        await this.projectRegistry.upsert({
+          ...project,
+          kind: projectKind,
+          rootPath: projectRootPath,
+          displayName: placement.projectName,
+          updatedAt: timestamp,
+        });
+      }
+
+      if (workspace.kind !== workspaceKind || workspace.displayName !== workspaceDisplayName) {
+        await this.workspaceRegistry.upsert({
+          ...workspace,
+          kind: workspaceKind,
+          displayName: workspaceDisplayName,
+          updatedAt: timestamp,
+        });
+        changedWorkspaceIds.add(workspace.workspaceId);
+      }
+
+      if (project?.kind !== projectKind || project?.rootPath !== projectRootPath) {
+        changedWorkspaceIds.add(workspace.workspaceId);
+      }
+    }
+
+    return changedWorkspaceIds;
   }
 
   private async emitWorkspaceUpdatesForWorkspaceIds(
@@ -7167,9 +7599,21 @@ export class Session {
     try {
       const agentId = resolved.agentId;
 
-      const prompt = this.buildAgentPrompt(msg.text, msg.images, msg.attachments);
+      const effectiveText = await this.buildContextHubPromptText(msg.text, {
+        agentId,
+        memoryIds: msg.memoryIds,
+        useWorkspaceMemory: msg.useWorkspaceMemory,
+        promptTemplateId: msg.promptTemplateId,
+      });
+      const prompt = this.buildAgentPrompt(effectiveText, msg.images, msg.attachments);
       this.sessionLogger.trace(
-        { agentId, messageId: msg.messageId, textPrefix: msg.text.slice(0, 80) },
+        {
+          agentId,
+          messageId: msg.messageId,
+          hidden: msg.hidden === true,
+          textPrefix: msg.text.slice(0, 80),
+          contextHubApplied: effectiveText !== msg.text,
+        },
         "send_agent_message_request: dispatching shared sendPromptToAgent",
       );
       try {
@@ -7180,6 +7624,7 @@ export class Session {
           userMessageText: msg.text,
           prompt,
           messageId: msg.messageId,
+          hidden: msg.hidden === true,
           logger: this.sessionLogger,
         });
       } catch (error) {
@@ -8283,6 +8728,534 @@ export class Session {
       });
     } catch (error) {
       this.emitChatRpcError(request, error);
+    }
+  }
+
+  private emitContextHubRpcError(
+    request: { requestId: string; type: string },
+    error: unknown,
+  ): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.sessionLogger.error(
+      { err: error, requestType: request.type },
+      "Context hub request failed",
+    );
+    this.emit({
+      type: "rpc_error",
+      payload: {
+        requestId: request.requestId,
+        requestType: request.type,
+        error: message,
+        code: "context_hub_request_failed",
+      },
+    });
+  }
+
+  private async handleMemoryListRequest(
+    request: Extract<SessionInboundMessage, { type: "memory/list" }>,
+  ): Promise<void> {
+    try {
+      const result = await this.contextHubService.listMemory(request);
+      this.emit({
+        type: "memory/list/response",
+        payload: {
+          requestId: request.requestId,
+          items: result.items,
+          total: result.total,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMemoryGetRequest(
+    request: Extract<SessionInboundMessage, { type: "memory/get" }>,
+  ): Promise<void> {
+    try {
+      const item = await this.contextHubService.getMemory(request.workspaceId, request.memoryId);
+      this.emit({
+        type: "memory/get/response",
+        payload: {
+          requestId: request.requestId,
+          item,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMemoryCreateRequest(
+    request: Extract<SessionInboundMessage, { type: "memory/create" }>,
+  ): Promise<void> {
+    try {
+      const item = await this.contextHubService.createMemory(request.input);
+      this.emit({
+        type: "memory/create/response",
+        payload: {
+          requestId: request.requestId,
+          item,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMemoryUpdateRequest(
+    request: Extract<SessionInboundMessage, { type: "memory/update" }>,
+  ): Promise<void> {
+    try {
+      const item = await this.contextHubService.updateMemory(
+        request.workspaceId,
+        request.memoryId,
+        request.patch,
+      );
+      this.emit({
+        type: "memory/update/response",
+        payload: {
+          requestId: request.requestId,
+          item,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMemoryDeleteRequest(
+    request: Extract<SessionInboundMessage, { type: "memory/delete" }>,
+  ): Promise<void> {
+    try {
+      const item = await this.contextHubService.deleteMemory(request.workspaceId, request.memoryId);
+      this.emit({
+        type: "memory/delete/response",
+        payload: {
+          requestId: request.requestId,
+          item,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleSkillsListRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/list" }>,
+  ): Promise<void> {
+    try {
+      const cwd = request.cwd ?? (await this.resolveContextHubWorkspaceCwd(request.workspaceId));
+      const skills = await this.contextHubService.listSkills({
+        workspaceId: request.workspaceId,
+        cwd,
+        includeContent: request.includeContent,
+      });
+      this.emit({
+        type: "skills/list/response",
+        payload: {
+          requestId: request.requestId,
+          skills,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleSkillsImportRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/import" }>,
+  ): Promise<void> {
+    try {
+      const skill = await this.contextHubService.importSkill({
+        name: request.name,
+        content: request.content,
+        description: request.description,
+      });
+      this.emit({
+        type: "skills/import/response",
+        payload: {
+          requestId: request.requestId,
+          skill,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleSkillsExportRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/export" }>,
+  ): Promise<void> {
+    try {
+      const cwd = request.cwd ?? (await this.resolveContextHubWorkspaceCwd(request.workspaceId));
+      const result = await this.contextHubService.exportSkill({
+        skillId: request.skillId,
+        workspaceId: request.workspaceId,
+        cwd,
+      });
+      this.emit({
+        type: "skills/export/response",
+        payload: {
+          requestId: request.requestId,
+          skill: result.skill,
+          content: result.content,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleSkillsSaveRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/save" }>,
+  ): Promise<void> {
+    try {
+      const cwd = request.cwd ?? (await this.resolveContextHubWorkspaceCwd(request.workspaceId));
+      const result = await this.contextHubService.saveSkill({
+        target: request.target,
+        scope: request.scope,
+        skillId: request.skillId,
+        name: request.name,
+        content: request.content,
+        workspaceId: request.workspaceId,
+        cwd,
+        overwrite: request.overwrite,
+      });
+      this.emit({
+        type: "skills/save/response",
+        payload: {
+          requestId: request.requestId,
+          skill: result.skill,
+          conflict: result.conflict,
+          error: null,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.emit({
+        type: "skills/save/response",
+        payload: {
+          requestId: request.requestId,
+          skill: null,
+          conflict: /already exists/i.test(message),
+          error: message,
+        },
+      });
+    }
+  }
+
+  private async handleSkillsImportPackageRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/import-package" }>,
+  ): Promise<void> {
+    try {
+      const cwd = request.cwd ?? (await this.resolveContextHubWorkspaceCwd(request.workspaceId));
+      const result = await this.contextHubService.importSkillPackage({
+        target: request.target,
+        scope: request.scope,
+        name: request.name,
+        packageBuffer: Buffer.from(request.packageBase64, "base64"),
+        workspaceId: request.workspaceId,
+        cwd,
+        overwrite: request.overwrite,
+      });
+      this.emit({
+        type: "skills/import-package/response",
+        payload: {
+          requestId: request.requestId,
+          skill: result.skill,
+          conflict: result.conflict,
+          error: null,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.emit({
+        type: "skills/import-package/response",
+        payload: {
+          requestId: request.requestId,
+          skill: null,
+          conflict: /already exists/i.test(message),
+          error: message,
+        },
+      });
+    }
+  }
+
+  private async handleSkillsDeleteRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/delete" }>,
+  ): Promise<void> {
+    try {
+      const cwd = request.cwd ?? (await this.resolveContextHubWorkspaceCwd(request.workspaceId));
+      const skillId = await this.contextHubService.deleteSkill({
+        skillId: request.skillId,
+        workspaceId: request.workspaceId,
+        cwd,
+      });
+      this.emit({
+        type: "skills/delete/response",
+        payload: {
+          requestId: request.requestId,
+          skillId,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleSkillsMarketplaceListRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/marketplace/list" }>,
+  ): Promise<void> {
+    try {
+      const cwd = request.cwd ?? (await this.resolveContextHubWorkspaceCwd(request.workspaceId));
+      const skills = await this.contextHubService.listMarketplaceSkills({
+        query: request.query,
+        capability: request.capability,
+        limit: request.limit,
+        minTrust: request.minTrust,
+        workspaceId: request.workspaceId,
+        cwd,
+      });
+      this.emit({
+        type: "skills/marketplace/list/response",
+        payload: {
+          requestId: request.requestId,
+          skills,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "skills/marketplace/list/response",
+        payload: {
+          requestId: request.requestId,
+          skills: [],
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  private async handleSkillsMarketplaceInstallRequest(
+    request: Extract<SessionInboundMessage, { type: "skills/marketplace/install" }>,
+  ): Promise<void> {
+    try {
+      const cwd = request.cwd ?? (await this.resolveContextHubWorkspaceCwd(request.workspaceId));
+      if (!cwd) {
+        throw new Error("Workspace directory is required to install a marketplace skill");
+      }
+      const result = await this.contextHubService.installMarketplaceSkill({
+        workspaceId: request.workspaceId,
+        cwd,
+        skillId: request.skillId,
+        name: request.name,
+        version: request.version,
+        overwrite: request.overwrite,
+      });
+      this.emit({
+        type: "skills/marketplace/install/response",
+        payload: {
+          requestId: request.requestId,
+          skill: result.skill,
+          installed: result.installed,
+          conflict: result.conflict,
+          error: null,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.emit({
+        type: "skills/marketplace/install/response",
+        payload: {
+          requestId: request.requestId,
+          skill: null,
+          installed: false,
+          conflict: /already exists with different content/i.test(message),
+          error: message,
+        },
+      });
+    }
+  }
+
+  private async handlePromptsListRequest(
+    request: Extract<SessionInboundMessage, { type: "prompts/list" }>,
+  ): Promise<void> {
+    try {
+      const prompts = await this.contextHubService.listPrompts({
+        workspaceId: request.workspaceId,
+        includeDeleted: request.includeDeleted,
+      });
+      this.emit({
+        type: "prompts/list/response",
+        payload: {
+          requestId: request.requestId,
+          prompts,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handlePromptsCreateRequest(
+    request: Extract<SessionInboundMessage, { type: "prompts/create" }>,
+  ): Promise<void> {
+    try {
+      const prompt = await this.contextHubService.createPrompt(request.input);
+      this.emit({
+        type: "prompts/create/response",
+        payload: {
+          requestId: request.requestId,
+          prompt,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handlePromptsUpdateRequest(
+    request: Extract<SessionInboundMessage, { type: "prompts/update" }>,
+  ): Promise<void> {
+    try {
+      const prompt = await this.contextHubService.updatePrompt(request.promptId, request.patch);
+      this.emit({
+        type: "prompts/update/response",
+        payload: {
+          requestId: request.requestId,
+          prompt,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handlePromptsDeleteRequest(
+    request: Extract<SessionInboundMessage, { type: "prompts/delete" }>,
+  ): Promise<void> {
+    try {
+      const promptId = await this.contextHubService.deletePrompt(request.promptId);
+      this.emit({
+        type: "prompts/delete/response",
+        payload: {
+          requestId: request.requestId,
+          promptId,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handlePromptsRenderRequest(
+    request: Extract<SessionInboundMessage, { type: "prompts/render" }>,
+  ): Promise<void> {
+    try {
+      const result = await this.contextHubService.renderPrompt({
+        promptId: request.promptId,
+        variables: request.variables,
+        argumentsText: request.argumentsText,
+        recordUsage: request.recordUsage,
+      });
+      this.emit({
+        type: "prompts/render/response",
+        payload: {
+          requestId: request.requestId,
+          text: result.text,
+          prompt: result.prompt,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMcpListRequest(
+    request: Extract<SessionInboundMessage, { type: "mcp/list" }>,
+  ): Promise<void> {
+    try {
+      const profiles = await this.contextHubService.listMcpProfiles();
+      this.emit({
+        type: "mcp/list/response",
+        payload: {
+          requestId: request.requestId,
+          profiles,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMcpUpsertRequest(
+    request: Extract<SessionInboundMessage, { type: "mcp/upsert" }>,
+  ): Promise<void> {
+    try {
+      const profile = await this.contextHubService.upsertMcpProfile(request.profile);
+      this.emit({
+        type: "mcp/upsert/response",
+        payload: {
+          requestId: request.requestId,
+          profile,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMcpDeleteRequest(
+    request: Extract<SessionInboundMessage, { type: "mcp/delete" }>,
+  ): Promise<void> {
+    try {
+      const profileId = await this.contextHubService.deleteMcpProfile(request.profileId);
+      this.emit({
+        type: "mcp/delete/response",
+        payload: {
+          requestId: request.requestId,
+          profileId,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
+    }
+  }
+
+  private async handleMcpTestRequest(
+    request: Extract<SessionInboundMessage, { type: "mcp/test" }>,
+  ): Promise<void> {
+    try {
+      const result = await this.contextHubService.testMcpProfile(request.profile);
+      this.emit({
+        type: "mcp/test/response",
+        payload: {
+          requestId: request.requestId,
+          ok: result.ok,
+          message: result.message,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emitContextHubRpcError(request, error);
     }
   }
 

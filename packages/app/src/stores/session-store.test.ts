@@ -25,6 +25,7 @@ function createWorkspace(
     status: input.status ?? "done",
     diffStat: input.diffStat ?? null,
     scripts: input.scripts ?? [],
+    worktreePersona: input.worktreePersona ?? null,
   };
 }
 
@@ -114,6 +115,32 @@ describe("normalizeWorkspaceDescriptor", () => {
     const workspace = normalizeWorkspaceDescriptor(payload);
 
     expect(workspace.scripts).toEqual([]);
+  });
+
+  it("preserves worktree persona metadata", () => {
+    const workspace = normalizeWorkspaceDescriptor({
+      id: "1",
+      projectId: "1",
+      projectDisplayName: "Project 1",
+      projectRootPath: "/repo",
+      workspaceDirectory: "/repo/.paseo/worktrees/dev",
+      projectKind: "git",
+      workspaceKind: "worktree",
+      name: "dev",
+      status: "done",
+      activityAt: null,
+      diffStat: null,
+      scripts: [],
+      worktreePersona: {
+        roleId: "technical_director",
+        skillIds: ["paseo-technical-director"],
+      },
+    });
+
+    expect(workspace.worktreePersona).toEqual({
+      roleId: "technical_director",
+      skillIds: ["paseo-technical-director"],
+    });
   });
 });
 

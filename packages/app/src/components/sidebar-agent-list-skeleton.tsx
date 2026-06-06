@@ -1,11 +1,21 @@
 import { useEffect, useRef } from "react";
 import { Animated, View, type StyleProp, type ViewStyle } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import { getIsElectron } from "@/constants/platform";
+import { useDesktopAgentMotionEnabled } from "@/hooks/use-desktop-agent-motion-enabled";
 
-function SkeletonPulse({ pulse, style }: { pulse: Animated.Value; style: StyleProp<ViewStyle> }) {
+function SkeletonPulse({
+  pulse,
+  style,
+  desktopMotionEnabled,
+}: {
+  pulse: Animated.Value;
+  style: StyleProp<ViewStyle>;
+  desktopMotionEnabled: boolean;
+}) {
   const opacity = pulse.interpolate({
     inputRange: [0, 1],
-    outputRange: [0.4, 0.8],
+    outputRange: desktopMotionEnabled ? [0.34, 0.58] : [0.4, 0.8],
   });
 
   return <Animated.View style={[style, { opacity }]} />;
@@ -13,18 +23,25 @@ function SkeletonPulse({ pulse, style }: { pulse: Animated.Value; style: StylePr
 
 export function SidebarAgentListSkeleton() {
   const pulse = useRef(new Animated.Value(0)).current;
+  const desktopMotionEnabled = useDesktopAgentMotionEnabled();
+  const isElectron = getIsElectron();
 
   useEffect(() => {
+    if (isElectron && !desktopMotionEnabled) {
+      pulse.setValue(0.5);
+      return;
+    }
+
     const animation = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, {
           toValue: 1,
-          duration: 1000,
+          duration: desktopMotionEnabled ? 1400 : 1000,
           useNativeDriver: true,
         }),
         Animated.timing(pulse, {
           toValue: 0,
-          duration: 1000,
+          duration: desktopMotionEnabled ? 1400 : 1000,
           useNativeDriver: true,
         }),
       ]),
@@ -32,7 +49,7 @@ export function SidebarAgentListSkeleton() {
 
     animation.start();
     return () => animation.stop();
-  }, [pulse]);
+  }, [desktopMotionEnabled, isElectron, pulse]);
 
   return (
     <View style={styles.container}>
@@ -42,17 +59,41 @@ export function SidebarAgentListSkeleton() {
           style={[styles.section, { opacity: sectionOpacity }]}
         >
           <View style={styles.sectionHeader}>
-            <SkeletonPulse pulse={pulse} style={styles.chevron} />
-            <SkeletonPulse pulse={pulse} style={styles.projectIcon} />
-            <SkeletonPulse pulse={pulse} style={styles.sectionTitle} />
+            <SkeletonPulse
+              pulse={pulse}
+              style={styles.chevron}
+              desktopMotionEnabled={desktopMotionEnabled}
+            />
+            <SkeletonPulse
+              pulse={pulse}
+              style={styles.projectIcon}
+              desktopMotionEnabled={desktopMotionEnabled}
+            />
+            <SkeletonPulse
+              pulse={pulse}
+              style={styles.sectionTitle}
+              desktopMotionEnabled={desktopMotionEnabled}
+            />
           </View>
 
           <View style={styles.rows}>
             {Array.from({ length: 3 }).map((__, rowIdx) => (
               <View key={`skeleton-row-${sectionIdx}-${rowIdx}`} style={styles.row}>
-                <SkeletonPulse pulse={pulse} style={styles.rowDot} />
-                <SkeletonPulse pulse={pulse} style={styles.rowTitle} />
-                <SkeletonPulse pulse={pulse} style={styles.rowBadge} />
+                <SkeletonPulse
+                  pulse={pulse}
+                  style={styles.rowDot}
+                  desktopMotionEnabled={desktopMotionEnabled}
+                />
+                <SkeletonPulse
+                  pulse={pulse}
+                  style={styles.rowTitle}
+                  desktopMotionEnabled={desktopMotionEnabled}
+                />
+                <SkeletonPulse
+                  pulse={pulse}
+                  style={styles.rowBadge}
+                  desktopMotionEnabled={desktopMotionEnabled}
+                />
               </View>
             ))}
           </View>

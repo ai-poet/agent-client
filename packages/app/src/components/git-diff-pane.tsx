@@ -33,6 +33,7 @@ import {
   RefreshCcw,
   Square,
   Upload,
+  WandSparkles,
   WrapText,
 } from "lucide-react-native";
 import { useCheckoutGitActionsStore } from "@/stores/checkout-git-actions-store";
@@ -83,6 +84,8 @@ import { useToast } from "@/contexts/toast-context";
 import { useGitCommitDialog, type GitCommitDialogFile } from "@/contexts/git-commit-dialog-context";
 import { useAppLocale } from "@/hooks/use-app-locale";
 import { getAppMessages } from "@/i18n/sub2api";
+import { useSessionStore } from "@/stores/session-store";
+import { buildMagicCommitPrompt } from "@/utils/magic-commit-prompt";
 import {
   formatDiffContentText,
   formatDiffGutterText,
@@ -658,6 +661,7 @@ interface GitDiffPaneProps {
   serverId: string;
   workspaceId?: string | null;
   cwd: string;
+  activeAgentId?: string | null;
   hideHeaderRow?: boolean;
 }
 
@@ -665,7 +669,13 @@ type DiffFlatItem =
   | { type: "header"; file: ParsedDiffFile; fileIndex: number; isExpanded: boolean }
   | { type: "body"; file: ParsedDiffFile; fileIndex: number };
 
-export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDiffPaneProps) {
+export function GitDiffPane({
+  serverId,
+  workspaceId,
+  cwd,
+  activeAgentId,
+  hideHeaderRow,
+}: GitDiffPaneProps) {
   const { theme } = useUnistyles();
   const toast = useToast();
   const { openCommitDialog } = useGitCommitDialog();
@@ -680,8 +690,22 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
   const [shipDefault, setShipDefault] = useState<"merge" | "pr">("merge");
   const [commitMessage, setCommitMessage] = useState("");
   const [commitError, setCommitError] = useState<string | null>(null);
+  const [isMagicCommitSending, setIsMagicCommitSending] = useState(false);
   const [selectedCommitPaths, setSelectedCommitPaths] = useState<Set<string>>(() => new Set());
   const commitInputRef = useRef<TextInputInstance>(null);
+  const focusedAgentId = useSessionStore(
+    (state) => state.sessions[serverId]?.focusedAgentId ?? null,
+  );
+  const focusedAgent = useSessionStore((state) =>
+    focusedAgentId ? (state.sessions[serverId]?.agents.get(focusedAgentId) ?? null) : null,
+  );
+  const activeAgent = useSessionStore((state) =>
+    activeAgentId ? (state.sessions[serverId]?.agents.get(activeAgentId) ?? null) : null,
+  );
+  const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
+  const storeSupportsHiddenAgentMessages = useSessionStore(
+    (state) => state.sessions[serverId]?.serverInfo?.features?.hiddenAgentMessages === true,
+  );
   const { preferences: changesPreferences, updatePreferences: updateChangesPreferences } =
     useChangesPreferences();
   const wrapLines = changesPreferences.wrapLines;
@@ -1073,11 +1097,86 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     setCommitError(null);
   }, []);
 
+  const handleMagicCommit = useCallback(() => {
+    if (isMagicCommitSending) {
+      return;
+    }
+    const paths = commitFilePaths.filter((path) => selectedCommitPaths.has(path));
+    if (paths.length === 0) {
+      setCommitError(text.commitFilesRequired);
+      return;
+    }
+    if (!client) {
+      setCommitError(text.hostNotConnected);
+      return;
+    }
+    const supportsHiddenAgentMessages =
+      storeSupportsHiddenAgentMessages ||
+      client.getLastServerInfoMessage()?.features?.hiddenAgentMessages === true;
+    if (!supportsHiddenAgentMessages) {
+      setCommitError(text.magicCommitUnsupported);
+      return;
+    }
+    const targetAgent =
+      activeAgent && activeAgent.cwd === cwd
+        ? activeAgent
+        : focusedAgent && focusedAgent.cwd === cwd
+          ? focusedAgent
+          : null;
+    if (!targetAgent) {
+      setCommitError(text.magicCommitNoFocusedAgent);
+      return;
+    }
+
+    setIsMagicCommitSending(true);
+    setCommitError(null);
+    void client
+      .sendAgentMessage(targetAgent.id, buildMagicCommitPrompt(paths, locale), {
+        hidden: true,
+        attachments: [],
+      })
+      .then(() => {
+        toastActionSuccess(text.magicCommitSent);
+        return client.waitForFinish(targetAgent.id);
+      })
+      .then((result) => {
+        if (result.status === "timeout") {
+          setCommitError(result.error ?? text.magicCommitFailed);
+        } else if (result.error) {
+          setCommitError(result.error);
+        }
+      })
+      .catch((err) => {
+        setCommitError(err instanceof Error ? err.message : text.magicCommitFailed);
+      })
+      .finally(() => {
+        setIsMagicCommitSending(false);
+      });
+  }, [
+    client,
+    activeAgent,
+    commitFilePaths,
+    cwd,
+    focusedAgent,
+    isMagicCommitSending,
+    locale,
+    selectedCommitPaths,
+    storeSupportsHiddenAgentMessages,
+    text.commitFilesRequired,
+    text.hostNotConnected,
+    text.magicCommitFailed,
+    text.magicCommitNoFocusedAgent,
+    text.magicCommitSent,
+    text.magicCommitUnsupported,
+    toastActionSuccess,
+  ]);
+
   const handleCommit = useCallback(() => {
     if (isMobile) {
       openCommitDialog({
         serverId,
         cwd,
+        activeAgentId,
         files: commitDialogFiles,
         onCommit: async (message, options) => {
           await runCommit({
@@ -1755,20 +1854,50 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
 
       {isGit && diffMode === "uncommitted" && !isMobile && hasChanges ? (
         <View style={styles.inlineCommitPanel} testID="changes-inline-commit">
-          <TextInput
-            ref={commitInputRef}
-            value={commitMessage}
-            onChangeText={handleCommitMessageChange}
-            placeholder={text.commitMessagePlaceholder}
-            placeholderTextColor={theme.colors.foregroundMuted}
-            autoCapitalize="sentences"
-            autoCorrect
-            editable={commitStatus !== "pending"}
-            returnKeyType="done"
-            onSubmitEditing={handleCommit}
-            style={styles.inlineCommitInput}
-            testID="changes-inline-commit-message"
-          />
+          <View style={styles.inlineCommitInputRow}>
+            <TextInput
+              ref={commitInputRef}
+              value={commitMessage}
+              onChangeText={handleCommitMessageChange}
+              placeholder={text.commitMessagePlaceholder}
+              placeholderTextColor={theme.colors.foregroundMuted}
+              autoCapitalize="sentences"
+              autoCorrect
+              editable={commitStatus !== "pending"}
+              returnKeyType="done"
+              onSubmitEditing={handleCommit}
+              style={styles.inlineCommitInput}
+              testID="changes-inline-commit-message"
+            />
+            <Tooltip delayDuration={300}>
+              <TooltipTrigger asChild>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={text.magicCommitAction}
+                  accessibilityState={{
+                    disabled: commitStatus === "pending" || isMagicCommitSending,
+                  }}
+                  disabled={commitStatus === "pending" || isMagicCommitSending}
+                  onPress={handleMagicCommit}
+                  style={({ hovered, pressed }) => [
+                    styles.inlineCommitMagicButton,
+                    (hovered || pressed) &&
+                      commitStatus !== "pending" &&
+                      !isMagicCommitSending &&
+                      styles.inlineCommitMagicButtonHovered,
+                    (commitStatus === "pending" || isMagicCommitSending) &&
+                      styles.inlineCommitMagicButtonDisabled,
+                  ]}
+                  testID="changes-inline-magic-commit"
+                >
+                  <WandSparkles size={16} color={theme.colors.foregroundMuted} />
+                </Pressable>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <Text style={styles.tooltipText}>{text.magicCommitAction}</Text>
+              </TooltipContent>
+            </Tooltip>
+          </View>
           <View style={styles.inlineCommitMetaRow}>
             <Text style={styles.inlineCommitCount} numberOfLines={1}>
               {text.commitFilesSelected(selectedCommitCount, commitFilePaths.length)}
@@ -1778,7 +1907,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
                 variant="ghost"
                 size="sm"
                 onPress={allCommitFilesSelected ? clearCommitFiles : selectAllCommitFiles}
-                disabled={commitStatus === "pending"}
+                disabled={commitStatus === "pending" || isMagicCommitSending}
                 testID="changes-inline-toggle-all-files"
               >
                 {allCommitFilesSelected ? text.clearCommitFiles : text.selectAllCommitFiles}
@@ -1787,11 +1916,19 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
                 variant="default"
                 size="sm"
                 onPress={handleCommit}
-                disabled={commitStatus === "pending"}
-                leftIcon={<GitCommitHorizontal size={14} color={theme.colors.palette.white} />}
+                disabled={commitStatus === "pending" || isMagicCommitSending}
+                leftIcon={
+                  isMagicCommitSending ? (
+                    <ActivityIndicator size="small" color={theme.colors.palette.white} />
+                  ) : (
+                    <GitCommitHorizontal size={14} color={theme.colors.palette.white} />
+                  )
+                }
                 testID="changes-inline-commit-submit"
               >
-                {commitStatus === "pending" ? text.committing : text.commitAction}
+                {commitStatus === "pending" || isMagicCommitSending
+                  ? text.committing
+                  : text.commitAction}
               </Button>
             </View>
           </View>
@@ -1957,16 +2094,36 @@ const styles = StyleSheet.create((theme) => ({
     borderBottomColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
   },
-  inlineCommitInput: {
+  inlineCommitInputRow: {
     minHeight: 34,
+    flexDirection: "row",
+    alignItems: "center",
+    overflow: "hidden",
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.md,
     backgroundColor: theme.colors.surface0,
+  },
+  inlineCommitInput: {
+    flex: 1,
+    minWidth: 0,
     color: theme.colors.foreground,
-    paddingHorizontal: theme.spacing[3],
+    paddingLeft: theme.spacing[3],
+    paddingRight: theme.spacing[1],
     paddingVertical: theme.spacing[2],
     fontSize: theme.fontSize.sm,
+  },
+  inlineCommitMagicButton: {
+    width: 34,
+    alignSelf: "stretch",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  inlineCommitMagicButtonHovered: {
+    backgroundColor: theme.colors.surface2,
+  },
+  inlineCommitMagicButtonDisabled: {
+    opacity: theme.opacity[50],
   },
   inlineCommitMetaRow: {
     flexDirection: "row",

@@ -29,6 +29,7 @@ export interface SidebarWorkspaceEntry {
   statusBucket: SidebarStateBucket;
   diffStat: { additions: number; deletions: number } | null;
   scripts: WorkspaceDescriptor["scripts"];
+  worktreePersona?: WorkspaceDescriptor["worktreePersona"];
   hasRunningScripts: boolean;
 }
 
@@ -65,6 +66,7 @@ function createStructuralWorkspaceEntry(input: {
     statusBucket: "done",
     diffStat: null,
     scripts: [],
+    worktreePersona: null,
     hasRunningScripts: false,
   };
 }
@@ -85,6 +87,7 @@ export function createSidebarWorkspaceEntry(input: {
     statusBucket: input.workspace.status,
     diffStat: input.workspace.diffStat,
     scripts: input.workspace.scripts,
+    worktreePersona: input.workspace.worktreePersona ?? null,
     hasRunningScripts: input.workspace.scripts.some((script) => script.lifecycle === "running"),
   };
 }

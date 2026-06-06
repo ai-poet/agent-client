@@ -17,6 +17,7 @@ import {
   X,
   Bot,
   Brain,
+  Users,
   ShieldCheck,
   ShieldAlert,
   ShieldOff,
@@ -28,6 +29,14 @@ import type {
 } from "@server/server/agent/agent-sdk-types";
 import type { AgentProviderDefinition } from "@server/server/agent/provider-manifest";
 import { getModeVisuals, type AgentModeIcon } from "@server/server/agent/provider-manifest";
+import {
+  getWorktreePersonaRole,
+  getWorktreePersonaSkill,
+  WORKTREE_PERSONA_ROLES,
+  WORKTREE_PERSONA_SKILLS,
+  type WorktreePersona,
+  type WorktreePersonaRoleId,
+} from "@server/shared/worktree-persona";
 import { Combobox, ComboboxItem, ComboboxEmpty } from "@/components/ui/combobox";
 import {
   IsolatedBottomSheetModal,
@@ -35,9 +44,10 @@ import {
 } from "@/components/ui/isolated-bottom-sheet-modal";
 import { APP_NAME } from "@/config/branding";
 import { useAppLocale } from "@/hooks/use-app-locale";
-import { getAppMessages } from "@/i18n/sub2api";
+import { getAppMessages, type Sub2APILocale } from "@/i18n/sub2api";
 import { baseColors } from "@/styles/theme";
 import { isNative } from "@/constants/platform";
+import { localizeAgentMode } from "@/utils/agent-mode-localization";
 
 const MODE_ICON_MAP: Record<AgentModeIcon, typeof ShieldCheck> = {
   ShieldCheck,
@@ -193,11 +203,7 @@ export function SelectField({
   const hasConcreteValue =
     normalizedValue.length > 0 &&
     (normalizedPlaceholder.length === 0 || normalizedValue !== normalizedPlaceholder);
-  const locale = useAppLocale();
-  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
-  const displayText = hasConcreteValue
-    ? normalizedValue
-    : normalizedPlaceholder || text.selectPlaceholder;
+  const displayText = hasConcreteValue ? normalizedValue : normalizedPlaceholder || "Select";
 
   return (
     <View style={styles.selectFieldContainer}>
@@ -239,6 +245,7 @@ interface DropdownSheetProps {
   visible: boolean;
   onClose: () => void;
   children: ReactNode;
+  closeLabel?: string;
 }
 
 function DropdownSheetBackground({ style }: BottomSheetBackgroundProps) {
@@ -264,10 +271,9 @@ export function DropdownSheet({
   visible,
   onClose,
   children,
+  closeLabel = "Close",
 }: DropdownSheetProps): ReactElement {
   const { theme } = useUnistyles();
-  const locale = useAppLocale();
-  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
   const titleColor = theme.colors.foreground;
   const snapPoints = useMemo(() => ["60%", "90%"], []);
   const { sheetRef, handleSheetChange } = useIsolatedBottomSheetVisibility({
@@ -306,7 +312,7 @@ export function DropdownSheet({
         </Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={text.closeSheet}
+          accessibilityLabel={closeLabel}
           onPress={handleClose}
           hitSlop={10}
           testID="dropdown-sheet-close"
@@ -327,6 +333,116 @@ export function DropdownSheet({
 
 // Re-export ComboboxItem as SelectOption for backwards compatibility
 const SelectOption = ComboboxItem;
+
+export function WorktreePersonaSection({
+  persona,
+  onPersonaChange,
+  locale,
+  disabled,
+}: {
+  persona: WorktreePersona;
+  onPersonaChange: (persona: WorktreePersona) => void;
+  locale: Sub2APILocale;
+  disabled?: boolean;
+}): ReactElement {
+  const { theme } = useUnistyles();
+  const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
+  const [isRoleSheetOpen, setIsRoleSheetOpen] = useState(false);
+  const [isSkillsSheetOpen, setIsSkillsSheetOpen] = useState(false);
+  const selectedRole = getWorktreePersonaRole(persona.roleId);
+  const selectedSkillLabels = persona.skillIds
+    .map((skillId) => getWorktreePersonaSkill(skillId)?.name ?? skillId)
+    .join(", ");
+
+  const handleSelectRole = useCallback(
+    (roleId: WorktreePersonaRoleId) => {
+      const role = getWorktreePersonaRole(roleId);
+      onPersonaChange({ roleId: role.id, skillIds: role.defaultSkillIds });
+      setIsRoleSheetOpen(false);
+    },
+    [onPersonaChange],
+  );
+
+  const handleToggleSkill = useCallback(
+    (skillId: string) => {
+      const hasSkill = persona.skillIds.includes(skillId);
+      const nextSkillIds = hasSkill
+        ? persona.skillIds.filter((id) => id !== skillId)
+        : [...persona.skillIds, skillId];
+      onPersonaChange({
+        roleId: persona.roleId,
+        skillIds: nextSkillIds,
+      });
+    },
+    [onPersonaChange, persona],
+  );
+
+  return (
+    <View style={styles.personaContainer}>
+      <View style={styles.personaHeader}>
+        <Users size={16} color={theme.colors.foregroundMuted} />
+        <Text style={styles.personaHeaderText}>{text.colleague}</Text>
+      </View>
+      <SelectField
+        label={text.colleagueRole}
+        value={locale === "zh" ? selectedRole.labelZh : selectedRole.label}
+        placeholder={text.selectColleagueRole}
+        onPress={() => setIsRoleSheetOpen(true)}
+        disabled={disabled}
+        helperText={locale === "zh" ? selectedRole.descriptionZh : selectedRole.description}
+        testID="worktree-persona-role-picker"
+      />
+      <SelectField
+        label={text.skills}
+        value={selectedSkillLabels || text.noSkillsSelected}
+        placeholder={text.selectSkills}
+        onPress={() => setIsSkillsSheetOpen(true)}
+        disabled={disabled}
+        helperText={text.skillsHelper}
+        testID="worktree-persona-skills-picker"
+      />
+
+      <DropdownSheet
+        title={text.selectColleagueRole}
+        visible={isRoleSheetOpen}
+        onClose={() => setIsRoleSheetOpen(false)}
+        closeLabel={text.closeSheet}
+      >
+        {WORKTREE_PERSONA_ROLES.map((role) => (
+          <SelectOption
+            key={role.id}
+            label={locale === "zh" ? role.labelZh : role.label}
+            description={locale === "zh" ? role.descriptionZh : role.description}
+            selected={role.id === persona.roleId}
+            testID={`worktree-persona-role-${role.id}`}
+            onPress={() => handleSelectRole(role.id)}
+          />
+        ))}
+      </DropdownSheet>
+
+      <DropdownSheet
+        title={text.selectSkills}
+        visible={isSkillsSheetOpen}
+        onClose={() => setIsSkillsSheetOpen(false)}
+        closeLabel={text.closeSheet}
+      >
+        {WORKTREE_PERSONA_SKILLS.map((skill) => {
+          const selected = persona.skillIds.includes(skill.id);
+          return (
+            <SelectOption
+              key={skill.id}
+              label={skill.name}
+              description={skill.description}
+              selected={selected}
+              testID={`worktree-persona-skill-${skill.id}`}
+              onPress={() => handleToggleSkill(skill.id)}
+            />
+          );
+        })}
+      </DropdownSheet>
+    </View>
+  );
+}
 
 interface ComboSelectOption {
   id: string;
@@ -561,11 +677,15 @@ export function AgentConfigRow({
     if (modeOptions.length === 0) {
       return [{ id: "", label: text.default }];
     }
-    return modeOptions.map((mode) => ({
-      id: mode.id,
-      label: mode.label,
-    }));
-  }, [modeOptions, text.default]);
+    return modeOptions.map((mode) => {
+      const localizedMode = localizeAgentMode(mode, locale);
+      return {
+        id: localizedMode.id,
+        label: localizedMode.label,
+        description: localizedMode.description,
+      };
+    });
+  }, [locale, modeOptions, text.default]);
 
   const modelSelectOptions: ComboSelectOption[] = useMemo(() => {
     return models.map((model) => ({
@@ -737,20 +857,24 @@ export function PermissionsDropdown({
   const text = useMemo(() => getAppMessages(locale).agentForm, [locale]);
 
   const hasOptions = modeOptions.length > 0;
+  const localizedModeOptions = useMemo(
+    () => modeOptions.map((mode) => localizeAgentMode(mode, locale)),
+    [locale, modeOptions],
+  );
   const selectedModeLabel = hasOptions
-    ? (modeOptions.find((mode) => mode.id === selectedMode)?.label ??
-      modeOptions[0]?.label ??
+    ? (localizedModeOptions.find((mode) => mode.id === selectedMode)?.label ??
+      localizedModeOptions[0]?.label ??
       text.default)
     : text.automatic;
 
   const options = useMemo(
     () =>
-      modeOptions.map((mode) => ({
+      localizedModeOptions.map((mode) => ({
         id: mode.id,
         label: mode.label,
         description: mode.description,
       })),
-    [modeOptions],
+    [localizedModeOptions],
   );
 
   const handleOpen = useCallback(() => {
@@ -1393,6 +1517,21 @@ const styles = StyleSheet.create((theme) => ({
   },
   gitOptionsContainer: {
     gap: theme.spacing[3],
+  },
+  personaContainer: {
+    gap: theme.spacing[3],
+  },
+  personaHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  personaHeaderText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
   worktreeToggle: {
     flexDirection: "row",

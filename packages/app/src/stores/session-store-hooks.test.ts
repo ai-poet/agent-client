@@ -13,6 +13,7 @@ import {
   useWorkspaceExecutionAuthority,
   useWorkspaceFields,
   useWorkspaceKeys,
+  useWorkspaceList,
   useWorkspaceStatusesForBadges,
   useWorkspaceStructure,
 } from "./session-store-hooks";
@@ -166,6 +167,30 @@ describe("useWorkspaceFields", () => {
       ]);
     });
     expect(result.current).not.toBe(before);
+  });
+});
+
+describe("useWorkspaceList", () => {
+  it("keeps its reference stable across non-workspace session updates", () => {
+    const workspace = createWorkspace({ id: "workspace-a", name: "A" });
+    initializeWorkspaces([workspace]);
+
+    const { result } = renderHook(() => useWorkspaceList(SERVER_ID));
+    const before = result.current;
+    expect(before).toEqual([workspace]);
+
+    act(() => {
+      useSessionStore.getState().setFocusedAgentId(SERVER_ID, "agent-a");
+    });
+    expect(result.current).toBe(before);
+
+    act(() => {
+      useSessionStore
+        .getState()
+        .mergeWorkspaces(SERVER_ID, [createWorkspace({ id: "workspace-b", name: "B" })]);
+    });
+    expect(result.current).not.toBe(before);
+    expect(result.current.map((entry) => entry.id)).toEqual(["workspace-a", "workspace-b"]);
   });
 });
 

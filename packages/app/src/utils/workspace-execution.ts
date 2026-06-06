@@ -7,6 +7,11 @@ export type WorkspaceAuthorityResult = {
   workspace: WorkspaceDescriptor;
 };
 
+type WorkspaceDirectoryLookup = {
+  id: string;
+  workspaceDirectory: string | null | undefined;
+};
+
 export type WorkspaceExecutionAuthorityFailureReason =
   | "workspace_id_missing"
   | "workspace_missing"
@@ -27,7 +32,7 @@ export function resolveWorkspaceRouteId(input: {
 }
 
 export function resolveWorkspaceIdByExecutionDirectory(input: {
-  workspaces: Iterable<WorkspaceDescriptor> | null | undefined;
+  workspaces: Iterable<WorkspaceDirectoryLookup> | null | undefined;
   workspaceDirectory: string | null | undefined;
 }): string | null {
   const normalizedWorkspaceDirectory = normalizeWorkspacePath(input.workspaceDirectory);

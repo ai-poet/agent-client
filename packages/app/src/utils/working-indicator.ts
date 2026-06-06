@@ -19,3 +19,13 @@ export function getWorkingIndicatorDotStrength(progress: number, offset: number)
   }
   return (1 - phase) * 2;
 }
+
+export function shouldShowAgentWorkingIndicator({
+  agentStatus,
+  pendingPermissionCount,
+}: {
+  agentStatus: string;
+  pendingPermissionCount: number;
+}): boolean {
+  return agentStatus === "running" && pendingPermissionCount === 0;
+}

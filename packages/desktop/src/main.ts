@@ -224,8 +224,8 @@ async function createMainWindow(): Promise<void> {
     : desktopBranding.appName;
   const mainWindow = new BrowserWindow({
     title,
-    width: 1200,
-    height: 800,
+    width: 1400,
+    height: 900,
     show: false,
     backgroundColor: getWindowBackgroundColor(systemTheme),
     ...(iconPath ? { icon: iconPath } : {}),

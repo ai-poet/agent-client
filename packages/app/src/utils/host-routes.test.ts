@@ -3,13 +3,19 @@ import {
   buildPaseoCloudRoute,
   buildHostAgentDetailRoute,
   buildHostRootRoute,
+  buildHostSimpleAgentRoute,
+  buildHostSimpleRoute,
+  buildHostSkillsRoute,
+  buildHostWorkspaceColleagueRoute,
   buildHostWorkspaceOpenRoute,
   buildHostWorkspaceRoute,
   decodeFilePathFromPathSegment,
   decodeWorkspaceIdFromPathSegment,
   encodeFilePathForPathSegment,
   encodeWorkspaceIdForPathSegment,
+  mapPathnameToServer,
   parseHostAgentRouteFromPathname,
+  parseHostWorkspaceColleagueRouteFromPathname,
   parseHostWorkspaceOpenIntentFromPathname,
   parseHostWorkspaceRouteFromPathname,
   parseWorkspaceOpenIntent,
@@ -61,6 +67,15 @@ describe("workspace route parsing", () => {
     });
   });
 
+  it("parses colleague route with encoded workspace ids", () => {
+    expect(
+      parseHostWorkspaceColleagueRouteFromPathname("/h/local/colleague/b64_L3RtcC9yZXBv"),
+    ).toEqual({
+      serverId: "local",
+      workspaceId: "/tmp/repo",
+    });
+  });
+
   it("does not treat /tab routes as valid workspace routes", () => {
     expect(
       parseHostWorkspaceRouteFromPathname("/h/local/workspace/L3RtcC9yZXBv/tab/draft_abc123"),
@@ -79,6 +94,28 @@ describe("workspace route parsing", () => {
 
   it("builds host root routes", () => {
     expect(buildHostRootRoute("local")).toBe("/h/local");
+  });
+
+  it("builds simple mode routes", () => {
+    expect(buildHostSimpleRoute("local")).toBe("/h/local/simple");
+    expect(buildHostSimpleAgentRoute("local", "agent-1")).toBe("/h/local/simple/agent/agent-1");
+  });
+
+  it("builds host-level library routes", () => {
+    expect(buildHostSkillsRoute("local")).toBe("/h/local/skills");
+  });
+
+  it("builds colleague routes with encoded workspace ids", () => {
+    expect(buildHostWorkspaceColleagueRoute("local", "/tmp/repo")).toBe(
+      "/h/local/colleague/b64_L3RtcC9yZXBv",
+    );
+  });
+
+  it("keeps simple route suffixes when switching hosts", () => {
+    expect(mapPathnameToServer("/h/local/simple", "remote")).toBe("/h/remote/simple");
+    expect(mapPathnameToServer("/h/local/simple/agent/agent-1", "remote")).toBe(
+      "/h/remote/simple/agent/agent-1",
+    );
   });
 
   it("parses workspace open intent from pathname query", () => {

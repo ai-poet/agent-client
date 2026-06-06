@@ -1,4 +1,5 @@
 import {
+  BranchAlreadyCheckedOutError,
   MergeConflictError,
   MergeFromBaseConflictError,
   NotGitRepoError,
@@ -11,10 +12,12 @@ export const READ_ONLY_GIT_ENV: NodeJS.ProcessEnv = {
 };
 
 export type CheckoutErrorCode = "NOT_GIT_REPO" | "NOT_ALLOWED" | "MERGE_CONFLICT" | "UNKNOWN";
+export type CheckoutErrorReason = "BRANCH_ALREADY_CHECKED_OUT";
 
 export type CheckoutErrorPayload = {
   code: CheckoutErrorCode;
   message: string;
+  reason?: CheckoutErrorReason;
 };
 
 export async function resolveCheckoutGitDir(cwd: string): Promise<string | null> {
@@ -39,6 +42,9 @@ export function toCheckoutError(error: unknown): CheckoutErrorPayload {
   }
   if (error instanceof MergeFromBaseConflictError) {
     return { code: "MERGE_CONFLICT", message: error.message };
+  }
+  if (error instanceof BranchAlreadyCheckedOutError) {
+    return { code: "NOT_ALLOWED", message: error.message, reason: "BRANCH_ALREADY_CHECKED_OUT" };
   }
   if (error instanceof Error) {
     return { code: "UNKNOWN", message: error.message };

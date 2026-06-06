@@ -28,6 +28,7 @@ import type {
   AgentSnapshotPayload,
   WorkspaceDescriptorPayload,
 } from "@server/shared/messages";
+import type { WorktreePersona } from "@server/shared/worktree-persona";
 import { normalizeWorkspaceOpaqueId } from "@/utils/workspace-identity";
 import {
   createAgentLastActivityCoalescer,
@@ -125,6 +126,7 @@ export interface WorkspaceDescriptor {
   status: WorkspaceDescriptorPayload["status"];
   diffStat: { additions: number; deletions: number } | null;
   scripts: WorkspaceDescriptorPayload["scripts"];
+  worktreePersona?: WorktreePersona | null;
 }
 
 export function normalizeWorkspaceDescriptor(
@@ -142,6 +144,7 @@ export function normalizeWorkspaceDescriptor(
     status: payload.status,
     diffStat: payload.diffStat ?? null,
     scripts: (payload.scripts ?? []).map((s) => ({ ...s })),
+    worktreePersona: payload.worktreePersona ?? null,
   };
 }
 
@@ -1197,3 +1200,56 @@ export const useSessionStore = create<SessionStore>()(
     };
   }),
 );
+
+// ---------------------------------------------------------------------------
+// Fine-grained selector hooks — use these instead of coarse useSessionStore()
+// to avoid unnecessary re-renders when unrelated slices change.
+// ---------------------------------------------------------------------------
+
+export function useSessionAgents(serverId: string) {
+  return useSessionStore((s) => s.sessions[serverId]?.agents);
+}
+
+export function useSessionWorkspaces(serverId: string) {
+  return useSessionStore((s) => s.sessions[serverId]?.workspaces);
+}
+
+export function useSessionClient(serverId: string) {
+  return useSessionStore((s) => s.sessions[serverId]?.client ?? null);
+}
+
+export function useIsPlayingAudio(serverId: string) {
+  return useSessionStore((s) => s.sessions[serverId]?.isPlayingAudio ?? false);
+}
+
+export function useFocusedAgentId(serverId: string) {
+  return useSessionStore((s) => s.sessions[serverId]?.focusedAgentId ?? null);
+}
+
+export function useSessionServerInfo(serverId: string) {
+  return useSessionStore((s) => s.sessions[serverId]?.serverInfo ?? null);
+}
+
+export function useHasHydratedWorkspaces(serverId: string) {
+  return useSessionStore((s) => s.sessions[serverId]?.hasHydratedWorkspaces ?? false);
+}
+
+export function useHasHydratedAgents(serverId: string) {
+  return useSessionStore((s) => s.sessions[serverId]?.hasHydratedAgents ?? false);
+}
+
+export function usePendingPermissions(serverId: string) {
+  return useSessionStore((s) => s.sessions[serverId]?.pendingPermissions);
+}
+
+export function useAgentStreamTail(serverId: string, agentId: string) {
+  return useSessionStore((s) => s.sessions[serverId]?.agentStreamTail.get(agentId) ?? []);
+}
+
+export function useAgentStreamHead(serverId: string, agentId: string) {
+  return useSessionStore((s) => s.sessions[serverId]?.agentStreamHead.get(agentId) ?? []);
+}
+
+export function useQueuedMessages(serverId: string, agentId: string) {
+  return useSessionStore((s) => s.sessions[serverId]?.queuedMessages.get(agentId) ?? []);
+}

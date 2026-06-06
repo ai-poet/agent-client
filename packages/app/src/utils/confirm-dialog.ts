@@ -5,8 +5,8 @@ import { isNative } from "@/constants/platform";
 export interface ConfirmDialogInput {
   title: string;
   message: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
+  confirmLabel: string;
+  cancelLabel: string;
   destructive?: boolean;
 }
 
@@ -17,8 +17,8 @@ interface ConfirmButtonConfig {
 
 function resolveButtonLabels(input: ConfirmDialogInput): ConfirmButtonConfig {
   return {
-    confirmLabel: input.confirmLabel ?? "Confirm",
-    cancelLabel: input.cancelLabel ?? "Cancel",
+    confirmLabel: input.confirmLabel,
+    cancelLabel: input.cancelLabel,
   };
 }
 

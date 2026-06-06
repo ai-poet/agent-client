@@ -4,6 +4,7 @@ import Markdown from "react-native-markdown-display";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { createMarkdownStyles } from "@/styles/markdown-styles";
 import { getMarkdownListMarker } from "@/utils/markdown-list";
+import { RichMarkdown } from "./rich-markdown";
 
 function createPlanMarkdownRules() {
   return {
@@ -111,6 +112,11 @@ export function PlanCard({
   const { theme } = useUnistyles();
   const markdownStyles = createMarkdownStyles(theme);
   const markdownRules = createPlanMarkdownRules();
+  const fallbackMarkdown = (
+    <Markdown style={markdownStyles} rules={markdownRules}>
+      {text}
+    </Markdown>
+  );
 
   return (
     <View
@@ -129,9 +135,7 @@ export function PlanCard({
           {description}
         </Text>
       ) : null}
-      <Markdown style={markdownStyles} rules={markdownRules}>
-        {text}
-      </Markdown>
+      <RichMarkdown text={text} variant="plan" fallback={fallbackMarkdown} />
       {footer ? <View style={styles.footer}>{footer}</View> : null}
     </View>
   );

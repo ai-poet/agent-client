@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AGENT_LIFECYCLE_STATUSES } from "./agent-lifecycle.js";
+import { WorktreePersonaSchema } from "./worktree-persona.js";
 import { MAX_EXPLICIT_AGENT_TITLE_CHARS } from "../server/agent/agent-title-limits.js";
 import { AgentProviderSchema } from "../server/agent/provider-manifest.js";
 import { TOOL_CALL_ICON_NAMES } from "../server/agent/agent-sdk-types.js";
@@ -47,6 +48,61 @@ import {
   LoopLogsResponseSchema,
   LoopStopResponseSchema,
 } from "../server/loop/rpc-schemas.js";
+import {
+  MemoryListRequestSchema,
+  MemoryGetRequestSchema,
+  MemoryCreateRequestSchema,
+  MemoryUpdateRequestSchema,
+  MemoryDeleteRequestSchema,
+  SkillsListRequestSchema,
+  SkillsImportRequestSchema,
+  SkillsExportRequestSchema,
+  SkillsSaveRequestSchema,
+  SkillsImportPackageRequestSchema,
+  SkillsDeleteRequestSchema,
+  SkillsMarketplaceListRequestSchema,
+  SkillsMarketplaceInstallRequestSchema,
+  PromptsListRequestSchema,
+  PromptsCreateRequestSchema,
+  PromptsUpdateRequestSchema,
+  PromptsDeleteRequestSchema,
+  PromptsRenderRequestSchema,
+  McpListRequestSchema,
+  McpUpsertRequestSchema,
+  McpDeleteRequestSchema,
+  McpTestRequestSchema,
+  MemoryListResponseSchema,
+  MemoryGetResponseSchema,
+  MemoryCreateResponseSchema,
+  MemoryUpdateResponseSchema,
+  MemoryDeleteResponseSchema,
+  SkillsListResponseSchema,
+  SkillsImportResponseSchema,
+  SkillsExportResponseSchema,
+  SkillsSaveResponseSchema,
+  SkillsImportPackageResponseSchema,
+  SkillsDeleteResponseSchema,
+  SkillsMarketplaceListResponseSchema,
+  SkillsMarketplaceInstallResponseSchema,
+  PromptsListResponseSchema,
+  PromptsCreateResponseSchema,
+  PromptsUpdateResponseSchema,
+  PromptsDeleteResponseSchema,
+  PromptsRenderResponseSchema,
+  McpListResponseSchema,
+  McpUpsertResponseSchema,
+  McpDeleteResponseSchema,
+  McpTestResponseSchema,
+  type ProjectMemoryItem,
+  type ProjectMemoryKind,
+  type PromptTemplate,
+  type ManagedSkillEntry,
+  type MarketplaceSkillEntry,
+  type SkillScope,
+  type SkillWritableTarget,
+  type McpServerProfile,
+  type ContextHubMcpServerConfig,
+} from "../server/context-hub/rpc-schemas.js";
 // ---------------------------------------------------------------------------
 // Mutable daemon config schemas (shared between server store and client)
 // ---------------------------------------------------------------------------
@@ -801,8 +857,13 @@ export const SendAgentMessageRequestSchema = z.object({
   agentId: z.string(),
   text: z.string(),
   messageId: z.string().optional(), // Client-provided ID for deduplication
+  hidden: z.boolean().optional(),
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,
+  memoryIds: z.array(z.string()).optional(),
+  useWorkspaceMemory: z.boolean().optional(),
+  promptTemplateId: z.string().optional(),
+  mcpServerIds: z.array(z.string()).optional(),
 });
 
 export const WaitForFinishRequestSchema = z.object({
@@ -871,6 +932,7 @@ export const CreateAgentRequestMessageSchema = z.object({
   config: AgentSessionConfigSchema,
   workspaceId: z.string().optional(),
   worktreeName: z.string().optional(),
+  worktreePersona: WorktreePersonaSchema.nullable().optional(),
   initialPrompt: z.string().optional(),
   clientMessageId: z.string().optional(),
   outputSchema: z.record(z.unknown()).optional(),
@@ -878,6 +940,10 @@ export const CreateAgentRequestMessageSchema = z.object({
   attachments: AgentAttachmentsSchema,
   git: GitSetupOptionsSchema.optional(),
   labels: z.record(z.string()).default({}),
+  memoryIds: z.array(z.string()).optional(),
+  useWorkspaceMemory: z.boolean().optional(),
+  promptTemplateId: z.string().optional(),
+  mcpServerIds: z.array(z.string()).optional(),
   requestId: z.string(),
 });
 
@@ -1076,6 +1142,7 @@ const CheckoutErrorCodeSchema = z.enum([
 const CheckoutErrorSchema = z.object({
   code: CheckoutErrorCodeSchema,
   message: z.string(),
+  reason: z.enum(["BRANCH_ALREADY_CHECKED_OUT"]).optional(),
 });
 
 const CheckoutDiffCompareSchema = z.object({
@@ -1211,6 +1278,13 @@ export const BranchSuggestionsRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const CommitGraphRequestSchema = z.object({
+  type: z.literal("commit_graph_request"),
+  cwd: z.string(),
+  limit: z.number().int().min(1).max(500).optional(),
+  requestId: z.string(),
+});
+
 export const GitHubSearchItemSchema = z.object({
   kind: z.enum(["issue", "pr"]),
   number: z.number(),
@@ -1264,10 +1338,18 @@ export const CreatePaseoWorktreeRequestSchema = z.object({
   type: z.literal("create_paseo_worktree_request"),
   cwd: z.string(),
   worktreeSlug: z.string().optional(),
+  worktreePersona: WorktreePersonaSchema.nullable().optional(),
   attachments: AgentAttachmentsSchema,
   refName: z.string().min(1).optional(),
   action: z.enum(["branch-off", "checkout"]).optional(),
   githubPrNumber: z.number().int().positive().optional(),
+  requestId: z.string(),
+});
+
+export const UpdateWorkspacePersonaRequestSchema = z.object({
+  type: z.literal("update_workspace_persona_request"),
+  workspaceId: z.string(),
+  worktreePersona: WorktreePersonaSchema.nullable(),
   requestId: z.string(),
 });
 
@@ -1599,11 +1681,13 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   StashListRequestSchema,
   ValidateBranchRequestSchema,
   BranchSuggestionsRequestSchema,
+  CommitGraphRequestSchema,
   GitHubSearchRequestSchema,
   DirectorySuggestionsRequestSchema,
   PaseoWorktreeListRequestSchema,
   PaseoWorktreeArchiveRequestSchema,
   CreatePaseoWorktreeRequestSchema,
+  UpdateWorkspacePersonaRequestSchema,
   WorkspaceSetupStatusRequestSchema,
   ListAvailableEditorsRequestSchema,
   OpenInEditorRequestSchema,
@@ -1635,6 +1719,28 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ChatPostRequestSchema,
   ChatReadRequestSchema,
   ChatWaitRequestSchema,
+  MemoryListRequestSchema,
+  MemoryGetRequestSchema,
+  MemoryCreateRequestSchema,
+  MemoryUpdateRequestSchema,
+  MemoryDeleteRequestSchema,
+  SkillsListRequestSchema,
+  SkillsImportRequestSchema,
+  SkillsExportRequestSchema,
+  SkillsSaveRequestSchema,
+  SkillsImportPackageRequestSchema,
+  SkillsDeleteRequestSchema,
+  SkillsMarketplaceListRequestSchema,
+  SkillsMarketplaceInstallRequestSchema,
+  PromptsListRequestSchema,
+  PromptsCreateRequestSchema,
+  PromptsUpdateRequestSchema,
+  PromptsDeleteRequestSchema,
+  PromptsRenderRequestSchema,
+  McpListRequestSchema,
+  McpUpsertRequestSchema,
+  McpDeleteRequestSchema,
+  McpTestRequestSchema,
   ScheduleCreateRequestSchema,
   ScheduleListRequestSchema,
   ScheduleInspectRequestSchema,
@@ -1812,6 +1918,7 @@ export const ServerInfoStatusPayloadSchema = z
     features: z
       .object({
         providersSnapshot: z.boolean().optional(),
+        hiddenAgentMessages: z.boolean().optional(),
       })
       .optional(),
   })
@@ -2068,6 +2175,7 @@ export const WorkspaceDescriptorPayloadSchema = z.object({
   scripts: z.array(WorkspaceScriptPayloadSchema).default([]),
   gitRuntime: WorkspaceGitRuntimePayloadSchema,
   githubRuntime: WorkspaceGitHubRuntimePayloadSchema,
+  worktreePersona: WorktreePersonaSchema.nullable().optional(),
 });
 
 export const AgentUpdateMessageSchema = z.object({
@@ -2770,6 +2878,41 @@ export const BranchSuggestionsResponseSchema = z.object({
   }),
 });
 
+export const CommitGraphResponseSchema = z.object({
+  type: z.literal("commit_graph_response"),
+  payload: z.object({
+    cwd: z.string(),
+    graph: z.object({
+      commits: z.array(
+        z.object({
+          hash: z.string(),
+          fullHash: z.string(),
+          message: z.string(),
+          author: z.string(),
+          authorEmail: z.string(),
+          date: z.number(),
+          parents: z.array(z.string()),
+          branchTips: z.array(z.string()),
+          tags: z.array(z.string()),
+          isMerge: z.boolean(),
+        }),
+      ),
+      branches: z.array(
+        z.object({
+          name: z.string(),
+          isRemote: z.boolean(),
+          isCurrent: z.boolean(),
+          tipCommit: z.string(),
+        }),
+      ),
+      headCommit: z.string().nullable(),
+      rootCommits: z.array(z.string()),
+    }),
+    error: z.string().nullable(),
+    requestId: z.string(),
+  }),
+});
+
 export const GitHubSearchResponseSchema = z.object({
   type: z.literal("github_search_response"),
   payload: z.object({
@@ -2831,6 +2974,15 @@ export const CreatePaseoWorktreeResponseSchema = z.object({
     error: z.string().nullable(),
     errorCode: z.string().optional(),
     setupTerminalId: z.string().nullable(),
+    requestId: z.string(),
+  }),
+});
+
+export const UpdateWorkspacePersonaResponseSchema = z.object({
+  type: z.literal("update_workspace_persona_response"),
+  payload: z.object({
+    workspace: WorkspaceDescriptorPayloadSchema.nullable(),
+    error: z.string().nullable(),
     requestId: z.string(),
   }),
 });
@@ -3167,11 +3319,13 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   StashListResponseSchema,
   ValidateBranchResponseSchema,
   BranchSuggestionsResponseSchema,
+  CommitGraphResponseSchema,
   GitHubSearchResponseSchema,
   DirectorySuggestionsResponseSchema,
   PaseoWorktreeListResponseSchema,
   PaseoWorktreeArchiveResponseSchema,
   CreatePaseoWorktreeResponseSchema,
+  UpdateWorkspacePersonaResponseSchema,
   FileExplorerResponseSchema,
   ProjectIconResponseSchema,
   FileDownloadTokenResponseSchema,
@@ -3198,6 +3352,28 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ChatPostResponseSchema,
   ChatReadResponseSchema,
   ChatWaitResponseSchema,
+  MemoryListResponseSchema,
+  MemoryGetResponseSchema,
+  MemoryCreateResponseSchema,
+  MemoryUpdateResponseSchema,
+  MemoryDeleteResponseSchema,
+  SkillsListResponseSchema,
+  SkillsImportResponseSchema,
+  SkillsExportResponseSchema,
+  SkillsSaveResponseSchema,
+  SkillsImportPackageResponseSchema,
+  SkillsDeleteResponseSchema,
+  SkillsMarketplaceListResponseSchema,
+  SkillsMarketplaceInstallResponseSchema,
+  PromptsListResponseSchema,
+  PromptsCreateResponseSchema,
+  PromptsUpdateResponseSchema,
+  PromptsDeleteResponseSchema,
+  PromptsRenderResponseSchema,
+  McpListResponseSchema,
+  McpUpsertResponseSchema,
+  McpDeleteResponseSchema,
+  McpTestResponseSchema,
   ScheduleCreateResponseSchema,
   ScheduleListResponseSchema,
   ScheduleInspectResponseSchema,
@@ -3303,6 +3479,36 @@ export type ChatDeleteResponse = z.infer<typeof ChatDeleteResponseSchema>;
 export type ChatPostResponse = z.infer<typeof ChatPostResponseSchema>;
 export type ChatReadResponse = z.infer<typeof ChatReadResponseSchema>;
 export type ChatWaitResponse = z.infer<typeof ChatWaitResponseSchema>;
+export type ContextHubProjectMemoryItem = ProjectMemoryItem;
+export type ContextHubProjectMemoryKind = ProjectMemoryKind;
+export type ContextHubPromptTemplate = PromptTemplate;
+export type ContextHubManagedSkillEntry = ManagedSkillEntry;
+export type ContextHubMarketplaceSkillEntry = MarketplaceSkillEntry;
+export type ContextHubSkillScope = SkillScope;
+export type ContextHubSkillWritableTarget = SkillWritableTarget;
+export type ContextHubMcpServerProfile = McpServerProfile;
+export type ContextHubMcpServerConfigPayload = ContextHubMcpServerConfig;
+export type MemoryListResponse = z.infer<typeof MemoryListResponseSchema>;
+export type MemoryGetResponse = z.infer<typeof MemoryGetResponseSchema>;
+export type MemoryCreateResponse = z.infer<typeof MemoryCreateResponseSchema>;
+export type MemoryUpdateResponse = z.infer<typeof MemoryUpdateResponseSchema>;
+export type MemoryDeleteResponse = z.infer<typeof MemoryDeleteResponseSchema>;
+export type SkillsListResponse = z.infer<typeof SkillsListResponseSchema>;
+export type SkillsImportResponse = z.infer<typeof SkillsImportResponseSchema>;
+export type SkillsExportResponse = z.infer<typeof SkillsExportResponseSchema>;
+export type SkillsMarketplaceListResponse = z.infer<typeof SkillsMarketplaceListResponseSchema>;
+export type SkillsMarketplaceInstallResponse = z.infer<
+  typeof SkillsMarketplaceInstallResponseSchema
+>;
+export type PromptsListResponse = z.infer<typeof PromptsListResponseSchema>;
+export type PromptsCreateResponse = z.infer<typeof PromptsCreateResponseSchema>;
+export type PromptsUpdateResponse = z.infer<typeof PromptsUpdateResponseSchema>;
+export type PromptsDeleteResponse = z.infer<typeof PromptsDeleteResponseSchema>;
+export type PromptsRenderResponse = z.infer<typeof PromptsRenderResponseSchema>;
+export type McpListResponse = z.infer<typeof McpListResponseSchema>;
+export type McpUpsertResponse = z.infer<typeof McpUpsertResponseSchema>;
+export type McpDeleteResponse = z.infer<typeof McpDeleteResponseSchema>;
+export type McpTestResponse = z.infer<typeof McpTestResponseSchema>;
 export type ScheduleCreateResponse = z.infer<typeof ScheduleCreateResponseSchema>;
 export type ScheduleListResponse = z.infer<typeof ScheduleListResponseSchema>;
 export type ScheduleInspectResponse = z.infer<typeof ScheduleInspectResponseSchema>;
@@ -3415,11 +3621,19 @@ export type ValidateBranchRequest = z.infer<typeof ValidateBranchRequestSchema>;
 export type ValidateBranchResponse = z.infer<typeof ValidateBranchResponseSchema>;
 export type BranchSuggestionsRequest = z.infer<typeof BranchSuggestionsRequestSchema>;
 export type BranchSuggestionsResponse = z.infer<typeof BranchSuggestionsResponseSchema>;
+export type CommitGraphRequest = z.infer<typeof CommitGraphRequestSchema>;
+export type CommitGraphResponse = z.infer<typeof CommitGraphResponseSchema>;
+export type GitGraph = CommitGraphResponse["payload"]["graph"];
+export type GitGraphCommit = GitGraph["commits"][number];
+export type GitGraphBranch = GitGraph["branches"][number];
 export type GitHubSearchItem = z.infer<typeof GitHubSearchItemSchema>;
 export type GitHubSearchKind = z.infer<typeof GitHubSearchKindSchema>;
 export type GitHubSearchRequest = z.infer<typeof GitHubSearchRequestSchema>;
 export type GitHubSearchResponse = z.infer<typeof GitHubSearchResponseSchema>;
 export type CreatePaseoWorktreeRequest = z.infer<typeof CreatePaseoWorktreeRequestSchema>;
+export type CreatePaseoWorktreeResponse = z.infer<typeof CreatePaseoWorktreeResponseSchema>;
+export type UpdateWorkspacePersonaRequest = z.infer<typeof UpdateWorkspacePersonaRequestSchema>;
+export type UpdateWorkspacePersonaResponse = z.infer<typeof UpdateWorkspacePersonaResponseSchema>;
 export type DirectorySuggestionsRequest = z.infer<typeof DirectorySuggestionsRequestSchema>;
 export type DirectorySuggestionsResponse = z.infer<typeof DirectorySuggestionsResponseSchema>;
 export type PaseoWorktreeListRequest = z.infer<typeof PaseoWorktreeListRequestSchema>;

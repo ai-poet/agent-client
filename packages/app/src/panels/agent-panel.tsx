@@ -8,6 +8,7 @@ import { useStoreWithEqualityFn } from "zustand/traditional";
 import invariant from "tiny-invariant";
 import { AgentStreamView, type AgentStreamViewHandle } from "@/components/agent-stream-view";
 import { Composer } from "@/components/composer";
+import { DesktopAgentLoadingState } from "@/components/desktop-agent-loading-state";
 import { ArchivedAgentCallout } from "@/components/archived-agent-callout";
 import { FileDropZone } from "@/components/file-drop-zone";
 import { getProviderIcon } from "@/components/provider-icons";
@@ -47,7 +48,7 @@ import {
   deriveRouteBottomAnchorIntent,
   deriveRouteBottomAnchorRequest,
 } from "@/screens/agent/agent-ready-screen-bottom-anchor";
-import { isNative } from "@/constants/platform";
+import { getIsElectron, isNative } from "@/constants/platform";
 
 function formatProviderLabel(provider: Agent["provider"]): string {
   if (!provider) {
@@ -138,6 +139,20 @@ export const agentPanelRegistration: PanelRegistration<"agent"> = {
   useDescriptor: useAgentPanelDescriptor,
 };
 
+export function StandaloneAgentConversation({
+  serverId,
+  agentId,
+  isFocused = true,
+}: {
+  serverId: string;
+  agentId: string;
+  isFocused?: boolean;
+}) {
+  return (
+    <AgentPanelContent serverId={serverId} agentId={agentId} isPaneFocused={isFocused} simpleMode />
+  );
+}
+
 const EMPTY_STREAM_ITEMS: StreamItem[] = [];
 const EMPTY_PENDING_PERMISSIONS = new Map<string, PendingPermission>();
 const EMPTY_PENDING_PERMISSION_LIST: PendingPermission[] = [];
@@ -191,11 +206,13 @@ function AgentPanelContent({
   agentId,
   isPaneFocused,
   onOpenWorkspaceFile,
+  simpleMode = false,
 }: {
   serverId: string;
   agentId: string;
   isPaneFocused: boolean;
   onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+  simpleMode?: boolean;
 }) {
   const resolvedAgentId = agentId.trim() || undefined;
   const resolvedServerId = serverId.trim() || undefined;
@@ -238,6 +255,7 @@ function AgentPanelContent({
       isConnected={runtimeIsConnected}
       connectionStatus={connectionStatus}
       onOpenWorkspaceFile={onOpenWorkspaceFile}
+      simpleMode={simpleMode}
     />
   );
 }
@@ -250,6 +268,7 @@ function AgentPanelBody({
   isConnected,
   connectionStatus,
   onOpenWorkspaceFile,
+  simpleMode = false,
 }: {
   serverId: string;
   agentId?: string;
@@ -258,8 +277,10 @@ function AgentPanelBody({
   isConnected: boolean;
   connectionStatus: HostRuntimeConnectionStatus;
   onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+  simpleMode?: boolean;
 }) {
   const { theme } = useUnistyles();
+  const shouldUseDesktopLoadingState = getIsElectron();
   const { isArchivingAgent } = useArchiveAgent();
   const hasSession = useSessionStore((state) => Boolean(state.sessions[serverId]));
   const setAgents = useSessionStore((state) => state.setAgents);
@@ -410,7 +431,11 @@ function AgentPanelBody({
     return (
       <View style={styles.container} testID="agent-loading">
         <View style={styles.errorContainer}>
-          <ActivityIndicator size="large" color={theme.colors.foregroundMuted} />
+          {shouldUseDesktopLoadingState ? (
+            <DesktopAgentLoadingState title="Loading agent" subtitle="Preparing this session." />
+          ) : (
+            <ActivityIndicator size="large" color={theme.colors.foregroundMuted} />
+          )}
         </View>
       </View>
     );
@@ -427,6 +452,7 @@ function AgentPanelBody({
       isConnected={isConnected}
       connectionStatus={connectionStatus}
       onOpenWorkspaceFile={onOpenWorkspaceFile}
+      simpleMode={simpleMode}
     />
   );
 }
@@ -439,6 +465,7 @@ function ChatAgentContent({
   isConnected,
   connectionStatus,
   onOpenWorkspaceFile,
+  simpleMode = false,
 }: {
   serverId: string;
   agentId?: string;
@@ -447,8 +474,10 @@ function ChatAgentContent({
   isConnected: boolean;
   connectionStatus: HostRuntimeConnectionStatus;
   onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+  simpleMode?: boolean;
 }) {
   const { theme } = useUnistyles();
+  const shouldUseDesktopLoadingState = getIsElectron();
   const panelToast = useToastHost();
   const { isArchivingAgent } = useArchiveAgent();
   const streamViewRef = useRef<AgentStreamViewHandle>(null);
@@ -868,7 +897,11 @@ function ChatAgentContent({
     return (
       <View style={styles.container} testID="agent-loading">
         <View style={styles.errorContainer}>
-          <ActivityIndicator size="large" color={theme.colors.foregroundMuted} />
+          {shouldUseDesktopLoadingState ? (
+            <DesktopAgentLoadingState title="Loading agent" subtitle="Preparing this session." />
+          ) : (
+            <ActivityIndicator size="large" color={theme.colors.foregroundMuted} />
+          )}
         </View>
       </View>
     );
@@ -891,6 +924,7 @@ function ChatAgentContent({
                 routeBottomAnchorRequest={routeBottomAnchorRequest}
                 hasAppliedAuthoritativeHistory={hasAppliedAuthoritativeHistory}
                 onOpenWorkspaceFile={onOpenWorkspaceFile}
+                simpleMode={simpleMode}
               />
             </ReanimatedAnimated.View>
           </View>
@@ -914,7 +948,14 @@ function ChatAgentContent({
           viewState.sync.status === "catching_up" &&
           viewState.sync.ui === "overlay" ? (
             <View style={styles.historySyncOverlay} testID="agent-history-overlay">
-              <ActivityIndicator size="large" color={theme.colors.foregroundMuted} />
+              {shouldUseDesktopLoadingState ? (
+                <DesktopAgentLoadingState
+                  title="Syncing history"
+                  subtitle="Catching up with the latest agent output."
+                />
+              ) : (
+                <ActivityIndicator size="large" color={theme.colors.foregroundMuted} />
+              )}
             </View>
           ) : null}
 
@@ -928,9 +969,19 @@ function ChatAgentContent({
 
       {isArchivingCurrentAgent ? (
         <View style={styles.archivingOverlay} testID="agent-archiving-overlay">
-          <ActivityIndicator size="large" color={theme.colors.foreground} />
-          <Text style={styles.archivingTitle}>Archiving agent...</Text>
-          <Text style={styles.archivingSubtitle}>Please wait while we archive this agent.</Text>
+          {shouldUseDesktopLoadingState ? (
+            <DesktopAgentLoadingState
+              title="Archiving agent..."
+              subtitle="Please wait while we archive this agent."
+              tone="blocking"
+            />
+          ) : (
+            <>
+              <ActivityIndicator size="large" color={theme.colors.foreground} />
+              <Text style={styles.archivingTitle}>Archiving agent...</Text>
+              <Text style={styles.archivingSubtitle}>Please wait while we archive this agent.</Text>
+            </>
+          )}
         </View>
       ) : null}
     </View>
@@ -948,6 +999,7 @@ function AgentStreamSection({
   routeBottomAnchorRequest,
   hasAppliedAuthoritativeHistory,
   onOpenWorkspaceFile,
+  simpleMode = false,
 }: {
   streamViewRef: React.RefObject<AgentStreamViewHandle | null>;
   serverId: string;
@@ -959,6 +1011,7 @@ function AgentStreamSection({
   routeBottomAnchorRequest: RouteBottomAnchorRequest;
   hasAppliedAuthoritativeHistory: boolean;
   onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+  simpleMode?: boolean;
 }) {
   const streamItemsRaw = useSessionStore((state) =>
     agentId ? state.sessions[serverId]?.agentStreamTail?.get(agentId) : undefined,
@@ -1086,6 +1139,7 @@ function AgentStreamSection({
       routeBottomAnchorRequest={routeBottomAnchorRequest}
       isAuthoritativeHistoryReady={hasAppliedAuthoritativeHistory}
       onOpenWorkspaceFile={onOpenWorkspaceFile}
+      simpleMode={simpleMode}
     />
   );
 }
@@ -1210,6 +1264,8 @@ function AgentSessionUnavailableState({
   lastError: string | null;
   isUnknownDaemon?: boolean;
 }) {
+  const shouldUseDesktopLoadingState = getIsElectron();
+
   if (isUnknownDaemon) {
     return (
       <View style={styles.container}>
@@ -1233,17 +1289,34 @@ function AgentSessionUnavailableState({
       <View style={styles.centerState}>
         {isConnecting || isPreparingSession ? (
           <>
-            <ActivityIndicator size="large" />
-            <Text style={styles.loadingText}>
-              {isPreparingSession
-                ? `Preparing ${serverLabel} session...`
-                : `Connecting to ${serverLabel}...`}
-            </Text>
-            <Text style={styles.statusText}>
-              {isPreparingSession
-                ? "We will show this agent in a moment."
-                : "We will show this agent once the host is online."}
-            </Text>
+            {shouldUseDesktopLoadingState ? (
+              <DesktopAgentLoadingState
+                title={
+                  isPreparingSession
+                    ? `Preparing ${serverLabel} session...`
+                    : `Connecting to ${serverLabel}...`
+                }
+                subtitle={
+                  isPreparingSession
+                    ? "We will show this agent in a moment."
+                    : "We will show this agent once the host is online."
+                }
+              />
+            ) : (
+              <>
+                <ActivityIndicator size="large" />
+                <Text style={styles.loadingText}>
+                  {isPreparingSession
+                    ? `Preparing ${serverLabel} session...`
+                    : `Connecting to ${serverLabel}...`}
+                </Text>
+                <Text style={styles.statusText}>
+                  {isPreparingSession
+                    ? "We will show this agent in a moment."
+                    : "We will show this agent once the host is online."}
+                </Text>
+              </>
+            )}
           </>
         ) : (
           <>

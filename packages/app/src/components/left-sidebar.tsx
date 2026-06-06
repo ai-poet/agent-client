@@ -5,6 +5,7 @@ import {
   useState,
   useEffect,
   useRef,
+  type ComponentType,
   type Dispatch,
   type ReactElement,
   type RefObject,
@@ -29,9 +30,11 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import {
   ArrowDownNarrowWide,
+  Box,
   Check,
   ChevronsDownUp,
   Cloud,
+  Folder,
   FolderPlus,
   MessageSquarePlus,
   Settings,
@@ -69,7 +72,7 @@ import { useHostRuntimeSnapshot, useHosts } from "@/runtime/host-runtime";
 import { formatConnectionStatus } from "@/utils/daemons";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import {
-  buildHostSessionsRoute,
+  buildHostSkillsRoute,
   buildPaseoCloudRoute,
   buildSettingsRoute,
   mapPathnameToServer,
@@ -82,6 +85,11 @@ import { CLOUD_NAME } from "@/config/branding";
 import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 import { getSub2APIMessages } from "@/i18n/sub2api";
 import { OnboardingGuideTarget } from "@/components/onboarding-guide-target";
+import { generateDraftId } from "@/stores/draft-keys";
+import { useSessionStore } from "@/stores/session-store";
+import { buildNewAgentRoute, resolveNewChatTarget } from "@/utils/new-agent-routing";
+import { navigateToPreparedWorkspaceTab } from "@/utils/workspace-navigation";
+import { useNavigationRecentWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 
 const MIN_CHAT_WIDTH = 400;
 
@@ -114,6 +122,8 @@ interface SidebarSharedProps {
   setSortMode: (mode: SidebarSortMode) => void;
   handleRefresh: () => void;
   handleHostSelect: (nextServerId: string) => void;
+  handleNewChat: () => void;
+  handleOpenSkills: () => void;
   handleOpenProject: () => void;
   handlePaseoCloud: () => void;
   handleSettings: () => void;
@@ -131,20 +141,14 @@ interface MobileSidebarProps extends SidebarSharedProps {
   insetsBottom: number;
   isOpen: boolean;
   closeToAgent: () => void;
-  handleViewMoreNavigate: () => void;
 }
 
 interface DesktopSidebarProps extends SidebarSharedProps {
   insetsTop: number;
   isOpen: boolean;
-  handleViewMore: () => void;
 }
 
-export const LeftSidebar = memo(function LeftSidebar({
-  selectedAgentId: _selectedAgentId,
-}: LeftSidebarProps) {
-  void _selectedAgentId;
-
+export const LeftSidebar = memo(function LeftSidebar({ selectedAgentId }: LeftSidebarProps) {
   const { theme } = useUnistyles();
   const locale = useSub2APILocale();
   const sidebarText = useMemo(() => getSub2APIMessages(locale).sidebar, [locale]);
@@ -213,6 +217,17 @@ export const LeftSidebar = memo(function LeftSidebar({
     serverId: activeServerId,
     enabled: isCompactLayout || isOpen,
   });
+  const recentWorkspace = useNavigationRecentWorkspaceSelection();
+  const fallbackWorkspace = useMemo(() => {
+    const workspace = projects.flatMap((project) => project.workspaces)[0];
+    if (!workspace) {
+      return null;
+    }
+    return {
+      serverId: workspace.serverId,
+      workspaceId: workspace.workspaceId,
+    };
+  }, [projects]);
   const { collapsedProjectKeys, shortcutIndexByWorkspaceKey, toggleProjectCollapsed } =
     useSidebarShortcutModel({ projects, isInitialLoad });
 
@@ -258,12 +273,63 @@ export const LeftSidebar = memo(function LeftSidebar({
     router.push(buildSettingsRoute());
   }, []);
 
-  const handleViewMoreNavigate = useCallback(() => {
-    if (!activeServerId) {
+  const handleNewChat = useCallback(() => {
+    const target = resolveNewChatTarget({
+      pathname,
+      selectedAgentId,
+      activeServerId,
+      recentWorkspace,
+      fallbackWorkspace,
+      getAgent: (serverId, agentId) =>
+        useSessionStore.getState().sessions[serverId]?.agents.get(agentId) ?? null,
+      getWorkspaces: (serverId) =>
+        useSessionStore.getState().sessions[serverId]?.workspaces.values() ?? null,
+    });
+
+    if (target.kind === "workspace") {
+      navigateToPreparedWorkspaceTab({
+        serverId: target.serverId,
+        workspaceId: target.workspaceId,
+        target: { kind: "draft", draftId: generateDraftId() },
+        navigationMethod: "navigate",
+      });
       return;
     }
-    router.push(buildHostSessionsRoute(activeServerId));
+
+    if (target.serverId) {
+      if (target.workingDir) {
+        router.push(buildNewAgentRoute(target.serverId, target.workingDir) as any);
+        return;
+      }
+      void openProjectPicker();
+      return;
+    }
+
+    void openProjectPicker();
+  }, [
+    activeServerId,
+    fallbackWorkspace,
+    openProjectPicker,
+    pathname,
+    recentWorkspace,
+    selectedAgentId,
+  ]);
+
+  const handleNewChatMobile = useCallback(() => {
+    showMobileAgent();
+    handleNewChat();
+  }, [handleNewChat, showMobileAgent]);
+
+  const handleOpenSkills = useCallback(() => {
+    if (activeServerId) {
+      router.push(buildHostSkillsRoute(activeServerId));
+    }
   }, [activeServerId]);
+
+  const handleOpenSkillsMobile = useCallback(() => {
+    showMobileAgent();
+    handleOpenSkills();
+  }, [handleOpenSkills, showMobileAgent]);
 
   const handleHostSelect = useCallback(
     (nextServerId: string) => {
@@ -317,6 +383,7 @@ export const LeftSidebar = memo(function LeftSidebar({
     handleRefresh,
     handleHostSelect,
     renderHostOption,
+    handleOpenSkills,
     text: sidebarText,
   };
 
@@ -328,10 +395,11 @@ export const LeftSidebar = memo(function LeftSidebar({
         insetsBottom={insets.bottom}
         isOpen={isOpen}
         closeToAgent={showMobileAgent}
+        handleNewChat={handleNewChatMobile}
+        handleOpenSkills={handleOpenSkillsMobile}
         handleOpenProject={handleOpenProjectMobile}
         handlePaseoCloud={handlePaseoCloudMobile}
         handleSettings={handleSettingsMobile}
-        handleViewMoreNavigate={handleViewMoreNavigate}
       />
     );
   }
@@ -341,10 +409,10 @@ export const LeftSidebar = memo(function LeftSidebar({
       {...sharedProps}
       insetsTop={insets.top}
       isOpen={isOpen}
+      handleNewChat={handleNewChat}
       handleOpenProject={handleOpenProjectDesktop}
       handlePaseoCloud={handlePaseoCloudDesktop}
       handleSettings={handleSettingsDesktop}
-      handleViewMore={handleViewMoreNavigate}
     />
   );
 });
@@ -434,6 +502,48 @@ function HostSwitchOption({
   );
 }
 
+function SidebarTopAction({
+  icon: Icon,
+  label,
+  onPress,
+  testID,
+}: {
+  icon: ComponentType<{ size?: number; color?: string }>;
+  label: string;
+  onPress: () => void;
+  testID: string;
+}) {
+  const { theme } = useUnistyles();
+
+  return (
+    <Pressable
+      style={({ hovered = false, pressed = false }) => [
+        styles.sidebarPrimaryAction,
+        (hovered || pressed) && styles.sidebarPrimaryActionHovered,
+      ]}
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      onPress={onPress}
+      testID={testID}
+    >
+      {({ hovered, pressed }) => {
+        const active = hovered || pressed;
+        return (
+          <>
+            <Icon
+              size={theme.iconSize.sm}
+              color={active ? theme.colors.foreground : theme.colors.foregroundMuted}
+            />
+            <Text style={styles.sidebarPrimaryActionText} numberOfLines={1}>
+              {label}
+            </Text>
+          </>
+        );
+      }}
+    </Pressable>
+  );
+}
+
 function MobileSidebar({
   theme,
   activeServerId,
@@ -457,6 +567,8 @@ function MobileSidebar({
   handleHostSelect,
   renderHostOption,
   text,
+  handleNewChat,
+  handleOpenSkills,
   handleOpenProject,
   handlePaseoCloud,
   handleSettings,
@@ -464,11 +576,8 @@ function MobileSidebar({
   insetsBottom,
   isOpen,
   closeToAgent,
-  handleViewMoreNavigate,
 }: MobileSidebarProps) {
   const newAgentKeys = useShortcutKeys("new-agent");
-  const pathname = usePathname();
-  const isSessionsActive = pathname.includes("/sessions");
   const {
     translateX,
     backdropOpacity,
@@ -486,23 +595,6 @@ function MobileSidebar({
     gestureAnimatingRef.current = true;
     closeToAgent();
   }, [closeToAgent, gestureAnimatingRef]);
-
-  const handleViewMore = useCallback(() => {
-    if (!activeServerId) {
-      return;
-    }
-    translateX.value = -windowWidth;
-    backdropOpacity.value = 0;
-    closeToAgent();
-    handleViewMoreNavigate();
-  }, [
-    activeServerId,
-    backdropOpacity,
-    closeToAgent,
-    handleViewMoreNavigate,
-    translateX,
-    windowWidth,
-  ]);
 
   const closeGesture = useMemo(
     () =>
@@ -623,9 +715,26 @@ function MobileSidebar({
           pointerEvents="auto"
         >
           <View style={styles.sidebarContent} pointerEvents="auto">
-            {/* Project header + 3 always-visible icons */}
+            <View style={styles.sidebarTopActions}>
+              <SidebarTopAction
+                icon={MessageSquarePlus}
+                label={text.newChat}
+                onPress={handleNewChat}
+                testID="sidebar-new-chat"
+              />
+              <SidebarTopAction
+                icon={Box}
+                label={text.skills}
+                onPress={handleOpenSkills}
+                testID="sidebar-skill-library"
+              />
+            </View>
+
             <OnboardingGuideTarget id="sidebar.projects" style={styles.sidebarHeader}>
-              <Text style={styles.sidebarHeaderTitle}>{text.projects}</Text>
+              <View style={styles.sidebarHeaderTitleRow}>
+                <Folder size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
+                <Text style={styles.sidebarHeaderTitle}>{text.projects}</Text>
+              </View>
               <View style={styles.sidebarHeaderIcons}>
                 <Pressable
                   style={styles.headerIconButton}
@@ -691,33 +800,6 @@ function MobileSidebar({
                 parentGestureRef={closeGestureRef}
               />
             )}
-
-            {/* Chat section */}
-            <View style={styles.chatSection}>
-              <Text style={styles.chatSectionTitle}>{text.chat}</Text>
-              <View style={styles.chatSectionIcons}>
-                <SortFilterDropdown
-                  theme={theme}
-                  sortMode={sortMode}
-                  setSortMode={setSortMode}
-                  text={text}
-                />
-                <Pressable
-                  style={styles.headerIconButton}
-                  accessibilityLabel={text.newChat}
-                  accessibilityRole="button"
-                  onPress={handleViewMore}
-                  testID="sidebar-new-chat"
-                >
-                  {({ hovered }) => (
-                    <MessageSquarePlus
-                      size={theme.iconSize.md}
-                      color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
-                    />
-                  )}
-                </Pressable>
-              </View>
-            </View>
 
             <View style={styles.sidebarFooter}>
               <View style={styles.footerHostSlot}>
@@ -816,16 +898,15 @@ function DesktopSidebar({
   handleHostSelect,
   renderHostOption,
   text,
+  handleNewChat,
+  handleOpenSkills,
   handleOpenProject,
   handlePaseoCloud,
   handleSettings,
   insetsTop,
   isOpen,
-  handleViewMore,
 }: DesktopSidebarProps) {
   const newAgentKeys = useShortcutKeys("new-agent");
-  const pathname = usePathname();
-  const isSessionsActive = pathname.includes("/sessions");
   const padding = useWindowControlsPadding("sidebar");
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
@@ -882,9 +963,26 @@ function DesktopSidebar({
         <View style={styles.sidebarDragArea}>
           <TitlebarDragRegion />
           {padding.top > 0 ? <View style={{ height: padding.top }} /> : null}
-          {/* Project header + 3 always-visible icons */}
+          <View style={styles.sidebarTopActions}>
+            <SidebarTopAction
+              icon={MessageSquarePlus}
+              label={text.newChat}
+              onPress={handleNewChat}
+              testID="sidebar-new-chat"
+            />
+            <SidebarTopAction
+              icon={Box}
+              label={text.skills}
+              onPress={handleOpenSkills}
+              testID="sidebar-skill-library"
+            />
+          </View>
+
           <OnboardingGuideTarget id="sidebar.projects" style={styles.sidebarHeader}>
-            <Text style={styles.sidebarHeaderTitle}>{text.projects}</Text>
+            <View style={styles.sidebarHeaderTitleRow}>
+              <Folder size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
+              <Text style={styles.sidebarHeaderTitle}>{text.projects}</Text>
+            </View>
             <View style={styles.sidebarHeaderIcons}>
               <Pressable
                 style={styles.headerIconButton}
@@ -949,33 +1047,6 @@ function DesktopSidebar({
             onAddProject={handleOpenProject}
           />
         )}
-
-        {/* Chat section */}
-        <View style={styles.chatSection}>
-          <Text style={styles.chatSectionTitle}>{text.chat}</Text>
-          <View style={styles.chatSectionIcons}>
-            <SortFilterDropdown
-              theme={theme}
-              sortMode={sortMode}
-              setSortMode={setSortMode}
-              text={text}
-            />
-            <Pressable
-              style={styles.headerIconButton}
-              accessibilityLabel={text.newChat}
-              accessibilityRole="button"
-              onPress={handleViewMore}
-              testID="sidebar-new-chat"
-            >
-              {({ hovered }) => (
-                <MessageSquarePlus
-                  size={theme.iconSize.md}
-                  color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
-                />
-              )}
-            </Pressable>
-          </View>
-        </View>
 
         <View style={styles.sidebarFooter}>
           <View style={styles.footerHostSlot}>
@@ -1095,20 +1166,53 @@ const styles = StyleSheet.create((theme) => ({
   sidebarDragArea: {
     position: "relative",
   },
+  sidebarTopActions: {
+    paddingHorizontal: theme.spacing[2],
+    paddingTop: theme.spacing[2],
+    paddingBottom: theme.spacing[1],
+    gap: 2,
+  },
+  sidebarPrimaryAction: {
+    minHeight: 28,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1.5],
+    borderRadius: theme.borderRadius.md,
+    userSelect: "none",
+  },
+  sidebarPrimaryActionHovered: {
+    backgroundColor: theme.colors.surfaceSidebarHover,
+  },
+  sidebarPrimaryActionText: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    flexShrink: 1,
+    minWidth: 0,
+  },
   sidebarHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: theme.spacing[4],
-    paddingVertical: theme.spacing[2],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
+    paddingLeft: theme.spacing[4],
+    paddingRight: theme.spacing[3],
+    paddingTop: theme.spacing[3],
+    paddingBottom: theme.spacing[1],
     userSelect: "none",
   },
+  sidebarHeaderTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    flexShrink: 1,
+    minWidth: 0,
+  },
   sidebarHeaderTitle: {
-    fontSize: theme.fontSize.base,
-    fontWeight: theme.fontWeight.bold,
-    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foregroundMuted,
   },
   sidebarHeaderIcons: {
     flexDirection: "row",
@@ -1124,25 +1228,6 @@ const styles = StyleSheet.create((theme) => ({
   },
   headerIconButtonHovered: {
     backgroundColor: theme.colors.surfaceSidebarHover,
-  },
-  chatSection: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: theme.spacing[4],
-    paddingVertical: theme.spacing[2],
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-  },
-  chatSectionTitle: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foregroundMuted,
-  },
-  chatSectionIcons: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[1],
   },
   hostTrigger: {
     flexDirection: "row",

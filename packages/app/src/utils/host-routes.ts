@@ -105,7 +105,8 @@ export type WorkspaceOpenIntent =
   | { kind: "terminal"; terminalId: string }
   | { kind: "file"; path: string }
   | { kind: "draft"; draftId: string }
-  | { kind: "setup"; workspaceId: string };
+  | { kind: "setup"; workspaceId: string }
+  | { kind: "preview"; scriptName: string };
 
 export function parseWorkspaceOpenIntent(
   value: string | null | undefined,
@@ -148,6 +149,9 @@ export function parseWorkspaceOpenIntent(
       return null;
     }
     return { kind: "setup", workspaceId };
+  }
+  if (kind === "preview") {
+    return { kind: "preview", scriptName: payload };
   }
 
   return null;
@@ -284,6 +288,28 @@ export function parseHostWorkspaceRouteFromPathname(
   return { serverId, workspaceId };
 }
 
+export function parseHostWorkspaceColleagueRouteFromPathname(
+  pathname: string,
+): { serverId: string; workspaceId: string } | null {
+  const pathOnly = stripSearchAndHash(pathname);
+  const match = pathOnly.match(/^\/h\/([^/]+)\/colleague\/([^/]+)\/?$/);
+  if (!match) {
+    return null;
+  }
+
+  const serverId = trimNonEmpty(decodeSegment(match[1]));
+  if (!serverId) {
+    return null;
+  }
+
+  const rawWorkspaceId = match[2];
+  const workspaceId = decodeWorkspaceIdFromPathSegment(rawWorkspaceId);
+  if (!workspaceId) {
+    return null;
+  }
+  return { serverId, workspaceId };
+}
+
 export function buildHostWorkspaceRoute(serverId: string, workspaceId: string) {
   const normalizedServerId = trimNonEmpty(serverId);
   const normalizedWorkspaceId = trimNonEmpty(workspaceId);
@@ -295,6 +321,21 @@ export function buildHostWorkspaceRoute(serverId: string, workspaceId: string) {
     return "/" as const;
   }
   return `/h/${encodeSegment(normalizedServerId)}/workspace/${encodeSegment(
+    encodedWorkspaceId,
+  )}` as const;
+}
+
+export function buildHostWorkspaceColleagueRoute(serverId: string, workspaceId: string) {
+  const normalizedServerId = trimNonEmpty(serverId);
+  const normalizedWorkspaceId = trimNonEmpty(workspaceId);
+  if (!normalizedServerId || !normalizedWorkspaceId) {
+    return "/" as const;
+  }
+  const encodedWorkspaceId = encodeWorkspaceIdForPathSegment(normalizedWorkspaceId);
+  if (!encodedWorkspaceId) {
+    return "/" as const;
+  }
+  return `/h/${encodeSegment(normalizedServerId)}/colleague/${encodeSegment(
     encodedWorkspaceId,
   )}` as const;
 }
@@ -351,12 +392,37 @@ export function buildHostSessionsRoute(serverId: string) {
   return `${base}/sessions` as const;
 }
 
+export function buildHostSkillsRoute(serverId: string) {
+  const base = buildHostRootRoute(serverId);
+  if (base === "/") {
+    return "/" as const;
+  }
+  return `${base}/skills` as const;
+}
+
 export function buildHostOpenProjectRoute(serverId: string) {
   const base = buildHostRootRoute(serverId);
   if (base === "/") {
     return "/" as const;
   }
   return `${base}/open-project` as const;
+}
+
+export function buildHostSimpleRoute(serverId: string) {
+  const base = buildHostRootRoute(serverId);
+  if (base === "/") {
+    return "/" as const;
+  }
+  return `${base}/simple` as const;
+}
+
+export function buildHostSimpleAgentRoute(serverId: string, agentId: string) {
+  const base = buildHostSimpleRoute(serverId);
+  const normalizedAgentId = trimNonEmpty(agentId);
+  if (base === "/" || !normalizedAgentId) {
+    return "/" as const;
+  }
+  return `${base}/agent/${encodeSegment(normalizedAgentId)}` as const;
 }
 
 export function buildHostNewWorkspaceRoute(
@@ -382,6 +448,7 @@ export const SETTINGS_SECTION_SLUGS = [
   "managed-provider",
   "shortcuts",
   "integrations",
+  "ai-context",
   "permissions",
   "diagnostics",
   "about",
@@ -449,6 +516,9 @@ export function mapPathnameToServer(pathname: string, nextServerId: string) {
   }
   if (suffix.startsWith("open-project")) {
     return `${base}/open-project` as const;
+  }
+  if (suffix.startsWith("simple")) {
+    return `${base}/${suffix}` as const;
   }
   const workspaceRoute = parseHostWorkspaceRouteFromPathname(pathname);
   if (workspaceRoute) {

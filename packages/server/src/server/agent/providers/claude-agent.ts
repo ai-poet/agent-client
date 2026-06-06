@@ -2118,8 +2118,8 @@ class ClaudeAgentSession implements AgentSession {
     let effort: ClaudeOptions["effort"];
     if (thinkingOptionId && isClaudeThinkingEffort(thinkingOptionId)) {
       thinking = { type: "adaptive" };
-      // SDK 0.2.71 types `effort` as 'low' | 'medium' | 'high' | 'max'; Opus 4.7
-      // adds 'xhigh' which the binary accepts but the typings don't yet expose.
+      // SDK 0.2.71 types `effort` as 'low' | 'medium' | 'high' | 'max'; newer
+      // Opus models add 'xhigh' which the binary accepts but the typings don't yet expose.
       effort = thinkingOptionId as ClaudeOptions["effort"];
     }
 

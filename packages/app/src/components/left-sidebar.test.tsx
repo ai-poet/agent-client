@@ -7,7 +7,18 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LeftSidebar } from "./left-sidebar";
 
-const { panelState, useSidebarWorkspacesListMock, theme } = vi.hoisted(() => {
+const {
+  panelState,
+  useSidebarWorkspacesListMock,
+  useNavigationRecentWorkspaceSelectionMock,
+  openProjectPickerMock,
+  navigateToPreparedWorkspaceTabMock,
+  resolveNewChatTargetMock,
+  routerPushMock,
+  theme,
+} = vi.hoisted(() => {
+  (globalThis as typeof globalThis & { __DEV__?: boolean }).__DEV__ = false;
+
   const panelState = {
     isOpen: false,
     showMobileAgent: vi.fn(),
@@ -16,6 +27,11 @@ const { panelState, useSidebarWorkspacesListMock, theme } = vi.hoisted(() => {
   return {
     panelState,
     useSidebarWorkspacesListMock: vi.fn(),
+    useNavigationRecentWorkspaceSelectionMock: vi.fn(),
+    openProjectPickerMock: vi.fn(),
+    navigateToPreparedWorkspaceTabMock: vi.fn(),
+    resolveNewChatTargetMock: vi.fn(),
+    routerPushMock: vi.fn(),
     theme: {
       spacing: { 0: 0, 0.5: 2, 1: 4, 1.5: 6, 2: 8, 3: 12, 4: 16, 5: 20 },
       iconSize: { sm: 14, md: 18, lg: 22 },
@@ -89,6 +105,85 @@ vi.mock("react-native-gesture-handler", () => {
   };
 });
 
+function normalizeStyle(style: unknown): Record<string, unknown> | undefined {
+  if (Array.isArray(style)) {
+    return Object.assign(
+      {},
+      ...style.filter((item) => typeof item === "object" && item !== null && !Array.isArray(item)),
+    );
+  }
+  return typeof style === "object" && style !== null
+    ? (style as Record<string, unknown>)
+    : undefined;
+}
+
+function mapNativeProps(props: Record<string, unknown>): Record<string, unknown> {
+  const {
+    accessibilityLabel,
+    accessibilityRole,
+    accessible,
+    children,
+    collapsable,
+    disabled,
+    nativeID,
+    numberOfLines,
+    onPress,
+    showsVerticalScrollIndicator,
+    style,
+    testID,
+    ...rest
+  } = props;
+  const resolvedStyle =
+    typeof style === "function" ? style({ hovered: false, pressed: false }) : style;
+  return {
+    ...rest,
+    ...(normalizeStyle(resolvedStyle) ? { style: normalizeStyle(resolvedStyle) } : {}),
+    ...(typeof accessibilityLabel === "string" ? { "aria-label": accessibilityLabel } : {}),
+    ...(accessibilityRole === "button" ? { role: "button" } : {}),
+    ...(typeof testID === "string" ? { "data-testid": testID } : {}),
+    children,
+    disabled: Boolean(disabled) || undefined,
+    onClick:
+      typeof onPress === "function"
+        ? (event: React.MouseEvent) => onPress({ stopPropagation: () => event.stopPropagation() })
+        : undefined,
+  };
+}
+
+vi.mock("react-native", () => ({
+  Modal: ({ children, visible }: { children: React.ReactNode; visible: boolean }) =>
+    visible ? React.createElement("div", null, children) : null,
+  Platform: {
+    OS: "web",
+    select: (specifics: Record<string, unknown>) => specifics.web ?? specifics.default,
+  },
+  Pressable: (props: Record<string, unknown>) => {
+    const children =
+      typeof props.children === "function"
+        ? props.children({ hovered: false, pressed: false, open: false })
+        : props.children;
+    return React.createElement("button", mapNativeProps({ ...props, children }));
+  },
+  ScrollView: ({ children, contentContainerStyle, ...props }: Record<string, unknown>) =>
+    React.createElement(
+      "div",
+      mapNativeProps({
+        ...props,
+        style: contentContainerStyle ?? props.style,
+        children,
+      }),
+    ),
+  Text: (props: Record<string, unknown>) => React.createElement("span", mapNativeProps(props)),
+  useWindowDimensions: () => ({ width: 390, height: 844 }),
+  View: React.forwardRef<HTMLDivElement, Record<string, unknown>>((props, ref) =>
+    React.createElement("div", { ...mapNativeProps(props), ref }),
+  ),
+  StyleSheet: {
+    absoluteFillObject: {},
+    create: (styles: unknown) => styles,
+  },
+}));
+
 vi.mock("lucide-react-native", () => {
   const createIcon = (name: string) => {
     function MockIcon(props: Record<string, unknown>) {
@@ -103,8 +198,10 @@ vi.mock("lucide-react-native", () => {
     CheckCircle: createIcon("CheckCircle"),
     ChevronsDownUp: createIcon("ChevronsDownUp"),
     Cloud: createIcon("Cloud"),
+    Folder: createIcon("Folder"),
     FolderPlus: createIcon("FolderPlus"),
     MessageSquarePlus: createIcon("MessageSquarePlus"),
+    Box: createIcon("Box"),
     MessagesSquare: createIcon("MessagesSquare"),
     Plus: createIcon("Plus"),
     Settings: createIcon("Settings"),
@@ -112,7 +209,7 @@ vi.mock("lucide-react-native", () => {
 });
 
 vi.mock("expo-router", () => ({
-  router: { push: vi.fn() },
+  router: { push: routerPushMock },
   usePathname: () => "/hosts/srv",
 }));
 
@@ -127,6 +224,10 @@ vi.mock("@/constants/layout", () => ({
 vi.mock("@/constants/platform", () => ({
   isWeb: true,
   isNative: false,
+}));
+
+vi.mock("@/config/branding", () => ({
+  CLOUD_NAME: "Paseo Cloud",
 }));
 
 vi.mock("@/stores/panel-store", () => ({
@@ -175,6 +276,7 @@ vi.mock("@/utils/desktop-window", () => ({
 }));
 
 vi.mock("@/utils/host-routes", () => ({
+  buildHostSkillsRoute: (serverId: string) => `/h/${serverId}/skills`,
   buildHostSessionsRoute: (serverId: string) => `/hosts/${serverId}/sessions`,
   buildPaseoCloudRoute: () => "/settings/paseo-cloud",
   buildSettingsRoute: () => "/settings",
@@ -182,12 +284,36 @@ vi.mock("@/utils/host-routes", () => ({
   parseServerIdFromPathname: () => "srv",
 }));
 
+vi.mock("@/stores/draft-keys", () => ({
+  generateDraftId: () => "draft-test",
+}));
+
+vi.mock("@/stores/session-store", () => ({
+  useSessionStore: {
+    getState: () => ({ sessions: {} }),
+  },
+}));
+
+vi.mock("@/utils/new-agent-routing", () => ({
+  buildNewAgentRoute: (serverId: string, workingDir?: string | null) =>
+    `/h/${serverId}/workspace/${workingDir || "."}`,
+  resolveNewChatTarget: resolveNewChatTargetMock,
+}));
+
+vi.mock("@/utils/workspace-navigation", () => ({
+  navigateToPreparedWorkspaceTab: navigateToPreparedWorkspaceTabMock,
+}));
+
 vi.mock("@/hooks/use-sub2api-locale", () => ({
   useSub2APILocale: () => "en",
 }));
 
 vi.mock("@/hooks/use-open-project-picker", () => ({
-  useOpenProjectPicker: () => vi.fn(),
+  useOpenProjectPicker: () => openProjectPickerMock,
+}));
+
+vi.mock("@/stores/navigation-active-workspace-store", () => ({
+  useNavigationRecentWorkspaceSelection: useNavigationRecentWorkspaceSelectionMock,
 }));
 
 vi.mock("@/components/sidebar/sidebar-header-row", () => ({
@@ -253,9 +379,31 @@ describe("LeftSidebar", () => {
   beforeEach(() => {
     panelState.isOpen = false;
     panelState.showMobileAgent.mockReset();
+    routerPushMock.mockReset();
+    openProjectPickerMock.mockReset();
+    navigateToPreparedWorkspaceTabMock.mockReset();
+    resolveNewChatTargetMock.mockReset();
+    useNavigationRecentWorkspaceSelectionMock.mockReset();
+    useNavigationRecentWorkspaceSelectionMock.mockReturnValue(null);
+    resolveNewChatTargetMock.mockReturnValue({
+      kind: "workspace",
+      serverId: "srv",
+      workspaceId: "workspace-1",
+    });
     useSidebarWorkspacesListMock.mockReset();
     useSidebarWorkspacesListMock.mockReturnValue({
-      projects: [{ projectKey: "project-1", projectName: "Project 1", workspaces: [] }],
+      projects: [
+        {
+          projectKey: "project-1",
+          projectName: "Project 1",
+          workspaces: [
+            {
+              serverId: "srv",
+              workspaceId: "workspace-visible",
+            },
+          ],
+        },
+      ],
       isInitialLoad: false,
       isRevalidating: false,
       refreshAll: vi.fn(),
@@ -285,5 +433,100 @@ describe("LeftSidebar", () => {
       serverId: "srv",
       enabled: true,
     });
+  });
+
+  it("renders new chat as the primary action without the old chat section label", async () => {
+    await act(async () => {
+      root?.render(<LeftSidebar />);
+    });
+
+    expect(container?.querySelector('[data-testid="sidebar-new-chat"]')).not.toBeNull();
+    expect(container?.textContent).toContain("New chat");
+    expect(container?.textContent).not.toContain("Chat");
+  });
+
+  it("navigates to the Skill Library page from the sidebar skills action", async () => {
+    await act(async () => {
+      root?.render(<LeftSidebar />);
+    });
+
+    await act(async () => {
+      container
+        ?.querySelector<HTMLButtonElement>('[data-testid="sidebar-skill-library"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(routerPushMock).toHaveBeenCalledWith("/h/srv/skills");
+  });
+
+  it("opens a focused draft tab for the current workspace", async () => {
+    await act(async () => {
+      root?.render(<LeftSidebar selectedAgentId="srv:agent-1" />);
+    });
+
+    await act(async () => {
+      container
+        ?.querySelector<HTMLButtonElement>('[data-testid="sidebar-new-chat"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(panelState.showMobileAgent).toHaveBeenCalledTimes(1);
+    expect(navigateToPreparedWorkspaceTabMock).toHaveBeenCalledWith({
+      serverId: "srv",
+      workspaceId: "workspace-1",
+      target: { kind: "draft", draftId: "draft-test" },
+      navigationMethod: "navigate",
+    });
+    expect(resolveNewChatTargetMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fallbackWorkspace: {
+          serverId: "srv",
+          workspaceId: "workspace-visible",
+        },
+      }),
+    );
+  });
+
+  it("falls back to the new-agent route when no current workspace is available", async () => {
+    resolveNewChatTargetMock.mockReturnValue({
+      kind: "fallback",
+      serverId: "srv",
+      workingDir: "/repo/other",
+    });
+
+    await act(async () => {
+      root?.render(<LeftSidebar />);
+    });
+
+    await act(async () => {
+      container
+        ?.querySelector<HTMLButtonElement>('[data-testid="sidebar-new-chat"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(navigateToPreparedWorkspaceTabMock).not.toHaveBeenCalled();
+    expect(routerPushMock).toHaveBeenCalledWith("/h/srv/workspace//repo/other");
+  });
+
+  it("opens the project picker instead of routing to a placeholder when no workspace exists", async () => {
+    resolveNewChatTargetMock.mockReturnValue({
+      kind: "fallback",
+      serverId: "srv",
+      workingDir: null,
+    });
+
+    await act(async () => {
+      root?.render(<LeftSidebar />);
+    });
+
+    await act(async () => {
+      container
+        ?.querySelector<HTMLButtonElement>('[data-testid="sidebar-new-chat"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(navigateToPreparedWorkspaceTabMock).not.toHaveBeenCalled();
+    expect(routerPushMock).not.toHaveBeenCalled();
+    expect(openProjectPickerMock).toHaveBeenCalledTimes(1);
   });
 });

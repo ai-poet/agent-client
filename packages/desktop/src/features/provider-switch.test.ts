@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildByokClaudeProviderFromDisk,
+  buildByokCodexProviderFromDisk,
   buildClaudeSettings,
+  buildCodexAuth,
   buildCodexConfig,
   DEFAULT_PROVIDER_ID,
   DEFAULT_PROVIDER_NAME,
@@ -35,7 +38,7 @@ describe("provider-switch", () => {
     });
   });
 
-  it("writes managed Claude settings using only the minimal integration-guide env keys", () => {
+  it("merges managed Claude settings while only changing the managed env keys", () => {
     const settings = buildClaudeSettings(
       createProvider({
         id: PASEO_MANAGED_CLAUDE_PROVIDER_ID,
@@ -49,6 +52,10 @@ describe("provider-switch", () => {
       {
         env: {
           SOME_OTHER_KEY: "keep-me",
+          ANTHROPIC_MODEL: "claude-sonnet-4-5",
+        },
+        permissions: {
+          allow: ["Bash(git status)"],
         },
         random: true,
       },
@@ -56,15 +63,21 @@ describe("provider-switch", () => {
 
     expect(settings).toEqual({
       env: {
+        SOME_OTHER_KEY: "keep-me",
+        ANTHROPIC_MODEL: "claude-sonnet-4-5",
         ANTHROPIC_BASE_URL: "https://api.example.com",
         ANTHROPIC_AUTH_TOKEN: "sk-live-example",
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
         CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
       },
+      permissions: {
+        allow: ["Bash(git status)"],
+      },
+      random: true,
     });
   });
 
-  it("preserves Claude Code Git Bash path on Windows when switching managed Claude keys", () => {
+  it("preserves existing Claude env keys when switching managed Claude keys", () => {
     const settings = buildClaudeSettings(
       createProvider({
         id: PASEO_MANAGED_CLAUDE_PROVIDER_ID,
@@ -73,24 +86,24 @@ describe("provider-switch", () => {
       {
         env: {
           CLAUDE_CODE_GIT_BASH_PATH: "C:\\Program Files\\Git\\bin\\bash.exe",
-          SOME_OTHER_KEY: "drop-me",
+          SOME_OTHER_KEY: "keep-me",
         },
       },
-      { platform: "win32" },
     );
 
     expect(settings).toEqual({
       env: {
-        ANTHROPIC_BASE_URL: "https://api.example.com",
-        ANTHROPIC_AUTH_TOKEN: "sk-live-example",
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-        CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
         CLAUDE_CODE_GIT_BASH_PATH: "C:\\Program Files\\Git\\bin\\bash.exe",
+        SOME_OTHER_KEY: "keep-me",
+        ANTHROPIC_BASE_URL: "https://api.example.com",
+        ANTHROPIC_AUTH_TOKEN: "sk-live-example",
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+        CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
       },
     });
   });
 
-  it("does not add or preserve Claude Code Git Bash path outside Windows", () => {
+  it("preserves Claude Code Git Bash path outside Windows because provider switching only patches managed keys", () => {
     const settings = buildClaudeSettings(
       createProvider({
         id: PASEO_MANAGED_CLAUDE_PROVIDER_ID,
@@ -101,11 +114,11 @@ describe("provider-switch", () => {
           CLAUDE_CODE_GIT_BASH_PATH: "C:\\Program Files\\Git\\bin\\bash.exe",
         },
       },
-      { platform: "darwin" },
     );
 
     expect(settings).toEqual({
       env: {
+        CLAUDE_CODE_GIT_BASH_PATH: "C:\\Program Files\\Git\\bin\\bash.exe",
         ANTHROPIC_BASE_URL: "https://api.example.com",
         ANTHROPIC_AUTH_TOKEN: "sk-live-example",
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
@@ -114,7 +127,7 @@ describe("provider-switch", () => {
     });
   });
 
-  it("uses a newly detected Windows Git Bash path over a stale existing value", () => {
+  it("does not update Claude Code Git Bash path during provider switching", () => {
     const settings = buildClaudeSettings(
       createProvider({
         id: PASEO_MANAGED_CLAUDE_PROVIDER_ID,
@@ -125,15 +138,11 @@ describe("provider-switch", () => {
           CLAUDE_CODE_GIT_BASH_PATH: "C:\\Old\\Git\\bin\\bash.exe",
         },
       },
-      {
-        platform: "win32",
-        gitBashPath: "C:\\Program Files\\Git\\bin\\bash.exe",
-      },
     );
 
     expect(settings).toMatchObject({
       env: {
-        CLAUDE_CODE_GIT_BASH_PATH: "C:\\Program Files\\Git\\bin\\bash.exe",
+        CLAUDE_CODE_GIT_BASH_PATH: "C:\\Old\\Git\\bin\\bash.exe",
       },
     });
   });
@@ -156,7 +165,6 @@ describe("provider-switch", () => {
           CLAUDE_CODE_GIT_BASH_PATH: "C:\\Program Files\\Git\\bin\\bash.exe",
         },
       },
-      { platform: "win32" },
     );
 
     expect(settings).toMatchObject({
@@ -208,7 +216,7 @@ describe("provider-switch", () => {
     expect(config).not.toContain("/v1/v1");
   });
 
-  it("forces managed Codex rows to use gpt-5.4 template even if stale custom config exists", () => {
+  it("uses the default Codex template for empty config even if managed row has stale custom config", () => {
     const config = buildCodexConfig(
       createProvider({
         id: PASEO_MANAGED_CODEX_PROVIDER_ID,
@@ -220,5 +228,114 @@ describe("provider-switch", () => {
     expect(config).toContain('model = "gpt-5.4"');
     expect(config).toContain('review_model = "gpt-5.4"');
     expect(config).not.toContain('model = "claude-opus-4-7"');
+  });
+
+  it("merges Codex auth by updating the API key and preserving other fields", () => {
+    expect(
+      buildCodexAuth(createProvider(), {
+        OPENAI_API_KEY: "old-key",
+        tokens: {
+          refresh: "keep-me",
+        },
+      }),
+    ).toEqual({
+      OPENAI_API_KEY: "sk-live-example",
+      tokens: {
+        refresh: "keep-me",
+      },
+    });
+  });
+
+  it("patches existing Codex config without changing user model preferences", () => {
+    const config = buildCodexConfig(
+      createProvider({
+        endpoint: "https://gateway.example.com",
+      }),
+      `# user choices
+model_provider = "Local"
+model = "gpt-5.2-codex"
+review_model = "gpt-5.2-codex"
+model_reasoning_effort = "medium"
+
+[model_providers.Local]
+name = "Local"
+base_url = "http://localhost:11434/v1"
+wire_api = "responses"
+
+[model_providers.OpenAI]
+name = "Old OpenAI"
+base_url = "https://old.example.com/v1"
+wire_api = "chat"
+requires_openai_auth = false
+
+[profiles.work]
+model = "custom-profile-model"
+`,
+    );
+
+    expect(config).toContain("# user choices");
+    expect(config).toContain('model_provider = "OpenAI"');
+    expect(config).toContain('model = "gpt-5.2-codex"');
+    expect(config).toContain('review_model = "gpt-5.2-codex"');
+    expect(config).toContain('model_reasoning_effort = "medium"');
+    expect(config).toContain("[model_providers.Local]");
+    expect(config).toContain("[profiles.work]");
+    expect(config).toContain('model = "custom-profile-model"');
+    expect(config).toContain('name = "OpenAI"');
+    expect(config).toContain('base_url = "https://gateway.example.com/v1"');
+    expect(config).toContain('wire_api = "responses"');
+    expect(config).toContain("requires_openai_auth = true");
+    expect(config).not.toContain("https://old.example.com/v1");
+  });
+
+  it("builds BYOK Claude provider from disk config with correct target and format", () => {
+    const provider = buildByokClaudeProviderFromDisk({
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "sk-ant-test",
+    });
+
+    expect(provider).toEqual({
+      id: "byok-local-claude",
+      name: "Local Claude Code",
+      type: "custom",
+      endpoint: "https://api.anthropic.com",
+      apiKey: "sk-ant-test",
+      isDefault: false,
+      target: "claude",
+      claudeApiFormat: "anthropic",
+    });
+  });
+
+  it("builds BYOK Codex provider from disk config with resolved base_url", () => {
+    const provider = buildByokCodexProviderFromDisk({
+      apiKey: "sk-openai-test",
+      configToml: `model_provider = "OpenAI"
+[model_providers.OpenAI]
+base_url = "https://api.openai.com/v1"
+wire_api = "responses"
+`,
+    });
+
+    expect(provider).toMatchObject({
+      id: "byok-local-codex",
+      name: "Local Codex",
+      type: "custom",
+      endpoint: "https://api.openai.com",
+      apiKey: "sk-openai-test",
+      isDefault: false,
+      target: "codex",
+      codexWireApi: "responses",
+    });
+  });
+
+  it("builds BYOK Codex provider with empty endpoint when base_url is missing", () => {
+    const provider = buildByokCodexProviderFromDisk({
+      apiKey: "sk-openai-test",
+      configToml: 'model_provider = "OpenAI"\n',
+    });
+
+    expect(provider.id).toBe("byok-local-codex");
+    expect(provider.endpoint).toBe("");
+    expect(provider.target).toBe("codex");
   });
 });

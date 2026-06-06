@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import { WorkspaceScriptsButton } from "@/screens/workspace/workspace-scripts-button";
 
-const { theme, startWorkspaceScriptMock } = vi.hoisted(() => {
+const { hostRuntimeState, theme, startWorkspaceScriptMock } = vi.hoisted(() => {
   const theme = {
     spacing: { 1: 4, 1.5: 6, 2: 8, 3: 12 },
     borderWidth: { 1: 1 },
@@ -30,6 +30,13 @@ const { theme, startWorkspaceScriptMock } = vi.hoisted(() => {
   };
 
   return {
+    hostRuntimeState: {
+      activeConnection: null as null | {
+        type: "directTcp" | "directSocket" | "directPipe" | "relay";
+        endpoint: string;
+        display: string;
+      },
+    },
     theme,
     startWorkspaceScriptMock: vi.fn(async () => ({ terminalId: "terminal-script-1" })),
   };
@@ -52,7 +59,7 @@ vi.mock("@/constants/platform", () => ({
 }));
 
 vi.mock("@/runtime/host-runtime", () => ({
-  useHostRuntimeSnapshot: () => ({ activeConnection: null }),
+  useHostRuntimeSnapshot: () => ({ activeConnection: hostRuntimeState.activeConnection }),
 }));
 
 vi.mock("@/stores/session-store", () => ({
@@ -137,7 +144,13 @@ function script(
   };
 }
 
-function renderScripts(scripts: WorkspaceScriptPayload[]): {
+function renderScripts(
+  scripts: WorkspaceScriptPayload[],
+  options: {
+    liveTerminalIds?: readonly string[];
+    onPreviewService?: (scriptName: string) => void;
+  } = {},
+): {
   rerender: (nextScripts: WorkspaceScriptPayload[]) => Promise<void>;
   unmount: () => void;
 } {
@@ -158,7 +171,8 @@ function renderScripts(scripts: WorkspaceScriptPayload[]): {
           serverId="test-server"
           workspaceId="workspace-1"
           scripts={nextScripts}
-          liveTerminalIds={["terminal-script-1"]}
+          liveTerminalIds={options.liveTerminalIds ?? ["terminal-script-1"]}
+          onPreviewService={options.onPreviewService}
         />
       </QueryClientProvider>
     );
@@ -214,6 +228,7 @@ describe("WorkspaceScriptsButton", () => {
       },
     );
     document.body.innerHTML = "";
+    hostRuntimeState.activeConnection = null;
     startWorkspaceScriptMock.mockClear();
   });
 
@@ -316,5 +331,134 @@ describe("WorkspaceScriptsButton", () => {
     expect(requirePrimaryIcon(requireRow("old-service")).dataset.color).toBe(
       theme.colors.foregroundMuted,
     );
+  });
+
+  it("shows Preview for a running service with an openable URL", async () => {
+    hostRuntimeState.activeConnection = {
+      type: "directTcp",
+      endpoint: "localhost:6767",
+      display: "localhost:6767",
+    };
+    const onPreviewService = vi.fn();
+
+    current = renderScripts(
+      [
+        script({
+          scriptName: "web",
+          type: "service",
+          hostname: "web.paseo.localhost",
+          lifecycle: "running",
+          port: 3000,
+          proxyUrl: "http://web.paseo.localhost:6767",
+        }),
+      ],
+      { onPreviewService },
+    );
+
+    const previewButton = document.querySelector('[data-testid="workspace-scripts-preview-web"]');
+    expect(previewButton).toBeInstanceOf(HTMLElement);
+    expect(requireRow("web").textContent).toContain("Preview");
+
+    await act(async () => {
+      (previewButton as HTMLElement).click();
+    });
+
+    expect(onPreviewService).toHaveBeenCalledWith("web");
+  });
+
+  it("keeps View terminal available when a running service can also be previewed", () => {
+    hostRuntimeState.activeConnection = {
+      type: "directTcp",
+      endpoint: "localhost:6767",
+      display: "localhost:6767",
+    };
+
+    current = renderScripts(
+      [
+        script({
+          scriptName: "web",
+          type: "service",
+          hostname: "web.paseo.localhost",
+          lifecycle: "running",
+          port: 3000,
+          proxyUrl: "http://web.paseo.localhost:6767",
+          terminalId: "terminal-script-1",
+        }),
+      ],
+      { onPreviewService: vi.fn() },
+    );
+
+    expect(document.querySelector('[data-testid="workspace-scripts-preview-web"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="workspace-scripts-view-web"]')).not.toBeNull();
+    expect(requireRow("web").textContent).toContain("Preview");
+    expect(requireRow("web").textContent).toContain("View");
+  });
+
+  it("does not show Preview for relay or unopenable service links", async () => {
+    const onPreviewService = vi.fn();
+    hostRuntimeState.activeConnection = {
+      type: "relay",
+      endpoint: "relay.paseo.sh:443",
+      display: "relay",
+    };
+
+    current = renderScripts(
+      [
+        script({
+          scriptName: "web",
+          type: "service",
+          hostname: "web.paseo.localhost",
+          lifecycle: "running",
+          port: 3000,
+          proxyUrl: "http://web.paseo.localhost:6767",
+        }),
+      ],
+      { onPreviewService },
+    );
+
+    expect(document.querySelector('[data-testid="workspace-scripts-preview-web"]')).toBeNull();
+
+    hostRuntimeState.activeConnection = {
+      type: "directTcp",
+      endpoint: "devbox.local:6767",
+      display: "devbox.local:6767",
+    };
+    await current.rerender([
+      script({
+        scriptName: "web",
+        type: "service",
+        hostname: "web.paseo.localhost",
+        lifecycle: "running",
+        port: null,
+        proxyUrl: "http://web.paseo.localhost:6767",
+      }),
+    ]);
+
+    expect(document.querySelector('[data-testid="workspace-scripts-preview-web"]')).toBeNull();
+  });
+
+  it("does not show Preview for stopped services", () => {
+    hostRuntimeState.activeConnection = {
+      type: "directTcp",
+      endpoint: "localhost:6767",
+      display: "localhost:6767",
+    };
+
+    current = renderScripts(
+      [
+        script({
+          scriptName: "web",
+          type: "service",
+          hostname: "web.paseo.localhost",
+          lifecycle: "stopped",
+          port: 3000,
+          proxyUrl: "http://web.paseo.localhost:6767",
+        }),
+      ],
+      { onPreviewService: vi.fn() },
+    );
+
+    expect(document.querySelector('[data-testid="workspace-scripts-preview-web"]')).toBeNull();
+    expect(requireRow("web").textContent).toContain("Run");
   });
 });

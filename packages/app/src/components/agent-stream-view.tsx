@@ -42,6 +42,7 @@ import type { StreamItem } from "@/types/stream";
 import type { PendingPermission } from "@/types/shared";
 import type {
   AgentPermissionAction,
+  AgentPermissionRequest,
   AgentPermissionResponse,
 } from "@server/server/agent/agent-sdk-types";
 import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
@@ -69,12 +70,11 @@ import { normalizeInlinePathTarget } from "@/utils/inline-path";
 import { resolveWorkspaceIdByExecutionDirectory } from "@/utils/workspace-execution";
 import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
 import { useStableEvent } from "@/hooks/use-stable-event";
-import {
-  getWorkingIndicatorDotStrength,
-  WORKING_INDICATOR_CYCLE_MS,
-  WORKING_INDICATOR_OFFSETS,
-} from "@/utils/working-indicator";
+import { WorkingDots } from "@/components/working-dots";
+import { shouldShowAgentWorkingIndicator } from "@/utils/working-indicator";
 import { isWeb } from "@/constants/platform";
+import { useAppLocale } from "@/hooks/use-app-locale";
+import { getAppMessages } from "@/i18n/sub2api";
 
 const isUserMessageItem = (item?: StreamItem) => item?.kind === "user_message";
 const isToolSequenceItem = (item?: StreamItem) =>
@@ -93,6 +93,7 @@ export interface AgentStreamViewProps {
   routeBottomAnchorRequest?: BottomAnchorRouteRequest | null;
   isAuthoritativeHistoryReady?: boolean;
   onOpenWorkspaceFile?: (input: { filePath: string }) => void;
+  simpleMode?: boolean;
 }
 
 const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamViewProps>(
@@ -106,6 +107,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       routeBottomAnchorRequest = null,
       isAuthoritativeHistoryReady = true,
       onOpenWorkspaceFile,
+      simpleMode = false,
     },
     ref,
   ) {
@@ -113,6 +115,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const { theme } = useUnistyles();
     const router = useRouter();
     const isMobile = useIsCompactFormFactor();
+    const locale = useAppLocale();
     const streamRenderStrategy = useMemo(
       () =>
         resolveStreamRenderStrategy({
@@ -360,6 +363,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                 args={item.text}
                 status={item.status === "ready" ? "completed" : "executing"}
                 isLastInSequence={isLastInSequence}
+                locale={locale}
                 onInlineDetailsExpandedChange={handleInlineDetailsExpandedChange}
               />
             );
@@ -398,6 +402,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                   cwd={agent.cwd}
                   metadata={data.metadata}
                   isLastInSequence={isLastInSequence}
+                  locale={locale}
                   onInlineDetailsExpandedChange={handleInlineDetailsExpandedChange}
                 />
               );
@@ -411,6 +416,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                 result={data.result}
                 status={data.status}
                 isLastInSequence={isLastInSequence}
+                locale={locale}
                 onInlineDetailsExpandedChange={handleInlineDetailsExpandedChange}
               />
             );
@@ -427,7 +433,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             );
 
           case "todo_list":
-            return <TodoListCard items={item.items} />;
+            return <TodoListCard items={item.items} locale={locale} />;
 
           case "compaction":
             return <CompactionMarker status={item.status} preTokens={item.preTokens} />;
@@ -436,7 +442,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             return null;
         }
       },
-      [handleInlinePathPress, agent.cwd, streamRenderStrategy],
+      [handleInlinePathPress, agent.cwd, streamRenderStrategy, locale],
     );
 
     const renderStreamItem = useCallback(
@@ -484,16 +490,24 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [pendingPermissions, agentId],
     );
 
-    const showWorkingIndicator = agent.status === "running";
+    const hasPendingPermissions = pendingPermissionItems.length > 0;
+    const showWorkingIndicator = shouldShowAgentWorkingIndicator({
+      agentStatus: agent.status,
+      pendingPermissionCount: pendingPermissionItems.length,
+    });
     const renderModel = useMemo<AgentStreamRenderModel>(() => {
-      const pendingPermissionsNode =
-        pendingPermissionItems.length > 0 ? (
-          <View style={stylesheet.permissionsContainer}>
-            {pendingPermissionItems.map((permission) => (
-              <PermissionRequestCard key={permission.key} permission={permission} client={client} />
-            ))}
-          </View>
-        ) : null;
+      const pendingPermissionsNode = hasPendingPermissions ? (
+        <View style={stylesheet.permissionsContainer}>
+          {pendingPermissionItems.map((permission) => (
+            <PermissionRequestCard
+              key={permission.key}
+              permission={permission}
+              client={client}
+              simpleMode={simpleMode}
+            />
+          ))}
+        </View>
+      ) : null;
       const workingIndicatorNode = showWorkingIndicator ? (
         <View style={stylesheet.bottomBarWrapper}>
           <WorkingIndicator />
@@ -514,7 +528,14 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           workingIndicator: workingIndicatorNode,
         },
       };
-    }, [baseRenderModel, client, getGapBetween, pendingPermissionItems, showWorkingIndicator]);
+    }, [
+      baseRenderModel,
+      client,
+      getGapBetween,
+      hasPendingPermissions,
+      pendingPermissionItems,
+      showWorkingIndicator,
+    ]);
 
     const listEmptyComponent = useMemo(() => {
       if (
@@ -657,75 +678,106 @@ export const AgentStreamView = memo(AgentStreamViewComponent);
 AgentStreamView.displayName = "AgentStreamView";
 
 function WorkingIndicator() {
-  const progress = useSharedValue(0);
+  const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const appText = useMemo(() => getAppMessages(locale), [locale]);
+  const label = appText.agentTools.labels.thinking;
 
+  // ChatGPT-style text shimmer animation
+  const shimmerProgress = useSharedValue(0);
   useEffect(() => {
-    progress.value = 0;
-    progress.value = withRepeat(
+    shimmerProgress.value = 0;
+    shimmerProgress.value = withRepeat(
       withTiming(1, {
-        duration: WORKING_INDICATOR_CYCLE_MS,
+        duration: 2000,
         easing: Easing.linear,
       }),
       -1,
       false,
     );
-
     return () => {
-      cancelAnimation(progress);
-      progress.value = 0;
+      cancelAnimation(shimmerProgress);
+      shimmerProgress.value = 0;
     };
-  }, [progress]);
+  }, [shimmerProgress]);
 
-  const translateDistance = -2;
-  const dotOneStyle = useAnimatedStyle(() => {
-    const strength = getWorkingIndicatorDotStrength(progress.value, WORKING_INDICATOR_OFFSETS[0]);
+  const textShimmerStyle = useAnimatedStyle(() => {
+    const phase = shimmerProgress.value;
+    // Create a sweeping glow effect: opacity pulses from 0.5 to 1.0 and back
+    const glow = 0.5 + Math.sin(phase * Math.PI * 2) * 0.5;
     return {
-      opacity: 0.3 + strength * 0.7,
-      transform: [{ translateY: strength * translateDistance }],
-    };
-  });
-
-  const dotTwoStyle = useAnimatedStyle(() => {
-    const strength = getWorkingIndicatorDotStrength(progress.value, WORKING_INDICATOR_OFFSETS[1]);
-    return {
-      opacity: 0.3 + strength * 0.7,
-      transform: [{ translateY: strength * translateDistance }],
-    };
-  });
-
-  const dotThreeStyle = useAnimatedStyle(() => {
-    const strength = getWorkingIndicatorDotStrength(progress.value, WORKING_INDICATOR_OFFSETS[2]);
-    return {
-      opacity: 0.3 + strength * 0.7,
-      transform: [{ translateY: strength * translateDistance }],
+      opacity: 0.5 + glow * 0.5,
+      textShadowColor: `rgba(255, 255, 255, ${glow * 0.3})`,
+      textShadowOffset: { width: 0, height: 0 },
+      textShadowRadius: glow * 4,
     };
   });
 
   return (
     <View style={stylesheet.workingIndicatorBubble}>
-      <View style={stylesheet.workingDotsRow}>
-        <Animated.View style={[stylesheet.workingDot, dotOneStyle]} />
-        <Animated.View style={[stylesheet.workingDot, dotTwoStyle]} />
-        <Animated.View style={[stylesheet.workingDot, dotThreeStyle]} />
-      </View>
+      <WorkingDots color={theme.colors.foregroundMuted} />
+      <Animated.Text
+        style={[
+          stylesheet.workingIndicatorText,
+          { color: theme.colors.foregroundMuted },
+          textShimmerStyle,
+        ]}
+      >
+        {label}
+      </Animated.Text>
     </View>
   );
 }
 
 // Permission Request Card Component
+type SimplePermissionText = ReturnType<typeof getAppMessages>["simplePermissions"];
+
+function resolveSimplePermissionTitle(
+  request: AgentPermissionRequest,
+  text: SimplePermissionText,
+): string {
+  if (request.kind === "plan") {
+    return text.confirmPlan;
+  }
+  const haystack = [request.name, request.title, request.description, request.kind]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+  if (/\b(read|search|list|scan|fetch|view|open|glob|grep)\b/.test(haystack)) {
+    return text.readFiles;
+  }
+  if (/\b(write|edit|modify|patch|create|delete|save|move|rename)\b/.test(haystack)) {
+    return text.changeFiles;
+  }
+  if (/\b(command|shell|terminal|exec|bash|run)\b/.test(haystack)) {
+    return text.runCommand;
+  }
+  return text.approval;
+}
+
 function PermissionRequestCard({
   permission,
   client,
+  simpleMode = false,
 }: {
   permission: PendingPermission;
   client: DaemonClient | null;
+  simpleMode?: boolean;
 }) {
   const { theme } = useUnistyles();
   const isMobile = useIsCompactFormFactor();
+  const locale = useAppLocale();
+  const appText = useMemo(() => getAppMessages(locale), [locale]);
+  const simplePermissionText = appText.simplePermissions;
+  const agentToolsText = appText.agentTools;
 
   const { request } = permission;
   const isPlanRequest = request.kind === "plan";
-  const title = isPlanRequest ? "Plan" : (request.title ?? request.name ?? "Permission Required");
+  const title = simpleMode
+    ? resolveSimplePermissionTitle(request, simplePermissionText)
+    : isPlanRequest
+      ? agentToolsText.labels.plan
+      : (request.title ?? request.name ?? "Permission Required");
   const description = request.description ?? "";
   const resolvedActions = useMemo((): AgentPermissionAction[] => {
     if (request.kind === "question") {
@@ -737,19 +789,25 @@ function PermissionRequestCard({
     return [
       {
         id: "reject",
-        label: "Deny",
+        label: simplePermissionText.deny,
         behavior: "deny",
         variant: "danger",
         intent: "dismiss",
       },
       {
         id: "accept",
-        label: isPlanRequest ? "Implement" : "Accept",
+        label: simpleMode
+          ? isPlanRequest
+            ? simplePermissionText.start
+            : simplePermissionText.allow
+          : isPlanRequest
+            ? simplePermissionText.implement
+            : simplePermissionText.allow,
         behavior: "allow",
         variant: "primary",
       },
     ];
-  }, [isPlanRequest, request]);
+  }, [isPlanRequest, request, simpleMode, simplePermissionText]);
 
   const planMarkdown = useMemo(() => {
     if (!request) {
@@ -843,7 +901,7 @@ function PermissionRequestCard({
         testID="permission-request-question"
         style={[permissionStyles.question, { color: theme.colors.foregroundMuted }]}
       >
-        How would you like to proceed?
+        {simpleMode ? simplePermissionText.question : simplePermissionText.proceedQuestion}
       </Text>
 
       <View
@@ -929,7 +987,7 @@ function PermissionRequestCard({
       ) : null}
 
       {planMarkdown ? (
-        <PlanCard title="Proposed plan" text={planMarkdown} disableOuterSpacing />
+        <PlanCard title={agentToolsText.labels.plan} text={planMarkdown} disableOuterSpacing />
       ) : null}
 
       {!isPlanRequest ? (
@@ -942,6 +1000,7 @@ function PermissionRequestCard({
             }
           }
           maxHeight={200}
+          detailsText={agentToolsText.details}
         />
       ) : null}
 
@@ -1024,6 +1083,11 @@ const stylesheet = StyleSheet.create((theme) => ({
     height: 6,
     borderRadius: 3,
     backgroundColor: theme.colors.foregroundMuted,
+  },
+  workingIndicatorText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    marginLeft: theme.spacing[1],
   },
   syncingIndicator: {
     flexDirection: "row",

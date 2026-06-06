@@ -158,6 +158,56 @@ describe("quick-create-worktree", () => {
     });
   });
 
+  it("forwards the selected worktree persona when creating a worktree", async () => {
+    const mergeWorkspaces = vi.fn();
+    const removeWorkspace = vi.fn();
+    const toast = { error: vi.fn() };
+    const worktreePersona = {
+      roleId: "product_manager" as const,
+      skillIds: ["paseo-product-manager"],
+    };
+    const client = {
+      createPaseoWorktree: vi.fn(async () => ({
+        requestId: "req-1",
+        setupTerminalId: null,
+        error: null,
+        workspace: {
+          id: "/repo/.paseo/worktrees/eager-squid",
+          projectId: "project-1",
+          projectDisplayName: "Repo",
+          projectRootPath: "/repo",
+          workspaceDirectory: "/repo/.paseo/worktrees/eager-squid",
+          projectKind: "git",
+          workspaceKind: "worktree",
+          name: "eager-squid",
+          status: "done",
+          diffStat: null,
+          scripts: [],
+        },
+      })),
+    } as unknown as Pick<DaemonClient, "createPaseoWorktree">;
+
+    await createWorktreeQuickly({
+      client,
+      isConnected: true,
+      serverId: "server-1",
+      sourceDirectory: "/repo",
+      worktreePersona,
+      projectId: "project-1",
+      projectDisplayName: "Repo",
+      projectRootPath: "/repo",
+      mergeWorkspaces,
+      removeWorkspace,
+      toast,
+    });
+
+    expect(client.createPaseoWorktree).toHaveBeenCalledWith({
+      cwd: "/repo",
+      worktreeSlug: "eager-squid",
+      worktreePersona,
+    });
+  });
+
   it("removes the placeholder and shows an error when creation fails", async () => {
     const mergeWorkspaces = vi.fn();
     const removeWorkspace = vi.fn();

@@ -1,35 +1,38 @@
+import { useIsFocused } from "@react-navigation/native";
+import { X } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
-  View,
-  Text,
   Pressable,
-  useWindowDimensions,
   StyleSheet as RNStyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useIsFocused } from "@react-navigation/native";
-import Animated, { useAnimatedStyle, useSharedValue, runOnJS } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { X } from "lucide-react-native";
-import { GitHubIcon } from "@/components/icons/github-icon";
-import { PrPane } from "./pr-pane";
-import { usePrPaneData } from "@/hooks/use-pr-pane-data";
-import {
-  usePanelStore,
-  selectIsFileExplorerOpen,
-  MIN_EXPLORER_SIDEBAR_WIDTH,
-  MAX_EXPLORER_SIDEBAR_WIDTH,
-  type ExplorerTab,
-} from "@/stores/panel-store";
-import { useExplorerSidebarAnimation } from "@/contexts/explorer-sidebar-animation-context";
-import { HEADER_INNER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout";
-import { GitDiffPane } from "./git-diff-pane";
-import { FileExplorerPane } from "./file-explorer-pane";
-import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
-import { useWindowControlsPadding } from "@/utils/desktop-window";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
+import { GitHubIcon } from "@/components/icons/github-icon";
+import { HEADER_INNER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout";
 import { isWeb } from "@/constants/platform";
+import { useExplorerSidebarAnimation } from "@/contexts/explorer-sidebar-animation-context";
+import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
+import { useAppLocale } from "@/hooks/use-app-locale";
+import { usePrPaneData } from "@/hooks/use-pr-pane-data";
+import { getAppMessages } from "@/i18n/sub2api";
+import {
+  type ExplorerTab,
+  MAX_EXPLORER_SIDEBAR_WIDTH,
+  MIN_EXPLORER_SIDEBAR_WIDTH,
+  selectIsFileExplorerOpen,
+  usePanelStore,
+} from "@/stores/panel-store";
+import { useWindowControlsPadding } from "@/utils/desktop-window";
+import { CommitGraphPane } from "./git-graph";
+import { FileExplorerPane } from "./file-explorer-pane";
+import { GitDiffPane } from "./git-diff-pane";
+import { PrPane } from "./pr-pane";
 
 const MIN_CHAT_WIDTH = 400;
 function logExplorerSidebar(_event: string, _details: Record<string, unknown>): void {}
@@ -38,6 +41,7 @@ interface ExplorerSidebarProps {
   serverId: string;
   workspaceId?: string | null;
   workspaceRoot: string;
+  activeAgentId?: string | null;
   isGit: boolean;
   onOpenFile?: (filePath: string) => void;
 }
@@ -46,6 +50,7 @@ export function ExplorerSidebar({
   serverId,
   workspaceId,
   workspaceRoot,
+  activeAgentId,
   isGit,
   onOpenFile,
 }: ExplorerSidebarProps) {
@@ -290,6 +295,7 @@ export function ExplorerSidebar({
               serverId={serverId}
               workspaceId={workspaceId}
               workspaceRoot={workspaceRoot}
+              activeAgentId={activeAgentId}
               isGit={isGit}
               isMobile={isMobile}
               isOpen={isOpen}
@@ -323,6 +329,7 @@ export function ExplorerSidebar({
           serverId={serverId}
           workspaceId={workspaceId}
           workspaceRoot={workspaceRoot}
+          activeAgentId={activeAgentId}
           isGit={isGit}
           isMobile={false}
           isOpen={isOpen}
@@ -340,6 +347,7 @@ interface SidebarContentProps {
   serverId: string;
   workspaceId?: string | null;
   workspaceRoot: string;
+  activeAgentId?: string | null;
   isGit: boolean;
   isMobile: boolean;
   isOpen: boolean;
@@ -353,12 +361,15 @@ function SidebarContent({
   serverId,
   workspaceId,
   workspaceRoot,
+  activeAgentId,
   isGit,
   isMobile,
   isOpen,
   onOpenFile,
 }: SidebarContentProps) {
   const { theme } = useUnistyles();
+  const locale = useAppLocale();
+  const text = useMemo(() => getAppMessages(locale).workspace.explorerTabs, [locale]);
   const padding = useWindowControlsPadding("explorerSidebar");
   const canQueryPullRequest = isGit && Boolean(workspaceRoot);
   const prPane = usePrPaneData({
@@ -369,7 +380,9 @@ function SidebarContent({
   });
   const hasPullRequest = prPane.prNumber !== null;
   const requestedTab: ExplorerTab =
-    !isGit && (activeTab === "changes" || activeTab === "pr") ? "files" : activeTab;
+    !isGit && (activeTab === "changes" || activeTab === "gitGraph" || activeTab === "pr")
+      ? "files"
+      : activeTab;
   const resolvedTab: ExplorerTab =
     requestedTab === "pr" && !hasPullRequest ? "changes" : requestedTab;
   const prTabLabel = prPane.prNumber === null ? "" : `#${prPane.prNumber}`;
@@ -387,7 +400,7 @@ function SidebarContent({
               onPress={() => onTabPress("changes")}
             >
               <Text style={[styles.tabText, resolvedTab === "changes" && styles.tabTextActive]}>
-                Changes
+                {text.changes}
               </Text>
             </Pressable>
           )}
@@ -397,9 +410,20 @@ function SidebarContent({
             onPress={() => onTabPress("files")}
           >
             <Text style={[styles.tabText, resolvedTab === "files" && styles.tabTextActive]}>
-              Files
+              {text.files}
             </Text>
           </Pressable>
+          {isGit && (
+            <Pressable
+              testID="explorer-tab-git-graph"
+              style={[styles.tab, resolvedTab === "gitGraph" && styles.tabActive]}
+              onPress={() => onTabPress("gitGraph")}
+            >
+              <Text style={[styles.tabText, resolvedTab === "gitGraph" && styles.tabTextActive]}>
+                {text.gitGraph}
+              </Text>
+            </Pressable>
+          )}
           {isGit && hasPullRequest && (
             <Pressable
               testID="explorer-tab-pr"
@@ -434,6 +458,7 @@ function SidebarContent({
             serverId={serverId}
             workspaceId={workspaceId}
             cwd={workspaceRoot}
+            activeAgentId={activeAgentId}
             hideHeaderRow={!isMobile}
           />
         )}
@@ -444,6 +469,9 @@ function SidebarContent({
             workspaceRoot={workspaceRoot}
             onOpenFile={onOpenFile}
           />
+        )}
+        {resolvedTab === "gitGraph" && isGit && (
+          <CommitGraphPane serverId={serverId} cwd={workspaceRoot} />
         )}
         {resolvedTab === "pr" && prPane.data && <PrPane data={prPane.data} />}
       </View>

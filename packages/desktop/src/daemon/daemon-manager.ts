@@ -64,6 +64,7 @@ const STARTUP_POLL_MAX_ATTEMPTS = 150;
 const STOP_TIMEOUT_MS = 15_000;
 const KILL_TIMEOUT_MS = 3_000;
 const DETACHED_STARTUP_GRACE_MS = 1200;
+const BUNDLED_SKILLS_ENV = "PASEO_BUNDLED_SKILLS_DIR";
 
 type DesktopDaemonState = "starting" | "running" | "stopped" | "errored";
 
@@ -102,6 +103,13 @@ function parseReleaseChannel(args: Record<string, unknown> | undefined): AppRele
 
 function getPaseoHome(): string {
   return resolvePaseoHome(process.env);
+}
+
+function getBundledSkillsDir(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "skills");
+  }
+  return path.join(__dirname, "..", "..", "..", "..", "skills");
 }
 
 function logFilePath(): string {
@@ -303,7 +311,11 @@ async function startDaemon(): Promise<DesktopDaemonStatus> {
 
   const child: ChildProcess = spawnProcess(invocation.command, invocation.args, {
     detached: true,
-    env: { ...invocation.env, PASEO_DESKTOP_MANAGED: "1" },
+    env: {
+      ...invocation.env,
+      PASEO_DESKTOP_MANAGED: "1",
+      [BUNDLED_SKILLS_ENV]: getBundledSkillsDir(),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
 

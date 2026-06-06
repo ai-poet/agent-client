@@ -1,5 +1,6 @@
 import { createNameId } from "mnemonic-id";
 import type { DaemonClient } from "@server/client/daemon-client";
+import type { WorktreePersona } from "@server/shared/worktree-persona";
 import type { ToastApi } from "@/components/toast-host";
 import { normalizeWorkspaceDescriptor, type WorkspaceDescriptor } from "@/stores/session-store";
 import { toErrorMessage } from "@/utils/error-messages";
@@ -31,6 +32,7 @@ export function buildCreatingWorktreePlaceholder(input: {
     status: "running",
     diffStat: null,
     scripts: [],
+    worktreePersona: null,
   };
 }
 
@@ -56,6 +58,7 @@ export async function createWorktreeQuickly(input: {
   serverId: string;
   sourceDirectory: string;
   refName?: string;
+  worktreePersona?: WorktreePersona | null;
   projectId: string;
   projectDisplayName: string;
   projectRootPath: string;
@@ -90,6 +93,7 @@ export async function createWorktreeQuickly(input: {
     const payload = await input.client.createPaseoWorktree({
       cwd: input.sourceDirectory,
       worktreeSlug: placeholder.name,
+      ...(input.worktreePersona ? { worktreePersona: input.worktreePersona } : {}),
       ...(input.refName ? { refName: input.refName } : {}),
     });
 

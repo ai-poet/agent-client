@@ -84,6 +84,18 @@ describe("shared messages attachments", () => {
     ]);
   });
 
+  it("parses optional hidden send-message flag", () => {
+    const parsed = SendAgentMessageRequestSchema.parse({
+      type: "send_agent_message_request",
+      requestId: "req-hidden",
+      agentId: "agent-1",
+      text: "Commit selected files",
+      hidden: true,
+    });
+
+    expect(parsed.hidden).toBe(true);
+  });
+
   it("keeps known attachments and drops unknown worktree-create attachments", () => {
     const parsed = CreatePaseoWorktreeRequestSchema.parse({
       type: "create_paseo_worktree_request",

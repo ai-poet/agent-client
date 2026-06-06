@@ -48,6 +48,9 @@ function getOpenIntentTarget(openIntent: WorkspaceOpenIntent): WorkspaceTabTarge
   if (openIntent.kind === "setup") {
     return { kind: "setup", workspaceId: openIntent.workspaceId };
   }
+  if (openIntent.kind === "preview") {
+    return { kind: "preview", scriptName: openIntent.scriptName };
+  }
   return { kind: "draft", draftId: openIntent.draftId };
 }
 

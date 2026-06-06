@@ -43,6 +43,7 @@ const {
   streamRenderCount,
   latestStreamPermissionKeys,
   latestStreamText,
+  platformState,
   theme,
   runtimeClient,
 } = vi.hoisted(() => {
@@ -71,6 +72,9 @@ const {
     streamRenderCount: vi.fn(),
     latestStreamPermissionKeys: { current: [] as string[] },
     latestStreamText: { current: null as string | null },
+    platformState: {
+      isElectron: false,
+    },
     theme: {
       colors: {
         foreground: "#ffffff",
@@ -100,6 +104,14 @@ vi.mock("react-native-reanimated", () => ({
     View: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   },
 }));
+
+vi.mock("@/constants/platform", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/constants/platform")>();
+  return {
+    ...actual,
+    getIsElectron: () => platformState.isElectron,
+  };
+});
 
 vi.mock("react-native-unistyles", () => {
   return {
@@ -154,6 +166,12 @@ vi.mock("@/components/toast-host", () => ({
 vi.mock("@/components/archived-agent-callout", () => ({
   ArchivedAgentCallout: ({ agentId }: { agentId: string }) => (
     <div data-testid="archived-agent-callout">{agentId}</div>
+  ),
+}));
+
+vi.mock("@/components/desktop-agent-loading-state", () => ({
+  DesktopAgentLoadingState: ({ title }: { title?: string }) => (
+    <div data-testid="desktop-agent-loading-state">{title}</div>
   ),
 }));
 
@@ -367,6 +385,7 @@ describe("AgentPanel render isolation", () => {
     streamRenderCount.mockClear();
     latestStreamPermissionKeys.current = [];
     latestStreamText.current = null;
+    platformState.isElectron = false;
   });
 
   it("refreshes the stream view without invoking Composer for stream-only updates", async () => {
@@ -462,5 +481,20 @@ describe("AgentPanel render isolation", () => {
 
     expect(latestStreamPermissionKeys.current).toEqual([]);
     expect(streamRenderCount).toHaveBeenCalledTimes(initialRenderCount + 2);
+  });
+
+  it("uses the desktop agent loading state for Electron agent boot", async () => {
+    platformState.isElectron = true;
+    useSessionStore.getState().initializeSession("server", makeClient());
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await renderAgentPanel(root);
+
+    expect(container.querySelector('[data-testid="agent-loading"]')).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="desktop-agent-loading-state"]')?.textContent,
+    ).toBe("Loading agent");
   });
 });
