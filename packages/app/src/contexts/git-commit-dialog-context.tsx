@@ -30,6 +30,7 @@ export type GitCommitDialogFile = {
 type GitCommitDialogInput = {
   serverId: string;
   cwd: string;
+  activeAgentId?: string | null;
   files?: GitCommitDialogFile[];
   onCommit: (message: string, options?: { paths?: string[]; addAll?: boolean }) => Promise<void>;
 };
@@ -70,6 +71,10 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
   const focusedAgent = useSessionStore((state) =>
     focusedAgentId ? (state.sessions[currentServerId]?.agents.get(focusedAgentId) ?? null) : null,
   );
+  const activeAgent = useSessionStore((state) => {
+    const agentId = pendingInputRef.current?.activeAgentId;
+    return agentId ? (state.sessions[currentServerId]?.agents.get(agentId) ?? null) : null;
+  });
   const client = useSessionStore((state) => state.sessions[currentServerId]?.client ?? null);
   const storeSupportsHiddenAgentMessages = useSessionStore(
     (state) => state.sessions[currentServerId]?.serverInfo?.features?.hiddenAgentMessages === true,
@@ -164,7 +169,13 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
       setError(text.magicCommitUnsupported);
       return;
     }
-    if (!focusedAgentId || focusedAgent?.cwd !== input.cwd) {
+    const targetAgent =
+      activeAgent && activeAgent.cwd === input.cwd
+        ? activeAgent
+        : focusedAgent && focusedAgent.cwd === input.cwd
+          ? focusedAgent
+          : null;
+    if (!targetAgent) {
       setError(text.magicCommitNoFocusedAgent);
       return;
     }
@@ -173,14 +184,14 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
     setError(null);
     try {
       await client.sendAgentMessage(
-        focusedAgentId,
+        targetAgent.id,
         buildMagicCommitPrompt(selectedFilePaths, locale),
         {
           hidden: true,
           attachments: [],
         },
       );
-      const result = await client.waitForFinish(focusedAgentId);
+      const result = await client.waitForFinish(targetAgent.id);
       if (result.status === "timeout") {
         setError(result.error ?? text.magicCommitFailed);
       } else if (result.error) {
@@ -193,9 +204,9 @@ export function GitCommitDialogProvider({ children }: { children: ReactNode }) {
     }
   }, [
     client,
+    activeAgent,
     files,
-    focusedAgent?.cwd,
-    focusedAgentId,
+    focusedAgent,
     hasFilePicker,
     isMagicSending,
     isSaving,

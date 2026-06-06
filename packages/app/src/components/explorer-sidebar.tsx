@@ -41,6 +41,7 @@ interface ExplorerSidebarProps {
   serverId: string;
   workspaceId?: string | null;
   workspaceRoot: string;
+  activeAgentId?: string | null;
   isGit: boolean;
   onOpenFile?: (filePath: string) => void;
 }
@@ -49,6 +50,7 @@ export function ExplorerSidebar({
   serverId,
   workspaceId,
   workspaceRoot,
+  activeAgentId,
   isGit,
   onOpenFile,
 }: ExplorerSidebarProps) {
@@ -293,6 +295,7 @@ export function ExplorerSidebar({
               serverId={serverId}
               workspaceId={workspaceId}
               workspaceRoot={workspaceRoot}
+              activeAgentId={activeAgentId}
               isGit={isGit}
               isMobile={isMobile}
               isOpen={isOpen}
@@ -326,6 +329,7 @@ export function ExplorerSidebar({
           serverId={serverId}
           workspaceId={workspaceId}
           workspaceRoot={workspaceRoot}
+          activeAgentId={activeAgentId}
           isGit={isGit}
           isMobile={false}
           isOpen={isOpen}
@@ -343,6 +347,7 @@ interface SidebarContentProps {
   serverId: string;
   workspaceId?: string | null;
   workspaceRoot: string;
+  activeAgentId?: string | null;
   isGit: boolean;
   isMobile: boolean;
   isOpen: boolean;
@@ -356,6 +361,7 @@ function SidebarContent({
   serverId,
   workspaceId,
   workspaceRoot,
+  activeAgentId,
   isGit,
   isMobile,
   isOpen,
@@ -452,6 +458,7 @@ function SidebarContent({
             serverId={serverId}
             workspaceId={workspaceId}
             cwd={workspaceRoot}
+            activeAgentId={activeAgentId}
             hideHeaderRow={!isMobile}
           />
         )}

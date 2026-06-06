@@ -2724,6 +2724,7 @@ function WorkspaceScreenContent({
               serverId={normalizedServerId}
               workspaceId={normalizedWorkspaceId}
               workspaceRoot={workspaceDirectory}
+              activeAgentId={focusedPaneAgentId}
               isGit={isGitCheckout}
               onOpenFile={handleOpenFileFromExplorer}
             />

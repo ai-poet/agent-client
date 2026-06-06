@@ -3,6 +3,7 @@
 ## 0.1.80 - 2026-06-05
 
 ### Added
+- Added Opus 4.8 model support.
 - CheapRouter branded desktop packaging, app identity, icons, and managed cloud endpoint configuration.
 - Skills library with local/bundled skill browsing, marketplace browsing, and local skill CRUD.
 - Zip package import for skills, including multi-file packages with `SKILL.md`, scripts, references, and assets.

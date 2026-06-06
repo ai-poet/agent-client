@@ -661,6 +661,7 @@ interface GitDiffPaneProps {
   serverId: string;
   workspaceId?: string | null;
   cwd: string;
+  activeAgentId?: string | null;
   hideHeaderRow?: boolean;
 }
 
@@ -668,7 +669,13 @@ type DiffFlatItem =
   | { type: "header"; file: ParsedDiffFile; fileIndex: number; isExpanded: boolean }
   | { type: "body"; file: ParsedDiffFile; fileIndex: number };
 
-export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDiffPaneProps) {
+export function GitDiffPane({
+  serverId,
+  workspaceId,
+  cwd,
+  activeAgentId,
+  hideHeaderRow,
+}: GitDiffPaneProps) {
   const { theme } = useUnistyles();
   const toast = useToast();
   const { openCommitDialog } = useGitCommitDialog();
@@ -691,6 +698,9 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
   );
   const focusedAgent = useSessionStore((state) =>
     focusedAgentId ? (state.sessions[serverId]?.agents.get(focusedAgentId) ?? null) : null,
+  );
+  const activeAgent = useSessionStore((state) =>
+    activeAgentId ? (state.sessions[serverId]?.agents.get(activeAgentId) ?? null) : null,
   );
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
   const storeSupportsHiddenAgentMessages = useSessionStore(
@@ -1107,7 +1117,13 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       setCommitError(text.magicCommitUnsupported);
       return;
     }
-    if (!focusedAgentId || focusedAgent?.cwd !== cwd) {
+    const targetAgent =
+      activeAgent && activeAgent.cwd === cwd
+        ? activeAgent
+        : focusedAgent && focusedAgent.cwd === cwd
+          ? focusedAgent
+          : null;
+    if (!targetAgent) {
       setCommitError(text.magicCommitNoFocusedAgent);
       return;
     }
@@ -1115,13 +1131,13 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     setIsMagicCommitSending(true);
     setCommitError(null);
     void client
-      .sendAgentMessage(focusedAgentId, buildMagicCommitPrompt(paths, locale), {
+      .sendAgentMessage(targetAgent.id, buildMagicCommitPrompt(paths, locale), {
         hidden: true,
         attachments: [],
       })
       .then(() => {
         toastActionSuccess(text.magicCommitSent);
-        return client.waitForFinish(focusedAgentId);
+        return client.waitForFinish(targetAgent.id);
       })
       .then((result) => {
         if (result.status === "timeout") {
@@ -1138,10 +1154,10 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       });
   }, [
     client,
+    activeAgent,
     commitFilePaths,
     cwd,
-    focusedAgent?.cwd,
-    focusedAgentId,
+    focusedAgent,
     isMagicCommitSending,
     locale,
     selectedCommitPaths,
@@ -1160,6 +1176,7 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
       openCommitDialog({
         serverId,
         cwd,
+        activeAgentId,
         files: commitDialogFiles,
         onCommit: async (message, options) => {
           await runCommit({

@@ -16,6 +16,7 @@ const {
   toastErrorMock,
   storeHiddenAgentMessagesMock,
   clientHiddenAgentMessagesMock,
+  focusedAgentIdMock,
 } = vi.hoisted(() => ({
   commitMock: vi.fn(),
   sendAgentMessageMock: vi.fn(),
@@ -24,6 +25,7 @@ const {
   toastErrorMock: vi.fn(),
   storeHiddenAgentMessagesMock: vi.fn(() => true),
   clientHiddenAgentMessagesMock: vi.fn(() => true),
+  focusedAgentIdMock: vi.fn(() => "agent-1" as string | null),
 }));
 
 const { diffFiles } = vi.hoisted(() => ({
@@ -303,8 +305,11 @@ vi.mock("@/stores/session-store", () => ({
     selector({
       sessions: {
         "server-1": {
-          focusedAgentId: "agent-1",
-          agents: new Map([["agent-1", { id: "agent-1", cwd: "/repo" }]]),
+          focusedAgentId: focusedAgentIdMock(),
+          agents: new Map([
+            ["agent-1", { id: "agent-1", cwd: "/repo" }],
+            ["agent-2", { id: "agent-2", cwd: "/repo" }],
+          ]),
           client: {
             getLastServerInfoMessage: () => ({
               features: { hiddenAgentMessages: clientHiddenAgentMessagesMock() },
@@ -402,6 +407,7 @@ beforeEach(() => {
   waitForFinishMock.mockResolvedValue({ status: "idle", final: null, error: null });
   storeHiddenAgentMessagesMock.mockReturnValue(true);
   clientHiddenAgentMessagesMock.mockReturnValue(true);
+  focusedAgentIdMock.mockReturnValue("agent-1");
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -422,12 +428,20 @@ afterEach(() => {
   toastErrorMock.mockReset();
   storeHiddenAgentMessagesMock.mockReset();
   clientHiddenAgentMessagesMock.mockReset();
+  focusedAgentIdMock.mockReset();
   vi.unstubAllGlobals();
 });
 
-function renderPane() {
+function renderPane(props?: { activeAgentId?: string | null }) {
   act(() => {
-    root?.render(<GitDiffPane serverId="server-1" cwd="/repo" hideHeaderRow />);
+    root?.render(
+      <GitDiffPane
+        serverId="server-1"
+        cwd="/repo"
+        activeAgentId={props?.activeAgentId}
+        hideHeaderRow
+      />,
+    );
   });
 }
 
@@ -525,6 +539,23 @@ describe("GitDiffPane inline commit", () => {
       (document.querySelector('[data-testid="changes-inline-commit-message"]') as HTMLInputElement)
         .value,
     ).toBe("Manual text stays put");
+  });
+
+  it("uses the active tab agent when the session focused agent is cleared", async () => {
+    focusedAgentIdMock.mockReturnValue(null);
+    renderPane({ activeAgentId: "agent-2" });
+
+    click("changes-inline-magic-commit");
+
+    await vi.waitFor(() => {
+      expect(sendAgentMessageMock).toHaveBeenCalledWith(
+        "agent-2",
+        expect.stringContaining('"src/app.ts"'),
+        expect.objectContaining({ hidden: true, attachments: [] }),
+      );
+    });
+    expect(waitForFinishMock).toHaveBeenCalledWith("agent-2");
+    expect(document.body.textContent).not.toContain("Focus an agent in this workspace first");
   });
 
   it("uses the client's latest server info when store feature metadata is stale", async () => {
