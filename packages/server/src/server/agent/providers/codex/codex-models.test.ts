@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { getCodexModels } from "./codex-models.js";
 
 describe("getCodexModels", () => {
-  it("matches the backend OpenAI default model catalog", () => {
+  it("returns the supported hardcoded Codex model catalog", () => {
     expect(getCodexModels().map((model) => model.id)).toEqual([
       "gpt-5.6-sol",
       "gpt-5.6-terra",
@@ -11,16 +11,6 @@ describe("getCodexModels", () => {
       "gpt-5.5",
       "gpt-5.4",
       "gpt-5.4-mini",
-      "gpt-5.4-nano",
-      "gpt-5.3-codex",
-      "gpt-5.3-codex-spark",
-      "gpt-5.2",
-      "gpt-5.2-codex",
-      "gpt-5.1-codex-max",
-      "gpt-5.1-codex",
-      "gpt-5.1",
-      "gpt-5.1-codex-mini",
-      "gpt-5",
     ]);
   });
 
@@ -48,6 +38,13 @@ describe("getCodexModels", () => {
 
   it("does not include an unconfirmed GPT-5.6 Pro model", () => {
     expect(getCodexModels().some((model) => model.id === "gpt-5.6-pro")).toBe(false);
+  });
+
+  it("excludes GPT-5.4 Nano and all models below GPT-5.4", () => {
+    const modelIds = getCodexModels().map((model) => model.id);
+
+    expect(modelIds).not.toContain("gpt-5.4-nano");
+    expect(modelIds.some((id) => /^(?:gpt-5(?:$|\.[0-3](?:$|-)))/.test(id))).toBe(false);
   });
 
   it("returns independent model and thinking option objects", () => {

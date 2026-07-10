@@ -73,21 +73,6 @@ const CODEX_MODELS: AgentModelDefinition[] = [
     label: "GPT-5.4 Mini",
     description: "Small, fast, and cost-efficient model for simpler coding tasks.",
   },
-  { provider: "codex", id: "gpt-5.4-nano", label: "GPT-5.4 Nano" },
-  { provider: "codex", id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
-  { provider: "codex", id: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark" },
-  {
-    provider: "codex",
-    id: "gpt-5.2",
-    label: "GPT-5.2",
-    description: "Optimized for professional work and long-running agents.",
-  },
-  { provider: "codex", id: "gpt-5.2-codex", label: "GPT-5.2 Codex" },
-  { provider: "codex", id: "gpt-5.1-codex-max", label: "GPT-5.1 Codex Max" },
-  { provider: "codex", id: "gpt-5.1-codex", label: "GPT-5.1 Codex" },
-  { provider: "codex", id: "gpt-5.1", label: "GPT-5.1" },
-  { provider: "codex", id: "gpt-5.1-codex-mini", label: "GPT-5.1 Codex Mini" },
-  { provider: "codex", id: "gpt-5", label: "GPT-5" },
 ];
 
 export function getCodexModels(): AgentModelDefinition[] {
