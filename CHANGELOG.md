@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.81 - 2026-07-10
+
+### Added
+- Claude Sonnet 5 and GPT-5.6 Sol, Terra, and Luna (with reasoning variants) in the static model catalogs.
+- Authenticated model catalog fetching from `/v1/models` for Claude and Codex managed clouds, with daemon-lifetime caching and hardcoded fallback.
+- Dated Claude model IDs (e.g. `claude-haiku-4-5-20251001`) now inherit their base model's label and thinking metadata.
+
+### Improved
+- Managed cloud model selector groups now reuse provider snapshot models, avoiding duplicate entries and empty groups.
+- The Codex hardcoded model list no longer includes GPT-5.4 Nano or any models below GPT-5.4.
+
 ## 0.1.80 - 2026-06-05
 
 ### Added
