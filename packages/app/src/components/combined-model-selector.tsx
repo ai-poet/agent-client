@@ -343,18 +343,21 @@ function GroupedProviderRows({
         const ProvIcon = getProviderIcon(group.providerId);
         const isInline = viewKind === "provider";
         const providerCloudGroups = cloudGroupsForProvider(cloudGroups, group.providerId);
-        const otherRows = buildOtherAvailableModelRows(group.rows, providerCloudGroups);
+        const selectableCloudGroups = providerCloudGroups.filter(
+          (group) => group.models.length > 0,
+        );
+        const otherRows = buildOtherAvailableModelRows(group.rows, selectableCloudGroups);
         const providerCanBeSelected = canSelectProvider(group.providerId);
 
         return (
           <View key={group.providerId}>
             {index > 0 ? <View style={styles.separator} /> : null}
-            {isInline && providerCloudGroups.length > 0 ? (
+            {isInline && selectableCloudGroups.length > 0 ? (
               <>
                 <View style={styles.sectionHeading}>
                   <Text style={styles.sectionHeadingText}>{text.cloudGroups}</Text>
                 </View>
-                {providerCloudGroups.map((cloudGroup) => (
+                {selectableCloudGroups.map((cloudGroup) => (
                   <Pressable
                     key={`${cloudGroup.provider}:${cloudGroup.groupId}`}
                     disabled={!providerCanBeSelected}

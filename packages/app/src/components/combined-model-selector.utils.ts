@@ -89,9 +89,14 @@ export function buildCloudGroupModelRows(input: {
 
 export function buildOtherAvailableModelRows(
   providerRows: SelectorModelRow[],
-  _cloudGroups: SelectorCloudGroup[] | undefined,
+  cloudGroups: SelectorCloudGroup[] | undefined,
 ): SelectorModelRow[] {
-  return providerRows;
+  const cloudModelKeys = new Set(
+    (cloudGroups ?? []).flatMap((group) =>
+      group.models.map((model) => `${group.provider}\0${model.id}`),
+    ),
+  );
+  return providerRows.filter((row) => !cloudModelKeys.has(`${row.provider}\0${row.modelId}`));
 }
 
 export function matchesSearch(row: SelectorModelRow, normalizedQuery: string): boolean {

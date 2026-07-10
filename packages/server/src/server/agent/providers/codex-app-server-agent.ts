@@ -52,6 +52,7 @@ import { findExecutable, isCommandAvailable } from "../../../utils/executable.js
 import { spawnProcess } from "../../../utils/spawn.js";
 import { extractCodexTerminalSessionId, nonEmptyString } from "./tool-call-mapper-utils.js";
 import { buildCodexFeatures, codexModelSupportsFastMode } from "./codex-feature-definitions.js";
+import { getCodexModels } from "./codex/codex-models.js";
 import {
   formatDiagnosticStatus,
   formatProviderDiagnostic,
@@ -147,10 +148,6 @@ function normalizeCodexModelId(modelId: string | null | undefined): string | und
     return undefined;
   }
   return normalized;
-}
-
-function normalizeCodexModelLabel(displayName: string): string {
-  return displayName.replace(/\bgpt\b/gi, "GPT");
 }
 
 function isSchemaRecord(value: unknown): value is Record<string, unknown> {
@@ -4181,86 +4178,7 @@ export class CodexAppServerAgentClient implements AgentClient {
   }
 
   async listModels(_options: ListModelsOptions): Promise<AgentModelDefinition[]> {
-    // Codex model/list is global to the app server in this flow; cwd/force are intentionally ignored.
-    const child = await this.spawnAppServer();
-    const client = new CodexAppServerClient(child, this.logger);
-
-    try {
-      await client.request("initialize", buildCodexAppServerInitializeParams());
-      client.notify("initialized", {});
-
-      const response = (await client.request("model/list", {})) as { data?: Array<any> };
-      const models = Array.isArray(response?.data) ? response.data : [];
-      const configuredDefaults = await readCodexConfiguredDefaults(client, this.logger);
-      const configuredDefaultModelId = configuredDefaults.model;
-      const configuredDefaultThinkingOptionId = configuredDefaults.thinkingOptionId;
-      const hasConfiguredDefaultModel =
-        typeof configuredDefaultModelId === "string"
-          ? models.some((model) => model?.id === configuredDefaultModelId)
-          : false;
-      return models.map((model) => {
-        const defaultReasoningEffort = normalizeCodexThinkingOptionId(
-          typeof model.defaultReasoningEffort === "string" ? model.defaultReasoningEffort : null,
-        );
-        const resolvedDefaultReasoningEffort =
-          configuredDefaultThinkingOptionId ?? defaultReasoningEffort;
-
-        const thinkingById = new Map<string, { id: string; label: string; description?: string }>();
-        if (Array.isArray(model.supportedReasoningEfforts)) {
-          for (const entry of model.supportedReasoningEfforts) {
-            const id = normalizeCodexThinkingOptionId(
-              typeof entry?.reasoningEffort === "string" ? entry.reasoningEffort : null,
-            );
-            if (!id) continue;
-            const description =
-              typeof entry?.description === "string" && entry.description.trim().length > 0
-                ? entry.description
-                : undefined;
-            thinkingById.set(id, { id, label: id, description });
-          }
-        }
-
-        if (resolvedDefaultReasoningEffort && !thinkingById.has(resolvedDefaultReasoningEffort)) {
-          thinkingById.set(resolvedDefaultReasoningEffort, {
-            id: resolvedDefaultReasoningEffort,
-            label: resolvedDefaultReasoningEffort,
-            description:
-              configuredDefaultThinkingOptionId === resolvedDefaultReasoningEffort
-                ? "Configured default reasoning effort"
-                : "Model default reasoning effort",
-          });
-        }
-
-        const thinkingOptions = Array.from(thinkingById.values()).map((option) => ({
-          ...option,
-          isDefault: option.id === resolvedDefaultReasoningEffort,
-        }));
-        const defaultThinkingOptionId =
-          resolvedDefaultReasoningEffort ??
-          thinkingOptions.find((option) => option.isDefault)?.id ??
-          thinkingOptions[0]?.id;
-        const isDefaultModel = hasConfiguredDefaultModel
-          ? model.id === configuredDefaultModelId
-          : model.isDefault;
-
-        return {
-          provider: CODEX_PROVIDER,
-          id: model.id,
-          label: normalizeCodexModelLabel(model.displayName),
-          description: model.description,
-          isDefault: isDefaultModel,
-          thinkingOptions: thinkingOptions.length > 0 ? thinkingOptions : undefined,
-          defaultThinkingOptionId,
-          metadata: {
-            model: model.model,
-            defaultReasoningEffort: model.defaultReasoningEffort,
-            supportedReasoningEfforts: model.supportedReasoningEfforts,
-          },
-        };
-      });
-    } finally {
-      await client.dispose();
-    }
+    return getCodexModels();
   }
 
   async isAvailable(): Promise<boolean> {
