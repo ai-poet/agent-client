@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import type { AgentModelDefinition } from "./agent-sdk-types.js";
+import { getClaudeModels } from "./providers/claude/claude-models.js";
 import {
   ManagedProviderModelCatalog,
   normalizeManagedProviderEndpoint,
@@ -152,6 +153,40 @@ describe("ManagedProviderModelCatalog", () => {
       defaultThinkingOptionId: "high",
       thinkingOptions: [{ id: "high", label: "High" }],
     });
+  });
+
+  it("uses canonical Claude metadata for a dated remote model ID", async () => {
+    const providersFile = await createProvidersFile(managedStore());
+    const catalog = new ManagedProviderModelCatalog(createTestLogger(), {
+      providersFile,
+      fetchImpl: vi.fn(async () =>
+        Response.json({
+          data: [
+            {
+              id: "claude-haiku-4-5-20251001",
+              display_name: "claude-haiku-4-5-20251001",
+            },
+          ],
+        }),
+      ),
+    });
+
+    const models = await catalog.getModels("claude", getClaudeModels());
+
+    expect(models).toEqual([
+      expect.objectContaining({
+        id: "claude-haiku-4-5-20251001",
+        label: "Haiku 4.5",
+        description: "Haiku 4.5 · Fastest for quick answers",
+        isDefault: true,
+        thinkingOptions: [
+          { id: "low", label: "Low" },
+          { id: "medium", label: "Medium" },
+          { id: "high", label: "High" },
+          { id: "max", label: "Max" },
+        ],
+      }),
+    ]);
   });
 
   it("uses a successful same-route cache on failure but does not share it after a key change", async () => {

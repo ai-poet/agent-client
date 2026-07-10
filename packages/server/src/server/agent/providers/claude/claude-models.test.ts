@@ -44,6 +44,17 @@ describe("getClaudeModels", () => {
       "max",
     ]);
   });
+
+  it("provides thinking options for Haiku 4.5", () => {
+    const haiku = getClaudeModels().find((model) => model.id === "claude-haiku-4-5");
+
+    expect(haiku?.thinkingOptions?.map((option) => option.id)).toEqual([
+      "low",
+      "medium",
+      "high",
+      "max",
+    ]);
+  });
 });
 
 describe("normalizeClaudeRuntimeModelId", () => {

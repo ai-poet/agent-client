@@ -6,6 +6,7 @@ import type { Logger } from "pino";
 import { z } from "zod";
 
 import type { AgentModelDefinition } from "./agent-sdk-types.js";
+import { normalizeClaudeRuntimeModelId } from "./providers/claude/claude-models.js";
 
 export type ManagedModelProvider = "claude" | "codex";
 
@@ -121,9 +122,12 @@ function mergeRemoteModels(
 ): AgentModelDefinition[] {
   const fallbackById = new Map(fallbackModels.map((model) => [model.id, model]));
   const merged = remoteModels.map((remote) => {
-    const known = fallbackById.get(remote.id);
+    const canonicalId =
+      provider === "claude" ? normalizeClaudeRuntimeModelId(remote.id) : remote.id;
+    const known =
+      fallbackById.get(remote.id) ?? (canonicalId ? fallbackById.get(canonicalId) : null);
     if (known) {
-      return cloneModels([{ ...known, provider }])[0]!;
+      return cloneModels([{ ...known, provider, id: remote.id }])[0]!;
     }
 
     return {

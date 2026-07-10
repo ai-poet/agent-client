@@ -720,7 +720,11 @@ describe("buildProviderRegistry", () => {
         },
       ]);
 
-      const registry = buildProviderRegistry(logger);
+      const registry = buildProviderRegistry(logger, {
+        managedModelCatalog: {
+          getModels: async (_provider, models) => models,
+        },
+      });
       const models = await registry.claude.fetchModels({
         cwd: "/tmp/registry-models",
         force: false,

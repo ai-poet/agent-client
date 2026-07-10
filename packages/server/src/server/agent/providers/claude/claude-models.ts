@@ -86,6 +86,7 @@ const CLAUDE_MODELS: AgentModelDefinition[] = [
     id: "claude-haiku-4-5",
     label: "Haiku 4.5",
     description: "Haiku 4.5 · Fastest for quick answers",
+    thinkingOptions: [...CLAUDE_THINKING_OPTIONS],
   },
 ];
 
