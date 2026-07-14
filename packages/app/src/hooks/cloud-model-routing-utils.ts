@@ -1,4 +1,5 @@
 import type { AgentProviderDefinition } from "@server/server/agent/provider-manifest";
+import type { AgentModelDefinition } from "@server/server/agent/agent-sdk-types";
 import type {
   Sub2APIGroup,
   Sub2APIGroupStatusItem,
@@ -157,6 +158,7 @@ export function buildGlobalCloudRouteGroups(input: {
   keys?: Sub2APIKey[] | null;
   groups?: Sub2APIGroup[] | null;
   providerDefinitions: AgentProviderDefinition[];
+  allProviderModels?: Map<string, AgentModelDefinition[]>;
 }): SelectorCloudGroup[] {
   const keys = input.keys ?? [];
   const groups = input.groups ?? [];
@@ -193,6 +195,14 @@ export function buildGlobalCloudRouteGroups(input: {
 
     const group = key.group ?? groupsById.get(groupId) ?? null;
     const groupLabel = group?.name ?? `Group #${groupId}`;
+    const models = (input.allProviderModels?.get(activeProvider.provider) ?? []).map((model) => ({
+      id: model.id,
+      label: model.label,
+      description: model.description,
+    }));
+    if (models.length === 0) {
+      continue;
+    }
     result.push({
       provider: activeProvider.provider,
       groupId,
@@ -200,7 +210,7 @@ export function buildGlobalCloudRouteGroups(input: {
       platform: group?.platform ?? "",
       description: `${route.cliLabel} · global CLI key`,
       isActiveForGlobalKey: true,
-      models: [],
+      models,
     });
   }
 

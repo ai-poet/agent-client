@@ -74,7 +74,7 @@ describe("combined model selector helpers", () => {
     expect(buildSelectedTriggerLabel("GPT-5.4")).toBe("GPT-5.4");
   });
 
-  it("builds cloud group rows and keeps provider models visible for global config", () => {
+  it("builds cloud group rows and removes duplicate provider models from other models", () => {
     const providerRows = buildModelRows(
       providerDefinitions,
       new Map([
@@ -108,6 +108,6 @@ describe("combined model selector helpers", () => {
     ]);
     expect(
       buildOtherAvailableModelRows(providerRows, [cloudGroup]).map((row) => row.modelId),
-    ).toEqual(["sonnet-4.6", "opus-4.6"]);
+    ).toEqual(["opus-4.6"]);
   });
 });

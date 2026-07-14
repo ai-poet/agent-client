@@ -29,6 +29,11 @@ import { OpenCodeAgentClient, OpenCodeServerManager } from "./providers/opencode
 import { PiDirectAgentClient } from "./providers/pi-direct-agent.js";
 import { MockLoadTestAgentClient } from "./providers/mock-load-test-agent.js";
 import {
+  ManagedProviderModelCatalog,
+  type ManagedModelProvider,
+  type ManagedProviderModelCatalogLike,
+} from "./managed-provider-model-catalog.js";
+import {
   AGENT_PROVIDER_DEFINITIONS,
   BUILTIN_PROVIDER_IDS,
   DEV_AGENT_PROVIDER_DEFINITIONS,
@@ -51,6 +56,7 @@ export type BuildProviderRegistryOptions = {
   providerOverrides?: Record<string, ProviderOverride>;
   workspaceGitService?: Pick<WorkspaceGitService, "resolveRepoRoot">;
   isDev?: boolean;
+  managedModelCatalog?: ManagedProviderModelCatalogLike;
 };
 
 type ProviderClientFactory = (
@@ -320,6 +326,7 @@ function createRegistryEntry(
   logger: Logger,
   provider: AgentProvider,
   resolved: ResolvedProvider,
+  managedModelCatalog: ManagedProviderModelCatalogLike,
 ): ProviderDefinition {
   const modelClient = resolved.createBaseClient(logger);
 
@@ -329,8 +336,17 @@ function createRegistryEntry(
       const inner = resolved.createBaseClient(providerLogger);
       return inner.provider === provider ? inner : wrapClientProvider(provider, inner);
     },
-    fetchModels: async (options: ListModelsOptions) =>
-      mergeModels(provider, resolved.profileModels, await modelClient.listModels(options)),
+    fetchModels: async (options: ListModelsOptions) => {
+      const models = mergeModels(
+        provider,
+        resolved.profileModels,
+        await modelClient.listModels(options),
+      );
+      if (resolved.profileModels.length > 0 || (provider !== "claude" && provider !== "codex")) {
+        return models;
+      }
+      return await managedModelCatalog.getModels(provider as ManagedModelProvider, models);
+    },
     fetchModes: async (options: ListModesOptions) => {
       const modes = modelClient.listModes
         ? await modelClient.listModes(options)
@@ -466,11 +482,16 @@ export function buildProviderRegistry(
     options?.isDev === true,
   );
   addDerivedProviders(resolvedProviders, providerOverrides);
+  const managedModelCatalog =
+    options?.managedModelCatalog ?? new ManagedProviderModelCatalog(logger);
 
   return Object.fromEntries(
     [...resolvedProviders.entries()]
       .filter(([, resolved]) => resolved.enabled)
-      .map(([provider, resolved]) => [provider, createRegistryEntry(logger, provider, resolved)]),
+      .map(([provider, resolved]) => [
+        provider,
+        createRegistryEntry(logger, provider, resolved, managedModelCatalog),
+      ]),
   ) as Record<AgentProvider, ProviderDefinition>;
 }
 

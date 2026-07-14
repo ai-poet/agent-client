@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { AgentProviderDefinition } from "@server/server/agent/provider-manifest";
+import type { AgentModelDefinition } from "@server/server/agent/agent-sdk-types";
 import { getIsElectron } from "@/constants/platform";
 import { invokeDesktopCommand } from "@/desktop/electron/invoke";
 import { useAppSettings } from "@/hooks/use-settings";
@@ -26,6 +27,7 @@ export function useCloudModelRouting(input: {
   serverId: string | null | undefined;
   cwd: string | null | undefined;
   providerDefinitions: AgentProviderDefinition[];
+  allProviderModels?: Map<string, AgentModelDefinition[]>;
 }) {
   const { settings } = useAppSettings();
   const cloudClient = useSub2APIClient();
@@ -54,6 +56,7 @@ export function useCloudModelRouting(input: {
             keys: cloudKeysQuery.data?.items,
             groups: cloudGroupsQuery.data,
             providerDefinitions: input.providerDefinitions,
+            allProviderModels: input.allProviderModels,
           })
         : [],
     [
@@ -62,6 +65,7 @@ export function useCloudModelRouting(input: {
       cloudKeysQuery.data?.items,
       desktopProviderStoreQuery.data,
       input.providerDefinitions,
+      input.allProviderModels,
       isCloudMode,
     ],
   );

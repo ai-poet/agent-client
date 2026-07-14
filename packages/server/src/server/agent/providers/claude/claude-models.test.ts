@@ -12,6 +12,7 @@ describe("getClaudeModels", () => {
       "claude-opus-4-7",
       "claude-opus-4-6[1m]",
       "claude-opus-4-6",
+      "claude-sonnet-5",
       "claude-sonnet-4-6",
       "claude-haiku-4-5",
     ]);
@@ -29,6 +30,30 @@ describe("getClaudeModels", () => {
     const b = getClaudeModels();
     expect(a).not.toBe(b);
     expect(a[0]).not.toBe(b[0]);
+    expect(a[0]!.thinkingOptions).not.toBe(b[0]!.thinkingOptions);
+  });
+
+  it("provides all supported Sonnet 5 thinking options", () => {
+    const sonnet5 = getClaudeModels().find((model) => model.id === "claude-sonnet-5");
+
+    expect(sonnet5?.thinkingOptions?.map((option) => option.id)).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+  });
+
+  it("provides thinking options for Haiku 4.5", () => {
+    const haiku = getClaudeModels().find((model) => model.id === "claude-haiku-4-5");
+
+    expect(haiku?.thinkingOptions?.map((option) => option.id)).toEqual([
+      "low",
+      "medium",
+      "high",
+      "max",
+    ]);
   });
 });
 
@@ -38,6 +63,7 @@ describe("normalizeClaudeRuntimeModelId", () => {
     expect(normalizeClaudeRuntimeModelId("claude-opus-4-8[1m]")).toBe("claude-opus-4-8[1m]");
     expect(normalizeClaudeRuntimeModelId("claude-opus-4-6")).toBe("claude-opus-4-6");
     expect(normalizeClaudeRuntimeModelId("claude-opus-4-6[1m]")).toBe("claude-opus-4-6[1m]");
+    expect(normalizeClaudeRuntimeModelId("claude-sonnet-5")).toBe("claude-sonnet-5");
     expect(normalizeClaudeRuntimeModelId("claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
     expect(normalizeClaudeRuntimeModelId("claude-haiku-4-5")).toBe("claude-haiku-4-5");
   });
@@ -46,11 +72,17 @@ describe("normalizeClaudeRuntimeModelId", () => {
     expect(normalizeClaudeRuntimeModelId("claude-opus-4-8-20260602")).toBe("claude-opus-4-8");
     expect(normalizeClaudeRuntimeModelId("claude-opus-4-6-20260101")).toBe("claude-opus-4-6");
     expect(normalizeClaudeRuntimeModelId("claude-sonnet-4-6-20260101")).toBe("claude-sonnet-4-6");
+    expect(normalizeClaudeRuntimeModelId("claude-sonnet-5-20260709")).toBe("claude-sonnet-5");
     expect(normalizeClaudeRuntimeModelId("claude-haiku-4-5-20251001")).toBe("claude-haiku-4-5");
   });
 
   it("preserves [1m] suffix from runtime model strings", () => {
     expect(normalizeClaudeRuntimeModelId("claude-opus-4-6[1m]")).toBe("claude-opus-4-6[1m]");
+  });
+
+  it("normalizes major-only Sonnet 5 runtime variants", () => {
+    expect(normalizeClaudeRuntimeModelId("sonnet-5")).toBe("claude-sonnet-5");
+    expect(normalizeClaudeRuntimeModelId("Claude Sonnet 5")).toBe("claude-sonnet-5");
   });
 
   it("returns null for empty/null/undefined", () => {

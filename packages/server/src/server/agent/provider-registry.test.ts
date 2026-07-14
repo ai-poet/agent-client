@@ -556,6 +556,29 @@ describe("buildProviderRegistry", () => {
   });
 
   describe("model merging", () => {
+    test("managed catalog overrides built-in Claude and Codex runtime models", async () => {
+      mockState.runtimeModels.set("claude", [
+        { provider: "claude", id: "runtime-claude", label: "Runtime Claude" },
+      ]);
+      mockState.runtimeModels.set("codex", [
+        { provider: "codex", id: "runtime-codex", label: "Runtime Codex" },
+      ]);
+      const getModels = vi.fn(async (provider: "claude" | "codex") => [
+        { provider, id: `remote-${provider}`, label: `Remote ${provider}` },
+      ]);
+      const registry = buildProviderRegistry(logger, {
+        managedModelCatalog: { getModels },
+      });
+
+      await expect(
+        registry.claude.fetchModels({ cwd: "/tmp/registry-models", force: false }),
+      ).resolves.toEqual([expect.objectContaining({ id: "remote-claude" })]);
+      await expect(
+        registry.codex.fetchModels({ cwd: "/tmp/registry-models", force: false }),
+      ).resolves.toEqual([expect.objectContaining({ id: "remote-codex" })]);
+      expect(getModels).toHaveBeenCalledTimes(2);
+    });
+
     test("profile models replace runtime models", async () => {
       mockState.runtimeModels.set("claude", [
         {
@@ -566,6 +589,9 @@ describe("buildProviderRegistry", () => {
       ]);
 
       const registry = buildProviderRegistry(logger, {
+        managedModelCatalog: {
+          getModels: vi.fn(async () => [{ provider: "claude", id: "remote", label: "Remote" }]),
+        },
         providerOverrides: {
           claude: {
             models: [
@@ -584,6 +610,24 @@ describe("buildProviderRegistry", () => {
       });
 
       expect(models.map((model) => model.id)).toEqual(["profile-fast"]);
+    });
+
+    test("managed catalog does not affect a custom provider derived from Claude", async () => {
+      mockState.runtimeModels.set("claude", [
+        { provider: "claude", id: "runtime-claude", label: "Runtime Claude" },
+      ]);
+      const getModels = vi.fn(async () => [{ provider: "claude", id: "remote", label: "Remote" }]);
+      const registry = buildProviderRegistry(logger, {
+        managedModelCatalog: { getModels },
+        providerOverrides: {
+          zai: { extends: "claude", label: "ZAI" },
+        },
+      });
+
+      await expect(
+        registry.zai.fetchModels({ cwd: "/tmp/registry-models", force: false }),
+      ).resolves.toEqual([{ provider: "zai", id: "runtime-claude", label: "Runtime Claude" }]);
+      expect(getModels).not.toHaveBeenCalled();
     });
 
     test("profile models exclude runtime models entirely", async () => {
@@ -676,7 +720,11 @@ describe("buildProviderRegistry", () => {
         },
       ]);
 
-      const registry = buildProviderRegistry(logger);
+      const registry = buildProviderRegistry(logger, {
+        managedModelCatalog: {
+          getModels: async (_provider, models) => models,
+        },
+      });
       const models = await registry.claude.fetchModels({
         cwd: "/tmp/registry-models",
         force: false,

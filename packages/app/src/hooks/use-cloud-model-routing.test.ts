@@ -216,6 +216,19 @@ describe("buildGlobalCloudRouteGroups", () => {
       keys,
       groups: [claudeGroup],
       providerDefinitions,
+      allProviderModels: new Map([
+        [
+          "claude",
+          [
+            {
+              provider: "claude",
+              id: "claude-sonnet-5",
+              label: "Sonnet 5",
+              description: "Managed catalog model",
+            },
+          ],
+        ],
+      ]),
     });
 
     expect(groups).toEqual([
@@ -224,7 +237,53 @@ describe("buildGlobalCloudRouteGroups", () => {
         groupId: 10,
         groupLabel: "Claude Fast",
         isActiveForGlobalKey: true,
+        models: [
+          {
+            id: "claude-sonnet-5",
+            label: "Sonnet 5",
+            description: "Managed catalog model",
+          },
+        ],
       }),
     ]);
+  });
+
+  it("omits a global Cloud group until its provider snapshot has models", () => {
+    const groups = buildGlobalCloudRouteGroups({
+      activeProviders: [
+        {
+          provider: "claude",
+          apiKey: "sk-global",
+          endpoint: "https://cloud.example.com",
+        },
+      ],
+      cloudEndpoint: "https://cloud.example.com",
+      keys: [
+        {
+          id: 7,
+          user_id: 1,
+          key: "sk-global",
+          name: "Desktop Claude",
+          group_id: claudeGroup.id,
+          status: "active",
+          quota: 0,
+          quota_used: 0,
+          rate_limit_5h: 0,
+          rate_limit_1d: 0,
+          rate_limit_7d: 0,
+          usage_5h: 0,
+          usage_1d: 0,
+          usage_7d: 0,
+          created_at: "",
+          updated_at: "",
+          group: claudeGroup,
+        },
+      ],
+      groups: [claudeGroup],
+      providerDefinitions,
+      allProviderModels: new Map(),
+    });
+
+    expect(groups).toEqual([]);
   });
 });

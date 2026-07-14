@@ -1002,12 +1002,6 @@ export const AgentStatusBar = memo(function AgentStatusBar({
       : undefined;
     return definition ? [definition] : [];
   }, [agent?.provider, snapshotEntries]);
-  const { cloudGroups } = useCloudModelRouting({
-    serverId,
-    cwd: agent?.cwd,
-    providerDefinitions: agentProviderDefinitions,
-  });
-
   const agentProviderModels = useMemo(() => {
     const map = new Map<string, AgentModelDefinition[]>();
     if (agent?.provider && models) {
@@ -1015,6 +1009,12 @@ export const AgentStatusBar = memo(function AgentStatusBar({
     }
     return map;
   }, [agent?.provider, models]);
+  const { cloudGroups } = useCloudModelRouting({
+    serverId,
+    cwd: agent?.cwd,
+    providerDefinitions: agentProviderDefinitions,
+    allProviderModels: agentProviderModels,
+  });
 
   const displayMode = agent?.currentModeId
     ? localizeAgentModeLabel(
@@ -1218,6 +1218,7 @@ export function DraftAgentStatusBar({
     serverId,
     cwd,
     providerDefinitions,
+    allProviderModels,
   });
 
   const mappedModeOptions = useMemo<StatusOption[]>(() => {
