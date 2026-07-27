@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import type { AgentProvider } from "@server/server/agent/agent-sdk-types";
+import { getBaseModelId } from "@/utils/model-context-window";
 
 const FORM_PREFERENCES_STORAGE_KEY = "@paseo:create-agent-preferences";
 const FORM_PREFERENCES_QUERY_KEY = ["form-preferences"];
@@ -100,7 +101,7 @@ export function mergeProviderPreferences(args: {
 }
 
 export function buildFavoriteModelKey(input: FavoriteModelPreference): string {
-  return `${input.provider}:${input.modelId}`;
+  return `${input.provider}:${getBaseModelId(input.provider, input.modelId)}`;
 }
 
 export function isFavoriteModel(args: {
@@ -119,7 +120,10 @@ export function toggleFavoriteModel(args: {
   provider: string;
   modelId: string;
 }): FormPreferences {
-  const favorite = { provider: args.provider, modelId: args.modelId };
+  const favorite = {
+    provider: args.provider,
+    modelId: getBaseModelId(args.provider, args.modelId),
+  };
   const favoriteKey = buildFavoriteModelKey(favorite);
   const existingFavorites = args.preferences.favoriteModels ?? [];
   const hasFavorite = existingFavorites.some(

@@ -68,6 +68,22 @@ beforeAll(async () => {
 });
 
 describe("useAgentInputDraft", () => {
+  describe("__private__.resolveSelectableProviderIds", () => {
+    it("returns only providers whose snapshots are ready", () => {
+      expect(
+        __private__.resolveSelectableProviderIds([
+          { provider: "claude", status: "ready" },
+          { provider: "codex", status: "loading" },
+          { provider: "opencode", status: "unavailable" },
+        ]),
+      ).toEqual(["claude"]);
+    });
+
+    it("preserves the legacy fallback when snapshot entries are unavailable", () => {
+      expect(__private__.resolveSelectableProviderIds(undefined)).toBeUndefined();
+    });
+  });
+
   describe("__private__.resolveDraftKey", () => {
     it("returns an object draft key string unchanged", () => {
       expect(

@@ -1,17 +1,22 @@
 import { describe, expect, it } from "vitest";
+import type { AgentModelDefinition } from "@server/server/agent/agent-sdk-types";
 import {
+  cloudGroupsForStatusProvider,
+  filterSelectableProviderDefinitions,
   getFeatureHighlightColor,
   getFeatureTooltip,
   getStatusSelectorHint,
   resolveCloudGroupDisplayLabel,
   normalizeModelId,
   resolveAgentModelSelection,
+  scopeModelsToProvider,
 } from "./agent-status-bar.utils";
 
 describe("getStatusSelectorHint", () => {
   it("explains what each editable status control does", () => {
     expect(getStatusSelectorHint("thinking")).toBe("Thinking mode");
     expect(getStatusSelectorHint("model")).toBe("Change model");
+    expect(getStatusSelectorHint("context")).toBe("Change context window");
     expect(getStatusSelectorHint("mode")).toBe("Change permission mode");
     expect(getStatusSelectorHint("cloud-group")).toBe("Cloud group");
   });
@@ -42,6 +47,65 @@ describe("cloud group status helpers", () => {
   it("resolves the active Cloud group as read-only status", () => {
     expect(resolveCloudGroupDisplayLabel(groups, "claude")).toBe("GLM Pay As You Go");
     expect(resolveCloudGroupDisplayLabel(groups, "codex")).toBeNull();
+  });
+
+  it("keeps only Cloud groups for the selected provider", () => {
+    expect(
+      cloudGroupsForStatusProvider(
+        [...groups, { ...groups[0]!, provider: "codex", groupId: 20 }],
+        "claude",
+      ).map((group) => group.groupId),
+    ).toEqual([10, 12]);
+  });
+});
+
+describe("draft provider and model controls", () => {
+  const providerDefinitions = [
+    {
+      id: "claude",
+      label: "Claude",
+      description: "Claude provider",
+      defaultModeId: "default",
+      modes: [],
+    },
+    {
+      id: "codex",
+      label: "Codex",
+      description: "Codex provider",
+      defaultModeId: "auto",
+      modes: [],
+    },
+  ];
+  const claudeModels = [{ provider: "claude" as const, id: "claude-opus-5", label: "Opus 5" }];
+  const codexModels = [{ provider: "codex" as const, id: "gpt-5.4", label: "GPT-5.4" }];
+
+  it("offers only provider snapshots that are ready", () => {
+    expect(
+      filterSelectableProviderDefinitions(providerDefinitions, ["claude"]).map(
+        (definition) => definition.id,
+      ),
+    ).toEqual(["claude"]);
+  });
+
+  it("keeps the model selector scoped to the selected provider", () => {
+    const scoped = scopeModelsToProvider(
+      "claude",
+      new Map<string, AgentModelDefinition[]>([
+        ["claude", claudeModels],
+        ["codex", codexModels],
+      ]),
+      [],
+    );
+
+    expect(Array.from(scoped.keys())).toEqual(["claude"]);
+    expect(scoped.get("claude")?.map((model) => model.id)).toEqual(["claude-opus-5"]);
+    expect(scoped.has("codex")).toBe(false);
+  });
+
+  it("uses selected-provider fallback models while its snapshot is absent", () => {
+    const scoped = scopeModelsToProvider("codex", new Map(), codexModels);
+
+    expect(scoped.get("codex")).toEqual(codexModels);
   });
 });
 

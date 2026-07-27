@@ -26,6 +26,21 @@ const CLAUDE_SONNET_5_THINKING_OPTIONS = [
 const CLAUDE_MODELS: AgentModelDefinition[] = [
   {
     provider: "claude",
+    id: "claude-opus-5",
+    label: "Opus 5",
+    description: "Opus 5 · Latest release",
+    isDefault: true,
+    thinkingOptions: [...CLAUDE_NEW_OPUS_THINKING_OPTIONS],
+  },
+  {
+    provider: "claude",
+    id: "claude-opus-5[1m]",
+    label: "Opus 5 1M",
+    description: "Opus 5 with 1M context window",
+    thinkingOptions: [...CLAUDE_NEW_OPUS_THINKING_OPTIONS],
+  },
+  {
+    provider: "claude",
     id: "claude-opus-4-8[1m]",
     label: "Opus 4.8 1M",
     description: "Opus 4.8 with 1M context window",
@@ -64,7 +79,6 @@ const CLAUDE_MODELS: AgentModelDefinition[] = [
     id: "claude-opus-4-6",
     label: "Opus 4.6",
     description: "Opus 4.6 · Most capable for complex work",
-    isDefault: true,
     thinkingOptions: [...CLAUDE_THINKING_OPTIONS],
   },
   {
@@ -76,9 +90,23 @@ const CLAUDE_MODELS: AgentModelDefinition[] = [
   },
   {
     provider: "claude",
+    id: "claude-sonnet-5[1m]",
+    label: "Sonnet 5 1M",
+    description: "Sonnet 5 with 1M context window",
+    thinkingOptions: [...CLAUDE_SONNET_5_THINKING_OPTIONS],
+  },
+  {
+    provider: "claude",
     id: "claude-sonnet-4-6",
     label: "Sonnet 4.6",
     description: "Sonnet 4.6 · Best for everyday tasks",
+    thinkingOptions: [...CLAUDE_THINKING_OPTIONS],
+  },
+  {
+    provider: "claude",
+    id: "claude-sonnet-4-6[1m]",
+    label: "Sonnet 4.6 1M",
+    description: "Sonnet 4.6 with 1M context window",
     thinkingOptions: [...CLAUDE_THINKING_OPTIONS],
   },
   {
