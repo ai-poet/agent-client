@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Cloud,
   ListTodo,
+  Maximize2,
   Settings2,
   ShieldAlert,
   ShieldCheck,
@@ -50,24 +51,35 @@ import {
   type AgentModeIcon,
 } from "@server/server/agent/provider-manifest";
 import {
+  cloudGroupsForStatusProvider,
+  filterSelectableProviderDefinitions,
   resolveCloudGroupDisplayLabel,
   getFeatureHighlightColor,
   getFeatureTooltip,
   getStatusSelectorHint,
   resolveAgentModelSelection,
+  scopeModelsToProvider,
 } from "@/components/agent-status-bar.utils";
 import { isWeb as platformIsWeb } from "@/constants/platform";
 import { useToast } from "@/contexts/toast-context";
 import { toErrorMessage } from "@/utils/error-messages";
 import { getAppMessages } from "@/i18n/sub2api";
 import { localizeAgentMode, localizeAgentModeLabel } from "@/utils/agent-mode-localization";
+import {
+  collapseModelContextVariants,
+  getAvailableModelContextWindows,
+  getBaseModelId,
+  getModelContextWindow,
+  resolveModelIdForContext,
+  supportsModelContextWindow,
+} from "@/utils/model-context-window";
 
 type StatusOption = {
   id: string;
   label: string;
 };
 
-type StatusSelector = "provider" | "mode" | "model" | "thinking" | `feature-${string}`;
+type StatusSelector = "provider" | "mode" | "model" | "context" | "thinking" | `feature-${string}`;
 
 type ControlledAgentStatusBarProps = {
   provider: string;
@@ -102,6 +114,7 @@ export interface DraftAgentStatusBarProps {
   serverId?: string;
   cwd?: string;
   providerDefinitions: AgentProviderDefinition[];
+  selectableProviderIds?: AgentProvider[];
   selectedProvider: AgentProvider | null;
   onSelectProvider: (provider: AgentProvider) => void;
   modeOptions: AgentMode[];
@@ -276,6 +289,7 @@ function ControlledStatusBar({
   const providerAnchorRef = useRef<View>(null);
   const modeAnchorRef = useRef<View>(null);
   const modelAnchorRef = useRef<View>(null);
+  const contextAnchorRef = useRef<View>(null);
   const thinkingAnchorRef = useRef<View>(null);
 
   const canSelectProvider = Boolean(
@@ -290,14 +304,24 @@ function ControlledStatusBar({
   const displayProvider = findOptionLabel(
     providerOptions,
     selectedProviderId,
-    text.providerFallback,
+    providerDefinitions.find((definition) => definition.id === selectedProviderId)?.label ??
+      text.providerFallback,
   );
   const displayCloudGroup = resolveCloudGroupDisplayLabel(cloudGroups, provider);
   const displayMode = findOptionLabel(modeOptions, selectedModeId, text.defaultMode);
+  const selectedDisplayModelId = getBaseModelId(provider, selectedModelId ?? "");
+  const displayModelOptions = useMemo(
+    () => collapseModelContextVariants(provider, modelOptions ?? []),
+    [modelOptions, provider],
+  );
   const displayModel =
-    isModelLoading && (!modelOptions || modelOptions.length === 0)
+    isModelLoading && displayModelOptions.length === 0
       ? text.loadingModels
-      : findOptionLabel(modelOptions, selectedModelId, appText.modelSelector.selectModel);
+      : findOptionLabel(
+          displayModelOptions,
+          selectedDisplayModelId,
+          appText.modelSelector.selectModel,
+        );
   const localizedThinkingOptions = useMemo(
     () => (thinkingOptions ?? []).map((option) => localizeThinkingOption(option, text)),
     [text, thinkingOptions],
@@ -328,7 +352,7 @@ function ControlledStatusBar({
     return null;
   }
 
-  const modelDisabled = disabled;
+  const modelDisabled = disabled || !hasSelectedProvider;
 
   const SEARCH_THRESHOLD = 6;
 
@@ -362,6 +386,73 @@ function ControlledStatusBar({
   }, [modelOptions, provider]);
   const effectiveProviderDefinitions = providerDefinitions;
   const effectiveAllProviderModels = allProviderModels ?? fallbackAllProviderModels;
+  const displayAllProviderModels = useMemo(() => {
+    return new Map(
+      Array.from(effectiveAllProviderModels.entries()).map(([providerId, models]) => [
+        providerId,
+        collapseModelContextVariants(providerId, models),
+      ]),
+    );
+  }, [effectiveAllProviderModels]);
+  const displayCloudGroups = useMemo(
+    () =>
+      cloudGroups.map((group) => ({
+        ...group,
+        models: collapseModelContextVariants(group.provider, group.models),
+      })),
+    [cloudGroups],
+  );
+  const contextModelCandidates = useMemo(() => {
+    if (!selectedDisplayModelId) {
+      return [];
+    }
+    const containsSelectedModel = (models: Array<{ id: string }>) =>
+      models.some((model) => getBaseModelId(provider, model.id) === selectedDisplayModelId);
+    const activeCloudGroup = cloudGroups.find(
+      (group) =>
+        group.provider === provider &&
+        (group.isActiveForGlobalKey || group.isActiveForWorkspace) &&
+        containsSelectedModel(group.models),
+    );
+    if (activeCloudGroup) {
+      return activeCloudGroup.models;
+    }
+    const providerModels = effectiveAllProviderModels.get(provider) ?? [];
+    if (containsSelectedModel(providerModels)) {
+      return providerModels;
+    }
+    return (
+      cloudGroups.find(
+        (group) => group.provider === provider && containsSelectedModel(group.models),
+      )?.models ?? providerModels
+    );
+  }, [cloudGroups, effectiveAllProviderModels, provider, selectedDisplayModelId]);
+  const contextWindows = useMemo(
+    () =>
+      getAvailableModelContextWindows({
+        provider,
+        modelId: selectedModelId ?? "",
+        models: contextModelCandidates,
+      }),
+    [contextModelCandidates, provider, selectedModelId],
+  );
+  const selectedContextWindow = getModelContextWindow(provider, selectedModelId ?? "");
+  const contextOptions = useMemo<StatusOption[]>(
+    () =>
+      contextWindows.map((contextWindow) => ({
+        id: contextWindow,
+        label: contextWindow === "1m" ? "1M" : "256K",
+      })),
+    [contextWindows],
+  );
+  const showContextSelector =
+    supportsModelContextWindow(provider) &&
+    Boolean(selectedDisplayModelId) &&
+    contextOptions.length > 0;
+  const canSelectContext =
+    showContextSelector &&
+    contextOptions.length > 1 &&
+    Boolean(onSelectModel || onSelectProviderAndModel);
   const canSelectProviderInModelMenu = canSelectModelProvider ?? (() => true);
   const comboboxThinkingOptions = useMemo<ComboboxOption[]>(
     () => localizedThinkingOptions.map((o) => ({ id: o.id, label: o.label })),
@@ -410,6 +501,74 @@ function ControlledStatusBar({
       handleOpenChange(selector)(openSelector !== selector);
     },
     [handleOpenChange, openSelector],
+  );
+
+  const commitModelSelection = useCallback(
+    (
+      selectedProvider: AgentProvider,
+      displayModelId: string,
+      candidateModels?: Array<{ id: string }>,
+    ) => {
+      const contextWindow =
+        selectedProvider === provider ? selectedContextWindow : ("256k" as const);
+      const models = candidateModels ?? effectiveAllProviderModels.get(selectedProvider) ?? [];
+      const modelId = resolveModelIdForContext({
+        provider: selectedProvider,
+        modelId: displayModelId,
+        contextWindow,
+        models,
+      });
+      if (onSelectProviderAndModel) {
+        onSelectProviderAndModel(selectedProvider, modelId);
+      } else if (selectedProvider === provider) {
+        onSelectModel?.(modelId);
+      }
+    },
+    [
+      effectiveAllProviderModels,
+      onSelectModel,
+      onSelectProviderAndModel,
+      provider,
+      selectedContextWindow,
+    ],
+  );
+
+  const handleSelectCloudModel = useCallback(
+    (selectedProvider: AgentProvider, displayModelId: string, group: SelectorCloudGroup) => {
+      const sourceGroup = cloudGroups.find(
+        (candidate) => candidate.provider === group.provider && candidate.groupId === group.groupId,
+      );
+      commitModelSelection(selectedProvider, displayModelId, sourceGroup?.models ?? group.models);
+    },
+    [cloudGroups, commitModelSelection],
+  );
+
+  const handleSelectContextWindow = useCallback(
+    (contextWindowId: string) => {
+      const contextWindow = contextWindows.find((entry) => entry === contextWindowId);
+      if (!contextWindow || !selectedDisplayModelId) {
+        return;
+      }
+      const modelId = resolveModelIdForContext({
+        provider,
+        modelId: selectedDisplayModelId,
+        contextWindow,
+        models: contextModelCandidates,
+      });
+      if (onSelectProviderAndModel) {
+        onSelectProviderAndModel(provider, modelId);
+      } else {
+        onSelectModel?.(modelId);
+      }
+    },
+    [
+      contextModelCandidates,
+      contextWindows,
+      onSelectModel,
+      onSelectProviderAndModel,
+      provider,
+      selectedDisplayModelId,
+    ],
   );
 
   return (
@@ -485,17 +644,13 @@ function ControlledStatusBar({
                 <View style={styles.modelSelectorSlot}>
                   <CombinedModelSelector
                     providerDefinitions={effectiveProviderDefinitions}
-                    allProviderModels={effectiveAllProviderModels}
+                    allProviderModels={displayAllProviderModels}
                     selectedProvider={provider}
-                    selectedModel={selectedModelId ?? ""}
+                    selectedModel={selectedDisplayModelId}
+                    cloudGroups={displayCloudGroups}
                     canSelectProvider={canSelectProviderInModelMenu}
-                    onSelect={(selectedProviderId, modelId) => {
-                      if (onSelectProviderAndModel) {
-                        onSelectProviderAndModel(selectedProviderId, modelId);
-                      } else if (selectedProviderId === provider) {
-                        onSelectModel?.(modelId);
-                      }
-                    }}
+                    onSelect={commitModelSelection}
+                    onSelectCloudModel={handleSelectCloudModel}
                     favoriteKeys={favoriteKeys}
                     onToggleFavorite={onToggleFavoriteModel}
                     isLoading={isModelLoading}
@@ -509,6 +664,51 @@ function ControlledStatusBar({
                 <Text style={styles.tooltipText}>{getStatusSelectorHint("model")}</Text>
               </TooltipContent>
             </Tooltip>
+          ) : null}
+
+          {showContextSelector ? (
+            <>
+              <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
+                <TooltipTrigger asChild triggerRefProp="ref">
+                  <Pressable
+                    ref={contextAnchorRef}
+                    collapsable={false}
+                    disabled={disabled || !canSelectContext}
+                    onPress={() => handleSelectorPress("context")}
+                    style={({ pressed, hovered }) => [
+                      styles.modeBadge,
+                      hovered && styles.modeBadgeHovered,
+                      (pressed || openSelector === "context") && styles.modeBadgePressed,
+                      (disabled || !canSelectContext) && styles.disabledBadge,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={text.selectContextWindow(
+                      selectedContextWindow === "1m" ? "1M" : "256K",
+                    )}
+                    testID="agent-context-selector"
+                  >
+                    <Maximize2 size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
+                    <Text style={styles.modeBadgeText} numberOfLines={1}>
+                      {selectedContextWindow === "1m" ? "1M" : "256K"}
+                    </Text>
+                    <ChevronDown size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
+                  </Pressable>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="center" offset={8}>
+                  <Text style={styles.tooltipText}>{getStatusSelectorHint("context")}</Text>
+                </TooltipContent>
+              </Tooltip>
+              <Combobox
+                options={contextOptions}
+                value={selectedContextWindow}
+                onSelect={handleSelectContextWindow}
+                searchable={false}
+                open={openSelector === "context"}
+                onOpenChange={handleOpenChange("context")}
+                anchorRef={contextAnchorRef}
+                desktopPlacement="top-start"
+              />
+            </>
           ) : null}
 
           {thinkingOptions && thinkingOptions.length > 0 ? (
@@ -727,6 +927,41 @@ function ControlledStatusBar({
             onClose={() => setPrefsOpen(false)}
             testID="agent-preferences-sheet"
           >
+            {providerOptions && providerOptions.length > 0 ? (
+              <View style={styles.sheetSection}>
+                <Pressable
+                  ref={providerAnchorRef}
+                  collapsable={false}
+                  disabled={disabled || !canSelectProvider}
+                  onPress={() => handleSelectorPress("provider")}
+                  style={({ pressed }) => [
+                    styles.sheetSelect,
+                    pressed && styles.sheetSelectPressed,
+                    (disabled || !canSelectProvider) && styles.disabledSheetSelect,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={text.selectAgentProvider}
+                  testID="agent-preferences-provider"
+                >
+                  {ProviderIcon ? (
+                    <ProviderIcon size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
+                  ) : null}
+                  <Text style={styles.sheetSelectText}>{displayProvider}</Text>
+                  <ChevronDown size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
+                </Pressable>
+                <Combobox
+                  options={comboboxProviderOptions}
+                  value={selectedProviderId ?? ""}
+                  onSelect={(id) => onSelectProvider?.(id)}
+                  searchable={comboboxProviderOptions.length > SEARCH_THRESHOLD}
+                  title={text.selectAgentProvider}
+                  open={openSelector === "provider"}
+                  onOpenChange={handleOpenChange("provider")}
+                  anchorRef={providerAnchorRef}
+                />
+              </View>
+            ) : null}
+
             {displayCloudGroup ? (
               <View style={styles.sheetSection}>
                 <View
@@ -744,20 +979,13 @@ function ControlledStatusBar({
               <View style={styles.sheetSection}>
                 <CombinedModelSelector
                   providerDefinitions={effectiveProviderDefinitions}
-                  allProviderModels={effectiveAllProviderModels}
+                  allProviderModels={displayAllProviderModels}
                   selectedProvider={provider}
-                  selectedModel={selectedModelId ?? ""}
+                  selectedModel={selectedDisplayModelId}
+                  cloudGroups={displayCloudGroups}
                   canSelectProvider={canSelectProviderInModelMenu}
-                  onSelect={(selectedProviderId, modelId) => {
-                    if (onSelectProviderAndModel) {
-                      onSelectProviderAndModel(selectedProviderId, modelId);
-                    } else {
-                      if (selectedProviderId !== provider) {
-                        onSelectProvider?.(selectedProviderId);
-                      }
-                      onSelectModel?.(modelId);
-                    }
-                  }}
+                  onSelect={commitModelSelection}
+                  onSelectCloudModel={handleSelectCloudModel}
                   favoriteKeys={favoriteKeys}
                   onToggleFavorite={onToggleFavoriteModel}
                   isLoading={isModelLoading}
@@ -781,6 +1009,47 @@ function ControlledStatusBar({
                     </View>
                   )}
                 />
+              </View>
+            ) : null}
+
+            {showContextSelector ? (
+              <View style={styles.sheetSection}>
+                <DropdownMenu
+                  open={openSelector === "context"}
+                  onOpenChange={handleOpenChange("context")}
+                >
+                  <DropdownMenuTrigger
+                    disabled={disabled || !canSelectContext}
+                    style={({ pressed }) => [
+                      styles.sheetSelect,
+                      pressed && styles.sheetSelectPressed,
+                      (disabled || !canSelectContext) && styles.disabledSheetSelect,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={text.selectContextWindow(
+                      selectedContextWindow === "1m" ? "1M" : "256K",
+                    )}
+                    testID="agent-preferences-context"
+                  >
+                    <Maximize2 size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
+                    <Text style={styles.sheetSelectText}>{text.contextWindow}</Text>
+                    <Text style={styles.modeBadgeText}>
+                      {selectedContextWindow === "1m" ? "1M" : "256K"}
+                    </Text>
+                    <ChevronDown size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" align="start">
+                    {contextOptions.map((contextOption) => (
+                      <DropdownMenuItem
+                        key={contextOption.id}
+                        selected={contextOption.id === selectedContextWindow}
+                        onSelect={() => handleSelectContextWindow(contextOption.id)}
+                      >
+                        {contextOption.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </View>
             ) : null}
 
@@ -1190,6 +1459,7 @@ export function DraftAgentStatusBar({
   serverId,
   cwd,
   providerDefinitions,
+  selectableProviderIds,
   selectedProvider,
   onSelectProvider,
   modeOptions,
@@ -1200,7 +1470,6 @@ export function DraftAgentStatusBar({
   onSelectModel,
   isModelLoading,
   allProviderModels,
-  isAllModelsLoading,
   onSelectProviderAndModel,
   thinkingOptions,
   selectedThinkingOptionId,
@@ -1220,6 +1489,27 @@ export function DraftAgentStatusBar({
     providerDefinitions,
     allProviderModels,
   });
+
+  const selectableProviderDefinitions = useMemo(
+    () => filterSelectableProviderDefinitions(providerDefinitions, selectableProviderIds),
+    [providerDefinitions, selectableProviderIds],
+  );
+  const providerOptions = useMemo<StatusOption[]>(
+    () =>
+      selectableProviderDefinitions.map((definition) => ({
+        id: definition.id,
+        label: definition.label,
+      })),
+    [selectableProviderDefinitions],
+  );
+  const selectedProviderModels = useMemo(
+    () => scopeModelsToProvider(selectedProvider, allProviderModels, models),
+    [allProviderModels, models, selectedProvider],
+  );
+  const selectedProviderCloudGroups = useMemo(
+    () => cloudGroupsForStatusProvider(cloudGroups, selectedProvider ?? ""),
+    [cloudGroups, selectedProvider],
+  );
 
   const mappedModeOptions = useMemo<StatusOption[]>(() => {
     if (modeOptions.length === 0) {
@@ -1269,8 +1559,11 @@ export function DraftAgentStatusBar({
     <>
       <ControlledStatusBar
         provider={selectedProvider ?? ""}
+        providerOptions={providerOptions}
+        selectedProviderId={selectedProvider ?? undefined}
+        onSelectProvider={(providerId) => onSelectProvider(providerId as AgentProvider)}
         providerDefinitions={providerDefinitions}
-        allProviderModels={allProviderModels}
+        allProviderModels={selectedProviderModels}
         modeOptions={hasSelectedProvider ? mappedModeOptions : undefined}
         selectedModeId={effectiveSelectedMode}
         onSelectMode={onSelectMode}
@@ -1284,8 +1577,8 @@ export function DraftAgentStatusBar({
           }
         }}
         onSelectProviderAndModel={handleSelectGlobalModel}
-        cloudGroups={cloudGroups}
-        isModelLoading={isAllModelsLoading}
+        cloudGroups={selectedProviderCloudGroups}
+        isModelLoading={isModelLoading}
         favoriteKeys={favoriteKeys}
         onToggleFavoriteModel={(provider, modelId) => {
           void updatePreferences((current) =>

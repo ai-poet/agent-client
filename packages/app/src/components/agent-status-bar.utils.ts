@@ -1,6 +1,11 @@
-import type { AgentFeature, AgentModelDefinition } from "@server/server/agent/agent-sdk-types";
+import type {
+  AgentFeature,
+  AgentModelDefinition,
+  AgentProvider,
+} from "@server/server/agent/agent-sdk-types";
+import type { AgentProviderDefinition } from "@server/server/agent/provider-manifest";
 
-export type ExplainedStatusSelector = "mode" | "model" | "thinking" | "cloud-group";
+export type ExplainedStatusSelector = "mode" | "model" | "context" | "thinking" | "cloud-group";
 export type FeatureHighlightColor = "blue" | "default" | "yellow";
 
 export type CloudGroupSelectorSummary = {
@@ -20,6 +25,8 @@ export function getStatusSelectorHint(selector: ExplainedStatusSelector): string
       return "Thinking mode";
     case "model":
       return "Change model";
+    case "context":
+      return "Change context window";
     case "mode":
       return "Change permission mode";
   }
@@ -48,6 +55,29 @@ export function resolveCloudGroupDisplayLabel(
   provider: string,
 ): string | null {
   return resolveActiveCloudGroup(cloudGroups, provider)?.groupLabel ?? null;
+}
+
+export function filterSelectableProviderDefinitions(
+  providerDefinitions: AgentProviderDefinition[],
+  selectableProviderIds: AgentProvider[] | undefined,
+): AgentProviderDefinition[] {
+  if (!selectableProviderIds) {
+    return providerDefinitions;
+  }
+  const selectableIds = new Set(selectableProviderIds);
+  return providerDefinitions.filter((definition) => selectableIds.has(definition.id));
+}
+
+export function scopeModelsToProvider(
+  provider: AgentProvider | null,
+  allProviderModels: Map<string, AgentModelDefinition[]>,
+  fallbackModels: AgentModelDefinition[],
+): Map<string, AgentModelDefinition[]> {
+  const scopedModels = new Map<string, AgentModelDefinition[]>();
+  if (provider) {
+    scopedModels.set(provider, allProviderModels.get(provider) ?? fallbackModels);
+  }
+  return scopedModels;
 }
 
 export function normalizeModelId(modelId: string | null | undefined): string | null {

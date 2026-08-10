@@ -997,6 +997,8 @@ export const sub2apiMessages = {
       loadingModels: "正在加载模型…",
       unknown: "未知",
       selectAgentProvider: "选择代理提供商",
+      contextWindow: "上下文",
+      selectContextWindow: (label: string) => `选择上下文容量（${label}）`,
       thinkingEffortLabels: {
         low: "低",
         medium: "中",
@@ -2784,6 +2786,8 @@ export const sub2apiMessages = {
       loadingModels: "Loading models...",
       unknown: "Unknown",
       selectAgentProvider: "Select agent provider",
+      contextWindow: "Context",
+      selectContextWindow: (label: string) => `Select context window (${label})`,
       thinkingEffortLabels: {
         low: "Low",
         medium: "Medium",

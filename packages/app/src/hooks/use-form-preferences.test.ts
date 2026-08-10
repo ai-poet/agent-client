@@ -103,6 +103,24 @@ describe("favorite model preferences", () => {
     );
   });
 
+  it("uses one favorite key for Claude context variants", () => {
+    expect(buildFavoriteModelKey({ provider: "claude", modelId: "claude-opus-5[1m]" })).toBe(
+      "claude:claude-opus-5",
+    );
+  });
+
+  it("removes a legacy 1M favorite when toggling its base model", () => {
+    expect(
+      toggleFavoriteModel({
+        preferences: {
+          favoriteModels: [{ provider: "claude", modelId: "claude-opus-5[1m]" }],
+        },
+        provider: "claude",
+        modelId: "claude-opus-5",
+      }).favoriteModels,
+    ).toEqual([]);
+  });
+
   it("adds a model to favorites without dropping other preferences", () => {
     expect(
       toggleFavoriteModel({

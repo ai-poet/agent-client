@@ -9,8 +9,11 @@ import {
 } from "@/hooks/use-agent-form-state";
 import { useDraftAgentFeatures } from "@/hooks/use-draft-agent-features";
 import { useDraftStore } from "@/stores/draft-store";
-import type { AgentModelDefinition } from "@server/server/agent/agent-sdk-types";
-import type { AgentProvider } from "@server/server/agent/agent-sdk-types";
+import type {
+  AgentModelDefinition,
+  AgentProvider,
+  ProviderSnapshotEntry,
+} from "@server/server/agent/agent-sdk-types";
 
 type AttachmentUpdater =
   | ComposerAttachment[]
@@ -150,6 +153,7 @@ function buildDraftStatusControls(input: {
   const { formState, features, onSetFeature, onDropdownClose } = input;
   return {
     providerDefinitions: formState.providerDefinitions,
+    selectableProviderIds: resolveSelectableProviderIds(formState.allProviderEntries),
     selectedProvider: formState.selectedProvider,
     onSelectProvider: formState.setProviderFromUser,
     modeOptions: formState.modeOptions,
@@ -170,6 +174,12 @@ function buildDraftStatusControls(input: {
     onDropdownClose,
     onModelSelectorOpen: formState.refetchProviderModelsIfStale,
   };
+}
+
+function resolveSelectableProviderIds(
+  entries: ProviderSnapshotEntry[] | undefined,
+): AgentProvider[] | undefined {
+  return entries?.filter((entry) => entry.status === "ready").map((entry) => entry.provider);
 }
 
 export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDraft {
@@ -428,4 +438,5 @@ export const __private__ = {
   resolveEffectiveComposerThinkingOptionId,
   buildDraftComposerCommandConfig,
   buildDraftStatusControls,
+  resolveSelectableProviderIds,
 };

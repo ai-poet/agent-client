@@ -1,6 +1,6 @@
 {
   "name": "agent-client",
-  "version": "0.1.81",
+  "version": "0.1.82",
   "private": true,
   "workspaces": [
     "packages/expo-two-way-audio",

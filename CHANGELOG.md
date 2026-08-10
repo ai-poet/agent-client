@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.82 - 2026-07-27
+
+### Added
+- Separate provider and model selection.
+- The model picker is scoped to the selected provider, including its Cloud groups.
+- Claude models offer separate 256K and 1M context choices, with 1M available for every model except Haiku.
+
+### Improved
+- Claude Opus 5 is now the default Claude model.
+- Model favorites are shared across context capacities.
+
 ## 0.1.81 - 2026-07-10
 
 ### Added

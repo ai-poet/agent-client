@@ -189,6 +189,36 @@ describe("ManagedProviderModelCatalog", () => {
     ]);
   });
 
+  it("uses Opus 5 metadata for a dated remote model ID", async () => {
+    const providersFile = await createProvidersFile(managedStore());
+    const catalog = new ManagedProviderModelCatalog(createTestLogger(), {
+      providersFile,
+      fetchImpl: vi.fn(async () =>
+        Response.json({
+          data: [{ id: "claude-opus-5-20260727", display_name: "claude-opus-5-20260727" }],
+        }),
+      ),
+    });
+
+    const models = await catalog.getModels("claude", getClaudeModels());
+
+    expect(models).toEqual([
+      expect.objectContaining({
+        id: "claude-opus-5-20260727",
+        label: "Opus 5",
+        description: "Opus 5 · Latest release",
+        isDefault: true,
+        thinkingOptions: [
+          { id: "low", label: "Low" },
+          { id: "medium", label: "Medium" },
+          { id: "high", label: "High" },
+          { id: "xhigh", label: "Extra High" },
+          { id: "max", label: "Max" },
+        ],
+      }),
+    ]);
+  });
+
   it("uses a successful same-route cache on failure but does not share it after a key change", async () => {
     const store = managedStore();
     const providersFile = await createProvidersFile(store);
