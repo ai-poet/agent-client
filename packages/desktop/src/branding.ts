@@ -23,7 +23,7 @@ const DEFAULT_DESKTOP_BRANDING: DesktopBranding = {
 
 const DESKTOP_UPDATE_URL_BY_BRAND: Record<string, string> = {
   cyberaicoding: "https://minio.cyberspirit.io/",
-  cheaprouter: "https://file.masterwordai.com/",
+  cheaprouter: "https://file.masterwordai.com/cheaprouter/",
 };
 
 function trimToNull(value: string | undefined): string | null {

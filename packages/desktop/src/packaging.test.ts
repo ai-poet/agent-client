@@ -123,7 +123,7 @@ describe("desktop packaging", () => {
     expect(config.publish).toEqual([
       {
         provider: "generic",
-        url: "https://file.masterwordai.com/",
+        url: "https://file.masterwordai.com/cheaprouter/",
       },
     ]);
   });
