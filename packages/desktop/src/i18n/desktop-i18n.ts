@@ -55,6 +55,8 @@ const DESKTOP_MESSAGES = {
     "cli.noGitInstaller": () => "No Git for Windows 64-bit installer was found on npmmirror.",
     "cli.packageInstallFailed": ({ packageName, errors }) =>
       `Failed to install ${packageName ?? "package"}. ${errors ?? ""}`,
+    "cli.nodeVersionTooLow": ({ command, required, current }) =>
+      `${command ?? "CLI"} requires Node.js ${required ?? ""} or newer. Detected ${current ?? "unknown"}.`,
   },
   zh: {
     "provider.notFound": ({ id }) => `未找到提供商：${id ?? ""}`,
@@ -101,6 +103,8 @@ const DESKTOP_MESSAGES = {
     "cli.noGitInstaller": () => "npmmirror 上没有找到 Git for Windows 64-bit 安装包。",
     "cli.packageInstallFailed": ({ packageName, errors }) =>
       `安装 ${packageName ?? "package"} 失败。${errors ?? ""}`,
+    "cli.nodeVersionTooLow": ({ command, required, current }) =>
+      `${command ?? "CLI"} 需要 Node.js ${required ?? ""} 或更高版本。当前检测到 ${current ?? "unknown"}。`,
   },
 } satisfies Record<DesktopLocale, Record<string, DesktopMessageFormatter>>;
 

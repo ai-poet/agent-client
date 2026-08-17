@@ -176,6 +176,14 @@ export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
     defaultModeId: null,
     modes: [],
   },
+  {
+    id: "grok",
+    label: "Grok",
+    // Modes are reported by the CLI over ACP, so none are declared statically here.
+    description: "xAI's Grok Build coding agent via Agent Client Protocol",
+    defaultModeId: null,
+    modes: [],
+  },
 ];
 
 export const DEV_AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [

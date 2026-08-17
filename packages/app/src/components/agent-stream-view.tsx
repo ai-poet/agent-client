@@ -38,6 +38,8 @@ import {
   type InlinePathTarget,
 } from "./message";
 import { PlanCard } from "./plan-card";
+import { ToolCallGroup } from "./tool-call-group";
+import { buildToolGroupIndex } from "./agent-stream-tool-grouping";
 import type { StreamItem } from "@/types/stream";
 import type { PendingPermission } from "@/types/shared";
 import type {
@@ -251,6 +253,13 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       viewportRef.current?.scrollToBottom("jump-to-bottom");
     }
 
+    // Built over the full timeline (history + live head) so a run that straddles the
+    // boundary still groups, and so ids stay stable for the item-keyed renderers.
+    const toolGroupIndex = useMemo(
+      () => buildToolGroupIndex([...streamItems, ...(streamHead ?? [])]),
+      [streamItems, streamHead],
+    );
+
     const tightGap = theme.spacing[1]; // 4px
     const looseGap = theme.spacing[4]; // 16px
 
@@ -393,6 +402,23 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                 );
               }
 
+              // A run of consecutive tool calls renders once, on its first item.
+              const groupRole = toolGroupIndex.get(item.id);
+              if (groupRole?.role === "member") {
+                return null;
+              }
+              if (groupRole?.role === "anchor") {
+                return (
+                  <ToolCallGroup
+                    group={groupRole.group}
+                    cwd={agent.cwd}
+                    locale={locale}
+                    isLastInSequence={isLastInSequence}
+                    onInlineDetailsExpandedChange={handleInlineDetailsExpandedChange}
+                  />
+                );
+              }
+
               return (
                 <ToolCall
                   toolName={data.name}
@@ -442,7 +468,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             return null;
         }
       },
-      [handleInlinePathPress, agent.cwd, streamRenderStrategy, locale],
+      [handleInlinePathPress, agent.cwd, streamRenderStrategy, locale, toolGroupIndex],
     );
 
     const renderStreamItem = useCallback(

@@ -60,6 +60,9 @@ export const agentConfigs = {
     provider: "pi",
     thinkingOptionId: "medium",
   },
+  grok: {
+    provider: "grok",
+  },
 } as const satisfies Record<string, AgentTestConfig>;
 
 export type AgentProvider = keyof typeof agentConfigs;
@@ -134,6 +137,12 @@ export function isProviderAvailable(provider: AgentProvider): Promise<boolean> {
             Boolean(process.env.OPENROUTER_API_KEY) ||
             existsSync(join(homedir(), ".pi", "agent", "auth.json")))
         );
+      case "grok":
+        return (
+          (await isCommandAvailable("grok")) &&
+          (Boolean(process.env.XAI_API_KEY) ||
+            existsSync(join(process.env.GROK_HOME ?? join(homedir(), ".grok"), "auth.json")))
+        );
     }
   })();
 
@@ -144,4 +153,11 @@ export function isProviderAvailable(provider: AgentProvider): Promise<boolean> {
 /**
  * Helper to run a test for each provider.
  */
-export const allProviders: AgentProvider[] = ["claude", "codex", "copilot", "opencode", "pi"];
+export const allProviders: AgentProvider[] = [
+  "claude",
+  "codex",
+  "copilot",
+  "opencode",
+  "pi",
+  "grok",
+];

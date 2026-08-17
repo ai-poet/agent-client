@@ -28,6 +28,7 @@ import {
   installAllModelClis,
   installClaudeCodeCli,
   installCodexCli,
+  installModelCli,
   installGitBashRuntime,
   installNode22Runtime,
 } from "../integrations/model-cli-manager.js";
@@ -572,6 +573,8 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     install_node22_runtime: () => installNode22Runtime(),
     install_codex_cli: () => installCodexCli(),
     install_claude_code_cli: () => installClaudeCodeCli(),
+    install_model_cli: (args?: Record<string, unknown>) =>
+      installModelCli((args as { id: string }).id),
     install_all_model_clis: () => installAllModelClis(),
 
     // Provider switching

@@ -155,6 +155,14 @@ export const sub2apiMessages = {
         noAdditionalDetails: "暂无更多详情",
         noTasksYet: "暂无任务。",
       },
+      group: {
+        readFiles: (count: number) => `批量读取 ${count} 个文件`,
+        mixedCalls: (count: number) => `批量工具调用 ${count} 项`,
+        fileList: (names: string[], count: number) =>
+          names.length < count ? `${names.join("、")} 等 ${count} 个文件` : names.join("、"),
+        toolCount: (name: string, count: number) => (count > 1 ? `${name} x${count}` : name),
+        toolList: (parts: string[]) => parts.join("、"),
+      },
     },
     agentModes: {
       alwaysAsk: {
@@ -1767,6 +1775,10 @@ export const sub2apiMessages = {
         codexInstallHint: "将 Codex CLI 安装到托管的 Node 22 运行时中。",
         claudeInstalled: (version: string) => `Claude Code ${version}`,
         claudeInstallHint: "将 Claude Code CLI 安装到托管的 Node 22 运行时中。",
+        grokInstalled: (version: string) => `Grok ${version}`,
+        grokInstallHint: "将 xAI Grok Build CLI 安装到托管的 Node 22 运行时中。",
+        piInstalled: (version: string) => `Pi ${version}`,
+        piInstallHint: "将 Pi CLI 安装到托管的运行时中，需要 Node.js 22.19 或更高版本。",
         commandLine: "命令行",
         commandLineHint: "从终端控制代理并编写脚本。",
         installed: "已安装",
@@ -1779,6 +1791,8 @@ export const sub2apiMessages = {
         codexCli: "Codex CLI",
         reinstall: "重新安装",
         claudeCodeCli: "Claude Code CLI",
+        grokCli: "Grok CLI",
+        piCli: "Pi CLI",
         externalAgentStack: "外部代理栈",
         externalAgentStackHint: "只安装当前缺失的 Git Bash、Node.js 22、Codex 或 Claude Code。",
         installAll: "全部安装",
@@ -1909,6 +1923,16 @@ export const sub2apiMessages = {
         subAgentActivity: "Sub-agent activity",
         noAdditionalDetails: "No additional details available",
         noTasksYet: "No tasks yet.",
+      },
+      group: {
+        readFiles: (count: number) => `Read ${count} files`,
+        mixedCalls: (count: number) => `${count} tool calls`,
+        fileList: (names: string[], count: number) =>
+          names.length < count
+            ? `${names.join(", ")} and ${count - names.length} more`
+            : names.join(", "),
+        toolCount: (name: string, count: number) => (count > 1 ? `${name} x${count}` : name),
+        toolList: (parts: string[]) => parts.join(", "),
       },
     },
     agentModes: {
@@ -3577,6 +3601,10 @@ export const sub2apiMessages = {
         codexInstallHint: "Install the Codex CLI into the managed Node 22 runtime.",
         claudeInstalled: (version: string) => `Claude Code ${version}`,
         claudeInstallHint: "Install the Claude Code CLI into the managed Node 22 runtime.",
+        grokInstalled: (version: string) => `Grok ${version}`,
+        grokInstallHint: "Install the xAI Grok Build CLI into the managed Node 22 runtime.",
+        piInstalled: (version: string) => `Pi ${version}`,
+        piInstallHint: "Install the Pi CLI into the managed runtime. Requires Node.js 22.19+.",
         commandLine: "Command line",
         commandLineHint: "Control and script agents from your terminal.",
         installed: "Installed",
@@ -3589,6 +3617,8 @@ export const sub2apiMessages = {
         codexCli: "Codex CLI",
         reinstall: "Reinstall",
         claudeCodeCli: "Claude Code CLI",
+        grokCli: "Grok CLI",
+        piCli: "Pi CLI",
         externalAgentStack: "External agent stack",
         externalAgentStackHint:
           "Install only the missing Git Bash, Node.js 22, Codex, or Claude Code pieces.",

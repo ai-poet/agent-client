@@ -210,7 +210,7 @@ export interface InstallStatus {
 }
 
 export interface ModelCliRuntimeToolStatus {
-  command: "codex" | "claude";
+  command: string;
   packageName: string;
   installed: boolean;
   version: string | null;
@@ -244,6 +244,8 @@ export interface GitRuntimeStatus {
 export interface ModelCliRuntimeStatus {
   git: GitRuntimeStatus;
   node: NodeRuntimeStatus;
+  /** Keyed by CLI id. Synthesized from codex/claude when talking to an older daemon. */
+  clis: Record<string, ModelCliRuntimeToolStatus>;
   codex: ModelCliRuntimeToolStatus;
   claude: ModelCliRuntimeToolStatus;
 }
@@ -301,7 +303,7 @@ function parseModelCliRuntimeToolStatus(raw: unknown): ModelCliRuntimeToolStatus
     throw new Error("Unexpected CLI runtime tool status response.");
   }
   const command = toStringOrNull(raw.command);
-  if (command !== "codex" && command !== "claude") {
+  if (!command) {
     throw new Error("Unexpected CLI runtime tool command.");
   }
   return {
@@ -313,15 +315,31 @@ function parseModelCliRuntimeToolStatus(raw: unknown): ModelCliRuntimeToolStatus
   };
 }
 
+function parseModelCliRecord(raw: unknown): Record<string, ModelCliRuntimeToolStatus> {
+  if (!isRecord(raw)) {
+    return {};
+  }
+  const parsed: Record<string, ModelCliRuntimeToolStatus> = {};
+  for (const [id, value] of Object.entries(raw)) {
+    parsed[id] = parseModelCliRuntimeToolStatus(value);
+  }
+  return parsed;
+}
+
 function parseModelCliRuntimeStatus(raw: unknown): ModelCliRuntimeStatus {
   if (!isRecord(raw)) {
     throw new Error("Unexpected CLI runtime status response.");
   }
+  const codex = parseModelCliRuntimeToolStatus(raw.codex);
+  const claude = parseModelCliRuntimeToolStatus(raw.claude);
+  const clis = parseModelCliRecord(raw.clis);
   return {
     git: parseGitRuntimeStatus(raw.git),
     node: parseNodeRuntimeStatus(raw.node),
-    codex: parseModelCliRuntimeToolStatus(raw.codex),
-    claude: parseModelCliRuntimeToolStatus(raw.claude),
+    // Older daemons only report the two legacy fields.
+    clis: Object.keys(clis).length > 0 ? clis : { codex, claude },
+    codex,
+    claude,
   };
 }
 
@@ -369,6 +387,10 @@ export async function installCodexCli(): Promise<ModelCliInstallResult> {
 
 export async function installClaudeCodeCli(): Promise<ModelCliInstallResult> {
   return parseModelCliInstallResult(await invokeDesktopCommand("install_claude_code_cli"));
+}
+
+export async function installModelCli(id: string): Promise<ModelCliInstallResult> {
+  return parseModelCliInstallResult(await invokeDesktopCommand("install_model_cli", { id }));
 }
 
 export async function installAllModelClis(): Promise<ModelCliInstallResult> {

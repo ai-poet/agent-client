@@ -1641,7 +1641,7 @@ export const TodoListCard = memo(function TodoListCard({
   );
 });
 
-interface ExpandableBadgeProps {
+export interface ExpandableBadgeProps {
   label: string;
   secondaryLabel?: string;
   icon?: ComponentType<{ size?: number; color?: string }>;
@@ -1657,7 +1657,7 @@ interface ExpandableBadgeProps {
   testID?: string;
 }
 
-const ExpandableBadge = memo(function ExpandableBadge({
+export const ExpandableBadge = memo(function ExpandableBadge({
   label,
   style,
   secondaryLabel,

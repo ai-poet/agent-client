@@ -111,7 +111,7 @@ const COPILOT_AUTOPILOT_MODE = "https://agentclientprotocol.com/protocol/session
 // Suppress interactive auth side-effects (e.g. Gemini CLI opening a Google
 // sign-in URL in the browser) when probing an ACP agent for models/modes.
 // NO_BROWSER is honored by Gemini CLI; other ACP agents ignore it.
-const PROBE_ENV: Record<string, string> = { NO_BROWSER: "true" };
+export const PROBE_ENV: Record<string, string> = { NO_BROWSER: "true" };
 
 export function createLoggedNdJsonStream(
   output: WritableStream<Uint8Array>,
