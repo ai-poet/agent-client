@@ -6,6 +6,8 @@ export interface AgentScreenAgent {
   status: "initializing" | "idle" | "running" | "error" | "closed";
   cwd: string;
   lastError?: string | null;
+  /** Latest reported usage, used by the turn progress line. */
+  lastUsage?: { outputTokens?: number } | null;
   projectPlacement?: {
     checkout?: {
       cwd?: string;

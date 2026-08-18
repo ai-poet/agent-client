@@ -393,6 +393,78 @@ export async function installModelCli(id: string): Promise<ModelCliInstallResult
   return parseModelCliInstallResult(await invokeDesktopCommand("install_model_cli", { id }));
 }
 
+export interface ExternalProviderCandidate {
+  id: string;
+  source: "ccswitch" | "cherry-studio";
+  target: "claude" | "codex";
+  name: string;
+  baseUrl: string;
+  hasApiKey: boolean;
+  models: string[];
+}
+
+export interface ExternalImportScan {
+  source: "ccswitch" | "cherry-studio";
+  detected: boolean;
+  dataPath: string | null;
+  items: ExternalProviderCandidate[];
+  error: string | null;
+}
+
+function parseExternalCandidate(raw: unknown): ExternalProviderCandidate | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const id = toStringOrNull(raw.id);
+  const baseUrl = toStringOrNull(raw.baseUrl);
+  if (!id || !baseUrl) {
+    return null;
+  }
+  const source = raw.source === "cherry-studio" ? "cherry-studio" : "ccswitch";
+  return {
+    id,
+    source,
+    target: raw.target === "codex" ? "codex" : "claude",
+    name: toStringOrNull(raw.name) ?? baseUrl,
+    baseUrl,
+    hasApiKey: raw.hasApiKey === true,
+    models: Array.isArray(raw.models)
+      ? raw.models.filter((model): model is string => typeof model === "string")
+      : [],
+  };
+}
+
+export async function scanExternalProviders(): Promise<ExternalImportScan[]> {
+  const raw = await invokeDesktopCommand("scan_external_providers");
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.flatMap((entry): ExternalImportScan[] => {
+    if (!isRecord(entry)) {
+      return [];
+    }
+    const source = entry.source === "cherry-studio" ? "cherry-studio" : "ccswitch";
+    return [
+      {
+        source,
+        detected: entry.detected === true,
+        dataPath: toStringOrNull(entry.dataPath),
+        items: Array.isArray(entry.items)
+          ? entry.items
+              .map(parseExternalCandidate)
+              .filter((item): item is ExternalProviderCandidate => item !== null)
+          : [],
+        error: toStringOrNull(entry.error),
+      },
+    ];
+  });
+}
+
+export async function importExternalProviders(ids: string[]): Promise<{ imported: number }> {
+  const raw = await invokeDesktopCommand("import_external_providers", { ids });
+  return { imported: isRecord(raw) && typeof raw.imported === "number" ? raw.imported : 0 };
+}
+
 export async function installAllModelClis(): Promise<ModelCliInstallResult> {
   return parseModelCliInstallResult(await invokeDesktopCommand("install_all_model_clis"));
 }

@@ -36,6 +36,7 @@ import {
   ScheduleResumeResponseSchema,
   ScheduleDeleteResponseSchema,
 } from "../server/schedule/rpc-schemas.js";
+import { UsageStatsRequestSchema, UsageStatsResponseSchema } from "../server/usage/rpc-schemas.js";
 import {
   LoopRunRequestSchema,
   LoopListRequestSchema,
@@ -205,6 +206,15 @@ const AgentModelDefinitionSchema: z.ZodType<AgentModelDefinition> = z.object({
   defaultThinkingOptionId: z.string().optional(),
 });
 
+const AgentCapabilityFlagsSchema: z.ZodType<AgentCapabilityFlags> = z.object({
+  supportsStreaming: z.boolean(),
+  supportsSessionPersistence: z.boolean(),
+  supportsDynamicModes: z.boolean(),
+  supportsMcpServers: z.boolean(),
+  supportsReasoningStream: z.boolean(),
+  supportsToolInvocations: z.boolean(),
+});
+
 const ProviderSnapshotEntrySchema: z.ZodType<ProviderSnapshotEntry> = z.object({
   provider: AgentProviderSchema,
   status: ProviderStatusSchema,
@@ -215,15 +225,13 @@ const ProviderSnapshotEntrySchema: z.ZodType<ProviderSnapshotEntry> = z.object({
   label: z.string().optional(),
   description: z.string().optional(),
   defaultModeId: z.string().nullable().optional(),
-});
-
-const AgentCapabilityFlagsSchema: z.ZodType<AgentCapabilityFlags> = z.object({
-  supportsStreaming: z.boolean(),
-  supportsSessionPersistence: z.boolean(),
-  supportsDynamicModes: z.boolean(),
-  supportsMcpServers: z.boolean(),
-  supportsReasoningStream: z.boolean(),
-  supportsToolInvocations: z.boolean(),
+  // COMPAT(providerInfo): added in v0.1.83. Older clients ignore these; older daemons
+  // simply omit them, so both directions stay safe.
+  version: z.string().optional(),
+  configDir: z.string().optional(),
+  docsUrl: z.string().optional(),
+  installCommand: z.string().optional(),
+  capabilities: AgentCapabilityFlagsSchema.optional(),
 });
 
 const AgentUsageSchema: z.ZodType<AgentUsage> = z.object({
@@ -1748,6 +1756,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   SchedulePauseRequestSchema,
   ScheduleResumeRequestSchema,
   ScheduleDeleteRequestSchema,
+  UsageStatsRequestSchema,
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -1919,6 +1928,8 @@ export const ServerInfoStatusPayloadSchema = z
       .object({
         providersSnapshot: z.boolean().optional(),
         hiddenAgentMessages: z.boolean().optional(),
+        // COMPAT(usageStats): added in v0.1.83; absent on older daemons.
+        usageStats: z.boolean().optional(),
       })
       .optional(),
   })
@@ -3381,6 +3392,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SchedulePauseResponseSchema,
   ScheduleResumeResponseSchema,
   ScheduleDeleteResponseSchema,
+  UsageStatsResponseSchema,
   LoopRunResponseSchema,
   LoopListResponseSchema,
   LoopInspectResponseSchema,
@@ -3516,6 +3528,7 @@ export type ScheduleLogsResponse = z.infer<typeof ScheduleLogsResponseSchema>;
 export type SchedulePauseResponse = z.infer<typeof SchedulePauseResponseSchema>;
 export type ScheduleResumeResponse = z.infer<typeof ScheduleResumeResponseSchema>;
 export type ScheduleDeleteResponse = z.infer<typeof ScheduleDeleteResponseSchema>;
+export type UsageStatsResponse = z.infer<typeof UsageStatsResponseSchema>;
 export type LoopRunResponse = z.infer<typeof LoopRunResponseSchema>;
 export type LoopListResponse = z.infer<typeof LoopListResponseSchema>;
 export type LoopInspectResponse = z.infer<typeof LoopInspectResponseSchema>;
@@ -3571,6 +3584,7 @@ export type ScheduleLogsRequest = z.infer<typeof ScheduleLogsRequestSchema>;
 export type SchedulePauseRequest = z.infer<typeof SchedulePauseRequestSchema>;
 export type ScheduleResumeRequest = z.infer<typeof ScheduleResumeRequestSchema>;
 export type ScheduleDeleteRequest = z.infer<typeof ScheduleDeleteRequestSchema>;
+export type UsageStatsRequest = z.infer<typeof UsageStatsRequestSchema>;
 export type LoopRunRequest = z.infer<typeof LoopRunRequestSchema>;
 export type LoopListRequest = z.infer<typeof LoopListRequestSchema>;
 export type LoopInspectRequest = z.infer<typeof LoopInspectRequestSchema>;

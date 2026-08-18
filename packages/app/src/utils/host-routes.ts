@@ -450,6 +450,8 @@ export const SETTINGS_SECTION_SLUGS = [
   "integrations",
   "ai-context",
   "permissions",
+  "usage",
+  "automations",
   "diagnostics",
   "about",
 ] as const;

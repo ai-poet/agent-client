@@ -9,6 +9,7 @@ const DESKTOP_MESSAGES = {
     "provider.notFound": ({ id }) => `Provider not found: ${id ?? ""}`,
     "provider.notForClaude": () => "This endpoint does not apply to Claude Code.",
     "provider.notForCodex": () => "This endpoint does not apply to Codex.",
+    "provider.notForGrok": () => "This endpoint does not apply to Grok.",
     "opener.unsupportedExternalUrl": () => "Unsupported external URL.",
     "cli.installFailed": ({ message, missingText }) =>
       `Install failed: ${message ?? ""}${missingText ? ` Missing: ${missingText}` : ""}`,
@@ -62,6 +63,7 @@ const DESKTOP_MESSAGES = {
     "provider.notFound": ({ id }) => `未找到提供商：${id ?? ""}`,
     "provider.notForClaude": () => "此端点不适用于 Claude Code。",
     "provider.notForCodex": () => "此端点不适用于 Codex。",
+    "provider.notForGrok": () => "此端点不适用于 Grok。",
     "opener.unsupportedExternalUrl": () => "不支持此外部 URL。",
     "cli.installFailed": ({ message, missingText }) =>
       `安装失败：${message ?? ""}${missingText ? ` 缺少：${missingText}` : ""}`,

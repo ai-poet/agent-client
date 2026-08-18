@@ -9,6 +9,8 @@ import type { AgentModelDefinition } from "./agent-sdk-types.js";
 import { getClaudeModels } from "./providers/claude/claude-models.js";
 import {
   ManagedProviderModelCatalog,
+  filterManagedModelsForProvider,
+  isManagedModelProvider,
   normalizeManagedProviderEndpoint,
 } from "./managed-provider-model-catalog.js";
 
@@ -318,5 +320,40 @@ describe("ManagedProviderModelCatalog", () => {
       await expect(catalog.getModels("claude", fallbackModels)).resolves.toEqual(fallbackModels);
       expect(fetchImpl).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe("isManagedModelProvider", () => {
+  it("recognises the providers that can route through the gateway", () => {
+    expect(isManagedModelProvider("claude")).toBe(true);
+    expect(isManagedModelProvider("codex")).toBe(true);
+    expect(isManagedModelProvider("grok")).toBe(true);
+  });
+
+  it("rejects providers with no managed route", () => {
+    expect(isManagedModelProvider("opencode")).toBe(false);
+    expect(isManagedModelProvider("pi")).toBe(false);
+  });
+});
+
+describe("filterManagedModelsForProvider", () => {
+  const catalog = [
+    { id: "grok-4.5" },
+    { id: "Grok-Build" },
+    { id: "gpt-5.4" },
+    { id: "claude-sonnet-4" },
+  ];
+
+  it("narrows the shared gateway catalog to the xAI family for grok", () => {
+    // The openai endpoint also lists models grok cannot run.
+    expect(filterManagedModelsForProvider("grok", catalog).map((model) => model.id)).toEqual([
+      "grok-4.5",
+      "Grok-Build",
+    ]);
+  });
+
+  it("leaves other providers' catalogs untouched", () => {
+    expect(filterManagedModelsForProvider("codex", catalog)).toHaveLength(4);
+    expect(filterManagedModelsForProvider("claude", catalog)).toHaveLength(4);
   });
 });

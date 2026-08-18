@@ -31,7 +31,7 @@ import { PiDirectAgentClient } from "./providers/pi-direct-agent.js";
 import { MockLoadTestAgentClient } from "./providers/mock-load-test-agent.js";
 import {
   ManagedProviderModelCatalog,
-  type ManagedModelProvider,
+  isManagedModelProvider,
   type ManagedProviderModelCatalogLike,
 } from "./managed-provider-model-catalog.js";
 import {
@@ -348,10 +348,10 @@ function createRegistryEntry(
         resolved.profileModels,
         await modelClient.listModels(options),
       );
-      if (resolved.profileModels.length > 0 || (provider !== "claude" && provider !== "codex")) {
+      if (resolved.profileModels.length > 0 || !isManagedModelProvider(provider)) {
         return models;
       }
-      return await managedModelCatalog.getModels(provider as ManagedModelProvider, models);
+      return await managedModelCatalog.getModels(provider, models);
     },
     fetchModes: async (options: ListModesOptions) => {
       const modes = modelClient.listModes

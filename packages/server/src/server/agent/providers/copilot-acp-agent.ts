@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
 import { homedir } from "node:os";
 
-import type { AgentCapabilityFlags, AgentMode } from "../agent-sdk-types.js";
+import type { AgentCapabilityFlags, AgentMode, ProviderInfo } from "../agent-sdk-types.js";
 import type { ProviderRuntimeSettings } from "../provider-launch-config.js";
 import { findExecutable } from "../../../utils/executable.js";
 import { ACPAgentClient } from "./acp-agent.js";
@@ -10,6 +10,7 @@ import {
   formatProviderDiagnostic,
   formatProviderDiagnosticError,
   resolveBinaryVersion,
+  resolveCliVersion,
   toDiagnosticErrorMessage,
 } from "./diagnostic-utils.js";
 
@@ -59,6 +60,10 @@ export class CopilotACPAgentClient extends ACPAgentClient {
 
   override async isAvailable(): Promise<boolean> {
     return super.isAvailable();
+  }
+
+  async getProviderInfo(): Promise<ProviderInfo> {
+    return { version: await resolveCliVersion("copilot", this.runtimeSettings) };
   }
 
   async getDiagnostic(): Promise<{ diagnostic: string }> {

@@ -79,6 +79,21 @@ export interface ProviderSnapshotEntry {
   label?: string;
   description?: string;
   defaultModeId?: string | null;
+  /** Installed CLI version, when the provider can resolve one. */
+  version?: string;
+  /** Where the provider keeps its own config, so the UI can point at it. */
+  configDir?: string;
+  /** Static per-provider setup documentation. */
+  docsUrl?: string;
+  /** Static install command, shown so a failed auto-install degrades to copy-paste. */
+  installCommand?: string;
+  capabilities?: AgentCapabilityFlags;
+}
+
+/** Runtime facts a provider can report about its local installation. */
+export interface ProviderInfo {
+  version?: string;
+  configDir?: string;
 }
 
 export type AgentFeatureToggle = {
@@ -524,4 +539,10 @@ export interface AgentClient {
    */
   isAvailable(): Promise<boolean>;
   getDiagnostic?(): Promise<{ diagnostic: string }>;
+  /**
+   * Structured installation facts for the provider snapshot. Unlike {@link getDiagnostic},
+   * which formats a human-readable blob and fetches models, this must stay cheap — the
+   * snapshot calls it on every refresh.
+   */
+  getProviderInfo?(): Promise<ProviderInfo>;
 }

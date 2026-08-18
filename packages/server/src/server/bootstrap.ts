@@ -111,6 +111,7 @@ import { ContextHubService } from "./context-hub/service.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { LoopService } from "./loop-service.js";
 import { ScheduleService } from "./schedule/service.js";
+import { UsageService } from "./usage/service.js";
 import { DaemonConfigStore } from "./daemon-config-store.js";
 import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 import { createTerminalManager, type TerminalManager } from "../terminal/terminal-manager.js";
@@ -430,6 +431,7 @@ export async function createPaseoDaemon(
         github,
       },
     });
+    const usageService = new UsageService({ paseoHome: config.paseoHome, logger });
     const agentManager = new AgentManager({
       clients: {
         ...createAllClients(logger, {
@@ -441,6 +443,7 @@ export async function createPaseoDaemon(
         ...config.agentClients,
       },
       registry: agentStorage,
+      usageRecorder: usageService,
       logger,
     });
     const providerRegistry = buildProviderRegistry(logger, {
@@ -488,6 +491,8 @@ export async function createPaseoDaemon(
     });
     await scheduleService.start();
     logger.info({ elapsed: elapsed() }, "Schedule service initialized");
+    // Drops usage shards past the retention window; safe on every boot.
+    await usageService.start();
     logger.info({ elapsed: elapsed() }, "Loading persisted agent registry");
     const persistedRecords = await agentStorage.list();
     logger.info(
@@ -735,6 +740,7 @@ export async function createPaseoDaemon(
               contextHubService,
               loopService,
               scheduleService,
+              usageService,
               checkoutDiffManager,
               scriptRouteStore,
               scriptRuntimeStore,

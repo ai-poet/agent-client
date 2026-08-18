@@ -51,7 +51,7 @@ interface UseProvidersSnapshotResult {
   isRefreshing: boolean;
   error: string | null;
   supportsSnapshot: boolean;
-  refresh: (providers?: AgentProvider[]) => Promise<void>;
+  refresh: (providers?: AgentProvider[]) => Promise<ProviderSnapshotEntry[] | undefined>;
   refetchIfStale: (selectedProvider?: AgentProvider | null) => void;
 }
 
@@ -181,11 +181,14 @@ export function useProvidersSnapshot(
   const refresh = useCallback(
     async (providers?: AgentProvider[]) => {
       if (!client) {
-        return;
+        return undefined;
       }
       await refreshSnapshot(providers);
       const snapshot = await client.getProvidersSnapshot(providersSnapshotRequest(normalizedCwd));
       queryClient.setQueryData(queryKey, snapshot);
+      // Returned so callers can inspect the post-refresh state without waiting for a
+      // re-render (used to report what an install actually accomplished).
+      return snapshot.entries;
     },
     [client, normalizedCwd, queryClient, queryKey, refreshSnapshot],
   );

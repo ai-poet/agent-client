@@ -29,9 +29,12 @@ import {
   installClaudeCodeCli,
   installCodexCli,
   installModelCli,
-  installGitBashRuntime,
-  installNode22Runtime,
 } from "../integrations/model-cli-manager.js";
+import {
+  importExternalProviders,
+  scanExternalProviders,
+} from "../integrations/external-provider-import.js";
+import { installGitBashRuntime, installNode22Runtime } from "../integrations/model-cli-manager.js";
 import {
   getProviders,
   addProvider,
@@ -45,6 +48,7 @@ import {
   type Provider,
   type ConfigBackup,
   type SetupManagedCloudScope,
+  type ManagedProviderTarget,
 } from "../features/provider-switch.js";
 import {
   openLocalTransportSession,
@@ -575,6 +579,9 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     install_claude_code_cli: () => installClaudeCodeCli(),
     install_model_cli: (args?: Record<string, unknown>) =>
       installModelCli((args as { id: string }).id),
+    scan_external_providers: () => scanExternalProviders(),
+    import_external_providers: (args?: Record<string, unknown>) =>
+      importExternalProviders(((args as { ids?: string[] })?.ids ?? []) as string[]),
     install_all_model_clis: () => installAllModelClis(),
 
     // Provider switching
@@ -583,8 +590,12 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     remove_provider: (args?: Record<string, unknown>) =>
       removeProvider((args as { id: string }).id),
     switch_provider: (args?: Record<string, unknown>) => {
-      const payload = args as { id: string; scope?: "claude" | "codex" };
-      return switchProvider(payload.id, payload.scope);
+      const payload = args as {
+        id: string;
+        scope?: ManagedProviderTarget;
+        grokModels?: string[];
+      };
+      return switchProvider(payload.id, payload.scope, { grokModels: payload.grokModels });
     },
     get_current_provider: () => getCurrentProvider(),
     setup_default_provider: (args?: Record<string, unknown>) =>

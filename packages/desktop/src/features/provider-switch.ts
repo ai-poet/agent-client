@@ -20,7 +20,7 @@ export const PASEO_MANAGED_CODEX_PROVIDER_ID = "paseo-managed-codex";
 
 export type SetupManagedCloudScope = "claude" | "codex" | "both";
 
-export type ManagedProviderTarget = "claude" | "codex";
+export type ManagedProviderTarget = "claude" | "codex" | "grok";
 
 /** Claude Code is written as native Anthropic Messages only; other wire shapes belong in a future gateway layer. */
 export type ClaudeApiFormat = "anthropic";
@@ -58,6 +58,8 @@ export interface ProviderStore {
   activeProviderId: string | null;
   activeClaudeProviderId: string | null;
   activeCodexProviderId: string | null;
+  /** Optional so stores written before Grok routing existed still load. */
+  activeGrokProviderId?: string | null;
 }
 
 const PROVIDERS_FILE = join(homedir(), ".agent-client", "providers.json");
@@ -72,6 +74,113 @@ function codexAuthPath(): string {
 
 function codexConfigPath(): string {
   return join(homedir(), ".codex", "config.toml");
+}
+
+/**
+ * Grok reads its whole configuration from GROK_HOME. We point it at a directory we own
+ * instead of editing the user's `~/.grok/config.toml` in place, so their own setup is
+ * never rewritten and switching back is just dropping the env var.
+ */
+export function grokManagedHomePath(): string {
+  return join(homedir(), ".agent-client", "agent-runtimes", "grok");
+}
+
+function grokManagedConfigPath(): string {
+  return join(grokManagedHomePath(), "config.toml");
+}
+
+/** Env var the generated TOML points at, so the key itself never lands on disk. */
+export const GROK_GATEWAY_KEY_ENV = "PASEO_GROK_GATEWAY_KEY";
+
+function escapeTomlString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/**
+ * Builds the managed Grok config. Every gateway model gets a `[model.<id>]` block whose
+ * credentials are an env-var reference rather than the literal key.
+ */
+export function buildGrokConfigToml(options: {
+  endpoint: string;
+  models: string[];
+  defaultModel?: string;
+}): string {
+  const lines: string[] = [
+    "# Managed by Agent Client. Edits here are overwritten when the route changes.",
+    "",
+  ];
+
+  if (options.defaultModel) {
+    lines.push("[models]", `default = "${escapeTomlString(options.defaultModel)}"`, "");
+  }
+
+  for (const model of options.models) {
+    lines.push(
+      `[model."${escapeTomlString(model)}"]`,
+      `model = "${escapeTomlString(model)}"`,
+      `base_url = "${escapeTomlString(options.endpoint)}"`,
+      // The gateway speaks the OpenAI Responses API for these models.
+      'api_backend = "responses"',
+      `env_key = "${GROK_GATEWAY_KEY_ENV}"`,
+      "",
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function daemonConfigPath(): string {
+  return join(homedir(), ".agent-client", "config.json");
+}
+
+/**
+ * Merges per-provider env into the daemon's config so it reaches the spawned CLI via
+ * `applyProviderEnv`. Only the keys we own are touched; the rest of the file is preserved.
+ */
+async function patchDaemonProviderEnv(
+  providerId: string,
+  env: Record<string, string> | null,
+): Promise<void> {
+  const configPath = daemonConfigPath();
+  const config = parseJsonObjectForMerge(await readFileOrNull(configPath), "daemon config.json");
+
+  const agents = isRecord(config.agents) ? { ...config.agents } : {};
+  const providers = isRecord(agents.providers) ? { ...agents.providers } : {};
+  const existing = isRecord(providers[providerId]) ? { ...providers[providerId] } : {};
+
+  if (env === null) {
+    delete existing.env;
+  } else {
+    existing.env = { ...(isRecord(existing.env) ? existing.env : {}), ...env };
+  }
+
+  if (Object.keys(existing).length === 0) {
+    delete providers[providerId];
+  } else {
+    providers[providerId] = existing;
+  }
+  agents.providers = providers;
+
+  await atomicWriteText(configPath, JSON.stringify({ ...config, agents }, null, 2));
+}
+
+async function writeGrokSettings(provider: StoredProvider, models: string[]): Promise<void> {
+  await mkdir(grokManagedHomePath(), { recursive: true });
+  await atomicWriteText(
+    grokManagedConfigPath(),
+    buildGrokConfigToml({
+      endpoint: provider.endpoint,
+      models,
+      defaultModel: models[0],
+    }),
+  );
+  // GROK_HOME redirects the CLI at the config we just generated; the key is passed
+  // separately so the TOML can reference it by name instead of embedding it.
+  await patchDaemonProviderEnv("grok", {
+    GROK_HOME: grokManagedHomePath(),
+    [GROK_GATEWAY_KEY_ENV]: provider.apiKey,
+  });
+  log.info("[provider-switch] wrote managed grok config for provider:", provider.name);
 }
 
 export function getProviderConfigPaths(): {
@@ -1215,6 +1324,11 @@ function shouldWriteCodex(provider: StoredProvider): boolean {
   return provider.target === undefined || provider.target === "codex";
 }
 
+/** Grok is opt-in only: an untargeted endpoint never rewrites its config. */
+function shouldWriteGrok(provider: StoredProvider): boolean {
+  return provider.target === "grok";
+}
+
 export async function getProviders(): Promise<ProviderStore> {
   return loadStore();
 }
@@ -1259,7 +1373,8 @@ export async function removeProvider(id: string): Promise<void> {
  */
 export async function switchProvider(
   id: string,
-  explicitScope?: "claude" | "codex",
+  explicitScope?: ManagedProviderTarget,
+  options?: { grokModels?: string[] },
 ): Promise<ConfigBackup> {
   const store = await loadStore();
   const provider = store.providers.find((entry) => entry.id === id);
@@ -1269,7 +1384,15 @@ export async function switchProvider(
 
   let writeClaude: boolean;
   let writeCodex: boolean;
-  if (explicitScope === "claude") {
+  let writeGrok = false;
+  if (explicitScope === "grok") {
+    if (!shouldWriteGrok(provider)) {
+      throw new Error(getDesktopMessage("provider.notForGrok"));
+    }
+    writeClaude = false;
+    writeCodex = false;
+    writeGrok = true;
+  } else if (explicitScope === "claude") {
     if (!shouldWriteClaude(provider)) {
       throw new Error(getDesktopMessage("provider.notForClaude"));
     }
@@ -1284,6 +1407,7 @@ export async function switchProvider(
   } else {
     writeClaude = shouldWriteClaude(provider);
     writeCodex = shouldWriteCodex(provider);
+    writeGrok = shouldWriteGrok(provider);
   }
 
   const backup = await backupCurrentConfig();
@@ -1295,6 +1419,10 @@ export async function switchProvider(
     if (writeCodex) {
       await writeCodexSettings(provider);
       store.activeCodexProviderId = id;
+    }
+    if (writeGrok) {
+      await writeGrokSettings(provider, options?.grokModels ?? []);
+      store.activeGrokProviderId = id;
     }
     syncLegacyActiveProviderId(store);
     await saveStore(store);

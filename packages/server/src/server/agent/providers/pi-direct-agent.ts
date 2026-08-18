@@ -47,6 +47,7 @@ import type {
   AgentUsage,
   ListModesOptions,
   ListModelsOptions,
+  ProviderInfo,
   ToolCallDetail,
 } from "../agent-sdk-types.js";
 import type { ProviderRuntimeSettings } from "../provider-launch-config.js";
@@ -57,6 +58,7 @@ import {
   formatProviderDiagnostic,
   formatProviderDiagnosticError,
   resolveBinaryVersion,
+  resolveCliVersion,
   toDiagnosticErrorMessage,
 } from "./diagnostic-utils.js";
 
@@ -1489,6 +1491,13 @@ export class PiDirectAgentClient implements AgentClient {
       Boolean(process.env.OPENROUTER_API_KEY) ||
       existsSync(join(homedir(), ".pi", "agent", "auth.json"))
     );
+  }
+
+  async getProviderInfo(): Promise<ProviderInfo> {
+    return {
+      version: await resolveCliVersion(PI_BINARY_COMMAND, this.runtimeSettings),
+      configDir: join(homedir(), ".pi", "agent"),
+    };
   }
 
   async getDiagnostic(): Promise<{ diagnostic: string }> {

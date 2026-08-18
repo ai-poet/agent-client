@@ -11,6 +11,7 @@ import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 import { getSub2APIMessages } from "@/i18n/sub2api";
 import { AccessModeSection } from "@/screens/settings/access-mode-section";
 import { useDesktopProvidersStore } from "@/screens/settings/desktop-providers-context";
+import { ExternalImportSection } from "@/screens/settings/external-import-section";
 import { managedProviderSettingsStyles as styles } from "@/screens/settings/managed-provider-settings-styles";
 import {
   getErrorMessage,
@@ -97,6 +98,7 @@ export function DesktopProvidersPanel() {
     handleSwitchProvider,
     handleRemoveProvider,
     handleAddProvider,
+    loadProviders,
   } = useDesktopProvidersStore();
 
   const openConfigPreview = useCallback(
@@ -222,6 +224,11 @@ export function DesktopProvidersPanel() {
           </View>
         </View>
       </SettingsSection>
+
+      <ExternalImportSection
+        existingNames={providers.map((provider) => provider.name)}
+        onImported={() => void loadProviders()}
+      />
 
       <SettingsSection title={text.savedEndpointsTitle}>
         {providers.length === 0 ? (

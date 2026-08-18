@@ -119,8 +119,26 @@ export type AgentManagerOptions = {
   mcpBaseUrl?: string;
   agentStreamCoalesceWindowMs?: number;
   rescueTimeouts?: AgentManagerRescueTimeouts;
+  /** Optional local usage recorder. Absent in tests and non-daemon embeddings. */
+  usageRecorder?: AgentUsageRecorder;
   logger: Logger;
 };
+
+/**
+ * Records a completed turn for local usage stats. Kept as a narrow interface so the
+ * manager does not depend on the usage module.
+ */
+export interface AgentUsageRecorder {
+  recordTurn(input: {
+    agentId: string;
+    provider: string;
+    cwd: string;
+    model?: string;
+    usage: AgentUsage | undefined;
+    durationMs?: number;
+    previousRawTotalCostUsd?: number;
+  }): Promise<void>;
+}
 
 export type WaitForAgentOptions = {
   signal?: AbortSignal;
@@ -189,6 +207,10 @@ type ManagedAgentBase = {
   historyPrimed: boolean;
   lastUserMessageAt: Date | null;
   lastUsage?: AgentUsage;
+  /** Wall-clock start of the in-flight turn, used to derive its duration. */
+  currentTurnStartedAt?: number;
+  /** Last raw cost reading, so cumulative providers can be charged per turn. */
+  lastRawTotalCostUsd?: number;
   lastError?: string;
   attention: AttentionState;
   foregroundTurnWaiters: Set<ForegroundTurnWaiter>;
@@ -351,10 +373,12 @@ export class AgentManager {
   private onAgentAttention?: AgentAttentionCallback;
   private logger: Logger;
   private readonly rescueTimeouts: Required<AgentManagerRescueTimeouts>;
+  private readonly usageRecorder?: AgentUsageRecorder;
 
   constructor(options: AgentManagerOptions) {
     this.idFactory = options?.idFactory ?? (() => randomUUID());
     this.registry = options?.registry;
+    this.usageRecorder = options?.usageRecorder;
     this.durableTimelineStore = options?.durableTimelineStore;
     this.onAgentAttention = options?.onAgentAttention;
     this.mcpBaseUrl = options?.mcpBaseUrl ?? null;
@@ -2477,6 +2501,9 @@ export class AgentManager {
         );
         agent.lastUsage = event.usage;
         agent.lastError = undefined;
+        // Single choke point for usage accounting: every provider and both foreground and
+        // headless/scheduled runs pass through here.
+        this.recordTurnUsage(agent, event.usage);
         // For autonomous turns (not foreground), transition to idle
         // unless a replacement is pending (avoid idle flash during replace)
         if (!isForegroundEvent && agent.lifecycle !== "idle" && !agent.pendingReplacement) {
@@ -2565,6 +2592,7 @@ export class AgentManager {
           },
           "handleStreamEvent: turn_started",
         );
+        agent.currentTurnStartedAt = Date.now();
         // For autonomous turn_started (no foreground match), set running
         if (!isForegroundEvent) {
           (agent as ActiveManagedAgent).lifecycle = "running";
@@ -2793,6 +2821,36 @@ export class AgentManager {
     void task.finally(() => {
       this.backgroundTasks.delete(task);
     });
+  }
+
+  /**
+   * Appends a completed turn to the local usage log. Tracked as a background task so a
+   * slow disk never delays the stream, and gated on a recorder being configured.
+   */
+  private recordTurnUsage(agent: ManagedAgent, usage: AgentUsage | undefined): void {
+    const startedAt = agent.currentTurnStartedAt;
+    agent.currentTurnStartedAt = undefined;
+
+    if (!this.usageRecorder) {
+      return;
+    }
+
+    const previousRawTotalCostUsd = agent.lastRawTotalCostUsd;
+    if (usage?.totalCostUsd !== undefined && Number.isFinite(usage.totalCostUsd)) {
+      agent.lastRawTotalCostUsd = usage.totalCostUsd;
+    }
+
+    this.trackBackgroundTask(
+      this.usageRecorder.recordTurn({
+        agentId: agent.id,
+        provider: agent.provider,
+        cwd: agent.cwd,
+        model: agent.runtimeInfo?.model ?? agent.config.model,
+        usage,
+        durationMs: startedAt === undefined ? undefined : Math.max(0, Date.now() - startedAt),
+        previousRawTotalCostUsd,
+      }),
+    );
   }
 
   /**

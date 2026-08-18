@@ -15,6 +15,8 @@ export const CODEX_PACKAGE_NAME = "@openai/codex";
 export const CLAUDE_CODE_PACKAGE_NAME = "@anthropic-ai/claude-code";
 export const GROK_PACKAGE_NAME = "@xai-official/grok";
 export const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
+export const OPENCODE_PACKAGE_NAME = "opencode-ai";
+export const COPILOT_PACKAGE_NAME = "@github/copilot";
 const WINDOWS_NODE_MIRROR_URL = "https://registry.npmmirror.com/-/binary/node/latest-v22.x/";
 const WINDOWS_GIT_MIRROR_URL = "https://registry.npmmirror.com/-/binary/git-for-windows/";
 const NPMMIRROR_REGISTRY_URL = "https://registry.npmmirror.com";
@@ -101,6 +103,18 @@ export const CLI_DESCRIPTORS: CliDescriptor[] = [
     autoInstallByDefault: false,
     windowsCandidates: (env) =>
       env.APPDATA?.trim() ? [path.join(env.APPDATA.trim(), "npm", "pi.cmd")] : [],
+  },
+  {
+    id: "opencode",
+    binName: "opencode",
+    packageName: OPENCODE_PACKAGE_NAME,
+    autoInstallByDefault: false,
+  },
+  {
+    id: "copilot",
+    binName: "copilot",
+    packageName: COPILOT_PACKAGE_NAME,
+    autoInstallByDefault: false,
   },
 ];
 

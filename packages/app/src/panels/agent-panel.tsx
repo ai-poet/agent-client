@@ -8,6 +8,7 @@ import { useStoreWithEqualityFn } from "zustand/traditional";
 import invariant from "tiny-invariant";
 import { AgentStreamView, type AgentStreamViewHandle } from "@/components/agent-stream-view";
 import { Composer } from "@/components/composer";
+import { CurrentTaskDock } from "@/components/current-task-dock";
 import { DesktopAgentLoadingState } from "@/components/desktop-agent-loading-state";
 import { ArchivedAgentCallout } from "@/components/archived-agent-callout";
 import { FileDropZone } from "@/components/file-drop-zone";
@@ -510,6 +511,7 @@ function ChatAgentContent({
         archivedAt: agent?.archivedAt ?? null,
         requiresAttention: agent?.requiresAttention ?? false,
         attentionReason: agent?.attentionReason ?? null,
+        lastOutputTokens: agent?.lastUsage?.outputTokens ?? null,
       };
     }),
   );
@@ -673,6 +675,10 @@ function ChatAgentContent({
             status: agentState.status,
             cwd: agentState.cwd,
             lastError: agentState.lastError ?? null,
+            lastUsage:
+              agentState.lastOutputTokens === null
+                ? null
+                : { outputTokens: agentState.lastOutputTokens },
             projectPlacement,
           }
         : null,
@@ -682,6 +688,7 @@ function ChatAgentContent({
       agentState.status,
       agentState.cwd,
       agentState.lastError,
+      agentState.lastOutputTokens,
       projectPlacement,
     ],
   );
@@ -1228,9 +1235,15 @@ function ActiveAgentComposer({
     }),
     initialCwd,
   });
+  // Read directly rather than threading through the stream section — the dock only needs
+  // the tail, and this keeps the two sections independent.
+  const streamTail = useSessionStore((state) =>
+    agentId ? state.sessions[serverId]?.agentStreamTail?.get(agentId) : undefined,
+  );
 
   return (
     <View style={[styles.inputAreaWrapper, { paddingBottom: insets.bottom }]}>
+      <CurrentTaskDock items={streamTail ?? EMPTY_STREAM_ITEMS} />
       <Composer
         agentId={agentId}
         serverId={serverId}

@@ -12,6 +12,7 @@ import type { FileBackedChatService } from "./chat/chat-service.js";
 import type { ContextHubService } from "./context-hub/service.js";
 import type { LoopService } from "./loop-service.js";
 import type { ScheduleService } from "./schedule/service.js";
+import type { UsageService } from "./usage/service.js";
 import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
 import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-store.js";
 import {
@@ -299,6 +300,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly contextHubService: ContextHubService | null;
   private readonly loopService: LoopService;
   private readonly scheduleService: ScheduleService;
+  private readonly usageService?: UsageService;
   private readonly checkoutDiffManager: CheckoutDiffManager;
   private readonly github: GitHubService;
   private readonly workspaceGitService: WorkspaceGitServiceImpl;
@@ -388,6 +390,7 @@ export class VoiceAssistantWebSocketServer {
     contextHubService?: ContextHubService,
     loopService?: LoopService,
     scheduleService?: ScheduleService,
+    usageService?: UsageService,
     checkoutDiffManager?: CheckoutDiffManager,
     scriptRouteStore?: ScriptRouteStore | null,
     scriptRuntimeStore?: WorkspaceScriptRuntimeStore | null,
@@ -425,6 +428,8 @@ export class VoiceAssistantWebSocketServer {
       throw new Error("VoiceAssistantWebSocketServer requires a schedule service.");
     }
     this.scheduleService = scheduleService;
+    // Optional: a daemon without usage accounting simply reports the feature as off.
+    this.usageService = usageService;
     if (!checkoutDiffManager) {
       throw new Error("VoiceAssistantWebSocketServer requires a checkout diff manager.");
     }
@@ -762,6 +767,7 @@ export class VoiceAssistantWebSocketServer {
       contextHubService: this.contextHubService ?? undefined,
       loopService: this.loopService,
       scheduleService: this.scheduleService,
+      usageService: this.usageService,
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,
       workspaceGitService: this.workspaceGitService,
@@ -927,6 +933,8 @@ export class VoiceAssistantWebSocketServer {
         // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
         providersSnapshot: true,
         hiddenAgentMessages: true,
+        // COMPAT(usageStats): added in v0.1.83; clients gate the usage screen on this.
+        usageStats: Boolean(this.usageService),
       },
     };
   }

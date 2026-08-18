@@ -585,6 +585,8 @@ describe("model-cli-manager", () => {
       "claude",
       "grok",
       "pi",
+      "opencode",
+      "copilot",
     ]);
     // Only the original stack is installed by "install missing".
     expect(

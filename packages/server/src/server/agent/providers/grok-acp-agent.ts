@@ -3,7 +3,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Logger } from "pino";
 
-import type { AgentCapabilityFlags, AgentModelDefinition } from "../agent-sdk-types.js";
+import type {
+  AgentCapabilityFlags,
+  AgentModelDefinition,
+  ProviderInfo,
+} from "../agent-sdk-types.js";
 import type { ListModelsOptions } from "../agent-sdk-types.js";
 import type { ProviderRuntimeSettings } from "../provider-launch-config.js";
 import { findExecutable } from "../../../utils/executable.js";
@@ -13,6 +17,7 @@ import {
   formatProviderDiagnostic,
   formatProviderDiagnosticError,
   resolveBinaryVersion,
+  resolveCliVersion,
   toDiagnosticErrorMessage,
 } from "./diagnostic-utils.js";
 
@@ -143,6 +148,13 @@ export class GrokACPAgentClient extends ACPAgentClient {
       return false;
     }
     return hasGrokCredentials();
+  }
+
+  async getProviderInfo(): Promise<ProviderInfo> {
+    return {
+      version: await resolveCliVersion(GROK_BINARY_COMMAND, this.runtimeSettings),
+      configDir: resolveGrokHome(),
+    };
   }
 
   async getDiagnostic(): Promise<{ diagnostic: string }> {

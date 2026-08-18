@@ -467,6 +467,10 @@ type ScheduleDeletePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/delete/response" }
 >["payload"];
+type UsageStatsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "usage/stats/response" }
+>["payload"];
 export type FetchAgentTimelinePayload = FetchAgentTimelineResponseMessage["payload"];
 
 export type FetchAgentTimelineDirection = FetchAgentTimelinePayload["direction"];
@@ -4051,6 +4055,29 @@ export class DaemonClient {
       },
       responseType: "schedule/create/response",
       timeout: 10000,
+    });
+  }
+
+  async getUsageStats(options: {
+    from: string;
+    to: string;
+    groupBy: "day" | "provider" | "project" | "model";
+    provider?: string;
+    cwd?: string;
+    requestId?: string;
+  }): Promise<UsageStatsPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "usage/stats",
+        from: options.from,
+        to: options.to,
+        groupBy: options.groupBy,
+        ...(options.provider ? { provider: options.provider } : {}),
+        ...(options.cwd ? { cwd: options.cwd } : {}),
+      },
+      responseType: "usage/stats/response",
+      timeout: 15000,
     });
   }
 
