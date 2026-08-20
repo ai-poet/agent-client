@@ -104,10 +104,13 @@ command = "my-server"
     expect(toml).not.toContain("[models]");
   });
 
-  it("escapes quotes so a hostile model id cannot break out of the header", () => {
-    const toml = build(['grok-"evil']);
+  it("drops model ids that cannot be a TOML key rather than emitting an unmatchable header", () => {
+    const toml = build(['grok-"evil', "grok-4.6"]);
 
-    expect(toml).toContain('[model."grok-\\"evil"]');
+    expect(toml).not.toContain("evil");
+    expect(toml).toContain('[model."grok-4.6"]');
+    // The default falls through to the first id we could actually write.
+    expect(toml).toContain('default = "grok-4.6"');
   });
 
   it("always ends with a newline", () => {
