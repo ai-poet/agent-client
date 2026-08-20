@@ -93,6 +93,13 @@ const GROK_CONTEXT_WINDOW = 500_000;
 const GROK_REASONING_EFFORTS = ["low", "medium", "high"] as const;
 
 /**
+ * Model ids usable as a TOML table key. Real gateway ids look like `grok-4.6`; an id needing
+ * escapes is dropped instead, because a header we cannot match again on the next write would
+ * accumulate duplicate sections until patching fails outright.
+ */
+const SAFE_TOML_MODEL_ID = /^[A-Za-z0-9._-]+$/u;
+
+/**
  * Preferences the CLI works better with but which are the user's to own. They are seeded on a
  * first write and never touched again, so re-running a login cannot clobber hand edits.
  */
@@ -126,9 +133,15 @@ export function buildGrokConfigToml(options: {
   const existing = options.existingToml?.trim() ? options.existingToml : null;
   let toml = existing ?? "";
 
+  const models = options.models.filter((id) => SAFE_TOML_MODEL_ID.test(id));
+  const skipped = options.models.length - models.length;
+  if (skipped > 0) {
+    log.warn(`[provider-switch] skipped ${skipped} grok model id(s) unusable as a TOML key`);
+  }
+
   toml = upsertTomlSection(toml, "cli", { installer: "internal" });
 
-  for (const model of options.models) {
+  for (const model of models) {
     toml = upsertTomlSection(toml, `model.${quoteTomlString(model)}`, {
       model,
       name: model,
@@ -142,7 +155,7 @@ export function buildGrokConfigToml(options: {
     });
   }
 
-  const defaultModel = options.models[0];
+  const defaultModel = models[0];
   if (defaultModel) {
     toml = upsertTomlSection(toml, "models", {
       default: defaultModel,
