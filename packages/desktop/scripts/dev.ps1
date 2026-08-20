@@ -28,8 +28,12 @@ Write-Host @"
 ======================================================
 "@
 
+# Ensure node_modules/.bin is on PATH so `concurrently` resolves through its
+# .cmd shim — PowerShell silently no-ops on the extensionless bin wrapper.
+$env:PATH = "$RootDir\node_modules\.bin;$env:PATH"
+
 # Launch Metro + Electron together, kill both on exit
-& "$RootDir\node_modules\.bin\concurrently" `
+concurrently `
     --kill-others `
     --names "metro,electron" `
     --prefix-colors "magenta,cyan" `
