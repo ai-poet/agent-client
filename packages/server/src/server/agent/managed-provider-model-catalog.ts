@@ -8,7 +8,7 @@ import { z } from "zod";
 import type { AgentModelDefinition } from "./agent-sdk-types.js";
 import { normalizeClaudeRuntimeModelId } from "./providers/claude/claude-models.js";
 
-export type ManagedModelProvider = "claude" | "codex" | "grok";
+export type ManagedModelProvider = "claude" | "codex" | "grok" | "pi";
 
 export interface ManagedProviderModelCatalogLike {
   getModels(
@@ -21,11 +21,14 @@ const MANAGED_PROVIDER_IDS: Record<ManagedModelProvider, string> = {
   claude: "paseo-managed-claude",
   codex: "paseo-managed-codex",
   grok: "paseo-managed-grok",
+  pi: "paseo-managed-pi",
 };
 
 /**
  * Grok routes through the gateway's OpenAI-compatible endpoint, whose catalog also lists
  * models for other agents. Only the xAI family is usable here.
+ *
+ * Pi deliberately has no entry: it is model-agnostic, so the whole gateway catalog applies.
  */
 const MANAGED_MODEL_PREFIXES: Partial<Record<ManagedModelProvider, string>> = {
   grok: "grok-",
@@ -52,7 +55,7 @@ const storedProviderSchema = z
     id: z.string(),
     endpoint: z.string(),
     apiKey: z.string(),
-    target: z.enum(["claude", "codex", "grok"]).optional(),
+    target: z.enum(["claude", "codex", "grok", "pi"]).optional(),
   })
   .passthrough();
 
@@ -62,6 +65,7 @@ const providerStoreSchema = z
     activeClaudeProviderId: z.string().nullable().optional(),
     activeCodexProviderId: z.string().nullable().optional(),
     activeGrokProviderId: z.string().nullable().optional(),
+    activePiProviderId: z.string().nullable().optional(),
   })
   .passthrough();
 
@@ -237,12 +241,12 @@ export class ManagedProviderModelCatalog implements ManagedProviderModelCatalogL
       return null;
     }
 
-    const activeProviderId =
-      provider === "claude"
-        ? parsed.data.activeClaudeProviderId
-        : provider === "codex"
-          ? parsed.data.activeCodexProviderId
-          : parsed.data.activeGrokProviderId;
+    const activeProviderId: string | null | undefined = {
+      claude: parsed.data.activeClaudeProviderId,
+      codex: parsed.data.activeCodexProviderId,
+      grok: parsed.data.activeGrokProviderId,
+      pi: parsed.data.activePiProviderId,
+    }[provider];
     const managedProviderId = MANAGED_PROVIDER_IDS[provider];
     if (activeProviderId !== managedProviderId) {
       return null;

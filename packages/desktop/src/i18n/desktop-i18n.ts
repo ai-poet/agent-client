@@ -10,6 +10,7 @@ const DESKTOP_MESSAGES = {
     "provider.notForClaude": () => "This endpoint does not apply to Claude Code.",
     "provider.notForCodex": () => "This endpoint does not apply to Codex.",
     "provider.notForGrok": () => "This endpoint does not apply to Grok.",
+    "provider.notForPi": () => "This endpoint does not apply to Pi.",
     "opener.unsupportedExternalUrl": () => "Unsupported external URL.",
     "cli.installFailed": ({ message, missingText }) =>
       `Install failed: ${message ?? ""}${missingText ? ` Missing: ${missingText}` : ""}`,
@@ -64,6 +65,7 @@ const DESKTOP_MESSAGES = {
     "provider.notForClaude": () => "此端点不适用于 Claude Code。",
     "provider.notForCodex": () => "此端点不适用于 Codex。",
     "provider.notForGrok": () => "此端点不适用于 Grok。",
+    "provider.notForPi": () => "此端点不适用于 Pi。",
     "opener.unsupportedExternalUrl": () => "不支持此外部 URL。",
     "cli.installFailed": ({ message, missingText }) =>
       `安装失败：${message ?? ""}${missingText ? ` 缺少：${missingText}` : ""}`,

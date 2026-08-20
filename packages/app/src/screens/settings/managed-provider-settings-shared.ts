@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import { getProviderIcon } from "@/components/provider-icons";
 import type { SegmentedControlOption } from "@/components/ui/segmented-control";
 import type { getSub2APIMessages } from "@/i18n/sub2api";
 import type {
@@ -7,32 +9,47 @@ import type {
 
 type DesktopProviderText = ReturnType<typeof getSub2APIMessages>["settings"]["desktopProviders"];
 
-export function providerWritesClaude(p: { target?: ManagedProviderTarget }): boolean {
-  return p.target === "claude";
-}
+/**
+ * Every CLI the managed UI can write, in the order they are offered. Claude and Codex come
+ * first because an untargeted legacy row still implicitly means those two.
+ */
+export const MANAGED_PROVIDER_TARGETS = ["claude", "codex", "grok", "pi"] as const;
 
-export function providerWritesCodex(p: { target?: ManagedProviderTarget }): boolean {
-  return p.target === "codex";
+export function providerWritesTarget(
+  p: { target?: ManagedProviderTarget },
+  target: ManagedProviderTarget,
+): boolean {
+  return p.target === target;
 }
 
 export function providerTargetHint(p: DesktopProviderPayload, text?: DesktopProviderText): string {
-  if (p.target === "claude") {
-    return text?.providerTargetHints.claude ?? "Claude Code · Anthropic";
+  const hints = text?.providerTargetHints;
+  switch (p.target) {
+    case "claude":
+      return hints?.claude ?? "Claude Code · Anthropic";
+    case "codex":
+      return hints?.codex ?? "Codex · Responses";
+    case "grok":
+      return hints?.grok ?? "Grok · Responses";
+    case "pi":
+      return hints?.pi ?? "Pi · all gateway models";
+    default:
+      return hints?.legacy ?? "Legacy unscoped endpoint";
   }
-  if (p.target === "codex") {
-    return text?.providerTargetHints.codex ?? "Codex · Responses";
-  }
-  return text?.providerTargetHints.legacy ?? "Legacy unscoped endpoint";
 }
 
 export function getCustomTargetSegmentOptions(text: {
   claude: string;
   codex: string;
+  grok: string;
+  pi: string;
 }): SegmentedControlOption<ManagedProviderTarget>[] {
-  return [
-    { value: "claude", label: text.claude },
-    { value: "codex", label: text.codex },
-  ];
+  return MANAGED_PROVIDER_TARGETS.map((target) => ({
+    value: target,
+    label: text[target],
+    // Same glyphs the model selector uses, so a target reads as the same thing in both places.
+    icon: ({ color, size }) => createElement(getProviderIcon(target), { color, size }),
+  }));
 }
 
 export const ENDPOINT_PLACEHOLDER =

@@ -594,8 +594,12 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
         id: string;
         scope?: ManagedProviderTarget;
         grokModels?: string[];
+        piModels?: string[];
       };
-      return switchProvider(payload.id, payload.scope, { grokModels: payload.grokModels });
+      return switchProvider(payload.id, payload.scope, {
+        grokModels: payload.grokModels,
+        piModels: payload.piModels,
+      });
     },
     get_current_provider: () => getCurrentProvider(),
     setup_default_provider: (args?: Record<string, unknown>) =>

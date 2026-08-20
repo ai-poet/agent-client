@@ -1851,6 +1851,8 @@ export const sub2apiMessages = {
       accessProviderTargets: {
         claude: "Claude Code",
         codex: "Codex",
+        grok: "Grok",
+        pi: "Pi",
       },
       desktopProviders: {
         active: "已启用",
@@ -1873,16 +1875,28 @@ export const sub2apiMessages = {
         noSavedByok: "在下方添加自定义提供商。每个条目只作用于 Claude Code 或 Codex。",
         noSavedCloud:
           "应用云端密钥后，默认路由会显示在这里。如果使用其他 base URL 或协议格式，可在下方添加自定义端点。",
-        claudeActive: "Claude 已启用",
-        codexActive: "Codex 已启用",
-        useClaude: "使用 · Claude",
-        useCodex: "使用 · Codex",
+        targetActive: {
+          claude: "Claude 已启用",
+          codex: "Codex 已启用",
+          grok: "Grok 已启用",
+          pi: "Pi 已启用",
+        },
+        targetUse: {
+          claude: "使用 · Claude",
+          codex: "使用 · Codex",
+          grok: "使用 · Grok",
+          pi: "使用 · Pi",
+        },
         remove: "移除",
         customEndpointTitle: "自定义端点",
         target: "目标",
-        claudeUsageHint:
-          "Claude Code 配置为原生 Anthropic Messages（ANTHROPIC_BASE_URL）。OpenAI 兼容上游后续会通过单独网关支持。",
-        codexUsageHint: "Codex 配置为 OpenAI Responses 协议（不是 Chat Completions）。",
+        targetUsageHint: {
+          claude:
+            "Claude Code 配置为原生 Anthropic Messages（ANTHROPIC_BASE_URL）。OpenAI 兼容上游后续会通过单独网关支持。",
+          codex: "Codex 配置为 OpenAI Responses 协议（不是 Chat Completions）。",
+          grok: "Grok 写入独立的托管配置目录，不改动你自己的 ~/.grok。只有 grok- 开头的模型会被写入。",
+          pi: "Pi 以自定义提供商的形式写入 ~/.pi/agent，网关上的全部模型都可用，不做前缀过滤。",
+        },
         name: "名称",
         providerNamePlaceholder: "提供商名称",
         endpoint: "端点",
@@ -1890,9 +1904,12 @@ export const sub2apiMessages = {
           "只输入 API 网关源（scheme + host）。不要包含 /v1；如果包含，保存时会去掉末尾 /v1。Claude 使用不带 /v1 的 base；Codex 配置会自动添加 /v1。",
         endpointPlaceholder: "https://api.example.com — 省略 /v1（末尾 /v1 会在保存时移除）",
         apiKey: "API 密钥",
-        claudeCredentialHint:
-          "Claude Code 使用的 Anthropic 风格凭证；桌面应用会把它映射到正确的环境变量。",
-        codexCredentialHint: "OpenAI 风格凭证（Codex / OPENAI_API_KEY 语义）。",
+        targetCredentialHint: {
+          claude: "Claude Code 使用的 Anthropic 风格凭证；桌面应用会把它映射到正确的环境变量。",
+          codex: "OpenAI 风格凭证（Codex / OPENAI_API_KEY 语义）。",
+          grok: "网关密钥。只通过环境变量引用传递，不会写进 Grok 的配置文件。",
+          pi: "网关密钥。写入 Pi 自己的凭据文件 ~/.pi/agent/auth.json。",
+        },
         add: "添加",
         cancel: "取消",
         addCustomProvider: "+ 添加自定义提供商",
@@ -1906,9 +1923,13 @@ export const sub2apiMessages = {
         providerTargetHints: {
           claude: "Claude Code · Anthropic",
           codex: "Codex · Responses",
+          grok: "Grok · Responses · 仅 grok- 模型",
+          pi: "Pi · 全部网关模型",
           legacy: "旧版未限定端点",
         },
         switchFailed: "切换失败",
+        providerRowMissing: "找不到该端点记录，请刷新后重试。",
+        noModelsForTarget: "网关上没有该目标可用的模型，配置未写入。",
         missingInformationTitle: "缺少信息",
         missingInformationBody: "需要填写名称、端点和 API 密钥。",
         invalidEndpointTitle: "端点无效",
@@ -3839,6 +3860,8 @@ export const sub2apiMessages = {
       accessProviderTargets: {
         claude: "Claude Code",
         codex: "Codex",
+        grok: "Grok",
+        pi: "Pi",
       },
       desktopProviders: {
         active: "Active",
@@ -3862,17 +3885,28 @@ export const sub2apiMessages = {
           "Add a custom provider below. Each entry targets Claude Code only or Codex only.",
         noSavedCloud:
           "After you apply a cloud key, your default route appears here. Add custom endpoints below when you use another base URL or wire format.",
-        claudeActive: "Claude active",
-        codexActive: "Codex active",
-        useClaude: "Use · Claude",
-        useCodex: "Use · Codex",
+        targetActive: {
+          claude: "Claude active",
+          codex: "Codex active",
+          grok: "Grok active",
+          pi: "Pi active",
+        },
+        targetUse: {
+          claude: "Use · Claude",
+          codex: "Use · Codex",
+          grok: "Use · Grok",
+          pi: "Use · Pi",
+        },
         remove: "Remove",
         customEndpointTitle: "Custom endpoint",
         target: "Target",
-        claudeUsageHint:
-          "Claude Code is configured as native Anthropic Messages only (ANTHROPIC_BASE_URL). OpenAI-compatible upstreams will be supported via a separate gateway later.",
-        codexUsageHint:
-          "Codex is configured for the OpenAI Responses wire only (not Chat Completions).",
+        targetUsageHint: {
+          claude:
+            "Claude Code is configured as native Anthropic Messages only (ANTHROPIC_BASE_URL). OpenAI-compatible upstreams will be supported via a separate gateway later.",
+          codex: "Codex is configured for the OpenAI Responses wire only (not Chat Completions).",
+          grok: "Grok is written to a managed config directory of its own, leaving your ~/.grok untouched. Only grok- prefixed models are written.",
+          pi: "Pi is written to ~/.pi/agent as a custom provider. Every model on the gateway is available — no prefix filtering.",
+        },
         name: "Name",
         providerNamePlaceholder: "Provider name",
         endpoint: "Endpoint",
@@ -3881,9 +3915,13 @@ export const sub2apiMessages = {
         endpointPlaceholder:
           "https://api.example.com — omit /v1 (a trailing /v1 is stripped if present)",
         apiKey: "API key",
-        claudeCredentialHint:
-          "Anthropic-style credential for Claude Code; the desktop app maps it into the right env vars.",
-        codexCredentialHint: "OpenAI-style credential (Codex / OPENAI_API_KEY semantics).",
+        targetCredentialHint: {
+          claude:
+            "Anthropic-style credential for Claude Code; the desktop app maps it into the right env vars.",
+          codex: "OpenAI-style credential (Codex / OPENAI_API_KEY semantics).",
+          grok: "Gateway key. Passed by env-var reference only — never written into Grok's config file.",
+          pi: "Gateway key. Written to Pi's own credential file, ~/.pi/agent/auth.json.",
+        },
         add: "Add",
         cancel: "Cancel",
         addCustomProvider: "+ Add custom provider",
@@ -3897,9 +3935,14 @@ export const sub2apiMessages = {
         providerTargetHints: {
           claude: "Claude Code · Anthropic",
           codex: "Codex · Responses",
+          grok: "Grok · Responses · grok- models only",
+          pi: "Pi · all gateway models",
           legacy: "Legacy unscoped endpoint",
         },
         switchFailed: "Switch failed",
+        providerRowMissing: "That saved endpoint is no longer listed. Refresh and try again.",
+        noModelsForTarget:
+          "The gateway lists no models this target can run; nothing was written.",
         missingInformationTitle: "Missing information",
         missingInformationBody: "Name, endpoint and API key are required.",
         invalidEndpointTitle: "Invalid endpoint",

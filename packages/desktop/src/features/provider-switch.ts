@@ -20,7 +20,10 @@ export const PASEO_MANAGED_CODEX_PROVIDER_ID = "paseo-managed-codex";
 
 export type SetupManagedCloudScope = "claude" | "codex" | "both";
 
-export type ManagedProviderTarget = "claude" | "codex" | "grok";
+/** Every CLI whose config this module can write, in the order the UI offers them. */
+export const MANAGED_PROVIDER_TARGETS = ["claude", "codex", "grok", "pi"] as const;
+
+export type ManagedProviderTarget = (typeof MANAGED_PROVIDER_TARGETS)[number];
 
 /** Claude Code is written as native Anthropic Messages only; other wire shapes belong in a future gateway layer. */
 export type ClaudeApiFormat = "anthropic";
@@ -58,8 +61,9 @@ export interface ProviderStore {
   activeProviderId: string | null;
   activeClaudeProviderId: string | null;
   activeCodexProviderId: string | null;
-  /** Optional so stores written before Grok routing existed still load. */
+  /** Optional so stores written before Grok/Pi routing existed still load. */
   activeGrokProviderId?: string | null;
+  activePiProviderId?: string | null;
 }
 
 const PROVIDERS_FILE = join(homedir(), ".agent-client", "providers.json");
@@ -169,7 +173,8 @@ async function writeGrokSettings(provider: StoredProvider, models: string[]): Pr
   await atomicWriteText(
     grokManagedConfigPath(),
     buildGrokConfigToml({
-      endpoint: provider.endpoint,
+      // Saved rows store the bare origin; the gateway speaks OpenAI at /v1, same as Codex.
+      endpoint: providerEndpointBaseUrl(provider.endpoint),
       models,
       defaultModel: models[0],
     }),
@@ -181,6 +186,85 @@ async function writeGrokSettings(provider: StoredProvider, models: string[]): Pr
     [GROK_GATEWAY_KEY_ENV]: provider.apiKey,
   });
   log.info("[provider-switch] wrote managed grok config for provider:", provider.name);
+}
+
+function piAgentDirPath(): string {
+  return join(homedir(), ".pi", "agent");
+}
+
+function piModelsPath(): string {
+  return join(piAgentDirPath(), "models.json");
+}
+
+function piAuthPath(): string {
+  return join(piAgentDirPath(), "auth.json");
+}
+
+/** The one provider key we own inside Pi's config; everything else in those files is left alone. */
+export const PI_MANAGED_PROVIDER_NAME = "paseo-gateway";
+
+/**
+ * Merges our gateway into Pi's `models.json`.
+ *
+ * Unlike Grok we cannot redirect Pi at a managed directory: Pi Direct runs in-process inside
+ * the daemon, and `applyProviderEnv` only decorates spawned processes, so `PI_CODING_AGENT_DIR`
+ * on the provider env channel would never reach it. We therefore write Pi's real config dir
+ * and merge rather than overwrite.
+ *
+ * Pi is not tied to one model family, so every gateway model is listed — no prefix filtering.
+ */
+export function buildPiModelsJson(options: {
+  endpoint: string;
+  models: string[];
+  existing?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const existing = options.existing ?? {};
+  const providers = isRecord(existing.providers) ? { ...existing.providers } : {};
+
+  providers[PI_MANAGED_PROVIDER_NAME] = {
+    baseUrl: options.endpoint,
+    api: "openai-completions",
+    models: options.models.map((id) => ({ id, name: id })),
+  };
+
+  return { ...existing, providers };
+}
+
+/** Pi keeps credentials in `auth.json`, the same file `pi` writes when you log in. */
+export function buildPiAuthJson(options: {
+  apiKey: string;
+  existing?: Record<string, unknown>;
+}): Record<string, unknown> {
+  return {
+    ...(options.existing ?? {}),
+    [PI_MANAGED_PROVIDER_NAME]: { type: "api_key", key: options.apiKey },
+  };
+}
+
+async function writePiSettings(provider: StoredProvider, models: string[]): Promise<void> {
+  await mkdir(piAgentDirPath(), { recursive: true });
+
+  const modelsPath = piModelsPath();
+  const authPath = piAuthPath();
+  const oldModels = await readFileOrNull(modelsPath);
+  const nextModels = buildPiModelsJson({
+    endpoint: providerEndpointBaseUrl(provider.endpoint),
+    models,
+    existing: parseJsonObjectForMerge(oldModels, "Pi models.json"),
+  });
+  const nextAuth = buildPiAuthJson({
+    apiKey: provider.apiKey,
+    existing: parseJsonObjectForMerge(await readFileOrNull(authPath), "Pi auth.json"),
+  });
+
+  await atomicWriteText(modelsPath, JSON.stringify(nextModels, null, 2));
+  try {
+    await atomicWriteText(authPath, JSON.stringify(nextAuth, null, 2));
+  } catch (error) {
+    await restoreFile(modelsPath, oldModels);
+    throw error;
+  }
+  log.info("[provider-switch] wrote managed pi config for provider:", provider.name);
 }
 
 export function getProviderConfigPaths(): {
@@ -1329,6 +1413,11 @@ function shouldWriteGrok(provider: StoredProvider): boolean {
   return provider.target === "grok";
 }
 
+/** Pi is opt-in only, for the same reason as Grok. */
+function shouldWritePi(provider: StoredProvider): boolean {
+  return provider.target === "pi";
+}
+
 export async function getProviders(): Promise<ProviderStore> {
   return loadStore();
 }
@@ -1367,14 +1456,62 @@ export async function removeProvider(id: string): Promise<void> {
   await saveStore(store);
 }
 
+const TARGET_WRITE_RULES: Record<
+  ManagedProviderTarget,
+  { supports: (provider: StoredProvider) => boolean; unsupportedMessage: () => string }
+> = {
+  claude: {
+    supports: shouldWriteClaude,
+    unsupportedMessage: () => getDesktopMessage("provider.notForClaude"),
+  },
+  codex: {
+    supports: shouldWriteCodex,
+    unsupportedMessage: () => getDesktopMessage("provider.notForCodex"),
+  },
+  grok: {
+    supports: shouldWriteGrok,
+    unsupportedMessage: () => getDesktopMessage("provider.notForGrok"),
+  },
+  pi: {
+    supports: shouldWritePi,
+    unsupportedMessage: () => getDesktopMessage("provider.notForPi"),
+  },
+};
+
 /**
- * Apply a saved endpoint to Claude and/or Codex on disk.
+ * Which CLIs a switch writes. An explicit scope writes exactly that one and must be declared
+ * by the row; without a scope, every target the row declares is written — so an untargeted
+ * legacy row still means Claude + Codex.
+ */
+function resolveWriteTargets(
+  provider: StoredProvider,
+  explicitScope?: ManagedProviderTarget,
+): ReadonlySet<ManagedProviderTarget> {
+  if (explicitScope) {
+    const rule = TARGET_WRITE_RULES[explicitScope];
+    if (!rule.supports(provider)) {
+      throw new Error(rule.unsupportedMessage());
+    }
+    return new Set([explicitScope]);
+  }
+
+  const targets = new Set<ManagedProviderTarget>();
+  for (const target of MANAGED_PROVIDER_TARGETS) {
+    if (TARGET_WRITE_RULES[target].supports(provider)) {
+      targets.add(target);
+    }
+  }
+  return targets;
+}
+
+/**
+ * Apply a saved endpoint to the CLIs it targets.
  * @param explicitScope When set, only that CLI is updated (must be supported by the provider row).
  */
 export async function switchProvider(
   id: string,
   explicitScope?: ManagedProviderTarget,
-  options?: { grokModels?: string[] },
+  options?: { grokModels?: string[]; piModels?: string[] },
 ): Promise<ConfigBackup> {
   const store = await loadStore();
   const provider = store.providers.find((entry) => entry.id === id);
@@ -1382,47 +1519,25 @@ export async function switchProvider(
     throw new Error(getDesktopMessage("provider.notFound", { id }));
   }
 
-  let writeClaude: boolean;
-  let writeCodex: boolean;
-  let writeGrok = false;
-  if (explicitScope === "grok") {
-    if (!shouldWriteGrok(provider)) {
-      throw new Error(getDesktopMessage("provider.notForGrok"));
-    }
-    writeClaude = false;
-    writeCodex = false;
-    writeGrok = true;
-  } else if (explicitScope === "claude") {
-    if (!shouldWriteClaude(provider)) {
-      throw new Error(getDesktopMessage("provider.notForClaude"));
-    }
-    writeClaude = true;
-    writeCodex = false;
-  } else if (explicitScope === "codex") {
-    if (!shouldWriteCodex(provider)) {
-      throw new Error(getDesktopMessage("provider.notForCodex"));
-    }
-    writeClaude = false;
-    writeCodex = true;
-  } else {
-    writeClaude = shouldWriteClaude(provider);
-    writeCodex = shouldWriteCodex(provider);
-    writeGrok = shouldWriteGrok(provider);
-  }
+  const targets = resolveWriteTargets(provider, explicitScope);
 
   const backup = await backupCurrentConfig();
   try {
-    if (writeClaude) {
+    if (targets.has("claude")) {
       await writeClaudeSettings(provider);
       store.activeClaudeProviderId = id;
     }
-    if (writeCodex) {
+    if (targets.has("codex")) {
       await writeCodexSettings(provider);
       store.activeCodexProviderId = id;
     }
-    if (writeGrok) {
+    if (targets.has("grok")) {
       await writeGrokSettings(provider, options?.grokModels ?? []);
       store.activeGrokProviderId = id;
+    }
+    if (targets.has("pi")) {
+      await writePiSettings(provider, options?.piModels ?? []);
+      store.activePiProviderId = id;
     }
     syncLegacyActiveProviderId(store);
     await saveStore(store);

@@ -18,8 +18,8 @@ import {
   getCustomTargetSegmentOptions,
   providerTargetHint,
   maskApiKey,
-  providerWritesClaude,
-  providerWritesCodex,
+  MANAGED_PROVIDER_TARGETS,
+  providerWritesTarget,
 } from "@/screens/settings/managed-provider-settings-shared";
 import type { DesktopProviderPayload } from "@/screens/settings/sub2api-provider-types";
 
@@ -80,8 +80,7 @@ export function DesktopProvidersPanel() {
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const {
     providers,
-    activeClaudeProviderId,
-    activeCodexProviderId,
+    activeProviderIds,
     activeClaudeProvider,
     activeCodexProvider,
     showAddProviderForm,
@@ -239,10 +238,12 @@ export function DesktopProvidersPanel() {
         ) : (
           <View style={settingsStyles.card}>
             {providers.map((provider, index) => {
-              const forClaude = providerWritesClaude(provider);
-              const forCodex = providerWritesCodex(provider);
-              const claudeActive = activeClaudeProviderId === provider.id;
-              const codexActive = activeCodexProviderId === provider.id;
+              const rowTargets = MANAGED_PROVIDER_TARGETS.filter((target) =>
+                providerWritesTarget(provider, target),
+              );
+              const activeTargets = rowTargets.filter(
+                (target) => activeProviderIds[target] === provider.id,
+              );
               return (
                 <View
                   key={provider.id}
@@ -255,43 +256,32 @@ export function DesktopProvidersPanel() {
                       {providerTargetHint(provider, text)}
                     </Text>
                     <View style={[styles.scopeActionsRow, { marginTop: theme.spacing[1] }]}>
-                      {claudeActive ? (
-                        <Text style={styles.scopeBadge}>{text.claudeActive}</Text>
-                      ) : null}
-                      {codexActive ? (
-                        <Text style={styles.scopeBadge}>{text.codexActive}</Text>
-                      ) : null}
+                      {activeTargets.map((target) => (
+                        <Text key={target} style={styles.scopeBadge}>
+                          {text.targetActive[target]}
+                        </Text>
+                      ))}
                     </View>
                   </View>
                   <View style={[styles.providerActions, { flexWrap: "wrap", maxWidth: 200 }]}>
-                    {forClaude ? (
-                      <Pressable
-                        onPress={() => void handleSwitchProvider(provider.id, "claude")}
-                        style={({ pressed }) => [
-                          styles.primaryButton,
-                          styles.compactScopeButton,
-                          pressed && styles.buttonPressed,
-                          claudeActive && styles.disabledButton,
-                        ]}
-                        disabled={claudeActive}
-                      >
-                        <Text style={styles.primaryButtonText}>{text.useClaude}</Text>
-                      </Pressable>
-                    ) : null}
-                    {forCodex ? (
-                      <Pressable
-                        onPress={() => void handleSwitchProvider(provider.id, "codex")}
-                        style={({ pressed }) => [
-                          styles.primaryButton,
-                          styles.compactScopeButton,
-                          pressed && styles.buttonPressed,
-                          codexActive && styles.disabledButton,
-                        ]}
-                        disabled={codexActive}
-                      >
-                        <Text style={styles.primaryButtonText}>{text.useCodex}</Text>
-                      </Pressable>
-                    ) : null}
+                    {rowTargets.map((target) => {
+                      const isActive = activeProviderIds[target] === provider.id;
+                      return (
+                        <Pressable
+                          key={target}
+                          onPress={() => void handleSwitchProvider(provider.id, target)}
+                          style={({ pressed }) => [
+                            styles.primaryButton,
+                            styles.compactScopeButton,
+                            pressed && styles.buttonPressed,
+                            isActive && styles.disabledButton,
+                          ]}
+                          disabled={isActive}
+                        >
+                          <Text style={styles.primaryButtonText}>{text.targetUse[target]}</Text>
+                        </Pressable>
+                      );
+                    })}
                     {!provider.isDefault ? (
                       <Pressable
                         onPress={() => void handleRemoveProvider(provider.id)}
@@ -322,11 +312,7 @@ export function DesktopProvidersPanel() {
                 onValueChange={setCustomTarget}
                 size="sm"
               />
-              {customTarget === "claude" ? (
-                <Text style={styles.usageHint}>{text.claudeUsageHint}</Text>
-              ) : (
-                <Text style={styles.usageHint}>{text.codexUsageHint}</Text>
-              )}
+              <Text style={styles.usageHint}>{text.targetUsageHint[customTarget]}</Text>
               <Text style={styles.fieldLabel}>{text.name}</Text>
               <TextInput
                 value={editProviderName}
@@ -349,9 +335,7 @@ export function DesktopProvidersPanel() {
                 style={styles.textInput}
               />
               <Text style={styles.fieldLabel}>{text.apiKey}</Text>
-              <Text style={styles.usageHint}>
-                {customTarget === "claude" ? text.claudeCredentialHint : text.codexCredentialHint}
-              </Text>
+              <Text style={styles.usageHint}>{text.targetCredentialHint[customTarget]}</Text>
               <TextInput
                 value={editProviderApiKey}
                 onChangeText={setEditProviderApiKey}
