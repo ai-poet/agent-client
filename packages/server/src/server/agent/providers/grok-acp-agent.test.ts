@@ -122,8 +122,10 @@ describe("GrokACPAgentClient", () => {
       await expect(createClient().isAvailable()).resolves.toBe(false);
     });
 
-    test("is false when the binary exists but no credentials are configured", async () => {
-      await expect(createClient().isAvailable()).resolves.toBe(false);
+    // Availability tracks installation, not configuration — the same rule Claude and Codex
+    // follow. A missing key is reported by getDiagnostic, it does not hide the provider.
+    test("is true when the binary exists but no credentials are configured", async () => {
+      await expect(createClient().isAvailable()).resolves.toBe(true);
     });
 
     test("is true when XAI_API_KEY is set", async () => {
@@ -134,17 +136,6 @@ describe("GrokACPAgentClient", () => {
 
     test("is true when the default auth file exists", async () => {
       mockState.existingPaths.add(DEFAULT_AUTH_PATH);
-
-      await expect(createClient().isAvailable()).resolves.toBe(true);
-    });
-
-    test("looks for the auth file under GROK_HOME when it is set", async () => {
-      process.env.GROK_HOME = join("/custom", "grok-home");
-      mockState.existingPaths.add(DEFAULT_AUTH_PATH);
-
-      await expect(createClient().isAvailable()).resolves.toBe(false);
-
-      mockState.existingPaths.add(join("/custom", "grok-home", "auth.json"));
 
       await expect(createClient().isAvailable()).resolves.toBe(true);
     });
@@ -220,21 +211,23 @@ describe("GrokACPAgentClient", () => {
       ]);
     });
 
-    test("closes the probe when the session request fails", async () => {
+    test("closes the probe and falls back when the session request fails", async () => {
       mockState.initializeResponse = {};
       mockState.newSessionResponse = {};
       const client = createClient();
-      const failure = new Error("probe failed");
       vi.spyOn(
         client as unknown as { transformSessionResponse: () => unknown },
         "transformSessionResponse",
       ).mockImplementation(() => {
-        throw failure;
+        throw new Error("probe failed");
       });
 
-      await expect(client.listModels({ cwd: "/repo", force: false })).rejects.toThrow(
-        "probe failed",
-      );
+      // Grok will not enumerate models until authenticated; surfacing nothing would drop it
+      // out of the picker, so a known catalog stands in.
+      const models = await client.listModels({ cwd: "/repo", force: false });
+
+      expect(models.map((model) => model.id)).toEqual(["grok-4.6", "grok-4.5"]);
+      expect(models[0]?.isDefault).toBe(true);
       expect(mockState.closedProbes).toBe(1);
     });
   });

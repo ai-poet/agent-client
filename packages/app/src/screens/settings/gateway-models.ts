@@ -14,8 +14,20 @@ const TARGET_MODEL_PREFIXES: Partial<Record<ManagedProviderTarget, string>> = {
   grok: "grok-",
 };
 
+/**
+ * Written when the catalog cannot be read — a BYOK endpoint need not serve `/v1/models`, and
+ * refusing to write the config would leave no file for the user to edit by hand.
+ */
+const FALLBACK_MODELS: Partial<Record<ManagedProviderTarget, string[]>> = {
+  grok: ["grok-4.6"],
+};
+
 export function targetNeedsModelList(target: ManagedProviderTarget): boolean {
   return TARGETS_NEEDING_MODEL_LIST.has(target);
+}
+
+export function defaultModelsForTarget(target: ManagedProviderTarget): string[] {
+  return FALLBACK_MODELS[target] ?? [];
 }
 
 export function filterGatewayModelsForTarget(

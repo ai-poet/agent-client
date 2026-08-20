@@ -395,7 +395,8 @@ function buildResolvedBuiltinProviders(
       definition: applyOverrideToDefinition(definition, override),
       runtimeSettings: mergedRuntimeSettings,
       profileModels: override?.models ?? [],
-      enabled: override?.enabled !== false,
+      // `hidden` only sets the default; an explicit config override still wins either way.
+      enabled: override?.enabled ?? definition.hidden !== true,
       createBaseClient: (logger) =>
         factory(logger, mergedRuntimeSettings, {
           workspaceGitService: options.workspaceGitService,

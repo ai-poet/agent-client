@@ -5,10 +5,11 @@ import type { Logger } from "pino";
 
 import type {
   AgentCapabilityFlags,
+  AgentMode,
   AgentModelDefinition,
   ProviderInfo,
 } from "../agent-sdk-types.js";
-import type { ListModelsOptions } from "../agent-sdk-types.js";
+import type { ListModelsOptions, ListModesOptions } from "../agent-sdk-types.js";
 import type { ProviderRuntimeSettings } from "../provider-launch-config.js";
 import { findExecutable } from "../../../utils/executable.js";
 import { ACPAgentClient, PROBE_ENV, deriveModelDefinitionsFromACP } from "./acp-agent.js";
@@ -36,6 +37,12 @@ type GrokACPAgentClientOptions = {
   logger: Logger;
   runtimeSettings?: ProviderRuntimeSettings;
 };
+
+/**
+ * Offered when the CLI will not enumerate models yet. Keeping Grok selectable while it is
+ * merely unconfigured matches how Claude and Codex behave.
+ */
+const FALLBACK_GROK_MODELS = ["grok-4.6", "grok-4.5"];
 
 /** Grok relocates its whole config directory (auth + config.toml) when GROK_HOME is set. */
 function resolveGrokHome(): string {
@@ -125,6 +132,9 @@ function extractInitializeModels(initialize: unknown): InitializeModelState | nu
 }
 
 export class GrokACPAgentClient extends ACPAgentClient {
+  /** Held locally rather than reaching into the base class's own logger field. */
+  private readonly log: Logger;
+
   constructor(options: GrokACPAgentClientOptions) {
     super({
       provider: "grok",
@@ -137,9 +147,41 @@ export class GrokACPAgentClient extends ACPAgentClient {
       defaultModes: [],
       capabilities: GROK_CAPABILITIES,
     });
+    this.log = options.logger;
   }
 
   override async listModels(options: ListModelsOptions): Promise<AgentModelDefinition[]> {
+    try {
+      return await this.probeModels(options);
+    } catch (error) {
+      // Grok refuses to enumerate models before it is authenticated ("no auth method id
+      // provided"). Failing here would drop the provider out of the picker entirely, so we
+      // fall back to the known catalog — the real one replaces it once a route is written.
+      this.log.debug({ err: error }, "Grok model probe failed; using fallback catalog");
+      return FALLBACK_GROK_MODELS.map((id, index) => ({
+        provider: this.provider,
+        id,
+        label: id,
+        isDefault: index === 0,
+      }));
+    }
+  }
+
+  /**
+   * The base implementation opens a session to read modes, which hits the same pre-auth
+   * refusal as the model probe. Modes are fully dynamic for Grok (`defaultModes` is empty),
+   * so an empty list is the honest answer — and it keeps the snapshot out of `error`.
+   */
+  override async listModes(options: ListModesOptions): Promise<AgentMode[]> {
+    try {
+      return await super.listModes(options);
+    } catch (error) {
+      this.log.debug({ err: error }, "Grok mode probe failed; reporting no modes");
+      return [];
+    }
+  }
+
+  private async probeModels(options: ListModelsOptions): Promise<AgentModelDefinition[]> {
     const probe = await this.spawnProcess(PROBE_ENV);
     try {
       const initializeModels = extractInitializeModels(probe.initialize);
@@ -165,11 +207,14 @@ export class GrokACPAgentClient extends ACPAgentClient {
     }
   }
 
+  /**
+   * Installed means selectable, matching Claude and Codex — neither of which checks
+   * credentials here. A missing key is a configuration gap the user fixes by editing the
+   * route (or `config.toml`) directly, not a reason to hide the provider; `getDiagnostic`
+   * is where that gap is reported.
+   */
   override async isAvailable(): Promise<boolean> {
-    if (!(await super.isAvailable())) {
-      return false;
-    }
-    return hasGrokCredentials();
+    return super.isAvailable();
   }
 
   async getProviderInfo(): Promise<ProviderInfo> {
@@ -216,6 +261,11 @@ export class GrokACPAgentClient extends ACPAgentClient {
           {
             label: "Config",
             value: existsSync(grokConfigPath) ? grokConfigPath : `not found (${grokConfigPath})`,
+          },
+          // Reported, not enforced: Grok stays selectable so the route can be configured.
+          {
+            label: "Credentials",
+            value: hasGrokCredentials() ? "configured" : "not configured",
           },
           { label: "Models", value: modelsValue },
           { label: "Status", value: status },

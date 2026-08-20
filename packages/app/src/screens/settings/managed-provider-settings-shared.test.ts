@@ -75,8 +75,13 @@ describe("getCustomTargetSegmentOptions", () => {
       { value: "claude", label: "Claude Code" },
       { value: "codex", label: "Codex" },
       { value: "grok", label: "Grok" },
-      { value: "pi", label: "Pi" },
     ]);
+  });
+
+  it("does not offer Pi while it is hidden", () => {
+    expect(getCustomTargetSegmentOptions(labels).map((option) => option.value)).not.toContain(
+      "pi",
+    );
   });
 
   it("stays free of component imports so it can run as a plain unit test", () => {

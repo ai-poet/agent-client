@@ -20,6 +20,12 @@ export interface AgentProviderDefinition {
   description: string;
   defaultModeId: string | null;
   modes: AgentProviderModeDefinition[];
+  /**
+   * Keeps the provider out of the registry — and so out of the model picker, the provider
+   * list and the CLI — while leaving its implementation in place. An explicit
+   * `agents.providers.<id>.enabled = true` in the daemon config still brings it back.
+   */
+  hidden?: boolean;
   /** Setup documentation for this provider's CLI. */
   docsUrl?: string;
   /**
@@ -190,6 +196,9 @@ export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
     description: "Minimal terminal-based coding agent with multi-provider LLM support",
     defaultModeId: null,
     modes: [],
+    // Hidden until its gateway routing is verified end to end. The provider, its installer
+    // and its config writer all still work — flip this to re-enable.
+    hidden: true,
     docsUrl: "https://pi.dev/docs/latest/quickstart",
     // Pi's postinstall scripts are skipped upstream too; the CLI works without them.
     installCommand: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent@latest",

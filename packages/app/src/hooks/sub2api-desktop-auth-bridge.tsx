@@ -28,6 +28,7 @@ import type {
   ProviderStore,
 } from "@/screens/settings/sub2api-provider-types";
 import {
+  defaultModelsForTarget,
   fetchGatewayModelIds,
   filterGatewayModelsForTarget,
 } from "@/screens/settings/gateway-models";
@@ -164,8 +165,11 @@ async function resolveCloudKeyForScope(input: {
   };
 }
 
-/** Targets that ride the OpenAI-compatible route rather than owning a gateway platform. */
-const GATEWAY_AGENT_TARGETS = ["grok", "pi"] as const;
+/**
+ * Targets that ride the OpenAI-compatible route rather than owning a gateway platform.
+ * Pi is omitted while it is hidden — see MANAGED_PROVIDER_TARGETS.
+ */
+const GATEWAY_AGENT_TARGETS = ["grok"] as const;
 
 function resolveOpenAiRoute(
   commands: SetupDefaultProviderPayload[],
@@ -208,28 +212,24 @@ async function withGatewayAgentCommands(
     return commands;
   }
 
-  let models: string[];
+  let models: string[] = [];
   try {
     models = await fetchGatewayModelIds({ endpoint: route.endpoint, apiKey: route.apiKey });
   } catch (error) {
-    // Grok/Pi are a bonus here; failing to reach the catalog must not break a login that
-    // already configured Claude and Codex.
-    console.warn("[sub2api] gateway catalog unavailable, skipping Grok/Pi setup", error);
-    return commands;
+    // Still write the configs with defaults below: the endpoint and key are known good here,
+    // and a file on disk is what the user can edit if the defaults are wrong.
+    console.warn("[sub2api] gateway catalog unavailable, using default models", error);
   }
 
   const extra: SetupDefaultProviderPayload[] = [];
   for (const scope of needsSetup) {
     const usable = filterGatewayModelsForTarget(scope, models);
-    if (usable.length === 0) {
-      continue;
-    }
     extra.push({
       endpoint: route.endpoint,
       apiKey: route.apiKey,
       scope,
       name: route.name,
-      models: usable,
+      models: usable.length > 0 ? usable : defaultModelsForTarget(scope),
     });
   }
   return [...commands, ...extra];

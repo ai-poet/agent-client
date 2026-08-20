@@ -1929,7 +1929,9 @@ export const sub2apiMessages = {
         },
         switchFailed: "切换失败",
         providerRowMissing: "找不到该端点记录，请刷新后重试。",
-        noModelsForTarget: "网关上没有该目标可用的模型，配置未写入。",
+        catalogUnavailableTitle: "已写入，但用的是默认模型",
+        catalogUnavailableBody:
+          "读取该端点的模型目录失败，已按默认模型写入配置。你可以直接编辑配置文件调整模型、base URL 和密钥。",
         missingInformationTitle: "缺少信息",
         missingInformationBody: "需要填写名称、端点和 API 密钥。",
         invalidEndpointTitle: "端点无效",
@@ -3941,8 +3943,9 @@ export const sub2apiMessages = {
         },
         switchFailed: "Switch failed",
         providerRowMissing: "That saved endpoint is no longer listed. Refresh and try again.",
-        noModelsForTarget:
-          "The gateway lists no models this target can run; nothing was written.",
+        catalogUnavailableTitle: "Written with default models",
+        catalogUnavailableBody:
+          "The model catalog for this endpoint could not be read, so the config was written with default models. Edit the config file directly to adjust models, base URL and key.",
         missingInformationTitle: "Missing information",
         missingInformationBody: "Name, endpoint and API key are required.",
         invalidEndpointTitle: "Invalid endpoint",

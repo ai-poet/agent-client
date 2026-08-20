@@ -8,10 +8,14 @@ import type {
 type DesktopProviderText = ReturnType<typeof getSub2APIMessages>["settings"]["desktopProviders"];
 
 /**
- * Every CLI the managed UI can write, in the order they are offered. Claude and Codex come
- * first because an untargeted legacy row still implicitly means those two.
+ * CLIs the managed UI offers, in display order. Claude and Codex come first because an
+ * untargeted legacy row still implicitly means those two.
+ *
+ * Pi is deliberately absent: its write path is implemented and tested, but the provider is
+ * hidden until its gateway routing is verified. Add it back here and drop `hidden` from the
+ * server manifest to re-enable it.
  */
-export const MANAGED_PROVIDER_TARGETS = ["claude", "codex", "grok", "pi"] as const;
+export const MANAGED_PROVIDER_TARGETS = ["claude", "codex", "grok"] as const;
 
 export function providerWritesTarget(
   p: { target?: ManagedProviderTarget },

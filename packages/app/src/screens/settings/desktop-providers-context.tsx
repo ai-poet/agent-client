@@ -21,6 +21,7 @@ import type {
 import { isValidSub2APIEndpoint } from "./sub2api-auth-bridge";
 import { getErrorMessage } from "./managed-provider-settings-shared";
 import {
+  defaultModelsForTarget,
   fetchGatewayModelIds,
   filterGatewayModelsForTarget,
   targetNeedsModelList,
@@ -136,26 +137,30 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
   const handleSwitchProvider = useCallback(
     async (id: string, scope?: ManagedProviderTarget) => {
       try {
-        // Grok and Pi embed an explicit model list in their config, so it has to be read from
-        // the gateway before switching — writing an empty list yields a valid-looking but
-        // unusable setup.
+        // Grok and Pi embed an explicit model list in their config, so it is read from the
+        // gateway first. A BYOK endpoint need not serve /v1/models, so an unreachable catalog
+        // falls back to defaults rather than blocking the write — the config file is what the
+        // user edits by hand afterwards.
         let models: Record<string, string[]> = {};
+        let usedFallback = false;
         if (scope && targetNeedsModelList(scope)) {
           const provider = providers.find((entry) => entry.id === id);
           if (!provider) {
             throw new Error(text.providerRowMissing);
           }
-          const usable = filterGatewayModelsForTarget(
-            scope,
-            await fetchGatewayModelIds({
+          let catalog: string[] = [];
+          try {
+            catalog = await fetchGatewayModelIds({
               endpoint: provider.endpoint,
               apiKey: provider.apiKey,
-            }),
-          );
-          if (usable.length === 0) {
-            throw new Error(text.noModelsForTarget);
+            });
+          } catch {
+            catalog = [];
           }
-          models = scope === "grok" ? { grokModels: usable } : { piModels: usable };
+          const usable = filterGatewayModelsForTarget(scope, catalog);
+          usedFallback = usable.length === 0;
+          const resolved = usedFallback ? defaultModelsForTarget(scope) : usable;
+          models = scope === "grok" ? { grokModels: resolved } : { piModels: resolved };
         }
 
         await invokeDesktopCommand("switch_provider", {
@@ -164,6 +169,9 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
           ...models,
         });
         await loadProviders();
+        if (usedFallback) {
+          Alert.alert(text.catalogUnavailableTitle, text.catalogUnavailableBody);
+        }
       } catch (error) {
         Alert.alert(text.switchFailed, getErrorMessage(error));
       }
@@ -171,7 +179,8 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
     [
       loadProviders,
       providers,
-      text.noModelsForTarget,
+      text.catalogUnavailableBody,
+      text.catalogUnavailableTitle,
       text.providerRowMissing,
       text.switchFailed,
     ],

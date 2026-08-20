@@ -1,11 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  defaultModelsForTarget,
   fetchGatewayModelIds,
   filterGatewayModelsForTarget,
   gatewayModelsUrl,
   parseGatewayModelIds,
   targetNeedsModelList,
 } from "./gateway-models";
+
+describe("defaultModelsForTarget", () => {
+  it("gives Grok something writable when the catalog cannot be read", () => {
+    expect(defaultModelsForTarget("grok")).toEqual(["grok-4.6"]);
+  });
+
+  it("has no defaults for targets that do not pin a model list", () => {
+    expect(defaultModelsForTarget("pi")).toEqual([]);
+    expect(defaultModelsForTarget("claude")).toEqual([]);
+  });
+});
 
 describe("targetNeedsModelList", () => {
   it("only asks for a catalog for targets whose config embeds a model list", () => {
