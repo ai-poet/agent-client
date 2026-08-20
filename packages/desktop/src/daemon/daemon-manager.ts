@@ -609,6 +609,7 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
           apiKey: string;
           name?: string;
           scope?: SetupManagedCloudScope;
+          models?: string[];
         },
       ),
     backup_config: () => backupCurrentConfig(),

@@ -42,8 +42,17 @@ function resolveGrokHome(): string {
   return process.env.GROK_HOME ?? join(homedir(), ".grok");
 }
 
+/**
+ * Credentials can arrive three ways: the env var, an OAuth login (`auth.json`), or a
+ * gateway route written into `config.toml` by the desktop app — which is how a managed
+ * CheapRouter login configures Grok, so it counts as configured too.
+ */
 function hasGrokCredentials(): boolean {
-  return Boolean(process.env.XAI_API_KEY) || existsSync(join(resolveGrokHome(), "auth.json"));
+  if (process.env.XAI_API_KEY) {
+    return true;
+  }
+  const home = resolveGrokHome();
+  return existsSync(join(home, "auth.json")) || existsSync(join(home, "config.toml"));
 }
 
 type InitializeModelState = {
@@ -162,6 +171,7 @@ export class GrokACPAgentClient extends ACPAgentClient {
       const available = await this.isAvailable();
       const resolvedBinary = await findExecutable(GROK_BINARY_COMMAND);
       const authConfigPath = join(resolveGrokHome(), "auth.json");
+      const grokConfigPath = join(resolveGrokHome(), "config.toml");
       let modelsValue = "Not checked";
       let status = formatDiagnosticStatus(available);
 
@@ -189,6 +199,10 @@ export class GrokACPAgentClient extends ACPAgentClient {
           {
             label: "Auth config",
             value: existsSync(authConfigPath) ? authConfigPath : `not found (${authConfigPath})`,
+          },
+          {
+            label: "Config",
+            value: existsSync(grokConfigPath) ? grokConfigPath : `not found (${grokConfigPath})`,
           },
           { label: "Models", value: modelsValue },
           { label: "Status", value: status },

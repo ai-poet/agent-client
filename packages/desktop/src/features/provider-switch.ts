@@ -1,8 +1,8 @@
 /**
- * Provider switching for Claude Code and Codex configurations.
+ * Provider switching for the local coding CLIs.
  *
- * Reads/writes ~/.claude/settings.json and ~/.codex/ config files.
- * Custom entries may target only Claude, only Codex, or both (managed default).
+ * Reads/writes ~/.claude/settings.json, ~/.codex/, ~/.grok/config.toml and ~/.pi/agent/.
+ * Custom entries target exactly one CLI; an untargeted legacy row means Claude + Codex.
  */
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -17,8 +17,11 @@ export const DEFAULT_PROVIDER_NAME = "Default";
 /** Paseo Cloud–managed rows: one per CLI so keys/endpoints can differ. */
 export const PASEO_MANAGED_CLAUDE_PROVIDER_ID = "paseo-managed-claude";
 export const PASEO_MANAGED_CODEX_PROVIDER_ID = "paseo-managed-codex";
+export const PASEO_MANAGED_GROK_PROVIDER_ID = "paseo-managed-grok";
+export const PASEO_MANAGED_PI_PROVIDER_ID = "paseo-managed-pi";
 
-export type SetupManagedCloudScope = "claude" | "codex" | "both";
+/** `"both"` is the legacy Claude+Codex pairing; every other value is a single CLI. */
+export type SetupManagedCloudScope = ManagedProviderTarget | "both";
 
 /** Every CLI whose config this module can write, in the order the UI offers them. */
 export const MANAGED_PROVIDER_TARGETS = ["claude", "codex", "grok", "pi"] as const;
@@ -80,112 +83,96 @@ function codexConfigPath(): string {
   return join(homedir(), ".codex", "config.toml");
 }
 
+/** Grok CLI's own config, created on demand — the CLI ships no default file. */
+export function grokConfigPath(): string {
+  return join(homedir(), ".grok", "config.toml");
+}
+
+/** Context window advertised for gateway-routed Grok models. */
+const GROK_CONTEXT_WINDOW = 500_000;
+const GROK_REASONING_EFFORTS = ["low", "medium", "high"] as const;
+
 /**
- * Grok reads its whole configuration from GROK_HOME. We point it at a directory we own
- * instead of editing the user's `~/.grok/config.toml` in place, so their own setup is
- * never rewritten and switching back is just dropping the env var.
+ * Preferences the CLI works better with but which are the user's to own. They are seeded on a
+ * first write and never touched again, so re-running a login cannot clobber hand edits.
  */
-export function grokManagedHomePath(): string {
-  return join(homedir(), ".agent-client", "agent-runtimes", "grok");
-}
-
-function grokManagedConfigPath(): string {
-  return join(grokManagedHomePath(), "config.toml");
-}
-
-/** Env var the generated TOML points at, so the key itself never lands on disk. */
-export const GROK_GATEWAY_KEY_ENV = "PASEO_GROK_GATEWAY_KEY";
-
-function escapeTomlString(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
+const GROK_PREFERENCE_SECTIONS: Record<string, Record<string, TomlValue>> = {
+  session: { auto_compact_threshold_percent: 85, load_envrc: true },
+  memory: { enabled: true },
+  "memory.session": { save_on_end: true },
+  ui: {
+    fork_secondary_model: "grok",
+    max_thoughts_width: 120,
+    yolo: false,
+    compact_mode: false,
+    permission_mode: "always-approve",
+  },
+  subagents: { enabled: true },
+};
 
 /**
- * Builds the managed Grok config. Every gateway model gets a `[model.<id>]` block whose
- * credentials are an env-var reference rather than the literal key.
+ * Builds Grok's `~/.grok/config.toml`.
+ *
+ * Every gateway model gets its own `[model."<id>"]` block keyed by the real model id, so the
+ * app's model picker can switch between them; `[models].default` points at the first one.
+ * Routing sections are always rewritten, preference sections only seeded when the file is new.
  */
 export function buildGrokConfigToml(options: {
   endpoint: string;
+  apiKey: string;
   models: string[];
-  defaultModel?: string;
+  existingToml?: string | null;
 }): string {
-  const lines: string[] = [
-    "# Managed by Agent Client. Edits here are overwritten when the route changes.",
-    "",
-  ];
+  const existing = options.existingToml?.trim() ? options.existingToml : null;
+  let toml = existing ?? "";
 
-  if (options.defaultModel) {
-    lines.push("[models]", `default = "${escapeTomlString(options.defaultModel)}"`, "");
-  }
+  toml = upsertTomlSection(toml, "cli", { installer: "internal" });
 
   for (const model of options.models) {
-    lines.push(
-      `[model."${escapeTomlString(model)}"]`,
-      `model = "${escapeTomlString(model)}"`,
-      `base_url = "${escapeTomlString(options.endpoint)}"`,
-      // The gateway speaks the OpenAI Responses API for these models.
-      'api_backend = "responses"',
-      `env_key = "${GROK_GATEWAY_KEY_ENV}"`,
-      "",
-    );
+    toml = upsertTomlSection(toml, `model.${quoteTomlString(model)}`, {
+      model,
+      name: model,
+      base_url: options.endpoint,
+      api_key: options.apiKey,
+      context_window: GROK_CONTEXT_WINDOW,
+      // The gateway serves these models over the OpenAI Responses API.
+      api_backend: "responses",
+      supports_reasoning_effort: true,
+      reasoning_efforts: GROK_REASONING_EFFORTS,
+    });
   }
 
-  return lines.join("\n");
-}
-
-function daemonConfigPath(): string {
-  return join(homedir(), ".agent-client", "config.json");
-}
-
-/**
- * Merges per-provider env into the daemon's config so it reaches the spawned CLI via
- * `applyProviderEnv`. Only the keys we own are touched; the rest of the file is preserved.
- */
-async function patchDaemonProviderEnv(
-  providerId: string,
-  env: Record<string, string> | null,
-): Promise<void> {
-  const configPath = daemonConfigPath();
-  const config = parseJsonObjectForMerge(await readFileOrNull(configPath), "daemon config.json");
-
-  const agents = isRecord(config.agents) ? { ...config.agents } : {};
-  const providers = isRecord(agents.providers) ? { ...agents.providers } : {};
-  const existing = isRecord(providers[providerId]) ? { ...providers[providerId] } : {};
-
-  if (env === null) {
-    delete existing.env;
-  } else {
-    existing.env = { ...(isRecord(existing.env) ? existing.env : {}), ...env };
+  const defaultModel = options.models[0];
+  if (defaultModel) {
+    toml = upsertTomlSection(toml, "models", {
+      default: defaultModel,
+      default_reasoning_effort: "high",
+    });
   }
 
-  if (Object.keys(existing).length === 0) {
-    delete providers[providerId];
-  } else {
-    providers[providerId] = existing;
+  if (!existing) {
+    for (const [section, entries] of Object.entries(GROK_PREFERENCE_SECTIONS)) {
+      toml = upsertTomlSection(toml, section, entries);
+    }
   }
-  agents.providers = providers;
 
-  await atomicWriteText(configPath, JSON.stringify({ ...config, agents }, null, 2));
+  return toml.endsWith("\n") ? toml : `${toml}\n`;
 }
 
 async function writeGrokSettings(provider: StoredProvider, models: string[]): Promise<void> {
-  await mkdir(grokManagedHomePath(), { recursive: true });
+  const configPath = grokConfigPath();
+  await mkdir(dirname(configPath), { recursive: true });
   await atomicWriteText(
-    grokManagedConfigPath(),
+    configPath,
     buildGrokConfigToml({
       // Saved rows store the bare origin; the gateway speaks OpenAI at /v1, same as Codex.
       endpoint: providerEndpointBaseUrl(provider.endpoint),
+      apiKey: provider.apiKey,
       models,
-      defaultModel: models[0],
+      existingToml: await readFileOrNull(configPath),
     }),
   );
-  // GROK_HOME redirects the CLI at the config we just generated; the key is passed
-  // separately so the TOML can reference it by name instead of embedding it.
-  await patchDaemonProviderEnv("grok", {
-    GROK_HOME: grokManagedHomePath(),
-    [GROK_GATEWAY_KEY_ENV]: provider.apiKey,
-  });
-  log.info("[provider-switch] wrote managed grok config for provider:", provider.name);
+  log.info("[provider-switch] wrote grok config for provider:", provider.name);
 }
 
 function piAgentDirPath(): string {
@@ -1075,8 +1062,26 @@ function quoteTomlString(value: string): string {
   return JSON.stringify(value);
 }
 
-function formatTomlValue(value: string | boolean): string {
-  return typeof value === "boolean" ? String(value) : quoteTomlString(value);
+/** Values we know how to emit. Arrays stay single-line, which is all our configs need. */
+type TomlValue = string | boolean | number | readonly string[];
+
+function formatTomlValue(value: TomlValue): string {
+  if (typeof value === "boolean" || typeof value === "number") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(quoteTomlString).join(", ")}]`;
+  }
+  return quoteTomlString(value as string);
+}
+
+/**
+ * A bare TOML key may only contain letters, digits, underscores and dashes. Anything else —
+ * a dot inside a model id like `grok-4.6`, for instance — has to be quoted, or the dot would
+ * silently turn one table into two nested ones.
+ */
+function renderTomlKeyPart(part: string): string {
+  return /^[A-Za-z0-9_-]+$/u.test(part) ? part : quoteTomlString(part);
 }
 
 function splitTomlDottedName(raw: string): string[] | null {
@@ -1187,11 +1192,11 @@ function findTomlAssignmentKey(line: string): string | null {
   return null;
 }
 
-function formatTomlAssignment(key: string, value: string | boolean): string {
+function formatTomlAssignment(key: string, value: TomlValue): string {
   return `${key} = ${formatTomlValue(value)}`;
 }
 
-function upsertTopLevelTomlKey(toml: string, key: string, value: string | boolean): string {
+function upsertTopLevelTomlKey(toml: string, key: string, value: TomlValue): string {
   const lines = toml.split(/\r?\n/u);
   const matches: number[] = [];
   let firstSectionIndex = lines.length;
@@ -1224,26 +1229,34 @@ function upsertTopLevelTomlKey(toml: string, key: string, value: string | boolea
   return lines.join("\n");
 }
 
+/**
+ * @param sectionName Dotted name, quoted where a part is not a bare key (`model."grok-4.6"`).
+ *   Matching is done on the normalized form, so an existing section is found regardless of how
+ *   it was quoted on disk; the header we write back is re-quoted as needed.
+ */
 function upsertTomlSection(
   toml: string,
   sectionName: string,
-  entries: Record<string, string | boolean>,
+  entries: Record<string, TomlValue>,
 ): string {
+  const sectionParts = splitTomlDottedName(sectionName) ?? [sectionName];
+  const canonicalName = sectionParts.join(".");
+  const renderedName = sectionParts.map(renderTomlKeyPart).join(".");
   const lines = toml.split(/\r?\n/u);
   const sectionIndexes: number[] = [];
 
   for (let i = 0; i < lines.length; i += 1) {
     const header = parseTomlHeader(lines[i]!);
-    if (header?.name === sectionName) {
+    if (header?.name === canonicalName) {
       if (header.isArray) {
-        throw new Error(`Codex config section [[${sectionName}]] cannot be safely patched.`);
+        throw new Error(`Config section [[${renderedName}]] cannot be safely patched.`);
       }
       sectionIndexes.push(i);
     }
   }
 
   if (sectionIndexes.length > 1) {
-    throw new Error(`Codex config has duplicate [${sectionName}] sections.`);
+    throw new Error(`Config has duplicate [${renderedName}] sections.`);
   }
 
   const assignmentLines = Object.entries(entries).map(([key, value]) =>
@@ -1257,7 +1270,7 @@ function upsertTomlSection(
     if (lines.length > 0) {
       lines.push("");
     }
-    lines.push(`[${sectionName}]`, ...assignmentLines);
+    lines.push(`[${renderedName}]`, ...assignmentLines);
     return `${lines.join("\n")}\n`;
   }
 
@@ -1382,6 +1395,10 @@ export interface ConfigBackup {
   claudeSettings: string | null;
   codexAuth: string | null;
   codexConfig: string | null;
+  /** Optional so a backup taken by an older build still restores what it did capture. */
+  grokConfig?: string | null;
+  piModels?: string | null;
+  piAuth?: string | null;
 }
 
 export async function backupCurrentConfig(): Promise<ConfigBackup> {
@@ -1390,6 +1407,9 @@ export async function backupCurrentConfig(): Promise<ConfigBackup> {
     claudeSettings: await readFileOrNull(claudeSettingsPath()),
     codexAuth: await readFileOrNull(codexAuthPath()),
     codexConfig: await readFileOrNull(codexConfigPath()),
+    grokConfig: await readFileOrNull(grokConfigPath()),
+    piModels: await readFileOrNull(piModelsPath()),
+    piAuth: await readFileOrNull(piAuthPath()),
   };
 }
 
@@ -1397,6 +1417,16 @@ export async function restoreConfig(backup: ConfigBackup): Promise<void> {
   await restoreFile(claudeSettingsPath(), backup.claudeSettings);
   await restoreFile(codexAuthPath(), backup.codexAuth);
   await restoreFile(codexConfigPath(), backup.codexConfig);
+  // Only restore what the backup actually captured; `undefined` means "not recorded".
+  if (backup.grokConfig !== undefined) {
+    await restoreFile(grokConfigPath(), backup.grokConfig);
+  }
+  if (backup.piModels !== undefined) {
+    await restoreFile(piModelsPath(), backup.piModels);
+  }
+  if (backup.piAuth !== undefined) {
+    await restoreFile(piAuthPath(), backup.piAuth);
+  }
   log.info("[provider-switch] restored config from backup at", backup.timestamp);
 }
 
@@ -1568,21 +1598,37 @@ function upsertProviderRow(store: ProviderStore, provider: StoredProvider): void
   }
 }
 
-export function buildPaseoManagedClaudeProvider(params: {
-  endpoint: string;
-  apiKey: string;
-  name: string;
-}): StoredProvider {
+const MANAGED_PROVIDER_ID_BY_TARGET: Record<ManagedProviderTarget, string> = {
+  claude: PASEO_MANAGED_CLAUDE_PROVIDER_ID,
+  codex: PASEO_MANAGED_CODEX_PROVIDER_ID,
+  grok: PASEO_MANAGED_GROK_PROVIDER_ID,
+  pi: PASEO_MANAGED_PI_PROVIDER_ID,
+};
+
+export function buildPaseoManagedProvider(
+  target: ManagedProviderTarget,
+  params: { endpoint: string; apiKey: string; name: string },
+): StoredProvider {
   return normalizeProvider({
-    id: PASEO_MANAGED_CLAUDE_PROVIDER_ID,
+    id: MANAGED_PROVIDER_ID_BY_TARGET[target],
     name: params.name,
     type: "default",
     endpoint: normalizeProviderEndpoint(params.endpoint),
     apiKey: params.apiKey,
     isDefault: true,
-    target: "claude",
-    claudeApiFormat: "anthropic",
+    target,
+    // Wire settings that only mean something for their own CLI.
+    ...(target === "claude" ? { claudeApiFormat: "anthropic" as const } : {}),
+    ...(target === "codex" ? { codexWireApi: "responses" as const } : {}),
   });
+}
+
+export function buildPaseoManagedClaudeProvider(params: {
+  endpoint: string;
+  apiKey: string;
+  name: string;
+}): StoredProvider {
+  return buildPaseoManagedProvider("claude", params);
 }
 
 export function buildPaseoManagedCodexProvider(params: {
@@ -1590,16 +1636,49 @@ export function buildPaseoManagedCodexProvider(params: {
   apiKey: string;
   name: string;
 }): StoredProvider {
-  return normalizeProvider({
-    id: PASEO_MANAGED_CODEX_PROVIDER_ID,
-    name: params.name,
-    type: "default",
-    endpoint: normalizeProviderEndpoint(params.endpoint),
-    apiKey: params.apiKey,
-    isDefault: true,
-    target: "codex",
-    codexWireApi: "responses",
-  });
+  return buildPaseoManagedProvider("codex", params);
+}
+
+/**
+ * Model families a target can actually run. Mirrors `MANAGED_MODEL_PREFIXES` in the server's
+ * managed-provider-model-catalog — this is the last check before a config hits disk, so a
+ * wrong model id here would produce a valid-looking but broken setup.
+ */
+const TARGET_MODEL_PREFIXES: Partial<Record<ManagedProviderTarget, string>> = {
+  grok: "grok-",
+};
+
+function modelsForTarget(target: ManagedProviderTarget, models: string[]): string[] {
+  const prefix = TARGET_MODEL_PREFIXES[target];
+  return prefix ? models.filter((id) => id.toLowerCase().startsWith(prefix)) : models;
+}
+
+/** Writes one target's config and marks it active in the store. */
+async function applyManagedTarget(
+  store: ProviderStore,
+  target: ManagedProviderTarget,
+  provider: StoredProvider,
+  models: string[],
+): Promise<void> {
+  upsertProviderRow(store, provider);
+  switch (target) {
+    case "claude":
+      await writeClaudeSettings(provider);
+      store.activeClaudeProviderId = provider.id;
+      break;
+    case "codex":
+      await writeCodexSettings(provider);
+      store.activeCodexProviderId = provider.id;
+      break;
+    case "grok":
+      await writeGrokSettings(provider, modelsForTarget("grok", models));
+      store.activeGrokProviderId = provider.id;
+      break;
+    case "pi":
+      await writePiSettings(provider, modelsForTarget("pi", models));
+      store.activePiProviderId = provider.id;
+      break;
+  }
 }
 
 /**
@@ -1611,6 +1690,8 @@ export async function setupDefaultProvider(params: {
   apiKey: string;
   name?: string;
   scope?: SetupManagedCloudScope;
+  /** Gateway model ids. Required for Grok and Pi, whose configs embed an explicit list. */
+  models?: string[];
   platform?: NodeJS.Platform;
   gitBashPath?: string | null;
 }): Promise<StoredProvider> {
@@ -1619,47 +1700,27 @@ export async function setupDefaultProvider(params: {
   const store = await loadStore();
   store.providers = store.providers.filter((entry) => entry.id !== LEGACY_DEFAULT_PROVIDER_ID);
 
-  const claudeDisplayName = scope === "both" ? `${baseName} (Claude Code)` : baseName;
-  const codexDisplayName = scope === "both" ? `${baseName} (Codex)` : baseName;
+  // "both" writes two rows, so each needs a distinguishing suffix.
+  const targets: ManagedProviderTarget[] = scope === "both" ? ["claude", "codex"] : [scope];
+  const displayNameFor = (target: ManagedProviderTarget): string =>
+    scope === "both" ? `${baseName} (${target === "claude" ? "Claude Code" : "Codex"})` : baseName;
+
+  const built = targets.map((target) => ({
+    target,
+    provider: buildPaseoManagedProvider(target, {
+      endpoint: params.endpoint,
+      apiKey: params.apiKey,
+      name: displayNameFor(target),
+    }),
+  }));
 
   const backup = await backupCurrentConfig();
   try {
     if (scope === "both") {
       store.providers = store.providers.filter((entry) => entry.id !== DEFAULT_PROVIDER_ID);
-      const claudeP = buildPaseoManagedClaudeProvider({
-        endpoint: params.endpoint,
-        apiKey: params.apiKey,
-        name: claudeDisplayName,
-      });
-      const codexP = buildPaseoManagedCodexProvider({
-        endpoint: params.endpoint,
-        apiKey: params.apiKey,
-        name: codexDisplayName,
-      });
-      upsertProviderRow(store, claudeP);
-      upsertProviderRow(store, codexP);
-      await writeClaudeSettings(claudeP);
-      await writeCodexSettings(codexP);
-      store.activeClaudeProviderId = PASEO_MANAGED_CLAUDE_PROVIDER_ID;
-      store.activeCodexProviderId = PASEO_MANAGED_CODEX_PROVIDER_ID;
-    } else if (scope === "claude") {
-      const claudeP = buildPaseoManagedClaudeProvider({
-        endpoint: params.endpoint,
-        apiKey: params.apiKey,
-        name: claudeDisplayName,
-      });
-      upsertProviderRow(store, claudeP);
-      await writeClaudeSettings(claudeP);
-      store.activeClaudeProviderId = PASEO_MANAGED_CLAUDE_PROVIDER_ID;
-    } else {
-      const codexP = buildPaseoManagedCodexProvider({
-        endpoint: params.endpoint,
-        apiKey: params.apiKey,
-        name: codexDisplayName,
-      });
-      upsertProviderRow(store, codexP);
-      await writeCodexSettings(codexP);
-      store.activeCodexProviderId = PASEO_MANAGED_CODEX_PROVIDER_ID;
+    }
+    for (const { target, provider } of built) {
+      await applyManagedTarget(store, target, provider, params.models ?? []);
     }
     syncLegacyActiveProviderId(store);
     await saveStore(store);
@@ -1668,16 +1729,6 @@ export async function setupDefaultProvider(params: {
     throw error;
   }
   log.info("[provider-switch] set up managed cloud provider scope:", scope);
-  if (scope === "codex") {
-    return buildPaseoManagedCodexProvider({
-      endpoint: params.endpoint,
-      apiKey: params.apiKey,
-      name: codexDisplayName,
-    });
-  }
-  return buildPaseoManagedClaudeProvider({
-    endpoint: params.endpoint,
-    apiKey: params.apiKey,
-    name: claudeDisplayName,
-  });
+  // "both" reports the Claude row, matching the previous behaviour; a single scope reports its own.
+  return built[0]!.provider;
 }

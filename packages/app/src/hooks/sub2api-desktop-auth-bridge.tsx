@@ -24,8 +24,13 @@ import {
 import { findReusableKey } from "@/screens/settings/managed-provider-settings-shared";
 import type {
   DesktopProviderPayload,
+  ManagedProviderTarget,
   ProviderStore,
 } from "@/screens/settings/sub2api-provider-types";
+import {
+  fetchGatewayModelIds,
+  filterGatewayModelsForTarget,
+} from "@/screens/settings/gateway-models";
 import { CLOUD_NAME } from "@/config/branding";
 
 let lastHandledCallbackUrl: string | null = null;
@@ -37,8 +42,10 @@ interface AuthCallbackPayload {
 type SetupDefaultProviderPayload = {
   endpoint: string;
   apiKey: string;
-  scope: ManagedCloudDesktopScope | "both";
+  scope: ManagedProviderTarget | "both";
   name: string;
+  /** Gateway model ids; only Grok and Pi embed an explicit list in their config. */
+  models?: string[];
 };
 
 function getErrorMessage(error: unknown): string {
@@ -157,6 +164,77 @@ async function resolveCloudKeyForScope(input: {
   };
 }
 
+/** Targets that ride the OpenAI-compatible route rather than owning a gateway platform. */
+const GATEWAY_AGENT_TARGETS = ["grok", "pi"] as const;
+
+function resolveOpenAiRoute(
+  commands: SetupDefaultProviderPayload[],
+  store: ProviderStore,
+): { endpoint: string; apiKey: string; name: string } | null {
+  const queued = commands.find((command) => command.scope === "codex" || command.scope === "both");
+  if (queued) {
+    return { endpoint: queued.endpoint, apiKey: queued.apiKey, name: queued.name };
+  }
+  // Codex may already be correctly configured from an earlier login that predates Grok/Pi
+  // support; reuse its route so those two still get set up.
+  const active = getActiveProviderForScope(store, "codex");
+  return active ? { endpoint: active.endpoint, apiKey: active.apiKey, name: active.name } : null;
+}
+
+/**
+ * Grok and Pi share Codex's OpenAI-compatible route and key. Their configs embed an explicit
+ * model list, so the gateway catalog has to be read before the desktop can write them.
+ */
+async function withGatewayAgentCommands(
+  commands: SetupDefaultProviderPayload[],
+  store: ProviderStore,
+): Promise<SetupDefaultProviderPayload[]> {
+  const route = resolveOpenAiRoute(commands, store);
+  if (!route) {
+    return commands;
+  }
+
+  const activeIds = resolveScopedActiveProviderIds(store);
+  const needsSetup = GATEWAY_AGENT_TARGETS.filter((target) => {
+    const activeId = activeIds[target];
+    if (!activeId) {
+      return true;
+    }
+    // Already configured — only rewrite when the key behind it has rotated.
+    const row = store.providers.find((provider) => provider.id === activeId);
+    return row?.apiKey?.trim() !== route.apiKey.trim();
+  });
+  if (needsSetup.length === 0) {
+    return commands;
+  }
+
+  let models: string[];
+  try {
+    models = await fetchGatewayModelIds({ endpoint: route.endpoint, apiKey: route.apiKey });
+  } catch (error) {
+    // Grok/Pi are a bonus here; failing to reach the catalog must not break a login that
+    // already configured Claude and Codex.
+    console.warn("[sub2api] gateway catalog unavailable, skipping Grok/Pi setup", error);
+    return commands;
+  }
+
+  const extra: SetupDefaultProviderPayload[] = [];
+  for (const scope of needsSetup) {
+    const usable = filterGatewayModelsForTarget(scope, models);
+    if (usable.length === 0) {
+      continue;
+    }
+    extra.push({
+      endpoint: route.endpoint,
+      apiKey: route.apiKey,
+      scope,
+      name: route.name,
+      models: usable,
+    });
+  }
+  return [...commands, ...extra];
+}
+
 async function configureMissingManagedRoutes(
   session: ReturnType<typeof parseSub2APIAuthCallback>,
   getAccessToken: () => Promise<string | null>,
@@ -246,11 +324,12 @@ async function configureMissingManagedRoutes(
     });
   }
 
-  if (commands.length === 0) {
+  const allCommands = await withGatewayAgentCommands(commands, store);
+  if (allCommands.length === 0) {
     return;
   }
 
-  for (const command of commands) {
+  for (const command of allCommands) {
     await invokeDesktopCommand("setup_default_provider", command);
   }
 }
