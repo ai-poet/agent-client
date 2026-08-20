@@ -79,10 +79,10 @@ describe("getCustomTargetSegmentOptions", () => {
     ]);
   });
 
-  it("attaches a provider icon to every option", () => {
+  it("stays free of component imports so it can run as a plain unit test", () => {
+    // Icons are the panel's job; this module must not pull React Native into node tests.
     for (const option of getCustomTargetSegmentOptions(labels)) {
-      expect(typeof option.icon).toBe("function");
-      expect(option.icon?.({ color: "#fff", size: 16 })).toBeTruthy();
+      expect(option.icon).toBeUndefined();
     }
   });
 });

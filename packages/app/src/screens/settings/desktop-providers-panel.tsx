@@ -9,6 +9,7 @@ import { settingsStyles } from "@/styles/settings";
 import { useAppSettings } from "@/hooks/use-settings";
 import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 import { getSub2APIMessages } from "@/i18n/sub2api";
+import { getProviderIcon } from "@/components/provider-icons";
 import { AccessModeSection } from "@/screens/settings/access-mode-section";
 import { useDesktopProvidersStore } from "@/screens/settings/desktop-providers-context";
 import { ExternalImportSection } from "@/screens/settings/external-import-section";
@@ -99,6 +100,21 @@ export function DesktopProvidersPanel() {
     handleAddProvider,
     loadProviders,
   } = useDesktopProvidersStore();
+
+  // Same glyphs the model selector uses, so a target reads as the same thing in both places.
+  const targetOptions = useMemo(
+    () =>
+      getCustomTargetSegmentOptions(providerTargetText).map((option) => {
+        const Icon = getProviderIcon(option.value);
+        return {
+          ...option,
+          icon: ({ color, size }: { color: string; size: number }) => (
+            <Icon color={color} size={size} />
+          ),
+        };
+      }),
+    [providerTargetText],
+  );
 
   const openConfigPreview = useCallback(
     async (target: Exclude<ConfigPreviewTarget, null>) => {
@@ -307,7 +323,7 @@ export function DesktopProvidersPanel() {
             <View style={styles.formBody}>
               <Text style={styles.fieldLabel}>{text.target}</Text>
               <SegmentedControl
-                options={getCustomTargetSegmentOptions(providerTargetText)}
+                options={targetOptions}
                 value={customTarget}
                 onValueChange={setCustomTarget}
                 size="sm"

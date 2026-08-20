@@ -1,5 +1,3 @@
-import { createElement } from "react";
-import { getProviderIcon } from "@/components/provider-icons";
 import type { SegmentedControlOption } from "@/components/ui/segmented-control";
 import type { getSub2APIMessages } from "@/i18n/sub2api";
 import type {
@@ -38,6 +36,10 @@ export function providerTargetHint(p: DesktopProviderPayload, text?: DesktopProv
   }
 }
 
+/**
+ * Labels only — icons are attached by the panel. Keeping this module free of component
+ * imports is what lets it stay a plain unit-testable module.
+ */
 export function getCustomTargetSegmentOptions(text: {
   claude: string;
   codex: string;
@@ -47,8 +49,6 @@ export function getCustomTargetSegmentOptions(text: {
   return MANAGED_PROVIDER_TARGETS.map((target) => ({
     value: target,
     label: text[target],
-    // Same glyphs the model selector uses, so a target reads as the same thing in both places.
-    icon: ({ color, size }) => createElement(getProviderIcon(target), { color, size }),
   }));
 }
 

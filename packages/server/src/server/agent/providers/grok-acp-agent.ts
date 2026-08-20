@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Logger } from "pino";
@@ -43,16 +43,29 @@ function resolveGrokHome(): string {
 }
 
 /**
- * Credentials can arrive three ways: the env var, an OAuth login (`auth.json`), or a
- * gateway route written into `config.toml` by the desktop app — which is how a managed
- * CheapRouter login configures Grok, so it counts as configured too.
+ * The installer leaves behind a stub `config.toml` holding nothing but `[cli] installer`, so
+ * the file existing proves nothing. Only a key inside it counts as a configured route.
+ */
+function grokConfigCarriesKey(configPath: string): boolean {
+  try {
+    return /^\s*(?:api_key|env_key)\s*=/mu.test(readFileSync(configPath, "utf8"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Credentials can arrive three ways: the env var, an OAuth login (`auth.json`), or a gateway
+ * route written into `config.toml` — which is how a managed CheapRouter login sets Grok up.
  */
 function hasGrokCredentials(): boolean {
   if (process.env.XAI_API_KEY) {
     return true;
   }
   const home = resolveGrokHome();
-  return existsSync(join(home, "auth.json")) || existsSync(join(home, "config.toml"));
+  return (
+    existsSync(join(home, "auth.json")) || grokConfigCarriesKey(join(home, "config.toml"))
+  );
 }
 
 type InitializeModelState = {
