@@ -28,7 +28,7 @@ export function providerTargetHint(p: DesktopProviderPayload, text?: DesktopProv
     case "codex":
       return hints?.codex ?? "Codex · Responses";
     case "grok":
-      return hints?.grok ?? "Grok · Responses";
+      return hints?.grok ?? "Grok · Responses · grok- models only";
     case "pi":
       return hints?.pi ?? "Pi · all gateway models";
     default:
