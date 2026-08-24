@@ -1,5 +1,6 @@
 import type { ProviderRuntimeSettings } from "../provider-launch-config.js";
 import { execCommand } from "../../../utils/spawn.js";
+import { findExecutable } from "../../../utils/executable.js";
 
 type DiagnosticEntry = {
   label: string;
@@ -49,6 +50,37 @@ export async function resolveBinaryVersion(binaryPath: string): Promise<string> 
     return stdout.trim() || "unknown";
   } catch {
     return "unknown";
+  }
+}
+
+/**
+ * Resolves a CLI's reported version for the provider snapshot. Returns `undefined` rather
+ * than `"unknown"` so callers can omit the field instead of surfacing a placeholder, and
+ * honors a `replace`-mode command override.
+ */
+export async function resolveCliVersion(
+  binaryName: string,
+  runtimeSettings?: ProviderRuntimeSettings,
+): Promise<string | undefined> {
+  const command = runtimeSettings?.command;
+  try {
+    if (command?.mode === "replace" && command.argv[0]) {
+      const { stdout } = await execCommand(
+        command.argv[0],
+        [...command.argv.slice(1), "--version"],
+        { timeout: 5_000 },
+      );
+      return stdout.trim() || undefined;
+    }
+
+    const executable = await findExecutable(binaryName);
+    if (!executable) {
+      return undefined;
+    }
+    const { stdout } = await execCommand(executable, ["--version"], { timeout: 5_000 });
+    return stdout.trim() || undefined;
+  } catch {
+    return undefined;
   }
 }
 

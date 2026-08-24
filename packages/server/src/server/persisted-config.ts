@@ -8,6 +8,7 @@ import {
   ProviderOverrideSchema,
 } from "./agent/provider-launch-config.js";
 import type { AgentProviderRuntimeSettingsMap } from "./agent/provider-launch-config.js";
+import { BUILTIN_PROVIDER_IDS } from "./agent/provider-manifest.js";
 
 const LogLevelSchema = z.enum(["trace", "debug", "info", "warn", "error", "fatal"]);
 const LogFormatSchema = z.enum(["pretty", "json"]);
@@ -118,7 +119,6 @@ const FeatureVoiceModeSchema = z
   })
   .strict();
 
-const BUILTIN_PROVIDER_IDS = ["claude", "codex", "copilot", "opencode", "pi"] as const;
 const PROVIDER_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 const ProviderOverridesSchema = z

@@ -18,6 +18,8 @@ import {
   buildWindowsSetUserPathPowerShellArgs,
   buildWindowsUserPathValue,
   REQUIRED_NODE_MAJOR,
+  CLI_DESCRIPTORS,
+  getCliDescriptor,
   buildWindowsCliExecutableCandidates,
   buildWindowsCliSearchPath,
   buildWindowsCliVersionCommand,
@@ -559,5 +561,76 @@ describe("model-cli-manager", () => {
       "official",
     );
     expect(officialCommand).toBe("npm install -g @anthropic-ai/claude-code@latest");
+  });
+
+  it("threads extra npm flags into package install commands", () => {
+    expect(
+      buildWindowsNpmPackageInstallCommand("@earendil-works/pi-coding-agent", "official", [
+        "--ignore-scripts",
+      ]),
+    ).toBe("npm install -g --ignore-scripts @earendil-works/pi-coding-agent@latest");
+
+    expect(
+      buildWindowsNpmPackageInstallCommand("@earendil-works/pi-coding-agent", "npmmirror", [
+        "--ignore-scripts",
+      ]),
+    ).toContain(
+      "npm install -g --ignore-scripts @earendil-works/pi-coding-agent@latest --registry=",
+    );
+  });
+
+  it("describes every installable agent CLI", () => {
+    expect(CLI_DESCRIPTORS.map((descriptor) => descriptor.id)).toEqual([
+      "codex",
+      "claude",
+      "grok",
+      "pi",
+      "opencode",
+      "copilot",
+    ]);
+    // Only the original stack is installed by "install missing".
+    expect(
+      CLI_DESCRIPTORS.filter((descriptor) => descriptor.autoInstallByDefault).map(
+        (descriptor) => descriptor.id,
+      ),
+    ).toEqual(["codex", "claude"]);
+  });
+
+  it("uses the published package names and install flags for Grok and Pi", () => {
+    const grok = getCliDescriptor("grok");
+    expect(grok.packageName).toBe("@xai-official/grok");
+    expect(grok.npmInstallArgs).toBeUndefined();
+    expect(grok.minNodeVersion).toBeUndefined();
+
+    const pi = getCliDescriptor("pi");
+    expect(pi.packageName).toBe("@earendil-works/pi-coding-agent");
+    expect(pi.npmInstallArgs).toEqual(["--ignore-scripts"]);
+    expect(pi.minNodeVersion).toBe("22.19.0");
+  });
+
+  it("rejects unknown agent CLI ids", () => {
+    expect(() => getCliDescriptor("nope")).toThrow("Unknown agent CLI 'nope'");
+  });
+
+  it("probes extra Windows install locations for Grok and Pi", () => {
+    const grokCandidates = getCliDescriptor("grok").windowsCandidates?.({
+      LOCALAPPDATA: "C:\\Users\\alice\\AppData\\Local",
+      USERPROFILE: "C:\\Users\\alice",
+    });
+    expect(grokCandidates).toEqual([
+      "C:\\Users\\alice\\AppData\\Local\\Grok\\grok.exe",
+      "C:\\Users\\alice\\.grok\\bin\\grok.exe",
+    ]);
+
+    const piCandidates = getCliDescriptor("pi").windowsCandidates?.({
+      APPDATA: "C:\\Users\\alice\\AppData\\Roaming",
+    });
+    expect(piCandidates).toEqual(["C:\\Users\\alice\\AppData\\Roaming\\npm\\pi.cmd"]);
+  });
+
+  it("quotes absolute fallback candidates in Windows version probes", () => {
+    expect(buildWindowsCliVersionCommand("grok", ["C:\\Program Files\\Grok\\grok.exe"])).toBe(
+      'grok.cmd --version || grok.exe --version || grok --version || "C:\\Program Files\\Grok\\grok.exe" --version',
+    );
   });
 });

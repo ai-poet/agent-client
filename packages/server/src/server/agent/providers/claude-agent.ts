@@ -50,6 +50,7 @@ import type {
   AgentClient,
   AgentLaunchContext,
   AgentMetadata,
+  ProviderInfo,
   AgentMode,
   AgentModelDefinition,
   AgentPermissionRequest,
@@ -1146,6 +1147,14 @@ export class ClaudeAgentClient implements AgentClient {
     // Default mode uses @anthropic-ai/claude-agent-sdk's bundled cli.js run
     // via process.execPath. No external `claude` binary is required.
     return true;
+  }
+
+  async getProviderInfo(): Promise<ProviderInfo> {
+    const version = await resolveClaudeVersion(this.runtimeSettings);
+    return {
+      version: version ?? undefined,
+      configDir: process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude"),
+    };
   }
 
   async getDiagnostic(): Promise<{ diagnostic: string }> {

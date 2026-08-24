@@ -37,6 +37,7 @@ import type {
   ListPersistedAgentsOptions,
   McpServerConfig,
   PersistedAgentDescriptor,
+  ProviderInfo,
   ToolCallDetail,
   ToolCallTimelineItem,
 } from "../agent-sdk-types.js";
@@ -54,6 +55,7 @@ import {
   formatProviderDiagnostic,
   formatProviderDiagnosticError,
   resolveBinaryVersion,
+  resolveCliVersion,
   toDiagnosticErrorMessage,
 } from "./diagnostic-utils.js";
 import { renderPromptAttachmentAsText } from "../prompt-attachments.js";
@@ -1156,6 +1158,10 @@ export class OpenCodeAgentClient implements AgentClient {
       return await isCommandAvailable(command.argv[0]);
     }
     return await isCommandAvailable("opencode");
+  }
+
+  async getProviderInfo(): Promise<ProviderInfo> {
+    return { version: await resolveCliVersion("opencode", this.runtimeSettings) };
   }
 
   async getDiagnostic(): Promise<{ diagnostic: string }> {

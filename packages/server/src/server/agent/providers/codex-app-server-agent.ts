@@ -25,6 +25,7 @@ import type {
   ListModelsOptions,
   ListPersistedAgentsOptions,
   PersistedAgentDescriptor,
+  ProviderInfo,
 } from "../agent-sdk-types.js";
 import type { Logger } from "pino";
 import { homedir } from "node:os";
@@ -58,6 +59,7 @@ import {
   formatProviderDiagnostic,
   formatProviderDiagnosticError,
   resolveBinaryVersion,
+  resolveCliVersion,
   toDiagnosticErrorMessage,
 } from "./diagnostic-utils.js";
 import type { WorkspaceGitService } from "../../workspace-git-service.js";
@@ -4187,6 +4189,13 @@ export class CodexAppServerAgentClient implements AgentClient {
       return await isCommandAvailable(command.argv[0]);
     }
     return await isCommandAvailable("codex");
+  }
+
+  async getProviderInfo(): Promise<ProviderInfo> {
+    return {
+      version: await resolveCliVersion("codex", this.runtimeSettings),
+      configDir: resolveCodexHomeDir(),
+    };
   }
 
   async getDiagnostic(): Promise<{ diagnostic: string }> {

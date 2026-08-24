@@ -1,16 +1,43 @@
-import { AlertCircle, RotateCw, Search } from "lucide-react-native";
+import {
+  AlertCircle,
+  Check,
+  Download,
+  ExternalLink,
+  RotateCw,
+  Search,
+  X,
+} from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { AdaptiveModalSheet, AdaptiveTextInput } from "@/components/adaptive-modal-sheet";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { Button } from "@/components/ui/button";
+import { FactRow } from "@/components/ui/fact-row";
+import { StatusPanel } from "@/components/ui/status-panel";
 import { isWeb } from "@/constants/platform";
 import { Fonts } from "@/constants/theme";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { resolveProviderLabel } from "@/utils/provider-definitions";
+import { classifyInstallOutcome } from "@/utils/provider-presentation";
 import { formatTimeAgo } from "@/utils/time";
-import type { AgentModelDefinition, AgentProvider } from "@server/server/agent/agent-sdk-types";
+import { openExternalUrl } from "@/utils/open-external-url";
+import { shouldUseDesktopDaemon, installModelCli } from "@/desktop/daemon/desktop-daemon";
+import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
+import { getSub2APIMessages } from "@/i18n/sub2api";
+import type {
+  AgentCapabilityFlags,
+  AgentModelDefinition,
+  AgentProvider,
+} from "@server/server/agent/agent-sdk-types";
+
+const CAPABILITY_ORDER: (keyof AgentCapabilityFlags)[] = [
+  "supportsToolInvocations",
+  "supportsSessionPersistence",
+  "supportsMcpServers",
+  "supportsReasoningStream",
+];
 
 interface ProviderDiagnosticSheetProps {
   provider: string;
@@ -26,10 +53,13 @@ export function ProviderDiagnosticSheet({
   serverId,
 }: ProviderDiagnosticSheetProps) {
   const { theme } = useUnistyles();
+  const locale = useSub2APILocale();
+  const text = useMemo(() => getSub2APIMessages(locale).settings.providers, [locale]);
   const client = useHostRuntimeClient(serverId);
   const { entries: snapshotEntries, refresh, isRefreshing } = useProvidersSnapshot(serverId);
   const [diagnostic, setDiagnostic] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [installing, setInstalling] = useState(false);
   const [query, setQuery] = useState("");
 
   const providerLabel = resolveProviderLabel(provider, snapshotEntries);
@@ -38,6 +68,7 @@ export function ProviderDiagnosticSheet({
     [snapshotEntries, provider],
   );
   const models = providerEntry?.models ?? [];
+  const isReady = providerEntry?.status === "ready";
   const providerSnapshotRefreshing = providerEntry?.status === "loading";
   const providerErrorMessage =
     providerEntry?.status === "error" ? (providerEntry.error ?? "Unknown error") : null;
@@ -99,36 +130,67 @@ export function ProviderDiagnosticSheet({
     }
   }, [visible, fetchDiagnostic]);
 
+  const canInstallHere = shouldUseDesktopDaemon();
+  const showInstallAction = Boolean(providerEntry?.installCommand) && !isReady;
+
+  const handleInstall = useCallback(() => {
+    if (installing) {
+      return;
+    }
+    const previousVersion = providerEntry?.version;
+    setInstalling(true);
+    void installModelCli(provider)
+      .then(async () => {
+        const refreshed = await refresh([provider as AgentProvider]);
+        const nextEntry = refreshed?.find((entry) => entry.provider === provider);
+        const outcome = classifyInstallOutcome({ previousVersion, nextEntry });
+        // Report what actually happened rather than assuming a zero exit means success.
+        if (outcome.kind === "not-detected") {
+          Alert.alert(text.installFailed, text.installNotDetected(providerLabel));
+        } else if (outcome.kind === "unchanged") {
+          Alert.alert(providerLabel, text.installUnchanged(providerLabel, outcome.version));
+        } else {
+          Alert.alert(
+            providerLabel,
+            outcome.version
+              ? text.installSucceeded(providerLabel, outcome.version)
+              : text.installSucceededUnknownVersion(providerLabel),
+          );
+        }
+        void fetchDiagnostic({ keepCurrent: true });
+      })
+      .catch((error) => {
+        console.error("[ProviderDiagnostic] Install failed", error);
+        Alert.alert(text.installFailed, error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        setInstalling(false);
+      });
+  }, [installing, provider, providerEntry?.version, providerLabel, refresh, fetchDiagnostic, text]);
+
   function renderModelsBody() {
     if (models.length === 0 && providerSnapshotRefreshing) {
-      return (
-        <View style={sheetStyles.emptyState}>
-          <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
-          <Text style={sheetStyles.mutedText}>Loading models…</Text>
-        </View>
-      );
+      return <StatusPanel title={text.loadingModels} loading />;
     }
     if (models.length === 0 && providerErrorMessage) {
       return (
-        <View style={sheetStyles.emptyState}>
-          <AlertCircle size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
-          <Text style={sheetStyles.mutedText}>{providerErrorMessage}</Text>
-        </View>
+        <StatusPanel
+          title={text.statuses.error}
+          description={providerErrorMessage}
+          error
+          icon={<AlertCircle size={theme.iconSize.md} color={theme.colors.foregroundMuted} />}
+        />
       );
     }
     if (models.length === 0) {
-      return (
-        <View style={sheetStyles.emptyState}>
-          <Text style={sheetStyles.mutedText}>No models detected.</Text>
-        </View>
-      );
+      return <StatusPanel title={text.noModels} />;
     }
     if (filteredModels.length === 0) {
       return (
-        <View style={sheetStyles.emptyState}>
-          <Search size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
-          <Text style={sheetStyles.mutedText}>No models match your search</Text>
-        </View>
+        <StatusPanel
+          title={text.noMatchingModels}
+          icon={<Search size={theme.iconSize.md} color={theme.colors.foregroundMuted} />}
+        />
       );
     }
     return filteredModels.map((model: AgentModelDefinition, index) => (
@@ -161,9 +223,7 @@ export function ProviderDiagnosticSheet({
             refreshInFlight ? sheetStyles.disabled : null,
           ]}
           accessibilityRole="button"
-          accessibilityLabel={
-            refreshInFlight ? `Refreshing ${providerLabel}` : `Refresh ${providerLabel}`
-          }
+          accessibilityLabel={refreshInFlight ? text.refreshing : text.refresh}
         >
           {refreshInFlight ? (
             <LoadingSpinner size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
@@ -174,12 +234,88 @@ export function ProviderDiagnosticSheet({
       }
     >
       <View style={sheetStyles.section}>
-        <Text style={sheetStyles.sectionTitle}>Diagnostic</Text>
+        <View style={sheetStyles.factsCard}>
+          <FactRow
+            label={text.facts.version}
+            value={providerEntry?.version ?? text.facts.notDetected}
+            mono={Boolean(providerEntry?.version)}
+          />
+          {providerEntry?.configDir ? (
+            <FactRow label={text.facts.configDir} value={providerEntry.configDir} mono copyable />
+          ) : null}
+          {providerEntry?.installCommand ? (
+            <FactRow
+              label={text.facts.installCommand}
+              value={providerEntry.installCommand}
+              mono
+              copyable
+            />
+          ) : null}
+        </View>
+
+        <View style={sheetStyles.actionRow}>
+          {showInstallAction && canInstallHere ? (
+            <Button
+              variant="outline"
+              size="sm"
+              busy={installing}
+              leftIcon={Download}
+              onPress={handleInstall}
+            >
+              {installing ? text.installing : text.install}
+            </Button>
+          ) : null}
+          {providerEntry?.docsUrl ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              leftIcon={ExternalLink}
+              onPress={() => void openExternalUrl(providerEntry.docsUrl ?? "")}
+            >
+              {text.docs}
+            </Button>
+          ) : null}
+        </View>
+        {showInstallAction && !canInstallHere ? (
+          <Text style={sheetStyles.mutedText}>{text.installOnDesktopOnly}</Text>
+        ) : null}
+      </View>
+
+      {providerEntry?.capabilities ? (
+        <View style={sheetStyles.section}>
+          <Text style={sheetStyles.sectionTitle}>{text.capabilities}</Text>
+          <View style={sheetStyles.capabilityRow}>
+            {CAPABILITY_ORDER.map((key) => {
+              const supported = providerEntry.capabilities?.[key] ?? false;
+              return (
+                <View key={key} style={sheetStyles.capabilityChip}>
+                  {supported ? (
+                    <Check size={theme.iconSize.xs} color={theme.colors.statusSuccess} />
+                  ) : (
+                    <X size={theme.iconSize.xs} color={theme.colors.foregroundMuted} />
+                  )}
+                  <Text
+                    style={[
+                      sheetStyles.capabilityText,
+                      !supported && sheetStyles.capabilityTextMuted,
+                    ]}
+                  >
+                    {text.capabilityLabels[key]}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
+
+      <View style={sheetStyles.section}>
+        <Text style={sheetStyles.sectionTitle}>{text.diagnostic}</Text>
         <View style={sheetStyles.codeBlock}>
           {loading && !diagnostic ? (
             <View style={sheetStyles.codeBlockLoading}>
               <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
-              <Text style={sheetStyles.mutedText}>Running diagnostic…</Text>
+              <Text style={sheetStyles.mutedText}>{text.runningDiagnostic}</Text>
             </View>
           ) : diagnostic ? (
             <ScrollView
@@ -195,7 +331,7 @@ export function ProviderDiagnosticSheet({
             </ScrollView>
           ) : (
             <View style={sheetStyles.codeBlockLoading}>
-              <Text style={sheetStyles.mutedText}>No diagnostic available.</Text>
+              <Text style={sheetStyles.mutedText}>{text.noDiagnostic}</Text>
             </View>
           )}
         </View>
@@ -203,13 +339,13 @@ export function ProviderDiagnosticSheet({
 
       <View style={sheetStyles.modelsSection}>
         <View style={sheetStyles.modelsHeader}>
-          <Text style={sheetStyles.sectionTitle}>Models</Text>
+          <Text style={sheetStyles.sectionTitle}>{text.models}</Text>
           <View style={sheetStyles.modelsHeaderMeta}>
             <Text style={sheetStyles.countText}>{models.length}</Text>
             {fetchedAtLabel ? (
               <>
                 <Text style={sheetStyles.metaDot}>·</Text>
-                <Text style={sheetStyles.countText}>Updated {fetchedAtLabel}</Text>
+                <Text style={sheetStyles.countText}>{text.updatedAgo(fetchedAtLabel)}</Text>
               </>
             ) : null}
           </View>
@@ -220,7 +356,7 @@ export function ProviderDiagnosticSheet({
             <AdaptiveTextInput
               value={query}
               onChangeText={setQuery}
-              placeholder="Search models"
+              placeholder={text.searchModels}
               placeholderTextColor={theme.colors.foregroundMuted}
               autoCapitalize="none"
               autoCorrect={false}
@@ -245,6 +381,42 @@ export function ProviderDiagnosticSheet({
 const sheetStyles = StyleSheet.create((theme) => ({
   section: {
     gap: theme.spacing[2],
+  },
+  factsCard: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface2,
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
+  },
+  actionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: theme.spacing[2],
+  },
+  capabilityRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[2],
+  },
+  capabilityChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.full,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 3,
+  },
+  capabilityText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foreground,
+  },
+  capabilityTextMuted: {
+    color: theme.colors.foregroundMuted,
   },
   sectionTitle: {
     color: theme.colors.foregroundMuted,

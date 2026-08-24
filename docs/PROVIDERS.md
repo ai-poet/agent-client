@@ -8,13 +8,13 @@ This guide walks through adding a new agent provider end-to-end. There are two i
 
 Extend `ACPAgentClient`. The base class handles process spawning, stdio transport, session lifecycle, streaming, permissions, and model discovery. You provide configuration (command, modes, capabilities) and optionally override `isAvailable()` for auth checks.
 
-Existing ACP providers: `claude-acp`, `copilot`.
+Existing ACP providers: `copilot`, `grok`.
 
 ### Direct
 
 Implement the `AgentClient` and `AgentSession` interfaces yourself. This gives full control but requires you to handle process management, streaming, permissions, and session persistence from scratch.
 
-Existing direct providers: `claude`, `codex`, `opencode`.
+Existing direct providers: `claude`, `codex`, `opencode`, `pi`.
 
 ---
 
@@ -234,10 +234,11 @@ Add to the `allProviders` array:
 ```ts
 export const allProviders: AgentProvider[] = [
   "claude",
-  "claude-acp",
   "codex",
   "copilot",
   "opencode",
+  "pi",
+  "grok",
   "my-provider",
 ];
 ```
@@ -353,6 +354,8 @@ Tests use `isProviderAvailable(provider)` to skip when the binary or credentials
 **Auth patterns vary.** Some providers need API keys in env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`), some use OAuth tokens (`CLAUDE_CODE_OAUTH_TOKEN`), some use auth files (`~/.codex/auth.json`), and some handle auth entirely in their CLI binary (Copilot). Your `isAvailable()` method should check whatever is needed.
 
 **The manifest mode list and the agent class mode list are separate.** The manifest in `provider-manifest.ts` includes UI metadata (`icon`, `colorTier`). The agent class defines modes without UI metadata (just `id`, `label`, `description`). Keep them in sync.
+
+**Leave both mode lists empty when the agent's mode vocabulary is unverified.** Static `defaultModes` are a *fallback* used only when the agent reports none; once they exist, the session layer will call `session/set_mode` with those ids, which fails if the agent does not recognize them. An empty list (see `grok`) means modes come purely from what the agent reports at `session/new`, which is always safe. Fill in static modes only after confirming the real ids against the running CLI.
 
 **`defaultCommand` is a tuple.** The first element is the binary name, the rest are default arguments. The base class uses this to find the executable and spawn the process.
 

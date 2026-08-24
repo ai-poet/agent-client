@@ -7,32 +7,53 @@ import type {
 
 type DesktopProviderText = ReturnType<typeof getSub2APIMessages>["settings"]["desktopProviders"];
 
-export function providerWritesClaude(p: { target?: ManagedProviderTarget }): boolean {
-  return p.target === "claude";
-}
+/**
+ * CLIs the managed UI offers, in display order. Claude and Codex come first because an
+ * untargeted legacy row still implicitly means those two.
+ *
+ * Pi is deliberately absent: its write path is implemented and tested, but the provider is
+ * hidden until its gateway routing is verified. Add it back here and drop `hidden` from the
+ * server manifest to re-enable it.
+ */
+export const MANAGED_PROVIDER_TARGETS = ["claude", "codex", "grok"] as const;
 
-export function providerWritesCodex(p: { target?: ManagedProviderTarget }): boolean {
-  return p.target === "codex";
+export function providerWritesTarget(
+  p: { target?: ManagedProviderTarget },
+  target: ManagedProviderTarget,
+): boolean {
+  return p.target === target;
 }
 
 export function providerTargetHint(p: DesktopProviderPayload, text?: DesktopProviderText): string {
-  if (p.target === "claude") {
-    return text?.providerTargetHints.claude ?? "Claude Code · Anthropic";
+  const hints = text?.providerTargetHints;
+  switch (p.target) {
+    case "claude":
+      return hints?.claude ?? "Claude Code · Anthropic";
+    case "codex":
+      return hints?.codex ?? "Codex · Responses";
+    case "grok":
+      return hints?.grok ?? "Grok · Responses · grok- models only";
+    case "pi":
+      return hints?.pi ?? "Pi · all gateway models";
+    default:
+      return hints?.legacy ?? "Legacy unscoped endpoint";
   }
-  if (p.target === "codex") {
-    return text?.providerTargetHints.codex ?? "Codex · Responses";
-  }
-  return text?.providerTargetHints.legacy ?? "Legacy unscoped endpoint";
 }
 
+/**
+ * Labels only — icons are attached by the panel. Keeping this module free of component
+ * imports is what lets it stay a plain unit-testable module.
+ */
 export function getCustomTargetSegmentOptions(text: {
   claude: string;
   codex: string;
+  grok: string;
+  pi: string;
 }): SegmentedControlOption<ManagedProviderTarget>[] {
-  return [
-    { value: "claude", label: text.claude },
-    { value: "codex", label: text.codex },
-  ];
+  return MANAGED_PROVIDER_TARGETS.map((target) => ({
+    value: target,
+    label: text[target],
+  }));
 }
 
 export const ENDPOINT_PLACEHOLDER =

@@ -20,6 +20,19 @@ export interface AgentProviderDefinition {
   description: string;
   defaultModeId: string | null;
   modes: AgentProviderModeDefinition[];
+  /**
+   * Keeps the provider out of the registry — and so out of the model picker, the provider
+   * list and the CLI — while leaving its implementation in place. An explicit
+   * `agents.providers.<id>.enabled = true` in the daemon config still brings it back.
+   */
+  hidden?: boolean;
+  /** Setup documentation for this provider's CLI. */
+  docsUrl?: string;
+  /**
+   * How to install the CLI by hand. Surfaced verbatim so a failed automated install
+   * degrades to copy-paste instead of a dead end.
+   */
+  installCommand?: string;
   voice?: {
     enabled: boolean;
     defaultModeId: string;
@@ -133,6 +146,8 @@ export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
     description: "Anthropic's multi-tool assistant with MCP support, streaming, and deep reasoning",
     defaultModeId: "default",
     modes: CLAUDE_MODES,
+    docsUrl: "https://docs.anthropic.com/en/docs/claude-code/setup",
+    installCommand: "npm install -g @anthropic-ai/claude-code",
     voice: {
       enabled: true,
       defaultModeId: "default",
@@ -145,6 +160,8 @@ export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
     description: "OpenAI's Codex workspace agent with sandbox controls and optional network access",
     defaultModeId: "auto",
     modes: CODEX_MODES,
+    docsUrl: "https://developers.openai.com/codex/cli/",
+    installCommand: "npm install -g @openai/codex@latest",
     voice: {
       enabled: true,
       defaultModeId: "auto",
@@ -157,6 +174,8 @@ export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
     description: "GitHub Copilot via Agent Client Protocol with dynamic modes and session support",
     defaultModeId: "https://agentclientprotocol.com/protocol/session-modes#agent",
     modes: COPILOT_MODES,
+    docsUrl: "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli",
+    installCommand: "npm install -g @github/copilot",
   },
   {
     id: "opencode",
@@ -164,6 +183,8 @@ export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
     description: "Open-source coding assistant with multi-provider model support",
     defaultModeId: "build",
     modes: OPENCODE_MODES,
+    docsUrl: "https://opencode.ai/docs/",
+    installCommand: "npm install -g opencode-ai@latest",
     voice: {
       enabled: true,
       defaultModeId: "build",
@@ -175,6 +196,22 @@ export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
     description: "Minimal terminal-based coding agent with multi-provider LLM support",
     defaultModeId: null,
     modes: [],
+    // Hidden until its gateway routing is verified end to end. The provider, its installer
+    // and its config writer all still work — flip this to re-enable.
+    hidden: true,
+    docsUrl: "https://pi.dev/docs/latest/quickstart",
+    // Pi's postinstall scripts are skipped upstream too; the CLI works without them.
+    installCommand: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent@latest",
+  },
+  {
+    id: "grok",
+    label: "Grok",
+    // Modes are reported by the CLI over ACP, so none are declared statically here.
+    description: "xAI's Grok Build coding agent via Agent Client Protocol",
+    defaultModeId: null,
+    modes: [],
+    docsUrl: "https://docs.x.ai/docs/overview",
+    installCommand: "npm install -g @xai-official/grok@latest",
   },
 ];
 

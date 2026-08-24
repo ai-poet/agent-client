@@ -1,8 +1,9 @@
 /**
  * Desktop provider store payload (see @getpaseo/desktop provider-switch).
- * Only Claude Code and Codex are supported in the managed UI.
+ * Must stay in lockstep with `ManagedProviderTarget` there — the UI cannot offer a
+ * target the switch layer refuses to write.
  */
-export type ManagedProviderTarget = "claude" | "codex";
+export type ManagedProviderTarget = "claude" | "codex" | "grok" | "pi";
 
 /** Claude Code is Anthropic-native only in settings we write; OpenAI-shaped upstreams are out of scope for now. */
 export type ClaudeApiFormat = "anthropic";
@@ -29,4 +30,7 @@ export interface ProviderStore {
   activeProviderId: string | null;
   activeClaudeProviderId: string | null;
   activeCodexProviderId: string | null;
+  /** Optional: stores written before Grok/Pi routing existed omit these. */
+  activeGrokProviderId?: string | null;
+  activePiProviderId?: string | null;
 }

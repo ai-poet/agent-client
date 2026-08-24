@@ -20,9 +20,17 @@ import type {
 } from "@/screens/settings/sub2api-provider-types";
 import { isValidSub2APIEndpoint } from "./sub2api-auth-bridge";
 import { getErrorMessage } from "./managed-provider-settings-shared";
+import {
+  defaultModelsForTarget,
+  fetchGatewayModelIds,
+  filterGatewayModelsForTarget,
+  targetNeedsModelList,
+} from "./gateway-models";
 
 export type DesktopProvidersStoreValue = {
   providers: DesktopProviderPayload[];
+  /** Active row per target; the two named fields below are the Claude/Codex entries of this. */
+  activeProviderIds: Record<ManagedProviderTarget, string | null>;
   activeClaudeProviderId: string | null;
   activeCodexProviderId: string | null;
   activeClaudeProvider: DesktopProviderPayload | null;
@@ -41,25 +49,34 @@ export type DesktopProvidersStoreValue = {
   setCustomTarget: (t: ManagedProviderTarget) => void;
   openCustomProviderForm: () => void;
   closeCustomProviderForm: () => void;
-  handleSwitchProvider: (id: string, scope?: "claude" | "codex") => Promise<void>;
+  handleSwitchProvider: (id: string, scope?: ManagedProviderTarget) => Promise<void>;
   handleRemoveProvider: (id: string) => Promise<void>;
   handleAddProvider: () => Promise<void>;
 };
 
 const DesktopProvidersContext = createContext<DesktopProvidersStoreValue | null>(null);
 
-export function resolveScopedActiveProviderIds(store: ProviderStore): {
-  claude: string | null;
-  codex: string | null;
-} {
+export function resolveScopedActiveProviderIds(
+  store: ProviderStore,
+): Record<ManagedProviderTarget, string | null> {
   const hasScopedIds =
     store.activeClaudeProviderId !== null || store.activeCodexProviderId !== null;
   const legacyFallback = hasScopedIds ? null : (store.activeProviderId ?? null);
   return {
     claude: store.activeClaudeProviderId ?? legacyFallback,
     codex: store.activeCodexProviderId ?? legacyFallback,
+    // Grok and Pi are opt-in targets, so a legacy unscoped row never implies them.
+    grok: store.activeGrokProviderId ?? null,
+    pi: store.activePiProviderId ?? null,
   };
 }
+
+const EMPTY_ACTIVE_IDS: Record<ManagedProviderTarget, string | null> = {
+  claude: null,
+  codex: null,
+  grok: null,
+  pi: null,
+};
 
 export function DesktopProvidersStoreProvider({ children }: { children: ReactNode }) {
   const { auth, isLoggedIn } = useSub2APIAuth();
@@ -67,8 +84,8 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
   const text = useMemo(() => getSub2APIMessages(locale).settings.desktopProviders, [locale]);
   const isElectron = getIsElectron();
   const [providers, setProviders] = useState<DesktopProviderPayload[]>([]);
-  const [activeClaudeProviderId, setActiveClaudeProviderId] = useState<string | null>(null);
-  const [activeCodexProviderId, setActiveCodexProviderId] = useState<string | null>(null);
+  const [activeProviderIds, setActiveProviderIds] =
+    useState<Record<ManagedProviderTarget, string | null>>(EMPTY_ACTIVE_IDS);
   const [showAddProviderForm, setShowAddProviderForm] = useState(false);
   const [editProviderName, setEditProviderName] = useState("");
   const [editProviderEndpoint, setEditProviderEndpoint] = useState("");
@@ -82,13 +99,10 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
     try {
       const store = await invokeDesktopCommand<ProviderStore>("get_providers");
       setProviders(store.providers);
-      const { claude, codex } = resolveScopedActiveProviderIds(store);
-      setActiveClaudeProviderId(claude);
-      setActiveCodexProviderId(codex);
+      setActiveProviderIds(resolveScopedActiveProviderIds(store));
     } catch {
       setProviders([]);
-      setActiveClaudeProviderId(null);
-      setActiveCodexProviderId(null);
+      setActiveProviderIds(EMPTY_ACTIVE_IDS);
     }
   }, [isElectron]);
 
@@ -121,18 +135,55 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
   }, []);
 
   const handleSwitchProvider = useCallback(
-    async (id: string, scope?: "claude" | "codex") => {
+    async (id: string, scope?: ManagedProviderTarget) => {
       try {
+        // Grok and Pi embed an explicit model list in their config, so it is read from the
+        // gateway first. A BYOK endpoint need not serve /v1/models, so an unreachable catalog
+        // falls back to defaults rather than blocking the write — the config file is what the
+        // user edits by hand afterwards.
+        let models: Record<string, string[]> = {};
+        let usedFallback = false;
+        if (scope && targetNeedsModelList(scope)) {
+          const provider = providers.find((entry) => entry.id === id);
+          if (!provider) {
+            throw new Error(text.providerRowMissing);
+          }
+          let catalog: string[] = [];
+          try {
+            catalog = await fetchGatewayModelIds({
+              endpoint: provider.endpoint,
+              apiKey: provider.apiKey,
+            });
+          } catch {
+            catalog = [];
+          }
+          const usable = filterGatewayModelsForTarget(scope, catalog);
+          usedFallback = usable.length === 0;
+          const resolved = usedFallback ? defaultModelsForTarget(scope) : usable;
+          models = scope === "grok" ? { grokModels: resolved } : { piModels: resolved };
+        }
+
         await invokeDesktopCommand("switch_provider", {
           id,
           ...(scope ? { scope } : {}),
+          ...models,
         });
         await loadProviders();
+        if (usedFallback) {
+          Alert.alert(text.catalogUnavailableTitle, text.catalogUnavailableBody);
+        }
       } catch (error) {
         Alert.alert(text.switchFailed, getErrorMessage(error));
       }
     },
-    [loadProviders, text.switchFailed],
+    [
+      loadProviders,
+      providers,
+      text.catalogUnavailableBody,
+      text.catalogUnavailableTitle,
+      text.providerRowMissing,
+      text.switchFailed,
+    ],
   );
 
   const handleAddProvider = useCallback(async () => {
@@ -157,9 +208,9 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
       apiKey,
       isDefault: false,
       target: customTarget,
-      ...(customTarget === "claude"
-        ? { claudeApiFormat: "anthropic" as const }
-        : { codexWireApi: "responses" as const }),
+      // These two fields are Claude/Codex-specific wire settings; Grok and Pi carry neither.
+      ...(customTarget === "claude" ? { claudeApiFormat: "anthropic" as const } : {}),
+      ...(customTarget === "codex" ? { codexWireApi: "responses" as const } : {}),
     };
 
     try {
@@ -195,6 +246,9 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
     [loadProviders, text.removeProviderFailed],
   );
 
+  const activeClaudeProviderId = activeProviderIds.claude;
+  const activeCodexProviderId = activeProviderIds.codex;
+
   const activeClaudeProvider = useMemo(
     () => providers.find((p) => p.id === activeClaudeProviderId) ?? null,
     [providers, activeClaudeProviderId],
@@ -216,6 +270,7 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
   const value = useMemo(
     (): DesktopProvidersStoreValue => ({
       providers,
+      activeProviderIds,
       activeClaudeProviderId,
       activeCodexProviderId,
       activeClaudeProvider,
@@ -242,6 +297,7 @@ export function DesktopProvidersStoreProvider({ children }: { children: ReactNod
       activeClaudeProviderId,
       activeCodexProvider,
       activeCodexProviderId,
+      activeProviderIds,
       activeRouteApiKeys,
       closeCustomProviderForm,
       customTarget,

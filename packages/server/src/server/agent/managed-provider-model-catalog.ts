@@ -8,7 +8,7 @@ import { z } from "zod";
 import type { AgentModelDefinition } from "./agent-sdk-types.js";
 import { normalizeClaudeRuntimeModelId } from "./providers/claude/claude-models.js";
 
-export type ManagedModelProvider = "claude" | "codex";
+export type ManagedModelProvider = "claude" | "codex" | "grok" | "pi";
 
 export interface ManagedProviderModelCatalogLike {
   getModels(
@@ -20,14 +20,42 @@ export interface ManagedProviderModelCatalogLike {
 const MANAGED_PROVIDER_IDS: Record<ManagedModelProvider, string> = {
   claude: "paseo-managed-claude",
   codex: "paseo-managed-codex",
+  grok: "paseo-managed-grok",
+  pi: "paseo-managed-pi",
 };
+
+/**
+ * Grok routes through the gateway's OpenAI-compatible endpoint, whose catalog also lists
+ * models for other agents. Only the xAI family is usable here.
+ *
+ * Pi deliberately has no entry: it is model-agnostic, so the whole gateway catalog applies.
+ */
+const MANAGED_MODEL_PREFIXES: Partial<Record<ManagedModelProvider, string>> = {
+  grok: "grok-",
+};
+
+/** Which provider ids can be routed through the managed gateway. */
+export function isManagedModelProvider(provider: string): provider is ManagedModelProvider {
+  return provider in MANAGED_PROVIDER_IDS;
+}
+
+export function filterManagedModelsForProvider<T extends { id: string }>(
+  provider: ManagedModelProvider,
+  models: T[],
+): T[] {
+  const prefix = MANAGED_MODEL_PREFIXES[provider];
+  if (!prefix) {
+    return models;
+  }
+  return models.filter((model) => model.id.toLowerCase().startsWith(prefix));
+}
 
 const storedProviderSchema = z
   .object({
     id: z.string(),
     endpoint: z.string(),
     apiKey: z.string(),
-    target: z.enum(["claude", "codex"]).optional(),
+    target: z.enum(["claude", "codex", "grok", "pi"]).optional(),
   })
   .passthrough();
 
@@ -36,6 +64,8 @@ const providerStoreSchema = z
     providers: z.array(storedProviderSchema),
     activeClaudeProviderId: z.string().nullable().optional(),
     activeCodexProviderId: z.string().nullable().optional(),
+    activeGrokProviderId: z.string().nullable().optional(),
+    activePiProviderId: z.string().nullable().optional(),
   })
   .passthrough();
 
@@ -171,7 +201,9 @@ export class ManagedProviderModelCatalog implements ManagedProviderModelCatalogL
     const cacheKey = `${provider}:${route.endpoint}:${apiKeyFingerprint(route.apiKey)}`;
     const result = await this.fetchRemoteModels(route);
     if (result.ok) {
-      const models = mergeRemoteModels(provider, result.models, fallbackModels);
+      // The gateway catalog is shared across agents, so narrow it to what this one can run.
+      const usable = filterManagedModelsForProvider(provider, result.models);
+      const models = mergeRemoteModels(provider, usable, fallbackModels);
       this.cache.set(cacheKey, cloneModels(models));
       return models;
     }
@@ -209,10 +241,12 @@ export class ManagedProviderModelCatalog implements ManagedProviderModelCatalogL
       return null;
     }
 
-    const activeProviderId =
-      provider === "claude"
-        ? parsed.data.activeClaudeProviderId
-        : parsed.data.activeCodexProviderId;
+    const activeProviderId: string | null | undefined = {
+      claude: parsed.data.activeClaudeProviderId,
+      codex: parsed.data.activeCodexProviderId,
+      grok: parsed.data.activeGrokProviderId,
+      pi: parsed.data.activePiProviderId,
+    }[provider];
     const managedProviderId = MANAGED_PROVIDER_IDS[provider];
     if (activeProviderId !== managedProviderId) {
       return null;

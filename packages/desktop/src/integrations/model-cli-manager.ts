@@ -13,6 +13,10 @@ import { getDesktopMessage } from "../i18n/desktop-i18n.js";
 export const REQUIRED_NODE_MAJOR = 22;
 export const CODEX_PACKAGE_NAME = "@openai/codex";
 export const CLAUDE_CODE_PACKAGE_NAME = "@anthropic-ai/claude-code";
+export const GROK_PACKAGE_NAME = "@xai-official/grok";
+export const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
+export const OPENCODE_PACKAGE_NAME = "opencode-ai";
+export const COPILOT_PACKAGE_NAME = "@github/copilot";
 const WINDOWS_NODE_MIRROR_URL = "https://registry.npmmirror.com/-/binary/node/latest-v22.x/";
 const WINDOWS_GIT_MIRROR_URL = "https://registry.npmmirror.com/-/binary/git-for-windows/";
 const NPMMIRROR_REGISTRY_URL = "https://registry.npmmirror.com";
@@ -34,11 +38,92 @@ export interface NodeRuntimeStatus {
 }
 
 export interface ModelCliStatus {
-  command: "codex" | "claude";
+  command: string;
   packageName: string;
   installed: boolean;
   version: string | null;
   error: string | null;
+}
+
+/**
+ * Everything that varies between the agent CLIs we can install. Adding a CLI should be a
+ * data change here, not new branches through the install/detect pipeline.
+ */
+export interface CliDescriptor {
+  /** Stable id used by IPC callers and as the key in {@link ModelCliRuntimeStatus.clis}. */
+  id: string;
+  /** Binary name as it appears on PATH. */
+  binName: string;
+  packageName: string;
+  /** Extra absolute locations to probe on Windows when PATH lookup fails. */
+  windowsCandidates?: (env: NodeJS.ProcessEnv) => string[];
+  /** Extra npm flags, e.g. Pi ships install scripts that must not run. */
+  npmInstallArgs?: string[];
+  /** Full semver floor when the CLI needs more than {@link REQUIRED_NODE_MAJOR}. */
+  minNodeVersion?: string;
+  /** Whether "install everything" should include this CLI. */
+  autoInstallByDefault: boolean;
+}
+
+function resolveWindowsHomeCandidates(relativeParts: string[], env: NodeJS.ProcessEnv): string[] {
+  const home = env.USERPROFILE?.trim() || homedir();
+  return home ? [path.join(home, ...relativeParts)] : [];
+}
+
+export const CLI_DESCRIPTORS: CliDescriptor[] = [
+  {
+    id: "codex",
+    binName: "codex",
+    packageName: CODEX_PACKAGE_NAME,
+    autoInstallByDefault: true,
+  },
+  {
+    id: "claude",
+    binName: "claude",
+    packageName: CLAUDE_CODE_PACKAGE_NAME,
+    autoInstallByDefault: true,
+  },
+  {
+    id: "grok",
+    binName: "grok",
+    packageName: GROK_PACKAGE_NAME,
+    autoInstallByDefault: false,
+    windowsCandidates: (env) => [
+      ...(env.LOCALAPPDATA?.trim() ? [path.join(env.LOCALAPPDATA.trim(), "Grok", "grok.exe")] : []),
+      ...resolveWindowsHomeCandidates([".grok", "bin", "grok.exe"], env),
+    ],
+  },
+  {
+    id: "pi",
+    binName: "pi",
+    packageName: PI_PACKAGE_NAME,
+    // Pi's postinstall scripts are skipped upstream too; the CLI works without them.
+    npmInstallArgs: ["--ignore-scripts"],
+    minNodeVersion: "22.19.0",
+    autoInstallByDefault: false,
+    windowsCandidates: (env) =>
+      env.APPDATA?.trim() ? [path.join(env.APPDATA.trim(), "npm", "pi.cmd")] : [],
+  },
+  {
+    id: "opencode",
+    binName: "opencode",
+    packageName: OPENCODE_PACKAGE_NAME,
+    autoInstallByDefault: false,
+  },
+  {
+    id: "copilot",
+    binName: "copilot",
+    packageName: COPILOT_PACKAGE_NAME,
+    autoInstallByDefault: false,
+  },
+];
+
+export function getCliDescriptor(id: string): CliDescriptor {
+  const descriptor = CLI_DESCRIPTORS.find((entry) => entry.id === id);
+  if (!descriptor) {
+    throw new Error(`Unknown agent CLI '${id}'`);
+  }
+  return descriptor;
 }
 
 export interface GitRuntimeStatus {
@@ -51,6 +136,9 @@ export interface GitRuntimeStatus {
 export interface ModelCliRuntimeStatus {
   git: GitRuntimeStatus;
   node: NodeRuntimeStatus;
+  /** Keyed by {@link CliDescriptor.id}; the source of truth. */
+  clis: Record<string, ModelCliStatus>;
+  /** Retained so older app builds keep reading these two directly. */
   codex: ModelCliStatus;
   claude: ModelCliStatus;
 }
@@ -430,8 +518,11 @@ export function isWindowsGitBashPath(value: string | null | undefined): boolean 
   );
 }
 
-export function buildWindowsCliExecutableCandidates(command: "codex" | "claude"): string[] {
-  return [`${command}.cmd`, `${command}.exe`, command];
+export function buildWindowsCliExecutableCandidates(
+  command: string,
+  extraCandidates: string[] = [],
+): string[] {
+  return [`${command}.cmd`, `${command}.exe`, command, ...extraCandidates];
 }
 
 function appendUniquePath(paths: string[], value: string | null | undefined): void {
@@ -1213,8 +1304,10 @@ async function installPortableGitFromUrl(
 export function buildWindowsNpmPackageInstallCommand(
   packageName: string,
   registry: "npmmirror" | "official",
+  npmInstallArgs: string[] = [],
 ): string {
-  const baseCommand = `npm install -g ${packageName}@latest`;
+  const flags = npmInstallArgs.length > 0 ? ` ${npmInstallArgs.join(" ")}` : "";
+  const baseCommand = `npm install -g${flags} ${packageName}@latest`;
   if (registry === "official") {
     return baseCommand;
   }
@@ -1613,16 +1706,17 @@ async function readGitStatus(): Promise<GitRuntimeStatus> {
 }
 
 async function readCliStatus(
-  command: "codex" | "claude",
-  packageName: string,
+  descriptor: CliDescriptor,
   manager: RuntimeManagerId,
   options?: ShellOptions,
 ): Promise<ModelCliStatus> {
+  const command = descriptor.binName;
+  const packageName = descriptor.packageName;
   try {
     const commandOptions = resolveCliStatusShellOptions(manager, options);
     const versionCommand =
       process.platform === "win32" && manager === "shell"
-        ? buildWindowsCliVersionCommand(command)
+        ? buildWindowsCliVersionCommand(command, resolveDescriptorWindowsCandidates(descriptor))
         : `${command} --version`;
     const result = await runShell(wrapWithRuntimeManager(versionCommand, manager), commandOptions);
     const version = parseSemanticVersion(result.stdout) ?? parseSemanticVersion(result.stderr);
@@ -1660,23 +1754,59 @@ export function resolveCliStatusShellOptions(
   return { ...options, forceWindowsCmd: true, env: buildWindowsCliSearchEnv() };
 }
 
-export function buildWindowsCliVersionCommand(command: "codex" | "claude"): string {
-  return buildWindowsCliExecutableCandidates(command)
-    .map((candidate) => `${candidate} --version`)
+export function buildWindowsCliVersionCommand(
+  command: string,
+  extraCandidates: string[] = [],
+): string {
+  return buildWindowsCliExecutableCandidates(command, extraCandidates)
+    .map((candidate) => `${quoteWindowsCliCandidate(candidate)} --version`)
     .join(" || ");
+}
+
+/** Absolute fallbacks can contain spaces (`C:\Program Files\...`); bare names must stay unquoted. */
+function quoteWindowsCliCandidate(candidate: string): string {
+  return /[\s]/.test(candidate) ? `"${candidate}"` : candidate;
+}
+
+function resolveDescriptorWindowsCandidates(
+  descriptor: CliDescriptor,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  return descriptor.windowsCandidates?.(env).filter((candidate) => existsSync(candidate)) ?? [];
 }
 
 export async function getModelCliRuntimeStatus(): Promise<ModelCliRuntimeStatus> {
   const manager = await resolveRuntimeManager();
   const gitBashPath = await resolveWindowsGitBashPath();
-  const [git, node, codex, claude] = await Promise.all([
+  const [git, node, ...cliStatuses] = await Promise.all([
     readGitStatus(),
     readNodeStatus(manager, { gitBashPath }),
-    readCliStatus("codex", CODEX_PACKAGE_NAME, manager, { gitBashPath }),
-    readCliStatus("claude", CLAUDE_CODE_PACKAGE_NAME, manager, { gitBashPath }),
+    ...CLI_DESCRIPTORS.map((descriptor) => readCliStatus(descriptor, manager, { gitBashPath })),
   ]);
 
-  return { git, node, codex, claude };
+  const clis: Record<string, ModelCliStatus> = {};
+  CLI_DESCRIPTORS.forEach((descriptor, index) => {
+    const status = cliStatuses[index];
+    if (status) {
+      clis[descriptor.id] = status;
+    }
+  });
+
+  return {
+    git,
+    node,
+    clis,
+    codex: requireCliStatus(clis, "codex"),
+    claude: requireCliStatus(clis, "claude"),
+  };
+}
+
+function requireCliStatus(clis: Record<string, ModelCliStatus>, id: string): ModelCliStatus {
+  const status = clis[id];
+  if (!status) {
+    throw new Error(`Missing status for agent CLI '${id}'`);
+  }
+  return status;
 }
 
 async function installNode22IntoManager(
@@ -1960,6 +2090,7 @@ async function installPackageIntoRuntime(
   packageName: string,
   manager: RuntimeManagerId,
   options?: ShellOptions,
+  npmInstallArgs: string[] = [],
 ): Promise<string> {
   const runtimeOptions = resolvePackageInstallShellOptions(manager, options);
   if (process.platform === "win32" && manager === "shell") {
@@ -1968,7 +2099,7 @@ async function installPackageIntoRuntime(
     for (const registry of ["npmmirror", "official"] as const) {
       try {
         const result = await runShell(
-          buildWindowsNpmPackageInstallCommand(packageName, registry),
+          buildWindowsNpmPackageInstallCommand(packageName, registry, npmInstallArgs),
           runtimeOptions,
         );
         outputs.push([result.stdout, result.stderr].filter(Boolean).join("\n").trim());
@@ -1996,49 +2127,108 @@ async function installPackageIntoRuntime(
     );
   }
 
+  const flags = npmInstallArgs.length > 0 ? ` ${npmInstallArgs.join(" ")}` : "";
   const result = await runShell(
-    wrapWithNode22Runtime(`npm install -g ${packageName}@latest`, manager),
+    wrapWithNode22Runtime(`npm install -g${flags} ${packageName}@latest`, manager),
     runtimeOptions,
   );
   return [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
 }
 
-export async function installCodexCli(): Promise<ModelCliInstallResult> {
-  const manager = await resolveRuntimeManager();
-  const gitBashPath = await resolveWindowsGitBashPath();
-  const nodeStatus = await readNodeStatus(manager, { gitBashPath });
-  const outputs: string[] = [];
+const RESOLVE_AFTER_INSTALL_ATTEMPTS = 10;
+const RESOLVE_AFTER_INSTALL_DELAY_MS = 500;
 
-  if (!nodeStatus.satisfies) {
-    outputs.push(await installNode22IntoManager(manager, { gitBashPath }));
-  } else {
-    await ensureWindowsExternalCliPathReady();
+const inFlightInstalls = new Map<string, Promise<ModelCliInstallResult>>();
+
+/**
+ * Global npm installs land on disk slightly after the install process exits, so a status read
+ * taken immediately can still report "not installed". Re-read until the CLI shows up.
+ */
+async function readStatusAfterInstall(descriptorId: string): Promise<ModelCliRuntimeStatus> {
+  let status = await getModelCliRuntimeStatus();
+  for (
+    let attempt = 1;
+    attempt < RESOLVE_AFTER_INSTALL_ATTEMPTS && !status.clis[descriptorId]?.installed;
+    attempt += 1
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, RESOLVE_AFTER_INSTALL_DELAY_MS));
+    status = await getModelCliRuntimeStatus();
   }
-  outputs.push(await installPackageIntoRuntime(CODEX_PACKAGE_NAME, manager, { gitBashPath }));
+  return status;
+}
 
-  return {
-    status: await getModelCliRuntimeStatus(),
-    output: outputs.filter(Boolean).join("\n").trim(),
-  };
+export async function installModelCli(id: string): Promise<ModelCliInstallResult> {
+  const pending = inFlightInstalls.get(id);
+  if (pending) {
+    return pending;
+  }
+
+  const descriptor = getCliDescriptor(id);
+  const install = (async (): Promise<ModelCliInstallResult> => {
+    const manager = await resolveRuntimeManager();
+    const gitBashPath = await resolveWindowsGitBashPath();
+    const nodeStatus = await readNodeStatus(manager, { gitBashPath });
+    const outputs: string[] = [];
+
+    if (!nodeStatus.satisfies || !satisfiesMinNodeVersion(descriptor, nodeStatus)) {
+      outputs.push(await installNode22IntoManager(manager, { gitBashPath }));
+      const upgraded = await readNodeStatus(manager, { gitBashPath });
+      if (!satisfiesMinNodeVersion(descriptor, upgraded)) {
+        throw new Error(
+          getDesktopMessage("cli.nodeVersionTooLow", {
+            command: descriptor.binName,
+            required: descriptor.minNodeVersion ?? `${REQUIRED_NODE_MAJOR}`,
+            current: upgraded.version ?? "unknown",
+          }),
+        );
+      }
+    } else {
+      await ensureWindowsExternalCliPathReady();
+    }
+
+    outputs.push(
+      await installPackageIntoRuntime(
+        descriptor.packageName,
+        manager,
+        { gitBashPath },
+        descriptor.npmInstallArgs,
+      ),
+    );
+
+    return {
+      status: await readStatusAfterInstall(descriptor.id),
+      output: outputs.filter(Boolean).join("\n").trim(),
+    };
+  })();
+
+  inFlightInstalls.set(id, install);
+  try {
+    return await install;
+  } finally {
+    inFlightInstalls.delete(id);
+  }
+}
+
+/** Pi needs a specific minor, not just Node 22. */
+function satisfiesMinNodeVersion(
+  descriptor: CliDescriptor,
+  nodeStatus: NodeRuntimeStatus,
+): boolean {
+  if (!descriptor.minNodeVersion) {
+    return nodeStatus.satisfies;
+  }
+  if (!nodeStatus.version) {
+    return false;
+  }
+  return compareVersionStrings(nodeStatus.version, descriptor.minNodeVersion) >= 0;
+}
+
+export async function installCodexCli(): Promise<ModelCliInstallResult> {
+  return installModelCli("codex");
 }
 
 export async function installClaudeCodeCli(): Promise<ModelCliInstallResult> {
-  const manager = await resolveRuntimeManager();
-  const outputs: string[] = [];
-  const gitBashPath = await resolveWindowsGitBashPath();
-  const nodeStatus = await readNodeStatus(manager, { gitBashPath });
-
-  if (!nodeStatus.satisfies) {
-    outputs.push(await installNode22IntoManager(manager, { gitBashPath }));
-  } else {
-    await ensureWindowsExternalCliPathReady();
-  }
-  outputs.push(await installPackageIntoRuntime(CLAUDE_CODE_PACKAGE_NAME, manager, { gitBashPath }));
-
-  return {
-    status: await getModelCliRuntimeStatus(),
-    output: outputs.filter(Boolean).join("\n").trim(),
-  };
+  return installModelCli("claude");
 }
 
 export async function installAllModelClis(): Promise<ModelCliInstallResult> {
@@ -2061,14 +2251,19 @@ export async function installAllModelClis(): Promise<ModelCliInstallResult> {
     } else {
       await ensureWindowsExternalCliPathReady();
     }
-    if (!status.codex.installed) {
-      outputs.push(await installPackageIntoRuntime(CODEX_PACKAGE_NAME, manager, { gitBashPath }));
-      status = await getModelCliRuntimeStatus();
-    }
-    if (!status.claude.installed) {
+    for (const descriptor of CLI_DESCRIPTORS.filter((entry) => entry.autoInstallByDefault)) {
+      if (status.clis[descriptor.id]?.installed) {
+        continue;
+      }
       outputs.push(
-        await installPackageIntoRuntime(CLAUDE_CODE_PACKAGE_NAME, manager, { gitBashPath }),
+        await installPackageIntoRuntime(
+          descriptor.packageName,
+          manager,
+          { gitBashPath },
+          descriptor.npmInstallArgs,
+        ),
       );
+      status = await getModelCliRuntimeStatus();
     }
 
     status = await getModelCliRuntimeStatus();
@@ -2076,8 +2271,9 @@ export async function installAllModelClis(): Promise<ModelCliInstallResult> {
       gitVersion: status.git.version,
       gitBashPath: status.git.bashPath,
       nodeVersion: status.node.version,
-      codexVersion: status.codex.version,
-      claudeVersion: status.claude.version,
+      versions: Object.fromEntries(
+        Object.entries(status.clis).map(([id, cli]) => [id, cli.version]),
+      ),
     });
 
     return {

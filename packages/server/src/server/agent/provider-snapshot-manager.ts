@@ -5,11 +5,18 @@ import { resolve } from "node:path";
 import type { Logger } from "pino";
 
 import { withTimeout } from "../../utils/promise-timeout.js";
-import type { AgentProvider, ProviderSnapshotEntry } from "./agent-sdk-types.js";
+import type {
+  AgentClient,
+  AgentProvider,
+  ProviderInfo,
+  ProviderSnapshotEntry,
+} from "./agent-sdk-types.js";
 import type { ProviderDefinition } from "./provider-registry.js";
 
 const DEFAULT_SNAPSHOT_TTL_MS = 300_000;
 const DEFAULT_REFRESH_TIMEOUT_MS = 30_000;
+/** Version probes spawn a process; keep them well under the snapshot refresh budget. */
+const PROVIDER_INFO_TIMEOUT_MS = 8_000;
 
 type ProviderSnapshotChangeListener = (entries: ProviderSnapshotEntry[], cwd: string) => void;
 type ProviderSnapshotManagerOptions = {
@@ -156,6 +163,8 @@ export class ProviderSnapshotManager {
         label: definition?.label,
         description: definition?.description,
         defaultModeId: definition?.defaultModeId ?? null,
+        docsUrl: definition?.docsUrl,
+        installCommand: definition?.installCommand,
       });
     }
     return entries;
@@ -248,6 +257,11 @@ export class ProviderSnapshotManager {
           label: definition.label,
           description: definition.description,
           defaultModeId: definition.defaultModeId,
+          // Kept on the unavailable entry too — this is exactly when the user needs
+          // the install command and the docs link.
+          docsUrl: definition.docsUrl,
+          installCommand: definition.installCommand,
+          capabilities: client.capabilities,
         });
         this.emitChange(cwd);
         return;
@@ -262,6 +276,10 @@ export class ProviderSnapshotManager {
         `Timed out refreshing ${definition.label} after ${this.refreshTimeoutMs}ms`,
       );
 
+      // Resolved separately so a slow or broken `--version` probe degrades to a missing
+      // version rather than failing the whole snapshot.
+      const info = await this.resolveProviderInfo(client, provider);
+
       if (!this.isCurrentProviderLoad(cwd, provider, load)) {
         return;
       }
@@ -274,6 +292,11 @@ export class ProviderSnapshotManager {
         label: definition.label,
         description: definition.description,
         defaultModeId: definition.defaultModeId,
+        docsUrl: definition.docsUrl,
+        installCommand: definition.installCommand,
+        capabilities: client.capabilities,
+        version: info?.version,
+        configDir: info?.configDir,
       });
       this.emitChange(cwd);
     } catch (error) {
@@ -287,9 +310,30 @@ export class ProviderSnapshotManager {
         label: definition.label,
         description: definition.description,
         defaultModeId: definition.defaultModeId,
+        docsUrl: definition.docsUrl,
+        installCommand: definition.installCommand,
       });
       this.logger.warn({ err: error, provider, cwd }, "Failed to refresh provider snapshot");
       this.emitChange(cwd);
+    }
+  }
+
+  private async resolveProviderInfo(
+    client: AgentClient,
+    provider: AgentProvider,
+  ): Promise<ProviderInfo | undefined> {
+    if (!client.getProviderInfo) {
+      return undefined;
+    }
+    try {
+      return await withTimeout(
+        client.getProviderInfo(),
+        PROVIDER_INFO_TIMEOUT_MS,
+        `Timed out reading ${provider} provider info after ${PROVIDER_INFO_TIMEOUT_MS}ms`,
+      );
+    } catch (error) {
+      this.logger.debug({ err: error, provider }, "Failed to read provider info");
+      return undefined;
     }
   }
 
@@ -447,6 +491,7 @@ function cloneEntry(entry: ProviderSnapshotEntry): ProviderSnapshotEntry {
     ...entry,
     models: entry.models?.map((model) => ({ ...model })),
     modes: entry.modes?.map((mode) => ({ ...mode })),
+    capabilities: entry.capabilities ? { ...entry.capabilities } : undefined,
   };
 }
 

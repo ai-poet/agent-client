@@ -1,5 +1,5 @@
 import { useState, type ComponentType, type PropsWithChildren, type ReactElement } from "react";
-import { Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import type { PressableProps, StyleProp, TextStyle, ViewStyle } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 
@@ -88,6 +88,7 @@ export function Button({
   variant = "secondary",
   size = "md",
   leftIcon,
+  busy = false,
   style,
   textStyle,
   disabled,
@@ -98,6 +99,8 @@ export function Button({
     variant?: ButtonVariant;
     size?: ButtonSize;
     leftIcon?: LeftIcon;
+    /** Replaces the left icon with a spinner in place and blocks presses. */
+    busy?: boolean;
     style?: StyleProp<ViewStyle>;
     textStyle?: StyleProp<TextStyle>;
   }
@@ -128,7 +131,26 @@ export function Button({
     isGhostHovered ? styles.textGhostHovered : null,
   ];
 
+  function resolveIconColor() {
+    return variant === "default"
+      ? theme.colors.accentForeground
+      : variant === "ghost"
+        ? isGhostHovered
+          ? theme.colors.foreground
+          : theme.colors.foregroundMuted
+        : theme.colors.foreground;
+  }
+
   function renderIcon() {
+    // The spinner takes the icon's slot so the button never changes width mid-action.
+    if (busy) {
+      return (
+        <View>
+          <ActivityIndicator size="small" color={resolveIconColor()} />
+        </View>
+      );
+    }
+
     if (!leftIcon) return null;
 
     // Pre-rendered element — pass through
@@ -136,14 +158,7 @@ export function Button({
       return <View>{leftIcon}</View>;
     }
 
-    const color =
-      variant === "default"
-        ? theme.colors.accentForeground
-        : variant === "ghost"
-          ? isGhostHovered
-            ? theme.colors.foreground
-            : theme.colors.foregroundMuted
-          : theme.colors.foreground;
+    const color = resolveIconColor();
     const iconSize = ICON_SIZE[size];
 
     // Render function
@@ -168,7 +183,8 @@ export function Button({
     <Pressable
       {...props}
       accessibilityRole={accessibilityRole ?? "button"}
-      disabled={disabled}
+      accessibilityState={{ disabled: disabled || busy, busy }}
+      disabled={disabled || busy}
       onHoverIn={() => setHovered(true)}
       onHoverOut={() => setHovered(false)}
       style={({ pressed }) => [

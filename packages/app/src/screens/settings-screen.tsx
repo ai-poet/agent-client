@@ -16,6 +16,8 @@ import {
   Server,
   Keyboard,
   Stethoscope,
+  BarChart3,
+  CalendarClock,
   Info,
   Shield,
   Puzzle,
@@ -58,6 +60,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { DesktopPermissionsSection } from "@/desktop/components/desktop-permissions-section";
+import { UsageSection } from "@/screens/settings/usage-section";
+import { AutomationSection } from "@/screens/settings/automation-section";
 import { AIContextHubSection } from "@/desktop/components/ai-context-hub-section";
 import { IntegrationsSection } from "@/desktop/components/integrations-section";
 import { isElectronRuntime } from "@/desktop/host";
@@ -111,6 +115,8 @@ const SIDEBAR_SECTION_ITEMS: SidebarSectionItem[] = [
   { id: "integrations", icon: Puzzle, desktopOnly: true },
   { id: "ai-context", icon: Brain, desktopOnly: true },
   { id: "permissions", icon: Shield, desktopOnly: true },
+  { id: "usage", icon: BarChart3 },
+  { id: "automations", icon: CalendarClock },
   { id: "diagnostics", icon: Stethoscope },
   { id: "about", icon: Info },
 ];
@@ -133,6 +139,10 @@ function getSettingsSectionLabel(section: SettingsSectionSlug, text: SettingsTex
       return text.sections.aiContext;
     case "permissions":
       return text.sections.permissions;
+    case "usage":
+      return text.usage.title;
+    case "automations":
+      return text.automation.title;
     case "diagnostics":
       return text.sections.diagnostics;
     case "about":
@@ -978,6 +988,10 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
           return isDesktopApp ? <AIContextHubSection /> : null;
         case "permissions":
           return isDesktopApp ? <DesktopPermissionsSection /> : null;
+        case "usage":
+          return <UsageSection />;
+        case "automations":
+          return <AutomationSection />;
         case "diagnostics":
           return (
             <>

@@ -156,6 +156,31 @@ When the same discriminator (`plan`, `provider`, `kind`, `status`) is checked ac
 - Never mirror a source of truth into local state; derive from it
 - Test state logic as pure functions without rendering
 
+## UI conventions
+
+Build from the shared primitives in `packages/app/src/components/ui/` — `SettingsRow`, `FactRow`,
+`StatCard`, `StatusPanel`, `StatusBadge`, `Button`. Don't hand-compose a row from raw styles.
+
+- **Async actions report in place.** Pass `busy` to `Button` — the spinner replaces the leading
+  icon so the control never changes size — and flip the label (`Install` → `Installing`,
+  `Delete` → `Confirm delete`, `Copy` → `Copied`). Don't render a separate spinner beside it.
+- **Two-step confirm over modals** for contextual destructive actions: the first press arms and
+  relabels, the second executes. Below it, say what will happen — and name what is being skipped
+  (`3 running sessions were skipped`). Quantify the irreversible subset separately.
+- **Disabled controls state their reason** in a tooltip or hint. A control that is dimmed with no
+  explanation is a dead end.
+- **Show the command, offer the copy button.** Automation is a convenience, never the only path —
+  surface the underlying command via `FactRow` with `copyable` so a failure degrades to copy-paste.
+- **Report outcomes honestly.** An action that "succeeded" but produced no observable change gets
+  its own message, distinct from real success.
+- **Empty, loading and error share one shell** (`StatusPanel`). Copy is query-aware:
+  `No matching X` when filtered vs `No X yet` when genuinely empty, and the description says what
+  to do next.
+- **Floor visual magnitudes** so nonzero never renders as nothing: 2% for chart bars, 4% for
+  progress tracks.
+- **Never bypass the theme.** No hex literals or `rgba(...)` in components; use semantic tokens
+  (`statusWarning`, `destructive`) over raw palette shades.
+
 ## File organization
 
 - Organize by domain first (`providers/claude/`), not by technical type (`tool-parsers/`)

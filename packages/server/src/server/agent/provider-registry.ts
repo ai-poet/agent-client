@@ -25,12 +25,13 @@ import { ClaudeAgentClient } from "./providers/claude-agent.js";
 import { CodexAppServerAgentClient } from "./providers/codex-app-server-agent.js";
 import { CopilotACPAgentClient } from "./providers/copilot-acp-agent.js";
 import { GenericACPAgentClient } from "./providers/generic-acp-agent.js";
+import { GrokACPAgentClient } from "./providers/grok-acp-agent.js";
 import { OpenCodeAgentClient, OpenCodeServerManager } from "./providers/opencode-agent.js";
 import { PiDirectAgentClient } from "./providers/pi-direct-agent.js";
 import { MockLoadTestAgentClient } from "./providers/mock-load-test-agent.js";
 import {
   ManagedProviderModelCatalog,
-  type ManagedModelProvider,
+  isManagedModelProvider,
   type ManagedProviderModelCatalogLike,
 } from "./managed-provider-model-catalog.js";
 import {
@@ -91,6 +92,11 @@ const PROVIDER_CLIENT_FACTORIES: Record<string, ProviderClientFactory> = {
   opencode: (logger, runtimeSettings) => new OpenCodeAgentClient(logger, runtimeSettings),
   pi: (logger, runtimeSettings) =>
     new PiDirectAgentClient({
+      logger,
+      runtimeSettings,
+    }),
+  grok: (logger, runtimeSettings) =>
+    new GrokACPAgentClient({
       logger,
       runtimeSettings,
     }),
@@ -342,10 +348,10 @@ function createRegistryEntry(
         resolved.profileModels,
         await modelClient.listModels(options),
       );
-      if (resolved.profileModels.length > 0 || (provider !== "claude" && provider !== "codex")) {
+      if (resolved.profileModels.length > 0 || !isManagedModelProvider(provider)) {
         return models;
       }
-      return await managedModelCatalog.getModels(provider as ManagedModelProvider, models);
+      return await managedModelCatalog.getModels(provider, models);
     },
     fetchModes: async (options: ListModesOptions) => {
       const modes = modelClient.listModes
@@ -389,7 +395,8 @@ function buildResolvedBuiltinProviders(
       definition: applyOverrideToDefinition(definition, override),
       runtimeSettings: mergedRuntimeSettings,
       profileModels: override?.models ?? [],
-      enabled: override?.enabled !== false,
+      // `hidden` only sets the default; an explicit config override still wins either way.
+      enabled: override?.enabled ?? definition.hidden !== true,
       createBaseClient: (logger) =>
         factory(logger, mergedRuntimeSettings, {
           workspaceGitService: options.workspaceGitService,

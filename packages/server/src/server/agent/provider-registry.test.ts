@@ -326,10 +326,31 @@ describe("buildProviderRegistry", () => {
     mockState.reset();
   });
 
-  test("builds registry with no overrides — same as built-in count", () => {
+  test("builds registry with no overrides — every visible built-in", () => {
     const registry = buildProviderRegistry(logger);
+    const visible = AGENT_PROVIDER_DEFINITIONS.filter((definition) => definition.hidden !== true);
 
-    expect(Object.keys(registry)).toHaveLength(AGENT_PROVIDER_DEFINITIONS.length);
+    expect(Object.keys(registry)).toHaveLength(visible.length);
+  });
+
+  test("leaves hidden providers out of the registry unless config re-enables them", () => {
+    const hidden = AGENT_PROVIDER_DEFINITIONS.filter((definition) => definition.hidden === true);
+    // Guard: if nothing is hidden this test would silently prove nothing.
+    expect(hidden.length).toBeGreaterThan(0);
+
+    const registry = buildProviderRegistry(logger);
+    for (const definition of hidden) {
+      expect(registry[definition.id]).toBeUndefined();
+    }
+
+    const reEnabled = buildProviderRegistry(logger, {
+      providerOverrides: Object.fromEntries(
+        hidden.map((definition) => [definition.id, { enabled: true }]),
+      ),
+    });
+    for (const definition of hidden) {
+      expect(reEnabled[definition.id]).toBeDefined();
+    }
   });
 
   test("includes mock provider only for development builds", () => {

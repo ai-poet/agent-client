@@ -9,6 +9,8 @@ const DESKTOP_MESSAGES = {
     "provider.notFound": ({ id }) => `Provider not found: ${id ?? ""}`,
     "provider.notForClaude": () => "This endpoint does not apply to Claude Code.",
     "provider.notForCodex": () => "This endpoint does not apply to Codex.",
+    "provider.notForGrok": () => "This endpoint does not apply to Grok.",
+    "provider.notForPi": () => "This endpoint does not apply to Pi.",
     "opener.unsupportedExternalUrl": () => "Unsupported external URL.",
     "cli.installFailed": ({ message, missingText }) =>
       `Install failed: ${message ?? ""}${missingText ? ` Missing: ${missingText}` : ""}`,
@@ -55,11 +57,15 @@ const DESKTOP_MESSAGES = {
     "cli.noGitInstaller": () => "No Git for Windows 64-bit installer was found on npmmirror.",
     "cli.packageInstallFailed": ({ packageName, errors }) =>
       `Failed to install ${packageName ?? "package"}. ${errors ?? ""}`,
+    "cli.nodeVersionTooLow": ({ command, required, current }) =>
+      `${command ?? "CLI"} requires Node.js ${required ?? ""} or newer. Detected ${current ?? "unknown"}.`,
   },
   zh: {
     "provider.notFound": ({ id }) => `未找到提供商：${id ?? ""}`,
     "provider.notForClaude": () => "此端点不适用于 Claude Code。",
     "provider.notForCodex": () => "此端点不适用于 Codex。",
+    "provider.notForGrok": () => "此端点不适用于 Grok。",
+    "provider.notForPi": () => "此端点不适用于 Pi。",
     "opener.unsupportedExternalUrl": () => "不支持此外部 URL。",
     "cli.installFailed": ({ message, missingText }) =>
       `安装失败：${message ?? ""}${missingText ? ` 缺少：${missingText}` : ""}`,
@@ -101,6 +107,8 @@ const DESKTOP_MESSAGES = {
     "cli.noGitInstaller": () => "npmmirror 上没有找到 Git for Windows 64-bit 安装包。",
     "cli.packageInstallFailed": ({ packageName, errors }) =>
       `安装 ${packageName ?? "package"} 失败。${errors ?? ""}`,
+    "cli.nodeVersionTooLow": ({ command, required, current }) =>
+      `${command ?? "CLI"} 需要 Node.js ${required ?? ""} 或更高版本。当前检测到 ${current ?? "unknown"}。`,
   },
 } satisfies Record<DesktopLocale, Record<string, DesktopMessageFormatter>>;
 

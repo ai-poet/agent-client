@@ -34,7 +34,7 @@ import {
 } from "./combined-model-selector.utils";
 
 // TODO: this should be configured per provider in the provider manifest
-const PROVIDERS_WITH_MODEL_DESCRIPTIONS = new Set(["opencode", "pi"]);
+const PROVIDERS_WITH_MODEL_DESCRIPTIONS = new Set(["opencode", "pi", "grok"]);
 
 type SelectorView =
   | { kind: "all" }

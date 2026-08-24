@@ -47,6 +47,7 @@ import type {
   AgentUsage,
   ListModesOptions,
   ListModelsOptions,
+  ProviderInfo,
   ToolCallDetail,
 } from "../agent-sdk-types.js";
 import type { ProviderRuntimeSettings } from "../provider-launch-config.js";
@@ -57,6 +58,7 @@ import {
   formatProviderDiagnostic,
   formatProviderDiagnosticError,
   resolveBinaryVersion,
+  resolveCliVersion,
   toDiagnosticErrorMessage,
 } from "./diagnostic-utils.js";
 
@@ -1473,22 +1475,37 @@ export class PiDirectAgentClient implements AgentClient {
     return [];
   }
 
-  async isAvailable(): Promise<boolean> {
-    const command = this.runtimeSettings?.command;
-    if (command?.mode === "replace" && command.argv[0]) {
-      if (!existsSync(command.argv[0])) {
-        return false;
-      }
-    } else if (!(await isCommandAvailable(PI_BINARY_COMMAND))) {
-      return false;
-    }
-
+  /**
+   * Reports whether a credential is configured anywhere Pi looks. Surfaced in diagnostics,
+   * but deliberately not a gate on `isAvailable` — see there.
+   */
+  private hasCredentials(): boolean {
     return (
       Boolean(process.env.OPENAI_API_KEY) ||
       Boolean(process.env.ANTHROPIC_API_KEY) ||
       Boolean(process.env.OPENROUTER_API_KEY) ||
       existsSync(join(homedir(), ".pi", "agent", "auth.json"))
     );
+  }
+
+  /**
+   * Installed means selectable, matching Claude and Codex — neither of which checks
+   * credentials here. A missing key is a configuration gap the user fixes by editing the
+   * route, not a reason to hide the provider.
+   */
+  async isAvailable(): Promise<boolean> {
+    const command = this.runtimeSettings?.command;
+    if (command?.mode === "replace" && command.argv[0]) {
+      return existsSync(command.argv[0]);
+    }
+    return await isCommandAvailable(PI_BINARY_COMMAND);
+  }
+
+  async getProviderInfo(): Promise<ProviderInfo> {
+    return {
+      version: await resolveCliVersion(PI_BINARY_COMMAND, this.runtimeSettings),
+      configDir: join(homedir(), ".pi", "agent"),
+    };
   }
 
   async getDiagnostic(): Promise<{ diagnostic: string }> {
@@ -1536,6 +1553,11 @@ export class PiDirectAgentClient implements AgentClient {
           {
             label: "Auth config (~/.pi/agent/auth.json)",
             value: existsSync(authConfigPath) ? "found" : "not found",
+          },
+          // Reported, not enforced: Pi stays selectable so the route can be configured.
+          {
+            label: "Credentials",
+            value: this.hasCredentials() ? "configured" : "not configured",
           },
           { label: "Models", value: modelsValue },
           { label: "Status", value: status },

@@ -133,6 +133,13 @@ function makeKey(
 }
 
 function makeRuntimeStatus(overrides?: Partial<ModelCliRuntimeStatus>): ModelCliRuntimeStatus {
+  const base = makeRuntimeStatusBase(overrides);
+  return { ...base, clis: overrides?.clis ?? { codex: base.codex, claude: base.claude } };
+}
+
+function makeRuntimeStatusBase(
+  overrides?: Partial<ModelCliRuntimeStatus>,
+): Omit<ModelCliRuntimeStatus, "clis"> {
   return {
     git: {
       installed: true,
@@ -206,7 +213,7 @@ describe("use-setup-checks availability helpers", () => {
   });
 
   it("lists Git Bash separately when the Windows bootstrap stack is incomplete", () => {
-    const status: ModelCliRuntimeStatus = {
+    const status = makeRuntimeStatus({
       git: {
         installed: false,
         version: null,
@@ -236,7 +243,7 @@ describe("use-setup-checks availability helpers", () => {
         version: null,
         error: "Codex was not found.",
       },
-    };
+    });
 
     expect(getMissingCliDependencyNames(status)).toEqual([
       "Git Bash",
@@ -247,7 +254,7 @@ describe("use-setup-checks availability helpers", () => {
   });
 
   it("formats install failures with missing tools and a concise error", () => {
-    const status: ModelCliRuntimeStatus = {
+    const status = makeRuntimeStatus({
       git: {
         installed: true,
         version: "2.54.0",
@@ -277,7 +284,7 @@ describe("use-setup-checks availability helpers", () => {
         version: "0.130.0",
         error: null,
       },
-    };
+    });
 
     expect(
       formatCliInstallFailureMessage(
@@ -315,7 +322,7 @@ describe("use-setup-checks availability helpers", () => {
   });
 
   it("does not append stale missing tools when the desktop error already includes them", () => {
-    const staleStatus: ModelCliRuntimeStatus = {
+    const staleStatus = makeRuntimeStatus({
       git: {
         installed: false,
         version: null,
@@ -345,7 +352,7 @@ describe("use-setup-checks availability helpers", () => {
         version: null,
         error: "Codex was not found.",
       },
-    };
+    });
 
     expect(
       formatCliInstallFailureMessage(

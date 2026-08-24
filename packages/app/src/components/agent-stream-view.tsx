@@ -38,6 +38,8 @@ import {
   type InlinePathTarget,
 } from "./message";
 import { PlanCard } from "./plan-card";
+import { ToolCallGroup } from "./tool-call-group";
+import { buildToolGroupIndex } from "./agent-stream-tool-grouping";
 import type { StreamItem } from "@/types/stream";
 import type { PendingPermission } from "@/types/shared";
 import type {
@@ -72,6 +74,15 @@ import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { WorkingDots } from "@/components/working-dots";
 import { shouldShowAgentWorkingIndicator } from "@/utils/working-indicator";
+import {
+  collectStreamingText,
+  estimateOutputTokens,
+  formatElapsed,
+  resolveDisplayTokens,
+  resolveTurnPhase,
+  type TurnPhase,
+} from "@/utils/turn-progress";
+import { formatTokenValue } from "@/utils/usage-format";
 import { isWeb } from "@/constants/platform";
 import { useAppLocale } from "@/hooks/use-app-locale";
 import { getAppMessages } from "@/i18n/sub2api";
@@ -251,6 +262,13 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       viewportRef.current?.scrollToBottom("jump-to-bottom");
     }
 
+    // Built over the full timeline (history + live head) so a run that straddles the
+    // boundary still groups, and so ids stay stable for the item-keyed renderers.
+    const toolGroupIndex = useMemo(
+      () => buildToolGroupIndex([...streamItems, ...(streamHead ?? [])]),
+      [streamItems, streamHead],
+    );
+
     const tightGap = theme.spacing[1]; // 4px
     const looseGap = theme.spacing[4]; // 16px
 
@@ -393,6 +411,23 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                 );
               }
 
+              // A run of consecutive tool calls renders once, on its first item.
+              const groupRole = toolGroupIndex.get(item.id);
+              if (groupRole?.role === "member") {
+                return null;
+              }
+              if (groupRole?.role === "anchor") {
+                return (
+                  <ToolCallGroup
+                    group={groupRole.group}
+                    cwd={agent.cwd}
+                    locale={locale}
+                    isLastInSequence={isLastInSequence}
+                    onInlineDetailsExpandedChange={handleInlineDetailsExpandedChange}
+                  />
+                );
+              }
+
               return (
                 <ToolCall
                   toolName={data.name}
@@ -442,7 +477,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             return null;
         }
       },
-      [handleInlinePathPress, agent.cwd, streamRenderStrategy, locale],
+      [handleInlinePathPress, agent.cwd, streamRenderStrategy, locale, toolGroupIndex],
     );
 
     const renderStreamItem = useCallback(
@@ -495,6 +530,31 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       agentStatus: agent.status,
       pendingPermissionCount: pendingPermissionItems.length,
     });
+
+    const liveItems = useMemo(
+      () => [...streamItems, ...(streamHead ?? [])],
+      [streamItems, streamHead],
+    );
+    const turnPhase = useMemo(
+      () =>
+        resolveTurnPhase({
+          pendingPermissionCount: pendingPermissionItems.length,
+          awaitingUserInput: false,
+          items: liveItems,
+        }),
+      [pendingPermissionItems.length, liveItems],
+    );
+    const streamingText = useMemo(() => collectStreamingText(liveItems), [liveItems]);
+    // Anchored to the last user message so the elapsed clock measures this turn only.
+    const turnStartedAt = useMemo(() => {
+      for (let index = liveItems.length - 1; index >= 0; index -= 1) {
+        const item = liveItems[index];
+        if (item?.kind === "user_message") {
+          return item.timestamp.getTime();
+        }
+      }
+      return null;
+    }, [liveItems]);
     const renderModel = useMemo<AgentStreamRenderModel>(() => {
       const pendingPermissionsNode = hasPendingPermissions ? (
         <View style={stylesheet.permissionsContainer}>
@@ -510,7 +570,12 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       ) : null;
       const workingIndicatorNode = showWorkingIndicator ? (
         <View style={stylesheet.bottomBarWrapper}>
-          <WorkingIndicator />
+          <WorkingIndicator
+            phase={turnPhase}
+            startedAt={turnStartedAt}
+            streamingText={streamingText}
+            reportedOutputTokens={agent.lastUsage?.outputTokens}
+          />
         </View>
       ) : null;
 
@@ -677,11 +742,55 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 export const AgentStreamView = memo(AgentStreamViewComponent);
 AgentStreamView.displayName = "AgentStreamView";
 
-function WorkingIndicator() {
+const TURN_PHASE_LABEL_KEYS = {
+  awaiting_approval: "awaitingApproval",
+  awaiting_input: "awaitingInput",
+  thinking: "thinking",
+  running_tool: "runningTool",
+  generating: "generating",
+  working: "working",
+} as const;
+
+interface WorkingIndicatorProps {
+  phase: TurnPhase;
+  /** Wall-clock start of the current turn, or null when unknown. */
+  startedAt: number | null;
+  streamingText: string;
+  reportedOutputTokens: number | undefined;
+}
+
+function WorkingIndicator({
+  phase,
+  startedAt,
+  streamingText,
+  reportedOutputTokens,
+}: WorkingIndicatorProps) {
   const { theme } = useUnistyles();
   const locale = useAppLocale();
   const appText = useMemo(() => getAppMessages(locale), [locale]);
-  const label = appText.agentTools.labels.thinking;
+  const progressText = appText.agentTools.progress;
+  const phaseLabel = progressText[TURN_PHASE_LABEL_KEYS[phase]];
+
+  // Ticks the elapsed label without re-rendering the whole timeline.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (startedAt === null) {
+      return;
+    }
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [startedAt]);
+
+  const tokenLabel = useMemo(() => {
+    const { tokens, isEstimate } = resolveDisplayTokens({
+      estimated: estimateOutputTokens(streamingText),
+      reported: reportedOutputTokens,
+    });
+    return tokens > 0 ? progressText.tokens(formatTokenValue(tokens), isEstimate) : null;
+  }, [streamingText, reportedOutputTokens, progressText]);
+
+  const elapsedLabel = startedAt === null ? null : formatElapsed(nowMs - startedAt);
+  const label = [phaseLabel, elapsedLabel, tokenLabel].filter(Boolean).join(" · ");
 
   // ChatGPT-style text shimmer animation
   const shimmerProgress = useSharedValue(0);

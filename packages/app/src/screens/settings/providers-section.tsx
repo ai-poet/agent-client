@@ -13,6 +13,7 @@ import { SettingsSection } from "@/screens/settings/settings-section";
 import { RotateCw } from "lucide-react-native";
 import { useSub2APILocale } from "@/hooks/use-sub2api-locale";
 import { getSub2APIMessages } from "@/i18n/sub2api";
+import { formatProviderMeta, resolveProviderStatusTone } from "@/utils/provider-presentation";
 
 export interface ProvidersSectionProps {
   serverId: string;
@@ -76,7 +77,7 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
                 entry.error.trim().length > 0
                   ? entry.error.trim()
                   : null;
-              const modelCount = entry?.models?.length ?? 0;
+              const meta = formatProviderMeta(entry, text.modelCount);
 
               return (
                 <Pressable
@@ -95,9 +96,7 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
                         {providerError}
                       </Text>
                     ) : null}
-                    {status === "ready" && modelCount > 0 ? (
-                      <Text style={settingsStyles.rowHint}>{text.modelCount(modelCount)}</Text>
-                    ) : null}
+                    {meta ? <Text style={settingsStyles.rowHint}>{meta}</Text> : null}
                   </View>
                   <StatusBadge
                     label={
@@ -109,9 +108,7 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
                             ? text.statuses.loading
                             : text.statuses.notInstalled
                     }
-                    variant={
-                      status === "ready" ? "success" : status === "error" ? "error" : "muted"
-                    }
+                    variant={resolveProviderStatusTone(status)}
                   />
                 </Pressable>
               );
@@ -150,7 +147,7 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
   },
   errorText: {
-    color: theme.colors.palette.red[300],
+    color: theme.colors.destructive,
     fontSize: theme.fontSize.xs,
     marginTop: theme.spacing[1],
   },

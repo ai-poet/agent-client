@@ -191,6 +191,7 @@ import { notifyChatMentions } from "./chat/chat-mentions.js";
 import { ContextHubService } from "./context-hub/service.js";
 import { LoopService } from "./loop-service.js";
 import { ScheduleService } from "./schedule/service.js";
+import type { UsageService } from "./usage/service.js";
 import { execCommand } from "../utils/spawn.js";
 import {
   createGitHubService,
@@ -505,6 +506,8 @@ export type SessionOptions = {
   chatService: FileBackedChatService;
   contextHubService?: ContextHubService;
   scheduleService: ScheduleService;
+  /** Optional so embeddings without local usage accounting still construct. */
+  usageService?: UsageService;
   loopService: LoopService;
   checkoutDiffManager: CheckoutDiffManager;
   github?: GitHubService;
@@ -680,6 +683,7 @@ export class Session {
   private readonly chatService: FileBackedChatService;
   private readonly contextHubService: ContextHubService;
   private readonly scheduleService: ScheduleService;
+  private readonly usageService?: UsageService;
   private readonly loopService: LoopService;
   private readonly checkoutDiffManager: CheckoutDiffManager;
   private readonly github: GitHubService;
@@ -776,6 +780,7 @@ export class Session {
       chatService,
       contextHubService,
       scheduleService,
+      usageService,
       loopService,
       checkoutDiffManager,
       github,
@@ -826,6 +831,7 @@ export class Session {
         logger: this.sessionLogger.child({ module: "context-hub" }),
       });
     this.scheduleService = scheduleService;
+    this.usageService = usageService;
     this.loopService = loopService;
     this.checkoutDiffManager = checkoutDiffManager;
     this.github = github ?? createGitHubService();
@@ -2100,6 +2106,10 @@ export class Session {
 
           case "schedule/delete":
             await this.handleScheduleDeleteRequest(msg);
+            break;
+
+          case "usage/stats":
+            await this.handleUsageStatsRequest(msg);
             break;
 
           case "loop/run":
@@ -9267,6 +9277,41 @@ export class Session {
   >["payload"]["schedules"][number] {
     const { runs: _runs, ...summary } = schedule;
     return summary;
+  }
+
+  private async handleUsageStatsRequest(
+    request: Extract<SessionInboundMessage, { type: "usage/stats" }>,
+  ): Promise<void> {
+    try {
+      if (!this.usageService) {
+        throw new Error("Usage statistics are not available on this daemon");
+      }
+      const from = new Date(request.from);
+      const to = new Date(request.to);
+      if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+        throw new Error("Invalid usage date range");
+      }
+
+      const stats = await this.usageService.getStats({
+        from,
+        to,
+        groupBy: request.groupBy,
+        provider: request.provider,
+        cwd: request.cwd,
+      });
+
+      this.emit({
+        type: "usage/stats/response",
+        payload: { requestId: request.requestId, stats, error: null },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.sessionLogger.error({ err: error }, "Usage stats request failed");
+      this.emit({
+        type: "usage/stats/response",
+        payload: { requestId: request.requestId, stats: null, error: message },
+      });
+    }
   }
 
   private emitScheduleRpcError(

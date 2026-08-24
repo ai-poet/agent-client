@@ -10,6 +10,7 @@ import type {
   AgentProvider,
   ListModesOptions,
   ListModelsOptions,
+  ProviderInfo,
   ProviderSnapshotEntry,
 } from "./agent-sdk-types.js";
 import type { ProviderDefinition } from "./provider-registry.js";
@@ -26,9 +27,12 @@ type MockProviderOptions = {
   label?: string;
   description?: string;
   defaultModeId?: string | null;
+  docsUrl?: string;
+  installCommand?: string;
   isAvailable?: () => Promise<boolean>;
   fetchModels?: (cwd: string, force: boolean) => Promise<AgentModelDefinition[]>;
   fetchModes?: (cwd: string, force: boolean) => Promise<AgentMode[]>;
+  getProviderInfo?: () => Promise<ProviderInfo>;
 };
 
 type MockProviderHandle = {
@@ -161,6 +165,7 @@ describe("ProviderSnapshotManager", () => {
           label: "codex",
           description: "codex test provider",
           defaultModeId: null,
+          capabilities: TEST_CAPABILITIES,
         },
       ]);
     });
@@ -1131,6 +1136,105 @@ describe("ProviderSnapshotManager", () => {
 
     manager.destroy();
   });
+
+  test("ready entries carry installation facts and capabilities", async () => {
+    const { registry } = createRegistry([
+      createMockProvider({
+        provider: "grok",
+        docsUrl: "https://docs.x.ai/docs/overview",
+        installCommand: "npm install -g @xai-official/grok@latest",
+        getProviderInfo: async () => ({ version: "1.0.4", configDir: "/home/me/.grok" }),
+      }),
+    ]);
+    const manager = new ProviderSnapshotManager(registry, createTestLogger());
+
+    manager.getSnapshot(projectCwd);
+
+    await vi.waitFor(() => {
+      expect(getProviderEntry(manager.getSnapshot(projectCwd), "grok")).toMatchObject({
+        status: "ready",
+        version: "1.0.4",
+        configDir: "/home/me/.grok",
+        docsUrl: "https://docs.x.ai/docs/overview",
+        installCommand: "npm install -g @xai-official/grok@latest",
+        capabilities: TEST_CAPABILITIES,
+      });
+    });
+
+    manager.destroy();
+  });
+
+  test("a failing provider info probe still yields a ready snapshot", async () => {
+    const { registry } = createRegistry([
+      createMockProvider({
+        provider: "grok",
+        installCommand: "npm install -g @xai-official/grok@latest",
+        getProviderInfo: async () => {
+          throw new Error("grok --version exploded");
+        },
+      }),
+    ]);
+    const manager = new ProviderSnapshotManager(registry, createTestLogger());
+
+    manager.getSnapshot(projectCwd);
+
+    await vi.waitFor(() => {
+      const entry = getProviderEntry(manager.getSnapshot(projectCwd), "grok");
+      expect(entry?.status).toBe("ready");
+      expect(entry?.version).toBeUndefined();
+      // Static facts still resolve — the user keeps the copy-paste fallback.
+      expect(entry?.installCommand).toBe("npm install -g @xai-official/grok@latest");
+    });
+
+    manager.destroy();
+  });
+
+  test("unavailable entries keep the install command and docs link", async () => {
+    const { registry } = createRegistry([
+      createMockProvider({
+        provider: "grok",
+        docsUrl: "https://docs.x.ai/docs/overview",
+        installCommand: "npm install -g @xai-official/grok@latest",
+        isAvailable: async () => false,
+      }),
+    ]);
+    const manager = new ProviderSnapshotManager(registry, createTestLogger());
+
+    manager.getSnapshot(projectCwd);
+
+    await vi.waitFor(() => {
+      expect(getProviderEntry(manager.getSnapshot(projectCwd), "grok")).toMatchObject({
+        status: "unavailable",
+        docsUrl: "https://docs.x.ai/docs/overview",
+        installCommand: "npm install -g @xai-official/grok@latest",
+      });
+    });
+
+    manager.destroy();
+  });
+
+  test("capabilities are cloned so callers cannot mutate the cached snapshot", async () => {
+    const { registry } = createRegistry([
+      createMockProvider({ provider: "grok", getProviderInfo: async () => ({}) }),
+    ]);
+    const manager = new ProviderSnapshotManager(registry, createTestLogger());
+
+    manager.getSnapshot(projectCwd);
+    await vi.waitFor(() => {
+      expect(getProviderEntry(manager.getSnapshot(projectCwd), "grok")?.status).toBe("ready");
+    });
+
+    const first = getProviderEntry(manager.getSnapshot(projectCwd), "grok");
+    if (first?.capabilities) {
+      first.capabilities.supportsStreaming = true;
+    }
+
+    expect(
+      getProviderEntry(manager.getSnapshot(projectCwd), "grok")?.capabilities?.supportsStreaming,
+    ).toBe(false);
+
+    manager.destroy();
+  });
 });
 
 function deferred<T>(): Deferred<T> {
@@ -1179,6 +1283,8 @@ function createMockProvider(options: MockProviderOptions): MockProviderHandle {
     description: options.description ?? `${options.provider} test provider`,
     defaultModeId: options.defaultModeId ?? null,
     modes: [],
+    docsUrl: options.docsUrl,
+    installCommand: options.installCommand,
     createClient: () =>
       ({
         provider: options.provider,
@@ -1195,6 +1301,9 @@ function createMockProvider(options: MockProviderOptions): MockProviderHandle {
         async isAvailable() {
           return isAvailable();
         },
+        ...(options.getProviderInfo
+          ? { getProviderInfo: () => options.getProviderInfo?.() ?? Promise.resolve({}) }
+          : {}),
       }) satisfies AgentClient,
     fetchModels,
     fetchModes,

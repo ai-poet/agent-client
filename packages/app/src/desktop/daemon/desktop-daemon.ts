@@ -210,7 +210,7 @@ export interface InstallStatus {
 }
 
 export interface ModelCliRuntimeToolStatus {
-  command: "codex" | "claude";
+  command: string;
   packageName: string;
   installed: boolean;
   version: string | null;
@@ -244,6 +244,8 @@ export interface GitRuntimeStatus {
 export interface ModelCliRuntimeStatus {
   git: GitRuntimeStatus;
   node: NodeRuntimeStatus;
+  /** Keyed by CLI id. Synthesized from codex/claude when talking to an older daemon. */
+  clis: Record<string, ModelCliRuntimeToolStatus>;
   codex: ModelCliRuntimeToolStatus;
   claude: ModelCliRuntimeToolStatus;
 }
@@ -301,7 +303,7 @@ function parseModelCliRuntimeToolStatus(raw: unknown): ModelCliRuntimeToolStatus
     throw new Error("Unexpected CLI runtime tool status response.");
   }
   const command = toStringOrNull(raw.command);
-  if (command !== "codex" && command !== "claude") {
+  if (!command) {
     throw new Error("Unexpected CLI runtime tool command.");
   }
   return {
@@ -313,15 +315,31 @@ function parseModelCliRuntimeToolStatus(raw: unknown): ModelCliRuntimeToolStatus
   };
 }
 
+function parseModelCliRecord(raw: unknown): Record<string, ModelCliRuntimeToolStatus> {
+  if (!isRecord(raw)) {
+    return {};
+  }
+  const parsed: Record<string, ModelCliRuntimeToolStatus> = {};
+  for (const [id, value] of Object.entries(raw)) {
+    parsed[id] = parseModelCliRuntimeToolStatus(value);
+  }
+  return parsed;
+}
+
 function parseModelCliRuntimeStatus(raw: unknown): ModelCliRuntimeStatus {
   if (!isRecord(raw)) {
     throw new Error("Unexpected CLI runtime status response.");
   }
+  const codex = parseModelCliRuntimeToolStatus(raw.codex);
+  const claude = parseModelCliRuntimeToolStatus(raw.claude);
+  const clis = parseModelCliRecord(raw.clis);
   return {
     git: parseGitRuntimeStatus(raw.git),
     node: parseNodeRuntimeStatus(raw.node),
-    codex: parseModelCliRuntimeToolStatus(raw.codex),
-    claude: parseModelCliRuntimeToolStatus(raw.claude),
+    // Older daemons only report the two legacy fields.
+    clis: Object.keys(clis).length > 0 ? clis : { codex, claude },
+    codex,
+    claude,
   };
 }
 
@@ -369,6 +387,82 @@ export async function installCodexCli(): Promise<ModelCliInstallResult> {
 
 export async function installClaudeCodeCli(): Promise<ModelCliInstallResult> {
   return parseModelCliInstallResult(await invokeDesktopCommand("install_claude_code_cli"));
+}
+
+export async function installModelCli(id: string): Promise<ModelCliInstallResult> {
+  return parseModelCliInstallResult(await invokeDesktopCommand("install_model_cli", { id }));
+}
+
+export interface ExternalProviderCandidate {
+  id: string;
+  source: "ccswitch" | "cherry-studio";
+  target: "claude" | "codex";
+  name: string;
+  baseUrl: string;
+  hasApiKey: boolean;
+  models: string[];
+}
+
+export interface ExternalImportScan {
+  source: "ccswitch" | "cherry-studio";
+  detected: boolean;
+  dataPath: string | null;
+  items: ExternalProviderCandidate[];
+  error: string | null;
+}
+
+function parseExternalCandidate(raw: unknown): ExternalProviderCandidate | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const id = toStringOrNull(raw.id);
+  const baseUrl = toStringOrNull(raw.baseUrl);
+  if (!id || !baseUrl) {
+    return null;
+  }
+  const source = raw.source === "cherry-studio" ? "cherry-studio" : "ccswitch";
+  return {
+    id,
+    source,
+    target: raw.target === "codex" ? "codex" : "claude",
+    name: toStringOrNull(raw.name) ?? baseUrl,
+    baseUrl,
+    hasApiKey: raw.hasApiKey === true,
+    models: Array.isArray(raw.models)
+      ? raw.models.filter((model): model is string => typeof model === "string")
+      : [],
+  };
+}
+
+export async function scanExternalProviders(): Promise<ExternalImportScan[]> {
+  const raw = await invokeDesktopCommand("scan_external_providers");
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.flatMap((entry): ExternalImportScan[] => {
+    if (!isRecord(entry)) {
+      return [];
+    }
+    const source = entry.source === "cherry-studio" ? "cherry-studio" : "ccswitch";
+    return [
+      {
+        source,
+        detected: entry.detected === true,
+        dataPath: toStringOrNull(entry.dataPath),
+        items: Array.isArray(entry.items)
+          ? entry.items
+              .map(parseExternalCandidate)
+              .filter((item): item is ExternalProviderCandidate => item !== null)
+          : [],
+        error: toStringOrNull(entry.error),
+      },
+    ];
+  });
+}
+
+export async function importExternalProviders(ids: string[]): Promise<{ imported: number }> {
+  const raw = await invokeDesktopCommand("import_external_providers", { ids });
+  return { imported: isRecord(raw) && typeof raw.imported === "number" ? raw.imported : 0 };
 }
 
 export async function installAllModelClis(): Promise<ModelCliInstallResult> {
