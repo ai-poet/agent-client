@@ -1,87 +1,17 @@
-# Dependencies
-node_modules/
+target
+.waku-cache
 
-# Build outputs
-build/
-dist/
-.next/
-out/
-waku/
+# The pre-fork TypeScript client, kept in the working tree for reference only.
+# It carries its own .git and its own node_modules; tracking it here would add
+# six figures of files to a repo that has nothing to do with it.
+old-code/
 
-# Environment variables
-.env
-.env.test
-.env.local
-.env.test.local
-.env*.local
-
-# Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# OS files
 .DS_Store
-*.swp
-*.swo
-*~
+*.log
+.env
 
-# TypeScript
-*.tsbuildinfo
-tsconfig.tsbuildinfo
+/dist
+node_modules
+temp/
 
-# IDEs
-.vscode/
-.idea/
-*.sublime-*
-
-# Testing
-coverage/
-
-# Playwright
-test-results/
-**/test-results/
-
-# Vercel
-.vercel/
-
-# Expo
-.expo/
-
-# Misc
-*.pem
-.vercel
-
-# Local Claude configuration
-CLAUDE.local.md
-
-# Task CLI
-.tasks/
-
-.debug.conversations/
-.debug/
-.paseo/
-.wrangler/
-**/.wrangler/
-
-# Local agent/tooling artifacts (do not commit)
-PLAN.md
-.valknut/
-valknut-report.html/
-valknut-report.json/
-**/.playwright-mcp/
-**/.paseo-provider-history/
-.claude/settings.local.json
-**/.claude/settings.local.json
-.claude/scheduled_tasks.lock
-.claude/worktrees/
-.plans/
-packages/server/src/server/fixtures/dictation/dictation-debug-largest.wav
-packages/server/src/server/fixtures/dictation/dictation-debug-largest.transcript.txt
-
-/artifacts
-packages/desktop/.cache/
-packages/desktop/src-tauri/resources/managed-runtime/
-release-win/
+.DS_Store

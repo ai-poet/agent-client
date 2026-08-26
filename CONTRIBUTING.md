@@ -1,168 +1,141 @@
-# Contributing to Paseo
+# Contributing to Waku
 
-Thanks for taking the time to contribute.
-
-## How this project works
-
-Paseo is a BDFL project. Product direction, scope, and what ships are the maintainer's call.
-
-This means:
-
-- PRs submitted without prior discussion will likely be rejected, heavily modified, or scoped down.
-- The maintainer may rewrite, split, cherry-pick from, or close any PR at their discretion.
-- There is no obligation to merge a PR as-submitted, regardless of code quality.
-
-This is not meant to discourage contributions. It is meant to set clear expectations so nobody wastes their time.
-
-## How to contribute
-
-1. **Open an issue first.** Describe the problem or improvement. Get a thumbs up before writing code.
-2. **Keep it small.** One bug, one flow, one focused change.
-3. **Open a PR** once there is alignment on scope.
-
-If you want to propose a direction change, start a conversation.
-
-## Before you start
-
-Please read these first:
-
-- [README.md](README.md)
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-- [docs/CODING_STANDARDS.md](docs/CODING_STANDARDS.md)
-- [docs/TESTING.md](docs/TESTING.md)
-- [CLAUDE.md](CLAUDE.md)
-
-## What is most helpful
-
-The most useful contributions right now are:
-
-- bug fixes
-- windows and linux specific fixes
-- regression fixes
-- doc improvements
-- packaging / platform fixes
-- focused UX improvements that fit the existing product direction
-- tests that lock down important behavior
-
-## Scope expectations
-
-Please keep PRs narrow.
-
-Good:
-
-- fix one bug
-- improve one flow
-- add one focused panel or command
-- tighten one piece of UI
-
-Bad:
-
-- combine multiple product ideas in one PR
-- bundle unrelated refactors with a feature
-- sneak in roadmap decisions
-
-If a contribution contains multiple ideas, split it up.
-
-## Product fit matters
-
-Paseo is an opinionated product.
-
-When reviewing contributions, the bar is not just:
-
-- is this useful?
-- is this well implemented?
-
-It is also:
-
-- does this fit Paseo?
-- does this add product surface that will be hard to maintain?
-- does the value justify the maintenance surface it adds?
-- does this solve a common need or over-serve an edge case?
-- does this preserve the product's current direction?
+Thanks for helping improve Waku. Bug reports, focused fixes, tests, and
+well-scoped features are welcome.
 
 ## Development setup
 
-### Prerequisites
+The debug app requires:
 
-- Node.js matching `.tool-versions`
-- npm workspaces
+- macOS, Linux (Wayland or X11), or Windows 10 1809 and newer
+- Rust 1.96 or newer
+- Bun
+- A supported agent CLI when testing a provider integration
 
-### Start local development
+On Ubuntu and Debian, install the Linux compiler and GPUI runtime
+prerequisites with:
 
-```bash
-# runs both daemon and expo app
-npm run dev
+```sh
+sudo apt install build-essential clang cmake pkg-config libfontconfig-dev \
+  libwayland-dev libx11-xcb-dev libxkbcommon-x11-dev libvulkan1 \
+  xdg-desktop-portal
 ```
 
-Useful commands:
+Equivalent packages are available on Fedora, Arch, and other desktop Linux
+distributions. A working Vulkan driver is required at runtime.
 
-```bash
-npm run dev:server
-npm run dev:app
-npm run dev:desktop
-npm run dev:website
-npm run cli -- ls -a -g
+Install dependencies and start the development watcher from the repository
+root:
+
+```sh
+bun install
+bun run dev
 ```
 
-Read [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for build-sync gotchas, local state, ports, and daemon details.
+On macOS the watcher builds and signs `target/debug/Waku Debug.app`; on Linux
+and Windows it builds `target/debug/waku`. In both cases the provider daemon remains an
+external `target/debug/waku-debug-daemon`: provider-only edits rebuild and
+hot-swap that process without relaunching the app, while desktop edits rebuild
+and relaunch the app normally. Keep that watcher running while you work. Do
+not start a second watcher or manually relaunch the debug app. Press `Ctrl-C`,
+or quit the app, to stop it.
 
-## Multi-platform testing
+The embedded browser and experimental computer-use integration are currently
+macOS-only. On Linux and Windows the browser reports that it is unavailable,
+while the computer-use UI and runtime stay disabled.
 
-Paseo ships to mobile (iOS/Android), web, and desktop (Electron). Every UI change must be tested on mobile and web at minimum, and desktop if relevant. Things that look fine on one surface regularly break on another.
+Windows needs the MSVC toolchain (Visual Studio Build Tools with the C++
+workload and the Windows SDK) so Cargo can link and so the resource compiler
+is available for the executable's icon and version block.
 
-Common checks:
+## Linux bundle
 
-```bash
-npm run typecheck
-npm run test --workspaces --if-present
+To produce a distro-compatible release archive with the desktop and daemon
+binaries, desktop entry, icon, and license:
+
+```sh
+./scripts/bundle-linux.sh
 ```
 
-Important rules:
+The archive is written under `target/release` with an install-prefix layout
+(`bin/` and `share/`) beneath one versioned directory. It intentionally does
+not bundle system graphics libraries; distribution packages should declare
+those runtime dependencies normally.
 
-- always run `npm run typecheck` after changes
-- tests should be deterministic
-- prefer real dependencies over mocks when possible
-- do not make breaking WebSocket / protocol changes
-- app and daemon versions in the wild lag each other, so compatibility matters
+`website/public/install.sh` (served at `https://waku.sh/install.sh`) is what
+users run to install that archive. Point it at a local build to exercise it
+without publishing:
 
-If you touch protocol or shared client/server behavior, read the compatibility notes in [CLAUDE.md](CLAUDE.md).
+```sh
+WAKU_BUNDLE_PATH=target/release/waku-<version>-<target>.tar.gz \
+  sh website/public/install.sh
+```
 
-## Coding standards
+[docs/linux.md](docs/linux.md) documents both paths for users.
 
-Paseo has explicit standards. Follow them.
+## Windows bundle
 
-The full guide lives in [docs/CODING_STANDARDS.md](docs/CODING_STANDARDS.md).
+To produce the portable archive and the installer, on Windows:
 
-## PR checklist
+```sh
+bun scripts/bundle-windows.ts
+```
 
-Before opening a PR, make sure:
+Both land under `target/release`. The zip holds the two executables side by
+side beneath one versioned directory — the layout Waku needs to find its
+daemon — and the installer is built from
+[`resources/windows/waku.iss`](resources/windows/waku.iss), so Inno Setup 6.3
+or newer must be installed (`choco install innosetup`) — the architecture
+gate uses identifiers added in 6.3. Set `WINDOWS_CERTIFICATE`
+(base64 `.pfx`) and `WINDOWS_CERTIFICATE_PASSWORD` to Authenticode-sign them;
+without those the script packages unsigned binaries and says so.
+[docs/windows.md](docs/windows.md) documents installing for users, and
+[RELEASING.md](RELEASING.md) the signed update feed.
 
-- there was prior discussion and alignment on scope (issue or conversation)
-- the change is focused, one idea per PR
-- the PR description explains what changed and why
-- **UI changes include screenshots or videos** for every affected platform (mobile, web, desktop)
-- UI changes have been tested on mobile and web at minimum
-- typecheck passes
-- tests pass, or you clearly explain what could not be run
-- relevant docs were updated if needed
+## Making changes
 
-## Communication
+- Before starting work on anything larger than a bug fix, open an issue and
+  discuss the proposal first.
+- Keep changes focused and follow the existing Rust and GPUI conventions.
+- Keep filesystem, process, network, and other blocking work off the UI thread.
+  Rendering and row-building paths must read data already held in memory.
+- Keep long collections virtualized and per-frame work proportional to visible
+  content.
+- Make every mouse control keyboard-operable, preserve visible focus, honor
+  reduce-motion settings, and do not communicate state with color alone.
+- Prefer provider-neutral behavior when a change applies to every agent, while
+  preserving provider-native event order and session semantics.
+- Add or update tests for behavior that can be verified without the UI.
 
-If you are unsure whether something fits, ask first.
+## Checks
 
-That is especially true for:
+Run the focused checks relevant to your change, then run the full baseline
+before opening a pull request:
 
-- new core UX
-- naming / terminology changes
-- new extension points
-- new orchestration models
-- anything that would be hard to remove later
+```sh
+cargo fmt --package waku --package waku-protocol --package waku-client --package waku-core --package waku-daemon -- --check
+cargo check
+cargo test
+bun run protocol:check
+bun run --filter @waku/client check
+bun run --filter @waku/client test
+```
 
-Early alignment saves everyone time.
+When a Rust wire type changes, run `bun run protocol:generate` and commit the
+updated files under `packages/waku-client/src/generated`.
 
-## Forks are fine
+For user-visible changes, wait for the watcher to report a successful rebuild
+and validate the freshly relaunched app. Include screenshots or a short
+recording in the pull request when they make the result easier to review.
 
-If you want to explore a different product direction, a fork is completely fine.
+## Pull requests
 
-Paseo is open source on purpose. Not every idea needs to land in the main repo to be valuable.
+In the pull request description:
+
+- Explain the problem and the chosen solution.
+- List the checks you ran.
+- Call out known limitations or follow-up work.
+- Link the related issue, if one exists.
+
+By contributing, you agree that your contribution will be licensed under the
+[GNU General Public License v3.0 only](LICENSE).

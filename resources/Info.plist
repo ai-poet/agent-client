@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <!-- Fork change: bundle identity. Keep these in step with `appName` and
+         `executableName` in scripts/release.ts and with DISPLAY_NAME/BUNDLE_ID
+         in crates/sub2api/src/brand.rs. -->
+    <key>CFBundleDisplayName</key>
+    <string>CheapRouter</string>
+    <key>CFBundleExecutable</key>
+    <string>CheapRouter</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIdentifier</key>
+    <string>org.cheaprouter.desktop</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>CheapRouter</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <!-- Sparkle auto-update configuration. The appcast feed and the private
+         half of SUPublicEDKey sign each archive during `bun run release` (see
+         RELEASING.md).
+
+         Fork change: this points at our own release channel, and SUPublicEDKey
+         MUST be replaced with our own signing key before the first release —
+         upstream's key is left here only so debug builds link. Keep this host
+         in step with SUB2API_RELEASES_BASE_URL (see build.rs and
+         crates/sub2api/src/brand.rs); build.rs reads SUPublicEDKey from this
+         file, so the two platforms cannot trust different keys. -->
+    <key>SUFeedURL</key>
+    <string>https://releases.cheaprouter.org/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>gv9GLMPjH5yMQkZMFXnoNfHOyL8/7KGzl/jzAqlzZZY=</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+</dict>
+</plist>

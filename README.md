@@ -1,117 +1,136 @@
-<h1 align="center">Agent Client</h1>
+# CheapRouter
 
-<p align="center">AI Agent 客户端 —— 专为 Claude Code CLI 与 Codex CLI 打造</p>
+CheapRouter is a fast, native desktop app for working with local coding agents.
+It is built in Rust with
+[GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) and keeps
+projects, sessions, and transcripts on your machine.
 
----
+> **Built on [Waku](https://github.com/egoist/waku)** by egoist, licensed under
+> GPL-3.0-only. This is a modified fork; see [NOTICE.md](NOTICE.md) for the list
+> of changes and [docs/FORK.md](docs/FORK.md) for how it tracks upstream.
+> Please report issues with this build here, not to the upstream project.
 
-Agent Client 是一个针对 **Claude Code CLI** 和 **Codex CLI** 深度定制的 AI Agent 客户端，提供更强大的 Agent 管理、编排和远程控制能力。
+## What this fork adds
 
-## 核心特性
+- **Managed cloud account.** Sign in through your browser and route agents
+  through the hosted gateway. Settings → CheapRouter Account carries the balance,
+  top-up, model group selection, gateway pricing per model, code redemption,
+  and your invite link; the balance also sits beside the plan usage meter while
+  routing is on. Your own `~/.claude` and `~/.codex` are never rewritten:
+  routing is applied as process environment at launch, so signing out needs no
+  cleanup.
+- **Assisted CLI setup.** Settings → Providers detects missing agent CLIs and
+  an outdated or absent Node, then installs them for you. Node installs
+  unattended with live progress — a portable runtime into an app-managed
+  directory on Windows (falling back to the silent MSI, then winget) and the
+  official tarball on macOS; on Linux your package manager owns Node and the
+  app only reports it. On Windows the app also installs Git unattended
+  (portable, per-user installer, winget) — task checkpoints shell out to
+  `git`, and Claude Code's mature shell tool is Git Bash. npm installs try the
+  mainland mirror first on Windows with the official registry as fallback. A failed install shows the
+  installer's own output instead of a generic error, and the command is one
+  click away on the clipboard if you would rather run it yourself.
 
-- **深度集成 Claude Code & Codex**: 针对两大主流 AI 编码 Agent 进行专项优化，支持高级参数配置、自定义工作流和深度交互
-- **多 Agent 并行编排**: 在本地机器上并行运行多个 Agent，支持跨 Agent 任务协调与结果聚合
-- **自托管架构**: Agent 运行在您的本地环境中，使用您的工具、配置和技能，代码始终留在您的机器上
-- **全平台覆盖**: iOS、Android、桌面端、Web 和 CLI，随时随地管理您的 Agent
-- **隐私优先**: 无遥测、无追踪、无强制登录，您的数据完全由您掌控
-- **语音控制**: 语音模式下达任务指令，解放双手
+Everything else tracks upstream Waku.
 
-## 系统要求
+## Install
 
-| 平台 | 最低版本 | 备注 |
-|---|---|---|
-| Node.js | 18.x | 守护进程运行所需 |
-| iOS | 15.0+ | 移动端 App |
-| Android | 8.0+ | 移动端 App |
-| macOS | 12+ | 桌面端 |
-| Windows | 10+ | 桌面端 |
+Download the installer for your platform from the
+[latest release](../../releases/latest). Builds update themselves.
 
-## 快速开始
+## Supported agents
 
-Agent Client 运行一个本地守护进程（daemon）来管理您的编码 Agent。桌面应用、移动应用、Web 应用和 CLI 都通过它进行连接。
+CheapRouter works with:
 
-### 前置要求
+- [Amp](https://ampcode.com/)
+- Claude Code
+- Codex CLI
+- Cursor CLI
+- [Fx](https://fx.sh/)
+- Grok Build
+- Kimi Code
+- OpenCode
+- Pi
 
-您需要至少安装并配置好一个 Agent CLI：
+Settings → Providers tells you what is missing and how to install it. Detection
+is automatic, and each provider uses its native structured protocol and session
+continuity.
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — Anthropic 的 Claude 编码助手
-- [Codex](https://github.com/openai/codex) — OpenAI 的 Codex 编码 Agent
+## Highlights
 
-### 桌面应用（推荐）
+- Keep projects and independent agent sessions in one native app.
+- Switch models, reasoning effort, and access modes from a shared interface.
+- Queue or steer follow-up messages while an agent is working.
+- Rewind Git-backed tasks with conversation-aware checkpoints.
+- Store app state locally; the managed cloud account is optional.
 
-从 releases 页面下载。打开应用后守护进程自动启动，无需额外安装。
+## Architecture
 
-手机连接：在设置中扫描二维码即可配对。
+The native desktop is an RPC client of the standalone `waku-daemon` process.
+Provider sessions run in [`waku-core`](crates/waku-core), behind the
+authenticated, versioned WebSocket contract in
+[`waku-protocol`](crates/waku-protocol). The desktop depends on
+[`waku-client`](crates/waku-client), not on the daemon implementation. The
+daemon owns task SQLite data, uploaded attachments, provider-native session
+forks, and all workspace filesystem and Git operations; paths returned by it
+always refer to the daemon host. The desktop retains only presentation state
+and a disposable preview cache.
 
-### CLI / 无头模式
+The browser client lives at [`apps/web`](apps/web) and uses the generated
+browser transport in [`packages/waku-client`](packages/waku-client). Its
+checked-in types are generated directly from the Rust protocol, while its
+WebSocket client implements the same handshake, request IDs, subscriptions,
+sequence deduplication, and replay cursors as the Rust client. Run
+`bun run protocol:generate` after changing a wire type and
+`bun run protocol:check` to verify that generated files are current.
 
-安装 CLI 并启动 Agent Client：
+Projectless task workspaces live on the daemon host under
+`~/.waku/projects/<date>/<slug>`. The daemon moves workspaces created by the
+older `~/.waku/<date>/<slug>` layout on first load.
 
-```bash
-npm install -g @getpaseo/cli
-agent-client
+Configuration ownership is separate too: the Release desktop writes
+`~/.waku/app.json`, while Debug stays isolated at `temp/app.json`. Daemon
+provider and Computer Use settings live in `~/.waku/settings.json`. The
+desktop's Settings → Daemon page can explicitly
+expose the child daemon on a fixed port, configure exact browser origins, and
+copy its stable authentication token. It remains loopback-only by default.
+
+When connected to a daemon managed outside the desktop process, Waku never
+interprets daemon paths on the client machine. The local folder picker and PTY
+are therefore unavailable until the protocol gains daemon-host picker and
+terminal-stream endpoints; files, diffs, Git, skills, usage, task state, and
+attachments already use daemon RPC.
+
+Release apps bundle and sign `waku-daemon`. Development keeps the daemon at
+`target/debug/waku-debug-daemon`, allowing provider-only edits to rebuild and
+replace the daemon without relaunching the debug build.
+
+## Development
+
+Development is supported on macOS, Linux, and Windows and requires
+[Rust 1.96 or newer](https://www.rust-lang.org/tools/install) and
+[Bun](https://bun.sh/). Linux supports both Wayland and X11, and Windows needs
+the MSVC toolchain; install the native build prerequisites listed in
+[CONTRIBUTING.md](CONTRIBUTING.md) first.
+
+```sh
+bun install
+bun run dev
 ```
 
-终端会显示二维码，使用任意客户端扫描连接。适用于服务器和远程机器场景。
+The embedded browser and experimental computer-use integration currently
+remain macOS-only. Agent sessions, projects, transcripts, skills, usage,
+diffs, file editing, and the terminal run natively on Linux and Windows.
 
-## CLI 使用示例
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and checks.
+Release maintainers should also read [RELEASING.md](RELEASING.md).
 
-应用中的所有操作都可以通过终端完成：
+## Upstream
 
-```bash
-# 使用 Claude Code 运行任务
-agent-client run --provider claude/opus-4.6 "实现用户认证系统"
+This fork exists because of upstream Waku. You can support its development via
+[GitHub Sponsors](https://github.com/sponsors/egoist).
 
-# 使用 Codex 在独立工作区运行
-agent-client run --provider codex/gpt-5.4 --worktree feature-x "实现功能 X"
+## License
 
-# 列出运行中的 Agent
-agent-client ls
-
-# 实时连接 Agent 输出流
-agent-client attach abc123
-
-# 向运行中的 Agent 追加指令
-agent-client send abc123 "顺便加上单元测试"
-
-# 连接远程守护进程
-agent-client --host workstation.local:6767 run "运行完整测试套件"
-```
-
-## Agent 编排技能（实验性）
-
-通过技能系统教 Agent 如何使用 CLI 编排其他 Agent。
-
-## 开发
-
-Monorepo 包结构：
-
-| 包 | 说明 |
-|---|---|
-| `packages/server` | 守护进程（Agent 进程编排、WebSocket API、MCP 服务器） |
-| `packages/app` | Expo 客户端（iOS、Android、Web） |
-| `packages/cli` | CLI（守护进程与 Agent 工作流） |
-| `packages/desktop` | Electron 桌面应用 |
-| `packages/relay` | 远程连接中继包 |
-| `packages/website` | 官网与文档 |
-
-常用命令：
-
-```bash
-# 启动所有本地开发服务
-npm run dev
-
-# 单独启动各端
-npm run dev:server
-npm run dev:app
-npm run dev:desktop
-
-# 构建守护进程
-npm run build:daemon
-
-# 全仓库类型检查
-npm run typecheck
-```
-
-## 许可证
-
-AGPL-3.0
+Licensed under the [GNU General Public License v3.0 only](LICENSE), the same
+license as upstream Waku. Modifications are recorded in [NOTICE.md](NOTICE.md).
