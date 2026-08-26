@@ -1,9 +1,0 @@
-# Build output
-dist/
-release/
-
-# Dependencies
-node_modules/
-
-# TypeScript
-*.tsbuildinfo

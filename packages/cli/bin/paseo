@@ -1,3 +1,0 @@
-#!/usr/bin/env -S node --disable-warning=DEP0040
-import '../dist/index.js'
-
