@@ -240,19 +240,47 @@ pub fn npm_global_bin_from_prefix(prefix_output: &str) -> Option<PathBuf> {
     }
 }
 
-/// Entries that must be added to `PATH` for `needed` to be reachable.
-///
-/// Comparison is case-insensitive and ignores trailing separators, because
-/// Windows reports the same directory in several spellings.
+/// Entries that must be added to the running platform's `PATH` for `needed`
+/// to be reachable.
 pub fn missing_path_entries(current_path: &str, needed: &[String]) -> Vec<String> {
+    missing_entries_with(
+        current_path,
+        needed,
+        if cfg!(target_os = "windows") { ';' } else { ':' },
+        cfg!(target_os = "windows"),
+    )
+}
+
+/// The separator and case rules follow the `PATH` value's own format, not the
+/// host: `windows_user_path_value` edits a Windows registry value and must
+/// behave identically when this crate is compiled on macOS or Linux (where
+/// the tests also run).
+///
+/// Comparison ignores trailing separators, and folds case only for Windows
+/// values — Windows reports the same directory in several spellings, while
+/// on Unix /opt/Tools and /opt/tools are different directories.
+fn missing_entries_with(
+    current_path: &str,
+    needed: &[String],
+    separator: char,
+    fold_case: bool,
+) -> Vec<String> {
+    let normalize = |entry: &str| {
+        let trimmed = entry.trim().trim_end_matches(['/', '\\']);
+        if fold_case {
+            trimmed.to_ascii_lowercase()
+        } else {
+            trimmed.to_owned()
+        }
+    };
     let existing: Vec<String> = current_path
-        .split(if cfg!(target_os = "windows") { ';' } else { ':' })
-        .map(normalize_path_entry)
+        .split(separator)
+        .map(normalize)
         .filter(|entry| !entry.is_empty())
         .collect();
     let mut missing = Vec::new();
     for entry in needed {
-        let normalized = normalize_path_entry(entry);
+        let normalized = normalize(entry);
         if normalized.is_empty() {
             continue;
         }
@@ -263,20 +291,11 @@ pub fn missing_path_entries(current_path: &str, needed: &[String]) -> Vec<String
     missing
 }
 
-fn normalize_path_entry(entry: &str) -> String {
-    let trimmed = entry.trim().trim_end_matches(['/', '\\']);
-    // Only Windows paths are case-insensitive; folding case on Unix would
-    // treat /opt/Tools as already present when only /opt/tools is.
-    if cfg!(target_os = "windows") {
-        trimmed.to_ascii_lowercase()
-    } else {
-        trimmed.to_owned()
-    }
-}
-
 /// Append entries to a Windows user `PATH` value without duplicating them.
+/// Always Windows semantics (`;`, case-folded) — the value comes from the
+/// Windows registry no matter where this code compiles.
 pub fn windows_user_path_value(current_path: &str, additions: &[String]) -> String {
-    let missing = missing_path_entries(current_path, additions);
+    let missing = missing_entries_with(current_path, additions, ';', true);
     if missing.is_empty() {
         return current_path.to_owned();
     }
