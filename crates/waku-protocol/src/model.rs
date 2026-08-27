@@ -1058,6 +1058,15 @@ impl AgentSession {
             || self.provider_cursor.is_some()
     }
 
+    /// Identifier owned by the underlying agent CLI, once its native session
+    /// has been established.
+    pub fn provider_native_id(&self) -> Option<&str> {
+        self.provider_cursor
+            .as_ref()
+            .map(ProviderResumeCursor::native_id)
+            .filter(|id| !id.trim().is_empty())
+    }
+
     pub fn display_title(&self) -> &str {
         if self.title != Self::DEFAULT_TITLE && !self.title.trim().is_empty() {
             &self.title
@@ -3851,7 +3860,7 @@ mod tests {
     #[test]
     fn projectless_projects_use_projects_root_and_recognize_legacy_paths() {
         let home = dirs::home_dir().expect("test user has a home directory");
-        let root = home.join(".waku");
+        let root = home.join(crate::identity::DATA_DIR_NAME);
         let legacy = Project::from_path(root.clone());
         let legacy_dated = Project::from_path(root.join("2026-08-08/new-chat"));
         let project = Project::from_path(root.join("projects/2026-08-08/new-chat"));

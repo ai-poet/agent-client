@@ -222,6 +222,10 @@ enum SettingsPage {
     Appearance,
     /// Fork addition: managed cloud account and gateway routing.
     CloudAccount,
+    /// Fork addition: the gateway model catalog with pricing and health.
+    ModelPlaza,
+    /// Fork addition: the managed account's request history.
+    CloudUsage,
 }
 
 impl SettingsPage {
@@ -1414,6 +1418,36 @@ pub struct Waku {
     cloud_account: cloud_account::CloudAccountState,
     /// Fork addition: agent CLI setup view state.
     cli_setup: cli_setup::CliSetupState,
+    /// Fork addition: per-CLI custom endpoint fields on the Providers page —
+    /// `(provider_id, base-URL field, API-key field, optional model list)`.
+    custom_api_inputs: Vec<(
+        &'static str,
+        Entity<TextInput>,
+        Entity<TextInput>,
+        Option<Entity<TextInput>>,
+    )>,
+    /// Fork addition: cloud usage view state.
+    cloud_usage: cloud_usage::CloudUsageState,
+    /// Fork addition: model plaza view state.
+    model_plaza: model_plaza::ModelPlazaState,
+    /// Fork addition: search field on the Model Plaza page.
+    plaza_search_input: Entity<TextInput>,
+    /// Fork addition: the native top-up modal, present while open.
+    cloud_pay: Option<cloud_pay::CloudPayState>,
+    /// A click staged the top-up modal; the next frame materializes it.
+    cloud_pay_request: bool,
+    /// Bumped whenever the modal opens, closes, or starts a new order, so a
+    /// stale poll loop can tell it has been superseded.
+    cloud_pay_epoch: usize,
+    /// A turn settled; the event pump refreshes the cloud balance. Same
+    /// stale-flag pattern as `workspace_queries_stale` — the turn-settlement
+    /// seam has no `Context`.
+    cloud_balance_stale: bool,
+    /// Fork addition: service announcements (header bell + modal).
+    cloud_announcements: announcements::AnnouncementsState,
+    /// Markdown parse cache for the open announcement detail.
+    announcement_markdown: RefCell<Option<(i64, MarkdownView)>>,
+    announcement_selection: TranscriptSelection,
     /// Fork addition: redeem-code field on the Cloud Account page.
     cloud_redeem_input: Entity<TextInput>,
     /// Bumped per scan; a result from a superseded scan is discarded.
@@ -1500,6 +1534,10 @@ pub struct Waku {
     assistant_footer_cache: RefCell<HashMap<usize, (Option<SharedString>, Option<u64>)>>,
     /// The row-kinds fingerprint `assistant_footer_cache` was built under.
     assistant_footer_fingerprint: Cell<Option<u64>>,
+    /// The response row currently under the pointer. Response footers are
+    /// separate virtual-list rows, so GPUI's ancestor-scoped `group_hover`
+    /// cannot reveal them when a sibling response row is hovered.
+    hovered_response_row: Option<(Uuid, TranscriptRowKind)>,
     /// Checkpoint-ref existence per (session, retained turn count), filled by
     /// `prefetch_checkpoint_refs` on the background executor. Rows read only
     /// this cache: resolving a ref forks a `git` subprocess, which must stay
@@ -1600,11 +1638,14 @@ pub struct Waku {
 }
 
 mod activity_diff;
+mod announcements;
 mod autocomplete;
 mod background_work;
 mod branches;
 mod cli_setup;
 mod cloud_account;
+mod cloud_pay;
+mod cloud_usage;
 mod command_palette;
 mod commit_dialog;
 mod goal_dialog;
@@ -1613,6 +1654,7 @@ mod composer;
 mod drafts;
 mod file_search;
 mod image_preview;
+mod model_plaza;
 mod render;
 mod right_panel;
 mod runtime;
@@ -1645,6 +1687,13 @@ pub use skills_page::init as init_skills_keys;
 use streaming::*;
 use transcript::*;
 use transcript_view::ConversationNavigationRail;
+
+/// Collapse provider- or page-supplied text into a label that cannot contain
+/// hard line breaks. GPUI's `truncate()` prevents wrapping, but explicit
+/// newlines still produce multiple visual lines.
+fn single_line_label(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
 
 /// Seconds until any session's time label next changes value, or `None` when
 /// no label is on the clock at all. A running turn's elapsed counter moves
@@ -2007,6 +2056,53 @@ impl Waku {
                 .select_all_on_focus_click()
                 .placeholder(tr!("cloud.redeem_placeholder"))
         });
+        // Fork addition: search field on the Model Plaza page.
+        let plaza_search_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("plaza.search_placeholder"))
+        });
+        // Fork addition: per-CLI custom endpoint fields, prefilled from the
+        // stored routing so reopening settings shows what is in effect.
+        let stored_custom_api = sub2api::custom_api::load();
+        let custom_api_inputs = sub2api::custom_api::CUSTOM_API_PROVIDERS
+            .into_iter()
+            .map(|provider_id| {
+                let stored = stored_custom_api.get(provider_id);
+                let url_input = cx.new(|cx| {
+                    let mut input = TextInput::new(window, cx)
+                        .select_all_on_focus_click()
+                        .placeholder(tr!("cli_setup.custom_url_placeholder"));
+                    if let Some(endpoint) = stored {
+                        input.set_content(endpoint.base_url.clone(), cx);
+                    }
+                    input
+                });
+                let key_input = cx.new(|cx| {
+                    let mut input = TextInput::new(window, cx)
+                        .select_all_on_focus_click()
+                        .placeholder(tr!("cli_setup.custom_key_placeholder"));
+                    if let Some(endpoint) = stored {
+                        input.set_content(endpoint.api_key.clone(), cx);
+                    }
+                    input
+                });
+                // OpenCode and Pi declare models in their config, so their
+                // cards carry an optional model-list field.
+                let models_input = matches!(provider_id, "opencode" | "pi").then(|| {
+                    cx.new(|cx| {
+                        let mut input = TextInput::new(window, cx)
+                            .select_all_on_focus_click()
+                            .placeholder(tr!("cli_setup.custom_models_placeholder"));
+                        if let Some(endpoint) = stored {
+                            input.set_content(endpoint.models.join(", "), cx);
+                        }
+                        input
+                    })
+                });
+                (provider_id, url_input, key_input, models_input)
+            })
+            .collect();
         let skills_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -2942,6 +3038,17 @@ impl Waku {
                 skills_catalog: None,
                 cloud_account: cloud_account::CloudAccountState::default(),
                 cli_setup: cli_setup::CliSetupState::default(),
+                custom_api_inputs,
+                cloud_usage: cloud_usage::CloudUsageState::default(),
+                model_plaza: model_plaza::ModelPlazaState::default(),
+                plaza_search_input,
+                cloud_pay: None,
+                cloud_pay_request: false,
+                cloud_pay_epoch: 0,
+                cloud_balance_stale: false,
+                cloud_announcements: announcements::AnnouncementsState::default(),
+                announcement_markdown: RefCell::new(None),
+                announcement_selection: TranscriptSelection::default(),
                 cloud_redeem_input,
                 skills_scan_generation: 0,
                 skills_scan_pending: false,
@@ -2993,6 +3100,7 @@ impl Waku {
                 transcript_navigation_turns_fingerprint: Cell::new(None),
                 assistant_footer_cache: RefCell::new(HashMap::new()),
                 assistant_footer_fingerprint: Cell::new(None),
+                hovered_response_row: None,
                 checkpoint_ref_cache: RefCell::new(HashMap::new()),
                 checkpoint_ref_generation: Cell::new(0),
                 checkpoint_ref_prefetch: Cell::new(None),

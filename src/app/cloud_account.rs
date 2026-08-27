@@ -4,17 +4,21 @@
 //! GPUI dependency and is unit-tested on its own; this file is the view and the
 //! plumbing that runs that logic off the UI thread.
 //!
-//! Publishing routing configuration goes through the persisted state rather
-//! than straight to the daemon: `PersistedState` owns the `extra` map that
-//! carries unknown daemon settings, and every later `save()` re-emits it. A
-//! direct `update_settings` call would be silently undone by the next save.
+//! Routing is applied by writing each CLI's own global configuration —
+//! [`Waku::apply_cloud_routing`] → `sub2api::global_config::reconcile` — the
+//! moment the state changes (sign-in, group switch, toggle, sign-out). The
+//! daemon carries no routing state.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::*;
 
 /// How long the loopback listener waits for the browser before giving up.
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// How long fetched group health stays fresh. The account refresh cadence
+/// (five minutes, plus every settled turn) calls in through this guard.
+const GROUP_STATUS_TTL: Duration = Duration::from_secs(180);
 
 /// Balance polling after the top-up page is opened.
 const TOP_UP_POLL_INTERVAL: Duration = Duration::from_secs(15);
@@ -39,8 +43,10 @@ pub(super) struct CloudAccountState {
     pub error: Option<String>,
     /// Groups this account may route through.
     pub groups: Vec<sub2api::client::Group>,
-    /// Gateway pricing per model.
-    pub catalog: Vec<sub2api::client::ModelCatalogItem>,
+    /// Group health from `/group-status`, decorating the switcher UIs.
+    pub group_status: Vec<sub2api::client::GroupStatusItem>,
+    /// Last group-health fetch attempt, for the TTL guard.
+    pub group_status_at: Option<Instant>,
     /// Referral code and share link.
     pub referral: Option<sub2api::client::ReferralInfo>,
     /// A group switch or redemption is in flight.
@@ -66,14 +72,42 @@ enum CloudAction {
 impl Waku {
     /// Load the stored session at startup and refresh the account summary.
     pub(super) fn load_cloud_account(&mut self, cx: &mut Context<Self>) {
+        self.migrate_legacy_routing_transport();
         let Some(credentials) = sub2api::Credentials::load() else {
+            // Reconcile anyway: custom endpoints apply while signed out, and
+            // a takeover left behind by a wiped login must be restored.
+            self.apply_cloud_routing();
             return;
         };
-        self.cloud_account.routing_enabled =
-            sub2api::gateway::load().is_some_and(|config| config.enabled);
+        self.cloud_account.routing_enabled = !credentials.routing_disabled;
         self.cloud_account.credentials = Some(credentials);
+        // Startup reconcile: an app update may write the files differently,
+        // and any drift between the ledger and the live configs heals here.
+        self.apply_cloud_routing();
         self.refresh_cloud_account(cx);
         self.load_cloud_details(cx);
+    }
+
+    /// Drain the injection-era routing transport out of daemon settings.
+    ///
+    /// Older builds carried the gateway and custom-endpoint configuration in
+    /// `DaemonSettings.extra`; routing is desktop-local now. Runs every
+    /// startup but only writes when a legacy key was actually present.
+    fn migrate_legacy_routing_transport(&mut self) {
+        let mut settings = self.state.daemon_settings();
+        let migrated_custom = sub2api::custom_api::migrate_from_extra(&mut settings.extra);
+        let had_gateway = settings.extra.remove("sub2apiCloudGateway").is_some();
+        if migrated_custom.is_none() && !had_gateway {
+            return;
+        }
+        if let Some(config) = migrated_custom
+            && sub2api::custom_api::config_path().is_some_and(|path| !path.exists())
+            && let Err(error) = sub2api::custom_api::save(&config)
+        {
+            self.show_toast(format!("{error:#}"));
+        }
+        self.state.apply_daemon_settings(settings);
+        self.save();
     }
 
     /// Fold a background task's renewed session into the in-memory one.
@@ -82,7 +116,7 @@ impl Waku {
     /// the task ran, so adopting it wholesale would silently roll back
     /// anything the user did meanwhile — picking a group rebinds `api_key`,
     /// and a balance poll finishing a moment later must not undo that.
-    fn adopt_cloud_tokens(&mut self, renewed: sub2api::Credentials) {
+    pub(super) fn adopt_cloud_tokens(&mut self, renewed: sub2api::Credentials) {
         match self.cloud_account.credentials.as_mut() {
             Some(existing) if existing.endpoint == renewed.endpoint => {
                 existing.access_token = renewed.access_token;
@@ -95,6 +129,11 @@ impl Waku {
 
     /// Refresh the account summary, renewing the access token if it is due.
     pub(super) fn refresh_cloud_account(&mut self, cx: &mut Context<Self>) {
+        // Announcements and group health ride the same cadence, each behind
+        // its own TTL guard so the turn-end balance refresh does not hammer
+        // those endpoints.
+        self.refresh_cloud_announcements(false, cx);
+        self.refresh_cloud_group_status(cx);
         let Some(credentials) = self.cloud_account.credentials.clone() else {
             return;
         };
@@ -127,6 +166,44 @@ impl Waku {
                 }
                 cx.notify();
             });
+        })
+        .detach();
+    }
+
+    /// Fetch group health when stale. Failures stay silent — this decorates
+    /// the switcher menus; the Model Plaza is the surface with error states.
+    pub(super) fn refresh_cloud_group_status(&mut self, cx: &mut Context<Self>) {
+        let Some(credentials) = self.cloud_account.credentials.clone() else {
+            return;
+        };
+        if self
+            .cloud_account
+            .group_status_at
+            .is_some_and(|at| at.elapsed() < GROUP_STATUS_TTL)
+        {
+            return;
+        }
+        // Stamped before the fetch so overlapping refreshes collapse and a
+        // failing endpoint is retried at the TTL, not every render.
+        self.cloud_account.group_status_at = Some(Instant::now());
+
+        cx.spawn(async move |this, cx| {
+            let fetched = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut credentials = credentials;
+                    sub2api::refresh_if_needed(&mut credentials)?;
+                    let statuses = sub2api::Client::new(credentials.endpoint.clone())
+                        .group_statuses(&credentials.access_token)?;
+                    anyhow::Ok(statuses)
+                })
+                .await;
+            if let Ok(statuses) = fetched {
+                let _ = this.update(cx, |this, cx| {
+                    this.cloud_account.group_status = statuses;
+                    cx.notify();
+                });
+            }
         })
         .detach();
     }
@@ -181,7 +258,7 @@ impl Waku {
                         // so routing starts on rather than needing a second
                         // switch nobody would find.
                         this.cloud_account.routing_enabled = true;
-                        this.publish_cloud_gateway();
+                        this.apply_cloud_routing();
                         this.load_cloud_details(cx);
                     }
                     Err(error) => this.cloud_account.error = Some(format!("{error:#}")),
@@ -201,15 +278,15 @@ impl Waku {
         self.cloud_account.user = None;
         self.cloud_account.routing_enabled = false;
         self.cloud_account.error = None;
-        self.publish_cloud_gateway();
+        self.apply_cloud_routing();
         cx.notify();
     }
 
-    /// Fetch the things that change rarely: groups, pricing, referral.
+    /// Fetch the things that change rarely: groups and referral. Model
+    /// pricing lives on its own page (the Model Plaza) and loads there.
     ///
     /// Kept out of [`Self::refresh_cloud_account`], which runs every five
-    /// minutes for the balance — the catalog is large and static enough that
-    /// re-pulling it on that cadence would be waste.
+    /// minutes for the balance.
     pub(super) fn load_cloud_details(&mut self, cx: &mut Context<Self>) {
         let Some(credentials) = self.cloud_account.credentials.clone() else {
             return;
@@ -226,20 +303,18 @@ impl Waku {
                     anyhow::Ok((
                         credentials.clone(),
                         client.available_groups(token).unwrap_or_default(),
-                        client.model_catalog(token).unwrap_or_default().items,
                         client.referral_info(token).ok(),
                     ))
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                let Ok((credentials, groups, catalog, referral)) = loaded else {
+                let Ok((credentials, groups, referral)) = loaded else {
                     // A failed renewal here is not worth a banner: the balance
                     // poll reports the same problem, and this data is optional.
                     return;
                 };
                 this.adopt_cloud_tokens(credentials);
                 this.cloud_account.groups = groups;
-                this.cloud_account.catalog = catalog;
                 this.cloud_account.referral = referral;
                 cx.notify();
             });
@@ -279,9 +354,28 @@ impl Waku {
                 match result {
                     Ok(renewed) => {
                         this.cloud_account.credentials = Some(renewed);
-                        this.publish_cloud_gateway();
+                        this.apply_cloud_routing();
+                        let name = group_id
+                            .and_then(|id| {
+                                this.cloud_account
+                                    .groups
+                                    .iter()
+                                    .find(|group| group.id == id)
+                                    .map(|group| group.name.clone())
+                            })
+                            .unwrap_or_else(|| tr!("cloud.group_default"));
+                        // A CLI reads its config at process start, so running
+                        // sessions keep their old route; say so instead of
+                        // letting it read as "nothing happened".
+                        this.show_toast(tr!("cloud.group_switched", group = name));
                     }
-                    Err(error) => this.cloud_account.error = Some(format!("{error:#}")),
+                    // The switch usually happens from the footer menu, where
+                    // the settings page's inline error area is invisible.
+                    Err(error) => {
+                        let message = format!("{error:#}");
+                        this.cloud_account.error = Some(message.clone());
+                        this.show_toast(message);
+                    }
                 }
                 cx.notify();
             });
@@ -319,10 +413,19 @@ impl Waku {
                         this.adopt_cloud_tokens(renewed);
                         this.cloud_redeem_input
                             .update(cx, |input, cx| input.clear(cx));
-                        if let Some(balance) = redeemed.new_balance
-                            && let Some(user) = this.cloud_account.user.as_mut()
-                        {
-                            user.balance = balance;
+                        if let Some(balance) = redeemed.new_balance {
+                            if let Some(user) = this.cloud_account.user.as_mut() {
+                                user.balance = balance;
+                            }
+                            // The top-up sheet hosts the redeem field now;
+                            // its account card must show the credited figure.
+                            if let Some(config) = this
+                                .cloud_pay
+                                .as_mut()
+                                .and_then(|state| state.config.as_mut())
+                            {
+                                config.user_balance = Some(balance);
+                            }
                         }
                         let message = if redeemed.message.is_empty() {
                             tr!("cloud.redeemed", value = format!("{:.2}", redeemed.value))
@@ -331,7 +434,9 @@ impl Waku {
                         };
                         this.show_toast(message);
                     }
-                    Err(error) => this.cloud_account.error = Some(format!("{error:#}")),
+                    // The field lives in the top-up sheet, where the account
+                    // page's inline error area is invisible — toast instead.
+                    Err(error) => this.show_toast(format!("{error:#}")),
                 }
                 cx.notify();
             });
@@ -339,25 +444,15 @@ impl Waku {
         .detach();
     }
 
-    /// Open the hosted top-up page in the user's browser.
-    pub(super) fn open_cloud_top_up(&mut self, cx: &mut Context<Self>) {
-        let Some(credentials) = self.cloud_account.credentials.clone() else {
-            return;
-        };
-        // The pay page takes a bare language tag, so `zh-CN` becomes `zh`;
-        // it falls back to its own default for anything it does not know.
-        let locale = self.state.language.locale();
-        let language = locale.split('-').next().unwrap_or(locale);
-        let url = sub2api::Client::new(credentials.endpoint.clone())
-            .top_up_url(&credentials.access_token, language);
-        cx.open_url(&url);
-
-        // Payment completes in the browser and the service has no way to call
-        // back into a desktop app, so there is nothing to await. Poll for a
-        // couple of minutes instead: `open_url` returns the instant the browser
-        // launches, so refreshing right here would only ever re-read the same
-        // pre-payment figure, and the five-minute tick is long enough that the
-        // user would assume the top-up failed.
+    /// Watch for the balance changing after payment moved to the browser.
+    ///
+    /// Payment completing in the browser has no way to call back into a
+    /// desktop app, so there is nothing to await. Poll for a couple of
+    /// minutes instead: the hosted page opens the instant the URL is handed
+    /// over, so refreshing right here would only ever re-read the same
+    /// pre-payment figure, and the five-minute tick is long enough that the
+    /// user would assume the top-up failed.
+    pub(super) fn poll_cloud_balance_until_changed(&mut self, cx: &mut Context<Self>) {
         let before = self.cloud_account.user.as_ref().map(|user| user.balance);
         cx.spawn(async move |this, cx| {
             for _ in 0..TOP_UP_POLL_ATTEMPTS {
@@ -381,32 +476,42 @@ impl Waku {
         .detach();
     }
 
-    /// Turn gateway routing on or off without signing out.
+    /// Turn gateway routing on or off without signing out. The choice
+    /// persists in the credential file so a restart keeps it.
     pub(super) fn set_cloud_routing_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.cloud_account.routing_enabled = enabled;
-        self.publish_cloud_gateway();
+        if let Some(credentials) = self.cloud_account.credentials.as_mut() {
+            credentials.routing_disabled = !enabled;
+            if let Err(error) = credentials.save() {
+                self.show_toast(format!("{error:#}"));
+            }
+        }
+        self.apply_cloud_routing();
         cx.notify();
     }
 
-    /// Publish routing configuration into daemon settings.
+    /// Drive every CLI's global configuration to the current routing state.
     ///
-    /// Existing sessions keep the environment they launched with; the change
-    /// applies to the next agent that starts.
-    fn publish_cloud_gateway(&mut self) {
-        let mut settings = self.state.daemon_settings();
-        match self.cloud_account.credentials.as_ref() {
-            Some(credentials) => {
-                let config =
-                    sub2api::gateway_config_from(credentials, self.cloud_account.routing_enabled);
-                if let Err(error) = config.write_into(&mut settings.extra) {
-                    self.show_toast(format!("{error:#}"));
-                    return;
+    /// This *is* the routing mechanism now: the gateway (or a custom
+    /// endpoint) is written into `~/.claude/settings.json`, `~/.codex/*`,
+    /// `~/.grok/config.toml`, `opencode.json`, and Pi's `models.json` —
+    /// with the pre-takeover originals backed up, and restored the moment a
+    /// CLI stops being routed. Files change immediately; running sessions
+    /// keep whatever they already read.
+    pub(super) fn apply_cloud_routing(&mut self) {
+        let custom = sub2api::custom_api::load();
+        let cloud = self.cloud_account.credentials.as_ref().map(|credentials| {
+            sub2api::gateway_config_from(credentials, self.cloud_account.routing_enabled)
+        });
+        let desired = sub2api::global_config::desired_routes(cloud.as_ref(), &custom);
+        match sub2api::global_config::reconcile(&desired) {
+            Ok(warnings) => {
+                for warning in warnings {
+                    self.show_toast(warning);
                 }
             }
-            None => sub2api::GatewayConfig::remove_from(&mut settings.extra),
+            Err(error) => self.show_toast(format!("{error:#}")),
         }
-        self.state.apply_daemon_settings(settings);
-        self.save();
     }
 
     pub(super) fn render_cloud_account_settings(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -484,11 +589,11 @@ impl Waku {
         }
 
         if signed_in {
+            // Redeem codes live in the top-up sheet and pricing on the Model
+            // Plaza page; this page keeps identity, routing, and groups.
             page = page
                 .child(self.render_cloud_groups(theme, cx))
-                .child(self.render_cloud_redeem(theme, cx))
-                .child(self.render_cloud_referral(theme, cx))
-                .child(self.render_cloud_catalog(theme));
+                .child(self.render_cloud_referral(theme, cx));
         }
 
         if let Some(error) = error {
@@ -552,11 +657,13 @@ impl Waku {
                     Some(group) => (
                         Some(group.id),
                         group.name.clone(),
-                        if group.rate_multiplier > 0.0 {
-                            format!("\u{00d7}{:.2}", group.rate_multiplier)
-                        } else {
-                            String::new()
-                        },
+                        group_status_suffix(
+                            group,
+                            self.cloud_account
+                                .group_status
+                                .iter()
+                                .find(|status| status.group_id == group.id),
+                        ),
                     ),
                     None => (
                         None,
@@ -629,52 +736,6 @@ impl Waku {
         rows
     }
 
-    /// Redeem-code field.
-    fn render_cloud_redeem(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
-        let busy = self.cloud_account.busy;
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(6.0))
-            .child(section_title(
-                theme,
-                &tr!("cloud.redeem_title"),
-                &tr!("cloud.redeem_detail"),
-            ))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(
-                        TextField::new("cloud-redeem-field", self.cloud_redeem_input.clone())
-                            .flex_1()
-                            .max_w(px(430.0)),
-                    )
-                    .child(
-                        div()
-                            .id("cloud-redeem-submit")
-                            .tab_index(0)
-                            .h(px(29.0))
-                            .px(px(11.0))
-                            .rounded(px(7.0))
-                            .border_1()
-                            .border_color(theme.border_strong)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .cursor_default()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_secondary)
-                            .opacity(if busy { 0.55 } else { 1.0 })
-                            .child(tr!("cloud.redeem_action"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.redeem_cloud_code(cx);
-                            })),
-                    ),
-            )
-    }
-
     /// Referral code and share link.
     fn render_cloud_referral(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
         let Some(referral) = self.cloud_account.referral.clone() else {
@@ -699,102 +760,6 @@ impl Waku {
         )
     }
 
-    /// Gateway pricing per model.
-    fn render_cloud_catalog(&self, theme: Theme) -> Div {
-        if self.cloud_account.catalog.is_empty() {
-            return div();
-        }
-        let mut list = div().flex().flex_col().gap(px(6.0)).child(section_title(
-            theme,
-            &tr!("cloud.pricing_title"),
-            &tr!("cloud.pricing_detail"),
-        ));
-        for item in &self.cloud_account.catalog {
-            let name = if item.display_name.is_empty() {
-                item.model.clone()
-            } else {
-                item.display_name.clone()
-            };
-            let price = match (
-                item.effective_pricing_usd.input_per_mtok_usd,
-                item.effective_pricing_usd.output_per_mtok_usd,
-            ) {
-                (Some(input), Some(output)) => tr!(
-                    "cloud.price_in_out",
-                    input = format!("{input:.2}"),
-                    output = format!("{output:.2}")
-                ),
-                (Some(input), None) => tr!("cloud.price_in", input = format!("{input:.2}")),
-                (None, Some(output)) => tr!("cloud.price_out", output = format!("{output:.2}")),
-                // Per-request models have no per-token price; showing 0.00
-                // would read as free.
-                (None, None) => match item.effective_pricing_usd.per_request_usd {
-                    Some(per_request) => {
-                        tr!("cloud.price_per_request", price = format!("{per_request:.4}"))
-                    }
-                    None => tr!("cloud.price_unknown"),
-                },
-            };
-            list = list.child(
-                div()
-                    .w_full()
-                    .px(px(16.0))
-                    .py(px(10.0))
-                    .rounded(px(11.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(div().text_size(sp(12.8)).text_color(theme.text).child(name))
-                            .child(
-                                div()
-                                    .mt(px(2.0))
-                                    .text_size(sp(12.0))
-                                    .text_color(theme.text_ghost)
-                                    .truncate()
-                                    .child(if item.best_group.name.is_empty() {
-                                        item.platform.clone()
-                                    } else {
-                                        format!("{}  ·  {}", item.platform, item.best_group.name)
-                                    }),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(sp(12.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(price),
-                            )
-                            .when_some(
-                                item.comparison
-                                    .savings_percent
-                                    .filter(|_| item.comparison.is_cheaper_than_official),
-                                |element, savings| {
-                                    element.child(
-                                        div()
-                                            .text_size(sp(12.0))
-                                            .text_color(theme.success)
-                                            .child(format!("-{savings:.0}%")),
-                                    )
-                                },
-                            ),
-                    ),
-            );
-        }
-        list
-    }
 }
 
 impl Waku {
@@ -919,15 +884,12 @@ impl Waku {
     pub(super) fn render_cloud_footer_chip(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let signed_in = self.cloud_account.credentials.is_some();
+        // Identity only — the balance is a figure to check deliberately, not
+        // to have on screen at all times, so it lives in the opened menu.
         let label = match self.cloud_account.user.as_ref() {
-            Some(user) => {
-                let identity = if user.email.is_empty() {
-                    user.username.clone()
-                } else {
-                    user.email.clone()
-                };
-                format!("{identity}  ·  ${:.2}", user.balance)
-            }
+            Some(user) if !user.email.is_empty() => user.email.clone(),
+            Some(user) if !user.username.is_empty() => user.username.clone(),
+            Some(_) => tr!("cloud.signed_in"),
             None if signed_in => tr!("cloud.signed_in"),
             None => tr!("cloud.sidebar_sign_in"),
         };
@@ -972,10 +934,21 @@ impl Waku {
         }
 
         // Snapshots for the item builder, which runs on every open frame.
-        let handle = self.menu_handle("cloud-account-menu", cx);
+        // Opening the menu re-pulls groups and balance, so a group created in
+        // the web console a moment ago is switchable without a restart.
+        let refresh_weak = cx.entity().downgrade();
+        let handle = self.menu_handle_with("cloud-account-menu", cx, move |open, _, cx| {
+            if open {
+                let _ = refresh_weak.update(cx, |this, cx| {
+                    this.load_cloud_details(cx);
+                    this.refresh_cloud_account(cx);
+                });
+            }
+        });
         let weak = cx.entity().downgrade();
         let balance = self.cloud_account.user.as_ref().map(|user| user.balance);
         let groups = self.cloud_account.groups.clone();
+        let statuses = self.cloud_account.group_status.clone();
         let bindings: Vec<(String, Option<i64>)> = cloud_platforms(&groups)
             .into_iter()
             .map(|platform| {
@@ -989,12 +962,6 @@ impl Waku {
                 (platform, bound)
             })
             .collect();
-        let endpoint = self
-            .cloud_account
-            .credentials
-            .as_ref()
-            .map(|credentials| credentials.endpoint.clone())
-            .unwrap_or_default();
 
         dropdown_menu(
             trigger,
@@ -1008,16 +975,37 @@ impl Waku {
                         "{}  ${balance:.2}",
                         tr!("cloud.balance")
                     ))));
+                    let top_up_weak = weak.clone();
+                    items.push(
+                        MenuItem::new(tr!("cloud.top_up"), move |_, cx| {
+                            let _ = top_up_weak.update(cx, |this, cx| {
+                                this.open_cloud_pay_modal(cx);
+                            });
+                        })
+                        .icon("icons/wallet.svg"),
+                    );
                     items.push(MenuItem::Separator);
                 }
 
                 // One submenu per CLI: pick the group its traffic routes
                 // through, or drop back to the account default.
                 for (platform, bound) in &bindings {
-                    let platform_groups: Vec<sub2api::client::Group> = groups
+                    // (id, plain name, menu label with rate + 24h availability).
+                    let platform_groups: Vec<(i64, String, String)> = groups
                         .iter()
                         .filter(|group| &group.platform == platform)
-                        .cloned()
+                        .map(|group| {
+                            let status = statuses
+                                .iter()
+                                .find(|status| status.group_id == group.id);
+                            let suffix = group_status_suffix(group, status);
+                            let label = if suffix.is_empty() {
+                                group.name.clone()
+                            } else {
+                                format!("{}   {suffix}", group.name)
+                            };
+                            (group.id, group.name.clone(), label)
+                        })
                         .collect();
                     if platform_groups.is_empty() {
                         continue;
@@ -1026,8 +1014,8 @@ impl Waku {
                         .and_then(|id| {
                             platform_groups
                                 .iter()
-                                .find(|group| group.id == id)
-                                .map(|group| group.name.clone())
+                                .find(|(group_id, ..)| *group_id == id)
+                                .map(|(_, name, _)| name.clone())
                         })
                         .unwrap_or_else(|| tr!("cloud.group_default"));
                     let bound = *bound;
@@ -1049,12 +1037,12 @@ impl Waku {
                                 })
                                 .selected(bound.is_none()),
                             );
-                            for group in &platform_groups {
+                            for (group_id, _, label) in &platform_groups {
                                 let entry_platform = submenu_platform.clone();
                                 let entry_weak = submenu_weak.clone();
-                                let group_id = group.id;
+                                let group_id = *group_id;
                                 entries.push(
-                                    MenuItem::new(group.name.clone(), move |_, cx| {
+                                    MenuItem::new(label.clone(), move |_, cx| {
                                         let platform = entry_platform.clone();
                                         let _ = entry_weak.update(cx, |this, cx| {
                                             this.select_cloud_group(
@@ -1064,7 +1052,7 @@ impl Waku {
                                             );
                                         });
                                     })
-                                    .selected(bound == Some(group.id)),
+                                    .selected(bound == Some(group_id)),
                                 );
                             }
                             entries
@@ -1078,17 +1066,14 @@ impl Waku {
                 let catalog_weak = weak.clone();
                 items.push(MenuItem::new(tr!("cloud.menu_catalog"), move |_, cx| {
                     let _ = catalog_weak.update(cx, |this, cx| {
-                        this.open_settings_page(SettingsPage::CloudAccount, cx);
+                        this.open_settings_page(SettingsPage::ModelPlaza, cx);
                     });
                 }));
-                // Usage history lives in the hosted console; recreating its
-                // filters and tables in the desktop would be a slow copy of a
-                // page one click away.
-                let usage_endpoint = endpoint.clone();
+                let usage_weak = weak.clone();
                 items.push(MenuItem::new(tr!("cloud.menu_usage"), move |_, cx| {
-                    if !usage_endpoint.is_empty() {
-                        cx.open_url(&format!("{usage_endpoint}/usage"));
-                    }
+                    let _ = usage_weak.update(cx, |this, cx| {
+                        this.open_settings_page(SettingsPage::CloudUsage, cx);
+                    });
                 }));
 
                 items.push(MenuItem::Separator);
@@ -1107,7 +1092,9 @@ impl Waku {
         )
     }
 
-    /// Balance chip for the status strip above the composer.
+    /// Balance badge for the status strip above the composer — the old
+    /// client's `HeaderBalanceBadge`: a wallet glyph and the graded figure,
+    /// and clicking it opens the top-up sheet directly.
     ///
     /// The old client kept this in the window header; the native app's
     /// equivalent always-visible strip is the one that already carries the
@@ -1122,6 +1109,7 @@ impl Waku {
         }
         let balance = self.cloud_account.user.as_ref()?.balance;
         let theme = Theme::current(cx);
+        let color = balance_color(balance, theme);
         Some(
             div()
                 .id("cloud-balance-badge")
@@ -1134,14 +1122,14 @@ impl Waku {
                 .gap(px(4.0))
                 .cursor_default()
                 .text_size(sp(12.5))
-                .text_color(balance_color(balance, theme))
+                .text_color(color)
                 .hover(|style| style.bg(theme.raised))
+                .child(icon("icons/wallet.svg", 13.0, color))
                 .child(format!("${balance:.2}"))
-                // Opens the account page rather than the browser: a stray
-                // click on a always-visible chip should not launch a payment
-                // page.
+                // The modal is safe under a stray click — it only shows the
+                // form; nothing is charged without further explicit steps.
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.open_settings_page(SettingsPage::CloudAccount, cx);
+                    this.open_cloud_pay_modal(cx);
                 }))
                 .into_any_element(),
         )
@@ -1165,12 +1153,50 @@ fn cloud_platforms(groups: &[sub2api::client::Group]) -> Vec<String> {
     platforms
 }
 
-/// The CLI a platform's groups route, named as the user knows it.
+/// The CLI a platform's groups route, named as the user knows it. Unknown
+/// platforms are shown capitalized rather than as their raw lowercase id.
+/// `×0.50 · 99.2%` — a group's rate multiplier, 24h availability, and a
+/// translated status word when it is not healthy. Empty when nothing is
+/// known. Availability formatting matches the Model Plaza's.
+fn group_status_suffix(
+    group: &sub2api::client::Group,
+    status: Option<&sub2api::client::GroupStatusItem>,
+) -> String {
+    let mut parts = Vec::new();
+    if group.rate_multiplier > 0.0 {
+        parts.push(format!("\u{00d7}{:.2}", group.rate_multiplier));
+    }
+    if let Some(status) = status {
+        if let Some(value) = status.availability_24h.filter(|value| value.is_finite()) {
+            parts.push(if value >= 99.0 {
+                format!("{value:.2}%")
+            } else {
+                format!("{value:.1}%")
+            });
+        }
+        // Never color alone in a menu row — say it.
+        match status.effective_status() {
+            "degraded" => parts.push(tr!("plaza.status_degraded")),
+            "down" => parts.push(tr!("plaza.status_down")),
+            _ => {}
+        }
+    }
+    parts.join(" \u{00b7} ")
+}
+
 fn platform_display_name(platform: &str) -> String {
     match platform {
         "anthropic" => "Claude Code".to_owned(),
         "openai" => "Codex".to_owned(),
-        other => other.to_owned(),
+        "grok" => "Grok".to_owned(),
+        "gemini" => "Gemini".to_owned(),
+        other => {
+            let mut characters = other.chars();
+            match characters.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + characters.as_str(),
+                None => other.to_owned(),
+            }
+        }
     }
 }
 
@@ -1196,12 +1222,12 @@ fn section_title(theme: Theme, title: &str, detail: &str) -> Div {
         )
 }
 
-/// Colour for a balance figure, matching the old client's header badge:
-/// exhausted is an error, nearly exhausted is a warning.
+/// Colour for a balance figure: at or below $1 the next sizeable request
+/// fails (red); below $5 it is time to top up (amber).
 fn balance_color(balance: f64, theme: Theme) -> Hsla {
-    if balance <= 0.0 {
+    if balance <= 1.0 {
         theme.danger
-    } else if balance < 1.0 {
+    } else if balance < 5.0 {
         theme.warning
     } else {
         theme.text_secondary
@@ -1281,7 +1307,7 @@ fn cloud_card(
                     CloudAction::SetRouting(enabled) => {
                         this.set_cloud_routing_enabled(enabled, cx)
                     }
-                    CloudAction::TopUp => this.open_cloud_top_up(cx),
+                    CloudAction::TopUp => this.open_cloud_pay_modal(cx),
                     CloudAction::CopyReferral => {
                         if let Some(referral) = this.cloud_account.referral.clone() {
                             cx.write_to_clipboard(ClipboardItem::new_string(

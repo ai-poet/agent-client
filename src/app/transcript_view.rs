@@ -1223,6 +1223,9 @@ impl Waku {
                 .unwrap_or(TranscriptRowKind::Message(index));
             (kinds.len(), kind)
         };
+        let response_turn_id = self
+            .selected_session()
+            .and_then(|session| response_row_turn_id(session, kind));
         let starts_followup_turn = match kind {
             TranscriptRowKind::Message(message_index) => {
                 self.selected_session().is_some_and(|session| {
@@ -1231,6 +1234,7 @@ impl Waku {
             }
             TranscriptRowKind::TurnBlock(_)
             | TranscriptRowKind::TurnFold(_)
+            | TranscriptRowKind::ResponseFooter(_, _)
             | TranscriptRowKind::ChangedFiles(_)
             | TranscriptRowKind::WorkingIndicator => false,
         };
@@ -1243,11 +1247,6 @@ impl Waku {
                     let copied = self.copied_message_feedback.contains_key(&message.id);
                     let (assistant_footer_copy_content, assistant_footer_time) =
                         self.assistant_response_footer_cached(message_index);
-                    let assistant_before_footer = assistant_footer_copy_content
-                        .as_ref()
-                        .and(message.turn_id)
-                        .filter(|_| !message.content.trim().is_empty())
-                        .and_then(|turn_id| self.render_changed_files_row(turn_id, &theme, cx));
                     let assistant_message_action =
                         self.assistant_message_action_for_message(message_index);
                     let user_message_action = self.user_message_action_for_message(message_index);
@@ -1320,7 +1319,6 @@ impl Waku {
                             message: &message,
                             assistant_footer_copy_content,
                             assistant_footer_time,
-                            assistant_before_footer,
                             copied,
                             assistant_message_action,
                             user_message_action,
@@ -1361,17 +1359,25 @@ impl Waku {
                 })
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::TurnFold(turn_id) => self.render_turn_fold_row(turn_id, &theme, cx),
+            TranscriptRowKind::ResponseFooter(turn_id, message_index) => {
+                self.render_response_footer_row(turn_id, message_index, &theme, cx)
+            }
             TranscriptRowKind::ChangedFiles(turn_id) => self
                 .render_changed_files_row(turn_id, &theme, cx)
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::WorkingIndicator => self.render_working_indicator_row(&theme),
         };
-        div()
+        let mut row = div()
+            .id(("transcript-row", index))
             .w_full()
             .flex()
             .justify_center()
             .px(px(20.0))
             .py(px(8.0))
+            .when(
+                matches!(kind, TranscriptRowKind::ResponseFooter(_, _)),
+                |element| element.pt(px(0.0)),
+            )
             .when(index == 0, |element| element.pt(px(22.0)))
             .when(starts_followup_turn, |element| {
                 element.pt(px(FOLLOWUP_TURN_TOP_GAP))
@@ -1383,7 +1389,72 @@ impl Waku {
                     .max_w(px(CONTENT_MAX_WIDTH))
                     .min_w_0()
                     .child(inner),
-            )
+            );
+        if let Some(turn_id) = response_turn_id {
+            let hover_target = (turn_id, kind);
+            row = row.on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
+                let previous = this.hovered_response_row;
+                if *hovering {
+                    this.hovered_response_row = Some(hover_target);
+                } else if previous == Some(hover_target) {
+                    this.hovered_response_row = None;
+                }
+                if this.hovered_response_row != previous {
+                    cx.notify();
+                }
+            }));
+        }
+        row.into_any_element()
+    }
+
+    fn render_response_footer_row(
+        &self,
+        turn_id: Uuid,
+        message_index: usize,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(message) = self
+            .selected_session()
+            .and_then(|session| session.messages.get(message_index))
+            .cloned()
+        else {
+            return div().into_any_element();
+        };
+        let (copy_content, footer_time) = self.assistant_response_footer_cached(message_index);
+        let Some(copy_content) = copy_content else {
+            return div().into_any_element();
+        };
+        let copied = self.copied_message_feedback.contains_key(&message.id);
+        let action = self.assistant_message_action_for_message(message_index);
+        let force_visible = self
+            .hovered_response_row
+            .is_some_and(|(hovered_turn_id, _)| hovered_turn_id == turn_id);
+        let group_name = SharedString::from(format!("assistant-response-footer-{turn_id}"));
+        let mut column = div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(px(3.0))
+            .group(group_name.clone());
+        if let Some(changed_files) = self.render_changed_files_row(turn_id, theme, cx) {
+            column = column.child(div().w_full().mb(px(3.0)).child(changed_files));
+        }
+        column
+            .child(render_message_footer(
+                theme,
+                &message,
+                footer_time.unwrap_or(message.created_at),
+                copy_content,
+                copied,
+                group_name,
+                force_visible,
+                false,
+                action,
+                None,
+                cx.entity().downgrade(),
+            ))
             .into_any_element()
     }
 

@@ -41,6 +41,9 @@ gpui_platform = { git = "https://github.com/egoist/zed", branch = "waku-webview"
     "x11",
 ] }
 parking_lot = "0.12"
+# Fork addition: renders the top-up QR code natively (bit matrix only, no
+# image backend).
+qrcode = { version = "0.14", default-features = false }
 rquickjs = "0.12.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -95,6 +95,11 @@ addCandidate(
 addCandidate(join(library, "Caches", "Waku Debug"));
 addCandidate(join(library, "Logs", "Waku Debug"));
 
+// Fork: debug data now lives under the branded directory name.
+addCandidate(join(library, "Application Support", "CheapRouter Debug"));
+addCandidate(join(library, "Caches", "CheapRouter Debug"));
+addCandidate(join(library, "Logs", "CheapRouter Debug"));
+
 // codes.waku.dev was Waku Debug's bundle ID before sh.waku.dev.
 for (const bundleIdentifier of debugBundleIdentifiers) {
   for (const path of [

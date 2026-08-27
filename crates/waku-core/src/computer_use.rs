@@ -267,7 +267,9 @@ pub fn pi_extension_path() -> anyhow::Result<PathBuf> {
 fn install_helper_app(source: &Path) -> anyhow::Result<PathBuf> {
     let application_support =
         dirs::data_dir().ok_or_else(|| anyhow!("Application Support directory is unavailable"))?;
-    let install_root = application_support.join("Waku").join("Computer Use");
+    let install_root = application_support
+        .join(crate::identity::DATA_DIRECTORY_NAME)
+        .join("Computer Use");
     crate::fs_ext::create_private_dir_all(&install_root)
         .with_context(|| format!("could not create {}", install_root.display()))?;
     let bundle_name = source

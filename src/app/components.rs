@@ -194,13 +194,14 @@ impl Waku {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn render_message_footer(
+pub(super) fn render_message_footer(
     theme: &Theme,
     message: &Message,
     footer_time: u64,
     copy_content: SharedString,
     copied: bool,
     group_name: SharedString,
+    force_visible: bool,
     align_right: bool,
     assistant_message_action: Option<AssistantMessageAction>,
     user_message_action: Option<UserMessageAction>,
@@ -259,8 +260,11 @@ fn render_message_footer(
         .flex()
         .items_center()
         .gap(px(1.0))
-        .invisible()
-        .group_hover(group_name, |element| element.visible())
+        .when(!force_visible, |element| {
+            element
+                .invisible()
+                .group_hover(group_name, |element| element.visible())
+        })
         .when(!align_right, |element| element.ml(-px(7.0)))
         .when(align_right, |element| element.justify_end());
 
@@ -347,7 +351,6 @@ pub(super) struct MessageRender<'a> {
     pub(super) message: &'a Message,
     pub(super) assistant_footer_copy_content: Option<SharedString>,
     pub(super) assistant_footer_time: Option<u64>,
-    pub(super) assistant_before_footer: Option<AnyElement>,
     pub(super) copied: bool,
     pub(super) assistant_message_action: Option<AssistantMessageAction>,
     pub(super) user_message_action: Option<UserMessageAction>,
@@ -543,7 +546,6 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         message,
         assistant_footer_copy_content,
         assistant_footer_time,
-        assistant_before_footer,
         copied,
         assistant_message_action,
         user_message_action,
@@ -695,6 +697,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     SharedString::from(content.clone()),
                     copied,
                     group_name,
+                    false,
                     true,
                     None,
                     user_message_action,
@@ -715,10 +718,12 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 .gap(px(3.0))
                 .group(group_name.clone())
                 .child(body);
-            if let Some(before_footer) = assistant_before_footer {
-                column = column.child(div().w_full().mt(px(12.0)).mb(px(3.0)).child(before_footer));
-            }
-            if let Some(copy_content) = assistant_footer_copy_content {
+            // Turn-backed responses render one footer after every ordered row
+            // in the turn. Only legacy/unkeyed assistant messages retain an
+            // inline footer because they have no turn boundary to target.
+            if message.turn_id.is_none()
+                && let Some(copy_content) = assistant_footer_copy_content
+            {
                 column = column.child(render_message_footer(
                     theme,
                     message,
@@ -726,6 +731,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     copy_content,
                     copied,
                     group_name,
+                    false,
                     false,
                     assistant_message_action,
                     None,

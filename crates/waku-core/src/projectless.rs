@@ -30,7 +30,10 @@ pub struct Workspace {
 fn workspace_root_slot() -> &'static RwLock<Option<PathBuf>> {
     static ROOT: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
     ROOT.get_or_init(|| {
-        RwLock::new(dirs::home_dir().map(|home| home.join(".waku").join("projects")))
+        RwLock::new(
+            dirs::home_dir()
+                .map(|home| home.join(crate::identity::DATA_DIR_NAME).join("projects")),
+        )
     })
 }
 
@@ -99,7 +102,10 @@ pub fn create_workspace(prompt: Option<&str>) -> io::Result<Workspace> {
     let root = workspace_root().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "could not locate the home directory for ~/.waku/projects",
+            format!(
+                "could not locate the home directory for ~/{}/projects",
+                crate::identity::DATA_DIR_NAME
+            ),
         )
     })?;
     create_workspace_in(&root, Local::now().date_naive(), None, prompt)
@@ -114,7 +120,10 @@ pub fn migrate_workspace(path: &Path) -> io::Result<Workspace> {
     let root = workspace_root().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "could not locate the home directory for ~/.waku/projects",
+            format!(
+                "could not locate the home directory for ~/{}/projects",
+                crate::identity::DATA_DIR_NAME
+            ),
         )
     })?;
     migrate_workspace_in(&root, path)

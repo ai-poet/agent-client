@@ -40,7 +40,7 @@ const LOGIN_BRIDGE_PATH: &str = "/auth/paseo";
 /// Refresh this long before expiry so a request never races the deadline.
 const REFRESH_SKEW_SECONDS: i64 = 120;
 
-/// Stored session. Serialized to `~/.waku/cloud-account.json`.
+/// Stored session. Serialized to `~/.cheaprouter/cloud-account.json`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct Credentials {
     pub access_token: String,
@@ -70,6 +70,11 @@ pub struct Credentials {
     /// Group `codex_api_key` is bound to, when the user picked one per CLI.
     #[serde(default)]
     pub codex_group_id: Option<i64>,
+    /// The user turned gateway routing off without signing out. Stored
+    /// inverted so the serde default (false) means the common case: signing
+    /// in routes.
+    #[serde(default)]
+    pub routing_disabled: bool,
 }
 
 impl Credentials {
@@ -299,6 +304,8 @@ pub fn credentials_from_fragment(fragment: &str, expected_endpoint: &str) -> Res
         group_id: None,
         claude_group_id: None,
         codex_group_id: None,
+        // Signing in is an explicit request to route through the service.
+        routing_disabled: false,
     })
 }
 

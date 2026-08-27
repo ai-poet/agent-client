@@ -387,8 +387,8 @@ impl Waku {
     pub(super) fn remeasure_changed_files(&self, turn_id: Uuid) {
         let target = self
             .selected_session()
-            .and_then(|session| changed_files_inline_message_index(session, turn_id))
-            .map(TranscriptRowKind::Message)
+            .and_then(|session| response_footer_message_index(session, turn_id))
+            .map(|message_index| TranscriptRowKind::ResponseFooter(turn_id, message_index))
             .unwrap_or(TranscriptRowKind::ChangedFiles(turn_id));
         self.remeasure_transcript_row(target);
     }
@@ -413,10 +413,13 @@ pub(super) enum TranscriptRowKind {
     Message(usize),
     TurnBlock(usize),
     TurnFold(Uuid),
+    /// Actions and completion time for one settled response. This is a turn
+    /// row rather than part of an assistant message so tool activity that
+    /// follows the last text segment can never strand the footer mid-response.
+    ResponseFooter(Uuid, usize),
     /// Immutable file stats captured between this turn's pre- and post-turn
-    /// checkpoints. Responses with a visible answer render this inside their
-    /// terminal message; the row remains for interrupted/tool-only turns whose
-    /// entire assistant output folds away.
+    /// checkpoints. Responses with a footer render this inside that row; the
+    /// standalone row remains for tool-only turns with nothing to copy.
     ChangedFiles(Uuid),
     /// The live turn's footer — pulsing dots plus "Working for Ns". Present
     /// from the moment the prompt lands until the turn settles, so a provider
@@ -628,6 +631,7 @@ pub(super) fn assistant_response_footer(
                 TranscriptRowKind::Message(index) => session.messages.get(index),
                 TranscriptRowKind::TurnBlock(_)
                 | TranscriptRowKind::TurnFold(_)
+                | TranscriptRowKind::ResponseFooter(_, _)
                 | TranscriptRowKind::ChangedFiles(_)
                 | TranscriptRowKind::WorkingIndicator => None,
             })
@@ -656,29 +660,15 @@ pub(super) fn assistant_response_footer_time(
     Some(completed_at.unwrap_or(message.created_at))
 }
 
-/// The visible terminal answer row that owns both the changed-files card and
-/// the response footer. A turn with no visible answer returns `None`, leaving
-/// its card as a standalone row after the collapsed work disclosure.
-pub(super) fn changed_files_inline_message_index(
+/// The assistant message whose content and identity back a settled turn's
+/// footer row. Blank/tool-only turns have no copy action and therefore no
+/// footer row.
+pub(super) fn response_footer_message_index(
     session: &AgentSession,
     turn_id: Uuid,
 ) -> Option<usize> {
-    let turn = session.turns.iter().find(|turn| turn.id == turn_id)?;
-    if turn.status == TurnStatus::Running
-        || !turn.checkpoint.as_ref().is_some_and(|checkpoint| {
-            checkpoint.status == CheckpointStatus::Ready && !checkpoint.files.is_empty()
-        })
-    {
-        return None;
-    }
-
-    let message_index = session.messages.iter().rposition(|message| {
-        message.role == MessageRole::Assistant && message.turn_id == Some(turn_id)
-    })?;
-    let message = &session.messages[message_index];
-    (!message.content.trim().is_empty()
-        && assistant_response_footer_index(session, message_index) == Some(message_index))
-    .then_some(message_index)
+    let rows = turn_rows(session, turn_id);
+    response_footer_message_index_from_rows(session, &rows)
 }
 
 pub(super) fn transcript_row_splice(
@@ -928,12 +918,16 @@ pub(super) fn folded_transcript_row_kinds(
     let raw_rows = transcript_row_kinds(session.messages.len(), &anchors);
     let mut hidden_rows = HashSet::new();
     let mut fold_anchors = HashMap::new();
+    let mut response_footers = HashMap::new();
 
     for turn in &session.turns {
         if turn.status == TurnStatus::Running {
             continue;
         }
         let turn_rows = turn_rows(session, turn.id);
+        if let Some(message_index) = response_footer_message_index_from_rows(session, &turn_rows) {
+            response_footers.insert(turn.id, message_index);
+        }
         let hidden = &turn_rows[..turn_answer_start(session, &turn_rows)];
         let Some(anchor) = hidden.first().copied() else {
             continue;
@@ -960,11 +954,10 @@ pub(super) fn folded_transcript_row_kinds(
         rows.push(TranscriptRowKind::WorkingIndicator);
     }
 
-    // A normal response renders its file summary inside the terminal answer,
-    // immediately before that message's footer actions. Only turns without a
-    // visible answer need a standalone row; derive its insertion point from
-    // the already-folded rows so it lands after the visible `Worked for …`
-    // disclosure and before the next user prompt.
+    // A response with copyable assistant text renders its file summary inside
+    // the footer row. Only turns without a footer need a standalone row;
+    // derive its insertion point from the already-folded rows so it lands
+    // after the visible `Worked for …` disclosure and before the next prompt.
     let changed_turns = session
         .turns
         .iter()
@@ -973,34 +966,67 @@ pub(super) fn folded_transcript_row_kinds(
                 && turn.checkpoint.as_ref().is_some_and(|checkpoint| {
                     checkpoint.status == CheckpointStatus::Ready && !checkpoint.files.is_empty()
                 })
-                && changed_files_inline_message_index(session, turn.id).is_none()
+                && !response_footers.contains_key(&turn.id)
         })
         .map(|turn| turn.id)
         .collect::<HashSet<_>>();
-    if changed_turns.is_empty() {
+    if !changed_turns.is_empty() {
+        let mut last_row_by_turn = HashMap::new();
+        for (index, row) in rows.iter().copied().enumerate() {
+            if let Some(turn_id) = row_turn_id(session, row)
+                && changed_turns.contains(&turn_id)
+            {
+                last_row_by_turn.insert(turn_id, index);
+            }
+        }
+        let changed_after_row = last_row_by_turn
+            .into_iter()
+            .map(|(turn_id, index)| (index, turn_id))
+            .collect::<HashMap<_, _>>();
+        let mut with_changes = Vec::with_capacity(rows.len() + changed_after_row.len());
+        for (index, row) in rows.into_iter().enumerate() {
+            with_changes.push(row);
+            if let Some(turn_id) = changed_after_row.get(&index).copied() {
+                with_changes.push(TranscriptRowKind::ChangedFiles(turn_id));
+            }
+        }
+        rows = with_changes;
+    }
+
+    // Footer actions belong to the response as a whole, not to whichever text
+    // message happened to arrive last. Insert one after the turn's final
+    // visible row, which may be answer text, tool activity, or a collapsed work
+    // disclosure. The message index supplies stable copy/fork identity without
+    // deciding the footer's position.
+    if response_footers.is_empty() {
         return rows;
     }
 
     let mut last_row_by_turn = HashMap::new();
     for (index, row) in rows.iter().copied().enumerate() {
         if let Some(turn_id) = row_turn_id(session, row)
-            && changed_turns.contains(&turn_id)
+            && response_footers.contains_key(&turn_id)
         {
             last_row_by_turn.insert(turn_id, index);
         }
     }
-    let changed_after_row = last_row_by_turn
+    let footer_after_row = last_row_by_turn
         .into_iter()
-        .map(|(turn_id, index)| (index, turn_id))
+        .filter_map(|(turn_id, index)| {
+            response_footers
+                .get(&turn_id)
+                .copied()
+                .map(|message_index| (index, (turn_id, message_index)))
+        })
         .collect::<HashMap<_, _>>();
-    let mut with_changes = Vec::with_capacity(rows.len() + changed_after_row.len());
+    let mut with_footers = Vec::with_capacity(rows.len() + footer_after_row.len());
     for (index, row) in rows.into_iter().enumerate() {
-        with_changes.push(row);
-        if let Some(turn_id) = changed_after_row.get(&index).copied() {
-            with_changes.push(TranscriptRowKind::ChangedFiles(turn_id));
+        with_footers.push(row);
+        if let Some((turn_id, message_index)) = footer_after_row.get(&index).copied() {
+            with_footers.push(TranscriptRowKind::ResponseFooter(turn_id, message_index));
         }
     }
-    with_changes
+    with_footers
 }
 
 /// The rows the turn *produced*, in transcript order: its assistant text parts
@@ -1039,6 +1065,36 @@ fn turn_rows(session: &AgentSession, turn_id: Uuid) -> Vec<TranscriptRowKind> {
     rows
 }
 
+fn response_footer_message_index_from_rows(
+    session: &AgentSession,
+    turn_rows: &[TranscriptRowKind],
+) -> Option<usize> {
+    let message_index = turn_rows.iter().rev().find_map(|row| match *row {
+        TranscriptRowKind::Message(message_index) => Some(message_index),
+        TranscriptRowKind::TurnBlock(_)
+        | TranscriptRowKind::TurnFold(_)
+        | TranscriptRowKind::ResponseFooter(_, _)
+        | TranscriptRowKind::ChangedFiles(_)
+        | TranscriptRowKind::WorkingIndicator => None,
+    })?;
+    let message = session.messages.get(message_index)?;
+    if message.streaming {
+        return None;
+    }
+    turn_rows
+        .iter()
+        .filter_map(|row| match *row {
+            TranscriptRowKind::Message(message_index) => session.messages.get(message_index),
+            TranscriptRowKind::TurnBlock(_)
+            | TranscriptRowKind::TurnFold(_)
+            | TranscriptRowKind::ResponseFooter(_, _)
+            | TranscriptRowKind::ChangedFiles(_)
+            | TranscriptRowKind::WorkingIndicator => None,
+        })
+        .any(|message| !message.content.trim().is_empty())
+        .then_some(message_index)
+}
+
 /// Where the turn's answer begins within its own rows: the trailing run of
 /// assistant text parts. Everything before that is work and folds.
 ///
@@ -1054,6 +1110,7 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
             .is_some_and(|message| !message.content.trim().is_empty()),
         TranscriptRowKind::TurnBlock(_)
         | TranscriptRowKind::TurnFold(_)
+        | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
         | TranscriptRowKind::WorkingIndicator => false,
     };
@@ -1071,8 +1128,29 @@ fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Option<Uuid> {
         TranscriptRowKind::Message(index) => session.messages.get(index)?.turn_id,
         TranscriptRowKind::TurnBlock(index) => session.transcript_blocks.get(index)?.turn_id,
         TranscriptRowKind::TurnFold(turn_id) => Some(turn_id),
+        TranscriptRowKind::ResponseFooter(turn_id, _) => Some(turn_id),
         TranscriptRowKind::ChangedFiles(turn_id) => Some(turn_id),
         TranscriptRowKind::WorkingIndicator => None,
+    }
+}
+
+/// The response owning a row for cross-row hover affordances. A user's prompt
+/// opens the turn but is not part of the response, so hovering it must not
+/// reveal the assistant footer.
+pub(super) fn response_row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Option<Uuid> {
+    match row {
+        TranscriptRowKind::Message(index) => {
+            session
+                .messages
+                .get(index)
+                .filter(|message| message.role == MessageRole::Assistant)?
+                .turn_id
+        }
+        TranscriptRowKind::WorkingIndicator => None,
+        TranscriptRowKind::TurnBlock(_)
+        | TranscriptRowKind::TurnFold(_)
+        | TranscriptRowKind::ResponseFooter(_, _)
+        | TranscriptRowKind::ChangedFiles(_) => row_turn_id(session, row),
     }
 }
 

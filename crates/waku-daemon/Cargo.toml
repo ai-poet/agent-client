@@ -21,6 +21,7 @@ required-features = ["dev-binary"]
 [dependencies]
 anyhow = "1.0"
 serde_json = "1.0"
+sub2api = { path = "../sub2api" }
 waku-core = { path = "../waku-core" }
 waku-protocol = { path = "../waku-protocol" }
 

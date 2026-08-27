@@ -914,7 +914,7 @@ impl RightPanelSurface {
 }
 
 fn right_panel_tab_label(surface: &RightPanelSurface, files_selected_path: Option<&str>) -> String {
-    match surface {
+    let label = match surface {
         RightPanelSurface::Files => files_selected_path
             .and_then(|path| Path::new(path).file_name())
             .and_then(|name| name.to_str())
@@ -922,7 +922,8 @@ fn right_panel_tab_label(surface: &RightPanelSurface, files_selected_path: Optio
             .map(str::to_owned)
             .unwrap_or_else(|| tr!("right_panel.files")),
         _ => surface.label(),
-    }
+    };
+    single_line_label(&label)
 }
 
 fn right_panel_tab_icon(
@@ -1604,6 +1605,15 @@ mod tests {
 
         assert!(header.contains(".truncate()"));
         assert!(!header.contains(".line_clamp(1)"));
+
+        let background = RightPanelSurface::BackgroundWork {
+            key: BackgroundWorkKey::new(BackgroundWorkKind::Process, "process-1"),
+            title: "node -e '\n  const value = 1'".into(),
+        };
+        assert_eq!(
+            right_panel_tab_label(&background, None),
+            "node -e ' const value = 1'"
+        );
     }
 
     #[test]

@@ -23,6 +23,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "arrow-right",
     "arrow-up",
     "arrow-up-right",
+    "bell",
     "block",
     "bot",
     "case-sensitive",
@@ -194,10 +195,12 @@ const ICONS: &[(&str, &[u8])] = icons![
     "star-filled",
     "stop",
     "stop-filled",
+    "store",
     "target",
     "terminal",
     "terminal-square",
     "trash",
+    "wallet",
     "whole-word",
     "wrench",
     "window-maximize",
@@ -206,6 +209,13 @@ const ICONS: &[(&str, &[u8])] = icons![
     "x",
     "zap",
 ];
+
+/// Full-color raster images — the brand mark, which the tinted-SVG icon
+/// pipeline cannot carry.
+const IMAGES: &[(&str, &[u8])] = &[(
+    "images/logo.png",
+    include_bytes!("../resources/linux/icons/64x64.png").as_slice(),
+)];
 
 const TEXT_FONTS: &[&[u8]] = &[
     include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf"),
@@ -235,6 +245,7 @@ impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         Ok(ICONS
             .iter()
+            .chain(IMAGES.iter())
             .find(|(name, _)| *name == path)
             .map(|(_, bytes)| Cow::Borrowed(*bytes)))
     }

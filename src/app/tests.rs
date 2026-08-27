@@ -9,12 +9,12 @@ use super::{
     NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, PendingUserInput, SessionNavigation,
     StreamDeltaKind, TranscriptRowKind::*, active_navigation_turn_index,
     append_text_delta_to_session, assistant_response_footer, assistant_response_footer_index,
-    assistant_response_footer_time, changed_files_inline_message_index, compact_driver_error,
-    disclosure_leading_space, fenced_code, fitted_file_tree_width, fitted_panel_widths,
-    folded_transcript_row_kinds, format_worked_duration, format_working_elapsed,
-    maintain_transcript_anchor, message_opens_turn, message_starts_followup_turn,
-    navigation_preview_snippet, navigation_rail_fade_visibility, navigation_rail_height,
-    navigation_rail_scale, paused_toast_duration, pop_stream_batch, push_transcript_activity,
+    assistant_response_footer_time, compact_driver_error, disclosure_leading_space, fenced_code,
+    fitted_file_tree_width, fitted_panel_widths, folded_transcript_row_kinds,
+    format_worked_duration, format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
+    message_starts_followup_turn, navigation_preview_snippet, navigation_rail_fade_visibility,
+    navigation_rail_height, navigation_rail_scale, paused_toast_duration, pop_stream_batch,
+    push_transcript_activity, response_footer_message_index, response_row_turn_id,
     session_accepts_turn_output, session_is_reapable, should_refresh_branch_after_activity,
     should_show_navigation_rail, should_show_scroll_to_bottom, task_id_from_notification_tag,
     task_notification_tag, transcript_anchor_end_space, transcript_navigation_turns,
@@ -1045,12 +1045,17 @@ fn row_kinds_and_row_count_describe_the_same_rows() {
     // Collapsed, that same work is one fold row — reachable, not lost.
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new()),
-        vec![Message(0), TurnFold(turn_id), Message(1)]
+        vec![
+            Message(0),
+            TurnFold(turn_id),
+            Message(1),
+            ResponseFooter(turn_id, 1),
+        ]
     );
 }
 
 #[test]
-fn changed_files_attach_to_the_terminal_response_before_its_footer() {
+fn changed_files_attach_to_the_response_footer() {
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     let first_turn = session.begin_turn("Build it");
     session.push_message(MessageRole::Assistant, "Done.");
@@ -1069,13 +1074,47 @@ fn changed_files_attach_to_the_terminal_response_before_its_footer() {
 
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new()),
-        vec![Message(0), Message(1), Message(2), WorkingIndicator],
-        "an inline card must not add a second transcript row before the next prompt"
+        vec![
+            Message(0),
+            Message(1),
+            ResponseFooter(first_turn, 1),
+            Message(2),
+            WorkingIndicator,
+        ],
+        "the footer containing the card must remain before the next prompt"
     );
-    assert_eq!(
-        changed_files_inline_message_index(&session, first_turn),
-        Some(1)
-    );
+    assert_eq!(response_footer_message_index(&session, first_turn), Some(1));
+}
+
+#[test]
+fn response_hover_owns_every_response_row_but_not_the_prompt() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    let turn_id = session.begin_turn("Build it");
+    session.transcript_blocks.push(TranscriptBlock {
+        after_message: 1,
+        turn_id: Some(turn_id),
+        activities: vec![ActivityItem::new(
+            None,
+            ActivityKind::Command,
+            "Inspected the project",
+            None,
+            true,
+        )],
+    });
+    session.push_message(MessageRole::Assistant, "Done.");
+    session.finish_active_turn(TurnStatus::Completed);
+
+    assert_eq!(response_row_turn_id(&session, Message(0)), None);
+    for row in [
+        TurnBlock(0),
+        TurnFold(turn_id),
+        Message(1),
+        ResponseFooter(turn_id, 1),
+        ChangedFiles(turn_id),
+    ] {
+        assert_eq!(response_row_turn_id(&session, row), Some(turn_id));
+    }
+    assert_eq!(response_row_turn_id(&session, WorkingIndicator), None);
 }
 
 #[test]
@@ -1118,7 +1157,7 @@ fn changed_files_remain_visible_when_an_interrupted_turn_has_no_answer() {
             ChangedFiles(turn_id),
         ]
     );
-    assert_eq!(changed_files_inline_message_index(&session, turn_id), None);
+    assert_eq!(response_footer_message_index(&session, turn_id), None);
 }
 
 #[test]
@@ -1141,13 +1180,10 @@ fn changed_files_surface_appears_only_for_a_ready_nonempty_checkpoint() {
             deletions: 1,
         }],
     );
-    assert_eq!(
-        changed_files_inline_message_index(&session, turn_id),
-        Some(1)
-    );
+    assert_eq!(response_footer_message_index(&session, turn_id), Some(1));
     assert!(
         !folded_transcript_row_kinds(&session, &HashSet::new()).contains(&ChangedFiles(turn_id)),
-        "a response with visible text hosts the card inside its terminal message"
+        "a response with visible text hosts the card inside its footer"
     );
     session.turns[0]
         .checkpoint
@@ -1157,7 +1193,7 @@ fn changed_files_surface_appears_only_for_a_ready_nonempty_checkpoint() {
     assert!(
         !folded_transcript_row_kinds(&session, &HashSet::new()).contains(&ChangedFiles(turn_id))
     );
-    assert_eq!(changed_files_inline_message_index(&session, turn_id), None);
+    assert_eq!(response_footer_message_index(&session, turn_id), Some(1));
 }
 
 #[test]
@@ -1181,25 +1217,29 @@ fn checkpoint_completion_invalidates_the_cached_transcript_rows() {
         transcript_rows_fingerprint(&session, &HashSet::new()),
         before
     );
-    assert_eq!(
-        changed_files_inline_message_index(&session, turn_id),
-        Some(1)
-    );
+    assert_eq!(response_footer_message_index(&session, turn_id), Some(1));
     assert!(
         !folded_transcript_row_kinds(&session, &HashSet::new()).contains(&ChangedFiles(turn_id)),
-        "checkpoint completion changes the existing terminal message's height"
+        "checkpoint completion changes the existing footer row's height"
     );
 }
 
 #[test]
 fn an_inline_checkpoint_keeps_followup_row_identity() {
-    let previous = vec![Message(0), Message(1), Message(2), WorkingIndicator];
-    let with_checkpoint = vec![Message(0), Message(1), Message(2), WorkingIndicator];
+    let turn_id = Uuid::new_v4();
+    let previous = vec![
+        Message(0),
+        Message(1),
+        ResponseFooter(turn_id, 1),
+        Message(2),
+        WorkingIndicator,
+    ];
+    let with_checkpoint = previous.clone();
 
     assert_eq!(
         transcript_row_splice(&previous, &with_checkpoint),
         None,
-        "the card remeasures its terminal message instead of shifting the following prompt"
+        "the card remeasures its footer instead of shifting the following prompt"
     );
 }
 
@@ -1357,7 +1397,12 @@ fn a_settled_turn_folds_all_of_its_work_above_the_answer() {
     // response.
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new()),
-        vec![Message(0), TurnFold(turn_id), Message(2)]
+        vec![
+            Message(0),
+            TurnFold(turn_id),
+            Message(2),
+            ResponseFooter(turn_id, 2),
+        ]
     );
     // Expanding restores the turn's real order in place.
     assert_eq!(
@@ -1368,7 +1413,8 @@ fn a_settled_turn_folds_all_of_its_work_above_the_answer() {
             TurnBlock(0),
             Message(1),
             TurnBlock(1),
-            Message(2)
+            Message(2),
+            ResponseFooter(turn_id, 2),
         ]
     );
 }
@@ -1397,7 +1443,13 @@ fn consecutive_trailing_text_parts_all_stay_out_of_the_fold() {
 
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new()),
-        vec![Message(0), TurnFold(turn_id), Message(1), Message(2)]
+        vec![
+            Message(0),
+            TurnFold(turn_id),
+            Message(1),
+            Message(2),
+            ResponseFooter(turn_id, 2),
+        ]
     );
 }
 
@@ -1485,6 +1537,35 @@ fn assistant_response_footer_is_owned_by_the_terminal_part_and_copies_the_visibl
     );
 }
 
+#[test]
+fn response_footer_follows_trailing_tool_activity() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    let turn_id = session.begin_turn("Inspect it");
+    session.push_message(MessageRole::Assistant, "I’ll inspect the implementation.");
+    session.transcript_blocks.push(TranscriptBlock {
+        after_message: 2,
+        turn_id: Some(turn_id),
+        activities: vec![ActivityItem::new(
+            None,
+            ActivityKind::Command,
+            "Searched the source",
+            None,
+            true,
+        )],
+    });
+    session.finish_active_turn(TurnStatus::Interrupted);
+
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::new()),
+        vec![
+            Message(0),
+            Message(1),
+            TurnBlock(0),
+            ResponseFooter(turn_id, 1),
+        ]
+    );
+}
+
 /// A blank part breaks the answer run the same way work does — the fold hides
 /// the text before it, so the copied message must leave that text out too.
 #[test]
@@ -1498,7 +1579,12 @@ fn assistant_response_footer_treats_a_blank_part_as_work() {
 
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new()),
-        vec![Message(0), TurnFold(turn_id), Message(3)]
+        vec![
+            Message(0),
+            TurnFold(turn_id),
+            Message(3),
+            ResponseFooter(turn_id, 3),
+        ]
     );
     assert_eq!(
         assistant_response_footer(&session, 3).as_deref(),
@@ -1537,7 +1623,12 @@ fn unkeyed_assistant_message_keeps_a_standalone_footer() {
 #[test]
 fn turn_fold_visibility_splice_preserves_surrounding_message_rows() {
     let turn_id = Uuid::new_v4();
-    let collapsed = vec![Message(0), TurnFold(turn_id), Message(2)];
+    let collapsed = vec![
+        Message(0),
+        TurnFold(turn_id),
+        Message(2),
+        ResponseFooter(turn_id, 2),
+    ];
     let expanded = vec![
         Message(0),
         TurnFold(turn_id),
@@ -1545,6 +1636,7 @@ fn turn_fold_visibility_splice_preserves_surrounding_message_rows() {
         Message(1),
         TurnBlock(1),
         Message(2),
+        ResponseFooter(turn_id, 2),
     ];
 
     let expand_splice = transcript_row_splice(&collapsed, &expanded);
@@ -1585,13 +1677,13 @@ fn running_turn_keeps_its_ordered_work_visible() {
 fn plain_settled_response_does_not_add_an_empty_work_fold() {
     let project_id = Uuid::new_v4();
     let mut session = AgentSession::new(project_id, ProviderKind::Codex);
-    session.begin_turn("Answer directly");
+    let turn_id = session.begin_turn("Answer directly");
     session.push_message(MessageRole::Assistant, "The answer.");
     session.finish_active_turn(TurnStatus::Completed);
 
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new()),
-        vec![Message(0), Message(1)]
+        vec![Message(0), Message(1), ResponseFooter(turn_id, 1)]
     );
 }
 
@@ -1705,7 +1797,7 @@ fn working_elapsed_stays_compact() {
 #[test]
 fn a_busy_turn_pins_the_working_indicator_after_the_last_row() {
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-    session.begin_turn("Build it");
+    let turn_id = session.begin_turn("Build it");
     session.status = SessionStatus::Working;
 
     // No chunks yet: the indicator alone follows the prompt.
@@ -1750,7 +1842,7 @@ fn a_busy_turn_pins_the_working_indicator_after_the_last_row() {
     session.status = SessionStatus::Idle;
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new()),
-        vec![Message(0), Message(1)]
+        vec![Message(0), Message(1), ResponseFooter(turn_id, 1)]
     );
 }
 
@@ -1783,13 +1875,17 @@ fn settings_search_filters_pages_for_arrow_cycling() {
     };
 
     // An empty query keeps every page in sidebar order, so the arrows cycle
-    // the full navigation even before anything is typed.
+    // the full navigation even before anything is typed. The cloud pages are
+    // fork additions; keep them here when merging upstream.
     let mut all_pages = vec![
         SettingsPage::General,
         SettingsPage::Appearance,
         SettingsPage::Providers,
         SettingsPage::Skills,
         SettingsPage::Usage,
+        SettingsPage::CloudAccount,
+        SettingsPage::ModelPlaza,
+        SettingsPage::CloudUsage,
         SettingsPage::Daemon,
     ];
     if cfg!(all(debug_assertions, target_os = "macos")) {

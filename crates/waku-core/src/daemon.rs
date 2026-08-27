@@ -162,8 +162,9 @@ fn migrate_projectless_state(
         let old_path = task_state.projects[index].path.clone();
         let workspace = crate::projectless::migrate_workspace(&old_path).with_context(|| {
             format!(
-                "could not move projectless workspace {} under ~/.waku/projects",
-                old_path.display()
+                "could not move projectless workspace {} under ~/{}/projects",
+                old_path.display(),
+                crate::identity::DATA_DIR_NAME
             )
         })?;
         task_state.projects[index].name = crate::model::Project::PROJECTLESS_NAME.to_owned();

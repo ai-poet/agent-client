@@ -191,6 +191,11 @@ impl WakuApplicationExt for Application {
 }
 
 pub fn run() {
+    // Fork: rename legacy upstream-named storage (~/.waku etc.) before the
+    // daemon or any persistence path opens files.
+    for warning in sub2api::migrate::migrate_legacy_storage() {
+        eprintln!("warning: {warning}");
+    }
     let daemon = crate::daemon::start_process()
         .unwrap_or_else(|error| panic!("failed to start Waku daemon: {error:#}"));
     gpui_platform::application()

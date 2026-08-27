@@ -19,7 +19,9 @@ import { join, resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dir, "..");
 
-export const defaultDownloadUrlPrefix = "https://releases.waku.sh/";
+// Fork: default to our release host; keep in step with
+// SUB2API_RELEASES_BASE_URL (build.rs, crates/sub2api/src/brand.rs).
+export const defaultDownloadUrlPrefix = "https://releases.cheaprouter.cc/";
 
 /** Locate Sparkle's `generate_appcast`: SPARKLE_BIN first, then the pinned
  *  distribution scripts/bundle.sh caches under .waku-cache, then PATH. */

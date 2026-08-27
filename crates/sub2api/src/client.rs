@@ -111,7 +111,18 @@ pub struct Price {
     #[serde(default)]
     pub output_per_mtok_usd: Option<f64>,
     #[serde(default)]
+    pub cache_write_per_mtok_usd: Option<f64>,
+    #[serde(default)]
+    pub cache_read_per_mtok_usd: Option<f64>,
+    #[serde(default)]
     pub per_request_usd: Option<f64>,
+    #[serde(default)]
+    pub per_image_usd: Option<f64>,
+    /// Where the official figure comes from (e.g. `litellm`), when known.
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub has_reference: bool,
 }
 
 /// How the gateway's price compares with the vendor's list price.
@@ -130,11 +141,63 @@ pub struct GroupRef {
     pub id: i64,
     #[serde(default)]
     pub name: String,
+    #[serde(default)]
+    pub rate_multiplier: f64,
+    /// `group_default` or `user_override`.
+    #[serde(default)]
+    pub rate_source: String,
 }
 
-/// One model in the catalog. Trimmed to what the desktop renders: the full
-/// payload also carries tiered pricing intervals and per-group companions that
-/// only the web console displays.
+/// One tier of a tiered price schedule.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct PriceInterval {
+    #[serde(default)]
+    pub min_tokens: i64,
+    #[serde(default)]
+    pub max_tokens: Option<i64>,
+    #[serde(default)]
+    pub tier_label: String,
+    #[serde(default)]
+    pub input_per_mtok_usd: Option<f64>,
+    #[serde(default)]
+    pub output_per_mtok_usd: Option<f64>,
+    #[serde(default)]
+    pub cache_write_per_mtok_usd: Option<f64>,
+    #[serde(default)]
+    pub cache_read_per_mtok_usd: Option<f64>,
+    #[serde(default)]
+    pub per_request_usd: Option<f64>,
+    #[serde(default)]
+    pub per_image_usd: Option<f64>,
+}
+
+/// Detail flags and schedules the catalog card surfaces.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct PricingDetails {
+    #[serde(default)]
+    pub supports_prompt_caching: bool,
+    #[serde(default)]
+    pub has_long_context_multiplier: bool,
+    #[serde(default)]
+    pub long_context_input_threshold: i64,
+    #[serde(default, deserialize_with = "null_to_default")]
+    pub intervals: Vec<PriceInterval>,
+}
+
+/// Another group a catalog entry is available through, with its own pricing.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct GroupCompanion {
+    #[serde(default)]
+    pub group: GroupRef,
+    #[serde(default)]
+    pub effective_pricing_usd: Price,
+    #[serde(default)]
+    pub comparison: Comparison,
+}
+
+/// One model in the catalog, in the shape the model-plaza page renders: both
+/// price columns (official struck through, effective beside it), the billing
+/// mode, and the other groups the model is reachable through.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct ModelCatalogItem {
     #[serde(default)]
@@ -143,18 +206,107 @@ pub struct ModelCatalogItem {
     pub display_name: String,
     #[serde(default)]
     pub platform: String,
+    /// `token`, `per_request`, or `image`; empty means `token`.
+    #[serde(default)]
+    pub billing_mode: String,
     #[serde(default)]
     pub best_group: GroupRef,
+    #[serde(default)]
+    pub available_group_count: i64,
+    #[serde(default)]
+    pub official_pricing: Price,
     #[serde(default)]
     pub effective_pricing_usd: Price,
     #[serde(default)]
     pub comparison: Comparison,
+    #[serde(default, deserialize_with = "null_to_default")]
+    pub pricing_details: PricingDetails,
+    #[serde(default, deserialize_with = "null_to_default")]
+    pub other_groups: Vec<GroupCompanion>,
+}
+
+/// Headline figures above the catalog.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct CatalogSummary {
+    #[serde(default)]
+    pub total_models: i64,
+    #[serde(default)]
+    pub token_models: i64,
+    #[serde(default)]
+    pub non_token_models: i64,
+    #[serde(default)]
+    pub max_savings_percent: f64,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct ModelCatalog {
     #[serde(default, deserialize_with = "null_to_default")]
     pub items: Vec<ModelCatalogItem>,
+    #[serde(default, deserialize_with = "null_to_default")]
+    pub summary: Option<CatalogSummary>,
+}
+
+/// Health of one group's upstream, as `/group-status` reports it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GroupStatusItem {
+    pub group_id: i64,
+    pub group_name: String,
+    pub latest_status: String,
+    pub stable_status: String,
+    pub latency_ms: Option<f64>,
+    pub availability_24h: Option<f64>,
+    pub availability_7d: Option<f64>,
+}
+
+impl GroupStatusItem {
+    /// The status the UI should describe: the smoothed one, falling back to
+    /// the latest sample.
+    pub fn effective_status(&self) -> &str {
+        if !self.stable_status.is_empty() {
+            &self.stable_status
+        } else {
+            &self.latest_status
+        }
+    }
+}
+
+/// `/group-status` has shipped two shapes: a flat item, and a nested
+/// `{summary: {...}, group: {...}}`. Normalize either — the Electron client
+/// does the same.
+fn normalize_group_status(value: &serde_json::Value) -> GroupStatusItem {
+    let summary = value.get("summary");
+    let group = value.get("group");
+    let number = |keys: [Option<&serde_json::Value>; 2]| {
+        keys.into_iter()
+            .flatten()
+            .find_map(serde_json::Value::as_f64)
+    };
+    let string = |keys: [Option<&serde_json::Value>; 2]| {
+        keys.into_iter()
+            .flatten()
+            .find_map(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let nested = |key: &str| summary.and_then(|summary| summary.get(key));
+    GroupStatusItem {
+        group_id: number([value.get("group_id"), nested("group_id")])
+            .or_else(|| group.and_then(|group| group.get("id")).and_then(serde_json::Value::as_f64))
+            .unwrap_or_default() as i64,
+        group_name: {
+            let name = string([value.get("group_name"), group.and_then(|group| group.get("name"))]);
+            if name.is_empty() {
+                string([nested("group_name"), None])
+            } else {
+                name
+            }
+        },
+        latest_status: string([value.get("latest_status"), nested("latest_status")]),
+        stable_status: string([value.get("stable_status"), nested("stable_status")]),
+        latency_ms: number([value.get("latency_ms"), nested("latency_ms")]),
+        availability_24h: number([value.get("availability_24h"), value.get("availability24")]),
+        availability_7d: number([value.get("availability_7d"), value.get("availability7d")]),
+    }
 }
 
 /// Result of redeeming a code.
@@ -183,6 +335,105 @@ pub struct ReferralInfo {
     pub referral_link: String,
     #[serde(default, deserialize_with = "null_to_default")]
     pub stats: ReferralStats,
+}
+
+/// One service announcement targeted at the signed-in account.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct Announcement {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub title: String,
+    /// Markdown body.
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub read_at: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+}
+
+impl Announcement {
+    pub fn is_unread(&self) -> bool {
+        self.read_at.is_none()
+    }
+
+    /// The calendar date of publication, for compact list rows.
+    pub fn created_date(&self) -> Option<&str> {
+        self.created_at
+            .as_deref()
+            .map(|stamp| stamp.split('T').next().unwrap_or(stamp))
+    }
+}
+
+/// Aggregate usage for a period, as `/usage/stats` reports it.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct UsageStats {
+    #[serde(default)]
+    pub total_requests: i64,
+    #[serde(default)]
+    pub total_input_tokens: i64,
+    #[serde(default)]
+    pub total_output_tokens: i64,
+    #[serde(default)]
+    pub total_cache_tokens: i64,
+    #[serde(default)]
+    pub total_tokens: i64,
+    #[serde(default)]
+    pub total_cost: f64,
+    #[serde(default)]
+    pub total_actual_cost: f64,
+    #[serde(default)]
+    pub average_duration_ms: f64,
+}
+
+/// One request in the usage log. Trimmed to what the desktop renders.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct UsageLog {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub input_tokens: i64,
+    #[serde(default)]
+    pub output_tokens: i64,
+    #[serde(default)]
+    pub cache_creation_tokens: i64,
+    #[serde(default)]
+    pub cache_read_tokens: i64,
+    #[serde(default)]
+    pub total_cost: f64,
+    #[serde(default)]
+    pub actual_cost: f64,
+    #[serde(default)]
+    pub stream: Option<bool>,
+    #[serde(default)]
+    pub duration_ms: i64,
+    #[serde(default)]
+    pub first_token_ms: Option<i64>,
+    #[serde(default)]
+    pub rate_multiplier: f64,
+    #[serde(default)]
+    pub long_context_billing_applied: bool,
+    #[serde(default)]
+    pub image_count: i64,
+    #[serde(default)]
+    pub request_type: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default, deserialize_with = "null_to_default")]
+    pub group: Option<Group>,
+}
+
+/// Filters for the request log, matching the web console's `/usage` params.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UsageLogQuery {
+    /// 1-based.
+    pub page: u32,
+    pub page_size: u32,
+    pub model: Option<String>,
+    pub group_id: Option<i64>,
 }
 
 /// Access/refresh pair returned by login and refresh.
@@ -284,6 +535,37 @@ impl Client {
         self.get("/models/catalog", access_token)
     }
 
+    /// Health of every group's upstream: status, latency, availability.
+    pub fn group_statuses(&self, access_token: &str) -> Result<Vec<GroupStatusItem>> {
+        let raw: Vec<serde_json::Value> = self.get("/group-status", access_token)?;
+        Ok(raw.iter().map(normalize_group_status).collect())
+    }
+
+    /// Aggregate usage for `period` (`today` / `week` / `month`).
+    pub fn usage_stats(&self, access_token: &str, period: &str) -> Result<UsageStats> {
+        self.get(&format!("/usage/stats?period={period}"), access_token)
+    }
+
+    /// A page of the request log, newest first, optionally filtered.
+    pub fn usage_logs(
+        &self,
+        access_token: &str,
+        query: &UsageLogQuery,
+    ) -> Result<Paginated<UsageLog>> {
+        let mut path = format!(
+            "/usage?page={}&page_size={}",
+            query.page.max(1),
+            query.page_size.max(1)
+        );
+        if let Some(model) = query.model.as_deref().filter(|model| !model.is_empty()) {
+            path.push_str(&format!("&model={}", percent_encode(model)));
+        }
+        if let Some(group_id) = query.group_id {
+            path.push_str(&format!("&group_id={group_id}"));
+        }
+        self.get(&path, access_token)
+    }
+
     /// Redeem a top-up or gift code.
     pub fn redeem_code(&self, access_token: &str, code: &str) -> Result<RedeemResult> {
         self.post(
@@ -296,6 +578,21 @@ impl Client {
     /// The user's referral code and share link.
     pub fn referral_info(&self, access_token: &str) -> Result<ReferralInfo> {
         self.get("/referral/info", access_token)
+    }
+
+    /// Active service announcements for this account, newest first.
+    pub fn announcements(&self, access_token: &str) -> Result<Vec<Announcement>> {
+        self.get("/announcements", access_token)
+    }
+
+    /// Mark one announcement read; the server keeps per-user read state.
+    pub fn mark_announcement_read(&self, access_token: &str, id: i64) -> Result<()> {
+        let _: serde_json::Value = self.post(
+            &format!("/announcements/{id}/read"),
+            Some(access_token),
+            serde_json::json!({}),
+        )?;
+        Ok(())
     }
 
     /// URL of the hosted top-up page, to be opened in the user's browser.
@@ -486,6 +783,74 @@ mod tests {
                 .expect("unwrap");
         assert_eq!(catalog.items[0].model, "m");
         assert!(catalog.items[0].display_name.is_empty());
+    }
+
+    #[test]
+    fn catalog_carries_both_price_columns_and_companions() {
+        // The plaza renders official struck through beside effective; losing
+        // either column silently would misstate the price.
+        let catalog: ModelCatalog = unwrap_envelope(&ok(
+            r#"{"code":0,"data":{"items":[
+                {"model":"claude-x","display_name":"Claude X","platform":"anthropic",
+                 "billing_mode":"token",
+                 "best_group":{"id":1,"name":"Fast","rate_multiplier":0.5},
+                 "available_group_count":2,
+                 "official_pricing":{"input_per_mtok_usd":3.0,"output_per_mtok_usd":15.0,
+                    "cache_write_per_mtok_usd":3.75,"cache_read_per_mtok_usd":0.3},
+                 "effective_pricing_usd":{"input_per_mtok_usd":1.5,"output_per_mtok_usd":7.5},
+                 "comparison":{"savings_percent":50.0,"is_cheaper_than_official":true},
+                 "pricing_details":{"supports_prompt_caching":true},
+                 "other_groups":[{"group":{"id":2,"name":"Std","rate_multiplier":1.0},
+                    "effective_pricing_usd":{"input_per_mtok_usd":3.0},
+                    "comparison":{"savings_percent":0.0,"is_cheaper_than_official":false}}]}
+            ],"summary":{"total_models":10,"token_models":8,"non_token_models":2,
+                "max_savings_percent":72.5}}}"#,
+        ))
+        .expect("unwrap");
+        let item = &catalog.items[0];
+        assert_eq!(item.official_pricing.input_per_mtok_usd, Some(3.0));
+        assert_eq!(item.official_pricing.cache_read_per_mtok_usd, Some(0.3));
+        assert_eq!(item.best_group.rate_multiplier, 0.5);
+        assert!(item.pricing_details.supports_prompt_caching);
+        assert_eq!(item.other_groups[0].group.name, "Std");
+        assert_eq!(catalog.summary.as_ref().map(|s| s.total_models), Some(10));
+
+        // Explicit nulls degrade like absences, as everywhere else.
+        let catalog: ModelCatalog = unwrap_envelope(&ok(
+            r#"{"code":0,"data":{"items":[{"model":"m","pricing_details":null,
+                "other_groups":null}],"summary":null}}"#,
+        ))
+        .expect("unwrap");
+        assert!(catalog.items[0].other_groups.is_empty());
+        assert!(catalog.summary.is_none());
+    }
+
+    #[test]
+    fn group_status_normalizes_flat_and_nested_payloads() {
+        let flat: serde_json::Value = serde_json::from_str(
+            r#"{"group_id":7,"group_name":"Fast","latest_status":"up",
+                "stable_status":"up","latency_ms":312.5,
+                "availability_24h":99.2,"availability_7d":98.7}"#,
+        )
+        .expect("json");
+        let item = normalize_group_status(&flat);
+        assert_eq!(item.group_id, 7);
+        assert_eq!(item.group_name, "Fast");
+        assert_eq!(item.effective_status(), "up");
+        assert_eq!(item.availability_24h, Some(99.2));
+
+        // The other shipped shape nests the figures under `summary`/`group`.
+        let nested: serde_json::Value = serde_json::from_str(
+            r#"{"group":{"id":9,"name":"Std"},
+                "summary":{"latest_status":"degraded","latency_ms":900.0}}"#,
+        )
+        .expect("json");
+        let item = normalize_group_status(&nested);
+        assert_eq!(item.group_id, 9);
+        assert_eq!(item.group_name, "Std");
+        assert_eq!(item.effective_status(), "degraded");
+        assert_eq!(item.latency_ms, Some(900.0));
+        assert_eq!(item.availability_24h, None);
     }
 
     #[test]

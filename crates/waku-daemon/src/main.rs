@@ -8,6 +8,12 @@ use anyhow::{Context as _, anyhow, bail};
 use waku_protocol::{DAEMON_TOKEN_ENV, DaemonReady, PROTOCOL_VERSION};
 
 fn main() -> anyhow::Result<()> {
+    // Fork: rename legacy upstream-named storage (~/.waku etc.) before the
+    // settings and task stores resolve their paths. The desktop runs the same
+    // migration, but the daemon can also start standalone.
+    for warning in sub2api::migrate::migrate_legacy_storage() {
+        eprintln!("warning: {warning}");
+    }
     let arguments = Arguments::parse(std::env::args().skip(1))?;
     let token =
         std::env::var(DAEMON_TOKEN_ENV).context("Waku daemon authentication token is missing")?;

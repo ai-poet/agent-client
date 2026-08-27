@@ -109,6 +109,40 @@ fn node_binary_name() -> &'static str {
     if cfg!(target_os = "windows") { "node.exe" } else { "node" }
 }
 
+/// `npm --version` from the same set of places [`detect_node`] looks.
+///
+/// The old client's runtime check reported both (`node -v && npm -v`): a Node
+/// without a working npm cannot install any agent, so showing only the Node
+/// version would claim health the machine does not have.
+pub fn detect_npm() -> Option<String> {
+    let npm_name = if cfg!(target_os = "windows") { "npm.cmd" } else { "npm" };
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(on_path) = cli_install::find_executable("npm") {
+        candidates.push(on_path);
+    }
+    if let Some(managed) = managed_node_bin_dir() {
+        candidates.push(managed.join(npm_name));
+    }
+    if cfg!(target_os = "windows") {
+        candidates.push(PathBuf::from(r"C:\Program Files\nodejs").join(npm_name));
+    }
+    for candidate in candidates {
+        if !candidate.is_file() {
+            continue;
+        }
+        let outcome = if cfg!(target_os = "windows") {
+            // npm.cmd is a batch file; it needs the shell.
+            cli_install::run_command(&format!("\"{}\" --version", candidate.display()))
+        } else {
+            cli_install::run_program(&candidate, &["--version"])
+        };
+        if outcome.success && !outcome.output.trim().is_empty() {
+            return Some(outcome.output.trim().to_owned());
+        }
+    }
+    None
+}
+
 /// Install Node 22 unattended, reporting stages as they start.
 ///
 /// Blocking — run it off the UI thread. Fallbacks accumulate their failures so

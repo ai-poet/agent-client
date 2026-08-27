@@ -2084,6 +2084,10 @@ impl Waku {
                 ),
             )
             .child(self.render_background_work_summary(cx))
+            // Fork addition: service announcements bell, signed-in only.
+            .when(self.cloud_account.credentials.is_some(), |element| {
+                element.child(self.render_announcement_bell(cx))
+            })
             .when(!self.right_panel_visible, |element| {
                 element
                     .when(self.fps_counter_visible, |element| {
@@ -2128,6 +2132,8 @@ impl Waku {
                 )
                 // Fork addition: the managed cloud sign-in nudge.
                 .children(self.render_cloud_onboarding_card(cx))
+                // Fork addition: point a bare machine at the CLI installer.
+                .children(self.render_missing_cli_hint(cx))
                 .child(
                     div()
                         .mt(px(20.0))
@@ -2279,7 +2285,8 @@ impl Waku {
             .justify_center()
             .px_8()
             .pb(px(52.0))
-            .child(icon("icons/sparkle.svg", 20.0, theme.accent))
+            // Fork addition: the brand mark, where upstream drew a sparkle.
+            .child(img("images/logo.png").w(px(30.0)).h(px(30.0)).rounded(px(7.0)))
             .child(
                 div()
                     .mt(px(14.0))

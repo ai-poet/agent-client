@@ -19,7 +19,7 @@ const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 8] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 10] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -55,6 +55,18 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 8] = [
         "settings.cloud_account",
         "icons/server.svg",
         "settings.cloud_account_keywords",
+    ),
+    (
+        SettingsPage::ModelPlaza,
+        "settings.model_plaza",
+        "icons/store.svg",
+        "settings.model_plaza_keywords",
+    ),
+    (
+        SettingsPage::CloudUsage,
+        "settings.cloud_usage",
+        "icons/chart-column.svg",
+        "settings.cloud_usage_keywords",
     ),
     (
         SettingsPage::Daemon,
@@ -369,6 +381,8 @@ impl Waku {
                         SettingsPage::ComputerUse => tr!("settings.computer_use"),
                         SettingsPage::Appearance => tr!("settings.appearance"),
                         SettingsPage::CloudAccount => tr!("settings.cloud_account"),
+                        SettingsPage::ModelPlaza => tr!("settings.model_plaza"),
+                        SettingsPage::CloudUsage => tr!("settings.cloud_usage"),
                     }),
             )
             .child(match page {
@@ -380,6 +394,8 @@ impl Waku {
                 SettingsPage::ComputerUse => self.render_computer_use_settings(cx),
                 SettingsPage::Appearance => self.render_appearance_settings(cx),
                 SettingsPage::CloudAccount => self.render_cloud_account_settings(cx),
+                SettingsPage::ModelPlaza => self.render_model_plaza_settings(window, cx),
+                SettingsPage::CloudUsage => self.render_cloud_usage_settings(cx),
             });
 
         div()

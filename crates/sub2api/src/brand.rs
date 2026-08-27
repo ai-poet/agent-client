@@ -21,30 +21,31 @@ pub const BUNDLE_ID: &str = match option_env!("SUB2API_BRAND_BUNDLE_ID") {
 /// Marketing site, linked from the about box and error surfaces.
 pub const WEBSITE_URL: &str = match option_env!("SUB2API_BRAND_WEBSITE") {
     Some(url) => url,
-    None => "https://cheaprouter.org",
+    None => "https://cheaprouter.cc",
 };
 
 /// Managed cloud service base URL. All `/api/v1` calls are built from this.
 pub const MANAGED_SERVICE_URL: &str = match option_env!("SUB2API_MANAGED_SERVICE_URL") {
     Some(url) => url,
-    None => "https://cheaprouter.org",
+    None => "https://cheaprouter.cc",
 };
 
 /// Host serving the Sparkle appcast and release artifacts.
 pub const RELEASES_BASE_URL: &str = match option_env!("SUB2API_RELEASES_BASE_URL") {
     Some(url) => url,
-    None => "https://releases.cheaprouter.org",
+    None => "https://releases.cheaprouter.cc",
 };
 
 /// Application data directory name under the user's home directory.
 ///
-/// Kept as upstream's `.waku` by default: changing it would mean touching
-/// several upstream files (`persistence.rs`, `projectless.rs`, `daemon.rs`) for
-/// no user-visible gain, and this fork ships no data migration. Override only
-/// if the fork must coexist with an upstream Waku install on one machine.
+/// Carries the brand (renamed from upstream's `.waku`). Keep the default
+/// identical to `waku_protocol::identity::DATA_DIR_NAME` — that crate cannot
+/// depend on this one, so both read the same build-time variable with the
+/// same fallback. Legacy `~/.waku` state is renamed in place at startup by
+/// [`crate::migrate::migrate_legacy_storage`].
 pub const DATA_DIR_NAME: &str = match option_env!("SUB2API_DATA_DIR_NAME") {
     Some(name) => name,
-    None => ".waku",
+    None => ".cheaprouter",
 };
 
 /// Whether upstream's analytics client should be constructed at all.

@@ -6,6 +6,9 @@ description = "Managed cloud account, gateway routing, and agent CLI installatio
 license = "GPL-3.0-only"
 
 [dependencies]
+# Surgical TOML edits that keep the user's comments and key order intact,
+# the same crate cc-switch uses for Codex/Grok config writes.
+toml_edit = "0.23"
 anyhow = "1.0"
 dirs = "6.0"
 serde = { version = "1.0", features = ["derive"] }

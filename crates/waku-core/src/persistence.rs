@@ -885,7 +885,7 @@ impl StateStore {
         let directory = path.parent().unwrap_or_else(|| Path::new(".")).to_owned();
         let configuration_directory = dirs::home_dir()
             .unwrap_or_else(std::env::temp_dir)
-            .join(".waku");
+            .join(crate::identity::DATA_DIR_NAME);
         let (app_settings_path, legacy_settings_paths) = if cfg!(debug_assertions) {
             (
                 directory.join("app.json"),
@@ -2418,10 +2418,13 @@ mod tests {
         }
         #[cfg(not(debug_assertions))]
         {
-            assert_eq!(directory, Some(std::ffi::OsStr::new("Waku")));
+            assert_eq!(
+                directory,
+                Some(std::ffi::OsStr::new(crate::identity::DATA_DIRECTORY_NAME))
+            );
             let configuration_directory = dirs::home_dir()
                 .unwrap_or_else(std::env::temp_dir)
-                .join(".waku");
+                .join(crate::identity::DATA_DIR_NAME);
             assert_eq!(
                 store.app_settings_path,
                 configuration_directory.join("app.json")

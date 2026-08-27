@@ -5,6 +5,7 @@ target
 # It carries its own .git and its own node_modules; tracking it here would add
 # six figures of files to a repo that has nothing to do with it.
 old-code/
+cc-switch-main/
 
 .DS_Store
 *.log

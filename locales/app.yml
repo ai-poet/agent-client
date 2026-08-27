@@ -80,6 +80,14 @@ command_palette.open_project:
   en: Open project…
 command_palette.choose_model:
   en: Choose model…
+command_palette.copy_task_id:
+  en: Copy Task ID
+command_palette.copy_agent_cli_thread_id:
+  en: Copy Agent CLI thread ID
+command_palette.task_id_copied:
+  en: Task ID copied
+command_palette.agent_cli_thread_id_copied:
+  en: Agent CLI thread ID copied
 command_palette.collapse_sidebar_groups:
   en: Collapse all sidebar groups
 command_palette.show_sidebar:
@@ -169,7 +177,7 @@ daemon.allowed_origins:
 daemon.allowed_origins_description:
   en: Exact http:// or https:// origins allowed to open the WebSocket.
 daemon.allowed_origins_placeholder:
-  en: https://waku.example.com, http://localhost:3001
+  en: https://app.example.com, http://localhost:3001
 daemon.apply:
   en: Apply
 daemon.restarting:
@@ -345,7 +353,7 @@ settings.share_anonymous_usage_data_description:
 providers.coding_agents:
   en: Coding agents
 providers.description:
-  en: The app drives agent CLIs installed on this computer. Install or sign in with each agent's own CLI, then refresh
+  en: The app drives agent CLIs installed on this computer. Anything missing installs in one click below, and each CLI can route through the cloud gateway or a custom endpoint
 providers.web_description:
   en: The app drives agent CLIs installed on the daemon host. Install or sign in with each agent's own CLI, then refresh
 providers.check_failed:
@@ -1226,11 +1234,11 @@ session.agent_stopped_reason:
 errors.open_session:
   en: "Could not open that session: %{error}"
 errors.create_projectless_task:
-  en: "Could not create a task beneath ~/.waku/projects: %{error}"
+  en: "Could not create a task beneath ~/.cheaprouter/projects: %{error}"
 errors.save_projectless_migration:
   en: "Could not save the projectless task migration: %{error}"
 errors.move_projectless_task:
-  en: "Could not move the old projectless task beneath ~/.waku/projects: %{error}"
+  en: "Could not move the old projectless task beneath ~/.cheaprouter/projects: %{error}"
 errors.remote_host_path:
   en: This path belongs to the daemon host and cannot be opened by the desktop
 errors.change_branch:
@@ -1254,9 +1262,9 @@ errors.provider_native_thread_cursor_unavailable:
 errors.provider_waku_task_unavailable:
   en: "%{provider}'s task is unavailable"
 errors.provider_not_installed:
-  en: "%{provider} is not installed"
+  en: "%{provider} is not installed — install it in Settings → Providers"
 errors.provider_not_found:
-  en: "%{provider} is not installed or could not be found"
+  en: "%{provider} is not installed or could not be found — check Settings → Providers"
 errors.claude_fork_checkpoint_missing:
   en: Claude omitted the fork checkpoint
 errors.claude_turn_checkpoint_unavailable:
@@ -1465,6 +1473,10 @@ environment.commit_or_push:
   en: Commit or push
 environment.compare_branch:
   en: Compare branch
+environment.task_id:
+  en: Task ID
+environment.agent_cli_thread_id:
+  en: Agent CLI thread ID
 
 commit.message_placeholder:
   en: Commit message (leave blank to generate)…
@@ -2151,7 +2163,7 @@ cloud.turn_off:
 cloud.group_title:
   en: "Model group"
 cloud.group_detail:
-  en: "Which pool your requests route through."
+  en: "Which pool your requests route through. Switching writes each CLI's own configuration files immediately (~/.claude/settings.json, ~/.codex, ~/.grok) — your originals are backed up and restored on sign-out. Running sessions keep their current route."
 cloud.group_default:
   en: "Account default"
 cloud.group_default_detail:
@@ -2160,8 +2172,6 @@ cloud.group_active:
   en: "Active"
 cloud.redeem_title:
   en: "Redeem a code"
-cloud.redeem_detail:
-  en: "Gift and top-up codes credit the balance above."
 cloud.redeem_action:
   en: "Redeem"
 cloud.redeem_placeholder:
@@ -2176,20 +2186,6 @@ cloud.copy_link:
   en: "Copy link"
 cloud.invite_copied:
   en: "Invite link copied"
-cloud.pricing_title:
-  en: "Model pricing"
-cloud.pricing_detail:
-  en: "Per million tokens, in USD, at your current rate."
-cloud.price_in_out:
-  en: "in %{input} · out %{output}"
-cloud.price_in:
-  en: "in %{input}"
-cloud.price_out:
-  en: "out %{output}"
-cloud.price_per_request:
-  en: "%{price} / request"
-cloud.price_unknown:
-  en: "—"
 cli_setup.title:
   en: "Set up missing agents"
 cli_setup.node_requirement:
@@ -2218,10 +2214,6 @@ cli_setup.stage_installing:
   en: "Installing (%{method})…"
 cli_setup.stage_verifying:
   en: "Verifying…"
-cli_setup.git_requirement:
-  en: "Git for Windows"
-cli_setup.git_missing:
-  en: "Not found — task checkpoints and Claude Code's shell need it"
 cli_setup.install_selected:
   en: "Install selected (%{count})"
 cloud.onboarding_title:
@@ -2242,3 +2234,307 @@ cloud.menu_usage:
   en: "Usage history"
 cloud.signed_out_note:
   en: "Signed out — agents now use your own CLI configuration"
+cli_setup.env_title:
+  en: "Runtime"
+settings.cloud_usage:
+  en: "Usage"
+settings.cloud_usage_keywords:
+  en: "usage history requests tokens cost logs cloud cheaprouter"
+cloud_usage.today:
+  en: "Today"
+cloud_usage.week:
+  en: "This week"
+cloud_usage.month:
+  en: "This month"
+cloud_usage.loading:
+  en: "Loading…"
+cloud_usage.requests:
+  en: "Requests"
+cloud_usage.tokens:
+  en: "Tokens"
+cloud_usage.cache:
+  en: "Cache"
+cloud_usage.cost:
+  en: "Cost"
+cloud_usage.standard_cost:
+  en: "std %{cost}"
+cloud_usage.avg_latency:
+  en: "avg %{ms}ms"
+cloud_usage.latency:
+  en: "Latency"
+cloud_usage.recent:
+  en: "Recent requests"
+cloud_usage.empty:
+  en: "No requests in this period"
+settings.model_plaza:
+  en: "Model Plaza"
+settings.model_plaza_keywords:
+  en: "model plaza catalog models pricing groups savings cloud cheaprouter"
+plaza.sign_in_hint:
+  en: "Sign in to %{name} to browse gateway models and pricing"
+plaza.loading:
+  en: "Loading…"
+plaza.no_models:
+  en: "No models available"
+plaza.summary_models:
+  en: "%{count} models"
+plaza.summary_token:
+  en: "%{count} token-billed"
+plaza.summary_non_token:
+  en: "%{count} non-token"
+plaza.summary_best_savings:
+  en: "best savings %{percent}%"
+plaza.search_placeholder:
+  en: "Search model, name, or platform"
+plaza.no_search_match:
+  en: "No models match the search"
+plaza.latency:
+  en: "%{ms} ms"
+plaza.status_up:
+  en: "Operational"
+plaza.status_degraded:
+  en: "Degraded"
+plaza.status_down:
+  en: "Down"
+plaza.status_unknown:
+  en: "Status unknown"
+plaza.input:
+  en: "Input /MTok"
+plaza.output:
+  en: "Output /MTok"
+plaza.per_request:
+  en: "Per request"
+plaza.per_image:
+  en: "Per image"
+plaza.savings:
+  en: "Savings"
+plaza.cache_write:
+  en: "Cache write"
+plaza.cache_read:
+  en: "Cache read"
+plaza.prompt_caching:
+  en: "Prompt caching"
+plaza.also_available:
+  en: "Also available in"
+plaza.group_count:
+  en: "%{count} groups"
+cli_setup.node_manual:
+  en: Node 22 was not found. Install it with your system package manager, then refresh
+cli_setup.welcome_missing:
+  en: No agent CLI detected on this computer yet
+announcements.title:
+  en: Announcements
+announcements.unread_count:
+  en: "%{count} unread"
+announcements.mark_all_read:
+  en: Mark all read
+announcements.loading:
+  en: Loading…
+announcements.load_failed:
+  en: Could not load announcements
+announcements.empty:
+  en: No announcements yet
+announcements.back:
+  en: Back
+pay.title:
+  en: "Top up"
+pay.loading_options:
+  en: "Loading top-up options…"
+pay.load_failed:
+  en: "Could not load top-up options"
+pay.open_full_center:
+  en: "Open the full pay center"
+pay.account:
+  en: "Account"
+pay.current_balance:
+  en: "Current balance: %{balance}"
+pay.amount:
+  en: "Amount (USD credited)"
+pay.credited_range:
+  en: "Credits %{credited} · range %{min} – %{max}"
+pay.settlement_rate:
+  en: "Estimated settlement %{amount}"
+pay.method_fee:
+  en: "Method fee %{rate}%"
+pay.estimated_charge:
+  en: "Estimated charge %{amount}"
+pay.method:
+  en: "Payment method"
+pay.no_methods:
+  en: "No payment methods are enabled"
+pay.method_unavailable:
+  en: "This method is unavailable right now"
+pay.stripe_hint:
+  en: "Stripe checkout opens in your browser"
+pay.select_method:
+  en: "Choose a payment method"
+pay.too_many_pending:
+  en: "Too many pending orders (%{count}) — cancel one first"
+pay.enter_valid_amount:
+  en: "Enter a valid amount"
+pay.amount_range:
+  en: "Amount must be between $%{min} and $%{max}"
+pay.creating_order:
+  en: "Creating order…"
+pay.continue:
+  en: "Continue to payment"
+pay.redirect_url_missing:
+  en: "The service returned no payment page"
+pay.order_meta:
+  en: "Order %{order} · time remaining %{remaining}"
+pay.amount_meta:
+  en: "Pay %{pay} · credits %{credited}"
+pay.scan_with:
+  en: "Scan with %{method} to pay"
+pay.qr_unavailable:
+  en: "Could not render the QR code"
+pay.open_payment_page:
+  en: "Open payment page"
+pay.redirect_hint:
+  en: "The payment page opened in your browser; this dialog completes automatically once paid"
+pay.cancel_order:
+  en: "Cancel order"
+pay.cancelling:
+  en: "Cancelling…"
+pay.back_to_form:
+  en: "Back"
+pay.polling_timed_out:
+  en: "Timed out waiting for payment — check the order in the pay center"
+pay.success_toast:
+  en: "Payment successful — balance updated"
+pay.expired:
+  en: "Expired"
+pay.status_pending_title:
+  en: "Awaiting payment"
+pay.status_pending_message:
+  en: "Complete the payment in your payment app"
+pay.status_received_title:
+  en: "Payment received"
+pay.status_received_message:
+  en: "Crediting your balance…"
+pay.status_unfinished_title:
+  en: "Paid, but crediting is unfinished"
+pay.status_unfinished_message:
+  en: "Contact support with the order id"
+pay.status_failed_title:
+  en: "Payment failed"
+pay.status_failed_message:
+  en: "The payment did not go through"
+pay.status_cancelled_title:
+  en: "Order cancelled"
+pay.status_cancelled_message:
+  en: "No payment was taken"
+pay.status_expired_title:
+  en: "Order expired"
+pay.status_expired_message:
+  en: "Create a new order to continue"
+pay.status_complete_title:
+  en: "Top-up complete"
+pay.status_complete_message:
+  en: "Your balance has been credited"
+pay.status_updated_title:
+  en: "Status updated"
+pay.status_updated_message:
+  en: "Waiting for the next update"
+cli_setup.custom_title:
+  en: "Custom API endpoints"
+cli_setup.custom_detail:
+  en: "Route a CLI through your own endpoint. Saving writes it into the CLI's own configuration file — the original values are backed up and restored when you clear the entry or sign out."
+cli_setup.custom_url_placeholder:
+  en: "https://api.example.com — omit /v1"
+cli_setup.custom_key_placeholder:
+  en: "API key"
+cli_setup.custom_save:
+  en: "Save"
+cli_setup.custom_saved:
+  en: "Custom endpoint saved — applies to new sessions"
+cli_setup.custom_cleared:
+  en: "Custom endpoint cleared"
+cli_setup.custom_need_both:
+  en: "Both the base URL and the API key are required"
+cli_setup.custom_active:
+  en: "Active for new sessions"
+cli_setup.custom_inactive:
+  en: "Not configured"
+cli_setup.custom_overridden:
+  en: "Cloud routing is on and overrides this endpoint"
+cloud.group_switched:
+  en: "Switched to %{group} — applies to newly started sessions"
+cli_setup.custom_hint_anthropic:
+  en: "Claude-compatible endpoint. Enter the service origin without a trailing slash; a pasted /v1 is stripped automatically."
+cli_setup.custom_hint_openai:
+  en: "OpenAI-compatible endpoint. Enter the service origin; /v1 is appended automatically."
+cli_setup.custom_models_placeholder:
+  en: "Model ids, comma separated (optional)"
+cli_setup.custom_edit:
+  en: "Edit"
+cli_setup.custom_collapse:
+  en: "Collapse"
+cli_setup.custom_test:
+  en: "Test connection"
+cli_setup.custom_open_file:
+  en: "Open config file"
+cli_setup.custom_clear:
+  en: "Clear"
+cli_setup.custom_connect_ok:
+  en: "Reachable (%{ms} ms)"
+cli_setup.custom_connect_slow:
+  en: "Reachable but slow (%{ms} ms)"
+cli_setup.custom_connect_failed:
+  en: "Could not connect: %{error}"
+cli_setup.custom_file_missing:
+  en: "The config file does not exist yet — save an endpoint or sign in first"
+cli_setup.custom_cloud_active:
+  en: "Cloud routing active"
+plaza.all_platforms:
+  en: "All platforms"
+plaza.billing_all:
+  en: "All billing"
+plaza.billing_token:
+  en: "Token"
+plaza.billing_per_request:
+  en: "Per request"
+plaza.billing_image:
+  en: "Per image"
+plaza.all_groups:
+  en: "All groups"
+plaza.filter_result:
+  en: "Showing %{visible} of %{total} models"
+plaza.rate_user_override:
+  en: "user rate"
+plaza.rate_group_default:
+  en: "group rate"
+plaza.unit_per_request:
+  en: "per request"
+plaza.unit_per_image:
+  en: "per image"
+plaza.unit_per_mtok:
+  en: "per MTok input"
+plaza.long_context:
+  en: "Long context >%{threshold}"
+plaza.tiered_pricing:
+  en: "Tiered pricing (%{count})"
+plaza.official_reference:
+  en: "Official reference price"
+plaza.expand_details:
+  en: "Show details"
+plaza.collapse_details:
+  en: "Hide details"
+plaza.intervals_title:
+  en: "Tiered price schedule"
+plaza.interval_default:
+  en: "Default tier"
+cloud_usage.all_models:
+  en: "All models"
+cloud_usage.all_groups:
+  en: "All groups"
+cloud_usage.total_records:
+  en: "%{total} records"
+cloud_usage.page_of:
+  en: "Page %{page} / %{pages}"
+cloud_usage.first_token:
+  en: "first token %{ms}ms"
+cloud_usage.long_context:
+  en: "long context"
+cloud_usage.images:
+  en: "Images"

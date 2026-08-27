@@ -127,8 +127,9 @@ pub fn detect_trigger(text: &str, cursor: usize) -> Option<Trigger> {
 /// Pi and Oh My Pi skills retain their short name and resolve to
 /// `/skill:name` there.
 ///
-/// On top of provider sources, every provider reads Waku's user-defined layer
-/// (`.waku/commands` and `~/.config/waku/commands`).
+/// On top of provider sources, every provider reads the app's user-defined
+/// layer (`.cheaprouter/commands` and `~/.config/cheaprouter/commands`, with
+/// upstream's `.waku` locations still scanned for compatibility).
 pub fn discover_slash_commands(
     provider: ProviderKind,
     project_root: &Path,
@@ -329,12 +330,26 @@ fn assemble_slash_commands(
         scan_skill_files(provider, &home.join(".agents/skills"), &mut commands);
     }
     scan_command_files(
+        &project_root.join(".cheaprouter/commands"),
+        CommandScope::Project,
+        true,
+        &mut commands,
+    );
+    // Fork: keep scanning upstream's project-level location so commands in
+    // existing checkouts keep working; duplicates dedup by name below.
+    scan_command_files(
         &project_root.join(".waku/commands"),
         CommandScope::Project,
         true,
         &mut commands,
     );
     if let Some(home) = home.as_deref() {
+        scan_command_files(
+            &home.join(".config/cheaprouter/commands"),
+            CommandScope::User,
+            true,
+            &mut commands,
+        );
         scan_command_files(
             &home.join(".config/waku/commands"),
             CommandScope::User,

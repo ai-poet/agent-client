@@ -1257,6 +1257,12 @@ impl Waku {
         {
             self.analytics.track(event);
         }
+        // Fork addition: a finished turn spent gateway credit, so the
+        // balance readouts refresh. Flag only — this seam has no `Context`;
+        // the event pump acts on it, like the other stale flags.
+        if result.is_some() && self.cloud_account.credentials.is_some() {
+            self.cloud_balance_stale = true;
+        }
         result
     }
 
@@ -3484,6 +3490,10 @@ impl Waku {
         }
         if std::mem::take(&mut self.workspace_queries_stale) {
             self.invalidate_workspace_queries(cx);
+        }
+        // Fork addition: refresh the cloud balance after a turn settles.
+        if std::mem::take(&mut self.cloud_balance_stale) {
+            self.refresh_cloud_account(cx);
         }
         if std::mem::take(&mut self.composer_sources_stale) {
             self.refresh_composer_sources(cx);

@@ -6,7 +6,10 @@ use std::sync::{OnceLock, RwLock};
 fn workspace_root_slot() -> &'static RwLock<Option<PathBuf>> {
     static ROOT: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
     ROOT.get_or_init(|| {
-        RwLock::new(dirs::home_dir().map(|home| home.join(".waku").join("projects")))
+        RwLock::new(
+            dirs::home_dir()
+                .map(|home| home.join(crate::identity::DATA_DIR_NAME).join("projects")),
+        )
     })
 }
 

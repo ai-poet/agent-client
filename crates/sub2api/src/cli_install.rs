@@ -55,23 +55,14 @@ pub const DESCRIPTORS: &[CliDescriptor] = &[
         package: "@openai/codex",
         binary: "codex",
     },
-    CliDescriptor {
-        id: "opencode",
-        display_name: "OpenCode",
-        package: "opencode-ai",
-        binary: "opencode",
-    },
+    // The three CLIs above and below are the supported set; OpenCode and Pi
+    // installs were dropped deliberately — the app still detects and runs
+    // them when the user installs them elsewhere.
     CliDescriptor {
         id: "grok",
-        display_name: "Grok",
+        display_name: "Grok Build",
         package: "@xai-official/grok",
         binary: "grok",
-    },
-    CliDescriptor {
-        id: "pi",
-        display_name: "Pi",
-        package: "@earendil-works/pi-coding-agent",
-        binary: "pi",
     },
 ];
 
@@ -354,7 +345,6 @@ pub fn node_runtime_dirs() -> Vec<PathBuf> {
             }
         }
     }
-    dirs.extend(crate::git_install::git_path_dirs());
     dirs
 }
 
@@ -395,15 +385,6 @@ pub fn apply_node_runtime(command: &mut std::process::Command) {
         command.env("PATH", augment_path(configured, &dirs));
     }
 
-    // The old client wrote this into `~/.claude/settings.json`; exporting it
-    // per process reaches the same code path in Claude Code without editing
-    // the user's configuration. A value the user set themselves wins.
-    if cfg!(target_os = "windows")
-        && std::env::var_os("CLAUDE_CODE_GIT_BASH_PATH").is_none()
-        && let Some(bash) = crate::git_install::find_git_bash()
-    {
-        command.env("CLAUDE_CODE_GIT_BASH_PATH", bash);
-    }
 }
 
 /// Run a program directly — no shell — and capture its output.
@@ -485,9 +466,6 @@ fn last_meaningful_lines(text: &str, limit: usize) -> String {
 pub enum SetupStep {
     /// Node is missing or too old; nothing else can proceed.
     InstallNode { required_major: u32 },
-    /// Install Git for Windows: the daemon's checkpoints need `git`, Claude
-    /// Code's mature shell tool needs Git Bash.
-    InstallGit,
     /// Install one agent CLI. `commands` are tried in order.
     InstallCli {
         id: &'static str,
@@ -499,22 +477,13 @@ pub enum SetupStep {
 /// Work out what the user has to do, given what was detected.
 ///
 /// Returns an empty plan when the machine is already usable.
-pub fn setup_plan(
-    node_version_output: Option<&str>,
-    git_complete: bool,
-    detections: &[Detection],
-) -> Vec<SetupStep> {
+pub fn setup_plan(node_version_output: Option<&str>, detections: &[Detection]) -> Vec<SetupStep> {
     let mut steps = Vec::new();
     let node_ok = node_version_output.is_some_and(node_is_supported);
     if !node_ok {
         steps.push(SetupStep::InstallNode {
             required_major: REQUIRED_NODE_MAJOR,
         });
-    }
-    // Only surfaced on Windows: macOS and Linux ship git through their own
-    // channels, and a row the app cannot act on would just be noise.
-    if cfg!(target_os = "windows") && !git_complete {
-        steps.push(SetupStep::InstallGit);
     }
     for detection in detections {
         if detection.is_installed() {
@@ -700,12 +669,12 @@ mod tests {
     #[test]
     fn plan_is_empty_when_everything_is_present() {
         let detections: Vec<Detection> = DESCRIPTORS.iter().map(|d| installed(d.id)).collect();
-        assert!(setup_plan(Some("v22.1.0"), true, &detections).is_empty());
+        assert!(setup_plan(Some("v22.1.0"), &detections).is_empty());
     }
 
     #[test]
     fn plan_puts_node_first_because_npm_installs_depend_on_it() {
-        let plan = setup_plan(Some("v18.0.0"), true, &[missing("claude")]);
+        let plan = setup_plan(Some("v18.0.0"), &[missing("claude")]);
         assert_eq!(
             plan.first(),
             Some(&SetupStep::InstallNode {
@@ -717,7 +686,7 @@ mod tests {
 
     #[test]
     fn plan_lists_only_missing_clis_with_their_candidates() {
-        let plan = setup_plan(Some("v22.0.0"), true, &[installed("claude"), missing("codex")]);
+        let plan = setup_plan(Some("v22.0.0"), &[installed("claude"), missing("codex")]);
         assert_eq!(
             plan,
             vec![SetupStep::InstallCli {
@@ -730,7 +699,7 @@ mod tests {
 
     #[test]
     fn absent_node_output_is_treated_as_missing_node() {
-        let plan = setup_plan(None, true, &[]);
+        let plan = setup_plan(None, &[]);
         assert_eq!(
             plan,
             vec![SetupStep::InstallNode {

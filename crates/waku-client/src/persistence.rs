@@ -708,7 +708,7 @@ impl PersistedState {
 fn configuration_directory() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join(".waku")
+        .join(waku_protocol::identity::DATA_DIR_NAME)
 }
 
 fn default_app_settings_path() -> PathBuf {
