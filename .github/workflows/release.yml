@@ -311,6 +311,11 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
+          # Fork: no certificate configured -> the Release step builds ad-hoc.
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "No Apple certificate secret; skipping keychain setup."
+            exit 0
+          fi
           KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
           echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
@@ -328,6 +333,10 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          if [ -z "$APPLE_ID" ]; then
+            echo "No notary credentials; skipping."
+            exit 0
+          fi
           xcrun notarytool store-credentials NOTARY \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_SPECIFIC_PASSWORD" \
@@ -335,11 +344,23 @@ jobs:
 
       - name: Release
         env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           WAKU_SIGNING_IDENTITY: ${{ secrets.WAKU_SIGNING_IDENTITY }}
           WAKU_ANALYTICS_ENDPOINT: ${{ secrets.WAKU_ANALYTICS_ENDPOINT }}
           WAKU_ANALYTICS_WEBSITE_ID: ${{ secrets.WAKU_ANALYTICS_WEBSITE_ID }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-        run: bun run release --local
+        run: |
+          # Fork: without a Developer ID certificate, ship ad-hoc-signed,
+          # unnotarized artifacts (installed via the quarantine-free
+          # install-mac.sh path; Sparkle updates verify our EdDSA key and are
+          # unaffected by notarization).
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            bun run release --local
+          else
+            echo "::warning::No Apple certificate — building ad-hoc, unnotarized macOS artifacts."
+            unset WAKU_SIGNING_IDENTITY
+            bun run release --local --adhoc
+          fi
 
       - uses: actions/upload-artifact@v7
         with:

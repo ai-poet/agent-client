@@ -127,7 +127,24 @@ no_check_bucket = true
 **定期备份**——旧版本 zip 是增量补丁和跨版本升级的原料，且更新源宕机期间
 老用户收不到新版本（应用本身不受影响）。
 
-## 阶段 3（一次性）：Apple 签名与公证（mac 包硬需求）
+## 阶段 3（可选）：Apple 签名与公证
+
+**当前走的是免证书的 ad-hoc 路线**：CI 的 mac job 检测不到
+`APPLE_CERTIFICATE` secret 时自动以 `--adhoc` 构建（ad-hoc 签名、不公证），
+产物照常出（DMG、zip、签名 appcast）。用户通过一键脚本安装：
+
+```sh
+curl -fsSL https://s3.cheaprouter.cc/cheaprouter-releases/install-mac.sh | sh
+```
+
+curl 下载不打 quarantine 隔离属性，所以 ad-hoc 应用零弹窗直接打开；后续
+升级走 Sparkle（验我们自己的 EdDSA 签名，与公证无关）。脚本源码在
+`scripts/install-mac.sh`，改动后需重新上传到桶（key `install-mac.sh`）。
+浏览器直接下载 DMG 的用户会遇到 Gatekeeper 拦截，需在
+系统设置 → 隐私与安全性 点"仍要打开"——下载页应主推脚本方式。
+
+以后加入 Apple Developer Program 后按下述配置证书与公证，CI 检测到
+secrets 自动转正，存量 ad-hoc 用户经 Sparkle 无缝升级到公证版本。
 
 1. 加入 [Apple Developer Program](https://developer.apple.com/programs/)（$99/年）。
 2. 在发布 Mac 的 Xcode（Settings → Accounts → Manage Certificates）创建

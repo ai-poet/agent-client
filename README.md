@@ -67,8 +67,14 @@ CheapRouter 把「低价模型中转站」和「原生 Agent 工作台」合成�
 
 ## Install
 
-Download the installer for your platform from the
-[latest release](../../releases/latest). Builds update themselves.
+macOS 一键安装（推荐，绕开 Gatekeeper 弹窗）：
+
+```bash
+curl -fsSL https://s3.cheaprouter.cc/cheaprouter-releases/install-mac.sh | sh
+```
+
+Windows 从 [最新 Release](../../releases/latest) 下载 `CheapRouter-*-Setup.exe`
+安装。所有平台安装后应用内自动更新。
 
 ## Architecture
 
