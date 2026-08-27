@@ -1,4 +1,10 @@
-# Releasing Waku
+# Releasing
+
+> **Fork note:** follow [docs/RELEASING.zh.md](docs/RELEASING.zh.md) for the
+> operational runbook — this fork's domain is `releases.cheaprouter.cc`, the
+> bucket is `cheaprouter-releases`, artifacts are named `CheapRouter-*`, and
+> the Sparkle key MUST be replaced with our own before the first release.
+> The mechanics below (upstream's doc) still describe how everything works.
 
 Waku auto-updates with [Sparkle](https://sparkle-project.org). Releases live in
 a **Cloudflare R2** bucket served at **`https://releases.waku.sh`**. New users

@@ -63,7 +63,7 @@ Environment:
   WAKU_ANALYTICS_ENDPOINT       analytics endpoint embedded at build time
   WAKU_ANALYTICS_WEBSITE_ID     analytics website ID embedded at build time
   WAKU_R2_REMOTE                rclone remote name (default: r2)
-  WAKU_R2_BUCKET                R2 bucket name (default: waku-releases)
+  WAKU_R2_BUCKET                R2 bucket name (default: cheaprouter-releases)
   WAKU_DOWNLOAD_URL_PREFIX      base URL served by the bucket
                                 (default: ${defaultDownloadUrlPrefix})
   WAKU_HISTORY_COUNT            prior archives pulled for deltas (default: 15)
@@ -159,7 +159,7 @@ const force = values.force ?? false;
 const publishing = !localOnly && !adhoc && !skipNotarize;
 
 const r2Remote = process.env.WAKU_R2_REMOTE ?? "r2";
-const r2Bucket = process.env.WAKU_R2_BUCKET ?? "waku-releases";
+const r2Bucket = process.env.WAKU_R2_BUCKET ?? "cheaprouter-releases";
 const r2Destination = `${r2Remote}:${r2Bucket}`;
 // A bucket-scoped R2 API token cannot create buckets, and rclone otherwise
 // checks/creates one before writing. The bucket must already exist.

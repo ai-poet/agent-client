@@ -211,7 +211,7 @@ jobs:
       # release's bundles are still sitting in `target/release` when this one
       # starts. Cargo does not own them, so nothing else clears them.
       - name: Clear stale bundles
-        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/waku-*.zip, target/release/Waku-*-Setup.exe
+        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/cheaprouter-*.zip, target/release/CheapRouter-*-Setup.exe
 
       - name: Bundle
         env:
@@ -223,8 +223,8 @@ jobs:
         with:
           name: windows-x86_64
           path: |
-            target/release/waku-${{ needs.version.outputs.version }}-x86_64-pc-windows-msvc.zip
-            target/release/Waku-${{ needs.version.outputs.version }}-x86_64-Setup.exe
+            target/release/cheaprouter-${{ needs.version.outputs.version }}-x86_64-pc-windows-msvc.zip
+            target/release/CheapRouter-${{ needs.version.outputs.version }}-x86_64-Setup.exe
           if-no-files-found: error
 
   windows-arm64:
@@ -261,7 +261,7 @@ jobs:
       # release's bundles are still sitting in `target/release` when this one
       # starts. Cargo does not own them, so nothing else clears them.
       - name: Clear stale bundles
-        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/waku-*.zip, target/release/Waku-*-Setup.exe
+        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/cheaprouter-*.zip, target/release/CheapRouter-*-Setup.exe
 
       - name: Bundle
         env:
@@ -273,8 +273,8 @@ jobs:
         with:
           name: windows-arm64
           path: |
-            target/release/waku-${{ needs.version.outputs.version }}-aarch64-pc-windows-msvc.zip
-            target/release/Waku-${{ needs.version.outputs.version }}-aarch64-Setup.exe
+            target/release/cheaprouter-${{ needs.version.outputs.version }}-aarch64-pc-windows-msvc.zip
+            target/release/CheapRouter-${{ needs.version.outputs.version }}-aarch64-Setup.exe
           if-no-files-found: error
 
   macos:
@@ -345,9 +345,9 @@ jobs:
         with:
           name: macos
           path: |
-            dist/Waku-${{ needs.version.outputs.version }}.dmg
-            dist/Waku-${{ needs.version.outputs.version }}.md
-            dist/Waku-${{ needs.version.outputs.version }}.zip
+            dist/CheapRouter-${{ needs.version.outputs.version }}.dmg
+            dist/CheapRouter-${{ needs.version.outputs.version }}.md
+            dist/CheapRouter-${{ needs.version.outputs.version }}.zip
             dist/appcast.xml
           if-no-files-found: error
 

@@ -21,7 +21,8 @@ const projectRoot = resolve(import.meta.dir, "..");
 
 // Fork: default to our release host; keep in step with
 // SUB2API_RELEASES_BASE_URL (build.rs, crates/sub2api/src/brand.rs).
-export const defaultDownloadUrlPrefix = "https://releases.cheaprouter.cc/";
+export const defaultDownloadUrlPrefix =
+  "https://s3.cheaprouter.cc/cheaprouter-releases/";
 
 /** Locate Sparkle's `generate_appcast`: SPARKLE_BIN first, then the pinned
  *  distribution scripts/bundle.sh caches under .waku-cache, then PATH. */

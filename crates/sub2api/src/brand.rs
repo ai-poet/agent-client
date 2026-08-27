@@ -30,10 +30,11 @@ pub const MANAGED_SERVICE_URL: &str = match option_env!("SUB2API_MANAGED_SERVICE
     None => "https://cheaprouter.cc",
 };
 
-/// Host serving the Sparkle appcast and release artifacts.
+/// Base URL serving the Sparkle appcast and release artifacts — the MinIO
+/// bucket, path-style, so no extra proxy sits in front of it.
 pub const RELEASES_BASE_URL: &str = match option_env!("SUB2API_RELEASES_BASE_URL") {
     Some(url) => url,
-    None => "https://releases.cheaprouter.cc",
+    None => "https://s3.cheaprouter.cc/cheaprouter-releases",
 };
 
 /// Application data directory name under the user's home directory.

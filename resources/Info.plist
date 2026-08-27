@@ -38,7 +38,7 @@
          crates/sub2api/src/brand.rs); build.rs reads SUPublicEDKey from this
          file, so the two platforms cannot trust different keys. -->
     <key>SUFeedURL</key>
-    <string>https://releases.cheaprouter.cc/appcast.xml</string>
+    <string>https://s3.cheaprouter.cc/cheaprouter-releases/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>gv9GLMPjH5yMQkZMFXnoNfHOyL8/7KGzl/jzAqlzZZY=</string>
 	<key>NSHighResolutionCapable</key>

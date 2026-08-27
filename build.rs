@@ -51,7 +51,10 @@ fn export_sparkle_public_key() {
 fn export_brand() {
     for (name, fallback) in [
         ("SUB2API_BRAND_NAME", "CheapRouter"),
-        ("SUB2API_RELEASES_BASE_URL", "https://releases.cheaprouter.cc"),
+        (
+            "SUB2API_RELEASES_BASE_URL",
+            "https://s3.cheaprouter.cc/cheaprouter-releases",
+        ),
     ] {
         println!("cargo:rerun-if-env-changed={name}");
         let value = std::env::var(name)
