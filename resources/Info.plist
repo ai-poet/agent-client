@@ -32,15 +32,16 @@
          RELEASING.md).
 
          Fork change: this points at our own release channel, and SUPublicEDKey
-         MUST be replaced with our own signing key before the first release —
-         upstream's key is left here only so debug builds link. Keep this host
+         is the fork's OWN key (minted 2026-08-27; the private half lives in
+         the maintainer's password manager and the SPARKLE_PRIVATE_KEY CI
+         secret — losing it strands every existing install). Keep this host
          in step with SUB2API_RELEASES_BASE_URL (see build.rs and
          crates/sub2api/src/brand.rs); build.rs reads SUPublicEDKey from this
          file, so the two platforms cannot trust different keys. -->
     <key>SUFeedURL</key>
     <string>https://s3.cheaprouter.cc/cheaprouter-releases/appcast.xml</string>
     <key>SUPublicEDKey</key>
-    <string>gv9GLMPjH5yMQkZMFXnoNfHOyL8/7KGzl/jzAqlzZZY=</string>
+    <string>IUd9ZU+OYtZIzWi/MmSrVKXY4cbfrTC3ahtEz52H8ZI=</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSPrincipalClass</key>
