@@ -29,10 +29,20 @@ pub fn app_server_args(binary: &Path) -> &'static [&'static str] {
 /// fails to launch (`MCP startup failed … os error 3`), which surfaces as an
 /// error inside every session — for a tool that is redundant here anyway: the
 /// agent already has a full shell, and upstream itself disables `node_repl`
-/// whenever it substitutes its own REPL. Unknown keys are accepted by older
-/// Codex versions, so this is safe across the range.
+/// whenever it substitutes its own REPL.
+///
+/// The stub `command` is never executed — `enabled=false` keeps the entry
+/// from spawning — but it must be present: newer Codex validates every
+/// `mcp_servers` table as a transport and rejects one that has neither
+/// `command` nor `url` with `invalid transport`, which kills config loading
+/// (and with it every session) outright.
 pub fn session_config_args() -> &'static [&'static str] {
-    &["-c", "mcp_servers.node_repl.enabled=false"]
+    &[
+        "-c",
+        "mcp_servers.node_repl.command=\"/usr/bin/true\"",
+        "-c",
+        "mcp_servers.node_repl.enabled=false",
+    ]
 }
 
 /// Whether this binary's `app-server` accepts `--stdio`, cached per path.
@@ -95,8 +105,17 @@ mod tests {
     #[test]
     fn session_config_disables_the_builtin_node_repl() {
         let args = session_config_args();
-        assert_eq!(args[0], "-c");
-        assert_eq!(args[1], "mcp_servers.node_repl.enabled=false");
+        // The disabled entry still carries a stub command: newer Codex
+        // rejects a transport-less `mcp_servers` table as `invalid transport`.
+        assert_eq!(
+            args,
+            [
+                "-c",
+                "mcp_servers.node_repl.command=\"/usr/bin/true\"",
+                "-c",
+                "mcp_servers.node_repl.enabled=false",
+            ]
+        );
     }
 
     #[test]
