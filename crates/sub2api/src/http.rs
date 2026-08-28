@@ -119,11 +119,22 @@ impl Request {
             .timeout_seconds
             .unwrap_or(DEFAULT_TIMEOUT_SECONDS)
             .to_string();
-        let mut child = Command::new(CURL_PATH)
+        let mut command = Command::new(CURL_PATH);
+        command
             .args(["-sS", "--max-time", &timeout, "-D", "-", "-K", "-", url])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        // The Windows build is a GUI-subsystem binary, so every console child
+        // would otherwise flash its own console window — and this client runs
+        // on every balance poll and payment status check.
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+        let mut child = command
             .spawn()
             .with_context(|| format!("could not run {CURL_PATH}"))?;
         {
