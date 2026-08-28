@@ -48,6 +48,21 @@ export function findGenerateAppcast(): string | null {
   return Bun.which("generate_appcast");
 }
 
+/** Sparkle's generate_appcast accepts a base64 secret that decodes to 32
+ *  bytes (the Ed25519 seed) or 96 bytes (legacy orlp private‖public) — a
+ *  64-byte secret fails its decode outright (common_cli/Secret.swift). Our
+ *  key is stored in libsodium's 64-byte layout (seed then public), the form
+ *  the Windows feed signer consumes, so hand Sparkle just the seed half; it
+ *  re-derives the public key from it. */
+function sparkleSecret(secret: string | undefined): string | undefined {
+  const trimmed = secret?.trim();
+  if (!trimmed) return undefined;
+  const bytes = Buffer.from(trimmed, "base64");
+  return bytes.length === 64
+    ? bytes.subarray(0, 32).toString("base64")
+    : trimmed;
+}
+
 /** Sign the archives in `updatesDir` and (re)write appcast.xml. */
 export async function generateAppcast(
   updatesDir: string,
@@ -64,7 +79,7 @@ export async function generateAppcast(
   // Same prefix for both: archives and the Waku-<version>.md release notes are
   // served from the same origin. The notes prefix makes generate_appcast emit
   // <sparkle:releaseNotesLink> for any notes file matching an archive name.
-  const privateKey = process.env.SPARKLE_PRIVATE_KEY?.trim();
+  const privateKey = sparkleSecret(process.env.SPARKLE_PRIVATE_KEY);
   const command = [
     generator,
     "--download-url-prefix",
