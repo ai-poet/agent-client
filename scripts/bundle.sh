@@ -44,8 +44,14 @@ case "$profile" in
     icon_file="AppIconDev.icns"
     ;;
   release)
-    app_name="Waku"
-    helper_name="Waku Computer Use"
+    # Fork change: the release bundle carries the brand, matching what
+    # scripts/release.ts expects to find in target/release. Keep the fallback
+    # chain identical to release.ts and build.rs. The bundle identifier stays
+    # upstream's `sh.waku` on purpose (see crates/waku-protocol/src/identity.rs),
+    # and the debug bundle keeps upstream's "Waku Debug" name because the dev
+    # tooling (dev.ts, delete-debug-app.ts) is keyed to it.
+    app_name="${SUB2API_BRAND_NAME:-CheapRouter}"
+    helper_name="$app_name Computer Use"
     bundle_identifier="sh.waku"
     icon_file="AppIcon.icns"
     ;;
