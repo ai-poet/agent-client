@@ -16,6 +16,8 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.1.17]
+
 - Fix Codex sessions reporting a startup error for the geo-blocked OpenAI docs MCP server
 - Sign-in now routes each platform through its first available group automatically; the "account default" option is removed
 - Fix turns failing with "turn starting checkpoint … is unavailable" when the starting snapshot ref disappears mid-turn (agent-run git gc, rewind cleanup); the checkpoint now falls back to the previous turn's diff base
