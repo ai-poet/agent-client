@@ -80,7 +80,7 @@ pub fn command_for_provider(program: impl AsRef<OsStr>, _provider_id: &str) -> C
 /// Windows needs this most: the login-shell probe there is best-effort — no
 /// PowerShell may be present, and a profile can refuse to load — so a
 /// GUI-launched Waku can still be running with only the `PATH` it inherited.
-fn child_search_path(program: &Path) -> Option<OsString> {
+pub(crate) fn child_search_path(program: &Path) -> Option<OsString> {
     let mut directories = executable_search_paths();
     // Last, not first: an install outside the known prefixes still finds its
     // runtime, while the user's own `PATH` order decides everything else.

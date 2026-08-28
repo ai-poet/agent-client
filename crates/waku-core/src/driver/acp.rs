@@ -232,17 +232,35 @@ fn sdk_agent(
             )
         })
         .collect::<Vec<_>>();
+    // The same `PATH` every other provider spawn gets from
+    // `command_env::command`: launcher-based installs (an npm `.cmd` shim or a
+    // `/usr/bin/env node` shebang needing `node` on the child's `PATH`) only
+    // work when the agent runs with the directories Waku itself searched.
+    if let Some(search_path) = crate::command_env::child_search_path(Path::new(binary)) {
+        environment.push(("PATH".to_owned(), search_path.to_string_lossy().into_owned()));
+    }
     environment.append(&mut launch.env);
     environment.extend(computer_env);
 
-    // `AcpAgentConfig` deliberately contains only argv and environment. macOS
-    // `env -C` supplies the session cwd without a shell, preserving exact
-    // argument boundaries and the SDK's process-group lifecycle management.
-    let mut args = vec!["-C".to_owned(), cwd.to_owned(), binary.to_owned()];
-    args.extend(launch.args);
-    let config = AcpAgentConfig::new("/usr/bin/env")
-        .args(args)
-        .envs(environment);
+    // `AcpAgentConfig` deliberately contains only argv and environment. On
+    // Unix, `env -C` supplies the session cwd without a shell, preserving
+    // exact argument boundaries and the SDK's process-group lifecycle
+    // management. Windows has no `/usr/bin/env`, so the binary is spawned
+    // directly and inherits Waku's own cwd; the agent still works in the
+    // session directory because ACP carries it in `session/new`,
+    // `session/load`, and `session/resume` requests.
+    #[cfg(not(windows))]
+    let config = {
+        let mut args = vec!["-C".to_owned(), cwd.to_owned(), binary.to_owned()];
+        args.extend(launch.args);
+        AcpAgentConfig::new("/usr/bin/env").args(args)
+    };
+    #[cfg(windows)]
+    let config = {
+        let _ = cwd;
+        AcpAgentConfig::new(binary).args(launch.args)
+    };
+    let config = config.envs(environment);
     Ok(AcpAgent::new(config).with_debug(move |line, direction| {
         if direction != LineDirection::Stderr || line.trim().is_empty() {
             return;

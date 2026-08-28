@@ -185,9 +185,15 @@ if (explicitBuildNumber && !/^\d+(?:\.\d+){0,2}$/.test(explicitBuildNumber)) {
 if (!Number.isSafeInteger(historyCount) || historyCount < 0) {
   throw new Error("WAKU_HISTORY_COUNT must be a non-negative integer.");
 }
-if (!values["skip-build"] && (!analyticsEndpoint || !analyticsWebsiteId)) {
+// Fork: telemetry is compiled out unless SUB2API_ANALYTICS_ENABLED is set,
+// so the analytics pair is only required when someone opted back in.
+if (
+  !values["skip-build"] &&
+  process.env.SUB2API_ANALYTICS_ENABLED &&
+  (!analyticsEndpoint || !analyticsWebsiteId)
+) {
   throw new Error(
-    "Set WAKU_ANALYTICS_ENDPOINT and WAKU_ANALYTICS_WEBSITE_ID before building a release.",
+    "SUB2API_ANALYTICS_ENABLED is set, so WAKU_ANALYTICS_ENDPOINT and WAKU_ANALYTICS_WEBSITE_ID are required.",
   );
 }
 
