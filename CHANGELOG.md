@@ -16,6 +16,10 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.1.18]
+
+- Fix a console window flashing on Windows for every cloud-account request (balance refresh, announcements, group status, payment polling)
+
 ## [0.1.17]
 
 - Fix Codex sessions reporting a startup error for the geo-blocked OpenAI docs MCP server
