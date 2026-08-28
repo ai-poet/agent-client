@@ -102,12 +102,18 @@ pub fn capture_turn(cwd: &Path, session_id: Uuid, turn_count: usize) -> anyhow::
     } else {
         let start_ref = turn_start_ref(session_id, turn_count);
         let legacy_ref = checkpoint_ref(session_id, turn_count - 1);
-        let diff_base = if has_ref(cwd, &start_ref) {
+        // Resolved once, then carried as a raw commit id: the provider runs
+        // arbitrary commands in this repository during the turn, so the ref
+        // can be deleted or repacked between any two git calls (a rewind's
+        // cleanup can remove it too). A commit id stays valid regardless, and
+        // a start ref that is already gone degrades to the legacy base
+        // instead of failing the whole capture.
+        let diff_base = if let Some(start_commit) = resolve_ref(cwd, &start_ref) {
             prepare_turn_diff_base(
                 cwd,
                 session_id,
                 turn_count,
-                &start_ref,
+                &start_commit,
                 end_head.as_deref(),
                 end_branch.as_deref(),
             )?
@@ -220,11 +226,11 @@ fn prepare_turn_diff_base(
     cwd: &Path,
     session_id: Uuid,
     turn_count: usize,
-    start_ref: &str,
+    start_commit: &str,
     end_head: Option<&str>,
     end_branch: Option<&str>,
 ) -> anyhow::Result<String> {
-    let metadata = turn_start_metadata(cwd, start_ref)?;
+    let metadata = turn_start_metadata(cwd, start_commit)?;
     let same_line = match (metadata.branch.as_deref(), end_branch) {
         (Some(start), Some(end)) => start == end,
         (None, None) => metadata.head.as_deref() == end_head,
@@ -232,19 +238,18 @@ fn prepare_turn_diff_base(
     };
 
     let commit = if same_line {
-        resolve_ref(cwd, start_ref)
-            .ok_or_else(|| anyhow!("turn starting checkpoint `{start_ref}` is unavailable"))?
+        start_commit.to_owned()
     } else {
-        let target_base = target_branch_start(cwd, start_ref, &metadata, end_head, end_branch)?;
-        virtual_branch_start(cwd, start_ref, metadata.head.as_deref(), &target_base)?
+        let target_base = target_branch_start(cwd, start_commit, &metadata, end_head, end_branch)?;
+        virtual_branch_start(cwd, start_commit, metadata.head.as_deref(), &target_base)?
     };
     let diff_ref = turn_diff_base_ref(session_id, turn_count);
     git_output(cwd, ["update-ref", &diff_ref, &commit])?;
     Ok(diff_ref)
 }
 
-fn turn_start_metadata(cwd: &Path, start_ref: &str) -> anyhow::Result<TurnStartMetadata> {
-    let message = git_output(cwd, ["show", "-s", "--format=%B", start_ref])?;
+fn turn_start_metadata(cwd: &Path, start_commit: &str) -> anyhow::Result<TurnStartMetadata> {
+    let message = git_output(cwd, ["show", "-s", "--format=%B", start_commit])?;
     let encoded = message
         .lines()
         .find_map(|line| line.strip_prefix(TURN_START_METADATA_PREFIX))
@@ -254,7 +259,7 @@ fn turn_start_metadata(cwd: &Path, start_ref: &str) -> anyhow::Result<TurnStartM
 
 fn target_branch_start(
     cwd: &Path,
-    start_ref: &str,
+    start_commit: &str,
     metadata: &TurnStartMetadata,
     end_head: Option<&str>,
     end_branch: Option<&str>,
@@ -275,7 +280,7 @@ fn target_branch_start(
             "--reverse",
             end_head,
             "--not",
-            start_ref,
+            start_commit,
         ],
     )?;
     let Some(first_new_commit) = new_commits.lines().find(|line| !line.trim().is_empty()) else {
@@ -286,7 +291,7 @@ fn target_branch_start(
 
 fn virtual_branch_start(
     cwd: &Path,
-    start_ref: &str,
+    start_commit: &str,
     start_head: Option<&str>,
     target_base: &str,
 ) -> anyhow::Result<String> {
@@ -294,10 +299,9 @@ fn virtual_branch_start(
         return Ok(target_base.to_owned());
     };
     if start_head == target_base {
-        return resolve_ref(cwd, start_ref)
-            .ok_or_else(|| anyhow!("turn starting checkpoint `{start_ref}` is unavailable"));
+        return Ok(start_commit.to_owned());
     }
-    if git_output(cwd, ["diff", "--name-only", start_head, start_ref])?
+    if git_output(cwd, ["diff", "--name-only", start_head, start_commit])?
         .trim()
         .is_empty()
     {
@@ -315,7 +319,7 @@ fn virtual_branch_start(
             "--merge-base",
             start_head,
             target_base,
-            start_ref,
+            start_commit,
         ],
     )?;
     let tree = output
@@ -927,6 +931,52 @@ mod tests {
 
         // Nothing left to remove is a no-op, not a failure.
         delete_session_refs(&directory, fork, 3).unwrap();
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    /// The provider runs arbitrary commands in the repository during a turn,
+    /// so the starting ref can vanish (gc, pack-refs, a rewind's cleanup)
+    /// before the ending capture reads it. The capture must fall back to the
+    /// previous turn's checkpoint, never fail the turn.
+    #[test]
+    fn a_start_ref_deleted_mid_turn_degrades_to_the_legacy_diff_base() {
+        let directory = std::env::temp_dir().join(format!("waku-checkpoints-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        git_ok(&directory, &["init", "--quiet"]);
+        git_ok(&directory, &["config", "core.autocrlf", "false"]);
+        fs::write(directory.join("tracked.txt"), "baseline\n").unwrap();
+        git_ok(&directory, &["add", "tracked.txt"]);
+        git_ok(
+            &directory,
+            &[
+                "-c",
+                "user.name=Waku Test",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "baseline",
+            ],
+        );
+
+        let session = Uuid::new_v4();
+        capture_turn(&directory, session, 0).unwrap();
+        capture_turn_start(&directory, session, 1).unwrap();
+        fs::write(directory.join("tracked.txt"), "edited\n").unwrap();
+        delete_ref(&directory, &turn_start_ref(session, 1)).unwrap();
+
+        let checkpoint = capture_turn(&directory, session, 1).unwrap();
+        assert_eq!(checkpoint.status, CheckpointStatus::Ready);
+        assert_eq!(
+            checkpoint
+                .files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            ["tracked.txt"],
+            "the turn's edit is still attributed via the previous checkpoint"
+        );
         fs::remove_dir_all(&directory).ok();
     }
 

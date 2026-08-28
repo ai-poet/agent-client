@@ -2166,8 +2166,6 @@ cloud.group_detail:
   en: "Which pool your requests route through. Switching writes each CLI's own configuration files immediately (~/.claude/settings.json, ~/.codex, ~/.grok) — your originals are backed up and restored on sign-out. Running sessions keep their current route."
 cloud.group_default:
   en: "Account default"
-cloud.group_default_detail:
-  en: "Let the service choose"
 cloud.group_active:
   en: "Active"
 cloud.redeem_title:

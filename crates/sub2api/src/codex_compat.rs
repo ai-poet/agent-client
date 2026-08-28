@@ -42,6 +42,16 @@ pub fn session_config_args() -> &'static [&'static str] {
         "mcp_servers.node_repl.command=\"/usr/bin/true\"",
         "-c",
         "mcp_servers.node_repl.enabled=false",
+        // Codex's bundled developer-docs MCP (an HTTP server behind the
+        // `$openai-docs` skill) is geo-blocked for our users and fails every
+        // session with an HTTP 403 startup error. The stub is its real `url`
+        // so the entry parses as an HTTP transport whether or not a lower
+        // config layer also defines it; a `command` stub would collide with
+        // such a layer's `url` and fail as `invalid transport`.
+        "-c",
+        "mcp_servers.openaiDeveloperDocs.url=\"https://developers.openai.com/mcp\"",
+        "-c",
+        "mcp_servers.openaiDeveloperDocs.enabled=false",
     ]
 }
 
@@ -103,10 +113,13 @@ mod tests {
     }
 
     #[test]
-    fn session_config_disables_the_builtin_node_repl() {
+    fn session_config_disables_the_builtin_servers() {
         let args = session_config_args();
-        // The disabled entry still carries a stub command: newer Codex
+        // Every disabled entry still carries a transport stub: newer Codex
         // rejects a transport-less `mcp_servers` table as `invalid transport`.
+        // The stub matches the transport a lower config layer would declare
+        // (stdio for node_repl, HTTP for the docs server) so the merged table
+        // never mixes `command` with `url`.
         assert_eq!(
             args,
             [
@@ -114,6 +127,10 @@ mod tests {
                 "mcp_servers.node_repl.command=\"/usr/bin/true\"",
                 "-c",
                 "mcp_servers.node_repl.enabled=false",
+                "-c",
+                "mcp_servers.openaiDeveloperDocs.url=\"https://developers.openai.com/mcp\"",
+                "-c",
+                "mcp_servers.openaiDeveloperDocs.enabled=false",
             ]
         );
     }

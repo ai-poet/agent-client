@@ -316,6 +316,71 @@ impl Waku {
                 this.adopt_cloud_tokens(credentials);
                 this.cloud_account.groups = groups;
                 this.cloud_account.referral = referral;
+                this.ensure_cloud_group_bindings(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Bind every platform that has groups but no selection yet to its first
+    /// group. There is no "account default" choice: the server-side fallback
+    /// is invisible to the user, so an explicit group keeps the routing (and
+    /// the switcher menus) honest. Runs after each group fetch, which also
+    /// migrates accounts signed in before this rule existed.
+    fn ensure_cloud_group_bindings(&mut self, cx: &mut Context<Self>) {
+        let Some(credentials) = self.cloud_account.credentials.clone() else {
+            return;
+        };
+        if self.cloud_account.busy {
+            return;
+        }
+        let pending: Vec<(String, i64)> = cloud_platforms(&self.cloud_account.groups)
+            .into_iter()
+            .filter(|platform| {
+                sub2api::bound_group_for_platform(&credentials, platform).is_none()
+            })
+            .filter_map(|platform| {
+                self.cloud_account
+                    .groups
+                    .iter()
+                    .find(|group| group.platform == platform)
+                    .map(|group| (platform, group.id))
+            })
+            .collect();
+        if pending.is_empty() {
+            return;
+        }
+        self.cloud_account.busy = true;
+        cx.notify();
+
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut credentials = credentials;
+                    for (platform, group_id) in &pending {
+                        sub2api::bind_group_for_platform(
+                            &mut credentials,
+                            platform,
+                            Some(*group_id),
+                        )?;
+                    }
+                    anyhow::Ok(credentials)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.cloud_account.busy = false;
+                match result {
+                    Ok(renewed) => {
+                        this.cloud_account.credentials = Some(renewed);
+                        this.apply_cloud_routing();
+                    }
+                    // No toast: nothing was user-initiated here. The balance
+                    // poll surfaces a broken session on its own, and the next
+                    // group fetch retries the binding.
+                    Err(error) => this.cloud_account.error = Some(format!("{error:#}")),
+                }
                 cx.notify();
             });
         })
@@ -646,31 +711,22 @@ impl Waku {
                     .text_color(theme.text_secondary)
                     .child(platform_display_name(&platform)),
             );
-            for group in std::iter::once(None).chain(
-                self.cloud_account
-                    .groups
-                    .iter()
-                    .filter(|group| group.platform == platform)
-                    .map(|group| Some(group.clone())),
-            ) {
-                let (id, name, detail) = match &group {
-                    Some(group) => (
-                        Some(group.id),
-                        group.name.clone(),
-                        group_status_suffix(
-                            group,
-                            self.cloud_account
-                                .group_status
-                                .iter()
-                                .find(|status| status.group_id == group.id),
-                        ),
-                    ),
-                    None => (
-                        None,
-                        tr!("cloud.group_default"),
-                        tr!("cloud.group_default_detail"),
-                    ),
-                };
+            for group in self
+                .cloud_account
+                .groups
+                .iter()
+                .filter(|group| group.platform == platform)
+                .cloned()
+            {
+                let id = Some(group.id);
+                let name = group.name.clone();
+                let detail = group_status_suffix(
+                    &group,
+                    self.cloud_account
+                        .group_status
+                        .iter()
+                        .find(|status| status.group_id == group.id),
+                );
                 let active = bound == id;
                 let row_platform = platform.clone();
                 rows = rows.child(
@@ -1026,17 +1082,6 @@ impl Waku {
                         current,
                         move |_| {
                             let mut entries = Vec::new();
-                            let default_platform = submenu_platform.clone();
-                            let default_weak = submenu_weak.clone();
-                            entries.push(
-                                MenuItem::new(tr!("cloud.group_default"), move |_, cx| {
-                                    let platform = default_platform.clone();
-                                    let _ = default_weak.update(cx, |this, cx| {
-                                        this.select_cloud_group(platform, None, cx);
-                                    });
-                                })
-                                .selected(bound.is_none()),
-                            );
                             for (group_id, _, label) in &platform_groups {
                                 let entry_platform = submenu_platform.clone();
                                 let entry_weak = submenu_weak.clone();

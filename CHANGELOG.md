@@ -16,6 +16,10 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- Fix Codex sessions reporting a startup error for the geo-blocked OpenAI docs MCP server
+- Sign-in now routes each platform through its first available group automatically; the "account default" option is removed
+- Fix turns failing with "turn starting checkpoint … is unavailable" when the starting snapshot ref disappears mid-turn (agent-run git gc, rewind cleanup); the checkpoint now falls back to the previous turn's diff base
+
 ## [0.1.16]
 
 - Codex thread goals: type /goal to set a persistent objective the task keeps pursuing — before or after the first message — with its autonomous pursuit streaming into the transcript, a status chip showing live budget or elapsed time, and a dialog to edit, pause, resume, or clear the goal (also in Waku Web)
