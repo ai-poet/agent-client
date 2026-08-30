@@ -446,8 +446,11 @@ Rewinding to turn zero clears the cursor and starts clean. The CLI also exposes
 rewrite — unverified, and the reason it is still hand-rolled is that the flag was
 found after the fork code was written.
 
-**Models** — no discovery command; the catalog is a curated fixed list
-([model_catalog.rs:52](../crates/waku-core/src/model_catalog.rs#L52)).
+**Models** — the sessionless SDK `initialize` control response publishes the
+same account- and configuration-aware list used by `/model`, including custom
+routes resolved through CC Switch. Waku probes it in the background and caches
+the last successful catalog; the curated list is only the startup/failure
+fallback ([model_catalog.rs](../crates/waku-core/src/model_catalog.rs)).
 
 ---
 

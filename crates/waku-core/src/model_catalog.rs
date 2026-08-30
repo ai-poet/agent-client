@@ -120,10 +120,7 @@ pub fn discover_catalog(
         // the picker aligned with the modes advertised by the current CLI.
         ProviderKind::Amp => (Vec::new(), None),
         ProviderKind::Codex => (discover_codex_models(binary), None),
-        // Claude Code accepts model aliases and full IDs but does not expose a
-        // model inventory command. Keep this catalog aligned with the
-        // version-gated list used by T3 Code.
-        ProviderKind::Claude => (Vec::new(), None),
+        ProviderKind::Claude => (discover_claude_models(binary), None),
         ProviderKind::Cursor => (discover_cursor_models(binary), None),
         ProviderKind::DeepSeek => discover_deepseek_catalog(binary),
         ProviderKind::Fx => (discover_fx_models(binary), None),
@@ -192,6 +189,89 @@ fn write_models_file(path: &Path, models: &[ProviderModel]) -> std::io::Result<(
     let temporary = path.with_extension("json.tmp");
     std::fs::write(&temporary, serde_json::to_vec(models)?)?;
     std::fs::rename(temporary, path)
+}
+
+/// Claude Code's sessionless SDK initialization response carries the exact
+/// catalog behind `/model`. Unlike a fixed Anthropic list, it reflects account
+/// availability and role mappings supplied by tools such as CC Switch.
+fn discover_claude_models(binary: &Path) -> Vec<ProviderModel> {
+    crate::claude_metadata::initialize(binary, None, "user")
+        .map(|value| parse_claude_models(&value))
+        .unwrap_or_default()
+}
+
+fn parse_claude_models(value: &Value) -> Vec<ProviderModel> {
+    value
+        .pointer("/response/response/models")
+        .or_else(|| value.get("models"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let id = entry
+                .get("value")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|id| !id.is_empty())?;
+            let resolved = entry
+                .get("resolvedModel")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|model| !model.is_empty());
+            let name = entry
+                .get("displayName")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+                .or_else(|| resolved.map(display_name_from_slug))
+                .unwrap_or_else(|| display_name_from_slug(id));
+
+            let mut model = ProviderModel::new(id, name);
+            model.is_default =
+                id == "default" || entry.get("isDefault").and_then(Value::as_bool) == Some(true);
+            if entry.get("supportsEffort").and_then(Value::as_bool) != Some(false) {
+                model.reasoning_efforts = entry
+                    .get("supportedEffortLevels")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|effort| !effort.is_empty())
+                    .map(|effort| ProviderModelOption::new(effort, reasoning_effort_label(effort)))
+                    .collect();
+                // `ultracode` is Waku's orchestration effort. Claude accepts
+                // it wherever the provider metadata says xhigh is supported.
+                if model
+                    .reasoning_efforts
+                    .iter()
+                    .any(|option| option.id == "xhigh")
+                {
+                    model.reasoning_efforts.push(ProviderModelOption::new(
+                        "ultracode",
+                        reasoning_effort_label("ultracode"),
+                    ));
+                }
+                model.default_reasoning_effort = ["high", "medium"]
+                    .into_iter()
+                    .find(|preferred| {
+                        model
+                            .reasoning_efforts
+                            .iter()
+                            .any(|option| option.id == *preferred)
+                    })
+                    .or_else(|| {
+                        model
+                            .reasoning_efforts
+                            .first()
+                            .map(|option| option.id.as_str())
+                    })
+                    .map(str::to_owned);
+            }
+            Some(model)
+        })
+        .collect()
 }
 
 fn discover_cursor_models(binary: &Path) -> Vec<ProviderModel> {
@@ -1150,11 +1230,11 @@ mod tests {
     use super::*;
 
     #[cfg(unix)]
-    fn write_fake_pi(name: &str, contents: &str) -> PathBuf {
+    fn write_fake_model_cli(name: &str, contents: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt as _;
 
         let path = std::env::temp_dir().join(format!(
-            "waku-{name}-{}-pi-model-discovery.sh",
+            "waku-{name}-{}-model-discovery.sh",
             std::process::id()
         ));
         std::fs::write(&path, contents).unwrap();
@@ -1228,6 +1308,64 @@ mod tests {
             ["low", "medium", "high", "xhigh", "max"]
         );
         assert!(efforts("claude-haiku-4-5").is_empty());
+    }
+
+    #[test]
+    fn parses_claude_initialization_models_without_repeating_resolved_ids() {
+        let models = parse_claude_models(&json!({
+            "type": "control_response",
+            "response": {"response": {"models": [
+                {
+                    "value": "default",
+                    "resolvedModel": "deepseek-v4-pro",
+                    "displayName": "DeepSeek V4 Pro",
+                    "supportsEffort": true,
+                    "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]
+                },
+                {
+                    "value": "sonnet",
+                    "resolvedModel": "claude-sonnet-5",
+                    "displayName": "Sonnet",
+                    "supportsEffort": false
+                },
+                {"value": "  ", "displayName": "ignored"}
+            ]}}
+        }));
+
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "default");
+        assert_eq!(models[0].name, "DeepSeek V4 Pro");
+        assert!(models[0].is_default);
+        assert_eq!(
+            models[0]
+                .reasoning_efforts
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
+            ["low", "medium", "high", "xhigh", "max", "ultracode"]
+        );
+        assert_eq!(models[0].default_reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(models[1].name, "Sonnet");
+        assert!(models[1].reasoning_efforts.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discovers_claude_models_from_sessionless_initialization() {
+        let binary = write_fake_model_cli(
+            "claude",
+            r#"#!/bin/sh
+read -r request
+printf '%s\n' '{"type":"control_response","response":{"request_id":"waku-initialize-catalog","response":{"models":[{"value":"cc-switch-model","resolvedModel":"cc-switch-model","displayName":"CC Switch Model"}]}}}'
+"#,
+        );
+
+        let models = discover_claude_models(&binary);
+
+        let _ = std::fs::remove_file(binary);
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "cc-switch-model");
+        assert_eq!(models[0].name, "CC Switch Model");
     }
 
     #[test]
@@ -1599,7 +1737,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn pi_rpc_discovery_keeps_model_provider_extensions_enabled() {
-        let binary = write_fake_pi(
+        let binary = write_fake_model_cli(
             "extensions",
             r#"#!/bin/sh
 for argument in "$@"; do

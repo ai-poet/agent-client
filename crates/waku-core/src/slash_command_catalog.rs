@@ -17,9 +17,6 @@ use waku_protocol::composer::{CommandScope, SlashCommand};
 use waku_protocol::model::ProviderKind;
 
 const CLI_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
-// Claude initializes account-backed configurations such as Bedrock before it
-// returns its local command registry. Match the upstream SDK probe's budget.
-const CLAUDE_PROBE_TIMEOUT: Duration = Duration::from_secs(25);
 const MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
 const COMMAND_CATALOG_CAP: usize = 500;
 
@@ -60,38 +57,8 @@ fn discover_claude(binary: &Path, project_root: &Path) -> Option<Vec<SlashComman
     // This is the initialization request used by the Claude Agent SDK. No user
     // message follows it, so the CLI loads local commands without making a
     // model request or persisting a conversation.
-    let request = json!({
-        "type": "control_request",
-        "request_id": "waku-command-catalog",
-        "request": {"subtype": "initialize"}
-    });
-    let input = format!("{request}\n");
-    let value = probe_json_lines(
-        binary,
-        &[
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "--input-format",
-            "stream-json",
-            "--no-session-persistence",
-            "--mcp-config",
-            r#"{"mcpServers":{}}"#,
-            "--strict-mcp-config",
-            "--setting-sources=user,project,local",
-        ],
-        project_root,
-        input.as_bytes(),
-        CLAUDE_PROBE_TIMEOUT,
-        |value| {
-            value.get("type").and_then(Value::as_str) == Some("control_response")
-                && value
-                    .pointer("/response/request_id")
-                    .and_then(Value::as_str)
-                    == Some("waku-command-catalog")
-        },
-        &[("ENABLE_CLAUDEAI_MCP_SERVERS", "false")],
-    )?;
+    let value =
+        crate::claude_metadata::initialize(binary, Some(project_root), "user,project,local")?;
     Some(parse_claude_commands(&value))
 }
 
