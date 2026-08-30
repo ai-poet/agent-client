@@ -748,6 +748,7 @@ impl Waku {
         let (processes, agents) = session_id
             .map(|session_id| self.background_work_counts(session_id))
             .unwrap_or_default();
+        let has_live_work = processes > 0 || agents > 0;
         let summary = background_work_count_summary(processes, agents);
         let theme = Theme::current(cx);
         let refresh_weak = cx.entity().downgrade();
@@ -761,6 +762,7 @@ impl Waku {
         let trigger = div()
             .id("environment-summary-trigger")
             .size(px(28.0))
+            .relative()
             .rounded(px(7.0))
             .flex_none()
             .flex()
@@ -780,7 +782,16 @@ impl Waku {
             } else {
                 summary
             }))
-            .child(icon("icons/info.svg", 15.0, theme.text_tertiary));
+            .child(icon("icons/info.svg", 15.0, theme.text_tertiary))
+            .when(has_live_work, |trigger| {
+                trigger.child(
+                    div()
+                        .absolute()
+                        .top(px(4.0))
+                        .right(px(4.0))
+                        .child(pulse_dot(5.0, theme.accent)),
+                )
+            });
         let git_status = change_counts.map(|(additions, deletions)| {
             let focus = self.transcript_control_focus("header-git-status", cx);
             div()
