@@ -863,6 +863,7 @@ impl StateStore {
 
     pub fn provider_sessions(
         &self,
+        provider: ProviderKind,
         limit: usize,
     ) -> impl FnOnce() -> io::Result<Vec<ProviderSessionSummary>> + Send + 'static {
         let daemon = self.daemon.clone();
@@ -871,7 +872,7 @@ impl StateStore {
             .request(
                 Uuid::nil(),
                 Uuid::nil(),
-                Command::ListProviderSessions { limit },
+                Command::ListProviderSessions { provider, limit },
             )
             .map_err(to_io_error)?
         {
@@ -885,6 +886,7 @@ impl StateStore {
     pub fn provider_session_history(
         &self,
         cursor: ProviderResumeCursor,
+        cwd: PathBuf,
     ) -> impl FnOnce() -> io::Result<ProviderSessionHistory> + Send + 'static {
         let daemon = self.daemon.clone();
         move || match daemon
@@ -892,7 +894,7 @@ impl StateStore {
             .request(
                 Uuid::nil(),
                 Uuid::nil(),
-                Command::LoadProviderSession { cursor },
+                Command::LoadProviderSession { cursor, cwd },
             )
             .map_err(to_io_error)?
         {

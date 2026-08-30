@@ -358,7 +358,20 @@ fn assemble_slash_commands(
         );
     }
     commands.extend(cli_commands);
-    dedup_and_sort_commands(commands)
+    let mut commands = dedup_and_sort_commands(commands);
+    // `/resume` belongs to Waku rather than any one provider. Reserve the
+    // name after provider/project discovery so every composer exposes the
+    // same picker and submitting it can never leak into an agent turn.
+    commands.retain(|command| command.name != "resume");
+    commands.push(SlashCommand {
+        name: "resume".to_owned(),
+        description: crate::i18n::translate("commands.resume_description"),
+        scope: CommandScope::Builtin,
+        argument_hint: None,
+        template: None,
+    });
+    sort_commands_for_display(&mut commands);
+    commands
 }
 
 /// Fold the commands a live process reported into the discovered list.
@@ -1381,6 +1394,35 @@ mod tests {
             );
             let _ = std::fs::remove_dir_all(root.join(dir));
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn waku_resume_is_reserved_and_listed_for_every_provider() {
+        let root = std::env::temp_dir().join(format!("waku-resume-command-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".waku/commands")).unwrap();
+        std::fs::write(root.join(".waku/commands/resume.md"), "Project override").unwrap();
+
+        for provider in ProviderKind::ALL {
+            let commands = assemble_slash_commands(provider, &root, Vec::new());
+            let resume = commands
+                .iter()
+                .filter(|command| command.name == "resume")
+                .collect::<Vec<_>>();
+            assert_eq!(
+                resume.len(),
+                1,
+                "{provider:?} has duplicate Resume commands",
+            );
+            assert_eq!(resume[0].scope, CommandScope::Builtin);
+            assert_eq!(resume[0].template, None);
+            assert_eq!(
+                resume[0].description,
+                crate::i18n::translate("commands.resume_description")
+            );
+        }
+
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -12,6 +12,8 @@ mod pi;
 mod support;
 mod title_refresh;
 
+pub(crate) use acp::catalog_agent;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

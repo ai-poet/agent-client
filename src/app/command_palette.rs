@@ -36,6 +36,7 @@ const PAGE_STEP: isize = 7;
 const MESSAGE_SEARCH_DEBOUNCE: Duration = Duration::from_millis(90);
 const SEARCH_ROW_HEIGHT: f32 = 60.0;
 const SECTION_HEADER_HEIGHT: f32 = 30.0;
+const PROVIDER_SECTION_TOP_MARGIN: f32 = 8.0;
 const RESULT_ROW_HEIGHT: f32 = 44.0;
 const CONTENT_RESULT_ROW_HEIGHT: f32 = 60.0;
 const EMPTY_RESULTS_HEIGHT: f32 = 180.0;
@@ -70,6 +71,7 @@ enum PaletteSection {
     Suggested,
     Tasks,
     Sessions,
+    Providers,
     Commands,
     Settings,
 }
@@ -80,6 +82,7 @@ impl PaletteSection {
             Self::Suggested => "command_palette.suggested",
             Self::Tasks => "command_palette.tasks",
             Self::Sessions => "command_palette.sessions",
+            Self::Providers => "command_palette.providers",
             Self::Commands => "command_palette.commands",
             Self::Settings => "command_palette.settings",
         })
@@ -87,7 +90,7 @@ impl PaletteSection {
 
     fn query_rank(self) -> usize {
         match self {
-            Self::Commands | Self::Suggested | Self::Sessions => 0,
+            Self::Commands | Self::Suggested | Self::Sessions | Self::Providers => 0,
             Self::Tasks => 1,
             Self::Settings => 2,
         }
@@ -145,6 +148,8 @@ impl PaletteIdentifier {
 enum PaletteAction {
     NewTask,
     Resume,
+    ChooseResumeProvider,
+    SelectResumeProvider(ProviderKind),
     ResumeProviderSession(ProviderSessionSummary),
     OpenProject,
     FocusComposer,
@@ -163,6 +168,7 @@ enum CommandPaletteView {
     #[default]
     Commands,
     Resume,
+    ResumeProviders,
 }
 
 #[derive(Clone, Debug)]
@@ -324,13 +330,19 @@ fn command_palette_results_height(results: &[CommandPaletteItem], show_empty_sta
         results
             .iter()
             .map(|item| {
-                let header_height = if previous_section == Some(item.section) {
-                    0.0
+                let section_leading_height = if previous_section != Some(item.section) {
+                    if item.section == PaletteSection::Providers {
+                        PROVIDER_SECTION_TOP_MARGIN
+                    } else {
+                        SECTION_HEADER_HEIGHT
+                    }
                 } else {
-                    previous_section = Some(item.section);
-                    SECTION_HEADER_HEIGHT
+                    0.0
                 };
-                header_height + command_palette_row_height(item)
+                if previous_section != Some(item.section) {
+                    previous_section = Some(item.section);
+                }
+                section_leading_height + command_palette_row_height(item)
             })
             .sum()
     };
@@ -350,6 +362,7 @@ pub(super) struct CommandPaletteUi {
     message_matches: HashMap<Uuid, crate::persistence::SessionMessageMatch>,
     message_search_pending: bool,
     provider_sessions: Vec<ProviderSessionSummary>,
+    resume_provider: ProviderKind,
     provider_sessions_pending: bool,
     provider_session_import: Option<ProviderResumeCursor>,
     provider_session_error: Option<String>,
@@ -374,6 +387,7 @@ impl CommandPaletteUi {
             message_matches: HashMap::new(),
             message_search_pending: false,
             provider_sessions: Vec::new(),
+            resume_provider: ProviderKind::default(),
             provider_sessions_pending: false,
             provider_session_import: None,
             provider_session_error: None,
@@ -390,6 +404,18 @@ impl CommandPaletteUi {
 }
 
 impl Waku {
+    pub(super) fn open_resume_picker_action(
+        &mut self,
+        _: &OpenResumePicker,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.command_palette.open {
+            self.open_command_palette(window, cx);
+        }
+        self.open_command_palette_resume_view(None, cx);
+    }
+
     pub(super) fn toggle_command_palette_action(
         &mut self,
         _: &ToggleCommandPalette,
@@ -512,11 +538,23 @@ impl Waku {
         cx.notify();
     }
 
+    fn leave_command_palette_resume_provider_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::Resume;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.resume_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
     fn dismiss_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.command_palette.view == CommandPaletteView::Resume {
-            self.leave_command_palette_resume_view(cx);
-        } else {
-            self.close_command_palette(window, cx);
+        match self.command_palette.view {
+            CommandPaletteView::Commands => self.close_command_palette(window, cx),
+            CommandPaletteView::Resume => self.leave_command_palette_resume_view(cx),
+            CommandPaletteView::ResumeProviders => {
+                self.leave_command_palette_resume_provider_view(cx)
+            }
         }
     }
 
@@ -524,6 +562,9 @@ impl Waku {
         let placeholder = match self.command_palette.view {
             CommandPaletteView::Commands => tr!("command_palette.placeholder"),
             CommandPaletteView::Resume => tr!("command_palette.resume_placeholder"),
+            CommandPaletteView::ResumeProviders => {
+                tr!("command_palette.resume_provider_placeholder")
+            }
         };
         self.command_palette
             .search
@@ -538,7 +579,10 @@ impl Waku {
         if !self.command_palette.open {
             return;
         }
-        if self.command_palette.view == CommandPaletteView::Resume {
+        if matches!(
+            self.command_palette.view,
+            CommandPaletteView::Resume | CommandPaletteView::ResumeProviders
+        ) {
             self.refresh_command_palette_results(query, false, cx);
             cx.notify();
             return;
@@ -936,6 +980,54 @@ impl Waku {
             .collect()
     }
 
+    fn command_palette_resume_provider_selector(&self) -> CommandPaletteItem {
+        let provider = self.command_palette.resume_provider;
+        CommandPaletteItem {
+            section: PaletteSection::Providers,
+            label: provider.display_name().to_owned(),
+            detail: Some(tr!("command_palette.change_provider")),
+            icon: PaletteIcon::Provider(provider),
+            shortcut: None,
+            action: PaletteAction::ChooseResumeProvider,
+            content_match: None,
+            search_text: format!(
+                "{} {} change select provider agent cli",
+                provider.short_name(),
+                provider.display_name()
+            ),
+            order: 0,
+            recency: u64::MAX,
+        }
+    }
+
+    fn command_palette_resume_provider_candidates(&self) -> Vec<CommandPaletteItem> {
+        ProviderKind::ALL
+            .into_iter()
+            .filter(|provider| {
+                *provider == self.command_palette.resume_provider
+                    || !self.state.disabled_providers.contains(provider)
+            })
+            .enumerate()
+            .map(|(order, provider)| CommandPaletteItem {
+                section: PaletteSection::Providers,
+                label: provider.display_name().to_owned(),
+                detail: (provider == self.command_palette.resume_provider)
+                    .then(|| tr!("command_palette.current_provider")),
+                icon: PaletteIcon::Provider(provider),
+                shortcut: None,
+                action: PaletteAction::SelectResumeProvider(provider),
+                content_match: None,
+                search_text: format!(
+                    "{} {} provider agent cli terminal session",
+                    provider.short_name(),
+                    provider.display_name()
+                ),
+                order,
+                recency: 0,
+            })
+            .collect()
+    }
+
     fn refresh_command_palette_resume_results(&mut self, query: &str, preserve_selection: bool) {
         let query = query.trim();
         let selected_action = preserve_selection.then(|| {
@@ -972,6 +1064,8 @@ impl Waku {
             scored.truncate(MAX_RESUME_RESULTS);
             self.command_palette.results = scored.into_iter().map(|scored| scored.item).collect();
         }
+        let provider_selector = self.command_palette_resume_provider_selector();
+        self.command_palette.results.insert(0, provider_selector);
         self.command_palette.selected = selected_action
             .flatten()
             .and_then(|action| {
@@ -980,9 +1074,65 @@ impl Waku {
                     .iter()
                     .position(|item| item.action == action)
             })
-            .unwrap_or(0);
+            .unwrap_or_else(|| usize::from(self.command_palette.results.len() > 1));
         let scroll_index = self.command_palette_scroll_index(self.command_palette.selected);
         self.command_palette.scroll.scroll_to_item(scroll_index);
+    }
+
+    fn refresh_command_palette_resume_provider_results(
+        &mut self,
+        query: &str,
+        preserve_selection: bool,
+    ) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let query = query.trim();
+        let mut candidates = self.command_palette_resume_provider_candidates();
+        if !query.is_empty() {
+            let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
+            let mut utf32 = Vec::new();
+            let mut scored = candidates
+                .into_iter()
+                .filter_map(|item| {
+                    pattern
+                        .score(
+                            Utf32Str::new(&item.search_text, &mut utf32),
+                            &mut self.command_palette.matcher,
+                        )
+                        .map(|score| ScoredPaletteItem { score, item })
+                })
+                .collect::<Vec<_>>();
+            scored.sort_by(|left, right| {
+                right
+                    .score
+                    .cmp(&left.score)
+                    .then(left.item.order.cmp(&right.item.order))
+            });
+            candidates = scored.into_iter().map(|scored| scored.item).collect();
+        }
+        self.command_palette.results = candidates;
+        self.command_palette.selected = selected_action
+            .flatten()
+            .and_then(|action| {
+                self.command_palette
+                    .results
+                    .iter()
+                    .position(|item| item.action == action)
+            })
+            .or_else(|| {
+                self.command_palette.results.iter().position(|item| {
+                    item.action
+                        == PaletteAction::SelectResumeProvider(self.command_palette.resume_provider)
+                })
+            })
+            .unwrap_or(0);
+        self.command_palette
+            .scroll
+            .scroll_to_item(self.command_palette_scroll_index(self.command_palette.selected));
     }
 
     fn refresh_command_palette_results(
@@ -991,9 +1141,16 @@ impl Waku {
         preserve_selection: bool,
         _cx: &App,
     ) {
-        if self.command_palette.view == CommandPaletteView::Resume {
-            self.refresh_command_palette_resume_results(query, preserve_selection);
-            return;
+        match self.command_palette.view {
+            CommandPaletteView::Resume => {
+                self.refresh_command_palette_resume_results(query, preserve_selection);
+                return;
+            }
+            CommandPaletteView::ResumeProviders => {
+                self.refresh_command_palette_resume_provider_results(query, preserve_selection);
+                return;
+            }
+            CommandPaletteView::Commands => {}
         }
         let query = query.trim();
         if query.is_empty() {
@@ -1111,7 +1268,9 @@ impl Waku {
         let mut previous = None;
         for item in self.command_palette.results.iter().take(selected + 1) {
             if previous != Some(item.section) {
-                headers += 1;
+                if item.section != PaletteSection::Providers {
+                    headers += 1;
+                }
                 previous = Some(item.section);
             }
         }
@@ -1137,8 +1296,35 @@ impl Waku {
         }
     }
 
-    fn open_command_palette_resume_view(&mut self, cx: &mut Context<Self>) {
+    fn default_resume_provider(&self) -> ProviderKind {
+        self.selected_session()
+            .map(|session| session.provider)
+            .or_else(|| {
+                ProviderKind::ALL
+                    .into_iter()
+                    .find(|provider| !self.state.disabled_providers.contains(provider))
+            })
+            .unwrap_or_default()
+    }
+
+    fn open_command_palette_resume_provider_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::ResumeProviders;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.resume_provider_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    fn open_command_palette_resume_view(
+        &mut self,
+        provider: Option<ProviderKind>,
+        cx: &mut Context<Self>,
+    ) {
+        let provider = provider.unwrap_or_else(|| self.default_resume_provider());
         self.command_palette.view = CommandPaletteView::Resume;
+        self.command_palette.resume_provider = provider;
         self.command_palette.provider_sessions.clear();
         self.command_palette.provider_sessions_pending = true;
         self.command_palette.provider_session_import = None;
@@ -1155,13 +1341,15 @@ impl Waku {
         self.refresh_command_palette_results("", false, cx);
         cx.notify();
 
-        let fetch = self.store.provider_sessions(PROVIDER_SESSION_CATALOG_LIMIT);
+        let fetch = self
+            .store
+            .provider_sessions(provider, PROVIDER_SESSION_CATALOG_LIMIT);
         cx.spawn(async move |waku, cx| {
             let result = cx.background_executor().spawn(async move { fetch() }).await;
             let _ = waku.update(cx, |waku, cx| {
                 if !waku.command_palette.open
-                    || waku.command_palette.view != CommandPaletteView::Resume
                     || waku.command_palette.provider_session_generation != generation
+                    || waku.command_palette.resume_provider != provider
                 {
                     return;
                 }
@@ -1176,8 +1364,10 @@ impl Waku {
                         waku.command_palette.provider_session_error = Some(error.to_string());
                     }
                 }
-                let query = waku.command_palette.search.read(cx).content().to_owned();
-                waku.refresh_command_palette_results(&query, false, cx);
+                if waku.command_palette.view == CommandPaletteView::Resume {
+                    let query = waku.command_palette.search.read(cx).content().to_owned();
+                    waku.refresh_command_palette_results(&query, false, cx);
+                }
                 cx.notify();
             });
         })
@@ -1294,7 +1484,9 @@ impl Waku {
             .wrapping_add(1);
         let generation = self.command_palette.provider_session_generation;
         let cursor = summary.cursor.clone();
-        let fetch = self.store.provider_session_history(cursor.clone());
+        let fetch = self
+            .store
+            .provider_session_history(cursor.clone(), summary.cwd.clone());
         let window_handle = window.window_handle();
         cx.notify();
 
@@ -1359,7 +1551,15 @@ impl Waku {
 
         match action {
             PaletteAction::Resume => {
-                self.open_command_palette_resume_view(cx);
+                self.open_command_palette_resume_view(None, cx);
+                return;
+            }
+            PaletteAction::ChooseResumeProvider => {
+                self.open_command_palette_resume_provider_view(cx);
+                return;
+            }
+            PaletteAction::SelectResumeProvider(provider) => {
+                self.open_command_palette_resume_view(Some(provider), cx);
                 return;
             }
             PaletteAction::ResumeProviderSession(summary) => {
@@ -1415,7 +1615,10 @@ impl Waku {
                     });
                 });
             }
-            PaletteAction::Resume | PaletteAction::ResumeProviderSession(_) => {
+            PaletteAction::Resume
+            | PaletteAction::ChooseResumeProvider
+            | PaletteAction::SelectResumeProvider(_)
+            | PaletteAction::ResumeProviderSession(_) => {
                 unreachable!("resume actions are handled before closing the palette")
             }
         }
@@ -1441,17 +1644,27 @@ impl Waku {
             .min(self.command_palette.results.len().saturating_sub(1));
         let search_query = self.command_palette.search.read(cx).content().to_owned();
         let resume_view = self.command_palette.view == CommandPaletteView::Resume;
-        let results_pending = if resume_view {
-            self.command_palette.provider_sessions_pending
-        } else {
-            self.command_palette.message_search_pending
+        let resume_session_count = self
+            .command_palette
+            .results
+            .iter()
+            .filter(|item| matches!(&item.action, PaletteAction::ResumeProviderSession(_)))
+            .count();
+        let results_pending = match self.command_palette.view {
+            CommandPaletteView::Resume => self.command_palette.provider_sessions_pending,
+            CommandPaletteView::Commands => self.command_palette.message_search_pending,
+            CommandPaletteView::ResumeProviders => false,
         };
         let show_empty_state = should_show_command_palette_empty_state(
-            self.command_palette.results.len(),
+            if resume_view {
+                resume_session_count
+            } else {
+                self.command_palette.results.len()
+            },
             results_pending,
         );
         let show_loading_state = resume_view
-            && self.command_palette.results.is_empty()
+            && resume_session_count == 0
             && self.command_palette.provider_sessions_pending;
         let show_placeholder_state = show_empty_state || show_loading_state;
         let results_height =
@@ -1531,24 +1744,83 @@ impl Waku {
                                 .text_color(theme.text_tertiary)
                                 .child(hint),
                         )
+                    })
+                    .when(show_loading_state, |empty| {
+                        let provider = self.command_palette.resume_provider;
+                        empty.child(
+                            div()
+                                .mt(px(12.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(7.0))
+                                .child(icon(
+                                    provider_icon(provider),
+                                    13.0,
+                                    provider_color(&theme, provider),
+                                ))
+                                .child(
+                                    div()
+                                        .text_size(sp(12.5))
+                                        .text_color(theme.text_secondary)
+                                        .child(provider.display_name().to_owned()),
+                                ),
+                        )
+                    })
+                    .when(resume_view && !show_loading_state, |empty| {
+                        let provider = self.command_palette.resume_provider;
+                        empty.child(
+                            div()
+                                .id("command-palette-resume-provider")
+                                .mt(px(12.0))
+                                .h(px(28.0))
+                                .px(px(9.0))
+                                .rounded(px(8.0))
+                                .border_1()
+                                .border_color(theme.border)
+                                .flex()
+                                .items_center()
+                                .gap(px(7.0))
+                                .cursor_default()
+                                .hover(|button| button.bg(theme.overlay))
+                                .active(|button| button.opacity(0.82))
+                                .child(icon(
+                                    provider_icon(provider),
+                                    13.0,
+                                    provider_color(&theme, provider),
+                                ))
+                                .child(
+                                    div()
+                                        .text_size(sp(12.5))
+                                        .text_color(theme.text_secondary)
+                                        .child(provider.display_name().to_owned()),
+                                )
+                                .child(icon("icons/chevron-down.svg", 11.0, theme.text_tertiary))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.open_command_palette_resume_provider_view(cx);
+                                    cx.stop_propagation();
+                                })),
+                        )
                     }),
             );
         } else {
             let mut previous_section = None;
             for (index, item) in self.command_palette.results.iter().enumerate() {
-                if previous_section != Some(item.section) {
-                    results = results.child(
-                        div()
-                            .h(px(SECTION_HEADER_HEIGHT))
-                            .px(px(9.0))
-                            .pt(px(10.0))
-                            .flex()
-                            .items_center()
-                            .text_size(sp(12.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text_tertiary)
-                            .child(item.section.label()),
-                    );
+                let starts_section = previous_section != Some(item.section);
+                if starts_section {
+                    if item.section != PaletteSection::Providers {
+                        results = results.child(
+                            div()
+                                .h(px(SECTION_HEADER_HEIGHT))
+                                .px(px(9.0))
+                                .pt(px(10.0))
+                                .flex()
+                                .items_center()
+                                .text_size(sp(12.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text_tertiary)
+                                .child(item.section.label()),
+                        );
+                    }
                     previous_section = Some(item.section);
                 }
 
@@ -1579,6 +1851,10 @@ impl Waku {
                 results = results.child(
                     div()
                         .id(SharedString::from(format!("command-palette-row-{index}")))
+                        .when(
+                            starts_section && item.section == PaletteSection::Providers,
+                            |row| row.mt(px(PROVIDER_SECTION_TOP_MARGIN)),
+                        )
                         .h(px(command_palette_row_height(item)))
                         .px(px(11.0))
                         .rounded(px(9.0))
@@ -1920,6 +2196,14 @@ mod tests {
         assert_eq!(
             command_palette_results_height(&[], true),
             EMPTY_RESULTS_HEIGHT + RESULTS_BOTTOM_PADDING
+        );
+        let providers = vec![
+            item(PaletteSection::Providers, 0),
+            item(PaletteSection::Providers, 1),
+        ];
+        assert_eq!(
+            command_palette_results_height(&providers, false),
+            PROVIDER_SECTION_TOP_MARGIN + RESULT_ROW_HEIGHT * 2.0 + RESULTS_BOTTOM_PADDING
         );
     }
 

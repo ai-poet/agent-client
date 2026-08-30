@@ -17,6 +17,7 @@ macro_rules! tr {
     };
 }
 
+pub mod acp_session;
 pub mod amp_session;
 pub mod attachments;
 pub mod blob_store;
@@ -43,6 +44,7 @@ pub mod model_catalog;
 pub mod opencode_pool;
 pub mod opencode_session;
 pub mod persistence;
+pub mod pi_session;
 pub mod projectless;
 pub mod settings;
 pub mod skills;

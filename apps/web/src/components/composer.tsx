@@ -52,6 +52,7 @@ import {
   detectComposerTrigger,
   expandedComposerSubmission,
   isFastModeToggleSubmission,
+  isResumeSubmission,
   mergeComposerCommands,
   parseGoalSubmission,
   replaceComposerTrigger,
@@ -129,6 +130,7 @@ export function Composer({
   onComposerDraftSubmitted,
   onAddProject,
   onProjectless,
+  onResume,
   onFocusSignalHandled,
   onModelPickerSignalHandled,
   onUsagePanelSignalHandled,
@@ -150,6 +152,7 @@ export function Composer({
   onComposerDraftSubmitted?: () => void
   onAddProject?: () => void
   onProjectless?: () => void
+  onResume?: () => void
   onFocusSignalHandled?: () => void
   onModelPickerSignalHandled?: () => void
   onUsagePanelSignalHandled?: () => void
@@ -368,7 +371,9 @@ export function Composer({
   }
 
   function executeLocalComposerCommand(submittedPrompt = prompt): boolean {
-    return executeFastModeToggle(submittedPrompt) || executeGoalCommand(submittedPrompt)
+    return executeResumeCommand(submittedPrompt)
+      || executeFastModeToggle(submittedPrompt)
+      || executeGoalCommand(submittedPrompt)
   }
 
   function clearComposerDraft() {
@@ -376,6 +381,13 @@ export function Composer({
     setCursor(0)
     setDismissedAutocomplete(null)
     setAutocompleteSelection({ key: '', index: 0 })
+  }
+
+  function executeResumeCommand(submittedPrompt: string): boolean {
+    if (!onResume || !isResumeSubmission(submittedPrompt)) return false
+    clearComposerDraft()
+    onResume()
+    return true
   }
 
   function executeFastModeToggle(submittedPrompt: string): boolean {

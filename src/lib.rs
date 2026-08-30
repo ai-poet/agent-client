@@ -70,6 +70,7 @@ actions!(
         ToggleSidebar,
         ToggleRightPanel,
         ToggleCommandPalette,
+        OpenResumePicker,
         ToggleFpsCounter,
         NavigateBack,
         NavigateForward,

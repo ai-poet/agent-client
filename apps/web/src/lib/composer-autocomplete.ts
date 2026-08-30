@@ -76,6 +76,11 @@ export function isFastModeToggleSubmission(
       && command.template === null)
 }
 
+/** Waku's provider-neutral terminal-session picker. */
+export function isResumeSubmission(prompt: string): boolean {
+  return prompt.trim() === '/resume'
+}
+
 export type GoalCommand =
   | { kind: 'show' }
   | { kind: 'edit' }

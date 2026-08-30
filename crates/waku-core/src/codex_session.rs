@@ -30,9 +30,11 @@ fn write_json_line(writer: &mut impl Write, value: &Value) -> std::io::Result<()
 }
 
 fn app_server_request(binary: &Path, request: Value) -> anyhow::Result<Value> {
+    let cwd = crate::acp_session::catalog_working_directory()?;
     let mut command = crate::command_env::command(binary);
     let command = command
         .args(["app-server", "--stdio"])
+        .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());

@@ -429,7 +429,7 @@ impl Backend for WakuBackend {
                 let matches = self.task_store.session_message_search(query, limit)()?;
                 Ok(ResponsePayload::SessionMessageMatches { matches })
             }
-            Command::ListProviderSessions { limit } => {
+            Command::ListProviderSessions { provider, limit } => {
                 const MAX_PROVIDER_SESSIONS: usize = 500;
                 let limit = limit.min(MAX_PROVIDER_SESSIONS);
                 if limit == 0 {
@@ -439,41 +439,44 @@ impl Backend for WakuBackend {
                 }
                 ensure_shell_environment();
                 let settings = self.settings.get();
-                let mut sessions = Vec::new();
-                let mut errors = Vec::new();
-                let mut successful_providers = 0usize;
-                for provider in [ProviderKind::Claude, ProviderKind::Codex] {
-                    if settings.disabled_providers.contains(&provider) {
-                        continue;
-                    }
-                    let binary_override = settings
-                        .provider_binary_overrides
-                        .get(&provider)
-                        .map(String::as_str);
-                    let Some(binary) = crate::model::provider_probe(provider, binary_override).path
-                    else {
-                        continue;
-                    };
-                    let result = match provider {
-                        ProviderKind::Claude => {
-                            crate::claude_session::list_provider_sessions(limit)
-                        }
-                        ProviderKind::Codex => {
-                            crate::codex_session::list_provider_sessions(&binary, limit)
-                        }
-                        _ => unreachable!("the external-session catalog is explicit"),
-                    };
-                    match result {
-                        Ok(found) => {
-                            successful_providers += 1;
-                            sessions.extend(found);
-                        }
-                        Err(error) => errors.push(format!(
-                            "{} session discovery failed: {error:#}",
-                            provider.display_name()
-                        )),
-                    }
+                if settings.disabled_providers.contains(&provider) {
+                    return Ok(ResponsePayload::ProviderSessions {
+                        sessions: Vec::new(),
+                    });
                 }
+                let binary_override = settings
+                    .provider_binary_overrides
+                    .get(&provider)
+                    .map(String::as_str);
+                let Some(binary) = crate::model::provider_probe(provider, binary_override).path
+                else {
+                    return Ok(ResponsePayload::ProviderSessions {
+                        sessions: Vec::new(),
+                    });
+                };
+                // Discovery is deliberately provider-scoped. Opening Resume
+                // must not start every installed agent CLI, and another
+                // provider is queried only after the user explicitly picks it.
+                let mut sessions = match provider {
+                    ProviderKind::Amp => {
+                        crate::amp_session::list_provider_sessions(&binary, limit)?
+                    }
+                    ProviderKind::Claude => crate::claude_session::list_provider_sessions(limit)?,
+                    ProviderKind::Codex => {
+                        crate::codex_session::list_provider_sessions(&binary, limit)?
+                    }
+                    ProviderKind::Cursor | ProviderKind::Fx | ProviderKind::OpenCode => {
+                        crate::acp_session::list_provider_sessions(provider, &binary, &[], limit)?
+                    }
+                    ProviderKind::DeepSeek => {
+                        crate::deepseek_session::list_provider_sessions(&binary, limit)?
+                    }
+                    ProviderKind::Grok => crate::grok_session::list_provider_sessions(limit)?,
+                    ProviderKind::Kimi => crate::kimi_session::list_provider_sessions(limit)?,
+                    ProviderKind::OhMyPi | ProviderKind::Pi => {
+                        crate::pi_session::list_provider_sessions(provider, limit)?
+                    }
+                };
                 sessions.sort_by(|a, b| {
                     b.updated_at
                         .cmp(&a.updated_at)
@@ -492,18 +495,22 @@ impl Backend for WakuBackend {
                     !imported.contains(&(session.provider(), session.cursor.native_id().to_owned()))
                 });
                 sessions.truncate(limit);
-                if successful_providers == 0
-                    && let Some(error) = errors.into_iter().next()
-                {
-                    bail!(error);
-                }
                 Ok(ResponsePayload::ProviderSessions { sessions })
             }
-            Command::LoadProviderSession { cursor } => {
+            Command::LoadProviderSession { cursor, cwd } => {
                 // Preserve every native turn shell for exact provider turn
                 // numbering, but bound imported display text to recent turns.
                 const VISIBLE_TURN_LIMIT: usize = 100;
                 let history = match &cursor {
+                    ProviderResumeCursor::Amp { thread_id, .. } => {
+                        let binary = self.provider_binary(ProviderKind::Amp)?;
+                        crate::amp_session::provider_session_history(
+                            &binary,
+                            &cwd,
+                            thread_id,
+                            VISIBLE_TURN_LIMIT,
+                        )?
+                    }
                     ProviderResumeCursor::Claude { session_id, .. } => {
                         self.provider_binary(ProviderKind::Claude)?;
                         crate::claude_session::provider_session_history(
@@ -519,10 +526,51 @@ impl Backend for WakuBackend {
                             VISIBLE_TURN_LIMIT,
                         )?
                     }
-                    _ => bail!(
-                        "{} does not expose resumable CLI sessions to Waku",
-                        cursor.provider().display_name()
-                    ),
+                    ProviderResumeCursor::Cursor { session_id, .. }
+                    | ProviderResumeCursor::Fx { session_id }
+                    | ProviderResumeCursor::OpenCode { session_id }
+                    | ProviderResumeCursor::Grok { session_id }
+                    | ProviderResumeCursor::Kimi { session_id } => {
+                        let provider = cursor.provider();
+                        let binary = self.provider_binary(provider)?;
+                        crate::acp_session::provider_session_history(
+                            provider,
+                            &binary,
+                            &cwd,
+                            session_id,
+                            VISIBLE_TURN_LIMIT,
+                        )?
+                    }
+                    ProviderResumeCursor::DeepSeek { session_id } => {
+                        let binary = self.provider_binary(ProviderKind::DeepSeek)?;
+                        crate::deepseek_session::provider_session_history(
+                            &binary,
+                            session_id,
+                            VISIBLE_TURN_LIMIT,
+                        )?
+                    }
+                    ProviderResumeCursor::OhMyPi {
+                        session_id,
+                        session_file,
+                    }
+                    | ProviderResumeCursor::Pi {
+                        session_id,
+                        session_file,
+                    } => {
+                        self.provider_binary(cursor.provider())?;
+                        let session_file = session_file.as_deref().ok_or_else(|| {
+                            anyhow!(
+                                "{} did not report its native session file",
+                                cursor.provider().display_name()
+                            )
+                        })?;
+                        crate::pi_session::provider_session_history(
+                            cursor.provider(),
+                            session_id,
+                            session_file,
+                            VISIBLE_TURN_LIMIT,
+                        )?
+                    }
                 };
                 Ok(ResponsePayload::ProviderSessionHistory { history })
             }

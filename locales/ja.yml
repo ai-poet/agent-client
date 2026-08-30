@@ -34,14 +34,18 @@ updater.up_to_date: 最新の状態です
 updater.failed: "アップデートに失敗しました：%{error}"
 
 command_palette.placeholder: タスクを検索、またはコマンドを実行…
-command_palette.resume_placeholder: Claude Code または Codex CLI のセッションを検索…
+command_palette.resume_placeholder: ターミナルセッションを検索…
+command_palette.resume_provider_placeholder: プロバイダーを選択…
 command_palette.suggested: おすすめ
 command_palette.tasks: タスク
 command_palette.sessions: ターミナルセッション
+command_palette.providers: プロバイダー
 command_palette.commands: コマンド
 command_palette.settings: 設定
 command_palette.new_task: 新規タスク
 command_palette.resume: 再開…
+command_palette.change_provider: プロバイダーを変更
+command_palette.current_provider: 現在のプロバイダー
 command_palette.open_project: プロジェクトを開く…
 command_palette.choose_model: モデルを選択…
 command_palette.copy_task_id: タスク ID をコピー
@@ -58,9 +62,10 @@ command_palette.you: あなた
 command_palette.agent: エージェント
 command_palette.no_results: 一致するタスクやコマンドはありません
 command_palette.no_results_hint: タスク名、メッセージ、プロジェクト、設定、コマンドで検索してください
+command_palette.no_matching_providers: 一致するプロバイダーはありません
 command_palette.loading_sessions: ターミナルセッションを読み込み中…
 command_palette.no_resume_sessions: 再開できるターミナルセッションはありません
-command_palette.no_resume_sessions_hint: Waku にすでにあるセッションは表示されません。Claude Code または Codex CLI でセッションを開始して、もう一度お試しください。
+command_palette.no_resume_sessions_hint: Waku にすでにあるセッションは表示されません。エージェント CLI でセッションを開始して、もう一度お試しください。
 command_palette.could_not_load_sessions: ターミナルセッションを読み込めませんでした
 command_palette.loading_selected_session: 会話を読み込み中…
 command_palette.resume_failed: "セッションを再開できませんでした：%{error}"
@@ -562,6 +567,7 @@ commands.fast_description: 高速モードを切り替え
 commands.fast_enabled: 高速モードを有効にしました
 commands.fast_disabled: 高速モードを無効にしました
 commands.goal_description: このタスクが継続して追求するゴールを設定
+commands.resume_description: ターミナルのエージェントセッションを再開
 goal.title: ゴール
 goal.objective_placeholder: このタスクは何を目指し続けるべきですか？
 goal.set: ゴールを設定

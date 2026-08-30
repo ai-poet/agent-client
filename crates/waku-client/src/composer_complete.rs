@@ -86,6 +86,13 @@ pub fn command_composer_text(command: &SlashCommand) -> String {
     format!("/{}", command.name)
 }
 
+/// Whether the composer submitted Waku's global terminal-session picker.
+/// The command is reserved by daemon-side discovery, so it is intentionally
+/// provider-neutral and never crosses into a provider transport.
+pub fn is_resume_submission(prompt: &str) -> bool {
+    prompt.trim() == "/resume"
+}
+
 /// Whether the submitted text resolves to Codex's native fast-mode command,
 /// which Waku bridges to the provider's service-tier control. Checking the
 /// resolved entry preserves project/user command precedence when one of them
@@ -421,6 +428,14 @@ mod tests {
             "/fast",
             &[command("fast", CommandScope::Project)],
         ));
+    }
+
+    #[test]
+    fn resume_is_an_exact_provider_neutral_local_command() {
+        assert!(is_resume_submission("/resume"));
+        assert!(is_resume_submission("  /resume  "));
+        assert!(!is_resume_submission("/resume latest"));
+        assert!(!is_resume_submission("please /resume"));
     }
 
     #[test]

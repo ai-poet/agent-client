@@ -273,6 +273,21 @@ fn sdk_agent(
     }))
 }
 
+/// Builds a short-lived ACP process for session discovery or history replay.
+///
+/// Catalog work runs on the daemon request thread, never a render path. It
+/// intentionally shares the production launch contract so provider argv and
+/// environment quirks cannot drift between a resumed task and the picker that
+/// discovered it.
+pub(crate) fn catalog_agent(
+    provider: ProviderKind,
+    binary: &Path,
+    cwd: &Path,
+) -> anyhow::Result<AcpAgent> {
+    let launch = launch_for(provider, None)?;
+    sdk_agent(binary, cwd, launch, None, Arc::new(Mutex::new(Vec::new())))
+}
+
 type PermissionResponder = Responder<RequestPermissionResponse>;
 type PendingPermissions = Arc<Mutex<HashMap<String, PermissionResponder>>>;
 

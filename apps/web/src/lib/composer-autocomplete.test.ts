@@ -6,6 +6,7 @@ import {
   expandCommandTemplate,
   expandedComposerSubmission,
   isFastModeToggleSubmission,
+  isResumeSubmission,
   mergeComposerCommands,
   parseGoalSubmission,
   replaceComposerTrigger,
@@ -66,6 +67,13 @@ describe('composer autocomplete', () => {
     expect(isFastModeToggleSubmission('codex', '/fast', [
       command('fast', 'Project', 'Project fast command', 'Run fast'),
     ])).toBe(false)
+  })
+
+  test('recognizes Resume as an exact provider-neutral local command', () => {
+    expect(isResumeSubmission('/resume')).toBe(true)
+    expect(isResumeSubmission('  /resume  ')).toBe(true)
+    expect(isResumeSubmission('/resume latest')).toBe(false)
+    expect(isResumeSubmission('please /resume')).toBe(false)
   })
 
   test('toggles the concrete Fast service-tier ID reported by the model', () => {
