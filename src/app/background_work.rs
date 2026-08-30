@@ -1566,31 +1566,37 @@ fn render_task_identifier_row(
 
     div()
         .w_full()
-        .px(px(8.0))
         .flex()
         .flex_col()
+        .gap(px(3.0))
         .child(
-            div()
-                .h(px(24.0))
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(
-                    div()
-                        .text_size(sp(12.0))
-                        .text_color(theme.text_tertiary)
-                        .child(label),
-                )
-                .child(copy_button),
+            div().h(px(20.0)).px(px(8.0)).flex().items_center().child(
+                div()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_tertiary)
+                    .child(label),
+            ),
         )
         .child(
             div()
-                .min_w_0()
-                .whitespace_normal()
-                .text_size(sp(11.5))
-                .font_family(md::render::MONO_FAMILY)
-                .text_color(theme.text_secondary)
-                .child(value),
+                .w_full()
+                .h(px(28.0))
+                .pl(px(8.0))
+                .rounded(px(6.0))
+                .bg(theme.inset)
+                .flex()
+                .items_center()
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .truncate()
+                        .text_size(sp(11.5))
+                        .font_family(md::render::MONO_FAMILY)
+                        .text_color(theme.text_secondary)
+                        .child(value),
+                )
+                .child(copy_button),
         )
 }
 
