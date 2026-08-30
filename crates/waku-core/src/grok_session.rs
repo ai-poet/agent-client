@@ -486,8 +486,9 @@ mod tests {
     #[test]
     fn maps_visible_grok_summaries_and_hides_internal_sessions() {
         let session_id = Uuid::new_v4().to_string();
+        let cwd = std::env::temp_dir().join("project");
         let summary = provider_summary(&json!({
-            "info": {"id": session_id, "cwd": "/tmp/project"},
+            "info": {"id": session_id, "cwd": cwd},
             "generated_title": "Resume Grok",
             "session_summary": "fallback",
             "created_at": "2026-01-01T00:00:00Z",
@@ -496,13 +497,13 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(summary.title, "Resume Grok");
-        assert_eq!(summary.cwd, PathBuf::from("/tmp/project"));
+        assert_eq!(summary.cwd, cwd);
         assert!(summary.updated_at > summary.created_at);
 
         for value in [
-            json!({"info":{"id":Uuid::new_v4(),"cwd":"/tmp"},"session_kind":"headless"}),
-            json!({"info":{"id":Uuid::new_v4(),"cwd":"/tmp"},"session_kind":"subagent_fork"}),
-            json!({"info":{"id":Uuid::new_v4(),"cwd":"/tmp"},"hidden":true}),
+            json!({"info":{"id":Uuid::new_v4(),"cwd":std::env::temp_dir()},"session_kind":"headless"}),
+            json!({"info":{"id":Uuid::new_v4(),"cwd":std::env::temp_dir()},"session_kind":"subagent_fork"}),
+            json!({"info":{"id":Uuid::new_v4(),"cwd":std::env::temp_dir()},"hidden":true}),
         ] {
             assert!(provider_summary(&value).is_none());
         }

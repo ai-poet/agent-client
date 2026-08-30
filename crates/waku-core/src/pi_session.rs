@@ -485,8 +485,16 @@ mod tests {
 
     #[test]
     fn imports_the_active_pi_branch_without_reasoning_or_tools() {
+        let header = serde_json::json!({
+            "type": "session",
+            "version": 3,
+            "id": "session-1",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "cwd": std::env::temp_dir(),
+        })
+        .to_string();
         let path = write_session(&[
-            r#"{"type":"session","version":3,"id":"session-1","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}"#,
+            &header,
             r#"{"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":"one","timestamp":1767225601000}}"#,
             r#"{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"private"},{"type":"text","text":"answer"}],"stopReason":"stop"}}"#,
             r#"{"type":"message","id":"old","parentId":"u1","timestamp":"2026-01-01T00:00:03Z","message":{"role":"user","content":"abandoned"}}"#,
@@ -508,9 +516,17 @@ mod tests {
 
     #[test]
     fn oh_my_pi_reset_hides_the_earlier_transcript_and_uses_the_title_slot() {
+        let header = serde_json::json!({
+            "type": "session",
+            "version": 3,
+            "id": "session-2",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "cwd": std::env::temp_dir(),
+        })
+        .to_string();
         let path = write_session(&[
             r#"{"type":"title","v":1,"title":"Current title","updatedAt":"2026-01-01T00:00:05Z","pad":""}"#,
-            r#"{"type":"session","version":3,"id":"session-2","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}"#,
+            &header,
             r#"{"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":"old"}}"#,
             r#"{"type":"reset_boundary","id":"r1","parentId":"u1","timestamp":"2026-01-01T00:00:02Z"}"#,
             r#"{"type":"message","id":"u2","parentId":"r1","timestamp":"2026-01-01T00:00:03Z","message":{"role":"user","content":"new"}}"#,

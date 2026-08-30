@@ -989,17 +989,18 @@ mod tests {
 
     #[test]
     fn maps_deepseek_catalog_and_visible_history() {
+        let cwd = std::env::temp_dir().join("project");
         let summaries = parse_provider_summaries(
             &json!({"items":[
                 {
                     "sessionId":"session-1",
-                    "cwd":"/tmp/project",
+                    "cwd":cwd,
                     "updatedAt":1_700_000_000_000_u64,
                     "blank":false,
                     "projections":{"values":{"title":"Resume DeepSeek"}}
                 },
-                {"sessionId":"blank","cwd":"/tmp","blank":true,"updatedAt":2},
-                {"sessionId":"child","cwd":"/tmp","parentSessionId":"parent","updatedAt":3}
+                {"sessionId":"blank","cwd":std::env::temp_dir(),"blank":true,"updatedAt":2},
+                {"sessionId":"child","cwd":std::env::temp_dir(),"parentSessionId":"parent","updatedAt":3}
             ]}),
             10,
         );

@@ -308,13 +308,17 @@ mod tests {
     fn lists_kimi_owned_state_without_opening_the_recorded_workspace() {
         let root = std::env::temp_dir().join(format!("waku-kimi-catalog-{}", uuid::Uuid::new_v4()));
         let session = root.join("sessions/wd-protected/session-native");
+        let recorded_cwd = std::env::temp_dir().join(format!(
+            "waku-kimi-protected-workspace-{}",
+            uuid::Uuid::new_v4()
+        ));
         fs::create_dir_all(&session).unwrap();
         fs::write(
             session.join("state.json"),
             serde_json::to_vec(&serde_json::json!({
                 "id": "session-native",
                 "title": "Protected workspace session",
-                "cwd": "/Users/test/Desktop/does-not-need-to-exist",
+                "cwd": recorded_cwd,
                 "createdAt": 1_700_000_000_000_u64,
                 "updatedAt": 1_700_000_100_000_u64,
                 "archived": false
@@ -328,10 +332,7 @@ mod tests {
         assert_eq!(sessions[0].cursor.native_id(), "session-native");
         assert_eq!(sessions[0].created_at, 1_700_000_000);
         assert_eq!(sessions[0].updated_at, 1_700_000_100);
-        assert_eq!(
-            sessions[0].cwd,
-            PathBuf::from("/Users/test/Desktop/does-not-need-to-exist")
-        );
+        assert_eq!(sessions[0].cwd, recorded_cwd);
 
         let _ = fs::remove_dir_all(root);
     }
