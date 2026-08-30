@@ -141,7 +141,7 @@ fn session_date_group_for_dates(session_date: NaiveDate, today: NaiveDate) -> Se
 
 fn session_group_header(theme: &Theme) -> Div {
     div()
-        .h(px(28.0))
+        .h(px(SIDEBAR_GROUP_HEADER_HEIGHT))
         .px(px(8.0))
         .flex()
         .items_center()
@@ -210,6 +210,10 @@ const SIDEBAR_SESSION_ROW_GAP: f32 = 1.0;
 const SIDEBAR_SESSION_ROW_HEIGHT: f32 = SIDEBAR_SESSION_CARD_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
 const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 32.0;
 const SIDEBAR_SEARCH_BOTTOM_GAP: f32 = 10.0;
+const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 28.0;
+const SIDEBAR_GROUP_HEADER_BOTTOM_GAP: f32 = 2.0;
+const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
+const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 10.0;
 const SIDEBAR_GROUP_GUIDE_X: f32 = 15.0;
 const SIDEBAR_GROUP_CHILD_PADDING: f32 = 28.0;
 const SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS: u64 = 3 * 24 * 60 * 60;
@@ -338,6 +342,67 @@ pub(super) enum SidebarRow {
     ShowMore(SidebarGroup),
     /// Spacing between date groups.
     GroupSpacer,
+}
+
+fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<usize> {
+    rows.iter()
+        .position(|row| *row == SidebarRow::Session(session_id))
+}
+
+fn sidebar_row_height(row: SidebarRow) -> Pixels {
+    px(match row {
+        SidebarRow::Search => SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP,
+        SidebarRow::Header(_) => {
+            SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
+        }
+        SidebarRow::Session(_) => SIDEBAR_SESSION_ROW_HEIGHT,
+        SidebarRow::ShowMore(_) => SIDEBAR_SHOW_MORE_ROW_HEIGHT,
+        SidebarRow::GroupSpacer => SIDEBAR_GROUP_SPACER_HEIGHT,
+    })
+}
+
+fn sidebar_bottom_aligned_offset(
+    rows: &[SidebarRow],
+    target: usize,
+    viewport_height: Pixels,
+) -> ListOffset {
+    let mut item_ix = target;
+    let mut height = sidebar_row_height(rows[target]);
+    while item_ix > 0 && height < viewport_height {
+        item_ix -= 1;
+        height += sidebar_row_height(rows[item_ix]);
+    }
+    ListOffset {
+        item_ix,
+        offset_in_item: (height - viewport_height).max(Pixels::ZERO),
+    }
+}
+
+fn reveal_sidebar_list_row(list: &ListState, rows: &[SidebarRow], index: usize) {
+    let viewport = list.viewport_bounds();
+    if viewport.size.height <= Pixels::ZERO {
+        return;
+    }
+    if let Some(item) = list.bounds_for_item(index) {
+        if item.top() >= viewport.top() && item.bottom() <= viewport.bottom() {
+            return;
+        }
+        list.scroll_to_reveal_item(index);
+    } else if index <= list.logical_scroll_top().item_ix {
+        list.scroll_to(ListOffset {
+            item_ix: index,
+            offset_in_item: Pixels::ZERO,
+        });
+    } else {
+        // Off-screen rows have not necessarily been measured yet. Their
+        // sidebar heights are fixed, so align a lower target to the viewport
+        // bottom just like scrollIntoView({ block: "nearest" }).
+        list.scroll_to(sidebar_bottom_aligned_offset(
+            rows,
+            index,
+            viewport.size.height,
+        ));
+    }
 }
 
 impl Waku {
@@ -986,6 +1051,28 @@ impl Waku {
 
         let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
         self.sync_sidebar_rows(&rows);
+        // Restored selection exists before ListState knows the viewport size.
+        // Retry after the first layout so nearest-edge alignment has a height.
+        if self.sidebar_list_state.viewport_bounds().size.height <= Pixels::ZERO
+            && let Some(session_id) = self
+                .pending_session_activation
+                .map(|pending| pending.session_id)
+                .or(self.state.selected_session)
+        {
+            let entity = cx.entity().downgrade();
+            window.on_next_frame(move |_, cx| {
+                let _ = entity.update(cx, |this, cx| {
+                    let selected_session = this
+                        .pending_session_activation
+                        .map(|pending| pending.session_id)
+                        .or(this.state.selected_session);
+                    if selected_session == Some(session_id) {
+                        this.reveal_sidebar_session(session_id);
+                        cx.notify();
+                    }
+                });
+            });
+        }
         let history_scrolled =
             self.sidebar_list_state.scroll_px_offset_for_scrollbar().y < px(-0.5);
         let entity = cx.entity().downgrade();
@@ -1049,6 +1136,16 @@ impl Waku {
                     }),
             )
             .child(self.render_sidebar_footer(cx))
+    }
+
+    /// Keep a newly selected task visible without disturbing the sidebar when
+    /// its row is already fully inside the viewport.
+    pub(super) fn reveal_sidebar_session(&self, session_id: Uuid) {
+        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        self.sync_sidebar_rows(&rows);
+        if let Some(index) = sidebar_session_row_index(&rows, session_id) {
+            reveal_sidebar_list_row(&self.sidebar_list_state, &rows, index);
+        }
     }
 
     /// The sidebar row snapshot, rebuilt only when its inputs move.
@@ -1283,7 +1380,10 @@ impl Waku {
             SidebarRow::ShowMore(group) => {
                 self.render_sidebar_show_more(group, cx).into_any_element()
             }
-            SidebarRow::GroupSpacer => div().w_full().h(px(10.0)).into_any_element(),
+            SidebarRow::GroupSpacer => div()
+                .w_full()
+                .h(px(SIDEBAR_GROUP_SPACER_HEIGHT))
+                .into_any_element(),
         }
     }
 
@@ -1464,7 +1564,10 @@ impl Waku {
                 }
             }));
 
-        div().w_full().pb(px(2.0)).child(header)
+        div()
+            .w_full()
+            .pb(px(SIDEBAR_GROUP_HEADER_BOTTOM_GAP))
+            .child(header)
     }
 
     fn open_new_task_for_sidebar_group(
@@ -1521,7 +1624,7 @@ impl Waku {
         div()
             .relative()
             .w_full()
-            .h(px(30.0))
+            .h(px(SIDEBAR_SHOW_MORE_ROW_HEIGHT))
             .pl(px(SIDEBAR_GROUP_CHILD_PADDING))
             .flex()
             .items_center()
@@ -2576,5 +2679,29 @@ mod tests {
             pending
         ));
         assert!(sidebar_session_selected(Some(current), None, current));
+    }
+
+    #[test]
+    fn selected_session_uses_nearest_bottom_edge_for_an_unmeasured_lower_row() {
+        let target = Uuid::from_u128(31);
+        let group = SidebarGroup::Updated(SessionDateGroup::Today);
+        let mut rows = vec![SidebarRow::Search, SidebarRow::Header(group)];
+        rows.extend((1..=40).map(|id| SidebarRow::Session(Uuid::from_u128(id))));
+        rows.push(SidebarRow::GroupSpacer);
+
+        let index = sidebar_session_row_index(&rows, target).unwrap();
+        let offset = sidebar_bottom_aligned_offset(&rows, index, px(400.0));
+
+        assert_eq!(index, 32);
+        assert_eq!(offset.item_ix, 25);
+        assert_eq!(offset.offset_in_item, px(16.0));
+        let visible_height = rows[offset.item_ix..=index]
+            .iter()
+            .copied()
+            .map(sidebar_row_height)
+            .fold(Pixels::ZERO, |height, row| height + row)
+            - offset.offset_in_item;
+        assert_eq!(visible_height, px(400.0));
+        assert_eq!(sidebar_session_row_index(&rows, Uuid::from_u128(41)), None);
     }
 }
