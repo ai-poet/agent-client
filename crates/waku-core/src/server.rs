@@ -1440,6 +1440,10 @@ mod tests {
     #[test]
     fn remote_supervisor_reconnects_without_losing_the_daemon_runtime() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        // Keep the address reserved between servers. If the first listener is
+        // dropped before the replacement binds, a parallel test can claim the
+        // newly freed ephemeral port and make this test fail with AddrInUse.
+        let replacement_listener = listener.try_clone().unwrap();
         let address = listener.local_addr().unwrap();
         let backend = Arc::new(TestBackend::default());
         let first_shutdown = Arc::new(AtomicBool::new(false));
@@ -1489,14 +1493,13 @@ mod tests {
         first_shutdown.store(true, Ordering::Release);
         first_server.join().unwrap();
 
-        let listener = TcpListener::bind(address).unwrap();
         let second_shutdown = Arc::new(AtomicBool::new(false));
         let second_server = {
             let backend = backend.clone();
             let shutdown = second_shutdown.clone();
             std::thread::spawn(move || {
                 serve(
-                    listener,
+                    replacement_listener,
                     "secret".into(),
                     backend,
                     shutdown,
