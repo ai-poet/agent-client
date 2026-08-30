@@ -551,6 +551,11 @@ impl Render for ConversationNavigationRail {
             .tab_index(0)
             .tab_group()
             .tab_stop(false)
+            // The rail is an independent scroll surface over the transcript.
+            // Its list handles the wheel first; stop the same gesture here so
+            // it never falls through to the transcript, including when the
+            // rail is already at either end.
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .child(tick_list)
             .when(show_top_fade, |rail| {
                 rail.child(
@@ -2890,6 +2895,113 @@ fn decode_activity_image(image_url: &str) -> Option<std::sync::Arc<gpui::Image>>
         .decode(encoded)
         .ok()?;
     (!bytes.is_empty()).then(|| std::sync::Arc::new(gpui::Image::from_bytes(format, bytes)))
+}
+
+#[cfg(test)]
+mod navigation_rail_scroll_tests {
+    use gpui::{
+        Context, Entity, IntoElement, ListAlignment, ListState, Render, ScrollDelta,
+        ScrollWheelEvent, TestAppContext, Window, div, list, point, px,
+    };
+
+    use super::*;
+
+    struct NavigationRailScrollHarness {
+        rail: Entity<ConversationNavigationRail>,
+        transcript: ListState,
+    }
+
+    impl Render for NavigationRailScrollHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .relative()
+                .child(
+                    list(self.transcript.clone(), |_, _, _| {
+                        div().h(px(24.0)).w_full().into_any_element()
+                    })
+                    .size_full(),
+                )
+                .child(self.rail.clone())
+        }
+    }
+
+    #[gpui::test]
+    fn scrolling_the_navigation_rail_does_not_scroll_the_transcript(cx: &mut TestAppContext) {
+        let transcript =
+            ListState::new(100, ListAlignment::Top, px(24.0)).with_uniform_item_height(px(24.0));
+        transcript.scroll_to(ListOffset {
+            item_ix: 20,
+            offset_in_item: px(0.0),
+        });
+        let transcript_for_view = transcript.clone();
+        let (harness, cx) = cx.add_window_view(move |_, cx| {
+            let turns = (0..100)
+                .map(|index| TranscriptNavigationTurn {
+                    message_id: Uuid::new_v4(),
+                    message_index: index,
+                    row_index: index,
+                    prompt: format!("Prompt {index}"),
+                    response: String::new(),
+                })
+                .collect::<Vec<_>>();
+            let rail = cx.new(|cx| {
+                let mut rail = ConversationNavigationRail::new();
+                rail.set_snapshot(
+                    ConversationNavigationRailSnapshot {
+                        visible: true,
+                        turns: Rc::new(turns),
+                        viewport_height: 600.0,
+                        active_turn: None,
+                        reset_generation: 0,
+                        theme_is_dark: true,
+                    },
+                    cx,
+                );
+                rail
+            });
+            NavigationRailScrollHarness {
+                rail,
+                transcript: transcript_for_view,
+            }
+        });
+        let rail = cx.read_entity(&harness, |harness, _| harness.rail.clone());
+        let transcript_offset = transcript.logical_scroll_top();
+
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(20.0), px(300.0)),
+            delta: ScrollDelta::Pixels(point(px(0.0), px(60.0))),
+            ..Default::default()
+        });
+
+        let transcript_offset_after_boundary_scroll = transcript.logical_scroll_top();
+        assert!(
+            transcript_offset_after_boundary_scroll.item_ix == transcript_offset.item_ix
+                && transcript_offset_after_boundary_scroll.offset_in_item
+                    == transcript_offset.offset_in_item,
+            "a gesture at the rail boundary must not move the transcript",
+        );
+
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(20.0), px(300.0)),
+            delta: ScrollDelta::Pixels(point(px(0.0), px(-60.0))),
+            ..Default::default()
+        });
+
+        let rail_offset =
+            cx.read_entity(&rail, |rail, _| rail.turn_list_state.logical_scroll_top());
+        assert!(
+            rail_offset.item_ix > 0 || rail_offset.offset_in_item > px(0.0),
+            "the wheel gesture should still scroll the navigation rail",
+        );
+        let transcript_offset_after_rail_scroll = transcript.logical_scroll_top();
+        assert!(
+            transcript_offset_after_rail_scroll.item_ix == transcript_offset.item_ix
+                && transcript_offset_after_rail_scroll.offset_in_item
+                    == transcript_offset.offset_in_item,
+            "the navigation rail must contain the gesture instead of scrolling the transcript",
+        );
+    }
 }
 
 #[cfg(test)]
