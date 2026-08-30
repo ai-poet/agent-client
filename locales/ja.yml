@@ -34,11 +34,14 @@ updater.up_to_date: 最新の状態です
 updater.failed: "アップデートに失敗しました：%{error}"
 
 command_palette.placeholder: タスクを検索、またはコマンドを実行…
+command_palette.resume_placeholder: Claude Code または Codex CLI のセッションを検索…
 command_palette.suggested: おすすめ
 command_palette.tasks: タスク
+command_palette.sessions: ターミナルセッション
 command_palette.commands: コマンド
 command_palette.settings: 設定
 command_palette.new_task: 新規タスク
+command_palette.resume: 再開…
 command_palette.open_project: プロジェクトを開く…
 command_palette.choose_model: モデルを選択…
 command_palette.copy_task_id: タスク ID をコピー
@@ -55,6 +58,12 @@ command_palette.you: あなた
 command_palette.agent: エージェント
 command_palette.no_results: 一致するタスクやコマンドはありません
 command_palette.no_results_hint: タスク名、メッセージ、プロジェクト、設定、コマンドで検索してください
+command_palette.loading_sessions: ターミナルセッションを読み込み中…
+command_palette.no_resume_sessions: 再開できるターミナルセッションはありません
+command_palette.no_resume_sessions_hint: Waku にすでにあるセッションは表示されません。Claude Code または Codex CLI でセッションを開始して、もう一度お試しください。
+command_palette.could_not_load_sessions: ターミナルセッションを読み込めませんでした
+command_palette.loading_selected_session: 会話を読み込み中…
+command_palette.resume_failed: "セッションを再開できませんでした：%{error}"
 
 language.title: 言語
 language.system: システム

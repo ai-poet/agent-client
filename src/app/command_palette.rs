@@ -28,6 +28,8 @@ actions!(
 
 const SEARCH_CONTEXT: &str = "CommandPalette > TextInput";
 const MAX_TASK_RESULTS: usize = 12;
+const MAX_RESUME_RESULTS: usize = 30;
+const PROVIDER_SESSION_CATALOG_LIMIT: usize = 250;
 const MESSAGE_SEARCH_LIMIT: usize = 50;
 const MESSAGE_SEARCH_CACHE_CAPACITY: usize = 24;
 const PAGE_STEP: isize = 7;
@@ -67,6 +69,7 @@ pub fn init(cx: &mut App) {
 enum PaletteSection {
     Suggested,
     Tasks,
+    Sessions,
     Commands,
     Settings,
 }
@@ -76,6 +79,7 @@ impl PaletteSection {
         crate::i18n::translate(match self {
             Self::Suggested => "command_palette.suggested",
             Self::Tasks => "command_palette.tasks",
+            Self::Sessions => "command_palette.sessions",
             Self::Commands => "command_palette.commands",
             Self::Settings => "command_palette.settings",
         })
@@ -83,7 +87,7 @@ impl PaletteSection {
 
     fn query_rank(self) -> usize {
         match self {
-            Self::Commands | Self::Suggested => 0,
+            Self::Commands | Self::Suggested | Self::Sessions => 0,
             Self::Tasks => 1,
             Self::Settings => 2,
         }
@@ -140,6 +144,8 @@ impl PaletteIdentifier {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum PaletteAction {
     NewTask,
+    Resume,
+    ResumeProviderSession(ProviderSessionSummary),
     OpenProject,
     FocusComposer,
     CopyIdentifier(PaletteIdentifier),
@@ -150,6 +156,13 @@ enum PaletteAction {
     ToggleRightPanel,
     OpenSettings(SettingsPage),
     SelectTask(Uuid),
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum CommandPaletteView {
+    #[default]
+    Commands,
+    Resume,
 }
 
 #[derive(Clone, Debug)]
@@ -299,6 +312,10 @@ fn should_keep_previous_command_palette_results(
     next_result_count == 0 && search_pending && previous_result_count > 0
 }
 
+fn same_provider_session(left: &ProviderResumeCursor, right: &ProviderResumeCursor) -> bool {
+    left.provider() == right.provider() && left.native_id() == right.native_id()
+}
+
 fn command_palette_results_height(results: &[CommandPaletteItem], show_empty_state: bool) -> f32 {
     let content_height = if show_empty_state {
         EMPTY_RESULTS_HEIGHT
@@ -325,12 +342,18 @@ pub(super) struct CommandPaletteUi {
     open: bool,
     focus_generation: u64,
     previous_focus: Option<FocusHandle>,
+    view: CommandPaletteView,
     results: Vec<CommandPaletteItem>,
     message_searches: QueryCache<String, Vec<crate::persistence::SessionMessageMatch>>,
     active_message_query: Option<String>,
     message_matches_query: Option<String>,
     message_matches: HashMap<Uuid, crate::persistence::SessionMessageMatch>,
     message_search_pending: bool,
+    provider_sessions: Vec<ProviderSessionSummary>,
+    provider_sessions_pending: bool,
+    provider_session_import: Option<ProviderResumeCursor>,
+    provider_session_error: Option<String>,
+    provider_session_generation: u64,
     selected: usize,
     scroll: ScrollHandle,
     matcher: Matcher,
@@ -343,12 +366,18 @@ impl CommandPaletteUi {
             open: false,
             focus_generation: 0,
             previous_focus: None,
+            view: CommandPaletteView::Commands,
             results: Vec::new(),
             message_searches: QueryCache::new(MESSAGE_SEARCH_CACHE_CAPACITY),
             active_message_query: None,
             message_matches_query: None,
             message_matches: HashMap::new(),
             message_search_pending: false,
+            provider_sessions: Vec::new(),
+            provider_sessions_pending: false,
+            provider_session_import: None,
+            provider_session_error: None,
+            provider_session_generation: 0,
             selected: 0,
             scroll: ScrollHandle::new(),
             matcher: crate::composer_complete::matcher(),
@@ -393,6 +422,7 @@ impl Waku {
         };
 
         self.command_palette.open = true;
+        self.command_palette.view = CommandPaletteView::Commands;
         self.command_palette.focus_generation =
             self.command_palette.focus_generation.wrapping_add(1);
         self.command_palette.message_searches.clear();
@@ -400,6 +430,14 @@ impl Waku {
         self.command_palette.message_matches_query = None;
         self.command_palette.message_matches.clear();
         self.command_palette.message_search_pending = false;
+        self.command_palette.provider_sessions.clear();
+        self.command_palette.provider_sessions_pending = false;
+        self.command_palette.provider_session_import = None;
+        self.command_palette.provider_session_error = None;
+        self.command_palette.provider_session_generation = self
+            .command_palette
+            .provider_session_generation
+            .wrapping_add(1);
         let focus_generation = self.command_palette.focus_generation;
         self.command_palette
             .search
@@ -444,16 +482,52 @@ impl Waku {
             self.command_palette.focus_generation.wrapping_add(1);
         self.command_palette.active_message_query = None;
         self.command_palette.message_search_pending = false;
+        self.command_palette.provider_sessions_pending = false;
+        self.command_palette.provider_session_import = None;
+        self.command_palette.provider_session_generation = self
+            .command_palette
+            .provider_session_generation
+            .wrapping_add(1);
         if let Some(previous_focus) = self.command_palette.previous_focus.take() {
             window.focus(&previous_focus, cx);
         }
         cx.notify();
     }
 
-    pub(super) fn refresh_command_palette_localized_text(&mut self, cx: &mut Context<Self>) {
+    fn leave_command_palette_resume_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::Commands;
+        self.command_palette.provider_sessions.clear();
+        self.command_palette.provider_sessions_pending = false;
+        self.command_palette.provider_session_import = None;
+        self.command_palette.provider_session_error = None;
+        self.command_palette.provider_session_generation = self
+            .command_palette
+            .provider_session_generation
+            .wrapping_add(1);
         self.command_palette.search.update(cx, |input, cx| {
-            input.set_placeholder(tr!("command_palette.placeholder"), cx)
+            input.set_placeholder(tr!("command_palette.placeholder"), cx);
+            input.clear(cx);
         });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    fn dismiss_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.command_palette.view == CommandPaletteView::Resume {
+            self.leave_command_palette_resume_view(cx);
+        } else {
+            self.close_command_palette(window, cx);
+        }
+    }
+
+    pub(super) fn refresh_command_palette_localized_text(&mut self, cx: &mut Context<Self>) {
+        let placeholder = match self.command_palette.view {
+            CommandPaletteView::Commands => tr!("command_palette.placeholder"),
+            CommandPaletteView::Resume => tr!("command_palette.resume_placeholder"),
+        };
+        self.command_palette
+            .search
+            .update(cx, |input, cx| input.set_placeholder(placeholder, cx));
         if self.command_palette.open {
             let query = self.command_palette.search.read(cx).content().to_owned();
             self.refresh_command_palette_results(&query, true, cx);
@@ -462,6 +536,11 @@ impl Waku {
 
     pub(super) fn command_palette_query_edited(&mut self, query: &str, cx: &mut Context<Self>) {
         if !self.command_palette.open {
+            return;
+        }
+        if self.command_palette.view == CommandPaletteView::Resume {
+            self.refresh_command_palette_results(query, false, cx);
+            cx.notify();
             return;
         }
         let query = query.trim().to_owned();
@@ -577,6 +656,15 @@ impl Waku {
                 Some(crate::platform::primary_shortcut("⌘N", "Ctrl+N")),
                 PaletteAction::NewTask,
                 "new task session chat conversation start",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.resume"),
+                "icons/rotate-cw.svg",
+                None,
+                PaletteAction::Resume,
+                "resume continue restore import external terminal cli session conversation",
                 next(),
             ),
             CommandPaletteItem::command(
@@ -807,12 +895,106 @@ impl Waku {
             .collect()
     }
 
+    fn command_palette_resume_candidates(&self) -> Vec<CommandPaletteItem> {
+        let now = unix_time();
+        self.command_palette
+            .provider_sessions
+            .iter()
+            .filter(|native| {
+                !self.state.sessions.iter().any(|session| {
+                    session.provider_cursor.as_ref().is_some_and(|cursor| {
+                        cursor.provider() == native.provider()
+                            && cursor.native_id() == native.cursor.native_id()
+                    })
+                })
+            })
+            .enumerate()
+            .map(|(order, native)| {
+                let provider = native.provider();
+                let age = super::sidebar::format_time_ago(now.saturating_sub(native.updated_at));
+                let path = native.cwd.to_string_lossy();
+                CommandPaletteItem {
+                    section: PaletteSection::Sessions,
+                    label: native.title.clone(),
+                    detail: Some(format!("{} · {} · {age}", provider.short_name(), path)),
+                    icon: PaletteIcon::Provider(provider),
+                    shortcut: None,
+                    action: PaletteAction::ResumeProviderSession(native.clone()),
+                    content_match: None,
+                    search_text: format!(
+                        "{} {} {} {} {} resume continue terminal cli session conversation",
+                        native.title,
+                        path,
+                        provider.short_name(),
+                        provider.display_name(),
+                        native.cursor.native_id(),
+                    ),
+                    order,
+                    recency: native.updated_at,
+                }
+            })
+            .collect()
+    }
+
+    fn refresh_command_palette_resume_results(&mut self, query: &str, preserve_selection: bool) {
+        let query = query.trim();
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let mut candidates = self.command_palette_resume_candidates();
+        if query.is_empty() {
+            candidates.sort_by(|a, b| b.recency.cmp(&a.recency).then(a.order.cmp(&b.order)));
+            candidates.truncate(MAX_RESUME_RESULTS);
+            self.command_palette.results = candidates;
+        } else {
+            let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
+            let mut utf32 = Vec::new();
+            let mut scored = candidates
+                .into_iter()
+                .filter_map(|item| {
+                    pattern
+                        .score(
+                            Utf32Str::new(&item.search_text, &mut utf32),
+                            &mut self.command_palette.matcher,
+                        )
+                        .map(|score| ScoredPaletteItem { score, item })
+                })
+                .collect::<Vec<_>>();
+            scored.sort_by(|a, b| {
+                b.score
+                    .cmp(&a.score)
+                    .then(b.item.recency.cmp(&a.item.recency))
+                    .then(a.item.order.cmp(&b.item.order))
+            });
+            scored.truncate(MAX_RESUME_RESULTS);
+            self.command_palette.results = scored.into_iter().map(|scored| scored.item).collect();
+        }
+        self.command_palette.selected = selected_action
+            .flatten()
+            .and_then(|action| {
+                self.command_palette
+                    .results
+                    .iter()
+                    .position(|item| item.action == action)
+            })
+            .unwrap_or(0);
+        let scroll_index = self.command_palette_scroll_index(self.command_palette.selected);
+        self.command_palette.scroll.scroll_to_item(scroll_index);
+    }
+
     fn refresh_command_palette_results(
         &mut self,
         query: &str,
         preserve_selection: bool,
         _cx: &App,
     ) {
+        if self.command_palette.view == CommandPaletteView::Resume {
+            self.refresh_command_palette_resume_results(query, preserve_selection);
+            return;
+        }
         let query = query.trim();
         if query.is_empty() {
             self.command_palette.results = self.command_palette_commands(false);
@@ -955,6 +1137,210 @@ impl Waku {
         }
     }
 
+    fn open_command_palette_resume_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::Resume;
+        self.command_palette.provider_sessions.clear();
+        self.command_palette.provider_sessions_pending = true;
+        self.command_palette.provider_session_import = None;
+        self.command_palette.provider_session_error = None;
+        self.command_palette.provider_session_generation = self
+            .command_palette
+            .provider_session_generation
+            .wrapping_add(1);
+        let generation = self.command_palette.provider_session_generation;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.resume_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+
+        let fetch = self.store.provider_sessions(PROVIDER_SESSION_CATALOG_LIMIT);
+        cx.spawn(async move |waku, cx| {
+            let result = cx.background_executor().spawn(async move { fetch() }).await;
+            let _ = waku.update(cx, |waku, cx| {
+                if !waku.command_palette.open
+                    || waku.command_palette.view != CommandPaletteView::Resume
+                    || waku.command_palette.provider_session_generation != generation
+                {
+                    return;
+                }
+                waku.command_palette.provider_sessions_pending = false;
+                match result {
+                    Ok(sessions) => {
+                        waku.command_palette.provider_sessions = sessions;
+                        waku.command_palette.provider_session_error = None;
+                    }
+                    Err(error) => {
+                        waku.command_palette.provider_sessions.clear();
+                        waku.command_palette.provider_session_error = Some(error.to_string());
+                    }
+                }
+                let query = waku.command_palette.search.read(cx).content().to_owned();
+                waku.refresh_command_palette_results(&query, false, cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn import_provider_session(
+        &mut self,
+        summary: ProviderSessionSummary,
+        history: ProviderSessionHistory,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(session_id) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| {
+                session
+                    .provider_cursor
+                    .as_ref()
+                    .is_some_and(|cursor| same_provider_session(cursor, &summary.cursor))
+            })
+            .map(|session| session.id)
+        {
+            self.close_command_palette(window, cx);
+            self.settings_page = None;
+            self.select_session(session_id, cx);
+            let focus = self.composer_focus(cx);
+            window.focus(&focus, cx);
+            return;
+        }
+
+        let project_id = if let Some(project) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.path == summary.cwd)
+        {
+            project.id
+        } else {
+            let project = Project::from_path(summary.cwd.clone());
+            let project_id = project.id;
+            self.state.projects.push(project);
+            self.analytics.track(crate::analytics::Event::ProjectAdded);
+            project_id
+        };
+        let provider = summary.provider();
+        let runtime_mode = self
+            .selected_session()
+            .map(|session| session.runtime_mode)
+            .unwrap_or(self.state.last_runtime_mode);
+        let now = unix_time();
+        let created_at = if summary.created_at == 0 {
+            now
+        } else {
+            summary.created_at
+        };
+        let updated_at = summary.updated_at.max(created_at);
+        let has_history = !history.messages.is_empty() || !history.turns.is_empty();
+        let mut session = AgentSession::new(project_id, provider);
+        session.runtime_mode = runtime_mode;
+        session.auto_title = Some(summary.title);
+        session.provider_cursor = Some(summary.cursor);
+        session.created_at = created_at;
+        session.updated_at = updated_at;
+        session.last_reply_at = has_history.then_some(updated_at);
+        session.messages = history.messages;
+        session.turns = history.turns;
+        let session_id = session.id;
+        self.state.push_session(session);
+
+        self.close_command_palette(window, cx);
+        self.settings_page = None;
+        self.select_session(session_id, cx);
+        let focus = self.composer_focus(cx);
+        window.focus(&focus, cx);
+    }
+
+    fn load_command_palette_provider_session(
+        &mut self,
+        summary: ProviderSessionSummary,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.command_palette.provider_session_import.is_some() {
+            return;
+        }
+        if let Some(session_id) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| {
+                session
+                    .provider_cursor
+                    .as_ref()
+                    .is_some_and(|cursor| same_provider_session(cursor, &summary.cursor))
+            })
+            .map(|session| session.id)
+        {
+            self.close_command_palette(window, cx);
+            self.settings_page = None;
+            self.select_session(session_id, cx);
+            let focus = self.composer_focus(cx);
+            window.focus(&focus, cx);
+            return;
+        }
+
+        self.command_palette.provider_session_import = Some(summary.cursor.clone());
+        self.command_palette.provider_session_error = None;
+        self.command_palette.provider_session_generation = self
+            .command_palette
+            .provider_session_generation
+            .wrapping_add(1);
+        let generation = self.command_palette.provider_session_generation;
+        let cursor = summary.cursor.clone();
+        let fetch = self.store.provider_session_history(cursor.clone());
+        let window_handle = window.window_handle();
+        cx.notify();
+
+        cx.spawn(async move |waku, cx| {
+            let result = cx.background_executor().spawn(async move { fetch() }).await;
+            let update = waku.update(cx, |waku, cx| {
+                if !waku.command_palette.open
+                    || waku.command_palette.view != CommandPaletteView::Resume
+                    || waku.command_palette.provider_session_generation != generation
+                    || waku
+                        .command_palette
+                        .provider_session_import
+                        .as_ref()
+                        .is_none_or(|pending| !same_provider_session(pending, &cursor))
+                {
+                    return None;
+                }
+                match result {
+                    Ok(history) => Some((summary, history)),
+                    Err(error) => {
+                        let error = error.to_string();
+                        waku.command_palette.provider_session_import = None;
+                        waku.command_palette.provider_session_error = Some(error.clone());
+                        waku.show_toast(tr!("command_palette.resume_failed", error = error));
+                        cx.notify();
+                        None
+                    }
+                }
+            });
+            let Ok(Some((summary, history))) = update else {
+                return;
+            };
+            let _ = window_handle.update(cx, |_, window, cx| {
+                let _ = waku.update(cx, |waku, cx| {
+                    if waku.command_palette.open
+                        && waku.command_palette.view == CommandPaletteView::Resume
+                        && waku.command_palette.provider_session_generation == generation
+                    {
+                        waku.import_provider_session(summary, history, window, cx);
+                    }
+                });
+            });
+        })
+        .detach();
+    }
+
     fn execute_command_palette_selection(
         &mut self,
         index: Option<usize>,
@@ -970,6 +1356,18 @@ impl Waku {
         else {
             return;
         };
+
+        match action {
+            PaletteAction::Resume => {
+                self.open_command_palette_resume_view(cx);
+                return;
+            }
+            PaletteAction::ResumeProviderSession(summary) => {
+                self.load_command_palette_provider_session(summary, window, cx);
+                return;
+            }
+            _ => {}
+        }
 
         self.close_command_palette(window, cx);
         match action {
@@ -1017,6 +1415,9 @@ impl Waku {
                     });
                 });
             }
+            PaletteAction::Resume | PaletteAction::ResumeProviderSession(_) => {
+                unreachable!("resume actions are handled before closing the palette")
+            }
         }
     }
 
@@ -1039,12 +1440,22 @@ impl Waku {
             .selected
             .min(self.command_palette.results.len().saturating_sub(1));
         let search_query = self.command_palette.search.read(cx).content().to_owned();
+        let resume_view = self.command_palette.view == CommandPaletteView::Resume;
+        let results_pending = if resume_view {
+            self.command_palette.provider_sessions_pending
+        } else {
+            self.command_palette.message_search_pending
+        };
         let show_empty_state = should_show_command_palette_empty_state(
             self.command_palette.results.len(),
-            self.command_palette.message_search_pending,
+            results_pending,
         );
+        let show_loading_state = resume_view
+            && self.command_palette.results.is_empty()
+            && self.command_palette.provider_sessions_pending;
+        let show_placeholder_state = show_empty_state || show_loading_state;
         let results_height =
-            command_palette_results_height(&self.command_palette.results, show_empty_state)
+            command_palette_results_height(&self.command_palette.results, show_placeholder_state)
                 .min((card_max_height - SEARCH_ROW_HEIGHT).max(0.0));
         let card_height = SEARCH_ROW_HEIGHT + results_height;
 
@@ -1057,7 +1468,40 @@ impl Waku {
             .px(px(8.0))
             .pb(px(8.0));
 
-        if show_empty_state {
+        if show_placeholder_state {
+            let error = resume_view
+                .then(|| self.command_palette.provider_session_error.clone())
+                .flatten();
+            let (icon_path, title, hint, spinning) = if show_loading_state {
+                (
+                    "icons/loader-circle.svg",
+                    tr!("command_palette.loading_sessions"),
+                    None,
+                    true,
+                )
+            } else if let Some(error) = error {
+                (
+                    "icons/alert.svg",
+                    tr!("command_palette.could_not_load_sessions"),
+                    Some(error),
+                    false,
+                )
+            } else if resume_view {
+                (
+                    "icons/search.svg",
+                    tr!("command_palette.no_resume_sessions"),
+                    Some(tr!("command_palette.no_resume_sessions_hint")),
+                    false,
+                )
+            } else {
+                (
+                    "icons/search.svg",
+                    tr!("command_palette.no_results"),
+                    Some(tr!("command_palette.no_results_hint")),
+                    false,
+                )
+            };
+            let empty_icon = icon(icon_path, 18.0, theme.text_ghost);
             results = results.child(
                 div()
                     .h(px(EMPTY_RESULTS_HEIGHT))
@@ -1065,22 +1509,29 @@ impl Waku {
                     .flex_col()
                     .items_center()
                     .justify_center()
-                    .child(icon("icons/search.svg", 18.0, theme.text_ghost))
+                    .child(if spinning {
+                        motion::spin(empty_icon)
+                    } else {
+                        empty_icon.into_any_element()
+                    })
                     .child(
                         div()
                             .mt(px(12.0))
                             .text_size(sp(13.0))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.text_secondary)
-                            .child(tr!("command_palette.no_results")),
+                            .child(title),
                     )
-                    .child(
-                        div()
-                            .mt(px(5.0))
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_tertiary)
-                            .child(tr!("command_palette.no_results_hint")),
-                    ),
+                    .when_some(hint, |empty, hint| {
+                        empty.child(
+                            div()
+                                .max_w(px(540.0))
+                                .mt(px(5.0))
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_tertiary)
+                                .child(hint),
+                        )
+                    }),
             );
         } else {
             let mut previous_section = None;
@@ -1110,7 +1561,19 @@ impl Waku {
                     PaletteIcon::Asset(path) => path,
                     PaletteIcon::Provider(provider) => provider_icon(provider),
                 };
-                let detail = item.detail.clone();
+                let importing = match &item.action {
+                    PaletteAction::ResumeProviderSession(summary) => self
+                        .command_palette
+                        .provider_session_import
+                        .as_ref()
+                        .is_some_and(|cursor| same_provider_session(cursor, &summary.cursor)),
+                    _ => false,
+                };
+                let detail = if importing {
+                    Some(tr!("command_palette.loading_selected_session"))
+                } else {
+                    item.detail.clone()
+                };
                 let content_match = item.content_match.clone();
                 let shortcut = item.shortcut;
                 results = results.child(
@@ -1148,7 +1611,11 @@ impl Waku {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(icon(icon_path, 16.0, icon_color)),
+                                .child(if importing {
+                                    motion::spin(icon("icons/loader-circle.svg", 16.0, icon_color))
+                                } else {
+                                    icon(icon_path, 16.0, icon_color).into_any_element()
+                                }),
                         )
                         .child(
                             div()
@@ -1257,7 +1724,7 @@ impl Waku {
                     this.execute_command_palette_selection(None, window, cx)
                 }))
                 .on_action(cx.listener(|this, _: &Dismiss, window, cx| {
-                    this.close_command_palette(window, cx)
+                    this.dismiss_command_palette(window, cx)
                 }))
                 .w_full()
                 .max_w(px(680.0))
@@ -1356,6 +1823,24 @@ mod tests {
                 .as_deref(),
             Some("019cfd7a-6942-78b1-9d47-30576c562321")
         );
+    }
+
+    #[test]
+    fn provider_session_identity_uses_provider_and_native_id() {
+        let listed = ProviderResumeCursor::Claude {
+            session_id: "11111111-1111-4111-8111-111111111111".into(),
+            resume_at: None,
+        };
+        let imported = ProviderResumeCursor::Claude {
+            session_id: "11111111-1111-4111-8111-111111111111".into(),
+            resume_at: Some("native-message".into()),
+        };
+        let other = ProviderResumeCursor::Codex {
+            thread_id: "11111111-1111-4111-8111-111111111111".into(),
+        };
+
+        assert!(same_provider_session(&listed, &imported));
+        assert!(!same_provider_session(&listed, &other));
     }
 
     #[test]

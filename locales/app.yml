@@ -66,16 +66,22 @@ updater.failed:
 
 command_palette.placeholder:
   en: Search tasks or run a command…
+command_palette.resume_placeholder:
+  en: Search Claude Code or Codex CLI sessions…
 command_palette.suggested:
   en: Suggested
 command_palette.tasks:
   en: Tasks
+command_palette.sessions:
+  en: Terminal sessions
 command_palette.commands:
   en: Commands
 command_palette.settings:
   en: Settings
 command_palette.new_task:
   en: New task
+command_palette.resume:
+  en: Resume…
 command_palette.open_project:
   en: Open project…
 command_palette.choose_model:
@@ -108,6 +114,18 @@ command_palette.no_results:
   en: No matching tasks or commands
 command_palette.no_results_hint:
   en: Try a task title, message, project, setting, or command
+command_palette.loading_sessions:
+  en: Loading terminal sessions…
+command_palette.no_resume_sessions:
+  en: No resumable terminal sessions
+command_palette.no_resume_sessions_hint:
+  en: Sessions already in Waku are hidden. Start one in Claude Code or Codex CLI and try again.
+command_palette.could_not_load_sessions:
+  en: Couldn’t load terminal sessions
+command_palette.loading_selected_session:
+  en: Loading conversation…
+command_palette.resume_failed:
+  en: "Couldn’t resume session: %{error}"
 
 language.title:
   en: Language

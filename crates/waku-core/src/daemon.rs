@@ -429,6 +429,103 @@ impl Backend for WakuBackend {
                 let matches = self.task_store.session_message_search(query, limit)()?;
                 Ok(ResponsePayload::SessionMessageMatches { matches })
             }
+            Command::ListProviderSessions { limit } => {
+                const MAX_PROVIDER_SESSIONS: usize = 500;
+                let limit = limit.min(MAX_PROVIDER_SESSIONS);
+                if limit == 0 {
+                    return Ok(ResponsePayload::ProviderSessions {
+                        sessions: Vec::new(),
+                    });
+                }
+                ensure_shell_environment();
+                let settings = self.settings.get();
+                let mut sessions = Vec::new();
+                let mut errors = Vec::new();
+                let mut successful_providers = 0usize;
+                for provider in [ProviderKind::Claude, ProviderKind::Codex] {
+                    if settings.disabled_providers.contains(&provider) {
+                        continue;
+                    }
+                    let binary_override = settings
+                        .provider_binary_overrides
+                        .get(&provider)
+                        .map(String::as_str);
+                    let Some(binary) = crate::model::provider_probe(provider, binary_override).path
+                    else {
+                        continue;
+                    };
+                    let result = match provider {
+                        ProviderKind::Claude => {
+                            crate::claude_session::list_provider_sessions(limit)
+                        }
+                        ProviderKind::Codex => {
+                            crate::codex_session::list_provider_sessions(&binary, limit)
+                        }
+                        _ => unreachable!("the external-session catalog is explicit"),
+                    };
+                    match result {
+                        Ok(found) => {
+                            successful_providers += 1;
+                            sessions.extend(found);
+                        }
+                        Err(error) => errors.push(format!(
+                            "{} session discovery failed: {error:#}",
+                            provider.display_name()
+                        )),
+                    }
+                }
+                sessions.sort_by(|a, b| {
+                    b.updated_at
+                        .cmp(&a.updated_at)
+                        .then_with(|| a.title.cmp(&b.title))
+                });
+                let imported = {
+                    let state = self.task_state.lock();
+                    state
+                        .sessions
+                        .iter()
+                        .filter_map(|session| session.provider_cursor.as_ref())
+                        .map(|cursor| (cursor.provider(), cursor.native_id().to_owned()))
+                        .collect::<HashSet<_>>()
+                };
+                sessions.retain(|session| {
+                    !imported.contains(&(session.provider(), session.cursor.native_id().to_owned()))
+                });
+                sessions.truncate(limit);
+                if successful_providers == 0
+                    && let Some(error) = errors.into_iter().next()
+                {
+                    bail!(error);
+                }
+                Ok(ResponsePayload::ProviderSessions { sessions })
+            }
+            Command::LoadProviderSession { cursor } => {
+                // Preserve every native turn shell for exact provider turn
+                // numbering, but bound imported display text to recent turns.
+                const VISIBLE_TURN_LIMIT: usize = 100;
+                let history = match &cursor {
+                    ProviderResumeCursor::Claude { session_id, .. } => {
+                        self.provider_binary(ProviderKind::Claude)?;
+                        crate::claude_session::provider_session_history(
+                            session_id,
+                            VISIBLE_TURN_LIMIT,
+                        )?
+                    }
+                    ProviderResumeCursor::Codex { thread_id } => {
+                        let binary = self.provider_binary(ProviderKind::Codex)?;
+                        crate::codex_session::provider_session_history(
+                            &binary,
+                            thread_id,
+                            VISIBLE_TURN_LIMIT,
+                        )?
+                    }
+                    _ => bail!(
+                        "{} does not expose resumable CLI sessions to Waku",
+                        cursor.provider().display_name()
+                    ),
+                };
+                Ok(ResponsePayload::ProviderSessionHistory { history })
+            }
             Command::LoadComposerDrafts => Ok(ResponsePayload::ComposerDrafts {
                 drafts: self.composer_drafts.load()?,
             }),
@@ -1562,6 +1659,8 @@ fn handle_driver_command(
         | Command::RemoveSession
         | Command::HydrateSession { .. }
         | Command::SearchSessionMessages { .. }
+        | Command::ListProviderSessions { .. }
+        | Command::LoadProviderSession { .. }
         | Command::LoadComposerDrafts
         | Command::SaveComposerDrafts { .. }
         | Command::ApplyComposerDraftChanges { .. }

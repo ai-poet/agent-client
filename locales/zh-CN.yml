@@ -32,11 +32,14 @@ updater.updating: 正在更新…
 updater.up_to_date: 已是最新版本
 updater.failed: "更新失败：%{error}"
 command_palette.placeholder: 搜索任务或运行命令…
+command_palette.resume_placeholder: 搜索 Claude Code 或 Codex CLI 会话…
 command_palette.suggested: 建议
 command_palette.tasks: 任务
+command_palette.sessions: 终端会话
 command_palette.commands: 命令
 command_palette.settings: 设置
 command_palette.new_task: 新建任务
+command_palette.resume: 恢复…
 command_palette.open_project: 打开项目…
 command_palette.choose_model: 选择模型…
 command_palette.copy_task_id: 复制任务 ID
@@ -53,6 +56,12 @@ command_palette.you: 你
 command_palette.agent: 智能体
 command_palette.no_results: 未找到匹配的任务或命令
 command_palette.no_results_hint: 可尝试搜索任务标题、消息、项目、设置或命令
+command_palette.loading_sessions: 正在加载终端会话…
+command_palette.no_resume_sessions: 没有可恢复的终端会话
+command_palette.no_resume_sessions_hint: 已在 Waku 中的会话不会显示。请在 Claude Code 或 Codex CLI 中开始会话后重试。
+command_palette.could_not_load_sessions: 无法加载终端会话
+command_palette.loading_selected_session: 正在加载对话…
+command_palette.resume_failed: "无法恢复会话：%{error}"
 language.title: 语言
 language.system: 跟随系统
 language.description: 选择应用的界面语言

@@ -34,9 +34,9 @@ use crate::model::{
     BackgroundWorkKey, BackgroundWorkKind, BackgroundWorkStatus, Checkpoint, CheckpointStatus,
     ContextUsage, DriverEvent, FavoriteModel, InteractionMode, Message, MessageAttachment,
     MessageRole, PendingPermission, Project, ProviderKind, ProviderModel, ProviderProbe,
-    ProviderResumeCursor, QueuedMessage, ReasoningBlock, RuntimeMode, SessionStatus,
-    SessionWorkspace, TranscriptBlock, TurnStatus, UserInputAnswer, UserInputQuestion,
-    compact_path, unix_time, unix_time_millis,
+    ProviderResumeCursor, ProviderSessionHistory, ProviderSessionSummary, QueuedMessage,
+    ReasoningBlock, RuntimeMode, SessionStatus, SessionWorkspace, TranscriptBlock, TurnStatus,
+    UserInputAnswer, UserInputQuestion, compact_path, unix_time, unix_time_millis,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
