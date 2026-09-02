@@ -19,7 +19,7 @@ mod platform {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread::JoinHandle;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use alacritty_terminal::event::{OnResize as _, WindowSize};
     use alacritty_terminal::tty::{self, EventedPty as _, EventedReadWrite as _, Shell};
@@ -48,6 +48,21 @@ mod platform {
             rows: u16,
             events: EventSink,
         ) -> anyhow::Result<Self> {
+            let shell = crate::command_env::default_terminal_shell();
+            let shell_args = crate::command_env::default_terminal_shell_args(&shell);
+            Self::open_with_shell(cwd, cols, rows, &shell, shell_args, events)
+        }
+
+        /// [`open`](Self::open) with an explicit program instead of the
+        /// user's login shell. Tests use it to run a known script in the PTY.
+        pub(crate) fn open_with_shell(
+            cwd: &std::path::Path,
+            cols: u16,
+            rows: u16,
+            shell: &std::path::Path,
+            shell_args: Vec<String>,
+            events: EventSink,
+        ) -> anyhow::Result<Self> {
             if !cwd.is_dir() {
                 bail!(
                     "terminal working directory does not exist: {}",
@@ -55,8 +70,6 @@ mod platform {
                 );
             }
 
-            let shell = crate::command_env::default_terminal_shell();
-            let shell_args = crate::command_env::default_terminal_shell_args(&shell);
             let mut options = tty::Options {
                 shell: Some(Shell::new(shell.to_string_lossy().into_owned(), shell_args)),
                 working_directory: Some(cwd.to_owned()),
@@ -160,23 +173,83 @@ mod platform {
         }
     }
 
+    /// How long a hung-up shell gets to exit on its own before it is killed.
+    const HANGUP_GRACE: Duration = Duration::from_secs(2);
+    /// How long to wait for the PTY to close once the shell is gone. Only a
+    /// process the shell started that kept the slave open outlasts this.
+    const CLOSE_GRACE: Duration = Duration::from_millis(500);
+    const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(4);
+
     impl Drop for DaemonTerminal {
         fn drop(&mut self) {
-            self.stopped.store(true, Ordering::Release);
-            // The output reader may be blocked in `read` while the shell is
-            // idle. Alacritty hangs the child up when its PTY is dropped, but
-            // the reader owns another `Arc` to that PTY, so waiting for the
-            // reader first would keep both the child and its slave fd alive.
-            // Terminate the shell before joining so the master read wakes and
-            // the reader can observe `stopped`.
             let child_pid = self.pty.lock().child().id() as libc::pid_t;
+            // Hang the shell up, but keep the output reader draining the
+            // master until the shell has actually gone. Stopping the reader
+            // first deadlocks on macOS: a BSD PTY only drains the slave's
+            // output queue when the master reads it, and a shell's exit path
+            // restores the terminal with `tcsetattr(TCSADRAIN)`, which waits
+            // for that queue to empty. With the reader stopped nothing reads
+            // it, the shell never exits, and Alacritty's blocking `wait` on
+            // it never returns. The reader ends by itself once every slave
+            // descriptor is closed; only escalate when it does not.
             unsafe {
                 libc::kill(child_pid, libc::SIGHUP);
             }
             if let Some(reader) = self.reader.take() {
+                if !wait_until(HANGUP_GRACE, || reader.is_finished()) {
+                    // The shell ignored the hangup, or something it started
+                    // still holds the slave open.
+                    unsafe {
+                        libc::kill(child_pid, libc::SIGKILL);
+                    }
+                    if !wait_until(CLOSE_GRACE, || reader.is_finished()) {
+                        self.stopped.store(true, Ordering::Release);
+                    }
+                }
                 let _ = reader.join();
             }
+            // Alacritty waits for the shell without a timeout when the PTY
+            // drops. Make sure it has exited first so teardown stays bounded.
+            if !wait_until(CLOSE_GRACE, || child_exited(child_pid)) {
+                unsafe {
+                    libc::kill(child_pid, libc::SIGKILL);
+                }
+                wait_until(CLOSE_GRACE, || child_exited(child_pid));
+            }
         }
+    }
+
+    /// Polls `done` until it holds or `timeout` elapses.
+    fn wait_until(timeout: Duration, mut done: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if done() {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(SHUTDOWN_POLL_INTERVAL);
+        }
+    }
+
+    /// Whether `pid` has exited. Peeks without reaping (`WNOWAIT`), so
+    /// Alacritty's own `wait` still collects the exit status afterwards.
+    fn child_exited(pid: libc::pid_t) -> bool {
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if result == -1 {
+            // `ECHILD`: already reaped, e.g. by the reader's exit check.
+            return std::io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD);
+        }
+        info.si_signo == libc::SIGCHLD
     }
 
     fn window_size(cols: u16, rows: u16) -> WindowSize {

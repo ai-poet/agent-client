@@ -1553,6 +1553,79 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn dropping_a_terminal_keeps_draining_until_the_shell_exits() {
+        let root = std::env::temp_dir().join(format!("waku-terminal-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let hub = Arc::new(Hub::default());
+        let session_id = Uuid::new_v4();
+        let runtime_id = Uuid::new_v4();
+        hub.begin_runtime(session_id, runtime_id);
+        let (events, received) = unbounded();
+        let _ = hub.subscribe(&[], events);
+        // On hangup the shell writes far more than a PTY buffers before it
+        // exits. A real shell's exit path blocks on the terminal the same
+        // way (readline and ZLE restore it with `tcsetattr(TCSADRAIN)`,
+        // which on macOS waits until the master has read everything), so
+        // the daemon must keep reading until the shell is gone.
+        let terminal = crate::terminal::DaemonTerminal::open_with_shell(
+            &root,
+            80,
+            24,
+            std::path::Path::new("/bin/sh"),
+            vec![
+                "-c".into(),
+                "trap 'yes | head -n 150000; exit 0' HUP; echo drain-ready; while :; do sleep 0.2; done"
+                    .into(),
+            ],
+            hub.event_sink(session_id, runtime_id),
+        )
+        .unwrap();
+
+        let marker = b"drain-ready";
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut output = Vec::new();
+        while !output.windows(marker.len()).any(|window| window == marker) {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            let Ok(message) = received.recv_timeout(remaining) else {
+                panic!(
+                    "shell did not report readiness; output={}",
+                    String::from_utf8_lossy(&output)
+                );
+            };
+            let ServerMessage::Event(event) = message else {
+                continue;
+            };
+            if event.event.kind != "terminalOutput" {
+                continue;
+            }
+            let data = event.event.payload["data"].as_str().unwrap();
+            output.extend(
+                base64::engine::general_purpose::STANDARD
+                    .decode(data)
+                    .unwrap(),
+            );
+        }
+
+        let (dropped, finished) = bounded(1);
+        std::thread::spawn(move || {
+            drop(terminal);
+            let _ = dropped.send(());
+        });
+        assert!(
+            finished.recv_timeout(Duration::from_secs(15)).is_ok(),
+            "dropping a daemon terminal deadlocked with a shell writing to its PTY on exit"
+        );
+        // The reader stayed on the PTY until the shell closed it, so the
+        // exit output was drained rather than the shell cut off.
+        let exited = std::iter::from_fn(|| received.try_recv().ok()).any(|message| {
+            matches!(message, ServerMessage::Event(event) if event.event.kind == "terminalExited")
+        });
+        assert!(exited, "daemon terminal did not report the shell exiting");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn websocket_terminal_round_trip_streams_input_and_output() {
         let root = std::env::temp_dir().join(format!("waku-terminal-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
