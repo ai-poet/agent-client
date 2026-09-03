@@ -468,7 +468,7 @@ fn executable_search_paths() -> Vec<PathBuf> {
     // when no system Node existed, so a CLI installed through the assisted
     // setup must be detectable before the updated user PATH reaches a fresh
     // process — that is, without restarting the app.
-    for directory in sub2api::cli_install::node_runtime_dirs() {
+    for directory in sub2api::cli_detect::detection_dirs() {
         if !directories.contains(&directory) {
             directories.push(directory);
         }

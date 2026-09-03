@@ -1219,6 +1219,8 @@ pub struct Waku {
     commit_dialog: Option<commit_dialog::CommitDialogState>,
     goal_dialog: Option<goal_dialog::GoalDialogState>,
     goal_dialog_request: Option<goal_dialog::GoalDialogRequest>,
+    /// Fork addition: a pending confirmation for a destructive action.
+    confirm_dialog: Option<confirm_dialog::ConfirmDialogState>,
     /// Goal operations accepted before the session's runtime exists. Goals
     /// attach to the provider thread, not to any turn, so `/goal` on a fresh
     /// task starts the provider and these drain once it installs.
@@ -1418,6 +1420,8 @@ pub struct Waku {
     cloud_account: cloud_account::CloudAccountState,
     /// Fork addition: agent CLI setup view state.
     cli_setup: cli_setup::CliSetupState,
+    /// Fork addition: first-run checklist state.
+    onboarding: onboarding::OnboardingViewState,
     /// Fork addition: per-CLI custom endpoint fields on the Providers page —
     /// `(provider_id, base-URL field, API-key field, optional model list)`.
     custom_api_inputs: Vec<(
@@ -1648,6 +1652,7 @@ mod cloud_pay;
 mod cloud_usage;
 mod command_palette;
 mod commit_dialog;
+mod confirm_dialog;
 mod goal_dialog;
 mod components;
 mod composer;
@@ -1655,6 +1660,10 @@ mod drafts;
 mod file_search;
 mod image_preview;
 mod model_plaza;
+mod onboarding;
+mod message_resend;
+mod task_rows;
+mod providers_page;
 mod render;
 mod right_panel;
 mod runtime;
@@ -1678,6 +1687,7 @@ use background_work::{
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
 pub use goal_dialog::init as init_goal_dialog_keys;
+pub use confirm_dialog::init as init_confirm_dialog_keys;
 use components::*;
 pub use image_preview::init as init_image_preview_keys;
 pub use settings::init as init_settings_keys;
@@ -2065,7 +2075,7 @@ impl Waku {
         // Fork addition: per-CLI custom endpoint fields, prefilled from the
         // stored routing so reopening settings shows what is in effect.
         let stored_custom_api = sub2api::custom_api::load();
-        let custom_api_inputs = sub2api::custom_api::CUSTOM_API_PROVIDERS
+        let custom_api_inputs: Vec<_> = sub2api::custom_api::CUSTOM_API_PROVIDERS
             .into_iter()
             .map(|provider_id| {
                 let stored = stored_custom_api.get(provider_id);
@@ -2089,7 +2099,7 @@ impl Waku {
                 });
                 // OpenCode and Pi declare models in their config, so their
                 // cards carry an optional model-list field.
-                let models_input = matches!(provider_id, "opencode" | "pi").then(|| {
+                let models_input = matches!(provider_id, "opencode" | "pi" | "grok").then(|| {
                     cx.new(|cx| {
                         let mut input = TextInput::new(window, cx)
                             .select_all_on_focus_click()
@@ -2633,6 +2643,8 @@ impl Waku {
                 },
             )
             .detach();
+            // Fork addition: Enter saves an endpoint form; edits re-render it.
+            Self::subscribe_custom_api_inputs(&custom_api_inputs, cx);
             cx.subscribe(
                 &settings_search,
                 |_: &mut Self, _, event: &InputEvent, cx| {
@@ -2780,10 +2792,15 @@ impl Waku {
             // Fork addition: restore the managed cloud session, then keep the
             // balance current. The balance is spendable, so a stale figure is
             // worse than a slightly chatty refresh; the request is a single
-            // cheap GET and only runs while signed in.
+            // cheap GET and only runs while signed in. The same task kicks off
+            // the first Node / agent-CLI detection pass, which runs off-thread.
             cx.spawn(async move |this, cx| {
                 if this
-                    .update(cx, |this, cx| this.load_cloud_account(cx))
+                    .update(cx, |this, cx| {
+                        this.refresh_cli_environment(cx);
+                        this.load_onboarding_state(cx);
+                        this.load_cloud_account(cx)
+                    })
                     .is_err()
                 {
                     return;
@@ -2931,6 +2948,7 @@ impl Waku {
                 commit_dialog: None,
                 goal_dialog: None,
                 goal_dialog_request: None,
+                confirm_dialog: None,
                 pending_goal_operations: HashMap::new(),
                 goal_runtime_starts: HashSet::new(),
                 goal_observed_at: HashMap::new(),
@@ -3038,6 +3056,7 @@ impl Waku {
                 skills_catalog: None,
                 cloud_account: cloud_account::CloudAccountState::default(),
                 cli_setup: cli_setup::CliSetupState::default(),
+                onboarding: onboarding::OnboardingViewState::default(),
                 custom_api_inputs,
                 cloud_usage: cloud_usage::CloudUsageState::default(),
                 model_plaza: model_plaza::ModelPlazaState::default(),

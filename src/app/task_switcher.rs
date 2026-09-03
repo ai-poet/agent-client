@@ -195,7 +195,7 @@ fn task_switcher_status_icon(status: SessionStatus) -> Option<&'static str> {
         SessionStatus::Idle => None,
         SessionStatus::Connecting | SessionStatus::Working => Some("icons/loader-circle.svg"),
         SessionStatus::Waiting => Some("icons/alert.svg"),
-        SessionStatus::Failed => Some("icons/x.svg"),
+        SessionStatus::Failed => Some("icons/circle-x.svg"),
     }
 }
 

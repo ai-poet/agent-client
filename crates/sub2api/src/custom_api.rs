@@ -128,9 +128,218 @@ pub fn migrate_from_extra(extra: &mut BTreeMap<String, Value>) -> Option<CustomA
     serde_json::from_value(value).ok()
 }
 
+// --- validation and connectivity -------------------------------------------
+
+/// Why a typed base URL was rejected.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UrlError {
+    Empty,
+    /// Spaces or line breaks inside — a paste that picked up extra text.
+    Whitespace,
+    /// A scheme other than `http` / `https`.
+    Scheme(String),
+    NoHost,
+}
+
+/// Turn what the user typed into the origin the config writers expect.
+///
+/// Adds `https://` when no scheme was given, lowercases the scheme, strips
+/// trailing slashes and a trailing `/v1` (each CLI's writer appends its own
+/// version path, so a pasted `/v1` would double up), and refuses anything
+/// that is not an `http(s)` URL with a host. Validation, not correction:
+/// a typo in the host is still the user's to notice.
+pub fn normalize_base_url(raw: &str) -> Result<String, UrlError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(UrlError::Empty);
+    }
+    if trimmed.chars().any(char::is_whitespace) {
+        return Err(UrlError::Whitespace);
+    }
+    let with_scheme = if trimmed.contains("://") {
+        trimmed.to_owned()
+    } else {
+        format!("https://{trimmed}")
+    };
+    let (scheme, rest) = with_scheme
+        .split_once("://")
+        .expect("a scheme separator was just ensured");
+    let scheme = scheme.to_ascii_lowercase();
+    if scheme != "http" && scheme != "https" {
+        return Err(UrlError::Scheme(scheme));
+    }
+    let host = rest.split('/').next().unwrap_or_default();
+    if host.is_empty() {
+        return Err(UrlError::NoHost);
+    }
+    let mut path = rest.trim_end_matches('/').to_owned();
+    if let Some(stripped) = path
+        .strip_suffix("/v1")
+        .or_else(|| path.strip_suffix("/V1"))
+    {
+        path = stripped.trim_end_matches('/').to_owned();
+    }
+    Ok(format!("{scheme}://{path}"))
+}
+
+/// How the connectivity test read the answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProbeVerdict {
+    /// The models listing answered 2xx: the endpoint speaks the protocol
+    /// and accepted the key.
+    Ok,
+    /// Reachable, but the key was refused (401 / 403).
+    Unauthorized,
+    /// Reachable, but some other HTTP error — a wrong path is the usual one.
+    HttpError,
+    /// No HTTP answer at all: DNS, TLS, proxy, or a dead host.
+    Unreachable,
+}
+
+/// What the connectivity test found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProbeResult {
+    pub latency_ms: u128,
+    pub status: Option<u16>,
+    pub verdict: ProbeVerdict,
+    /// The server's error text or the transport error, shortened.
+    pub detail: String,
+}
+
+/// The request the connectivity test sends: the models listing, which every
+/// API family serves and which costs nothing.
+///
+/// The path follows the CLI's protocol exactly as the config writers do —
+/// Anthropic's SDK appends `/v1` to the root, OpenAI-style clients expect it
+/// in the base — so a green test means the *routed* endpoint answers, not
+/// merely that the host is up.
+pub fn probe_request(
+    provider_id: &str,
+    base_url: &str,
+    api_key: &str,
+) -> (String, crate::http::Request) {
+    let key = api_key.trim();
+    let mut request = crate::http::Request::new().timeout_seconds(10);
+    if provider_id == "claude" {
+        let url = format!(
+            "{}/v1/models",
+            crate::gateway::anthropic_base_url(base_url)
+        );
+        request = request.header("anthropic-version", "2023-06-01");
+        if !key.is_empty() {
+            request = request.header("x-api-key", key);
+        }
+        (url, request)
+    } else {
+        let url = format!("{}/models", crate::gateway::openai_base_url(base_url));
+        if !key.is_empty() {
+            request = request.bearer(key);
+        }
+        (url, request)
+    }
+}
+
+/// Run the connectivity test. Blocks for up to the request timeout; callers
+/// run it off the UI thread.
+pub fn probe_endpoint(provider_id: &str, base_url: &str, api_key: &str) -> ProbeResult {
+    let (url, request) = probe_request(provider_id, base_url, api_key);
+    let started = std::time::Instant::now();
+    match request.send(&url) {
+        Ok(response) => {
+            let latency_ms = started.elapsed().as_millis();
+            let verdict = match response.status {
+                200..=299 => ProbeVerdict::Ok,
+                401 | 403 => ProbeVerdict::Unauthorized,
+                _ => ProbeVerdict::HttpError,
+            };
+            let detail = if verdict == ProbeVerdict::Ok {
+                String::new()
+            } else {
+                crate::http::error_summary(&response.body)
+            };
+            ProbeResult {
+                latency_ms,
+                status: Some(response.status),
+                verdict,
+                detail,
+            }
+        }
+        Err(error) => ProbeResult {
+            latency_ms: started.elapsed().as_millis(),
+            status: None,
+            verdict: ProbeVerdict::Unreachable,
+            detail: format!("{error:#}"),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_base_url_cases() {
+        assert_eq!(
+            normalize_base_url("api.example.com"),
+            Ok("https://api.example.com".to_owned())
+        );
+        assert_eq!(
+            normalize_base_url("  HTTPS://api.example.com/  "),
+            Ok("https://api.example.com".to_owned())
+        );
+        assert_eq!(
+            normalize_base_url("http://gw.local:8080/api/v1/"),
+            Ok("http://gw.local:8080/api".to_owned())
+        );
+        assert_eq!(
+            normalize_base_url("https://gw.example.org/V1"),
+            Ok("https://gw.example.org".to_owned())
+        );
+        assert_eq!(normalize_base_url(""), Err(UrlError::Empty));
+        assert_eq!(normalize_base_url("   "), Err(UrlError::Empty));
+        assert_eq!(
+            normalize_base_url("https://a.example.org key"),
+            Err(UrlError::Whitespace)
+        );
+        assert_eq!(
+            normalize_base_url("ftp://files.example.org"),
+            Err(UrlError::Scheme("ftp".to_owned()))
+        );
+        assert_eq!(normalize_base_url("https:///path"), Err(UrlError::NoHost));
+    }
+
+    #[test]
+    fn probe_endpoint_builds_per_cli_request() {
+        let (url, request) = probe_request("claude", "https://gw.example.org/v1/", "sk-ant-key");
+        assert_eq!(url, "https://gw.example.org/v1/models");
+        assert!(
+            request
+                .header_lines()
+                .iter()
+                .any(|line| line == "x-api-key: sk-ant-key")
+        );
+        assert!(
+            request
+                .header_lines()
+                .iter()
+                .any(|line| line.starts_with("anthropic-version: "))
+        );
+
+        let (url, request) = probe_request("codex", "https://gw.example.org", "sk-openai");
+        assert_eq!(url, "https://gw.example.org/v1/models");
+        assert!(
+            request
+                .header_lines()
+                .iter()
+                .any(|line| line == "Authorization: Bearer sk-openai")
+        );
+
+        // Grok, OpenCode and Pi speak the OpenAI shape too.
+        let (url, request) = probe_request("grok", "https://api.x.ai", "");
+        assert_eq!(url, "https://api.x.ai/v1/models");
+        assert!(request.header_lines().is_empty());
+        assert_eq!(request.timeout(), Some(10));
+    }
 
     fn endpoint(url: &str, key: &str) -> CustomEndpoint {
         CustomEndpoint {

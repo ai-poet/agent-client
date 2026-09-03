@@ -95,6 +95,16 @@ impl Request {
         self
     }
 
+    /// The headers as `name: value` lines, for tests that check what a
+    /// request would send without sending it.
+    pub fn header_lines(&self) -> &[String] {
+        &self.headers
+    }
+
+    pub fn timeout(&self) -> Option<u32> {
+        self.timeout_seconds
+    }
+
     /// Render the curl config passed on stdin.
     ///
     /// Separated from [`Self::send`] so the escaping is unit-testable without
@@ -207,7 +217,7 @@ fn parse(raw: &str) -> Result<Response> {
 /// Pull a human-readable message out of an error body, falling back to the
 /// raw text. The managed service reports errors as `{"message": "..."}` or
 /// `{"error": "..."}` depending on the endpoint.
-fn error_summary(body: &str) -> String {
+pub(crate) fn error_summary(body: &str) -> String {
     let parsed: Option<serde_json::Value> = serde_json::from_str(body).ok();
     parsed
         .as_ref()

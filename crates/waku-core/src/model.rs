@@ -39,7 +39,8 @@ fn apply_cached_models(
     if probe.provider.supports_model_discovery()
         && let Some(models) = cached_models
     {
-        probe.models = models;
+        // Fork: a cache written before a curated entry existed still shows it.
+        probe.models = crate::model_catalog::with_curated_fallback(probe.provider, models);
     }
     probe
 }
@@ -89,5 +90,31 @@ mod tests {
 
         assert_eq!(probe.models.len(), 1);
         assert_eq!(probe.models[0].id, "cached-model");
+    }
+
+    #[test]
+    fn cached_claude_catalog_gains_curated_entries_it_predates() {
+        let probe = ProviderProbe {
+            provider: ProviderKind::Claude,
+            installed: true,
+            path: Some("/usr/bin/claude".into()),
+            models: crate::model_catalog::fallback_models(ProviderKind::Claude),
+            agent_presets: Vec::new(),
+        };
+        let cached = vec![ProviderModel::new("claude-sonnet-5", "Sonnet").default()];
+
+        let probe = apply_cached_models(probe, Some(cached));
+
+        assert_eq!(probe.models[0].id, "claude-sonnet-5");
+        assert!(probe.models[0].is_default);
+        assert!(probe.models.iter().any(|model| model.id == "claude-fable-5-1"));
+        assert_eq!(
+            probe
+                .models
+                .iter()
+                .filter(|model| model.id == "claude-sonnet-5")
+                .count(),
+            1
+        );
     }
 }

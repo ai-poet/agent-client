@@ -372,7 +372,7 @@ impl Waku {
             .into_any_element()
     }
 
-    fn scroll_transcript_to_bottom(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn scroll_transcript_to_bottom(&mut self, cx: &mut Context<Self>) {
         self.sync_transcript_rows();
         self.pin_transcript_to_tail();
         cx.notify();
@@ -1255,6 +1255,7 @@ impl Waku {
                     let assistant_message_action =
                         self.assistant_message_action_for_message(message_index);
                     let user_message_action = self.user_message_action_for_message(message_index);
+                    let resend_action = self.resend_action_for_message(message_index);
                     let message_edit_input = user_message_action.and_then(|action| {
                         self.message_edit
                             .as_ref()
@@ -1327,6 +1328,7 @@ impl Waku {
                             copied,
                             assistant_message_action,
                             user_message_action,
+                            resend_action,
                             message_edit_input,
                             attachment_menus,
                             attachment_images,
@@ -1457,6 +1459,7 @@ impl Waku {
                 force_visible,
                 false,
                 action,
+                None,
                 None,
                 cx.entity().downgrade(),
             ))

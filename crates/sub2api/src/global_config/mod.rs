@@ -139,6 +139,42 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
     }
 }
 
+/// Which configuration a CLI runs with right now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RouteKind {
+    /// The managed gateway covers it: signed in, routing on, key present.
+    Cloud,
+    /// A usable custom endpoint is set and nothing outranks it.
+    Custom,
+    /// Neither — the CLI's own configuration, untouched (or restored).
+    CliOwn,
+}
+
+/// The route a CLI is on, for the Providers page. Same precedence as
+/// [`desired_routes`]: the cloud wins while it covers the CLI, the custom
+/// endpoint applies otherwise. A custom entry the cloud outranks is still
+/// stored, which is why the page says so next to it.
+pub fn active_route_kind(
+    provider_id: &str,
+    cloud: Option<&GatewayConfig>,
+    custom: &CustomApiConfig,
+) -> RouteKind {
+    let cloud_only = desired_routes(cloud, &CustomApiConfig::default());
+    let cloud_covers = match provider_id {
+        "claude" => cloud_only.claude.is_some(),
+        "codex" => cloud_only.codex.is_some(),
+        "grok" => cloud_only.grok.is_some(),
+        _ => false,
+    };
+    if cloud_covers {
+        RouteKind::Cloud
+    } else if custom.endpoint_for(provider_id).is_some() {
+        RouteKind::Custom
+    } else {
+        RouteKind::CliOwn
+    }
+}
+
 /// A file as it was the moment we first took a CLI over.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileBackup {
@@ -370,6 +406,82 @@ pub(crate) fn remove_if_exists(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_route_kind_prefers_cloud_over_custom() {
+        let cloud = GatewayConfig {
+            enabled: true,
+            endpoint: "https://cloud.example.org".into(),
+            api_key: Some("sk-general".into()),
+            claude_api_key: Some("sk-claude".into()),
+            codex_api_key: None,
+            codex_model: None,
+        };
+        let mut custom = CustomApiConfig::default();
+        custom.set(
+            "claude",
+            Some(crate::custom_api::CustomEndpoint {
+                base_url: "https://mine.example.org".into(),
+                api_key: "sk-mine".into(),
+                models: Vec::new(),
+            }),
+        );
+        custom.set(
+            "codex",
+            Some(crate::custom_api::CustomEndpoint {
+                base_url: "https://mine.example.org".into(),
+                api_key: "sk-mine".into(),
+                models: Vec::new(),
+            }),
+        );
+
+        // Claude: the cloud key outranks the stored custom endpoint.
+        assert_eq!(
+            active_route_kind("claude", Some(&cloud), &custom),
+            RouteKind::Cloud
+        );
+        // Codex and Grok ride the general key when they have none of their own.
+        assert_eq!(
+            active_route_kind("codex", Some(&cloud), &custom),
+            RouteKind::Cloud
+        );
+        assert_eq!(
+            active_route_kind("grok", Some(&cloud), &custom),
+            RouteKind::Cloud
+        );
+        // Without a general key, Codex falls back to its custom endpoint and
+        // Grok has nothing.
+        let claude_only = GatewayConfig {
+            api_key: None,
+            ..cloud.clone()
+        };
+        assert_eq!(
+            active_route_kind("codex", Some(&claude_only), &custom),
+            RouteKind::Custom
+        );
+        assert_eq!(
+            active_route_kind("grok", Some(&claude_only), &custom),
+            RouteKind::CliOwn
+        );
+        // Nothing configured at all.
+        assert_eq!(
+            active_route_kind("pi", Some(&cloud), &custom),
+            RouteKind::CliOwn
+        );
+        // Signed out: the custom endpoint takes over for Claude.
+        assert_eq!(
+            active_route_kind("claude", None, &custom),
+            RouteKind::Custom
+        );
+        let disabled = GatewayConfig {
+            enabled: false,
+            ..cloud
+        };
+        assert_eq!(
+            active_route_kind("grok", Some(&disabled), &custom),
+            RouteKind::CliOwn
+        );
+    }
 
     fn target(url: &str, key: &str) -> RouteTarget {
         RouteTarget {

@@ -2214,16 +2214,12 @@ cloud.copy_link:
   en: "Copy link"
 cloud.invite_copied:
   en: "Invite link copied"
-cli_setup.title:
-  en: "Set up missing agents"
 cli_setup.node_requirement:
   en: "Node %{major} or newer"
 cli_setup.node_found:
   en: "Found %{version}"
 cli_setup.node_missing:
   en: "Not found on PATH"
-cli_setup.not_installed:
-  en: "Not installed"
 cli_setup.copy:
   en: "Copy"
 cli_setup.install:
@@ -2242,14 +2238,6 @@ cli_setup.stage_installing:
   en: "Installing (%{method})…"
 cli_setup.stage_verifying:
   en: "Verifying…"
-cli_setup.install_selected:
-  en: "Install selected (%{count})"
-cloud.onboarding_title:
-  en: "Sign in to %{name}"
-cloud.onboarding_detail:
-  en: "One account for Claude Code and Codex — no separate subscriptions, pay-as-you-go, balance always visible."
-cloud.onboarding_later:
-  en: "Later"
 cloud.onboarding_waiting:
   en: "Waiting for the browser…"
 cloud.sidebar_sign_in:
@@ -2348,8 +2336,120 @@ plaza.group_count:
   en: "%{count} groups"
 cli_setup.node_manual:
   en: Node 22 was not found. Install it with your system package manager, then refresh
-cli_setup.welcome_missing:
-  en: No agent CLI detected on this computer yet
+cli_setup.node_not_runnable:
+  en: "Node was found but cannot run: %{detail}"
+cli_setup.detecting:
+  en: "Checking Node and the agent CLIs…"
+cli_setup.installed_not_on_path:
+  en: "%{name} installed to %{dir}, which is not on PATH. This app remembers the directory; add it to PATH for your own terminals"
+cli_setup.installed_not_runnable:
+  en: "installed at %{path}, but it does not run: %{detail}"
+cli_setup.hint_permission:
+  en: "npm could not write its global directory. Move the prefix somewhere writable, then retry:"
+cli_setup.hint_network:
+  en: "The registry could not be reached. Check the network or proxy, then retry"
+providers.status_installed:
+  en: "Installed"
+providers.status_not_runnable:
+  en: "Installed, but it does not run"
+providers.route_title:
+  en: "Routing"
+providers.route_cloud:
+  en: "Cloud gateway"
+providers.route_custom:
+  en: "Custom endpoint"
+providers.route_cli_own:
+  en: "The CLI's own configuration"
+providers.route_manage:
+  en: "Manage cloud routing"
+providers.install_result_ok:
+  en: "Installed %{version}"
+cli_setup.use_this_path:
+  en: "Use this path"
+cli_setup.copy_fix:
+  en: "Copy fix commands"
+cli_setup.custom_url_label:
+  en: "Endpoint URL"
+cli_setup.custom_key_label:
+  en: "API key"
+cli_setup.custom_models_label:
+  en: "Models"
+cli_setup.custom_reveal:
+  en: "Show"
+cli_setup.custom_hide:
+  en: "Hide"
+cli_setup.custom_cancel:
+  en: "Discard changes"
+cli_setup.custom_unsaved:
+  en: "Unsaved changes"
+cli_setup.custom_invalid_url:
+  en: "Invalid endpoint URL: %{reason}"
+cli_setup.custom_url_empty:
+  en: "enter a URL"
+cli_setup.custom_url_whitespace:
+  en: "it contains spaces"
+cli_setup.custom_url_scheme:
+  en: "only http and https are supported (got %{scheme})"
+cli_setup.custom_url_no_host:
+  en: "no host"
+cli_setup.custom_testing:
+  en: "Testing…"
+cli_setup.custom_test_unauthorized:
+  en: "Reachable, but the key was refused (HTTP %{status})"
+cli_setup.custom_test_http:
+  en: "Reachable, but it answered HTTP %{status}: %{detail}"
+cli_setup.custom_clear_confirm:
+  en: "Clear the custom endpoint for %{name}?"
+cli_setup.custom_clear_confirm_detail:
+  en: "The CLI's original configuration is restored."
+cli_setup.env_conflicts_title:
+  en: "Environment variables may override routing"
+cli_setup.env_conflicts_detail:
+  en: "These variables outrank the configuration files this app writes. Remove them, or expect the CLI to route by them."
+cli_setup.env_source_process:
+  en: "this process's environment"
+cli_setup.env_source_user:
+  en: "Windows user environment"
+cli_setup.env_source_machine:
+  en: "Windows system environment"
+cli_setup.env_source_file:
+  en: "%{path}:%{line}"
+cli_setup.env_conflict_open_settings:
+  en: "Open environment variables"
+cli_setup.env_conflict_copy_unset:
+  en: "Copy unset command"
+cli_setup.env_conflict_copied:
+  en: "Command copied"
+onboarding.checklist_title:
+  en: "Three steps to get going"
+onboarding.progress:
+  en: "%{done} / %{total}"
+onboarding.step_sign_in:
+  en: "Sign in to your %{name} account"
+onboarding.step_install_cli:
+  en: "Install an agent CLI"
+onboarding.step_first_message:
+  en: "Open a project and send your first message"
+onboarding.install_defaults:
+  en: "Install Claude Code + Codex"
+onboarding.open_providers:
+  en: "Provider settings"
+onboarding.write_first_message:
+  en: "Write a message"
+onboarding.later:
+  en: "Later"
+session.edit_and_resend:
+  en: "Edit and send again"
+session.resend_as_new_message:
+  en: "The message is in the composer; sending it starts a new turn"
+session.failed:
+  en: "This task failed"
+session.remove_task:
+  en: "Remove task"
+session.remove_confirm_title:
+  en: "Remove this task?"
+session.remove_confirm_detail:
+  en: "Its transcript is deleted from this computer. This cannot be undone."
 announcements.title:
   en: Announcements
 announcements.unread_count:
@@ -2480,10 +2580,6 @@ cli_setup.custom_cleared:
   en: "Custom endpoint cleared"
 cli_setup.custom_need_both:
   en: "Both the base URL and the API key are required"
-cli_setup.custom_active:
-  en: "Active for new sessions"
-cli_setup.custom_inactive:
-  en: "Not configured"
 cli_setup.custom_overridden:
   en: "Cloud routing is on and overrides this endpoint"
 cloud.group_switched:
@@ -2494,10 +2590,6 @@ cli_setup.custom_hint_openai:
   en: "OpenAI-compatible endpoint. Enter the service origin; /v1 is appended automatically."
 cli_setup.custom_models_placeholder:
   en: "Model ids, comma separated (optional)"
-cli_setup.custom_edit:
-  en: "Edit"
-cli_setup.custom_collapse:
-  en: "Collapse"
 cli_setup.custom_test:
   en: "Test connection"
 cli_setup.custom_open_file:
@@ -2512,8 +2604,6 @@ cli_setup.custom_connect_failed:
   en: "Could not connect: %{error}"
 cli_setup.custom_file_missing:
   en: "The config file does not exist yet — save an endpoint or sign in first"
-cli_setup.custom_cloud_active:
-  en: "Cloud routing active"
 plaza.all_platforms:
   en: "All platforms"
 plaza.billing_all:

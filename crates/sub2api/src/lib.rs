@@ -23,15 +23,18 @@
 
 pub mod auth;
 pub mod brand;
+pub mod cli_detect;
 pub mod cli_install;
 pub mod client;
 pub mod codex_compat;
 pub mod custom_api;
+pub mod env_conflicts;
 pub mod gateway;
 pub mod global_config;
 pub mod http;
 pub mod migrate;
 pub mod node_install;
+pub mod onboarding;
 pub mod pay;
 
 pub use auth::Credentials;

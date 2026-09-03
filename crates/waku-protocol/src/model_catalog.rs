@@ -41,6 +41,7 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         })
         .collect(),
         ProviderKind::Claude => vec![
+            claude_long_context(claude_ultracode_model("claude-fable-5-1", "Claude Fable 5.1")),
             claude_long_context(claude_ultracode_model("claude-fable-5", "Claude Fable 5")),
             claude_long_context(claude_ultracode_model("claude-opus-5", "Claude Opus 5")),
             claude_long_context(claude_ultracode_model("claude-opus-4-8", "Claude Opus 4.8")),

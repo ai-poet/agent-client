@@ -51,12 +51,6 @@ pub(super) struct CloudAccountState {
     pub referral: Option<sub2api::client::ReferralInfo>,
     /// A group switch or redemption is in flight.
     pub busy: bool,
-    /// The welcome-screen sign-in card was dismissed this session.
-    ///
-    /// Deliberately not persisted: signing in is the product's whole value,
-    /// so the nudge may return on the next launch — but within a session,
-    /// "later" means later.
-    pub onboarding_dismissed: bool,
 }
 
 /// What a card's button does.
@@ -819,119 +813,6 @@ impl Waku {
 }
 
 impl Waku {
-    /// Sign-in call-to-action for the welcome screen.
-    ///
-    /// `None` once signed in or dismissed. The primary button starts the
-    /// browser flow directly — sending a first-run user through Settings to
-    /// find the same button is a needless detour.
-    pub(super) fn render_cloud_onboarding_card(&self, cx: &mut Context<Self>) -> Option<Div> {
-        if self.cloud_account.credentials.is_some() || self.cloud_account.onboarding_dismissed {
-            return None;
-        }
-        let theme = Theme::current(cx);
-        let pending = self.cloud_account.pending;
-
-        Some(
-            div()
-                .mt(px(28.0))
-                .max_w(px(420.0))
-                .w_full()
-                .px(px(20.0))
-                .py(px(18.0))
-                .rounded(px(14.0))
-                .bg(theme.raised)
-                .border_1()
-                .border_color(theme.border_strong)
-                .flex()
-                .flex_col()
-                .items_center()
-                .child(
-                    div()
-                        .text_size(sp(14.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .child(tr!(
-                            "cloud.onboarding_title",
-                            name = sub2api::brand::DISPLAY_NAME
-                        )),
-                )
-                .child(
-                    div()
-                        .mt(px(6.0))
-                        .text_center()
-                        .text_size(sp(12.5))
-                        .line_height(sp(19.0))
-                        .text_color(theme.text_tertiary)
-                        .child(tr!("cloud.onboarding_detail")),
-                )
-                .child(
-                    div()
-                        .mt(px(14.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(10.0))
-                        .child(
-                            div()
-                                .id("cloud-onboarding-sign-in")
-                                .tab_index(0)
-                                .focus_visible(|style| {
-                                    style.border_1().border_color(theme.accent)
-                                })
-                                .h(px(32.0))
-                                .px(px(16.0))
-                                .rounded_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .cursor_default()
-                                .bg(theme.inverse)
-                                .text_color(theme.on_inverse)
-                                .text_size(sp(12.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .opacity(if pending { 0.55 } else { 1.0 })
-                                .child(if pending {
-                                    tr!("cloud.onboarding_waiting")
-                                } else {
-                                    tr!("cloud.sign_in")
-                                })
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.start_cloud_sign_in(cx);
-                                })),
-                        )
-                        .child(
-                            div()
-                                .id("cloud-onboarding-later")
-                                .tab_index(0)
-                                .h(px(32.0))
-                                .px(px(12.0))
-                                .rounded_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .cursor_default()
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_tertiary)
-                                .hover(|style| style.bg(theme.overlay))
-                                .child(tr!("cloud.onboarding_later"))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.cloud_account.onboarding_dismissed = true;
-                                    cx.notify();
-                                })),
-                        ),
-                )
-                .when_some(self.cloud_account.error.clone(), |card, error| {
-                    card.child(
-                        div()
-                            .mt(px(10.0))
-                            .text_center()
-                            .text_size(sp(12.0))
-                            .text_color(theme.text_tertiary)
-                            .child(error),
-                    )
-                }),
-        )
-    }
-
     /// Account chip for the sidebar footer: the always-visible way in.
     ///
     /// Signed out it invites and opens the account page. Signed in it opens a

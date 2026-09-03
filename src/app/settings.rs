@@ -387,7 +387,7 @@ impl Waku {
             )
             .child(match page {
                 SettingsPage::General => self.render_general_settings(cx),
-                SettingsPage::Providers => self.render_providers_settings(cx),
+                SettingsPage::Providers => self.render_providers_page(cx),
                 SettingsPage::Skills => self.render_skills_settings(cx),
                 SettingsPage::Usage => self.render_usage_settings(cx),
                 SettingsPage::Daemon => self.render_daemon_settings(cx),
@@ -1563,6 +1563,7 @@ impl Waku {
             .reset(self.skills_rows.borrow().len());
     }
 
+    #[allow(dead_code)]
     fn render_providers_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let checking = self.provider_detection_remaining > 0;
@@ -1818,14 +1819,12 @@ impl Waku {
                     ),
             )
             .child(rows)
-            // Fork addition: what to install when a CLI is missing.
-            .child(self.render_cli_setup_section(cx))
             .into_any_element()
     }
 
     /// The expanded row's settings body: the binary override for this
     /// provider, with the detection result as its caption.
-    fn render_provider_expanded_settings(
+    pub(super) fn render_provider_expanded_settings(
         &self,
         kind: ProviderKind,
         theme: Theme,
@@ -1918,7 +1917,7 @@ impl Waku {
             )
     }
 
-    fn toggle_provider_expanded(
+    pub(super) fn toggle_provider_expanded(
         &mut self,
         provider: ProviderKind,
         window: &mut Window,
@@ -1980,7 +1979,7 @@ impl Waku {
 
     /// Providers switched off here stop offering models to new sessions;
     /// sessions already locked to them keep working.
-    fn set_provider_enabled(
+    pub(super) fn set_provider_enabled(
         &mut self,
         provider: ProviderKind,
         enabled: bool,
@@ -2465,7 +2464,7 @@ fn font_size_label(size: f32) -> String {
 
 /// "Checked …" caption for the Providers page. Recomputed whenever the page
 /// redraws; precision beyond the minute is noise here.
-fn detection_checked_label(elapsed: Duration) -> String {
+pub(super) fn detection_checked_label(elapsed: Duration) -> String {
     let seconds = elapsed.as_secs();
     if seconds < 90 {
         tr!("providers.checked_just_now")
@@ -2477,7 +2476,7 @@ fn detection_checked_label(elapsed: Duration) -> String {
 }
 
 /// Keep the full binary path, abbreviating only the user's home directory.
-fn abbreviate_home_path(path: &Path, home: Option<&Path>) -> String {
+pub(super) fn abbreviate_home_path(path: &Path, home: Option<&Path>) -> String {
     match home.and_then(|home| path.strip_prefix(home).ok()) {
         Some(relative) if relative.as_os_str().is_empty() => "~".to_owned(),
         Some(relative) => format!("~/{}", relative.display()),

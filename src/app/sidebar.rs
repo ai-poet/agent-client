@@ -1893,8 +1893,11 @@ impl Waku {
         let menu = self.menu_handle(format!("session-{session_id}"), cx);
         let row_focus = menu.trigger_focus_handle().clone();
         let keyboard_menu = menu.clone();
+        // Fork addition: the row is a hover group for its remove button.
+        let row_group = SharedString::from(format!("session-row-{session_id}"));
         let row = div()
             .id(SharedString::from(format!("session-{}", session.id)))
+            .group(row_group.clone())
             .w_full()
             .min_w_0()
             .flex()
@@ -1932,13 +1935,9 @@ impl Waku {
                             status_color(&theme, session.status),
                         ))
                     })
-                    .when(session.status == SessionStatus::Failed, |element| {
-                        element.child(icon(
-                            "icons/x.svg",
-                            12.0,
-                            status_color(&theme, session.status),
-                        ))
-                    }),
+                    // Fork addition: failure badge with the cause, and a remove control.
+                    .children(self.render_task_failure_badge(session, cx))
+                    .child(self.render_task_remove_button(session, row_group.clone(), cx)),
             )
             .child(
                 div()
@@ -2233,10 +2232,8 @@ impl Waku {
                         .text_color(theme.text_tertiary)
                         .child(tr_cow!("onboarding.description")),
                 )
-                // Fork addition: the managed cloud sign-in nudge.
-                .children(self.render_cloud_onboarding_card(cx))
-                // Fork addition: point a bare machine at the CLI installer.
-                .children(self.render_missing_cli_hint(cx))
+                // Fork addition: the first-run checklist.
+                .children(self.render_onboarding_checklist(cx))
                 .child(
                     div()
                         .mt(px(20.0))
@@ -2411,7 +2408,7 @@ impl Waku {
     }
 }
 
-fn localized_session_title(session: &AgentSession) -> String {
+pub(super) fn localized_session_title(session: &AgentSession) -> String {
     let title = session.display_title();
     if title == AgentSession::DEFAULT_TITLE {
         tr!("session.new_task")

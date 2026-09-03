@@ -205,6 +205,7 @@ pub(super) fn render_message_footer(
     align_right: bool,
     assistant_message_action: Option<AssistantMessageAction>,
     user_message_action: Option<UserMessageAction>,
+    resend_action: Option<super::message_resend::ResendAction>,
     waku: gpui::WeakEntity<Waku>,
 ) -> AnyElement {
     let theme = *theme;
@@ -316,6 +317,11 @@ pub(super) fn render_message_footer(
         footer = footer.child(timestamp);
     }
 
+    // Fork addition: edit-and-resend where rewind is unavailable.
+    if let Some(action) = resend_action {
+        footer = footer.child(super::message_resend::footer_button(action, footer_color, &theme, waku.clone()));
+    }
+
     if let Some(action) = user_message_action {
         let edit_waku = waku;
         footer = footer.child(
@@ -354,6 +360,7 @@ pub(super) struct MessageRender<'a> {
     pub(super) copied: bool,
     pub(super) assistant_message_action: Option<AssistantMessageAction>,
     pub(super) user_message_action: Option<UserMessageAction>,
+    pub(super) resend_action: Option<super::message_resend::ResendAction>,
     pub(super) message_edit_input: Option<Entity<ComposerInput>>,
     pub(super) attachment_menus: Vec<ContextMenuHandle>,
     pub(super) attachment_images: Vec<Option<Arc<gpui::Image>>>,
@@ -549,6 +556,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         copied,
         assistant_message_action,
         user_message_action,
+        resend_action,
         message_edit_input,
         attachment_menus,
         attachment_images,
@@ -701,6 +709,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     true,
                     None,
                     user_message_action,
+                    resend_action,
                     waku.clone(),
                 ));
             }
@@ -735,6 +744,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     false,
                     assistant_message_action,
                     None,
+                    None,
                     waku.clone(),
                 ));
             }
@@ -768,6 +778,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 &menu_copy_content,
                 role,
                 user_message_action,
+                resend_action,
                 assistant_message_action,
                 &selection,
                 &composer,
@@ -785,6 +796,7 @@ fn message_menu_items(
     content: &str,
     role: MessageRole,
     user_message_action: Option<UserMessageAction>,
+    resend_action: Option<super::message_resend::ResendAction>,
     assistant_message_action: Option<AssistantMessageAction>,
     selection: &TranscriptSelection,
     composer: &Entity<ComposerInput>,
@@ -820,6 +832,11 @@ fn message_menu_items(
                 window.focus(&focus_handle, cx);
             },
         ));
+    }
+
+    // Fork addition: edit-and-resend where rewind is unavailable.
+    if let Some(action) = resend_action {
+        items.push(super::message_resend::menu_item(action, waku.clone()));
     }
 
     if let Some(code) = fenced_code(content) {

@@ -14,8 +14,11 @@
 //! function, which also makes it testable without touching the machine.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+
+use crate::cli_detect::Probe;
 
 /// Node major version the agent CLIs require.
 pub const REQUIRED_NODE_MAJOR: u32 = 22;
@@ -71,64 +74,52 @@ pub fn descriptor(id: &str) -> Option<&'static CliDescriptor> {
     DESCRIPTORS.iter().find(|descriptor| descriptor.id == id)
 }
 
-/// What we found for one CLI.
+/// What we found for one CLI: whether a binary exists and whether it runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Detection {
     pub id: &'static str,
-    pub path: Option<PathBuf>,
+    pub probe: Probe,
 }
 
 impl Detection {
+    /// A binary exists, runnable or not. A broken install is still an
+    /// install — offering to `npm install` over it would not fix it.
     pub fn is_installed(&self) -> bool {
-        self.path.is_some()
+        self.probe.is_present()
+    }
+
+    pub fn is_runnable(&self) -> bool {
+        self.probe.is_runnable()
+    }
+
+    pub fn path(&self) -> Option<&Path> {
+        self.probe.path()
     }
 }
 
-/// Detect every known CLI on the current `PATH`.
+/// Detect every known CLI in the default search directories, running each
+/// one found. Blocking; see [`crate::cli_detect::snapshot`] for the full pass
+/// the desktop uses.
 pub fn detect_all() -> Vec<Detection> {
+    let dirs = crate::cli_detect::default_search_dirs();
     DESCRIPTORS
         .iter()
         .map(|descriptor| Detection {
             id: descriptor.id,
-            path: find_executable(descriptor.binary),
+            probe: crate::cli_detect::probe_named(descriptor.binary, &dirs, &dirs),
         })
         .collect()
 }
 
-/// Resolve an executable on `PATH`, honouring `PATHEXT` on Windows.
+/// Resolve an executable in the default search directories — the process
+/// `PATH` plus every place [`crate::cli_detect::detection_dirs`] knows.
 pub fn find_executable(name: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).find_map(|directory| {
-        for candidate in executable_candidates(name) {
-            let full = directory.join(&candidate);
-            if is_executable_file(&full) {
-                return Some(full);
-            }
-        }
-        None
-    })
+    crate::cli_detect::find_executable_in(name, &crate::cli_detect::default_search_dirs())
 }
 
-/// Names to try for `name`: the bare name, plus each `PATHEXT` suffix on
-/// Windows, where `claude` is really `claude.cmd`.
-fn executable_candidates(name: &str) -> Vec<String> {
-    if !cfg!(target_os = "windows") {
-        return vec![name.to_owned()];
-    }
-    let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_owned());
-    let mut candidates = vec![name.to_owned()];
-    candidates.extend(
-        extensions
-            .split(';')
-            .map(str::trim)
-            .filter(|extension| !extension.is_empty())
-            .map(|extension| format!("{name}{}", extension.to_ascii_lowercase())),
-    );
-    candidates
-}
-
-fn is_executable_file(path: &Path) -> bool {
-    path.is_file()
+/// The npm launcher's file name on this platform.
+pub fn npm_binary_name() -> &'static str {
+    if cfg!(target_os = "windows") { "npm.cmd" } else { "npm" }
 }
 
 /// `npm install -g <package>`, optionally pinned to a registry mirror.
@@ -146,23 +137,356 @@ pub fn install_command(package: &str, registry: Option<&str>) -> String {
     }
 }
 
-/// Install commands to try, in order.
+/// Install commands to try, in order — the copyable form of
+/// [`install_attempts`].
 ///
 /// On Windows the mirror comes first for everyone, with the official registry
 /// as the fallback — the audience this ships to reaches npmmirror far more
 /// reliably than registry.npmjs.org, and a locale check would miss them
-/// because Windows rarely sets `LANG`. Elsewhere the official registry is
-/// dependable and the mirror is the wrong default.
+/// because Windows rarely sets `LANG`. Elsewhere the official registry comes
+/// first, but the mirror still follows: a mainland macOS user is not rarer
+/// than a mainland Windows user, only differently defaulted.
 pub fn install_candidates(package: &str) -> Vec<String> {
     let pinned = format!("{package}@latest");
+    let mirror = install_command(&pinned, Some(MIRROR_REGISTRY));
+    let official = install_command(&pinned, None);
+    if cfg!(target_os = "windows") {
+        vec![mirror, official]
+    } else {
+        vec![official, mirror]
+    }
+}
+
+/// Upper bound on one `npm install` run. npm's own retries live inside it;
+/// past this it is stuck, not slow.
+pub const INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// What an install needs to know about the machine it runs on.
+#[derive(Clone, Debug)]
+pub struct InstallContext {
+    /// Directory of the Node that detection found; npm is anchored to it.
+    pub node_bin_dir: Option<PathBuf>,
+    /// Every directory the app searches for binaries — the child's `PATH`
+    /// and the yardstick for "is the result on PATH".
+    pub search_dirs: Vec<PathBuf>,
+    pub timeout: Duration,
+}
+
+impl InstallContext {
+    pub fn new(node_bin_dir: Option<PathBuf>, search_dirs: Vec<PathBuf>) -> Self {
+        Self {
+            node_bin_dir,
+            search_dirs,
+            timeout: INSTALL_TIMEOUT,
+        }
+    }
+
+    /// `search_dirs` with the Node directory first, so a shim finds *that*
+    /// Node rather than whichever one the inherited `PATH` reaches.
+    fn child_dirs(&self) -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
+        if let Some(node) = &self.node_bin_dir {
+            dirs.push(node.clone());
+        }
+        for dir in &self.search_dirs {
+            if !dirs.contains(dir) {
+                dirs.push(dir.clone());
+            }
+        }
+        dirs
+    }
+
+    /// The npm launcher to run: the one beside the detected Node, else the
+    /// first on the search directories, else the bare name for the child's
+    /// `PATH` to resolve.
+    fn npm_program(&self) -> PathBuf {
+        if let Some(node) = &self.node_bin_dir {
+            let beside_node = node.join(npm_binary_name());
+            if beside_node.is_file() {
+                return beside_node;
+            }
+        }
+        crate::cli_detect::find_executable_in("npm", &self.search_dirs)
+            .unwrap_or_else(|| PathBuf::from(npm_binary_name()))
+    }
+}
+
+/// One `npm install` invocation, fully resolved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InstallAttempt {
+    /// `"mirror"` or `"official"`, for labelling failures.
+    pub label: &'static str,
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    /// Prepended to the child's `PATH`.
+    pub dirs: Vec<PathBuf>,
+}
+
+impl InstallAttempt {
+    /// The command as the user would type it.
+    pub fn display(&self) -> String {
+        let mut line = self
+            .program
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "npm".to_owned());
+        for arg in &self.args {
+            line.push(' ');
+            line.push_str(arg);
+        }
+        line
+    }
+
+    fn command(&self) -> std::process::Command {
+        let args: Vec<&str> = self.args.iter().map(String::as_str).collect();
+        crate::cli_detect::command_for(&self.program, &args, &self.dirs)
+    }
+}
+
+/// The attempts for `package`, in order: npm anchored to the detected Node,
+/// the mirror and the official registry both present on every platform.
+///
+/// Anchoring matters with two Nodes on a machine — nvm's and Homebrew's,
+/// say. A bare `npm` would install into whichever one the inherited `PATH`
+/// reaches, while the app runs the other, and the CLI would land in a prefix
+/// nothing here searches.
+pub fn install_attempts(ctx: &InstallContext, package: &str) -> Vec<InstallAttempt> {
+    let program = ctx.npm_program();
+    let dirs = ctx.child_dirs();
+    let pinned = format!("{package}@latest");
+    let mirror = InstallAttempt {
+        label: "mirror",
+        program: program.clone(),
+        args: vec![
+            "install".to_owned(),
+            "-g".to_owned(),
+            pinned.clone(),
+            format!("--registry={MIRROR_REGISTRY}"),
+            "--fetch-retries=2".to_owned(),
+            "--fetch-timeout=60000".to_owned(),
+        ],
+        dirs: dirs.clone(),
+    };
+    let official = InstallAttempt {
+        label: "official",
+        program,
+        args: vec!["install".to_owned(), "-g".to_owned(), pinned],
+        dirs,
+    };
+    if cfg!(target_os = "windows") {
+        vec![mirror, official]
+    } else {
+        vec![official, mirror]
+    }
+}
+
+/// What a failed install's output points at, when it points anywhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstallHint {
+    /// npm could not write its global prefix.
+    Permission,
+    /// The registry was unreachable.
+    Network,
+}
+
+/// Read npm's failure for the two causes with a known fix.
+pub fn classify_failure(output: &str) -> Option<InstallHint> {
+    let upper = output.to_ascii_uppercase();
+    if ["EACCES", "EPERM", "PERMISSION DENIED", "ACCESS IS DENIED", "OPERATION NOT PERMITTED"]
+        .iter()
+        .any(|marker| upper.contains(marker))
+    {
+        return Some(InstallHint::Permission);
+    }
+    if [
+        "ETIMEDOUT",
+        "ENOTFOUND",
+        "ECONNRESET",
+        "ECONNREFUSED",
+        "EAI_AGAIN",
+        "FETCH_ERROR",
+        "NETWORK",
+        "TIMED OUT",
+    ]
+    .iter()
+    .any(|marker| upper.contains(marker))
+    {
+        return Some(InstallHint::Network);
+    }
+    None
+}
+
+/// The commands that move npm's global prefix somewhere the user can write,
+/// for the permission hint. Copyable, not run: changing a prefix is the
+/// user's decision.
+pub fn permission_fix_commands() -> Vec<String> {
     if cfg!(target_os = "windows") {
         vec![
-            install_command(&pinned, Some(MIRROR_REGISTRY)),
-            install_command(&pinned, None),
+            "npm config set prefix \"%LOCALAPPDATA%\\npm-global\"".to_owned(),
+            "setx PATH \"%LOCALAPPDATA%\\npm-global;%PATH%\"".to_owned(),
         ]
     } else {
-        vec![install_command(&pinned, None)]
+        vec![
+            "mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global".to_owned(),
+            "echo 'export PATH=\"$HOME/.npm-global/bin:$PATH\"' >> ~/.zshrc".to_owned(),
+        ]
     }
+}
+
+/// How an install ended, after the binary was actually looked for and run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InstallVerdict {
+    /// Found on the app's search directories and answering `--version`.
+    Installed { path: PathBuf, version: String },
+    /// Runs, but only from a directory nothing searched before — npm's
+    /// global prefix. The directory is remembered for this app; the user's
+    /// terminals may still need it on `PATH`.
+    InstalledNotOnPath {
+        bin_dir: PathBuf,
+        path: PathBuf,
+        version: String,
+    },
+    /// npm succeeded, the binary exists, and it does not run.
+    InstalledNotRunnable { path: PathBuf, diagnostic: String },
+    /// Every attempt failed; `output` carries each one's tail.
+    Failed {
+        output: String,
+        hint: Option<InstallHint>,
+    },
+}
+
+impl InstallVerdict {
+    /// The CLI can be used from this app.
+    pub fn is_usable(&self) -> bool {
+        matches!(
+            self,
+            InstallVerdict::Installed { .. } | InstallVerdict::InstalledNotOnPath { .. }
+        )
+    }
+}
+
+/// Progress of one install, for a status row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstallStage {
+    /// Running the attempt with this label.
+    Running { attempt: &'static str },
+    /// npm exited 0; now looking for and running the binary.
+    Verifying,
+}
+
+/// Install `descriptor` and verify the result.
+///
+/// Blocking — run it off the UI thread. Exit status 0 from npm is not the
+/// verdict: the binary is then located in the search directories plus npm's
+/// own global prefix, and run, so "installed" means "the app can start it".
+pub fn install_cli(
+    ctx: &InstallContext,
+    descriptor: &CliDescriptor,
+    mut report: impl FnMut(InstallStage),
+) -> InstallVerdict {
+    let attempts = install_attempts(ctx, descriptor.package);
+    let mut failures: Vec<String> = Vec::new();
+    let mut succeeded: Option<&InstallAttempt> = None;
+    for attempt in &attempts {
+        report(InstallStage::Running {
+            attempt: attempt.label,
+        });
+        let run = crate::cli_detect::run_with_timeout(attempt.command(), ctx.timeout);
+        if run.success {
+            succeeded = Some(attempt);
+            break;
+        }
+        failures.push(format!(
+            "{} ({})\n{}",
+            attempt.display(),
+            attempt.label,
+            last_meaningful_lines(&run.output, 6)
+        ));
+    }
+    let Some(attempt) = succeeded else {
+        let output = failures.join("\n\n");
+        let hint = classify_failure(&output);
+        return InstallVerdict::Failed { output, hint };
+    };
+    report(InstallStage::Verifying);
+    verify_install(ctx, descriptor, attempt, &mut |bin_dir| {
+        crate::cli_detect::remember_search_dir(bin_dir);
+        crate::node_install::persist_windows_user_path(bin_dir);
+    })
+}
+
+/// Locate and run the binary npm claims to have installed. `remember` is
+/// told about a prefix directory that was not on the search list.
+fn verify_install(
+    ctx: &InstallContext,
+    descriptor: &CliDescriptor,
+    attempt: &InstallAttempt,
+    remember: &mut dyn FnMut(&Path),
+) -> InstallVerdict {
+    let prefix_bin = npm_global_bin(attempt);
+    let mut dirs = ctx.search_dirs.clone();
+    if let Some(bin) = &prefix_bin
+        && !dirs.contains(bin)
+    {
+        dirs.push(bin.clone());
+    }
+    let Some(path) = crate::cli_detect::find_executable_in(descriptor.binary, &dirs) else {
+        return InstallVerdict::Failed {
+            output: format!(
+                "npm reported success, but `{}` was not found afterwards{}",
+                descriptor.binary,
+                prefix_bin
+                    .map(|bin| format!(" (npm's global bin directory is {})", bin.display()))
+                    .unwrap_or_default()
+            ),
+            hint: None,
+        };
+    };
+    let mut child_dirs = ctx.child_dirs();
+    if let Some(parent) = path.parent()
+        && !child_dirs.iter().any(|dir| dir == parent)
+    {
+        child_dirs.push(parent.to_path_buf());
+    }
+    match crate::cli_detect::probe_version(&path, &child_dirs, crate::cli_detect::PROBE_TIMEOUT) {
+        Probe::Found { version, .. } => {
+            let on_search_dirs = ctx.search_dirs.iter().any(|dir| path.starts_with(dir));
+            if on_search_dirs {
+                return InstallVerdict::Installed { path, version };
+            }
+            let bin_dir = path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| path.clone());
+            remember(&bin_dir);
+            InstallVerdict::InstalledNotOnPath {
+                bin_dir,
+                path,
+                version,
+            }
+        }
+        Probe::FoundButFailed { diagnostic, .. } => {
+            InstallVerdict::InstalledNotRunnable { path, diagnostic }
+        }
+        Probe::NotFound => InstallVerdict::Failed {
+            output: format!("`{}` vanished between install and verification", path.display()),
+            hint: None,
+        },
+    }
+}
+
+/// `npm prefix -g` through the same npm the install used, as a bin directory.
+fn npm_global_bin(attempt: &InstallAttempt) -> Option<PathBuf> {
+    let run = crate::cli_detect::run_with_timeout(
+        crate::cli_detect::command_for(&attempt.program, &["prefix", "-g"], &attempt.dirs),
+        Duration::from_secs(30),
+    );
+    if !run.success {
+        return None;
+    }
+    // The prefix is the last non-empty line; npm may print notices first.
+    let prefix = run.output.lines().rev().find(|line| !line.trim().is_empty())?;
+    npm_global_bin_from_prefix(prefix)
 }
 
 /// Run each candidate until one succeeds.
@@ -392,7 +716,7 @@ pub(crate) fn augment_path(current: Option<std::ffi::OsString>, extra: &[PathBuf
 /// Applied to every agent process the fork spawns, so a CLI installed against
 /// the managed runtime keeps working without an app restart.
 pub fn apply_node_runtime(command: &mut std::process::Command) {
-    let dirs = node_runtime_dirs();
+    let dirs = crate::cli_detect::detection_dirs();
     if !dirs.is_empty() {
         let configured = command
             .get_envs()
@@ -413,7 +737,7 @@ pub fn apply_node_runtime(command: &mut std::process::Command) {
 pub fn run_program(program: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> InstallOutcome {
     let mut process = std::process::Command::new(program.as_ref());
     process.args(args);
-    process.env("PATH", augment_path(std::env::var_os("PATH"), &node_runtime_dirs()));
+    process.env("PATH", augment_path(std::env::var_os("PATH"), &crate::cli_detect::detection_dirs()));
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -435,7 +759,7 @@ pub fn run_command(command: &str) -> InstallOutcome {
     process.args(args);
     // The freshly installed managed runtime must be visible to `npm` runs that
     // happen in this same app session.
-    process.env("PATH", augment_path(std::env::var_os("PATH"), &node_runtime_dirs()));
+    process.env("PATH", augment_path(std::env::var_os("PATH"), &crate::cli_detect::detection_dirs()));
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -470,7 +794,7 @@ fn capture(mut process: std::process::Command, program: &str) -> InstallOutcome 
 
 /// Keep the tail of a command's output: npm's failure reason is at the end,
 /// and the preceding progress lines are noise in a settings panel.
-fn last_meaningful_lines(text: &str, limit: usize) -> String {
+pub(crate) fn last_meaningful_lines(text: &str, limit: usize) -> String {
     let lines: Vec<&str> = text
         .lines()
         .map(str::trim_end)
@@ -525,13 +849,29 @@ mod tests {
     use super::*;
 
     fn missing(id: &'static str) -> Detection {
-        Detection { id, path: None }
+        Detection {
+            id,
+            probe: Probe::NotFound,
+        }
     }
 
     fn installed(id: &'static str) -> Detection {
         Detection {
             id,
-            path: Some(PathBuf::from("/usr/local/bin/x")),
+            probe: Probe::Found {
+                path: PathBuf::from("/usr/local/bin/x"),
+                version: "1.0.0".to_owned(),
+            },
+        }
+    }
+
+    fn broken(id: &'static str) -> Detection {
+        Detection {
+            id,
+            probe: Probe::FoundButFailed {
+                path: PathBuf::from("/usr/local/bin/x"),
+                diagnostic: "node: command not found".to_owned(),
+            },
         }
     }
 
@@ -563,22 +903,159 @@ mod tests {
     }
 
     #[test]
-    fn candidates_try_the_mirror_first_on_windows_only() {
+    fn attempts_fall_back_between_mirror_and_official_on_every_platform() {
         let candidates = install_candidates("@openai/codex");
+        assert_eq!(candidates.len(), 2);
+        let mirror = candidates
+            .iter()
+            .position(|candidate| candidate.contains("--registry=https://registry.npmmirror.com"))
+            .expect("a mirror attempt");
+        let official = candidates
+            .iter()
+            .position(|candidate| candidate.ends_with("@openai/codex@latest"))
+            .expect("an official attempt");
+        assert!(candidates[mirror].contains("--fetch-retries=2"));
+        // Mirror first where the audience needs it, official first elsewhere —
+        // but both everywhere.
         if cfg!(target_os = "windows") {
-            // Mirror first with a fallback: the audience reaches npmmirror far
-            // more reliably, and Windows rarely sets LANG so a locale check
-            // cannot be the gate.
-            assert_eq!(candidates.len(), 2);
-            assert!(candidates[0].contains("--registry=https://registry.npmmirror.com"));
-            assert!(candidates[0].contains("--fetch-retries=2"));
-            assert!(candidates[1].ends_with("@openai/codex@latest"));
+            assert!(mirror < official);
         } else {
-            assert_eq!(
-                candidates,
-                vec!["npm install -g @openai/codex@latest".to_owned()]
-            );
+            assert!(official < mirror);
         }
+
+        let ctx = InstallContext::new(None, Vec::new());
+        let attempts = install_attempts(&ctx, "@openai/codex");
+        let labels: Vec<&str> = attempts.iter().map(|attempt| attempt.label).collect();
+        if cfg!(target_os = "windows") {
+            assert_eq!(labels, ["mirror", "official"]);
+        } else {
+            assert_eq!(labels, ["official", "mirror"]);
+        }
+        assert!(attempts.iter().all(|attempt| attempt.display().starts_with("npm")));
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "sub2api-cli-install-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        dir
+    }
+
+    fn executable(dir: &Path, stem: &str, body: &str) -> PathBuf {
+        let path = if cfg!(target_os = "windows") {
+            dir.join(format!("{stem}.cmd"))
+        } else {
+            dir.join(stem)
+        };
+        std::fs::write(&path, body).expect("write script");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn install_attempts_anchor_npm_to_the_node_dir_and_prepend_it_to_path() {
+        let node_dir = scratch("anchor");
+        let npm = executable(&node_dir, "npm", "");
+        let elsewhere = PathBuf::from("/somewhere/else");
+        let ctx = InstallContext::new(Some(node_dir.clone()), vec![elsewhere.clone()]);
+
+        let attempts = install_attempts(&ctx, "@anthropic-ai/claude-code");
+        for attempt in &attempts {
+            assert_eq!(attempt.program, npm, "npm beside the detected node");
+            assert_eq!(attempt.dirs.first(), Some(&node_dir), "node dir first on PATH");
+            assert!(attempt.dirs.contains(&elsewhere));
+            assert!(attempt.args.contains(&"@anthropic-ai/claude-code@latest".to_owned()));
+        }
+        assert!(attempts[0].display().starts_with("npm"));
+        let _ = std::fs::remove_dir_all(node_dir);
+    }
+
+    #[test]
+    fn classify_failure_recognises_permission_and_network() {
+        assert_eq!(
+            classify_failure("npm ERR! code EACCES\nnpm ERR! syscall mkdir"),
+            Some(InstallHint::Permission)
+        );
+        assert_eq!(
+            classify_failure("Error: EPERM: operation not permitted, rename"),
+            Some(InstallHint::Permission)
+        );
+        assert_eq!(
+            classify_failure("npm ERR! code ETIMEDOUT\nnpm ERR! network request failed"),
+            Some(InstallHint::Network)
+        );
+        assert_eq!(
+            classify_failure("npm ERR! code ENOTFOUND registry.npmjs.org"),
+            Some(InstallHint::Network)
+        );
+        assert_eq!(classify_failure("npm ERR! 404 Not Found"), None);
+        assert!(!permission_fix_commands().is_empty());
+    }
+
+    #[test]
+    fn verdict_is_not_on_path_when_binary_only_in_prefix_bin() {
+        let root = scratch("verify");
+        let node_dir = root.join("node");
+        let prefix = root.join("prefix");
+        let prefix_bin = npm_global_bin_from_prefix(&prefix.display().to_string()).unwrap();
+        std::fs::create_dir_all(&node_dir).unwrap();
+        std::fs::create_dir_all(&prefix_bin).unwrap();
+
+        // A fake npm: installs "succeed", and `prefix -g` names our prefix.
+        let npm_body = if cfg!(target_os = "windows") {
+            format!(
+                "@echo off\r\nif \"%1\"==\"prefix\" echo {}\r\nexit /b 0\r\n",
+                prefix.display()
+            )
+        } else {
+            format!(
+                "#!/bin/sh\ncase \"$1\" in prefix) echo '{}';; esac\nexit 0\n",
+                prefix.display()
+            )
+        };
+        executable(&node_dir, "npm", &npm_body);
+        // The CLI npm "installed", living only in the prefix's bin directory.
+        let cli_body = if cfg!(target_os = "windows") {
+            "@echo off\r\necho 1.2.3\r\n".to_owned()
+        } else {
+            "#!/bin/sh\necho 1.2.3\n".to_owned()
+        };
+        let cli = executable(&prefix_bin, "grok", &cli_body);
+
+        let ctx = InstallContext::new(Some(node_dir.clone()), vec![node_dir.clone()]);
+        let descriptor = descriptor("grok").unwrap();
+        let attempt = install_attempts(&ctx, descriptor.package).remove(0);
+        let mut remembered = Vec::new();
+        let verdict = verify_install(&ctx, descriptor, &attempt, &mut |dir| {
+            remembered.push(dir.to_path_buf());
+        });
+
+        assert_eq!(
+            verdict,
+            InstallVerdict::InstalledNotOnPath {
+                bin_dir: prefix_bin.clone(),
+                path: cli.clone(),
+                version: "1.2.3".to_owned(),
+            }
+        );
+        assert_eq!(remembered, vec![prefix_bin.clone()]);
+        assert!(verdict.is_usable());
+
+        // Once the prefix is among the search dirs, the same result is plain
+        // "installed".
+        let ctx = InstallContext::new(Some(node_dir.clone()), vec![node_dir, prefix_bin]);
+        let verdict = verify_install(&ctx, descriptor, &attempt, &mut |_| {
+            panic!("nothing to remember")
+        });
+        assert!(matches!(verdict, InstallVerdict::Installed { .. }));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -772,11 +1249,13 @@ mod tests {
     }
 
     #[test]
-    fn executable_candidates_cover_windows_extensions() {
-        let candidates = executable_candidates("claude");
-        assert_eq!(candidates.first().map(String::as_str), Some("claude"));
-        if cfg!(target_os = "windows") {
-            assert!(candidates.iter().any(|candidate| candidate == "claude.cmd"));
-        }
+    fn plan_does_not_reinstall_a_broken_cli() {
+        // A shim whose Node is gone is an install to repair, not a missing
+        // CLI; `npm install` over it would leave it exactly as broken.
+        let plan = setup_plan(Some("v22.0.0"), &[broken("claude"), missing("codex")]);
+        assert_eq!(plan.len(), 1);
+        assert!(matches!(plan[0], SetupStep::InstallCli { id: "codex", .. }));
+        assert!(broken("claude").is_installed());
+        assert!(!broken("claude").is_runnable());
     }
 }

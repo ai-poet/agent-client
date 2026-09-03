@@ -77,36 +77,22 @@ pub fn managed_node_bin_dir() -> Option<PathBuf> {
     })
 }
 
-/// `node --version` from anywhere we know to look: `PATH` first, then the
-/// managed runtime, then the MSI's install location.
+/// `node --version` from anywhere we know to look: the process `PATH`, the
+/// managed runtime, the MSI's install location, and every version-manager
+/// directory [`crate::cli_detect::detection_dirs`] enumerates.
 ///
 /// Detection must see what installation produced, in the same app session,
 /// or a successful install would still render as "not found".
 pub fn detect_node() -> Option<String> {
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(on_path) = cli_install::find_executable("node") {
-        candidates.push(on_path);
-    }
-    if let Some(managed) = managed_node_bin_dir() {
-        candidates.push(managed.join(node_binary_name()));
-    }
-    if cfg!(target_os = "windows") {
-        candidates.push(PathBuf::from(r"C:\Program Files\nodejs\node.exe"));
-    }
-    for candidate in candidates {
-        if !candidate.is_file() {
-            continue;
-        }
-        let outcome = cli_install::run_program(&candidate, &["--version"]);
-        if outcome.success && !outcome.output.trim().is_empty() {
-            return Some(outcome.output.trim().to_owned());
-        }
-    }
-    None
+    detect_node_in(&crate::cli_detect::default_search_dirs())
 }
 
-fn node_binary_name() -> &'static str {
-    if cfg!(target_os = "windows") { "node.exe" } else { "node" }
+/// [`detect_node`] over an explicit directory list — the desktop passes the
+/// login-shell-aware list waku-core maintains.
+pub fn detect_node_in(dirs: &[PathBuf]) -> Option<String> {
+    crate::cli_detect::probe_named("node", dirs, dirs)
+        .version()
+        .map(str::to_owned)
 }
 
 /// `npm --version` from the same set of places [`detect_node`] looks.
@@ -115,32 +101,10 @@ fn node_binary_name() -> &'static str {
 /// without a working npm cannot install any agent, so showing only the Node
 /// version would claim health the machine does not have.
 pub fn detect_npm() -> Option<String> {
-    let npm_name = if cfg!(target_os = "windows") { "npm.cmd" } else { "npm" };
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(on_path) = cli_install::find_executable("npm") {
-        candidates.push(on_path);
-    }
-    if let Some(managed) = managed_node_bin_dir() {
-        candidates.push(managed.join(npm_name));
-    }
-    if cfg!(target_os = "windows") {
-        candidates.push(PathBuf::from(r"C:\Program Files\nodejs").join(npm_name));
-    }
-    for candidate in candidates {
-        if !candidate.is_file() {
-            continue;
-        }
-        let outcome = if cfg!(target_os = "windows") {
-            // npm.cmd is a batch file; it needs the shell.
-            cli_install::run_command(&format!("\"{}\" --version", candidate.display()))
-        } else {
-            cli_install::run_program(&candidate, &["--version"])
-        };
-        if outcome.success && !outcome.output.trim().is_empty() {
-            return Some(outcome.output.trim().to_owned());
-        }
-    }
-    None
+    let dirs = crate::cli_detect::default_search_dirs();
+    crate::cli_detect::probe_named(cli_install::npm_binary_name(), &dirs, &dirs)
+        .version()
+        .map(str::to_owned)
 }
 
 /// Install Node 22 unattended, reporting stages as they start.
@@ -490,7 +454,7 @@ fn install_windows_winget(report: &mut impl FnMut(NodeStage)) -> Result<String> 
 ///
 /// Best-effort: a failure here only affects the user's own future terminals,
 /// not this app, which injects the directory into every process it spawns.
-fn persist_windows_user_path(directory: &Path) {
+pub(crate) fn persist_windows_user_path(directory: &Path) {
     if !cfg!(target_os = "windows") {
         return;
     }

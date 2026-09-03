@@ -52,6 +52,7 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         })
         .collect(),
         ProviderKind::Claude => vec![
+            claude_long_context(claude_ultracode_model("claude-fable-5-1", "Claude Fable 5.1")),
             claude_long_context(claude_ultracode_model("claude-fable-5", "Claude Fable 5")),
             claude_long_context(claude_ultracode_model("claude-opus-5", "Claude Opus 5")),
             claude_long_context(claude_ultracode_model("claude-opus-4-8", "Claude Opus 4.8")),
@@ -196,8 +197,75 @@ fn write_models_file(path: &Path, models: &[ProviderModel]) -> std::io::Result<(
 /// availability and role mappings supplied by tools such as CC Switch.
 fn discover_claude_models(binary: &Path) -> Vec<ProviderModel> {
     crate::claude_metadata::initialize(binary, None, "user")
-        .map(|value| parse_claude_models(&value))
+        .map(|value| {
+            let discovered = parse_claude_models(&value);
+            if discovered.is_empty() {
+                // An empty answer is a failed probe, not a catalog: leave it
+                // to the caller's cache-or-fallback rule.
+                return discovered;
+            }
+            merge_claude_catalog(discovered, claude_known_ids(&value))
+        })
         .unwrap_or_default()
+}
+
+/// Fork: every model id the CLI's catalog covers, by alias (`value`) and by
+/// what the alias resolves to (`resolvedModel`). A curated entry is only
+/// appended when neither names it, so "sonnet → claude-sonnet-5" does not get
+/// a second, curated "claude-sonnet-5" row beside it.
+fn claude_known_ids(value: &Value) -> std::collections::HashSet<String> {
+    value
+        .pointer("/response/response/models")
+        .or_else(|| value.get("models"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| {
+            ["value", "resolvedModel"]
+                .into_iter()
+                .filter_map(|key| entry.get(key).and_then(Value::as_str))
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// Fork: the discovered Claude catalog, followed by the curated entries it
+/// does not cover. Claude Code passes any `--model` id straight through to the
+/// API, and the gateway this build routes to can serve models newer than the
+/// installed CLI knows about, so the curated list is a safe superset here —
+/// unlike Grok, Cursor, or Pi, whose CLIs reject ids outside their own list.
+/// Appended entries never claim the default; that stays the CLI's call.
+fn merge_claude_catalog(
+    discovered: Vec<ProviderModel>,
+    known: std::collections::HashSet<String>,
+) -> Vec<ProviderModel> {
+    let mut models = discovered;
+    for mut extra in fallback_models(ProviderKind::Claude) {
+        if known.contains(&extra.id) || models.iter().any(|model| model.id == extra.id) {
+            continue;
+        }
+        extra.is_default = false;
+        models.push(extra);
+    }
+    models
+}
+
+/// Fork: apply [`merge_claude_catalog`] to a catalog that carries only ids —
+/// the cached one — so a curated entry added after the cache was written still
+/// shows up before the next live discovery. Other providers are returned as
+/// they are; an empty catalog stays empty so the caller's fallback rule holds.
+pub(crate) fn with_curated_fallback(
+    provider: ProviderKind,
+    models: Vec<ProviderModel>,
+) -> Vec<ProviderModel> {
+    if provider != ProviderKind::Claude || models.is_empty() {
+        return models;
+    }
+    let known = models.iter().map(|model| model.id.clone()).collect();
+    merge_claude_catalog(models, known)
 }
 
 fn parse_claude_models(value: &Value) -> Vec<ProviderModel> {
@@ -1304,10 +1372,72 @@ mod tests {
             ["low", "medium", "high", "xhigh", "max", "ultracode"]
         );
         assert_eq!(
+            efforts("claude-fable-5-1"),
+            ["low", "medium", "high", "xhigh", "max", "ultracode"]
+        );
+        assert_eq!(
             efforts("claude-sonnet-4-6"),
             ["low", "medium", "high", "xhigh", "max"]
         );
         assert!(efforts("claude-haiku-4-5").is_empty());
+        assert_eq!(models[0].id, "claude-fable-5-1");
+        assert!(models[0].context_windows.iter().any(|option| option.id == "1m"));
+    }
+
+    #[test]
+    fn claude_discovery_keeps_curated_models_absent_from_the_cli() {
+        let value = json!({
+            "type": "control_response",
+            "response": {"response": {"models": [
+                {
+                    "value": "default",
+                    "resolvedModel": "claude-opus-5",
+                    "displayName": "Opus",
+                    "supportsEffort": true,
+                    "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]
+                },
+                {
+                    "value": "sonnet",
+                    "resolvedModel": "claude-sonnet-5",
+                    "displayName": "Sonnet",
+                    "supportsEffort": false
+                }
+            ]}}
+        });
+
+        let models = merge_claude_catalog(parse_claude_models(&value), claude_known_ids(&value));
+        let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
+
+        // Discovered rows first, in the CLI's order, keeping the CLI's default.
+        assert_eq!(&ids[..2], ["default", "sonnet"]);
+        assert!(models[0].is_default);
+        // Curated entries the CLI did not list are appended, never as default.
+        assert!(ids.contains(&"claude-fable-5-1"));
+        assert!(models.iter().skip(2).all(|model| !model.is_default));
+        // Neither an alias nor its resolved model is duplicated.
+        assert!(!ids.contains(&"claude-opus-5"));
+        assert!(!ids.contains(&"claude-sonnet-5"));
+        assert_eq!(ids.iter().filter(|id| **id == "claude-fable-5-1").count(), 1);
+    }
+
+    #[test]
+    fn curated_fallback_is_claude_only_and_keeps_an_empty_catalog_empty() {
+        let grok = vec![ProviderModel::new("grok-4.6", "Grok 4.6")];
+        assert_eq!(with_curated_fallback(ProviderKind::Grok, grok.clone()), grok);
+        assert!(with_curated_fallback(ProviderKind::Claude, Vec::new()).is_empty());
+
+        let cached = vec![ProviderModel::new("claude-sonnet-5", "Sonnet").default()];
+        let merged = with_curated_fallback(ProviderKind::Claude, cached);
+        assert_eq!(merged[0].id, "claude-sonnet-5");
+        assert!(merged[0].is_default);
+        assert!(merged.iter().any(|model| model.id == "claude-fable-5-1"));
+        assert_eq!(
+            merged
+                .iter()
+                .filter(|model| model.id == "claude-sonnet-5")
+                .count(),
+            1
+        );
     }
 
     #[test]
