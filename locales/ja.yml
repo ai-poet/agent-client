@@ -38,6 +38,7 @@ updater.available: 新しいバージョンをインストールできます
 updater.available_version: "バージョン %{version} をインストールできます"
 updater.install_now: 今すぐ更新
 updater.later: あとで
+updater.unavailable: "現在のバージョン %{version}。このビルドにはアップデーターがありません（デバッグビルド、またはバンドル外で実行中）"
 settings.check_for_updates: アップデートを確認
 updater.failed: "アップデートに失敗しました：%{error}"
 

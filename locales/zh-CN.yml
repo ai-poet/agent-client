@@ -38,6 +38,7 @@ updater.available: 有新版本可以安装
 updater.available_version: "新版本 %{version} 已就绪，可以安装"
 updater.install_now: 立即更新
 updater.later: 稍后
+updater.unavailable: "当前版本 %{version}。此构建不含更新器（调试版，或未从安装包运行）"
 settings.check_for_updates: 检查更新
 command_palette.placeholder: 搜索任务或运行命令…
 command_palette.resume_placeholder: 搜索终端会话…

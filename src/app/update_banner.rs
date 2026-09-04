@@ -79,19 +79,28 @@ impl Waku {
         let status = self.updater_status;
         let checking = self.update_ui.check_in_flight;
         let available_version = Self::available_update_version(cx);
+        // A debug build, or a binary running outside its bundle, has no
+        // updater. The row still says which version this is and why the
+        // button does nothing, rather than vanishing.
+        let updater_present = Self::updater(cx).is_some();
 
-        let detail = match status {
-            crate::updater::UpdateStatus::Available => match &available_version {
-                Some(version) => tr!("updater.available_version", version = version),
-                None => tr!("updater.available"),
-            },
-            crate::updater::UpdateStatus::Updating => tr!("updater.updating"),
-            crate::updater::UpdateStatus::Idle if checking => tr!("updater.checking"),
-            crate::updater::UpdateStatus::Idle => {
-                tr!("updater.current_version", version = env!("CARGO_PKG_VERSION"))
+        let detail = if !updater_present {
+            tr!("updater.unavailable", version = env!("CARGO_PKG_VERSION"))
+        } else {
+            match status {
+                crate::updater::UpdateStatus::Available => match &available_version {
+                    Some(version) => tr!("updater.available_version", version = version),
+                    None => tr!("updater.available"),
+                },
+                crate::updater::UpdateStatus::Updating => tr!("updater.updating"),
+                crate::updater::UpdateStatus::Idle if checking => tr!("updater.checking"),
+                crate::updater::UpdateStatus::Idle => {
+                    tr!("updater.current_version", version = env!("CARGO_PKG_VERSION"))
+                }
             }
         };
         let (label, primary, disabled): (String, bool, bool) = match status {
+            _ if !updater_present => (tr!("updater.check_now"), false, true),
             crate::updater::UpdateStatus::Available => (tr!("updater.install_now"), true, false),
             crate::updater::UpdateStatus::Updating => (tr!("updater.updating"), true, true),
             crate::updater::UpdateStatus::Idle => (

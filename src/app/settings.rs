@@ -564,9 +564,9 @@ impl Waku {
                         )
                         .child(toggle),
                 )
-                // Fork addition: a visible check button beside the toggle.
-                .child(self.render_update_check_card(theme, cx))
             })
+            // Fork addition: a visible check button, in every build.
+            .child(self.render_update_check_card(theme, cx))
             .into_any_element()
     }
 

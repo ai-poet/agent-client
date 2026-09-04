@@ -77,6 +77,8 @@ updater.install_now:
   en: Update now
 updater.later:
   en: Later
+updater.unavailable:
+  en: "Current version %{version}. This build has no updater (debug build, or running outside the installed bundle)"
 settings.check_for_updates:
   en: Check for updates
 
