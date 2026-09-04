@@ -24,7 +24,17 @@ fn workspace_has_ref(
     }
 }
 
-fn start_driver(mut request: DriverStartRequest, cwd: PathBuf) -> anyhow::Result<PreparedDriver> {
+pub(super) fn start_driver(
+    mut request: DriverStartRequest,
+    cwd: PathBuf,
+) -> anyhow::Result<PreparedDriver> {
+    // Fork addition: a warm start already booting for this session hands its
+    // process over instead of a second one being spawned.
+    if let Some(handoff) = request.prewarmed.take()
+        && let Some(prepared) = super::runtime_prewarm::await_prewarmed_driver(handoff)
+    {
+        return prepared;
+    }
     request.options.cwd = cwd;
     let (event_tx, events) = driver::event_channel(request.event_wake);
     let handle = driver::start_remote(
@@ -2620,6 +2630,8 @@ impl Waku {
             return;
         }
         self.last_idle_session_sweep = Instant::now();
+        // Fork addition: warmed runtimes nobody prompted get a shorter leash.
+        self.reap_unused_prewarms();
         let idle = self
             .runtimes
             .iter()
@@ -2685,7 +2697,7 @@ impl Waku {
         .detach();
     }
 
-    fn driver_start_request_for_session(
+    pub(super) fn driver_start_request_for_session(
         &self,
         session: &AgentSession,
         cwd: PathBuf,
@@ -2728,6 +2740,7 @@ impl Waku {
             },
             event_wake: self.event_wake_tx.clone(),
             daemon: self.daemon.clone(),
+            prewarmed: None,
         })
     }
 
@@ -2894,7 +2907,7 @@ impl Waku {
         cx.notify();
     }
 
-    fn install_prepared_driver(
+    pub(super) fn install_prepared_driver(
         &mut self,
         session_id: Uuid,
         prepared: PreparedDriver,
@@ -3209,6 +3222,14 @@ impl Waku {
                 .unwrap_or_default();
             self.driver_start_request_for_session(session, provisional_cwd)
         });
+        // Fork addition: a warm start already in flight hands its process to
+        // this submission rather than a second one booting beside it.
+        let driver_start = driver_start.map(|request| {
+            request.map(|mut request| {
+                request.prewarmed = self.take_prewarm_handoff(session_id);
+                request
+            })
+        });
         let Some(project) = self
             .state
             .projects
@@ -3453,7 +3474,11 @@ impl Waku {
         let driver_prompt = self.resolve_provider_submission(provider, &prompt);
         let mut failed_to_start = false;
         match driver {
-            Ok(driver) => driver.prompt(driver_prompt),
+            Ok(driver) => {
+                // Fork addition: a warmed runtime is a working one from here.
+                self.note_runtime_prompted(session_id);
+                driver.prompt(driver_prompt)
+            }
             Err(error) => {
                 failed_to_start = true;
                 let message = tr!("errors.start_agent", error = error);

@@ -57,7 +57,7 @@ lines below.
 | `crates/waku-core/Cargo.toml` | `sub2api` dependency | 1 |
 | `crates/waku-core/src/command_env.rs` | added `command_for_provider()` beside `command()` (calls `sub2api::cli_install::apply_provider_launch_env`: managed Node runtime on `PATH`, Claude's nonessential-traffic switch off; routing itself is written into each CLI's own config by the desktop — `sub2api::global_config`); `sub2api::cli_detect::detection_dirs()` (managed runtime, version-manager dirs, remembered npm prefixes) appended to `executable_search_paths()` so a just-installed CLI is detected without a restart | +18 |
 | `crates/waku-core/src/checkpoint.rs` | `snapshot_tree` seeds the temporary index from the repository's own index (stat cache) before `add -A`, falling back to the HEAD rebuild; `repository_index_path` helper | ~45 |
-| `src/app/runtime.rs` | `prepare_submission` runs the turn-start snapshot and the provider start on two threads instead of one after the other | ~15 |
+| `src/app/runtime.rs` | `prepare_submission` runs the turn-start snapshot and the provider start on two threads instead of one after the other; warm-start hooks for `runtime_prewarm` — `start_driver` takes a handed-over process when one is in flight, the submission path attaches that handoff to its request, the prompt write calls `note_runtime_prompted`, the idle sweep calls `reap_unused_prewarms`; `start_driver`, `driver_start_request_for_session`, `install_prepared_driver` are `pub(super)` | ~35 |
 | `crates/waku-core/src/model_catalog.rs`, `crates/waku-protocol/src/model_catalog.rs` | `claude-fable-5-1` first in the curated Claude list; waku-core additionally merges curated entries the CLI did not return (`merge_claude_catalog` / `with_curated_fallback`, Claude only) at the end of `discover_catalog` | 1 + ~60 |
 | `crates/waku-core/src/model.rs` | `apply_cached_models` runs the cached Claude catalog through `with_curated_fallback` | 1 |
 | `src/lib.rs` | `init_confirm_dialog_keys(cx)` beside the other dialog key inits | 1 |
@@ -66,7 +66,7 @@ lines below.
 | `src/app/task_switcher.rs` | failed-task glyph is `circle-x` | 1 |
 | `crates/waku-core/src/driver/claude.rs` | spawn uses `command_for_provider(.., "claude")` | 1 |
 | `crates/waku-core/src/driver/codex.rs` | same, at both spawn sites (session + title turn) | 2 |
-| `src/app.rs` | fork `mod` lines, `SettingsPage::{CloudAccount, ModelPlaza, CloudUsage}`, fork struct fields + initializers (cloud account, cli setup, custom API inputs, plaza, pay modal, confirm dialog, onboarding), `init_confirm_dialog_keys` re-export, startup refresh loop (also kicks off CLI detection and loads onboarding state), `subscribe_custom_api_inputs` beside the other input subscriptions | ~80 |
+| `src/app.rs` | fork `mod` lines, `SettingsPage::{CloudAccount, ModelPlaza, CloudUsage}`, fork struct fields + initializers (cloud account, cli setup, custom API inputs, plaza, pay modal, confirm dialog, onboarding, runtime prewarms), `DriverStartRequest.prewarmed`, `init_confirm_dialog_keys` re-export, startup refresh loop (also kicks off CLI detection and loads onboarding state), `subscribe_custom_api_inputs` beside the other input subscriptions, `maybe_prewarm_selected_runtime` in the composer's `Edited` arm | ~90 |
 | `src/app/render.rs` | pay-modal, announcements-modal and confirm-dialog composites in both render branches; onboarding strip above the composer | 13 |
 | `src/app/tests.rs` | `settings_search_filters_pages_for_arrow_cycling` expects the fork's nav pages | 3 |
 | `src/assets.rs` | `bell`/`circle-x`/`store`/`wallet` icon entries; embedded `images/logo.png` brand mark | ~12 |
@@ -103,6 +103,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `crates/sub2api/**`, `src/app/cloud_account.rs`, `src/app/cli_setup.rs`,
 `src/app/providers_page.rs`, `src/app/confirm_dialog.rs`,
 `src/app/onboarding.rs`, `src/app/message_resend.rs`, `src/app/task_rows.rs`,
+`src/app/runtime_prewarm.rs`,
 `src/app/cloud_usage.rs`, `src/app/model_plaza.rs`, `src/app/cloud_pay.rs`,
 `src/app/announcements.rs`, `assets/icons/{bell,circle-x,store,wallet}.svg`,
 `NOTICE.md`, `docs/FORK.md`.

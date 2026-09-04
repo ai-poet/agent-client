@@ -567,6 +567,9 @@ struct DriverStartRequest {
     options: DriverStartOptions,
     event_wake: smol::channel::Sender<()>,
     daemon: waku_client::DaemonSupervisor,
+    /// Fork addition: a warm start already in flight for this session. When
+    /// set, `start_driver` waits for that process instead of spawning one.
+    prewarmed: Option<std::sync::mpsc::Receiver<anyhow::Result<PreparedDriver>>>,
 }
 
 /// A provider process that has started off-thread but is not installed into
@@ -1422,6 +1425,8 @@ pub struct Waku {
     cli_setup: cli_setup::CliSetupState,
     /// Fork addition: first-run checklist state.
     onboarding: onboarding::OnboardingViewState,
+    /// Fork addition: provider processes warmed while the user types.
+    runtime_prewarms: runtime_prewarm::RuntimePrewarms,
     /// Fork addition: per-CLI custom endpoint fields on the Providers page —
     /// `(provider_id, base-URL field, API-key field, optional model list)`.
     custom_api_inputs: Vec<(
@@ -1667,6 +1672,7 @@ mod providers_page;
 mod render;
 mod right_panel;
 mod runtime;
+mod runtime_prewarm;
 mod sessions;
 mod settings;
 mod sidebar;
@@ -2520,6 +2526,9 @@ impl Waku {
                     }
                     ComposerEvent::Edited => {
                         this.schedule_composer_draft_save(cx);
+                        // Fork addition: a draft is intent enough to start
+                        // the provider booting.
+                        this.maybe_prewarm_selected_runtime(cx);
                         cx.notify();
                     }
                     ComposerEvent::Focus => {}
@@ -3057,6 +3066,7 @@ impl Waku {
                 cloud_account: cloud_account::CloudAccountState::default(),
                 cli_setup: cli_setup::CliSetupState::default(),
                 onboarding: onboarding::OnboardingViewState::default(),
+                runtime_prewarms: runtime_prewarm::RuntimePrewarms::default(),
                 custom_api_inputs,
                 cloud_usage: cloud_usage::CloudUsageState::default(),
                 model_plaza: model_plaza::ModelPlazaState::default(),
