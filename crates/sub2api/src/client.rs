@@ -636,18 +636,18 @@ fn percent_encode(value: &str) -> String {
 fn unwrap_envelope<T: serde::de::DeserializeOwned>(response: &Response) -> Result<T> {
     let envelope: Envelope<T> = response.json()?;
     if envelope.code != 0 {
-        let reason = envelope
-            .reason
-            .as_deref()
-            .filter(|reason| !reason.is_empty())
-            .map(|reason| format!(" ({reason})"))
-            .unwrap_or_default();
         let message = if envelope.message.is_empty() {
             "the service rejected the request".to_owned()
         } else {
             envelope.message
         };
-        return Err(anyhow!("{message}{reason}"));
+        return Err(crate::http::ApiError {
+            status: response.status,
+            code: envelope.code,
+            reason: envelope.reason.unwrap_or_default(),
+            message,
+        }
+        .into());
     }
     envelope
         .data

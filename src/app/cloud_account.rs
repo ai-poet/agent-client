@@ -156,6 +156,9 @@ impl Waku {
                         this.cloud_account.user = Some(user);
                         this.cloud_account.error = None;
                     }
+                    // The service refused the refresh token itself: no retry
+                    // will bring the session back, so stop pretending.
+                    Err(error) if sub2api::session_ended(&error) => this.end_cloud_session(cx),
                     Err(error) => this.cloud_account.error = Some(format!("{error:#}")),
                 }
                 cx.notify();
@@ -273,6 +276,17 @@ impl Waku {
         self.cloud_account.routing_enabled = false;
         self.cloud_account.error = None;
         self.apply_cloud_routing();
+        cx.notify();
+    }
+
+    /// The stored session can no longer be renewed. Forget it the way a
+    /// sign-out does - credentials gone, the CLIs' own configuration
+    /// restored - and say why, so the user sees "sign in again" rather than
+    /// a footer that still claims to be signed in while every request fails.
+    pub(super) fn end_cloud_session(&mut self, cx: &mut Context<Self>) {
+        self.sign_out_cloud(cx);
+        self.cloud_account.error = Some(tr!("cloud.session_expired"));
+        self.show_toast(tr!("cloud.session_expired"));
         cx.notify();
     }
 

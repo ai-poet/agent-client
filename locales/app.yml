@@ -2248,6 +2248,8 @@ cloud.menu_catalog:
   en: "Model plaza"
 cloud.menu_usage:
   en: "Usage history"
+cloud.session_expired:
+  en: "Your sign-in is no longer valid. Sign in again to keep routing through the cloud"
 cloud.signed_out_note:
   en: "Signed out — agents now use your own CLI configuration"
 cli_setup.env_title:

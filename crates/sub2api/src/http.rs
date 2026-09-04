@@ -41,19 +41,91 @@ impl Response {
         (200..300).contains(&self.status)
     }
 
-    /// Deserialize a successful JSON body, or surface the server's error text.
+    /// Deserialize a successful JSON body, or surface the server's error as an
+    /// [`ApiError`] that keeps the status and the envelope's reason.
     pub fn json<T: serde::de::DeserializeOwned>(&self) -> Result<T> {
         if !self.is_success() {
-            return Err(anyhow!(
-                "request failed with status {}: {}",
-                self.status,
-                error_summary(&self.body)
-            ));
+            return Err(ApiError::from_body(self.status, &self.body).into());
         }
         serde_json::from_str(&self.body)
             .with_context(|| format!("could not parse response body: {}", truncate(&self.body, 200)))
     }
 }
+
+/// A request the service refused, with what its envelope said about why.
+///
+/// Kept as a typed error rather than a formatted string so callers can tell a
+/// rejected identity (a dead refresh token, a revoked session) from a flaky
+/// network or a busy server — the first means "sign in again", the others
+/// mean "try later", and treating them alike either strands or logs out the
+/// user for no reason.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiError {
+    pub status: u16,
+    /// The envelope's `code`; the service mirrors the HTTP status here.
+    pub code: i64,
+    /// The envelope's `reason`, e.g. `REFRESH_TOKEN_INVALID`. May be empty.
+    pub reason: String,
+    pub message: String,
+}
+
+impl ApiError {
+    /// Build from a non-2xx body, reading the envelope when there is one.
+    pub(crate) fn from_body(status: u16, body: &str) -> Self {
+        let parsed: Option<serde_json::Value> = serde_json::from_str(body).ok();
+        let field = |name: &str| {
+            parsed
+                .as_ref()
+                .and_then(|value| value.get(name))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        Self {
+            status,
+            code: parsed
+                .as_ref()
+                .and_then(|value| value.get("code"))
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(i64::from(status)),
+            reason: field("reason").unwrap_or_default(),
+            message: field("message")
+                .or_else(|| field("error"))
+                .unwrap_or_else(|| truncate(body, 200)),
+        }
+    }
+
+    /// The service rejected who the caller claims to be — as opposed to a
+    /// malformed request, a busy server, or a rate limit. Only this class of
+    /// failure means the stored session is finished.
+    pub fn is_auth_rejection(&self) -> bool {
+        matches!(self.status, 401 | 403)
+            || matches!(
+                self.reason.as_str(),
+                "REFRESH_TOKEN_INVALID"
+                    | "REFRESH_TOKEN_EXPIRED"
+                    | "REFRESH_TOKEN_REUSED"
+                    | "TOKEN_REVOKED"
+                    | "SESSION_BINDING_MISMATCH"
+                    | "USER_NOT_ACTIVE"
+            )
+    }
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if (200..300).contains(&self.status) {
+            write!(f, "{}", self.message)?;
+        } else {
+            write!(f, "request failed with status {}: {}", self.status, self.message)?;
+        }
+        if !self.reason.is_empty() {
+            write!(f, " ({})", self.reason)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ApiError {}
 
 /// An outgoing request. Headers and body are passed to curl via stdin config.
 #[derive(Clone, Debug, Default)]
