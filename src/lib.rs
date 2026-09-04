@@ -315,6 +315,8 @@ pub fn run() {
                 KeyBinding::new("secondary-a", WebviewSelectAll, Some("Browser")),
                 KeyBinding::new("escape", BrowserAddressCancel, Some("BrowserAddress")),
             ]);
+            // Fork addition: shortcuts for the right panel's surfaces.
+            cx.bind_keys(crate::app::surface_key_bindings());
 
             cx.on_action(|_: &Quit, cx| cx.quit());
 
@@ -467,7 +469,10 @@ pub(crate) fn set_app_menus(cx: &mut App, updater_available: bool) {
                 MenuItem::action(tr!("menu.focus_composer"), FocusComposer),
                 MenuItem::action(tr!("menu.toggle_model_picker"), ToggleModelPicker),
                 MenuItem::action(tr!("menu.toggle_usage_panel"), ToggleUsagePanel),
-            ],
+            ]
+            .into_iter()
+            .chain(crate::app::surface_menu_items())
+            .collect(),
         },
         Menu {
             name: tr!("menu.window").into(),

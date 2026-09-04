@@ -2676,3 +2676,11 @@ cloud_usage.long_context:
   en: "long context"
 cloud_usage.images:
   en: "Images"
+surface_bar.open:
+  en: "Open %{surface} (%{shortcut})"
+surface_bar.switch:
+  en: "Switch to %{surface} (%{shortcut})"
+surface_bar.hide:
+  en: "Hide %{surface} (%{shortcut})"
+command_palette.open_surface:
+  en: "Open %{surface}"

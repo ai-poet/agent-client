@@ -2117,6 +2117,7 @@ impl Waku {
         }
     }
 
+    #[allow(dead_code)] // Fork: unused since the surface bar replaced the toggle.
     pub(super) fn render_right_panel_toggle(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
         div()
@@ -2560,14 +2561,14 @@ impl Waku {
             );
         }
 
+        // Fork change: no panel toggle here either; the header's surface bar
+        // hides the panel, and the tabs' close buttons empty it.
         self.window_drag_region(
-            header.child(self.render_right_panel_toggle(cx)).children(
-                self.render_client_window_controls(
-                    super::window_chrome::WindowControlSide::Right,
-                    window,
-                    cx,
-                ),
-            ),
+            header.children(self.render_client_window_controls(
+                super::window_chrome::WindowControlSide::Right,
+                window,
+                cx,
+            )),
             cx,
         )
     }

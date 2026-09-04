@@ -60,22 +60,24 @@ lines below.
 | `src/app/runtime.rs` | `prepare_submission` runs the turn-start snapshot and the provider start on two threads instead of one after the other; warm-start hooks for `runtime_prewarm` — `start_driver` takes a handed-over process when one is in flight, the submission path attaches that handoff to its request, the prompt write calls `note_runtime_prompted`, the idle sweep calls `reap_unused_prewarms`; `start_driver`, `driver_start_request_for_session`, `install_prepared_driver` are `pub(super)` | ~35 |
 | `crates/waku-core/src/model_catalog.rs`, `crates/waku-protocol/src/model_catalog.rs` | `claude-fable-5-1` first in the curated Claude list; waku-core additionally merges curated entries the CLI did not return (`merge_claude_catalog` / `with_curated_fallback`, Claude only) at the end of `discover_catalog` | 1 + ~60 |
 | `crates/waku-core/src/model.rs` | `apply_cached_models` runs the cached Claude catalog through `with_curated_fallback` | 1 |
-| `src/lib.rs` | `init_confirm_dialog_keys(cx)` beside the other dialog key inits | 1 |
+| `src/lib.rs` | `init_confirm_dialog_keys(cx)` beside the other dialog key inits; `cx.bind_keys(surface_key_bindings())` right after the upstream bindings; the View menu's `items` chained with `surface_menu_items()` | 5 |
 | `src/app/components.rs` | `resend_action` threaded through `MessageRender`, `render_message_footer`, `message_menu_items`; one footer child and one menu item from `message_resend` | ~10 |
 | `src/app/transcript_view.rs` | `resend_action_for_message` computed beside `user_message_action`, passed into `MessageRender` (+ a `None` at the assistant footer call); `scroll_transcript_to_bottom` is `pub(super)` | 4 |
 | `src/app/task_switcher.rs` | failed-task glyph is `circle-x` | 1 |
 | `crates/waku-core/src/driver/claude.rs` | spawn uses `command_for_provider(.., "claude")` | 1 |
 | `crates/waku-core/src/driver/codex.rs` | same, at both spawn sites (session + title turn) | 2 |
-| `src/app.rs` | fork `mod` lines, `SettingsPage::{CloudAccount, ModelPlaza, CloudUsage}`, fork struct fields + initializers (cloud account, cli setup, custom API inputs, plaza, pay modal, confirm dialog, onboarding, runtime prewarms), `DriverStartRequest.prewarmed`, `init_confirm_dialog_keys` re-export, startup refresh loop (also kicks off CLI detection and loads onboarding state), `subscribe_custom_api_inputs` beside the other input subscriptions, `maybe_prewarm_selected_runtime` in the composer's `Edited` arm; `update_ui` field + `on_updater_event` call in `handle_updater_event` | ~94 |
-| `src/app/render.rs` | pay-modal, announcements-modal and confirm-dialog composites in both render branches; onboarding strip above the composer; update banner above the header (main) and above the settings page (settings branch is now a flex column) | ~22 |
+| `src/app.rs` | fork `mod` lines, `SettingsPage::{CloudAccount, ModelPlaza, CloudUsage}`, fork struct fields + initializers (cloud account, cli setup, custom API inputs, plaza, pay modal, confirm dialog, onboarding, runtime prewarms), `DriverStartRequest.prewarmed`, `init_confirm_dialog_keys` re-export, startup refresh loop (also kicks off CLI detection and loads onboarding state), `subscribe_custom_api_inputs` beside the other input subscriptions, `maybe_prewarm_selected_runtime` in the composer's `Edited` arm; `update_ui` field + `on_updater_event` call in `handle_updater_event`; `mod surface_bar` and its `surface_key_bindings` / `surface_menu_items` re-export | ~96 |
+| `src/app/render.rs` | pay-modal, announcements-modal and confirm-dialog composites in both render branches; onboarding strip above the composer; update banner above the header (main) and above the settings page (settings branch is now a flex column); `open_surface_action` registered beside `toggle_right_panel_action` | ~23 |
 | `src/app/tests.rs` | `settings_search_filters_pages_for_arrow_cycling` expects the fork's nav pages | 3 |
 | `src/assets.rs` | `bell`/`circle-x`/`store`/`wallet` icon entries; embedded `images/logo.png` brand mark | ~12 |
 | `src/app/runtime.rs` | `cloud_balance_stale` set at the turn-settlement seam, drained in the event pump | 6 |
-| `src/app/sidebar.rs` | empty-state icon swapped for the brand mark; announcements bell in the window header; onboarding checklist + footer chip rows in the empty state; task rows carry a hover group, the failure badge and the remove button from `task_rows`; `localized_session_title` is `pub(super)` | 10 |
+| `src/app/sidebar.rs` | both empty states' icon (no project / project open) swapped for the brand mark; announcements bell in the window header; onboarding checklist + footer chip rows in the empty state; task rows carry a hover group, the failure badge and the remove button from `task_rows`; `localized_session_title` is `pub(super)`; the surface bar (`render_surface_bar`) in the window header where the panel toggle used to be (the toggle's `.child` line removed, fps counter kept) | 13 |
 | `src/app/composer.rs` | balance chip in the status strip | 3 |
 | `resources/AppIcon*.icns`, `resources/windows/AppIcon.ico`, `resources/linux/` | brand artwork and desktop entry name | assets |
 | `scripts/bundle-linux.sh` | installs the brand icon | 5 |
-| `src/app/settings.rs` | nav entries, title arms, dispatch arms, `SETTINGS_PAGES` length (7 upstream → 10); the Providers arm dispatches to the fork's `render_providers_page` (upstream's `render_providers_settings` kept under `#[allow(dead_code)]`); `render_provider_expanded_settings`, `toggle_provider_expanded`, `set_provider_enabled`, `detection_checked_label`, `abbreviate_home_path` widened to `pub(super)`; General page appends `render_update_check_card` after the automatic-updates toggle, outside the `updater_available` guard so the row shows in every build | ~32 |
+| `src/app/settings.rs` | nav entries, title arms, dispatch arms, `SETTINGS_PAGES` length (7 upstream → 10); the Providers arm dispatches to the fork's `render_providers_page` (upstream's `render_providers_settings` kept under `#[allow(dead_code)]`); `render_provider_expanded_settings`, `toggle_provider_expanded`, `set_provider_enabled`, `detection_checked_label`, `abbreviate_home_path` widened to `pub(super)`; General page appends `render_update_check_card` after the automatic-updates toggle, outside the `updater_available` guard so the row shows in every build; `open_surface_action` registered beside `toggle_right_panel_action` | ~33 |
+| `src/app/right_panel.rs` | the panel header no longer renders `render_right_panel_toggle` beside the window controls (the fn stays, under `#[allow(dead_code)]`, so upstream edits to it merge cleanly) | 3 |
+| `src/app/command_palette.rs` | `PaletteAction::OpenSurface(SurfaceKind)`; one `commands.extend(..)` statement after the right-panel toggle command building the four surface commands; its dispatch arm | 3 |
 | `src/updater.rs` | Windows appcast URL built from the brand env var; `StagedUpdate.version` and `Updater::available_version()` on all three implementations, for the update banner and the settings row | ~25 |
 | `src/app/sidebar.rs` (updater) | `start_available_update` is `pub(super)` so the banner and the settings row install through the same path as the footer pill | 1 |
 | `src/analytics.rs` | early return unless `brand::ANALYTICS_ENABLED` | 4 |
@@ -84,7 +86,7 @@ lines below.
 | `scripts/release.ts` | `appName`/`executableName` from the brand | 6 |
 | `scripts/appcast.ts` | default download prefix points at our release host | 3 |
 | `scripts/delete-debug-app.ts` | branded debug data dirs added to the cleanup candidates | 4 |
-| `locales/{app,ja,zh-CN}.yml` | our new `cloud.*`/`cli_setup.*` keys, plus a de-brand sweep: every user-visible "Waku" replaced (neutral wording, or `CheapRouter` where a name is load-bearing — consent prompts, hero copy, composer placeholder) | ~85 lines |
+| `locales/{app,ja,zh-CN}.yml` | our new `cloud.*`/`cli_setup.*`/`surface_bar.*` keys, plus a de-brand sweep: every user-visible "Waku" replaced (neutral wording, or `CheapRouter` where a name is load-bearing — consent prompts, hero copy, composer placeholder) | ~85 lines |
 | `crates/waku-protocol/src/identity.rs` | `APP_NAME` reads `SUB2API_BRAND_NAME`; `DATA_DIR_NAME` (".cheaprouter") reads `SUB2API_DATA_DIR_NAME`; `DATA_DIRECTORY_NAME` is "CheapRouter"/"CheapRouter Debug" (defaults mirror `brand.rs` — keep in sync); `APP_ID` stays upstream | ~15 |
 | `crates/waku-protocol/src/settings.rs`, `crates/waku-protocol/src/projectless.rs`, `crates/waku-protocol/src/model.rs` (test) | `.waku` literal → `identity::DATA_DIR_NAME` | 3 sites |
 | `crates/waku-core/src/{persistence,projectless,worktree,computer_use,daemon}.rs` | `.waku`/"Waku" literals → `identity::DATA_DIR_NAME`/`DATA_DIRECTORY_NAME` (incl. one test and one error string) | 6 sites |
@@ -104,7 +106,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `crates/sub2api/**`, `src/app/cloud_account.rs`, `src/app/cli_setup.rs`,
 `src/app/providers_page.rs`, `src/app/confirm_dialog.rs`,
 `src/app/onboarding.rs`, `src/app/message_resend.rs`, `src/app/task_rows.rs`,
-`src/app/runtime_prewarm.rs`, `src/app/update_banner.rs`,
+`src/app/runtime_prewarm.rs`, `src/app/update_banner.rs`, `src/app/surface_bar.rs`,
 `src/app/cloud_usage.rs`, `src/app/model_plaza.rs`, `src/app/cloud_pay.rs`,
 `src/app/announcements.rs`, `assets/icons/{bell,circle-x,store,wallet}.svg`,
 `NOTICE.md`, `docs/FORK.md`.

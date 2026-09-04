@@ -2190,12 +2190,14 @@ impl Waku {
             .when(self.cloud_account.credentials.is_some(), |element| {
                 element.child(self.render_announcement_bell(cx))
             })
+            // Fork addition: direct entries for the right-panel surfaces.
+            .child(self.render_surface_bar(cx))
+            // Fork change: the panel toggle is gone from here — the surface
+            // bar above opens, switches and hides the panel.
             .when(!self.right_panel_visible, |element| {
-                element
-                    .when(self.fps_counter_visible, |element| {
-                        element.child(self.render_fps_counter(cx))
-                    })
-                    .child(self.render_right_panel_toggle(cx))
+                element.when(self.fps_counter_visible, |element| {
+                    element.child(self.render_fps_counter(cx))
+                })
             })
             .children(right_window_controls)
     }
@@ -2213,7 +2215,8 @@ impl Waku {
                 .justify_center()
                 .px_8()
                 .pb(px(46.0))
-                .child(icon("icons/sparkle.svg", 24.0, theme.accent))
+                // Fork addition: the brand mark here too, not upstream's sparkle.
+                .child(img("images/logo.png").w(px(30.0)).h(px(30.0)).rounded(px(7.0)))
                 .child(
                     div()
                         .mt(px(16.0))

@@ -159,6 +159,7 @@ enum PaletteAction {
     CollapseSidebarGroups,
     ToggleSidebar,
     ToggleRightPanel,
+    OpenSurface(super::surface_bar::SurfaceKind),
     OpenSettings(SettingsPage),
     SelectTask(Uuid),
 }
@@ -807,6 +808,18 @@ impl Waku {
                 next(),
             ),
         ]);
+        // Fork addition: one command per right-panel surface.
+        commands.extend(super::surface_bar::SurfaceKind::ALL.into_iter().map(|kind| {
+            CommandPaletteItem::command(
+                PaletteSection::Commands,
+                kind.palette_label(),
+                kind.icon_path(),
+                Some(kind.shortcut_label()),
+                PaletteAction::OpenSurface(kind),
+                kind.palette_keywords(),
+                next(),
+            )
+        }));
 
         for (page, label_key, icon, keywords) in [
             (
@@ -1586,6 +1599,7 @@ impl Waku {
             PaletteAction::ToggleRightPanel => {
                 self.toggle_right_panel_action(&ToggleRightPanel, window, cx)
             }
+            PaletteAction::OpenSurface(kind) => self.activate_surface_kind(kind, cx),
             PaletteAction::OpenSettings(page) => {
                 self.open_settings_action(&OpenSettings, window, cx);
                 self.open_settings_page(page, cx);
