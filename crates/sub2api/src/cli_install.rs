@@ -730,6 +730,33 @@ pub fn apply_node_runtime(command: &mut std::process::Command) {
 
 }
 
+/// Switches that keep Claude Code's startup off the network. The CLI
+/// otherwise checks for updates and phones home before it is ready for its
+/// first prompt, and where those hosts are slow or blocked that is seconds
+/// added to every cold start. The routed configuration already writes the
+/// same switch into `settings.json`; this covers sessions that are not
+/// routed through the service. A value the user set in their own
+/// environment or settings wins over this default.
+const CLAUDE_STARTUP_ENV: [(&str, &str); 1] = [("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")];
+
+/// Environment for a provider process this app launches: the managed Node
+/// runtime on `PATH` ([`apply_node_runtime`]) plus per-CLI startup switches.
+pub fn apply_provider_launch_env(command: &mut std::process::Command, provider_id: &str) {
+    apply_node_runtime(command);
+    if provider_id != "claude" {
+        return;
+    }
+    for (name, value) in CLAUDE_STARTUP_ENV {
+        let already_set = command
+            .get_envs()
+            .any(|(candidate, _)| candidate.to_str().is_some_and(|c| c.eq_ignore_ascii_case(name)))
+            || std::env::var_os(name).is_some();
+        if !already_set {
+            command.env(name, value);
+        }
+    }
+}
+
 /// Run a program directly — no shell — and capture its output.
 ///
 /// Used where an argument would otherwise need shell quoting (PowerShell
@@ -1246,6 +1273,31 @@ mod tests {
         let command = broadcast_environment_change_command();
         assert!(command.contains("SendMessageTimeout"));
         assert!(command.contains("'Environment'"));
+    }
+
+    #[test]
+    fn claude_launches_with_nonessential_traffic_off_unless_the_user_decided() {
+        let value = |command: &std::process::Command| {
+            command
+                .get_envs()
+                .find(|(name, _)| *name == "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
+                .and_then(|(_, value)| value.map(|value| value.to_string_lossy().into_owned()))
+        };
+
+        let mut claude = std::process::Command::new("claude");
+        apply_provider_launch_env(&mut claude, "claude");
+        // The test process itself may carry the variable; either way the
+        // child ends up with it set.
+        assert!(value(&claude).is_some() || std::env::var_os("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC").is_some());
+
+        let mut opted_in = std::process::Command::new("claude");
+        opted_in.env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "0");
+        apply_provider_launch_env(&mut opted_in, "claude");
+        assert_eq!(value(&opted_in).as_deref(), Some("0"));
+
+        let mut codex = std::process::Command::new("codex");
+        apply_provider_launch_env(&mut codex, "codex");
+        assert!(value(&codex).is_none());
     }
 
     #[test]

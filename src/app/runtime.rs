@@ -183,23 +183,41 @@ fn prepare_submission(
     // Every turn gets its own immutable starting snapshot. Reusing the prior
     // response's ending ref would attribute branch switches or terminal edits
     // made between turns to the next response.
-    let checkpoint_warning = workspace_ack(
-        &workspace_client,
-        waku_client::WorkspaceOperation::CaptureTurnStart {
-            cwd: project_path.to_path_buf(),
-            session_id,
-            turn_count,
-        },
-    )
-    .err()
-    .map(|error| tr!("errors.capture_pre_turn_checkpoint", error = error));
-
+    //
     // Process startup can synchronously resolve executables, bind sockets,
     // and spawn children. It belongs behind the same animated preparation
     // boundary as Git work, otherwise the last spinner frame visibly freezes
     // just before Stop appears.
-    let driver = driver_start.map(|request| {
-        request.and_then(|request| start_driver(request, project_path.to_path_buf()))
+    //
+    // The two run side by side. They are independent — the provider touches
+    // nothing in the workspace until its first prompt, which is only written
+    // once both are done — and each takes seconds on its own: a snapshot of
+    // a few thousand files, a Node-based CLI booting. Paid one after the
+    // other, they were most of the wait between Enter and the first request
+    // leaving the machine.
+    let (checkpoint_warning, driver) = std::thread::scope(|scope| {
+        let snapshot = scope.spawn(move || {
+            workspace_ack(
+                &workspace_client,
+                waku_client::WorkspaceOperation::CaptureTurnStart {
+                    cwd: project_path.to_path_buf(),
+                    session_id,
+                    turn_count,
+                },
+            )
+            .err()
+            .map(|error| tr!("errors.capture_pre_turn_checkpoint", error = error))
+        });
+        let driver = driver_start.map(|request| {
+            request.and_then(|request| start_driver(request, project_path.to_path_buf()))
+        });
+        let checkpoint_warning = snapshot.join().unwrap_or_else(|_| {
+            Some(tr!(
+                "errors.capture_pre_turn_checkpoint",
+                error = "the snapshot thread panicked"
+            ))
+        });
+        (checkpoint_warning, driver)
     });
 
     Ok(PreparedSubmission {

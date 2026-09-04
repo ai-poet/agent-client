@@ -58,9 +58,9 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
 /// user had configured it by hand. What remains provider-specific is only
 /// that a CLI installed by Settings → Providers may need the app-managed
 /// Node runtime, whose directory predates the desktop's `PATH`.
-pub fn command_for_provider(program: impl AsRef<OsStr>, _provider_id: &str) -> Command {
+pub fn command_for_provider(program: impl AsRef<OsStr>, provider_id: &str) -> Command {
     let mut command = command(program);
-    sub2api::cli_install::apply_node_runtime(&mut command);
+    sub2api::cli_install::apply_provider_launch_env(&mut command, provider_id);
     command
 }
 

@@ -188,16 +188,22 @@ fn capture_worktree_commit_from(
     let temporary_index = common_dir.join(format!("waku-checkpoint-index-{}", Uuid::new_v4()));
 
     let result = (|| {
-        if let Some(head) = head {
-            git_with_index(cwd, &temporary_index, ["read-tree", head])?;
-        }
-        git_with_index(cwd, &temporary_index, ["add", "-A", "--", "."])?;
-        let tree = git_with_index(cwd, &temporary_index, ["write-tree"])?
-            .trim()
-            .to_owned();
-        if tree.is_empty() {
-            bail!("git write-tree returned no object id");
-        }
+        // Seed the temporary index from the repository's own index when it
+        // has one. That copy carries each file's cached stat data, so
+        // `add -A` re-hashes only what changed since the last git operation.
+        // An index rebuilt from HEAD has none and must read and hash every
+        // file in the worktree — on a few thousand files that is seconds per
+        // turn, paid before the provider even starts. The worktree, not the
+        // copied index, is still what gets recorded: `add -A` reconciles the
+        // two. Should the seeded index refuse to become a tree (unmerged
+        // entries, say), fall back to the HEAD-based rebuild.
+        let tree = match snapshot_tree(cwd, &temporary_index, head, true) {
+            Ok(tree) => tree,
+            Err(_) => {
+                let _ = fs::remove_file(&temporary_index);
+                snapshot_tree(cwd, &temporary_index, head, false)?
+            }
+        };
         let mut arguments = vec![
             "commit-tree".to_owned(),
             tree,
@@ -220,6 +226,50 @@ fn capture_worktree_commit_from(
     let _ = fs::remove_file(&temporary_index);
     let _ = fs::remove_file(temporary_index.with_extension("lock"));
     result
+}
+
+/// Stage the whole worktree into `temporary_index` and write it as a tree.
+/// `seed_from_index` starts from a copy of the repository's index (fast,
+/// stat-cached); otherwise from HEAD's tree (exact, but every file is read).
+fn snapshot_tree(
+    cwd: &Path,
+    temporary_index: &Path,
+    head: Option<&str>,
+    seed_from_index: bool,
+) -> anyhow::Result<String> {
+    let seeded = seed_from_index
+        && repository_index_path(cwd)
+            .filter(|index| index.is_file())
+            .is_some_and(|index| fs::copy(&index, temporary_index).is_ok());
+    if !seeded && let Some(head) = head {
+        git_with_index(cwd, temporary_index, ["read-tree", head])?;
+    }
+    git_with_index(cwd, temporary_index, ["add", "-A", "--", "."])?;
+    let tree = git_with_index(cwd, temporary_index, ["write-tree"])?
+        .trim()
+        .to_owned();
+    if tree.is_empty() {
+        bail!("git write-tree returned no object id");
+    }
+    Ok(tree)
+}
+
+/// The repository's index file — per worktree, which `--git-path` resolves
+/// and `--git-common-dir` would not.
+fn repository_index_path(cwd: &Path) -> Option<PathBuf> {
+    let path = git_output(cwd, ["rev-parse", "--git-path", "index"])
+        .ok()?
+        .trim()
+        .to_owned();
+    if path.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(path);
+    Some(if path.is_absolute() {
+        path
+    } else {
+        cwd.join(path)
+    })
 }
 
 fn prepare_turn_diff_base(
