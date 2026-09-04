@@ -1083,6 +1083,8 @@ pub struct Waku {
     /// that lookup can reach cfprefsd.
     automatic_updates_enabled: bool,
     updater_status: crate::updater::UpdateStatus,
+    /// Fork addition: the check button and banner around the updater.
+    update_ui: update_banner::UpdateUiState,
     updater_button_focus: FocusHandle,
     updater_button_hovered: bool,
     updater_button_focused: bool,
@@ -1668,6 +1670,7 @@ mod model_plaza;
 mod onboarding;
 mod message_resend;
 mod task_rows;
+mod update_banner;
 mod providers_page;
 mod render;
 mod right_panel;
@@ -1833,6 +1836,8 @@ impl Waku {
         event: crate::updater::UpdaterEvent,
         cx: &mut Context<Self>,
     ) {
+        // Fork addition: the check button and banner follow the same events.
+        self.update_ui.on_updater_event(&event);
         match event {
             crate::updater::UpdaterEvent::StatusChanged(status) => {
                 self.updater_status = status;
@@ -2887,6 +2892,7 @@ impl Waku {
                     .and_then(|updater| updater.0.as_ref())
                     .is_some_and(|updater| updater.automatically_checks_for_updates()),
                 updater_status,
+                update_ui: update_banner::UpdateUiState::default(),
                 updater_button_focus,
                 updater_button_hovered: false,
                 updater_button_focused: false,

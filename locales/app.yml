@@ -63,6 +63,22 @@ updater.up_to_date:
   en: You're up to date
 updater.failed:
   en: "Update failed: %{error}"
+updater.check_now:
+  en: Check for updates
+updater.checking:
+  en: Checking…
+updater.current_version:
+  en: "Current version %{version}"
+updater.available:
+  en: A new version is ready to install
+updater.available_version:
+  en: "Version %{version} is ready to install"
+updater.install_now:
+  en: Update now
+updater.later:
+  en: Later
+settings.check_for_updates:
+  en: Check for updates
 
 command_palette.placeholder:
   en: Search tasks or run a command…

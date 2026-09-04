@@ -786,7 +786,7 @@ impl Waku {
             .child(search)
     }
 
-    fn start_available_update(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn start_available_update(&mut self, cx: &mut Context<Self>) {
         if self.updater_status != crate::updater::UpdateStatus::Available {
             return;
         }

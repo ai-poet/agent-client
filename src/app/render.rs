@@ -256,6 +256,8 @@ impl Render for Waku {
             let content = div()
                 .relative()
                 .size_full()
+                .flex()
+                .flex_col()
                 .on_action(cx.listener(Self::toggle_command_palette_action))
                 .on_action(cx.listener(Self::open_resume_picker_action))
                 .on_action(cx.listener(Self::switch_task_forward_action))
@@ -265,7 +267,15 @@ impl Render for Waku {
                 .on_action(cx.listener(Self::confirm_task_switch_action))
                 .on_action(cx.listener(Self::cancel_task_switch_action))
                 .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
-                .child(self.render_settings(window, cx))
+                // Fork addition: an available update announces itself here too.
+                .children(self.render_update_banner(cx))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .w_full()
+                        .child(self.render_settings(window, cx)),
+                )
                 .children(toast)
                 .children(command_palette)
                 .children(commit_dialog)
@@ -370,6 +380,8 @@ impl Render for Waku {
                     .when(panels.sidebar > 0.0, |element| {
                         element.border_l_1().border_color(theme.sidebar_border)
                     })
+                    // Fork addition: an available update announces itself here.
+                    .children(self.render_update_banner(cx))
                     .child(self.render_header(window, cx))
                     .child(if empty {
                         self.render_empty_state(cx).into_any_element()

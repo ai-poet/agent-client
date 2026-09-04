@@ -31,6 +31,14 @@ window.restore: 元に戻す
 updater.update: アップデート
 updater.updating: アップデート中…
 updater.up_to_date: 最新の状態です
+updater.check_now: アップデートを確認
+updater.checking: 確認中…
+updater.current_version: "現在のバージョン %{version}"
+updater.available: 新しいバージョンをインストールできます
+updater.available_version: "バージョン %{version} をインストールできます"
+updater.install_now: 今すぐ更新
+updater.later: あとで
+settings.check_for_updates: アップデートを確認
 updater.failed: "アップデートに失敗しました：%{error}"
 
 command_palette.placeholder: タスクを検索、またはコマンドを実行…

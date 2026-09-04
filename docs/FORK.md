@@ -66,8 +66,8 @@ lines below.
 | `src/app/task_switcher.rs` | failed-task glyph is `circle-x` | 1 |
 | `crates/waku-core/src/driver/claude.rs` | spawn uses `command_for_provider(.., "claude")` | 1 |
 | `crates/waku-core/src/driver/codex.rs` | same, at both spawn sites (session + title turn) | 2 |
-| `src/app.rs` | fork `mod` lines, `SettingsPage::{CloudAccount, ModelPlaza, CloudUsage}`, fork struct fields + initializers (cloud account, cli setup, custom API inputs, plaza, pay modal, confirm dialog, onboarding, runtime prewarms), `DriverStartRequest.prewarmed`, `init_confirm_dialog_keys` re-export, startup refresh loop (also kicks off CLI detection and loads onboarding state), `subscribe_custom_api_inputs` beside the other input subscriptions, `maybe_prewarm_selected_runtime` in the composer's `Edited` arm | ~90 |
-| `src/app/render.rs` | pay-modal, announcements-modal and confirm-dialog composites in both render branches; onboarding strip above the composer | 13 |
+| `src/app.rs` | fork `mod` lines, `SettingsPage::{CloudAccount, ModelPlaza, CloudUsage}`, fork struct fields + initializers (cloud account, cli setup, custom API inputs, plaza, pay modal, confirm dialog, onboarding, runtime prewarms), `DriverStartRequest.prewarmed`, `init_confirm_dialog_keys` re-export, startup refresh loop (also kicks off CLI detection and loads onboarding state), `subscribe_custom_api_inputs` beside the other input subscriptions, `maybe_prewarm_selected_runtime` in the composer's `Edited` arm; `update_ui` field + `on_updater_event` call in `handle_updater_event` | ~94 |
+| `src/app/render.rs` | pay-modal, announcements-modal and confirm-dialog composites in both render branches; onboarding strip above the composer; update banner above the header (main) and above the settings page (settings branch is now a flex column) | ~22 |
 | `src/app/tests.rs` | `settings_search_filters_pages_for_arrow_cycling` expects the fork's nav pages | 3 |
 | `src/assets.rs` | `bell`/`circle-x`/`store`/`wallet` icon entries; embedded `images/logo.png` brand mark | ~12 |
 | `src/app/runtime.rs` | `cloud_balance_stale` set at the turn-settlement seam, drained in the event pump | 6 |
@@ -75,8 +75,9 @@ lines below.
 | `src/app/composer.rs` | balance chip in the status strip | 3 |
 | `resources/AppIcon*.icns`, `resources/windows/AppIcon.ico`, `resources/linux/` | brand artwork and desktop entry name | assets |
 | `scripts/bundle-linux.sh` | installs the brand icon | 5 |
-| `src/app/settings.rs` | nav entries, title arms, dispatch arms, `SETTINGS_PAGES` length (7 upstream → 10); the Providers arm dispatches to the fork's `render_providers_page` (upstream's `render_providers_settings` kept under `#[allow(dead_code)]`); `render_provider_expanded_settings`, `toggle_provider_expanded`, `set_provider_enabled`, `detection_checked_label`, `abbreviate_home_path` widened to `pub(super)` | ~30 |
-| `src/updater.rs` | Windows appcast URL built from the brand env var | 8 |
+| `src/app/settings.rs` | nav entries, title arms, dispatch arms, `SETTINGS_PAGES` length (7 upstream → 10); the Providers arm dispatches to the fork's `render_providers_page` (upstream's `render_providers_settings` kept under `#[allow(dead_code)]`); `render_provider_expanded_settings`, `toggle_provider_expanded`, `set_provider_enabled`, `detection_checked_label`, `abbreviate_home_path` widened to `pub(super)`; General page appends `render_update_check_card` beside the automatic-updates toggle | ~32 |
+| `src/updater.rs` | Windows appcast URL built from the brand env var; `StagedUpdate.version` and `Updater::available_version()` on all three implementations, for the update banner and the settings row | ~25 |
+| `src/app/sidebar.rs` (updater) | `start_available_update` is `pub(super)` so the banner and the settings row install through the same path as the footer pill | 1 |
 | `src/analytics.rs` | early return unless `brand::ANALYTICS_ENABLED` | 4 |
 | `build.rs` | `export_brand()`; Windows version block uses the brand | ~25 |
 | `resources/Info.plist` | bundle identity + `SUFeedURL` | 6 |
@@ -103,7 +104,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `crates/sub2api/**`, `src/app/cloud_account.rs`, `src/app/cli_setup.rs`,
 `src/app/providers_page.rs`, `src/app/confirm_dialog.rs`,
 `src/app/onboarding.rs`, `src/app/message_resend.rs`, `src/app/task_rows.rs`,
-`src/app/runtime_prewarm.rs`,
+`src/app/runtime_prewarm.rs`, `src/app/update_banner.rs`,
 `src/app/cloud_usage.rs`, `src/app/model_plaza.rs`, `src/app/cloud_pay.rs`,
 `src/app/announcements.rs`, `assets/icons/{bell,circle-x,store,wallet}.svg`,
 `NOTICE.md`, `docs/FORK.md`.

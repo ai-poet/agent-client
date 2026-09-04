@@ -713,6 +713,12 @@ mod macos {
             self.status.get()
         }
 
+        /// Sparkle keeps the update's details in its own windows; nothing
+        /// is surfaced here.
+        pub fn available_version(&self) -> Option<String> {
+            None
+        }
+
         pub fn events(&self) -> smol::channel::Receiver<UpdaterEvent> {
             self.events.clone()
         }
@@ -1018,6 +1024,8 @@ mod windows {
     /// A verified installer on disk, ready to run.
     struct StagedUpdate {
         installer: PathBuf,
+        /// The build it installs, for the banner and the settings row.
+        version: String,
     }
 
     pub struct Updater {
@@ -1129,11 +1137,10 @@ mod windows {
                     // meanwhile is honored.
                     let report = explicit_check.load(Ordering::Relaxed);
                     match outcome {
-                        Ok(Some(installer)) => {
+                        Ok(Some(update)) => {
                             *staged
                                 .lock()
-                                .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-                                Some(StagedUpdate { installer });
+                                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(update);
                             publish(UpdateStatus::Available);
                         }
                         Ok(None) => {
@@ -1205,6 +1212,15 @@ mod windows {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
         }
 
+        /// The version of the staged update, while one is on offer.
+        pub fn available_version(&self) -> Option<String> {
+            self.staged
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .as_ref()
+                .map(|update| update.version.clone())
+        }
+
         pub fn events(&self) -> smol::channel::Receiver<UpdaterEvent> {
             self.receiver.clone()
         }
@@ -1241,7 +1257,7 @@ mod windows {
     }
 
     /// Resolve the feed, and stage the installer when it names a newer build.
-    fn fetch_and_stage() -> anyhow::Result<Option<PathBuf>> {
+    fn fetch_and_stage() -> anyhow::Result<Option<StagedUpdate>> {
         let document = http_get(FEED_URL)?;
         let Some(item) = feed::newest_item(&document) else {
             anyhow::bail!("the update feed has no signed release");
@@ -1249,7 +1265,10 @@ mod windows {
         if !feed::is_newer(&item.version, env!("CARGO_PKG_VERSION")) {
             return Ok(None);
         }
-        Ok(Some(download_and_verify(&item)?))
+        Ok(Some(StagedUpdate {
+            installer: download_and_verify(&item)?,
+            version: item.version.clone(),
+        }))
     }
 
     fn download_and_verify(item: &AppcastItem) -> anyhow::Result<PathBuf> {
@@ -1465,6 +1484,10 @@ impl Updater {
 
     pub fn status(&self) -> UpdateStatus {
         UpdateStatus::Idle
+    }
+
+    pub fn available_version(&self) -> Option<String> {
+        None
     }
 
     pub fn events(&self) -> smol::channel::Receiver<UpdaterEvent> {
