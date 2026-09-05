@@ -31,6 +31,7 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         })
         .collect(),
         ProviderKind::Codex => [
+            ProviderModel::new("gpt-6-astra", "GPT-6-Astra"),
             ProviderModel::new("gpt-5.6-sol", "GPT-5.6-Sol").default(),
             ProviderModel::new("gpt-5.6-terra", "GPT-5.6-Terra"),
             ProviderModel::new("gpt-5.6-luna", "GPT-5.6-Luna"),
