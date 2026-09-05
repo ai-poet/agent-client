@@ -25,6 +25,7 @@ use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc::Receiver;
 use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
@@ -38,6 +39,9 @@ use crate::env_conflicts::{self, EnvConflict};
 /// cc-switch uses the same budget: long enough for a cold Node start on a
 /// slow disk, short enough that a wedged shim does not stall detection.
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long a timed-out run still waits for its output pipes to close.
+const DRAIN_GRACE: Duration = Duration::from_secs(2);
 
 /// What running a binary revealed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -502,6 +506,14 @@ pub fn run_with_timeout(mut command: Command, timeout: Duration) -> CommandRun {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     detach_console(&mut command);
+    #[cfg(unix)]
+    {
+        // Its own process group, so a timeout can take the whole tree: a
+        // shim's grandchild would otherwise outlive the kill, keep the
+        // pipes open, and hold the drain below until it exited on its own.
+        use std::os::unix::process::CommandExt as _;
+        command.process_group(0);
+    }
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -533,12 +545,21 @@ pub fn run_with_timeout(mut command: Command, timeout: Duration) -> CommandRun {
         }
     };
 
-    let mut output = stdout
-        .and_then(|handle| handle.join().ok())
-        .unwrap_or_default();
-    if let Some(errors) = stderr.and_then(|handle| handle.join().ok())
-        && !errors.trim().is_empty()
-    {
+    // After a timeout the tree is dead, but a straggler that inherited the
+    // pipes could still hold them: give it a moment, then stop waiting.
+    let collect = |drain: Option<Receiver<String>>| -> String {
+        let Some(drain) = drain else {
+            return String::new();
+        };
+        if timed_out {
+            drain.recv_timeout(DRAIN_GRACE).unwrap_or_default()
+        } else {
+            drain.recv().unwrap_or_default()
+        }
+    };
+    let mut output = collect(stdout);
+    let errors = collect(stderr);
+    if !errors.trim().is_empty() {
         if !output.trim().is_empty() {
             output.push('\n');
         }
@@ -557,12 +578,14 @@ pub fn run_with_timeout(mut command: Command, timeout: Duration) -> CommandRun {
     }
 }
 
-fn drain_in_background<R: Read + Send + 'static>(mut reader: R) -> std::thread::JoinHandle<String> {
+fn drain_in_background<R: Read + Send + 'static>(mut reader: R) -> Receiver<String> {
+    let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut bytes = Vec::new();
         let _ = reader.read_to_end(&mut bytes);
-        String::from_utf8_lossy(&bytes).into_owned()
-    })
+        let _ = sender.send(String::from_utf8_lossy(&bytes).into_owned());
+    });
+    receiver
 }
 
 fn kill_tree(child: &mut std::process::Child) {
@@ -576,6 +599,16 @@ fn kill_tree(child: &mut std::process::Child) {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
+    }
+    #[cfg(unix)]
+    {
+        // The child leads its own process group (see `run_with_timeout`),
+        // so this reaches every descendant, not just the shim.
+        // SAFETY: a plain signal to a group we created; a stale id fails
+        // harmlessly with ESRCH.
+        unsafe {
+            libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
+        }
     }
     let _ = child.kill();
 }

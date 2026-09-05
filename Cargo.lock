@@ -7223,6 +7223,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dirs",
+ "libc",
  "serde",
  "serde_json",
  "toml_edit 0.23.10+spec-1.0.0",
