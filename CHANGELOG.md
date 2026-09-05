@@ -16,6 +16,23 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.1.19]
+
+- Terminal, Files, Browser and Review buttons now sit in the window header: one click opens the surface, switches to its tab, or hides the panel when it is already in front. Shortcuts ⇧⌘T / E / O / D (Ctrl+Shift on Windows and Linux), plus View-menu and command-palette entries; the old right-panel toggle button is gone (⇧⌘B still toggles the panel)
+- Check for updates from Settings → General; when an update is ready a banner appears across the top of the window and installs on click
+- Providers settings rebuilt as one card per CLI: install status, "installed but not runnable" diagnostics, Node/npm runtime status, environment-variable conflict warnings, and a cleaner custom endpoint form (labelled fields, hidden keys, URL validation, an endpoint test with its result, confirmation before clearing)
+- CLI detection now looks where your shell does (login-shell PATH, nvm/fnm/volta/pnpm/scoop directories) and tells "not installed" from "installed but broken"; installs are verified after npm finishes, with specific hints for permission and network failures
+- Onboarding checklist for new installs: sign in, install a CLI, open a project — remembers completion and dismissal
+- Edit and resend a sent message when rewind is not available (pencil button and context menu)
+- Failed tasks show a failure badge in the sidebar with the error on hover, and a remove button that asks before removing
+- Fix being signed out of the cloud account after a while; an expired session now says so and restores the local CLI configs
+- Faster first message: the turn snapshot reuses the repository's index, the provider starts in parallel with it, and the CLI is prewarmed while you type
+- The Codex model list follows the selected cloud group: switching a group drops Codex's cached manifest and re-probes the CLI right away
+- Model catalogs: Claude Fable 5.1 and curated Claude entries the CLI does not report; GPT-6-Astra added to the Codex catalog
+- /resume for Codex, Claude Code and the other providers; the sidebar scrolls the selected task into view; live work indicator in the environment summary
+- Fix Claude model discovery (#185) and navigation-rail scrolls reaching the transcript
+- Fix a CLI probe hanging for the full timeout on Linux and macOS when the CLI's shell script left a child running
+
 ## [0.1.18]
 
 - Fix a console window flashing on Windows for every cloud-account request (balance refresh, announcements, group status, payment polling)
