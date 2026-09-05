@@ -25,6 +25,10 @@ use crate::gateway::openai_base_url;
 
 const AUTH_FILE: &str = "auth.json";
 const CONFIG_FILE: &str = "config.toml";
+/// Codex's cache of the provider's model manifest (`GET /models`). It is
+/// keyed by provider, not by key, and a different key can mean a different
+/// group with a different model list — so it goes whenever the route changes.
+const MODELS_CACHE_FILE: &str = "models_cache.json";
 
 /// Codex model pinned while routed, matching the Electron client's template.
 const DEFAULT_MODEL: &str = "gpt-5.4";
@@ -49,6 +53,7 @@ pub fn take_over(codex_dir: &Path, target: &RouteTarget, backups: &mut CliBackup
     // Parse before touching anything: an unparseable config must abort the
     // whole takeover, not leave auth.json half-switched.
     let mut document = read_document(&config_path)?;
+    let route_changed = route_changed(&document, target);
     capture_backup(backups, CONFIG_FILE, &config_path)?;
     capture_backup(backups, AUTH_FILE, &auth_path)?;
 
@@ -84,10 +89,40 @@ pub fn take_over(codex_dir: &Path, target: &RouteTarget, backups: &mut CliBackup
     table.insert("experimental_bearer_token", value(target.api_key.as_str()));
     providers.insert(PROVIDER_ID, Item::Table(table));
 
-    write_document(&config_path, &document)
+    write_document(&config_path, &document)?;
+    if route_changed {
+        forget_models_cache(codex_dir);
+    }
+    Ok(())
+}
+
+/// Whether `target` differs from the route the live config already carries
+/// — a first takeover, another gateway, or (the common case) another
+/// group's key.
+fn route_changed(document: &DocumentMut, target: &RouteTarget) -> bool {
+    let Some(table) = document
+        .get("model_providers")
+        .and_then(Item::as_table)
+        .and_then(|providers| providers.get(PROVIDER_ID))
+        .and_then(Item::as_table)
+    else {
+        return true;
+    };
+    let current = |key: &str| table.get(key).and_then(Item::as_str);
+    current("experimental_bearer_token") != Some(target.api_key.as_str())
+        || current("base_url") != Some(openai_base_url(&target.base_url).as_str())
+}
+
+/// Drop Codex's model-manifest cache so its next start asks the gateway
+/// again with the current key. Best effort: a cache that will not delete
+/// only costs a stale list until Codex's own refresh.
+fn forget_models_cache(codex_dir: &Path) {
+    let _ = remove_if_exists(&codex_dir.join(MODELS_CACHE_FILE));
 }
 
 pub fn restore(codex_dir: &Path, backups: &CliBackups) -> Result<()> {
+    // Back to the user's own provider: its manifest is not ours to keep.
+    forget_models_cache(codex_dir);
     // auth.json: the original bytes, or gone if it never existed.
     if let Some(backup) = backups.get(AUTH_FILE) {
         let auth_path = codex_dir.join(AUTH_FILE);
@@ -226,6 +261,29 @@ mod tests {
             std::fs::read_to_string(dir.join(AUTH_FILE)).unwrap(),
             r#"{"tokens":{"access_token":"oauth"}}"#
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn models_cache_is_dropped_only_when_the_route_changes() {
+        let dir = temp_dir("models-cache");
+        let cache = dir.join(MODELS_CACHE_FILE);
+        let mut backups = BTreeMap::new();
+
+        std::fs::write(&cache, "{}").unwrap();
+        take_over(&dir, &target("sk-gw"), &mut backups).expect("take over");
+        assert!(!cache.exists(), "first takeover is a route change");
+
+        std::fs::write(&cache, "{}").unwrap();
+        take_over(&dir, &target("sk-gw"), &mut backups).expect("same route");
+        assert!(cache.exists(), "an unchanged route keeps Codex's cache");
+
+        take_over(&dir, &target("sk-other-group"), &mut backups).expect("switch");
+        assert!(!cache.exists(), "a new key is a new group: cache dropped");
+
+        std::fs::write(&cache, "{}").unwrap();
+        restore(&dir, &backups).expect("restore");
+        assert!(!cache.exists(), "restore drops it too");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

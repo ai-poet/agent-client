@@ -413,6 +413,13 @@ impl Waku {
         self.cloud_account.error = None;
         cx.notify();
 
+        // The CLI whose route this group drives; its model list follows
+        // the group (Codex asks the gateway for a manifest with the key).
+        let probe_scope = match platform.as_str() {
+            "openai" => Some(ProviderKind::Codex),
+            "anthropic" => Some(ProviderKind::Claude),
+            _ => None,
+        };
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -428,6 +435,9 @@ impl Waku {
                     Ok(renewed) => {
                         this.cloud_account.credentials = Some(renewed);
                         this.apply_cloud_routing();
+                        // Re-read the CLI's catalog under the new route;
+                        // routing has already dropped Codex's manifest cache.
+                        this.refresh_provider_detection(probe_scope);
                         let name = group_id
                             .and_then(|id| {
                                 this.cloud_account
