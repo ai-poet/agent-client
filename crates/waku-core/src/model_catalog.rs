@@ -121,7 +121,7 @@ pub fn discover_catalog(
         // the picker aligned with the modes advertised by the current CLI.
         ProviderKind::Amp => (Vec::new(), None),
         ProviderKind::Codex => (discover_codex_models(binary), None),
-        ProviderKind::Claude => (discover_claude_models(binary), None),
+        ProviderKind::Claude => (discover_claude_catalog(binary), None),
         ProviderKind::Cursor => (discover_cursor_models(binary), None),
         ProviderKind::DeepSeek => discover_deepseek_catalog(binary),
         ProviderKind::Fx => (discover_fx_models(binary), None),
@@ -195,7 +195,17 @@ fn write_models_file(path: &Path, models: &[ProviderModel]) -> std::io::Result<(
 /// Claude Code's sessionless SDK initialization response carries the exact
 /// catalog behind `/model`. Unlike a fixed Anthropic list, it reflects account
 /// availability and role mappings supplied by tools such as CC Switch.
+#[allow(dead_code)] // Fork: `discover_catalog` goes through `discover_claude_catalog`; kept for upstream's tests.
 fn discover_claude_models(binary: &Path) -> Vec<ProviderModel> {
+    crate::claude_metadata::initialize(binary, None, "user")
+        .map(|value| parse_claude_models(&value))
+        .unwrap_or_default()
+}
+
+/// Fork: what `discover_catalog` uses for Claude — the CLI's own catalog
+/// plus the curated entries it did not name. Kept apart from
+/// [`discover_claude_models`], which stays the plain probe upstream tests.
+fn discover_claude_catalog(binary: &Path) -> Vec<ProviderModel> {
     crate::claude_metadata::initialize(binary, None, "user")
         .map(|value| {
             let discovered = parse_claude_models(&value);
