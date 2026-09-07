@@ -125,18 +125,36 @@ const installer = join(
   `CheapRouter-${version}-${architecture}-Setup.exe`,
 );
 
-await $`cargo build --locked --release --package waku --bin waku --package waku-daemon --bin waku-daemon`;
+await $`cargo build --locked --release --package waku --bin waku --bin waku_js_repl --package waku-daemon --bin waku-daemon`;
 
 const staging = await mkdtemp(join(tmpdir(), "waku-bundle-"));
 try {
-  // Both executables stay side by side: the app resolves the daemon next to
-  // itself, so the layout is what makes an extracted zip runnable in place.
+  // The executables stay side by side: the app resolves the daemon and the
+  // Computer Use REPL next to itself, so the layout is what makes an
+  // extracted zip runnable in place.
   const packageDirectory = join(staging, packageDirectoryName);
   await mkdir(packageDirectory, { recursive: true });
-  for (const file of ["waku.exe", "waku-daemon.exe"]) {
+  for (const file of ["waku.exe", "waku-daemon.exe", "waku_js_repl.exe"]) {
     await copyFile(join(releaseDirectory, file), join(packageDirectory, file));
   }
   await copyFile(join(projectRoot, "LICENSE"), join(packageDirectory, "LICENSE"));
+
+  // Computer Use resources, at the flat paths waku-core's resolvers expect
+  // beside the executable (the macOS bundle keeps them under Resources/).
+  // The skill is the Windows variant, installed under the platform-neutral
+  // name every provider wiring points at.
+  await mkdir(join(packageDirectory, "computer-use"), { recursive: true });
+  await copyFile(
+    join(projectRoot, "resources", "computer-use", "pi-extension.ts"),
+    join(packageDirectory, "computer-use", "pi-extension.ts"),
+  );
+  await mkdir(join(packageDirectory, "skills", "waku-computer-use"), {
+    recursive: true,
+  });
+  await copyFile(
+    join(projectRoot, "resources", "computer-use", "SKILL.windows.md"),
+    join(packageDirectory, "skills", "waku-computer-use", "SKILL.md"),
+  );
 
   // Authenticode has to be applied before anything is packaged, so the
   // executables inside the zip and the installer are all signed. Unsigned
@@ -152,6 +170,7 @@ try {
     await sign(signtool, certificate, certificatePassword, [
       join(packageDirectory, "waku.exe"),
       join(packageDirectory, "waku-daemon.exe"),
+      join(packageDirectory, "waku_js_repl.exe"),
     ]);
   } else {
     console.log("No WINDOWS_CERTIFICATE set; packaging unsigned binaries.");

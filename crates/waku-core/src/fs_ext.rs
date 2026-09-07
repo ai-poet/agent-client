@@ -14,6 +14,7 @@ use std::path::Path;
 /// Windows has no mode bits: the locations Waku creates here live under the
 /// user's own profile (`%LOCALAPPDATA%`, `%TEMP%`), which already inherits an
 /// ACL granting the owner and administrators alone.
+#[cfg(target_os = "macos")]
 pub(crate) fn create_private_dir_all(path: &Path) -> io::Result<()> {
     let mut builder = std::fs::DirBuilder::new();
     builder.recursive(true);

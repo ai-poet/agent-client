@@ -7227,6 +7227,7 @@ dependencies = [
  "serde",
  "serde_json",
  "toml_edit 0.23.10+spec-1.0.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

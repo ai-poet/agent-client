@@ -82,6 +82,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "{#StageDir}\waku.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\waku-daemon.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+; Computer Use: the QuickJS REPL the agents talk to, the Pi extension that
+; registers it, and the Windows skill — all resolved relative to waku.exe.
+Source: "{#StageDir}\waku_js_repl.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\computer-use\pi-extension.ts"; DestDir: "{app}\computer-use"; Flags: ignoreversion
+Source: "{#StageDir}\skills\waku-computer-use\SKILL.md"; DestDir: "{app}\skills\waku-computer-use"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\CheapRouter"; Filename: "{app}\waku.exe"

@@ -148,20 +148,28 @@ pub(super) fn create_process_directory() -> anyhow::Result<PathBuf> {
     Ok(directory)
 }
 
+/// Terminate every helper process registered in `directory` that still runs
+/// `helper_executable`, then clear the registrations. A pid whose executable
+/// no longer matches has been reused by something else and is left alone.
 pub(super) fn stop_registered_processes(directory: &Path, helper_executable: &Path) {
-    let expected_executable =
-        fs::canonicalize(helper_executable).unwrap_or_else(|_| helper_executable.to_path_buf());
     for (pid, registration) in registered_processes(directory) {
-        if process_executable(pid).as_deref() == Some(expected_executable.as_path()) {
-            // Unreachable off unix, where `process_executable` never resolves
-            // and the loop only clears stale registration files.
-            #[cfg(unix)]
-            unsafe {
-                libc::kill(pid, libc::SIGTERM);
-            }
+        if process_executable(pid)
+            .is_some_and(|executable| same_executable(&executable, helper_executable))
+        {
+            sub2api::mcp_stdio::kill_process_tree(pid as u32);
         }
         let _ = fs::remove_file(registration);
     }
+}
+
+/// Compare two executable paths by identity rather than spelling.
+///
+/// Both sides are canonicalized: on Windows `canonicalize` yields a
+/// `\\?\`-prefixed path while the process image name comes back plain, so
+/// canonicalizing only one of them would never match.
+fn same_executable(left: &Path, right: &Path) -> bool {
+    let canonical = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    canonical(left) == canonical(right)
 }
 
 pub(super) fn registered_processes(directory: &Path) -> Vec<(i32, PathBuf)> {
@@ -202,7 +210,12 @@ pub(super) fn process_executable(pid: i32) -> Option<PathBuf> {
     fs::read_link(format!("/proc/{pid}/exe")).ok()
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(windows)]
+pub(super) fn process_executable(pid: i32) -> Option<PathBuf> {
+    sub2api::win_process::executable_path(u32::try_from(pid).ok()?)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 pub(super) fn process_executable(_: i32) -> Option<PathBuf> {
     None
 }

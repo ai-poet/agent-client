@@ -341,14 +341,16 @@
 
   const chromeComputerUseMetaKey = "codex/computerUseChrome";
   const macChromeAppPathPattern = /(?:^|[\\/])Google Chrome\.app(?:[\\/]|$)/i;
+  const windowsChromeAppPathPattern = /(?:^|[\\/])chrome\.exe$/i;
   const markChromeComputerUse = (arguments_) => {
     if (typeof arguments_ !== "object" || arguments_ === null) return;
     const descriptor = Object.getOwnPropertyDescriptor(arguments_, "app");
     if (!descriptor || !("value" in descriptor) || typeof descriptor.value !== "string") return;
     const app = descriptor.value.trim();
     if (
-      ["chrome", "google chrome", "com.google.chrome"].includes(app.toLowerCase()) ||
-      macChromeAppPathPattern.test(app)
+      ["chrome", "google chrome", "com.google.chrome", "chrome.exe"].includes(app.toLowerCase()) ||
+      macChromeAppPathPattern.test(app) ||
+      windowsChromeAppPathPattern.test(app)
     ) {
       nativeSetResponseMeta(JSON.stringify({ [chromeComputerUseMetaKey]: true }));
     }
@@ -364,7 +366,11 @@
     let sky = globalThis[computerUseRuntimeKey];
     if (!sky) {
       sky = Object.freeze({
-        target: "mac",
+        // The kernel names the platform the native backend drives; "mac" is
+        // what the skill documents and what older bundles assume.
+        target: typeof globalThis.__wakuComputerUseTarget === "string"
+          ? globalThis.__wakuComputerUseTarget
+          : "mac",
         list_apps: async () => nativeCall("list_apps"),
         get_app_state: async (arguments_ = {}) => nativeCall("get_app_state", arguments_),
         click: async (arguments_) => { nativeCall("click", arguments_); },

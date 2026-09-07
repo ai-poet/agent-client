@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -14,8 +13,8 @@ use parking_lot::Mutex;
 use rquickjs::context::EvalOptions;
 use rquickjs::{Context, Ctx, Exception, Function, Persistent, Promise, Runtime, Value};
 use serde_json::{Map, Value as JsonValue, json};
+use sub2api::mcp_stdio::{MCP_PROTOCOL_VERSION, McpStdioClient, text_content, write_message};
 
-const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 const DEFAULT_EXECUTION_TIMEOUT_MS: u64 = 30_000;
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 
@@ -343,6 +342,7 @@ impl JavaScriptRepl {
     }
 
     fn reset(&mut self) -> anyhow::Result<()> {
+        self.bridge.lock().reset();
         self.kernel = create_kernel(
             self.bridge.clone(),
             self.call_output.clone(),
@@ -499,6 +499,9 @@ fn create_kernel(
     let (timer_dispatch, request_meta_setter) = context.with(
         |ctx| -> anyhow::Result<(Persistent<Function<'static>>, Persistent<Function<'static>>)> {
             let globals = ctx.globals();
+
+            // Read by the bootstrap when it builds `sky.target`.
+            globals.set("__wakuComputerUseTarget", bridge.lock().target())?;
 
             let sky_bridge = bridge.clone();
             let sky_deadline = deadline.clone();
@@ -766,13 +769,72 @@ fn image_mime_type(path: &Path, bytes: &[u8]) -> anyhow::Result<&'static str> {
     }
 }
 
+/// The ten operations the `sky` façade may forward. Anything else is refused
+/// before it reaches a helper, whichever backend serves it.
+const SKY_OPERATIONS: [&str; 10] = [
+    "list_apps",
+    "get_app_state",
+    "click",
+    "drag",
+    "perform_secondary_action",
+    "set_value",
+    "select_text",
+    "scroll",
+    "press_key",
+    "type_text",
+];
+
+/// What actually drives the desktop behind `sky`.
+enum Backend {
+    /// The platform's own helper — the Swift bundle on macOS — which speaks
+    /// the `sky` vocabulary itself, one MCP tool per operation.
+    Helper(Option<McpStdioClient>),
+    /// `cua-driver`, whose tools the adapter translates `sky` onto.
+    Cua(Box<crate::js_repl_cua::CuaAdapter>),
+}
+
+/// The backend for this platform, or the one `WAKU_COMPUTER_USE_BACKEND`
+/// names (`helper` / `cua`). The override is what lets the adapter be
+/// exercised on a Mac against cua's own macOS build.
+fn select_backend() -> Backend {
+    let choice = std::env::var("WAKU_COMPUTER_USE_BACKEND")
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase());
+    match choice.as_deref() {
+        Some("helper") => Backend::Helper(None),
+        Some("cua") => Backend::Cua(Box::new(crate::js_repl_cua::CuaAdapter::new())),
+        _ if cfg!(target_os = "macos") => Backend::Helper(None),
+        _ => Backend::Cua(Box::new(crate::js_repl_cua::CuaAdapter::new())),
+    }
+}
+
 struct NativeComputerUseClient {
-    connection: Option<HelperConnection>,
+    backend: Backend,
 }
 
 impl NativeComputerUseClient {
     fn new() -> Self {
-        Self { connection: None }
+        Self {
+            backend: select_backend(),
+        }
+    }
+
+    /// The platform name `sky.target` reports to the model.
+    fn target(&self) -> &'static str {
+        match self.backend {
+            Backend::Helper(_) => "mac",
+            Backend::Cua(_) if cfg!(windows) => "windows",
+            Backend::Cua(_) if cfg!(target_os = "macos") => "mac",
+            Backend::Cua(_) => "linux",
+        }
+    }
+
+    /// Forget per-session state on `js_reset`. The helper process itself
+    /// stays up; only what the model derived from it is discarded.
+    fn reset(&mut self) {
+        if let Backend::Cua(adapter) = &mut self.backend {
+            adapter.reset();
+        }
     }
 
     fn call_sky(
@@ -781,53 +843,15 @@ impl NativeComputerUseClient {
         arguments: JsonValue,
         deadline: Option<Instant>,
     ) -> anyhow::Result<JsonValue> {
-        if !matches!(
-            name,
-            "list_apps"
-                | "get_app_state"
-                | "click"
-                | "drag"
-                | "perform_secondary_action"
-                | "set_value"
-                | "select_text"
-                | "scroll"
-                | "press_key"
-                | "type_text"
-        ) {
+        if !SKY_OPERATIONS.contains(&name) {
             bail!("unknown sky operation: {name}");
+        }
+        if let Backend::Cua(adapter) = &mut self.backend {
+            return adapter.call(name, arguments, deadline);
         }
         let requested_app = arguments.get("app").cloned().unwrap_or(JsonValue::Null);
         let result = self.call_helper(name, arguments, deadline)?;
-        match name {
-            "list_apps" => {
-                if let Some(apps) = result.pointer("/structuredContent/apps") {
-                    return Ok(apps.clone());
-                }
-                let text = text_content(&result);
-                serde_json::from_str(&text).context("Computer Use returned an invalid app list")
-            }
-            "get_app_state" => {
-                let structured = result
-                    .get("structuredContent")
-                    .and_then(JsonValue::as_object);
-                let app = structured
-                    .and_then(|value| value.get("app"))
-                    .cloned()
-                    .unwrap_or(requested_app);
-                let text = structured
-                    .and_then(|value| value.get("text"))
-                    .and_then(JsonValue::as_str)
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| text_content(&result));
-                let screenshot = structured
-                    .and_then(|value| value.get("screenshot"))
-                    .and_then(JsonValue::as_str)
-                    .map(|url| json!({"url": url}))
-                    .unwrap_or(JsonValue::Null);
-                Ok(json!({"app": app, "text": text, "screenshot": screenshot}))
-            }
-            _ => Ok(JsonValue::Null),
-        }
+        shape_helper_result(name, requested_app, result)
     }
 
     fn call_helper(
@@ -836,232 +860,82 @@ impl NativeComputerUseClient {
         arguments: JsonValue,
         deadline: Option<Instant>,
     ) -> anyhow::Result<JsonValue> {
-        if self.connection.is_none() {
-            self.connection = Some(HelperConnection::start(deadline)?);
+        let Backend::Helper(connection) = &mut self.backend else {
+            bail!("the native helper is not the active Computer Use backend");
+        };
+        if connection.is_none() {
+            *connection = Some(start_helper_connection(deadline)?);
         }
-        let result = self
-            .connection
+        let result = connection
             .as_mut()
             .expect("initialized above")
-            .call(name, arguments, deadline);
+            .call_tool(name, arguments, deadline);
         if result.is_err() {
-            self.connection = None;
+            *connection = None;
         }
         result
     }
 }
 
-struct HelperConnection {
-    child: Child,
-    input: BufWriter<ChildStdin>,
-    output: BufReader<ChildStdout>,
-    next_id: u64,
+/// Spawn the native helper named by `WAKU_COMPUTER_USE_SERVER` in its MCP
+/// mode. The helper speaks the `sky` vocabulary directly, one tool per
+/// operation.
+fn start_helper_connection(deadline: Option<Instant>) -> anyhow::Result<McpStdioClient> {
+    let command = std::env::var_os("WAKU_COMPUTER_USE_SERVER")
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            anyhow!("WAKU_COMPUTER_USE_SERVER is required before the first sky operation")
+        })?;
+    McpStdioClient::spawn(
+        &command,
+        &["mcp"],
+        &[],
+        "waku_js_repl",
+        "Computer Use",
+        deadline,
+    )
 }
 
-struct RequestWatchdog {
-    completed: Option<std::sync::mpsc::Sender<()>>,
-    thread: Option<std::thread::JoinHandle<bool>>,
-}
-
-impl RequestWatchdog {
-    fn start(pid: u32, deadline: Option<Instant>) -> anyhow::Result<Self> {
-        let Some(deadline) = deadline else {
-            return Ok(Self {
-                completed: None,
-                thread: None,
-            });
-        };
-        let remaining = deadline
-            .checked_duration_since(Instant::now())
-            .ok_or_else(|| anyhow!("Computer Use request timed out"))?;
-        let (completed, completion) = std::sync::mpsc::channel();
-        let thread = std::thread::Builder::new()
-            .name("waku-js-repl-computer-use-timeout".into())
-            .spawn(move || {
-                if completion.recv_timeout(remaining).is_ok() {
-                    return false;
-                }
-                let _ = Command::new("/bin/kill")
-                    .args(["-TERM", &pid.to_string()])
-                    .status();
-                true
-            })?;
-        Ok(Self {
-            completed: Some(completed),
-            thread: Some(thread),
-        })
-    }
-
-    fn finish(mut self) -> bool {
-        self.complete()
-    }
-
-    fn complete(&mut self) -> bool {
-        if let Some(completed) = self.completed.take() {
-            let _ = completed.send(());
-        }
-        self.thread
-            .take()
-            .and_then(|thread| thread.join().ok())
-            .unwrap_or(false)
-    }
-}
-
-impl Drop for RequestWatchdog {
-    fn drop(&mut self) {
-        let _ = self.complete();
-    }
-}
-
-impl HelperConnection {
-    fn start(deadline: Option<Instant>) -> anyhow::Result<Self> {
-        let command = std::env::var_os("WAKU_COMPUTER_USE_SERVER")
-            .map(PathBuf::from)
-            .ok_or_else(|| {
-                anyhow!("WAKU_COMPUTER_USE_SERVER is required before the first sky operation")
-            })?;
-        let mut child = Command::new(&command)
-            .arg("mcp")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("failed to start {}", command.display()))?;
-        let input = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow!("Computer Use helper stdin is unavailable"))?;
-        let output = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow!("Computer Use helper stdout is unavailable"))?;
-        if let Some(stderr) = child.stderr.take() {
-            std::thread::Builder::new()
-                .name("waku-js-repl-computer-use-stderr".into())
-                .spawn(move || {
-                    for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                        eprintln!("Computer Use: {line}");
-                    }
-                })?;
-        }
-        let mut connection = Self {
-            child,
-            input: BufWriter::new(input),
-            output: BufReader::new(output),
-            next_id: 1,
-        };
-        connection.request(
-            "initialize",
-            json!({
-                "protocolVersion": MCP_PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "waku_js_repl", "version": env!("CARGO_PKG_VERSION")}
-            }),
-            deadline,
-        )?;
-        connection.notify("notifications/initialized", json!({}))?;
-        Ok(connection)
-    }
-
-    fn call(
-        &mut self,
-        name: &str,
-        arguments: JsonValue,
-        deadline: Option<Instant>,
-    ) -> anyhow::Result<JsonValue> {
-        let result = self.request(
-            "tools/call",
-            json!({"name": name, "arguments": arguments}),
-            deadline,
-        )?;
-        if result.get("isError").and_then(JsonValue::as_bool) == Some(true) {
-            bail!("{}", text_content(&result));
-        }
-        Ok(result)
-    }
-
-    fn request(
-        &mut self,
-        method: &str,
-        params: JsonValue,
-        deadline: Option<Instant>,
-    ) -> anyhow::Result<JsonValue> {
-        let id = self.next_id;
-        self.next_id += 1;
-        let watchdog = RequestWatchdog::start(self.child.id(), deadline)?;
-        let result = (|| -> anyhow::Result<JsonValue> {
-            write_message(
-                &mut self.input,
-                &json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}),
-            )?;
-            loop {
-                let mut line = String::new();
-                let bytes = self.output.read_line(&mut line)?;
-                if bytes == 0 {
-                    let status = self.child.try_wait()?;
-                    bail!(
-                        "Computer Use helper closed its session{}",
-                        status
-                            .map(|status| format!(" ({status})"))
-                            .unwrap_or_default()
-                    );
-                }
-                let message: JsonValue = serde_json::from_str(line.trim())
-                    .context("Computer Use helper returned invalid JSON")?;
-                if message.get("id").and_then(JsonValue::as_u64) != Some(id) {
-                    continue;
-                }
-                if let Some(error) = message.get("error") {
-                    let detail = error
-                        .get("message")
-                        .and_then(JsonValue::as_str)
-                        .unwrap_or("Computer Use request failed");
-                    bail!("{detail}");
-                }
-                return message
-                    .get("result")
-                    .cloned()
-                    .ok_or_else(|| anyhow!("Computer Use response has no result"));
+/// Reduce a helper's MCP tool result to the value `sky` hands JavaScript.
+///
+/// Only the two read operations carry a payload: `list_apps` returns the app
+/// array and `get_app_state` the `{app, text, screenshot}` envelope. Every
+/// action resolves to nothing.
+fn shape_helper_result(
+    name: &str,
+    requested_app: JsonValue,
+    result: JsonValue,
+) -> anyhow::Result<JsonValue> {
+    match name {
+        "list_apps" => {
+            if let Some(apps) = result.pointer("/structuredContent/apps") {
+                return Ok(apps.clone());
             }
-        })();
-        if watchdog.finish() {
-            bail!("Computer Use request timed out");
+            let text = text_content(&result);
+            serde_json::from_str(&text).context("Computer Use returned an invalid app list")
         }
-        result
+        "get_app_state" => {
+            let structured = result
+                .get("structuredContent")
+                .and_then(JsonValue::as_object);
+            let app = structured
+                .and_then(|value| value.get("app"))
+                .cloned()
+                .unwrap_or(requested_app);
+            let text = structured
+                .and_then(|value| value.get("text"))
+                .and_then(JsonValue::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| text_content(&result));
+            let screenshot = structured
+                .and_then(|value| value.get("screenshot"))
+                .and_then(JsonValue::as_str)
+                .map(|url| json!({"url": url}))
+                .unwrap_or(JsonValue::Null);
+            Ok(json!({"app": app, "text": text, "screenshot": screenshot}))
+        }
+        _ => Ok(JsonValue::Null),
     }
-
-    fn notify(&mut self, method: &str, params: JsonValue) -> anyhow::Result<()> {
-        write_message(
-            &mut self.input,
-            &json!({"jsonrpc": "2.0", "method": method, "params": params}),
-        )
-    }
-}
-
-impl Drop for HelperConnection {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-fn text_content(result: &JsonValue) -> String {
-    result
-        .get("content")
-        .and_then(JsonValue::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|item| item.get("type").and_then(JsonValue::as_str) == Some("text"))
-        .filter_map(|item| item.get("text").and_then(JsonValue::as_str))
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
-fn write_message(output: &mut impl Write, message: &JsonValue) -> anyhow::Result<()> {
-    serde_json::to_writer(&mut *output, message)?;
-    output.write_all(b"\n")?;
-    output.flush()?;
-    Ok(())
 }
 
 fn json_rpc_result(id: JsonValue, result: JsonValue) -> JsonValue {

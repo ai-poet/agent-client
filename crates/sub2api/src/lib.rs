@@ -25,6 +25,7 @@ pub mod auth;
 pub mod brand;
 pub mod cli_detect;
 pub mod cli_install;
+pub mod cua_install;
 pub mod client;
 pub mod codex_compat;
 pub mod custom_api;
@@ -35,11 +36,14 @@ pub mod gateway;
 pub mod gateway_origin;
 pub mod global_config;
 pub mod http;
+pub mod mcp_stdio;
 pub mod migrate;
 pub mod node_install;
 pub mod onboarding;
 pub mod pay;
 pub mod speedtest;
+#[cfg(windows)]
+pub mod win_process;
 
 pub use auth::Credentials;
 pub use client::Client;

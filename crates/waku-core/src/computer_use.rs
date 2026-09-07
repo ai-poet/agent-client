@@ -1,17 +1,30 @@
 //! Headless Computer Use state and helper lifecycle.
+//!
+//! The native helper differs per platform — the Swift bundle shipped inside
+//! the app on macOS, `cua-driver` on Windows — but everything above it
+//! speaks one protocol (MCP over stdio) and lives at one set of paths
+//! resolved here.
 
+#[cfg(target_os = "macos")]
 use std::fs;
+#[cfg(target_os = "macos")]
 use std::io::Write as _;
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::path::Path;
+use std::path::PathBuf;
+#[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
+#[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use anyhow::{Context as _, anyhow, bail};
 use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::{Value, json};
+#[cfg(target_os = "macos")]
 use uuid::Uuid;
 
+#[cfg(target_os = "macos")]
 const MAX_HELPER_OUTPUT_BYTES: usize = 24 * 1024 * 1024;
 
 pub use waku_protocol::computer_use::{
@@ -113,6 +126,7 @@ pub struct PendingComputerApproval {
     pub sensitive: bool,
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HelperResponse {
@@ -123,6 +137,9 @@ struct HelperResponse {
     permissions: Option<ComputerPermissions>,
 }
 
+/// macOS: ask the helper for its Screen Recording and Accessibility grants,
+/// prompting the user for them when `prompt` is set.
+#[cfg(target_os = "macos")]
 pub fn probe_permissions(prompt: bool) -> anyhow::Result<ComputerPermissions> {
     let operation = if prompt {
         json!({"operation": "requestPermissions"})
@@ -143,6 +160,50 @@ pub fn probe_permissions(prompt: bool) -> anyhow::Result<ComputerPermissions> {
     Ok(response.permissions.unwrap_or_default())
 }
 
+/// Windows: ask `cua-driver` itself, over the same MCP session the REPL
+/// would open. There is no TCC here, so the two grants are structurally
+/// present whenever the driver answers; what the probe really establishes
+/// is that a driver is installed, runs, and can reach the interactive
+/// desktop. A field the driver does not report counts as granted.
+#[cfg(windows)]
+pub fn probe_permissions(prompt: bool) -> anyhow::Result<ComputerPermissions> {
+    use std::time::{Duration, Instant};
+
+    use sub2api::mcp_stdio::{McpStdioClient, text_content};
+
+    let driver = mcp_server_command()?;
+    let deadline = Some(Instant::now() + Duration::from_secs(30));
+    let mut client = McpStdioClient::spawn(
+        &driver,
+        &["mcp", "--direct"],
+        &[],
+        "waku-daemon",
+        "Computer Use driver",
+        deadline,
+    )?;
+    let result = client.call_tool(
+        "check_permissions",
+        json!({"prompt": prompt, "probe_direct_capture": true}),
+        deadline,
+    )?;
+    let report = result
+        .get("structuredContent")
+        .cloned()
+        .or_else(|| serde_json::from_str::<Value>(&text_content(&result)).ok())
+        .unwrap_or(Value::Null);
+    let granted = |name: &str| report.get(name).and_then(Value::as_bool).unwrap_or(true);
+    Ok(ComputerPermissions {
+        screen_recording: granted("screen_recording"),
+        accessibility: granted("accessibility"),
+    })
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+pub fn probe_permissions(_: bool) -> anyhow::Result<ComputerPermissions> {
+    bail!("Computer Use is not available on this platform")
+}
+
+#[cfg(target_os = "macos")]
 fn invoke_helper_direct(
     helper: &Path,
     operation: &Value,
@@ -183,6 +244,7 @@ fn invoke_helper_direct(
     serde_json::from_slice(&output.stdout).context("computer-use helper returned invalid JSON")
 }
 
+#[cfg(target_os = "macos")]
 fn helper_app_path() -> anyhow::Result<PathBuf> {
     let executable = host_executable_path()?;
     let macos = executable
@@ -203,6 +265,8 @@ fn helper_app_path() -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
+/// The user-facing name of whatever does the native work.
+#[cfg(not(windows))]
 pub fn helper_display_name() -> String {
     host_executable_path()
         .ok()
@@ -214,6 +278,16 @@ pub fn helper_display_name() -> String {
         .unwrap_or_else(|| "Waku Computer Use".into())
 }
 
+#[cfg(windows)]
+pub fn helper_display_name() -> String {
+    "cua-driver".into()
+}
+
+/// The executable the REPL spawns in MCP mode to reach the desktop.
+///
+/// macOS: the bundled Swift helper, re-installed under Application Support
+/// so it carries its own TCC identity.
+#[cfg(target_os = "macos")]
 pub fn mcp_server_command() -> anyhow::Result<PathBuf> {
     let bundled_helper = helper_app_path()?;
     let helper = install_helper_app(&bundled_helper)?;
@@ -223,15 +297,45 @@ pub fn mcp_server_command() -> anyhow::Result<PathBuf> {
     Ok(helper.join("Contents").join("MacOS").join(executable))
 }
 
-pub fn js_repl_server_path() -> anyhow::Result<PathBuf> {
+/// Windows: `cua-driver`, wherever [`sub2api::cua_install::resolve_driver`]
+/// finds it. Nothing is installed here; Settings does that on request.
+#[cfg(windows)]
+pub fn mcp_server_command() -> anyhow::Result<PathBuf> {
+    sub2api::cua_install::resolve_driver()
+        .ok_or_else(|| anyhow!("Computer Use driver (cua-driver) is not installed"))
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+pub fn mcp_server_command() -> anyhow::Result<PathBuf> {
+    bail!("Computer Use is not available on this platform")
+}
+
+/// The directory holding the resources shipped beside Waku — the JavaScript
+/// REPL, the Pi extension and the skill. Inside the bundle's `Resources` on
+/// macOS; flat beside the executable everywhere else, which is the layout
+/// `scripts/bundle-windows.ts` produces.
+fn resource_root() -> anyhow::Result<PathBuf> {
     let executable = host_executable_path()?;
-    let macos = executable
+    let directory = executable
         .parent()
         .ok_or_else(|| anyhow!("Waku executable has no parent directory"))?;
-    let contents = macos
-        .parent()
-        .ok_or_else(|| anyhow!("Waku app bundle is malformed"))?;
-    let path = contents.join("Resources").join("waku_js_repl");
+    if cfg!(target_os = "macos") {
+        let contents = directory
+            .parent()
+            .ok_or_else(|| anyhow!("Waku app bundle is malformed"))?;
+        Ok(contents.join("Resources"))
+    } else {
+        Ok(directory.to_path_buf())
+    }
+}
+
+pub fn js_repl_server_path() -> anyhow::Result<PathBuf> {
+    let name = if cfg!(windows) {
+        "waku_js_repl.exe"
+    } else {
+        "waku_js_repl"
+    };
+    let path = resource_root()?.join(name);
     if !path.is_file() {
         bail!("Waku JavaScript REPL is missing from this Waku build")
     }
@@ -239,15 +343,7 @@ pub fn js_repl_server_path() -> anyhow::Result<PathBuf> {
 }
 
 pub fn pi_extension_path() -> anyhow::Result<PathBuf> {
-    let executable = host_executable_path()?;
-    let macos = executable
-        .parent()
-        .ok_or_else(|| anyhow!("Waku executable has no parent directory"))?;
-    let contents = macos
-        .parent()
-        .ok_or_else(|| anyhow!("Waku app bundle is malformed"))?;
-    let path = contents
-        .join("Resources")
+    let path = resource_root()?
         .join("computer-use")
         .join("pi-extension.ts");
     if !path.is_file() {
@@ -264,6 +360,7 @@ pub fn pi_extension_path() -> anyhow::Result<PathBuf> {
 /// helper. Launching this standalone copy through Launch Services gives the
 /// helper its own TCC identity while the signed app bundle remains the source
 /// shipped with Waku.
+#[cfg(target_os = "macos")]
 fn install_helper_app(source: &Path) -> anyhow::Result<PathBuf> {
     let application_support =
         dirs::data_dir().ok_or_else(|| anyhow!("Application Support directory is unavailable"))?;
@@ -301,6 +398,7 @@ fn install_helper_app(source: &Path) -> anyhow::Result<PathBuf> {
     Ok(destination)
 }
 
+#[cfg(target_os = "macos")]
 fn helper_install_matches(source: &Path, destination: &Path) -> anyhow::Result<bool> {
     if !destination.is_dir() {
         return Ok(false);
@@ -313,6 +411,7 @@ fn helper_install_matches(source: &Path, destination: &Path) -> anyhow::Result<b
     Ok(source_fingerprint == installed_fingerprint)
 }
 
+#[cfg(target_os = "macos")]
 fn copy_directory(source: &Path, destination: &Path) -> anyhow::Result<()> {
     let metadata = fs::symlink_metadata(source)?;
     fs::create_dir(destination)?;
@@ -338,14 +437,7 @@ fn copy_directory(source: &Path, destination: &Path) -> anyhow::Result<()> {
 }
 
 pub fn skill_root_path() -> anyhow::Result<PathBuf> {
-    let executable = host_executable_path()?;
-    let macos = executable
-        .parent()
-        .ok_or_else(|| anyhow!("Waku executable has no parent directory"))?;
-    let contents = macos
-        .parent()
-        .ok_or_else(|| anyhow!("Waku app bundle is malformed"))?;
-    let path = contents.join("Resources").join("skills");
+    let path = resource_root()?.join("skills");
     if !path.join("waku-computer-use").join("SKILL.md").is_file() {
         bail!("Waku Computer Use skill is missing from this Waku build")
     }
