@@ -16,6 +16,13 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- Custom endpoints are now profiles: keep several per CLI (the gateway, an official key, another relay) and switch between them from Settings → Providers
+- Add alternate domains to an endpoint, measure them all at once, and route through whichever answers fastest — automatically, if you ask it to
+- Pick which of the service's domains the agents reach it on, from Settings → Cloud Account. Signing in stays on the domain you signed in with, and a domain that stops answering falls back on its own
+- Fill an endpoint's model list from the endpoint itself
+- Remove the environment variables that override routing, from the warning that reports them. Values are backed up first and can be restored; machine-wide Windows variables still hand you the command to run as administrator
+- Optional automatic failover per platform: when the group you are on reports an outage, switch to a healthy one and switch back once yours recovers
+
 ## [0.1.19]
 
 - Terminal, Files, Browser and Review buttons now sit in the window header: one click opens the surface, switches to its tab, or hides the panel when it is already in front. Shortcuts ⇧⌘T / E / O / D (Ctrl+Shift on Windows and Linux), plus View-menu and command-palette entries; the old right-panel toggle button is gone (⇧⌘B still toggles the panel)

@@ -11,6 +11,7 @@
 
 use std::time::{Duration, Instant};
 
+use super::providers_page::card_button;
 use super::*;
 
 /// How long the loopback listener waits for the browser before giving up.
@@ -19,6 +20,11 @@ const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
 /// How long fetched group health stays fresh. The account refresh cadence
 /// (five minutes, plus every settled turn) calls in through this guard.
 const GROUP_STATUS_TTL: Duration = Duration::from_secs(180);
+
+/// The same, while a platform has automatic failover on: an outage is only
+/// noticed as fast as health is read, and five minutes of failing requests
+/// is exactly what the feature exists to avoid.
+const FAILOVER_STATUS_TTL: Duration = Duration::from_secs(60);
 
 /// Balance polling after the top-up page is opened.
 const TOP_UP_POLL_INTERVAL: Duration = Duration::from_secs(15);
@@ -51,6 +57,43 @@ pub(super) struct CloudAccountState {
     pub referral: Option<sub2api::client::ReferralInfo>,
     /// A group switch or redemption is in flight.
     pub busy: bool,
+    /// Per-platform automatic failover settings, loaded at startup.
+    pub failover: sub2api::failover::FailoverConfig,
+    /// How long each platform's preferred group has looked healthy, so a
+    /// flapping group cannot bounce the routing back and forth.
+    pub failover_history: std::collections::BTreeMap<String, sub2api::failover::History>,
+    /// Platforms currently routed somewhere other than the user's choice,
+    /// and the group they came from.
+    pub failed_over: std::collections::BTreeMap<String, i64>,
+    /// The failover health poll is running; one loop serves every platform.
+    pub failover_polling: bool,
+    /// Which of the service's domains the CLIs are pointed at.
+    pub gateway_origin: sub2api::gateway_origin::GatewayOriginConfig,
+    /// The last domain measurement's progress and results.
+    pub origin_test: Option<OriginTest>,
+    /// Bumped per measurement; a result from a superseded run is discarded.
+    pub origin_generation: u64,
+    /// The once-per-run check of the chosen domain has been made.
+    pub origin_checked: bool,
+    /// Field for adding a domain, built on first use — creating a
+    /// `TextInput` needs a `Window`, which render does not have.
+    pub origin_input: Option<Entity<TextInput>>,
+}
+
+/// A gateway-domain measurement. Which run it belongs to is tracked by
+/// `origin_generation` on the state, so a superseded result is discarded.
+#[derive(Default)]
+pub(super) struct OriginTest {
+    pub running: bool,
+    pub results: Vec<sub2api::speedtest::CandidateResult>,
+}
+
+/// Whether a group switch was asked for or decided automatically. A manual
+/// pick also records the new preference; an automatic one must not.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SwitchOrigin {
+    Manual,
+    Auto,
 }
 
 /// What a card's button does.
@@ -67,6 +110,8 @@ impl Waku {
     /// Load the stored session at startup and refresh the account summary.
     pub(super) fn load_cloud_account(&mut self, cx: &mut Context<Self>) {
         self.migrate_legacy_routing_transport();
+        self.cloud_account.failover = sub2api::failover::load();
+        self.cloud_account.gateway_origin = sub2api::gateway_origin::load();
         let Some(credentials) = sub2api::Credentials::load() else {
             // Reconcile anyway: custom endpoints apply while signed out, and
             // a takeover left behind by a wiped login must be restored.
@@ -80,6 +125,7 @@ impl Waku {
         self.apply_cloud_routing();
         self.refresh_cloud_account(cx);
         self.load_cloud_details(cx);
+        self.poll_cloud_failover(cx);
     }
 
     /// Drain the injection-era routing transport out of daemon settings.
@@ -128,6 +174,7 @@ impl Waku {
         // those endpoints.
         self.refresh_cloud_announcements(false, cx);
         self.refresh_cloud_group_status(cx);
+        self.verify_gateway_origin(cx);
         let Some(credentials) = self.cloud_account.credentials.clone() else {
             return;
         };
@@ -173,10 +220,15 @@ impl Waku {
         let Some(credentials) = self.cloud_account.credentials.clone() else {
             return;
         };
+        let ttl = if self.cloud_failover_active() {
+            FAILOVER_STATUS_TTL
+        } else {
+            GROUP_STATUS_TTL
+        };
         if self
             .cloud_account
             .group_status_at
-            .is_some_and(|at| at.elapsed() < GROUP_STATUS_TTL)
+            .is_some_and(|at| at.elapsed() < ttl)
         {
             return;
         }
@@ -198,11 +250,380 @@ impl Waku {
             if let Ok(statuses) = fetched {
                 let _ = this.update(cx, |this, cx| {
                     this.cloud_account.group_status = statuses;
+                    this.evaluate_cloud_failover(cx);
                     cx.notify();
                 });
             }
         })
         .detach();
+    }
+
+    /// Act on the health just fetched: move off a group that is down, and
+    /// move back once the user's own choice has been healthy long enough.
+    ///
+    /// One switch per pass — [`Self::select_cloud_group`] returns early while
+    /// a switch is running, and the decision refuses to start another — so a
+    /// platform-wide outage cannot set off a storm of rebinds.
+    fn evaluate_cloud_failover(&mut self, cx: &mut Context<Self>) {
+        use sub2api::failover::{Decision, Input};
+
+        let Some(credentials) = self.cloud_account.credentials.clone() else {
+            return;
+        };
+        let platforms: Vec<String> = cloud_platforms(&self.cloud_account.groups)
+            .into_iter()
+            .filter(|platform| self.cloud_account.failover.enabled(platform))
+            .collect();
+        for platform in platforms {
+            let history = self
+                .cloud_account
+                .failover_history
+                .get(&platform)
+                .copied()
+                .unwrap_or_default();
+            let (decision, history) = sub2api::failover::decide(&Input {
+                platform: &platform,
+                bound: sub2api::bound_group_for_platform(&credentials, &platform),
+                preferred: self.cloud_account.failover.preferred(&platform),
+                groups: &self.cloud_account.groups,
+                statuses: &self.cloud_account.group_status,
+                history: &history,
+                busy: self.cloud_account.busy,
+            });
+            self.cloud_account
+                .failover_history
+                .insert(platform.clone(), history);
+            let Some(decision) = decision else {
+                continue;
+            };
+            let name = |id: i64| {
+                self.cloud_account
+                    .groups
+                    .iter()
+                    .find(|group| group.id == id)
+                    .map(|group| group.name.clone())
+                    .unwrap_or_else(|| id.to_string())
+            };
+            let message = match decision {
+                Decision::FailOver { from, to } => {
+                    self.cloud_account.failed_over.insert(platform.clone(), from);
+                    tr!(
+                        "cloud.failover_switched",
+                        from = name(from),
+                        to = name(to)
+                    )
+                }
+                Decision::FailBack { to, .. } => {
+                    self.cloud_account.failed_over.remove(&platform);
+                    tr!("cloud.failover_restored", group = name(to))
+                }
+            };
+            self.select_cloud_group_with_origin(
+                platform,
+                Some(decision.target()),
+                SwitchOrigin::Auto,
+                cx,
+            );
+            self.show_toast(message);
+            // The binding has changed under every other platform's input;
+            // the next refresh re-decides for them.
+            break;
+        }
+    }
+
+    // ── Service domains ────────────────────────────────────────────────
+
+    /// Build (once) the field for adding a service domain.
+    fn ensure_origin_input(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<TextInput> {
+        if let Some(input) = self.cloud_account.origin_input.clone() {
+            return input;
+        }
+        let input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("cloud.origin_placeholder"))
+        });
+        cx.subscribe(
+            &input,
+            |this: &mut Self, _, event: &InputEvent, cx| match event {
+                InputEvent::Submit(_) => this.add_gateway_origin(cx),
+                InputEvent::Edited => cx.notify(),
+                _ => {}
+            },
+        )
+        .detach();
+        self.cloud_account.origin_input = Some(input.clone());
+        input
+    }
+
+    /// Reveal the domain field and put the cursor in it.
+    pub(super) fn open_gateway_origin_input(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let input = self.ensure_origin_input(window, cx);
+        let focus = input.read(cx).focus();
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    /// Save the origin choice and re-point every routed CLI at it.
+    fn persist_gateway_origin(&mut self, cx: &mut Context<Self>) {
+        if let Err(error) = sub2api::gateway_origin::save(&self.cloud_account.gateway_origin) {
+            self.show_toast(format!("{error:#}"));
+        }
+        self.apply_cloud_routing();
+        // The model list is served by the domain that was just swapped.
+        self.refresh_provider_detection(None);
+        cx.notify();
+    }
+
+    pub(super) fn add_gateway_origin(&mut self, cx: &mut Context<Self>) {
+        let Some(input) = self.cloud_account.origin_input.clone() else {
+            return;
+        };
+        let raw = input.read(cx).content().trim().to_owned();
+        if raw.is_empty() {
+            return;
+        }
+        match self.cloud_account.gateway_origin.add(&raw) {
+            Ok(true) => {
+                input.update(cx, |input, cx| input.clear(cx));
+                self.cloud_account.error = None;
+                // Adding a domain does not route to it; measuring comes
+                // first, then a deliberate choice.
+                if let Err(error) =
+                    sub2api::gateway_origin::save(&self.cloud_account.gateway_origin)
+                {
+                    self.show_toast(format!("{error:#}"));
+                }
+                cx.notify();
+            }
+            Ok(false) => {
+                self.cloud_account.error = Some(tr!("cloud.origin_duplicate"));
+                cx.notify();
+            }
+            Err(error) => {
+                self.cloud_account.error = Some(format!("{error:#}"));
+                cx.notify();
+            }
+        }
+    }
+
+    pub(super) fn remove_gateway_origin(&mut self, origin: String, cx: &mut Context<Self>) {
+        let routed = self.cloud_account.gateway_origin.origin();
+        self.cloud_account.gateway_origin.remove(&origin);
+        self.cloud_account.origin_test = None;
+        if routed.as_deref() == Some(origin.as_str()) {
+            self.persist_gateway_origin(cx);
+        } else if let Err(error) =
+            sub2api::gateway_origin::save(&self.cloud_account.gateway_origin)
+        {
+            self.show_toast(format!("{error:#}"));
+        }
+        cx.notify();
+    }
+
+    pub(super) fn select_gateway_origin(&mut self, origin: String, cx: &mut Context<Self>) {
+        if self.cloud_account.gateway_origin.origin().as_deref() == Some(origin.as_str()) {
+            return;
+        }
+        if let Err(error) = self.cloud_account.gateway_origin.select(&origin) {
+            self.show_toast(format!("{error:#}"));
+            return;
+        }
+        self.persist_gateway_origin(cx);
+    }
+
+    pub(super) fn set_gateway_origin_auto_select(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.cloud_account.gateway_origin.auto_select = on;
+        if let Err(error) = sub2api::gateway_origin::save(&self.cloud_account.gateway_origin) {
+            self.show_toast(format!("{error:#}"));
+        }
+        cx.notify();
+    }
+
+    /// Check the chosen domain once per run.
+    ///
+    /// A domain that stopped serving this account would break every CLI with
+    /// no visible cause, so the fallback to the build's primary happens
+    /// whether or not automatic selection is on.
+    fn verify_gateway_origin(&mut self, cx: &mut Context<Self>) {
+        if self.cloud_account.origin_checked {
+            return;
+        }
+        let nothing_to_check = self.cloud_account.gateway_origin.effective_candidates().len() < 2;
+        let no_key = self
+            .cloud_account
+            .credentials
+            .as_ref()
+            .is_none_or(|credentials| {
+                sub2api::gateway_origin::probe_target(credentials).is_none()
+            });
+        if nothing_to_check || no_key {
+            return;
+        }
+        self.cloud_account.origin_checked = true;
+        self.run_gateway_origin_test(true, cx);
+    }
+
+    /// Measure every service domain, and act on the result.
+    pub(super) fn run_gateway_origin_test(&mut self, automatic: bool, cx: &mut Context<Self>) {
+        let Some(credentials) = self.cloud_account.credentials.clone() else {
+            return;
+        };
+        let config = self.cloud_account.gateway_origin.clone();
+        if sub2api::gateway_origin::probe_target(&credentials).is_none() {
+            if !automatic {
+                self.show_toast(tr!("cloud.origin_no_key"));
+            }
+            return;
+        }
+        self.cloud_account.origin_generation += 1;
+        let generation = self.cloud_account.origin_generation;
+        self.cloud_account.origin_test = Some(OriginTest {
+            running: true,
+            results: Vec::new(),
+        });
+        cx.notify();
+
+        let routed = config.origin();
+        let auto_select = config.auto_select;
+        cx.spawn(async move |this, cx| {
+            let results = cx
+                .background_executor()
+                .spawn(async move {
+                    sub2api::gateway_origin::test_origins(
+                        &config,
+                        &credentials,
+                        sub2api::speedtest::DEFAULT_TIMEOUT_SECS,
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.cloud_account.origin_generation != generation {
+                    return;
+                }
+                this.cloud_account.origin_test = Some(OriginTest {
+                    running: false,
+                    results: results.clone(),
+                });
+                cx.notify();
+
+                let fastest = sub2api::speedtest::fastest_ok(&results)
+                    .map(|index| results[index].url.clone());
+                let routed_ok = routed.as_ref().is_some_and(|current| {
+                    results
+                        .iter()
+                        .any(|candidate| candidate.url == *current && candidate.is_ok())
+                });
+                // A domain that no longer answers is left in place only when
+                // there is nothing better to move to.
+                if !routed_ok
+                    && let Some(fallback) = fastest.clone()
+                    && routed.as_deref() != Some(fallback.as_str())
+                {
+                    this.select_gateway_origin(fallback.clone(), cx);
+                    this.show_toast(tr!("cloud.origin_fallback", url = fallback));
+                    return;
+                }
+                if !auto_select {
+                    if !automatic && fastest.is_none() {
+                        this.show_toast(tr!("cloud.origin_no_ok"));
+                    }
+                    return;
+                }
+                match fastest {
+                    Some(best) if routed.as_deref() != Some(best.as_str()) => {
+                        this.select_gateway_origin(best.clone(), cx);
+                        this.show_toast(tr!("cloud.origin_auto_selected", url = best));
+                    }
+                    Some(_) => {}
+                    None if !automatic => this.show_toast(tr!("cloud.origin_no_ok")),
+                    None => {}
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Any platform watching for outages.
+    fn cloud_failover_active(&self) -> bool {
+        self.cloud_account
+            .failover
+            .platforms
+            .values()
+            .any(|platform| platform.enabled)
+    }
+
+    /// Keep reading group health while failover is on.
+    ///
+    /// The account refresh runs every five minutes, which is far too coarse
+    /// to catch an outage the user is sitting through. One loop serves every
+    /// platform and ends as soon as the last toggle goes off, so nothing
+    /// polls for a feature nobody enabled.
+    pub(super) fn poll_cloud_failover(&mut self, cx: &mut Context<Self>) {
+        if self.cloud_account.failover_polling || !self.cloud_failover_active() {
+            return;
+        }
+        self.cloud_account.failover_polling = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(FAILOVER_STATUS_TTL).await;
+                let running = this.update(cx, |this, cx| {
+                    if !this.cloud_failover_active() || this.cloud_account.credentials.is_none() {
+                        this.cloud_account.failover_polling = false;
+                        return false;
+                    }
+                    this.refresh_cloud_group_status(cx);
+                    true
+                });
+                match running {
+                    Ok(true) => {}
+                    Ok(false) => break,
+                    Err(_) => break,
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Turn automatic failover on or off for one platform. Turning it on
+    /// remembers the group in use as the one to come back to.
+    pub(super) fn set_cloud_failover(
+        &mut self,
+        platform: String,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let bound = self
+            .cloud_account
+            .credentials
+            .as_ref()
+            .and_then(|credentials| sub2api::bound_group_for_platform(credentials, &platform));
+        self.cloud_account
+            .failover
+            .set_enabled(&platform, enabled, bound);
+        if !enabled {
+            self.cloud_account.failover_history.remove(&platform);
+            self.cloud_account.failed_over.remove(&platform);
+        }
+        if let Err(error) = sub2api::failover::save(&self.cloud_account.failover) {
+            self.show_toast(format!("{error:#}"));
+        }
+        if enabled {
+            // Read health now rather than at the next five-minute tick, so
+            // turning this on acts on the outage the user is looking at.
+            self.cloud_account.group_status_at = None;
+            self.refresh_cloud_group_status(cx);
+            self.poll_cloud_failover(cx);
+        }
+        cx.notify();
     }
 
     /// Open the browser and wait for the sign-in redirect.
@@ -403,11 +824,34 @@ impl Waku {
         group_id: Option<i64>,
         cx: &mut Context<Self>,
     ) {
+        self.select_cloud_group_with_origin(platform, group_id, SwitchOrigin::Manual, cx);
+    }
+
+    /// [`Self::select_cloud_group`], distinguishing a deliberate pick from an
+    /// automatic one: a pick is also a statement about which group the user
+    /// wants, so it becomes the group failover returns to.
+    pub(super) fn select_cloud_group_with_origin(
+        &mut self,
+        platform: String,
+        group_id: Option<i64>,
+        origin: SwitchOrigin,
+        cx: &mut Context<Self>,
+    ) {
         let Some(credentials) = self.cloud_account.credentials.clone() else {
             return;
         };
         if self.cloud_account.busy {
             return;
+        }
+        if origin == SwitchOrigin::Manual {
+            self.cloud_account.failed_over.remove(&platform);
+            self.cloud_account.failover_history.remove(&platform);
+            if self.cloud_account.failover.enabled(&platform) {
+                self.cloud_account.failover.set_preferred(&platform, group_id);
+                if let Err(error) = sub2api::failover::save(&self.cloud_account.failover) {
+                    self.show_toast(format!("{error:#}"));
+                }
+            }
         }
         self.cloud_account.busy = true;
         self.cloud_account.error = None;
@@ -449,8 +893,11 @@ impl Waku {
                             .unwrap_or_else(|| tr!("cloud.group_default"));
                         // A CLI reads its config at process start, so running
                         // sessions keep their old route; say so instead of
-                        // letting it read as "nothing happened".
-                        this.show_toast(tr!("cloud.group_switched", group = name));
+                        // letting it read as "nothing happened". An automatic
+                        // switch says it in its own words instead.
+                        if origin == SwitchOrigin::Manual {
+                            this.show_toast(tr!("cloud.group_switched", group = name));
+                        }
                     }
                     // The switch usually happens from the footer menu, where
                     // the settings page's inline error area is invisible.
@@ -583,8 +1030,13 @@ impl Waku {
     /// keep whatever they already read.
     pub(super) fn apply_cloud_routing(&mut self) {
         let custom = sub2api::custom_api::load();
+        let origin = self.cloud_account.gateway_origin.origin();
         let cloud = self.cloud_account.credentials.as_ref().map(|credentials| {
-            sub2api::gateway_config_from(credentials, self.cloud_account.routing_enabled)
+            sub2api::gateway_config_with_origin(
+                credentials,
+                self.cloud_account.routing_enabled,
+                origin.as_deref(),
+            )
         });
         let desired = sub2api::global_config::desired_routes(cloud.as_ref(), &custom);
         match sub2api::global_config::reconcile(&desired) {
@@ -675,6 +1127,7 @@ impl Waku {
             // Redeem codes live in the top-up sheet and pricing on the Model
             // Plaza page; this page keeps identity, routing, and groups.
             page = page
+                .child(self.render_gateway_origins(theme, cx))
                 .child(self.render_cloud_groups(theme, cx))
                 .child(self.render_cloud_referral(theme, cx));
         }
@@ -700,6 +1153,212 @@ impl Waku {
         page.into_any_element()
     }
 
+    /// The service domains this build knows, their measured latency, and
+    /// which one the CLIs are pointed at.
+    fn render_gateway_origins(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
+        let candidates = self.cloud_account.gateway_origin.effective_candidates();
+        let extra = self.cloud_account.origin_input.is_some();
+        // One domain and nothing added: there is no choice to present.
+        if candidates.len() < 2 && !extra {
+            return div().child(card_button(
+                theme,
+                "cloud-origin-open".into(),
+                tr!("cloud.origin_title"),
+                false,
+                false,
+                cx,
+                |this, window, cx| this.open_gateway_origin_input(window, cx),
+            ));
+        }
+
+        let routed = self.cloud_account.gateway_origin.origin();
+        let auto_select = self.cloud_account.gateway_origin.auto_select;
+        let test = self.cloud_account.origin_test.as_ref();
+        let testing = test.is_some_and(|test| test.running);
+        let results = test.map(|test| test.results.clone()).unwrap_or_default();
+        let outcome = |url: &str| results.iter().find(|candidate| candidate.url == url).cloned();
+
+        let mut ordered = candidates.clone();
+        if !results.is_empty() {
+            ordered.sort_by_key(|url| match outcome(url) {
+                Some(candidate) => match candidate.latency_ms() {
+                    Some(ms) => (0u8, ms),
+                    None => (1, 0),
+                },
+                None => (2, 0),
+            });
+        }
+
+        let mut rows = div().flex().flex_col().gap(px(6.0)).child(section_title(
+            theme,
+            &tr!("cloud.origin_title"),
+            &tr!("cloud.origin_detail"),
+        ));
+
+        for (index, url) in ordered.iter().enumerate() {
+            let in_use = routed.as_deref() == Some(url.as_str());
+            let candidate = outcome(url);
+            let (status_text, status_color) = match candidate.as_ref() {
+                Some(result) if result.invalid.is_some() => {
+                    (tr!("cli_setup.speed_invalid_url"), theme.danger)
+                }
+                Some(result) => match result.result.as_ref() {
+                    Some(probe) => match probe.verdict {
+                        sub2api::custom_api::ProbeVerdict::Ok => (
+                            tr!("cli_setup.candidate_latency", ms = probe.latency_ms),
+                            theme.success,
+                        ),
+                        sub2api::custom_api::ProbeVerdict::Unauthorized => {
+                            (tr!("cli_setup.candidate_unauthorized"), theme.warning)
+                        }
+                        sub2api::custom_api::ProbeVerdict::HttpError => (
+                            tr!(
+                                "cli_setup.candidate_http",
+                                status = probe.status.unwrap_or_default()
+                            ),
+                            theme.warning,
+                        ),
+                        sub2api::custom_api::ProbeVerdict::Unreachable => {
+                            (tr!("cli_setup.candidate_unreachable"), theme.danger)
+                        }
+                    },
+                    None => (String::new(), theme.text_ghost),
+                },
+                None if testing => (tr!("cli_setup.custom_testing"), theme.text_ghost),
+                None => (String::new(), theme.text_ghost),
+            };
+
+            let mut row = div()
+                .w_full()
+                .px(px(16.0))
+                .py(px(10.0))
+                .rounded(px(11.0))
+                .bg(theme.raised)
+                .border_1()
+                .border_color(if in_use { theme.accent } else { theme.raised })
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .font_family(crate::md::render::MONO_FAMILY)
+                        .text_size(sp(12.0))
+                        .text_color(theme.text)
+                        .child(url.clone()),
+                );
+            if !status_text.is_empty() {
+                row = row.child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(11.5))
+                        .text_color(status_color)
+                        .child(status_text),
+                );
+            }
+            if in_use {
+                row = row.child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(12.0))
+                        .text_color(theme.accent)
+                        .child(tr!("cli_setup.candidate_active")),
+                );
+            } else {
+                let pick = url.clone();
+                row = row.child(card_button(
+                    theme,
+                    SharedString::from(format!("cloud-origin-use-{index}")),
+                    tr!("cli_setup.candidate_use"),
+                    false,
+                    false,
+                    cx,
+                    move |this, _, cx| this.select_gateway_origin(pick.clone(), cx),
+                ));
+            }
+            // The domains the build ships with are not the user's to remove.
+            if self.cloud_account.gateway_origin.is_removable(url) {
+                let drop = url.clone();
+                row = row.child(card_button(
+                    theme,
+                    SharedString::from(format!("cloud-origin-remove-{index}")),
+                    tr!("cli_setup.candidate_remove"),
+                    false,
+                    false,
+                    cx,
+                    move |this, _, cx| this.remove_gateway_origin(drop.clone(), cx),
+                ));
+            }
+            rows = rows.child(row);
+        }
+
+        if let Some(input) = self.cloud_account.origin_input.clone() {
+            rows = rows.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(TextField::new("cloud-origin-input", input).flex_1())
+                    .child(card_button(
+                        theme,
+                        "cloud-origin-add".into(),
+                        tr!("cli_setup.candidate_add"),
+                        false,
+                        false,
+                        cx,
+                        |this, _, cx| this.add_gateway_origin(cx),
+                    )),
+            );
+        } else {
+            rows = rows.child(div().flex().child(card_button(
+                theme,
+                "cloud-origin-add-open".into(),
+                tr!("cli_setup.candidate_add"),
+                false,
+                false,
+                cx,
+                |this, window, cx| this.open_gateway_origin_input(window, cx),
+            )));
+        }
+
+        rows.child(
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(8.0))
+                .child(card_button(
+                    theme,
+                    "cloud-origin-test".into(),
+                    if testing {
+                        tr!("cli_setup.speed_testing")
+                    } else {
+                        tr!("cli_setup.speed_test_all")
+                    },
+                    false,
+                    testing,
+                    cx,
+                    |this, _, cx| this.run_gateway_origin_test(false, cx),
+                ))
+                .child(toggle_switch(
+                    "cloud-origin-auto",
+                    auto_select,
+                    false,
+                    theme,
+                    cx,
+                    move |this, _, cx| this.set_gateway_origin_auto_select(!auto_select, cx),
+                ))
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("cli_setup.speed_auto_select")),
+                ),
+        )
+    }
+
     /// Group picker, one section per CLI. Selecting a group rebinds that
     /// CLI's gateway key.
     fn render_cloud_groups(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
@@ -721,14 +1380,65 @@ impl Waku {
                 .and_then(|credentials| {
                     sub2api::bound_group_for_platform(credentials, &platform)
                 });
+            let failover_on = self.cloud_account.failover.enabled(&platform);
+            let toggle_platform = platform.clone();
             rows = rows.child(
                 div()
                     .mt(px(8.0))
-                    .text_size(sp(12.5))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text_secondary)
-                    .child(platform_display_name(&platform)),
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_secondary)
+                            .child(platform_display_name(&platform)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_ghost)
+                            .child(tr!("cloud.failover_title")),
+                    )
+                    .child(toggle_switch(
+                        SharedString::from(format!("cloud-failover-{platform}")),
+                        failover_on,
+                        busy,
+                        theme,
+                        cx,
+                        move |this, _, cx| {
+                            this.set_cloud_failover(
+                                toggle_platform.clone(),
+                                !failover_on,
+                                cx,
+                            );
+                        },
+                    )),
             );
+            if failover_on {
+                rows = rows.child(
+                    div()
+                        .text_size(sp(11.5))
+                        .line_height(sp(16.0))
+                        .text_color(theme.text_ghost)
+                        .child(tr!("cloud.failover_detail")),
+                );
+            }
+            let failed_over_from = self
+                .cloud_account
+                .failed_over
+                .get(&platform)
+                .and_then(|from| {
+                    self.cloud_account
+                        .groups
+                        .iter()
+                        .find(|group| group.id == *from)
+                        .map(|group| group.name.clone())
+                });
             for group in self
                 .cloud_account
                 .groups
@@ -746,6 +1456,12 @@ impl Waku {
                         .find(|status| status.group_id == group.id),
                 );
                 let active = bound == id;
+                // On a fallback the "Active" tag would read as the user's own
+                // choice; name the group routing was moved off instead.
+                let active_label = match failed_over_from.clone() {
+                    Some(from) if active => tr!("cloud.failover_active", group = from),
+                    _ => tr!("cloud.group_active"),
+                };
                 let row_platform = platform.clone();
                 rows = rows.child(
                     div()
@@ -793,9 +1509,10 @@ impl Waku {
                         .when(active, |element| {
                             element.child(
                                 div()
+                                    .flex_none()
                                     .text_size(sp(12.0))
                                     .text_color(theme.accent)
-                                    .child(tr!("cloud.group_active")),
+                                    .child(active_label),
                             )
                         })
                         .on_click(cx.listener(move |this, _, _, cx| {

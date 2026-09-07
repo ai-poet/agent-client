@@ -46,19 +46,271 @@ impl CustomEndpoint {
     }
 }
 
-/// Custom routing for every CLI that supports it.
+/// One saved endpoint configuration for a CLI — a "profile". A CLI can keep
+/// several (the gateway, an official key, another relay) and route through
+/// exactly one at a time.
+///
+/// The endpoint fields are flattened so a profile serializes as the old
+/// single-endpoint object plus `id`/`name`/`candidate_urls`/`auto_select`.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct EndpointProfile {
+    /// Stable identity, `p-<unix ms>-<n>`; never shown.
+    #[serde(default)]
+    pub id: String,
+    /// Display name; the app fills in a default when empty.
+    #[serde(default)]
+    pub name: String,
+    /// The routed endpoint. `base_url` is the URL currently in use.
+    #[serde(flatten)]
+    pub endpoint: CustomEndpoint,
+    /// Alternate origins for the same service (mirror domains, a direct IP),
+    /// normalized. Always contains `base_url` once it is set.
+    #[serde(default)]
+    pub candidate_urls: Vec<String>,
+    /// After a speed test, switch `base_url` to the fastest candidate that
+    /// answered successfully.
+    #[serde(default)]
+    pub auto_select: bool,
+}
+
+impl EndpointProfile {
+    /// A fresh, empty profile with a new id.
+    pub fn new(name: &str) -> Self {
+        Self {
+            id: next_profile_id(),
+            name: name.to_owned(),
+            ..Self::default()
+        }
+    }
+
+    /// Add a candidate origin. Returns false when it was already listed.
+    pub fn add_candidate(&mut self, url: &str) -> bool {
+        let url = url.trim();
+        if url.is_empty() || self.candidate_urls.iter().any(|known| known == url) {
+            return false;
+        }
+        self.candidate_urls.push(url.to_owned());
+        true
+    }
+
+    /// Drop a candidate. Removing the URL in use moves `base_url` to the
+    /// first remaining candidate (or clears it when none is left).
+    pub fn remove_candidate(&mut self, url: &str) {
+        self.candidate_urls.retain(|known| known != url);
+        if self.endpoint.base_url == url {
+            self.endpoint.base_url = self.candidate_urls.first().cloned().unwrap_or_default();
+        }
+    }
+
+    /// Route through `url`, listing it as a candidate if it was not yet.
+    pub fn select_url(&mut self, url: &str) {
+        let url = url.trim();
+        self.add_candidate(url);
+        self.endpoint.base_url = url.to_owned();
+    }
+
+    /// Keep the invariant that the URL in use is one of the candidates.
+    fn normalize(&mut self) {
+        if self.id.is_empty() {
+            self.id = next_profile_id();
+        }
+        let base_url = self.endpoint.base_url.trim().to_owned();
+        if !base_url.is_empty() {
+            self.add_candidate(&base_url);
+        }
+    }
+}
+
+/// Monotonic within a process, so two profiles created in the same
+/// millisecond still get distinct ids.
+fn next_profile_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis())
+        .unwrap_or_default();
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("p-{millis}-{n}")
+}
+
+/// Every profile one CLI has, and which of them routes it.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ProviderProfiles {
+    #[serde(default)]
+    pub profiles: Vec<EndpointProfile>,
+    /// Id of the routing profile. `None` only while there are no profiles.
+    #[serde(default)]
+    pub active: Option<String>,
+}
+
+impl ProviderProfiles {
+    fn from_legacy(endpoint: CustomEndpoint) -> Self {
+        let empty = endpoint.base_url.trim().is_empty()
+            && endpoint.api_key.trim().is_empty()
+            && endpoint.models.is_empty();
+        if empty {
+            return Self::default();
+        }
+        let mut profile = EndpointProfile {
+            id: "legacy".to_owned(),
+            name: String::new(),
+            endpoint,
+            candidate_urls: Vec::new(),
+            auto_select: false,
+        };
+        profile.normalize();
+        Self {
+            active: Some(profile.id.clone()),
+            profiles: vec![profile],
+        }
+    }
+
+    /// Repair what a hand-edited or older file may have left inconsistent:
+    /// missing ids, an `active` that points nowhere, a base URL absent from
+    /// its own candidates.
+    fn normalize(&mut self) {
+        for profile in &mut self.profiles {
+            profile.normalize();
+        }
+        let active_exists = self
+            .active
+            .as_ref()
+            .is_some_and(|id| self.profiles.iter().any(|profile| profile.id == *id));
+        if !active_exists {
+            self.active = self.profiles.first().map(|profile| profile.id.clone());
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.profiles.is_empty()
+    }
+
+    pub fn active_profile(&self) -> Option<&EndpointProfile> {
+        let id = self.active.as_deref()?;
+        self.profiles.iter().find(|profile| profile.id == id)
+    }
+
+    pub fn active_profile_mut(&mut self) -> Option<&mut EndpointProfile> {
+        let id = self.active.clone()?;
+        self.profiles.iter_mut().find(|profile| profile.id == id)
+    }
+
+    pub fn find(&self, id: &str) -> Option<&EndpointProfile> {
+        self.profiles.iter().find(|profile| profile.id == id)
+    }
+
+    pub fn find_mut(&mut self, id: &str) -> Option<&mut EndpointProfile> {
+        self.profiles.iter_mut().find(|profile| profile.id == id)
+    }
+
+    /// Add an empty profile and make it the active one. Returns its id.
+    pub fn add(&mut self, name: &str) -> String {
+        let profile = EndpointProfile::new(name);
+        let id = profile.id.clone();
+        self.profiles.push(profile);
+        self.active = Some(id.clone());
+        id
+    }
+
+    /// Copy a profile (endpoint, candidates, auto-select) under a new name
+    /// and make the copy active. Returns the new id.
+    pub fn duplicate(&mut self, id: &str, name: &str) -> Option<String> {
+        let mut copy = self.find(id)?.clone();
+        copy.id = next_profile_id();
+        copy.name = name.to_owned();
+        let new_id = copy.id.clone();
+        let position = self
+            .profiles
+            .iter()
+            .position(|profile| profile.id == id)
+            .map_or(self.profiles.len(), |index| index + 1);
+        self.profiles.insert(position, copy);
+        self.active = Some(new_id.clone());
+        Some(new_id)
+    }
+
+    pub fn rename(&mut self, id: &str, name: &str) -> bool {
+        match self.find_mut(id) {
+            Some(profile) => {
+                profile.name = name.trim().to_owned();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Remove a profile. Removing the active one activates the profile that
+    /// followed it (or the last remaining). Returns false for unknown ids.
+    pub fn remove(&mut self, id: &str) -> bool {
+        let Some(index) = self.profiles.iter().position(|profile| profile.id == id) else {
+            return false;
+        };
+        self.profiles.remove(index);
+        if self.active.as_deref() == Some(id) {
+            self.active = self
+                .profiles
+                .get(index)
+                .or_else(|| self.profiles.last())
+                .map(|profile| profile.id.clone());
+        }
+        true
+    }
+
+    /// Route through `id`. Returns false for unknown ids.
+    pub fn set_active(&mut self, id: &str) -> bool {
+        if self.find(id).is_none() {
+            return false;
+        }
+        self.active = Some(id.to_owned());
+        true
+    }
+}
+
+/// Accept both shapes of a CLI's slot: the current `{profiles, active}`
+/// object and the pre-profile single endpoint `{base_url, api_key, models}`
+/// (or `null`). Older files upgrade on the first save, since serialization
+/// always writes the current shape.
+fn deserialize_slot<'de, D>(deserializer: D) -> Result<ProviderProfiles, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Order matters: `CustomEndpoint` has only defaulted fields and would
+    // match any object, so the shape that needs `profiles` is tried first.
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum SlotRepr {
+        Profiles {
+            profiles: Vec<EndpointProfile>,
+            #[serde(default)]
+            active: Option<String>,
+        },
+        Legacy(CustomEndpoint),
+    }
+
+    let mut slot = match Option::<SlotRepr>::deserialize(deserializer)? {
+        None => ProviderProfiles::default(),
+        Some(SlotRepr::Profiles { profiles, active }) => ProviderProfiles { profiles, active },
+        Some(SlotRepr::Legacy(endpoint)) => ProviderProfiles::from_legacy(endpoint),
+    };
+    slot.normalize();
+    Ok(slot)
+}
+
+/// Custom routing for every CLI that supports it: per CLI, the saved
+/// profiles and the one in use.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CustomApiConfig {
-    #[serde(default)]
-    pub claude: Option<CustomEndpoint>,
-    #[serde(default)]
-    pub codex: Option<CustomEndpoint>,
-    #[serde(default)]
-    pub grok: Option<CustomEndpoint>,
-    #[serde(default)]
-    pub opencode: Option<CustomEndpoint>,
-    #[serde(default)]
-    pub pi: Option<CustomEndpoint>,
+    #[serde(default, deserialize_with = "deserialize_slot")]
+    pub claude: ProviderProfiles,
+    #[serde(default, deserialize_with = "deserialize_slot")]
+    pub codex: ProviderProfiles,
+    #[serde(default, deserialize_with = "deserialize_slot")]
+    pub grok: ProviderProfiles,
+    #[serde(default, deserialize_with = "deserialize_slot")]
+    pub opencode: ProviderProfiles,
+    #[serde(default, deserialize_with = "deserialize_slot")]
+    pub pi: ProviderProfiles,
 }
 
 impl CustomApiConfig {
@@ -68,26 +320,65 @@ impl CustomApiConfig {
             .all(|provider| self.get(provider).is_none())
     }
 
-    pub fn get(&self, provider_id: &str) -> Option<&CustomEndpoint> {
+    /// One CLI's profiles. `None` for ids this feature does not cover.
+    pub fn profiles(&self, provider_id: &str) -> Option<&ProviderProfiles> {
         match provider_id {
-            "claude" => self.claude.as_ref(),
-            "codex" => self.codex.as_ref(),
-            "grok" => self.grok.as_ref(),
-            "opencode" => self.opencode.as_ref(),
-            "pi" => self.pi.as_ref(),
+            "claude" => Some(&self.claude),
+            "codex" => Some(&self.codex),
+            "grok" => Some(&self.grok),
+            "opencode" => Some(&self.opencode),
+            "pi" => Some(&self.pi),
             _ => None,
         }
     }
 
-    /// Set or clear one CLI's endpoint. Unknown ids are ignored.
-    pub fn set(&mut self, provider_id: &str, endpoint: Option<CustomEndpoint>) {
+    pub fn profiles_mut(&mut self, provider_id: &str) -> Option<&mut ProviderProfiles> {
         match provider_id {
-            "claude" => self.claude = endpoint,
-            "codex" => self.codex = endpoint,
-            "grok" => self.grok = endpoint,
-            "opencode" => self.opencode = endpoint,
-            "pi" => self.pi = endpoint,
-            _ => {}
+            "claude" => Some(&mut self.claude),
+            "codex" => Some(&mut self.codex),
+            "grok" => Some(&mut self.grok),
+            "opencode" => Some(&mut self.opencode),
+            "pi" => Some(&mut self.pi),
+            _ => None,
+        }
+    }
+
+    /// The active profile's endpoint — what the form shows and the writers
+    /// consult. `None` while the CLI has no profile at all.
+    pub fn get(&self, provider_id: &str) -> Option<&CustomEndpoint> {
+        self.profiles(provider_id)?
+            .active_profile()
+            .map(|profile| &profile.endpoint)
+    }
+
+    /// The active profile itself, when there is one.
+    pub fn active_profile(&self, provider_id: &str) -> Option<&EndpointProfile> {
+        self.profiles(provider_id)?.active_profile()
+    }
+
+    /// Write the active profile's endpoint, creating a first profile when
+    /// the CLI has none; `None` deletes the active profile (the next one, if
+    /// any, takes over). Unknown ids are ignored.
+    pub fn set(&mut self, provider_id: &str, endpoint: Option<CustomEndpoint>) {
+        let Some(slot) = self.profiles_mut(provider_id) else {
+            return;
+        };
+        match endpoint {
+            Some(endpoint) => {
+                if slot.active_profile().is_none() {
+                    slot.add("");
+                }
+                let profile = slot
+                    .active_profile_mut()
+                    .expect("a profile was just added");
+                profile.endpoint = endpoint;
+                profile.normalize();
+            }
+            None => {
+                if let Some(id) = slot.active.clone() {
+                    slot.remove(&id);
+                }
+            }
         }
     }
 
@@ -204,7 +495,13 @@ pub struct ProbeResult {
     pub verdict: ProbeVerdict,
     /// The server's error text or the transport error, shortened.
     pub detail: String,
+    /// The models listing itself when the probe succeeded (for filling the
+    /// model list), empty otherwise.
+    pub body: String,
 }
+
+/// Seconds a single probe waits before it is called unreachable.
+pub const PROBE_TIMEOUT_SECS: u32 = 10;
 
 /// The request the connectivity test sends: the models listing, which every
 /// API family serves and which costs nothing.
@@ -218,8 +515,18 @@ pub fn probe_request(
     base_url: &str,
     api_key: &str,
 ) -> (String, crate::http::Request) {
+    probe_request_with_timeout(provider_id, base_url, api_key, PROBE_TIMEOUT_SECS)
+}
+
+/// [`probe_request`] with an explicit timeout, for the speed test.
+pub fn probe_request_with_timeout(
+    provider_id: &str,
+    base_url: &str,
+    api_key: &str,
+    timeout_secs: u32,
+) -> (String, crate::http::Request) {
     let key = api_key.trim();
-    let mut request = crate::http::Request::new().timeout_seconds(10);
+    let mut request = crate::http::Request::new().timeout_seconds(timeout_secs);
     if provider_id == "claude" {
         let url = format!(
             "{}/v1/models",
@@ -242,7 +549,17 @@ pub fn probe_request(
 /// Run the connectivity test. Blocks for up to the request timeout; callers
 /// run it off the UI thread.
 pub fn probe_endpoint(provider_id: &str, base_url: &str, api_key: &str) -> ProbeResult {
-    let (url, request) = probe_request(provider_id, base_url, api_key);
+    probe_endpoint_with_timeout(provider_id, base_url, api_key, PROBE_TIMEOUT_SECS)
+}
+
+/// [`probe_endpoint`] with an explicit timeout.
+pub fn probe_endpoint_with_timeout(
+    provider_id: &str,
+    base_url: &str,
+    api_key: &str,
+    timeout_secs: u32,
+) -> ProbeResult {
+    let (url, request) = probe_request_with_timeout(provider_id, base_url, api_key, timeout_secs);
     let started = std::time::Instant::now();
     match request.send(&url) {
         Ok(response) => {
@@ -252,16 +569,17 @@ pub fn probe_endpoint(provider_id: &str, base_url: &str, api_key: &str) -> Probe
                 401 | 403 => ProbeVerdict::Unauthorized,
                 _ => ProbeVerdict::HttpError,
             };
-            let detail = if verdict == ProbeVerdict::Ok {
-                String::new()
+            let (detail, body) = if verdict == ProbeVerdict::Ok {
+                (String::new(), response.body)
             } else {
-                crate::http::error_summary(&response.body)
+                (crate::http::error_summary(&response.body), String::new())
             };
             ProbeResult {
                 latency_ms,
                 status: Some(response.status),
                 verdict,
                 detail,
+                body,
             }
         }
         Err(error) => ProbeResult {
@@ -269,6 +587,7 @@ pub fn probe_endpoint(provider_id: &str, base_url: &str, api_key: &str) -> Probe
             status: None,
             verdict: ProbeVerdict::Unreachable,
             detail: format!("{error:#}"),
+            body: String::new(),
         },
     }
 }
@@ -393,7 +712,166 @@ mod tests {
             r#"{"claude":{"base_url":"https://a.org","api_key":"k"}}"#,
         )
         .expect("legacy decode");
-        assert_eq!(legacy.claude.as_ref().unwrap().models, Vec::<String>::new());
+        assert_eq!(legacy.get("claude").unwrap().models, Vec::<String>::new());
+    }
+
+    #[test]
+    fn legacy_file_migrates_to_one_active_profile() {
+        // The exact shape the previous release wrote, `null` slots included.
+        let raw = r#"{
+  "claude": {
+    "base_url": "https://a.example.org",
+    "api_key": "sk-a",
+    "models": []
+  },
+  "codex": null,
+  "grok": null,
+  "opencode": {
+    "base_url": "https://o.example.org",
+    "api_key": "sk-o",
+    "models": ["m1"]
+  },
+  "pi": null
+}"#;
+        let config: CustomApiConfig = serde_json::from_str(raw).expect("legacy decode");
+        let claude = config.profiles("claude").unwrap();
+        assert_eq!(claude.profiles.len(), 1);
+        assert_eq!(claude.active.as_deref(), Some("legacy"));
+        let profile = claude.active_profile().unwrap();
+        assert_eq!(profile.endpoint.base_url, "https://a.example.org");
+        assert_eq!(profile.endpoint.api_key, "sk-a");
+        assert_eq!(profile.candidate_urls, vec!["https://a.example.org".to_owned()]);
+        assert!(!profile.auto_select);
+        assert!(config.profiles("codex").unwrap().is_empty());
+        assert!(config.get("codex").is_none());
+        assert_eq!(config.get("opencode").unwrap().models, vec!["m1".to_owned()]);
+        // An all-empty legacy entry is not worth a profile.
+        let config: CustomApiConfig =
+            serde_json::from_str(r#"{"pi":{"base_url":"","api_key":""}}"#).expect("decode");
+        assert!(config.get("pi").is_none());
+    }
+
+    #[test]
+    fn legacy_then_save_writes_new_shape() {
+        let config: CustomApiConfig =
+            serde_json::from_str(r#"{"claude":{"base_url":"https://a.org","api_key":"k"}}"#)
+                .expect("decode");
+        let encoded = serde_json::to_string(&config).expect("encode");
+        assert!(encoded.contains(r#""profiles":[{"id":"legacy""#), "{encoded}");
+        assert!(encoded.contains(r#""active":"legacy""#), "{encoded}");
+        let again: CustomApiConfig = serde_json::from_str(&encoded).expect("re-decode");
+        assert_eq!(again, config);
+    }
+
+    #[test]
+    fn new_shape_round_trips_and_repairs_active() {
+        let raw = r#"{"codex":{"profiles":[
+            {"id":"one","name":"One","base_url":"https://1.org","api_key":"k1"},
+            {"id":"two","name":"Two","base_url":"https://2.org","api_key":"k2",
+             "candidate_urls":["https://2.org","https://2b.org"],"auto_select":true}
+        ],"active":"missing"}}"#;
+        let config: CustomApiConfig = serde_json::from_str(raw).expect("decode");
+        let codex = config.profiles("codex").unwrap();
+        // An `active` that points nowhere falls back to the first profile.
+        assert_eq!(codex.active.as_deref(), Some("one"));
+        assert_eq!(codex.find("one").unwrap().candidate_urls, vec!["https://1.org".to_owned()]);
+        assert!(codex.find("two").unwrap().auto_select);
+        let encoded = serde_json::to_string(&config).expect("encode");
+        let decoded: CustomApiConfig = serde_json::from_str(&encoded).expect("decode");
+        assert_eq!(decoded, config);
+    }
+
+    #[test]
+    fn set_none_deletes_active_and_activates_next() {
+        let mut config = CustomApiConfig::default();
+        let slot = config.profiles_mut("grok").unwrap();
+        let first = slot.add("First");
+        slot.find_mut(&first).unwrap().endpoint = endpoint("https://1.org", "k1");
+        let second = slot.add("Second");
+        slot.find_mut(&second).unwrap().endpoint = endpoint("https://2.org", "k2");
+        let third = slot.add("Third");
+        slot.find_mut(&third).unwrap().endpoint = endpoint("https://3.org", "k3");
+        assert!(slot.set_active(&second));
+        assert_eq!(config.get("grok").unwrap().base_url, "https://2.org");
+
+        config.set("grok", None);
+        // The profile after the removed one takes over.
+        assert_eq!(config.get("grok").unwrap().base_url, "https://3.org");
+        config.set("grok", None);
+        assert_eq!(config.get("grok").unwrap().base_url, "https://1.org");
+        config.set("grok", None);
+        assert!(config.get("grok").is_none());
+        assert!(config.is_empty());
+    }
+
+    #[test]
+    fn set_some_on_empty_slot_creates_profile_and_lists_url() {
+        let mut config = CustomApiConfig::default();
+        config.set("claude", Some(endpoint("https://a.org", "k")));
+        let claude = config.profiles("claude").unwrap();
+        assert_eq!(claude.profiles.len(), 1);
+        let profile = claude.active_profile().unwrap();
+        assert!(!profile.id.is_empty());
+        assert_eq!(profile.candidate_urls, vec!["https://a.org".to_owned()]);
+        // A second set on the same slot edits the active profile in place.
+        config.set("claude", Some(endpoint("https://b.org", "k2")));
+        let claude = config.profiles("claude").unwrap();
+        assert_eq!(claude.profiles.len(), 1);
+        assert_eq!(
+            claude.active_profile().unwrap().candidate_urls,
+            vec!["https://a.org".to_owned(), "https://b.org".to_owned()]
+        );
+    }
+
+    #[test]
+    fn select_url_and_remove_candidate_keep_base_url_consistent() {
+        let mut profile = EndpointProfile::new("P");
+        profile.endpoint = endpoint("https://a.org", "k");
+        profile.normalize();
+        profile.select_url("https://b.org");
+        assert_eq!(profile.endpoint.base_url, "https://b.org");
+        assert_eq!(
+            profile.candidate_urls,
+            vec!["https://a.org".to_owned(), "https://b.org".to_owned()]
+        );
+        assert!(!profile.add_candidate("https://b.org"));
+        assert!(!profile.add_candidate("  "));
+        profile.remove_candidate("https://b.org");
+        assert_eq!(profile.endpoint.base_url, "https://a.org");
+        profile.remove_candidate("https://a.org");
+        assert_eq!(profile.endpoint.base_url, "");
+        assert!(profile.candidate_urls.is_empty());
+    }
+
+    #[test]
+    fn duplicate_rename_and_ids_are_distinct() {
+        let mut slot = ProviderProfiles::default();
+        let original = slot.add("Gateway");
+        {
+            let profile = slot.find_mut(&original).unwrap();
+            profile.endpoint = endpoint("https://g.org", "k");
+            profile.add_candidate("https://g2.org");
+            profile.auto_select = true;
+        }
+        let copy = slot.duplicate(&original, "Gateway copy").expect("copy");
+        assert_ne!(copy, original);
+        assert_eq!(slot.active.as_deref(), Some(copy.as_str()));
+        let copied = slot.find(&copy).unwrap();
+        assert_eq!(copied.name, "Gateway copy");
+        assert_eq!(copied.endpoint.api_key, "k");
+        assert_eq!(copied.candidate_urls, vec!["https://g2.org".to_owned()]);
+        assert!(copied.auto_select);
+        // The copy sits right after its source.
+        assert_eq!(slot.profiles[1].id, copy);
+        assert!(slot.rename(&copy, "  Mirror  "));
+        assert_eq!(slot.find(&copy).unwrap().name, "Mirror");
+        assert!(!slot.rename("nope", "x"));
+        assert!(slot.duplicate("nope", "x").is_none());
+        assert!(!slot.remove("nope"));
+        assert!(!slot.set_active("nope"));
+        let a = next_profile_id();
+        let b = next_profile_id();
+        assert_ne!(a, b);
     }
 
     #[test]
@@ -405,7 +883,7 @@ mod tests {
             serde_json::json!({"claude": {"base_url": "https://a.org", "api_key": "k"}}),
         );
         let migrated = migrate_from_extra(&mut extra).expect("parse legacy payload");
-        assert_eq!(migrated.claude.as_ref().unwrap().api_key, "k");
+        assert_eq!(migrated.get("claude").unwrap().api_key, "k");
         assert!(!extra.contains_key(LEGACY_SETTINGS_KEY));
         // Garbage payloads still drain the key.
         extra.insert(LEGACY_SETTINGS_KEY.to_owned(), serde_json::json!("junk"));

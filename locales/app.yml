@@ -2684,3 +2684,119 @@ surface_bar.hide:
   en: "Hide %{surface} (%{shortcut})"
 command_palette.open_surface:
   en: "Open %{surface}"
+cli_setup.profile_label:
+  en: "Profile"
+cli_setup.profile_default_name:
+  en: "Custom"
+cli_setup.profile_none:
+  en: "None yet"
+cli_setup.profile_new:
+  en: "New"
+cli_setup.profile_new_name:
+  en: "Endpoint %{n}"
+cli_setup.profile_duplicate:
+  en: "Duplicate"
+cli_setup.profile_copy_suffix:
+  en: " copy"
+cli_setup.profile_rename:
+  en: "Rename"
+cli_setup.profile_name_placeholder:
+  en: "Profile name"
+cli_setup.profile_delete:
+  en: "Delete profile"
+cli_setup.profile_delete_confirm:
+  en: "Delete the profile \"%{name}\"?"
+cli_setup.profile_switched:
+  en: "Now routing through %{name}; new sessions use it"
+cli_setup.candidates_open:
+  en: "Alternate domains"
+cli_setup.candidates_title:
+  en: "Alternate domains"
+cli_setup.candidates_detail:
+  en: "Other origins serving the same API. Measure them and route through whichever answers fastest."
+cli_setup.candidate_placeholder:
+  en: "https://backup.example.com"
+cli_setup.candidate_add:
+  en: "Add domain"
+cli_setup.candidate_use:
+  en: "Use"
+cli_setup.candidate_remove:
+  en: "Remove"
+cli_setup.candidate_active:
+  en: "In use"
+cli_setup.candidate_duplicate:
+  en: "That domain is already listed."
+cli_setup.candidate_latency:
+  en: "%{ms} ms"
+cli_setup.candidate_unauthorized:
+  en: "Key refused"
+cli_setup.candidate_http:
+  en: "HTTP %{status}"
+cli_setup.candidate_unreachable:
+  en: "Unreachable"
+cli_setup.speed_test_all:
+  en: "Test all"
+cli_setup.speed_testing:
+  en: "Testing…"
+cli_setup.speed_auto_select:
+  en: "Switch to the fastest after a test"
+cli_setup.speed_auto_selected:
+  en: "Now routing through %{url} (%{ms} ms)"
+cli_setup.speed_no_ok:
+  en: "No domain answered successfully; the endpoint was left alone."
+cli_setup.speed_invalid_url:
+  en: "Not a valid URL"
+cli_setup.fetch_models:
+  en: "Fetch models"
+cli_setup.fetch_models_done:
+  en: "Filled in %{count} models from the endpoint"
+cli_setup.fetch_models_none:
+  en: "The endpoint listed no models"
+cli_setup.env_conflict_remove:
+  en: "Remove"
+cli_setup.env_conflict_remove_all:
+  en: "Remove all"
+cli_setup.env_conflict_restore:
+  en: "Restore last backup"
+cli_setup.env_conflict_copy_admin:
+  en: "Copy admin command"
+cli_setup.env_conflict_needs_admin:
+  en: "Copied. Run it in an elevated PowerShell — machine-wide variables need administrator rights."
+cli_setup.env_conflict_process_note:
+  en: "Set for this app's own process. Remove it wherever it is really set, then restart the app."
+cli_setup.env_fix_confirm:
+  en: "Remove %{count} environment variables?"
+cli_setup.env_fix_backup_note:
+  en: "Their values are saved first, and can be restored from this card."
+cli_setup.env_fix_done:
+  en: "Removed %{count} variables"
+cli_setup.env_fix_restored:
+  en: "Restored from the last backup"
+cli_setup.env_fix_restore_confirm:
+  en: "Put the removed environment variables back?"
+cloud.failover_title:
+  en: "Auto failover"
+cloud.failover_detail:
+  en: "When the group in use reports an outage, switch to another healthy group on this platform and switch back once yours recovers. Rates differ between groups."
+cloud.failover_switched:
+  en: "%{from} is down; routing moved to %{to}"
+cloud.failover_restored:
+  en: "%{group} is healthy again; routing moved back"
+cloud.failover_active:
+  en: "Active · moved from %{group}"
+cloud.origin_title:
+  en: "Service domains"
+cloud.origin_detail:
+  en: "The domains this service answers on. Measure them and route the agent CLIs through whichever answers fastest; signing in always stays on the domain you signed in with."
+cloud.origin_placeholder:
+  en: "https://mirror.example.com"
+cloud.origin_duplicate:
+  en: "That domain is already listed."
+cloud.origin_no_key:
+  en: "Pick a group first — measuring uses this account's gateway key."
+cloud.origin_no_ok:
+  en: "No domain answered successfully; routing was left alone."
+cloud.origin_auto_selected:
+  en: "Agents now reach the service at %{url}"
+cloud.origin_fallback:
+  en: "The domain in use stopped answering; agents moved to %{url}"

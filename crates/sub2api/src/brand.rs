@@ -30,6 +30,28 @@ pub const MANAGED_SERVICE_URL: &str = match option_env!("SUB2API_MANAGED_SERVICE
     None => "https://cheaprouter.cc",
 };
 
+/// Alternate origins serving the same managed API, comma separated.
+///
+/// The service is reachable on more than one domain; which one is fastest,
+/// or reachable at all, depends on the user's network. Set at build time so
+/// a build ships knowing its own mirrors, and added to by the user.
+pub const MANAGED_SERVICE_ALT_URLS: &str = match option_env!("SUB2API_MANAGED_SERVICE_ALT_URLS") {
+    Some(urls) => urls,
+    None => "",
+};
+
+/// Every origin this build knows the managed service by, primary first.
+pub fn managed_service_endpoints() -> Vec<String> {
+    let mut endpoints = vec![MANAGED_SERVICE_URL.to_owned()];
+    for alternate in MANAGED_SERVICE_ALT_URLS.split(',') {
+        let alternate = alternate.trim();
+        if !alternate.is_empty() && !endpoints.iter().any(|known| known == alternate) {
+            endpoints.push(alternate.to_owned());
+        }
+    }
+    endpoints
+}
+
 /// Base URL serving the Sparkle appcast and release artifacts — the MinIO
 /// bucket, path-style, so no extra proxy sits in front of it.
 pub const RELEASES_BASE_URL: &str = match option_env!("SUB2API_RELEASES_BASE_URL") {

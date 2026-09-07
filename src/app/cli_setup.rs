@@ -44,6 +44,14 @@ pub(super) struct CliSetupState {
     /// Cached stored custom endpoints; render reads this instead of the
     /// file. Refilled lazily, replaced on save.
     pub custom_cache: std::cell::RefCell<Option<sub2api::custom_api::CustomApiConfig>>,
+    /// An environment-variable removal or restore is running.
+    pub env_fix_busy: bool,
+    /// The newest removal backup, found by the same background pass that
+    /// takes the detection snapshot — render never looks at the disk.
+    pub env_backup_latest: Option<std::path::PathBuf>,
+    /// What the last removal could not do, kept on screen: a toast would be
+    /// gone before the user finished reading it.
+    pub env_fix_report: Option<String>,
     /// Per-CLI endpoint form state for the Providers page.
     pub page: super::providers_page::ProvidersPageState,
 }
@@ -137,6 +145,19 @@ pub(super) fn install_verdict_detail(verdict: &sub2api::cli_install::InstallVerd
     }
 }
 
+/// Everything a removal or restore could not do, as one block of text —
+/// empty runs produce nothing rather than an empty status line.
+fn fix_report_notes(report: &sub2api::env_fix::FixReport) -> Option<String> {
+    let mut notes = report.errors.clone();
+    notes.extend(
+        report
+            .skipped
+            .iter()
+            .map(|(name, reason)| format!("{name}: {reason}")),
+    );
+    (!notes.is_empty()).then(|| notes.join("\n"))
+}
+
 /// Human label for an installer stage.
 fn stage_label(reported: sub2api::node_install::NodeStage) -> String {
     match reported {
@@ -178,21 +199,154 @@ impl Waku {
         self.cli_setup.snapshot_generation.set(generation);
         self.cli_setup.snapshot_pending.set(true);
         cx.spawn(async move |this, cx| {
-            let snapshot = cx
+            let (snapshot, backup) = cx
                 .background_executor()
-                .spawn(async move { sub2api::cli_detect::snapshot(&cli_search_dirs()) })
+                .spawn(async move {
+                    let snapshot = sub2api::cli_detect::snapshot(&cli_search_dirs());
+                    // Same pass, so the "Restore last backup" button never
+                    // costs a frame a directory listing.
+                    let backup = sub2api::env_fix::backups_dir()
+                        .and_then(|dir| sub2api::env_fix::latest_backup(&dir));
+                    (snapshot, backup)
+                })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if this.cli_setup.snapshot_generation.get() != generation {
                     return;
                 }
                 this.cli_setup.snapshot = Some(std::sync::Arc::new(snapshot));
+                this.cli_setup.env_backup_latest = backup;
                 this.cli_setup.snapshot_at.set(Some(Instant::now()));
                 this.cli_setup.snapshot_pending.set(false);
                 cx.notify();
             });
         })
         .detach();
+    }
+
+    /// Ask before removing conflicting environment variables, listing what
+    /// will go and where the values are saved.
+    pub(super) fn confirm_remove_env_conflicts(
+        &mut self,
+        conflicts: Vec<sub2api::env_conflicts::EnvConflict>,
+        cx: &mut Context<Self>,
+    ) {
+        use sub2api::env_fix::FixPlan;
+
+        let removable: Vec<_> = conflicts
+            .into_iter()
+            .filter(|conflict| {
+                matches!(
+                    sub2api::env_fix::plan(conflict),
+                    FixPlan::RemoveUserVar | FixPlan::CommentOutLine { .. }
+                )
+            })
+            .collect();
+        if removable.is_empty() || self.cli_setup.env_fix_busy {
+            return;
+        }
+        let names = removable
+            .iter()
+            .map(|conflict| conflict.name.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let count = removable.len();
+        self.request_confirm(
+            tr!("cli_setup.env_fix_confirm", count = count),
+            Some(format!(
+                "{names}\n\n{}",
+                tr!("cli_setup.env_fix_backup_note")
+            )),
+            tr!("cli_setup.env_conflict_remove"),
+            true,
+            cx,
+            move |this, _, cx| this.remove_env_conflicts(removable, cx),
+        );
+    }
+
+    fn remove_env_conflicts(
+        &mut self,
+        conflicts: Vec<sub2api::env_conflicts::EnvConflict>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.cli_setup.env_fix_busy {
+            return;
+        }
+        self.cli_setup.env_fix_busy = true;
+        self.cli_setup.env_fix_report = None;
+        cx.notify();
+
+        cx.spawn(async move |this, cx| {
+            let outcome = cx
+                .background_executor()
+                .spawn(async move { sub2api::env_fix::remove(&conflicts) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.cli_setup.env_fix_busy = false;
+                match outcome {
+                    Ok(report) => {
+                        if !report.removed.is_empty() {
+                            this.show_toast(tr!(
+                                "cli_setup.env_fix_done",
+                                count = report.removed.len()
+                            ));
+                        }
+                        this.cli_setup.env_fix_report = fix_report_notes(&report);
+                        // The rescan is what makes the row disappear, and it
+                        // also re-finds the backup this run just wrote.
+                        this.refresh_cli_environment(cx);
+                    }
+                    Err(error) => {
+                        this.cli_setup.env_fix_report = Some(format!("{error:#}"));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Put back everything the last removal took away.
+    pub(super) fn restore_last_env_backup(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.cli_setup.env_backup_latest.clone() else {
+            return;
+        };
+        if self.cli_setup.env_fix_busy {
+            return;
+        }
+        self.request_confirm(
+            tr!("cli_setup.env_fix_restore_confirm"),
+            Some(path.display().to_string()),
+            tr!("cli_setup.env_conflict_restore"),
+            false,
+            cx,
+            move |this, _, cx| {
+                this.cli_setup.env_fix_busy = true;
+                this.cli_setup.env_fix_report = None;
+                cx.notify();
+                cx.spawn(async move |this, cx| {
+                    let outcome = cx
+                        .background_executor()
+                        .spawn(async move { sub2api::env_fix::restore(&path) })
+                        .await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.cli_setup.env_fix_busy = false;
+                        match outcome {
+                            Ok(report) => {
+                                this.show_toast(tr!("cli_setup.env_fix_restored"));
+                                this.cli_setup.env_fix_report = fix_report_notes(&report);
+                                this.refresh_cli_environment(cx);
+                            }
+                            Err(error) => {
+                                this.cli_setup.env_fix_report = Some(format!("{error:#}"));
+                            }
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
+            },
+        );
     }
 
     /// Install Node unattended, reporting each stage as it starts.

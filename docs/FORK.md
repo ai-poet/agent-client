@@ -86,7 +86,7 @@ lines below.
 | `scripts/release.ts` | `appName`/`executableName` from the brand | 6 |
 | `scripts/appcast.ts` | default download prefix points at our release host | 3 |
 | `scripts/delete-debug-app.ts` | branded debug data dirs added to the cleanup candidates | 4 |
-| `locales/{app,ja,zh-CN}.yml` | our new `cloud.*`/`cli_setup.*`/`surface_bar.*` keys, plus a de-brand sweep: every user-visible "Waku" replaced (neutral wording, or `CheapRouter` where a name is load-bearing — consent prompts, hero copy, composer placeholder) | ~85 lines |
+| `locales/{app,ja,zh-CN}.yml` | our new `cloud.*`/`cli_setup.*`/`surface_bar.*` keys, plus a de-brand sweep: every user-visible "Waku" replaced (neutral wording, or `CheapRouter` where a name is load-bearing — consent prompts, hero copy, composer placeholder) | ~150 lines |
 | `crates/waku-protocol/src/identity.rs` | `APP_NAME` reads `SUB2API_BRAND_NAME`; `DATA_DIR_NAME` (".cheaprouter") reads `SUB2API_DATA_DIR_NAME`; `DATA_DIRECTORY_NAME` is "CheapRouter"/"CheapRouter Debug" (defaults mirror `brand.rs` — keep in sync); `APP_ID` stays upstream | ~15 |
 | `crates/waku-protocol/src/settings.rs`, `crates/waku-protocol/src/projectless.rs`, `crates/waku-protocol/src/model.rs` (test) | `.waku` literal → `identity::DATA_DIR_NAME` | 3 sites |
 | `crates/waku-core/src/{persistence,projectless,worktree,computer_use,daemon}.rs` | `.waku`/"Waku" literals → `identity::DATA_DIR_NAME`/`DATA_DIRECTORY_NAME` (incl. one test and one error string) | 6 sites |
@@ -118,6 +118,8 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
   `crates/sub2api` or one of our own view files.
 - `SETTINGS_PAGES` has a hard-coded length; upstream adding a page turns that
   into a type error rather than a silent break, which is the desired failure.
+- `providers_page::card_button` is `pub(super)` because `cloud_account.rs`
+  draws the same buttons; both files are ours, so this is not a hook point.
 
 ## What we deliberately do not touch
 
@@ -142,6 +144,30 @@ comments preserved), `~/.grok/config.toml`, `opencode.json` and Pi's
 first write per CLI the originals are backed up into
 `~/.cheaprouter/takeover.json` and restored on sign-out / clearing the
 endpoint. Pi's `auth.json` and `settings.json` are never read or written.
+
+What feeds `desired_routes` on each side:
+
+- **Custom endpoints** (`sub2api::custom_api`, `~/.cheaprouter/custom-api.json`)
+  are a list of named profiles per CLI with one active, each holding the
+  endpoint plus alternate domains for the same service. Only the active
+  profile routes. Files written before profiles existed are a single
+  endpoint object per CLI; `deserialize_slot` reads them as one profile named
+  "Custom" and the next save rewrites the file — keep that variant.
+- **The cloud gateway's own domain** (`sub2api::gateway_origin`,
+  `~/.cheaprouter/gateway-origin.json`) chooses which of the service's
+  origins goes into the CLI configs, via `gateway_config_with_origin`.
+  `Credentials.endpoint` is deliberately *not* rewritten: sign-in, refresh
+  and `/auth/me` stay on the origin the browser flow used.
+- **Which group is bound** can move on its own when a platform has automatic
+  failover on (`sub2api::failover`, `~/.cheaprouter/failover.json`), through
+  the same `select_cloud_group` path a manual pick uses.
+
+`sub2api::speedtest` measures a set of candidate origins for all three (one
+warm-up request, one timed request, bounded concurrency, results in input
+order). `sub2api::env_fix` removes the environment variables that would
+otherwise outrank everything above, after saving them under
+`~/.cheaprouter/env-backups/`; machine-wide Windows variables are never
+touched, only reported with the elevated command.
 
 ## License
 

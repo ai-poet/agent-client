@@ -29,13 +29,17 @@ pub mod client;
 pub mod codex_compat;
 pub mod custom_api;
 pub mod env_conflicts;
+pub mod env_fix;
+pub mod failover;
 pub mod gateway;
+pub mod gateway_origin;
 pub mod global_config;
 pub mod http;
 pub mod migrate;
 pub mod node_install;
 pub mod onboarding;
 pub mod pay;
+pub mod speedtest;
 
 pub use auth::Credentials;
 pub use client::Client;
@@ -273,9 +277,24 @@ pub fn bound_group_for_platform(credentials: &Credentials, platform: &str) -> Op
 
 /// Build the routing configuration the daemon needs from a signed-in session.
 pub fn gateway_config_from(credentials: &Credentials, enabled: bool) -> GatewayConfig {
+    gateway_config_with_origin(credentials, enabled, None)
+}
+
+/// [`gateway_config_from`] pointed at one of the service's other domains.
+///
+/// Only the endpoint the agent CLIs are given moves. The session keeps the
+/// origin it was signed in on — tokens are minted and refreshed there — so
+/// choosing a faster domain cannot invalidate a login.
+pub fn gateway_config_with_origin(
+    credentials: &Credentials,
+    enabled: bool,
+    origin: Option<&str>,
+) -> GatewayConfig {
     GatewayConfig {
         enabled,
-        endpoint: credentials.endpoint.clone(),
+        endpoint: origin
+            .map(str::to_owned)
+            .unwrap_or_else(|| credentials.endpoint.clone()),
         api_key: credentials.api_key.clone(),
         claude_api_key: credentials.claude_api_key.clone(),
         codex_api_key: credentials.codex_api_key.clone(),
