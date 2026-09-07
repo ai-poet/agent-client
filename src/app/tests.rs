@@ -1886,6 +1886,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::CloudAccount,
         SettingsPage::ModelPlaza,
         SettingsPage::CloudUsage,
+        SettingsPage::Workflow,
         SettingsPage::Daemon,
     ];
     if cfg!(all(debug_assertions, target_os = "macos")) {

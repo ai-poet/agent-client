@@ -28,7 +28,12 @@ pub(super) fn failure_summary(session: &AgentSession) -> Option<String> {
         .iter()
         .rev()
         .find(|message| message.role == MessageRole::Assistant)
-        .map(|message| message.display_content.as_deref().unwrap_or(&message.content))?;
+        .map(|message| {
+            message
+                .display_content
+                .as_deref()
+                .unwrap_or(&message.content)
+        })?;
     let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.is_empty() {
         return None;
@@ -52,14 +57,19 @@ impl Waku {
         &self,
         session: &AgentSession,
         cx: &mut Context<Self>,
-    ) -> Option<Stateful<Div>> {
+    ) -> Vec<Stateful<Div>> {
+        // A stage of a workflow carries its role beside the failure mark.
+        let mut marks = Vec::new();
+        if let Some(chip) = self.render_workflow_task_chip(session, cx) {
+            marks.push(chip);
+        }
         if session.status != SessionStatus::Failed {
-            return None;
+            return marks;
         }
         let theme = Theme::current(cx);
         let session_id = session.id;
         let summary = failure_summary(session).unwrap_or_else(|| tr!("session.failed"));
-        Some(
+        marks.push(
             div()
                 .id(SharedString::from(format!("task-failed-{session_id}")))
                 .flex_none()
@@ -79,7 +89,8 @@ impl Waku {
                     this.select_session(session_id, cx);
                     this.scroll_transcript_to_bottom(cx);
                 })),
-        )
+        );
+        marks
     }
 
     /// The remove control for a task row. Hidden until the row is hovered
@@ -154,7 +165,10 @@ mod tests {
     fn failure_summary_takes_the_last_assistant_words_flattened() {
         let session = failed_session_with(&[
             (MessageRole::User, "do the thing"),
-            (MessageRole::Assistant, "Error:   provider\nexited  before   a response"),
+            (
+                MessageRole::Assistant,
+                "Error:   provider\nexited  before   a response",
+            ),
         ]);
         assert_eq!(
             failure_summary(&session).as_deref(),

@@ -1291,6 +1291,10 @@ impl Waku {
         if result.is_some() && self.cloud_account.credentials.is_some() {
             self.cloud_balance_stale = true;
         }
+        // Fork addition: a settled turn may belong to a workflow stage.
+        if let Some((turn_id, _)) = result {
+            self.workflow.pending_settles.push((session_id, turn_id, status));
+        }
         result
     }
 
@@ -3158,7 +3162,7 @@ impl Waku {
         );
     }
 
-    fn submit_submission_for_session(
+    pub(super) fn submit_submission_for_session(
         &mut self,
         session_id: Uuid,
         submission: ComposerSubmission,
@@ -3538,6 +3542,7 @@ impl Waku {
         if std::mem::take(&mut self.cloud_balance_stale) {
             self.refresh_cloud_account(cx);
         }
+        self.drain_workflow_settles(cx);
         if std::mem::take(&mut self.composer_sources_stale) {
             self.refresh_composer_sources(cx);
         }

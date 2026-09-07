@@ -356,7 +356,7 @@ pub(crate) fn capture_backup(backups: &mut CliBackups, name: &str, path: &Path) 
 
 /// Write atomically: temp file in the same directory, then rename over the
 /// target. Credential-bearing files get 0600 on Unix.
-pub(crate) fn atomic_write_private(path: &Path, contents: &[u8]) -> Result<()> {
+pub fn atomic_write_private(path: &Path, contents: &[u8]) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| anyhow!("{} has no parent directory", path.display()))?;

@@ -2800,3 +2800,196 @@ cloud.origin_auto_selected:
   en: "Agents now reach the service at %{url}"
 cloud.origin_fallback:
   en: "The domain in use stopped answering; agents moved to %{url}"
+
+settings.workflow:
+  en: "Workflow"
+settings.workflow_keywords:
+  en: "workflow pipeline agents stages prd implement review test multi-agent orchestrate"
+workflow.description:
+  en: "Hand one goal to several agents: each stage runs as its own session in a shared worktree, one after another."
+workflow.new_run:
+  en: "New workflow"
+workflow.empty_title:
+  en: "Give one goal to several agents"
+workflow.empty_detail:
+  en: "Draft a PRD with one agent, implement with another, review with a third — each stage starts when the previous one finishes."
+workflow.back:
+  en: "Back"
+workflow.goal_label:
+  en: "Goal"
+workflow.goal_placeholder:
+  en: "What should be done? For example: add a search box to the settings page, matching pinyin too."
+workflow.project_label:
+  en: "Project"
+workflow.no_project:
+  en: "No project"
+workflow.seed_from_session:
+  en: "Fill from current task"
+workflow.template_label:
+  en: "Template"
+workflow.template_custom:
+  en: "Custom"
+workflow.roles_label:
+  en: "Roles"
+workflow.no_agents:
+  en: "No agent CLI is installed and enabled. Install one under Providers first."
+workflow.custom_role_name:
+  en: "Stage %{n}"
+workflow.add_role:
+  en: "Add stage"
+workflow.role_model_default:
+  en: "Default model"
+workflow.agent_not_installed:
+  en: "not installed"
+workflow.mode_plan:
+  en: "Plan"
+workflow.mode_build:
+  en: "Build"
+workflow.role_writes:
+  en: "Writes files"
+workflow.use_planner:
+  en: "Let AI plan"
+workflow.use_planner_detail:
+  en: "The planner may add or rework stages while the run is going; you approve each change."
+workflow.create:
+  en: "Create"
+workflow.needs_goal:
+  en: "Describe the goal first."
+workflow.needs_project:
+  en: "Pick a project."
+workflow.needs_roles:
+  en: "Add at least one stage."
+workflow.delete_run:
+  en: "Delete"
+workflow.delete_run_confirm:
+  en: "Delete workflow “%{title}”?"
+workflow.delete_run_confirm_detail:
+  en: "The sessions it started stay in the sidebar; only the workflow record is removed."
+workflow.nodes_line:
+  en: "%{done}/%{total} stages done · %{elapsed}"
+workflow.budget_line:
+  en: "Stages %{nodes}/%{max_nodes} · Planner calls %{calls}/%{max_calls} · %{elapsed}/%{max_elapsed}"
+workflow.after_node:
+  en: "after %{name}"
+workflow.on_failure_of:
+  en: "if %{name} fails"
+workflow.status_draft:
+  en: "Draft"
+workflow.status_planning:
+  en: "Planning"
+workflow.status_awaiting:
+  en: "Awaiting approval"
+workflow.status_running:
+  en: "Running"
+workflow.status_paused:
+  en: "Paused"
+workflow.status_done:
+  en: "Done"
+workflow.status_failed:
+  en: "Failed"
+workflow.node_proposed:
+  en: "Proposed"
+workflow.node_pending:
+  en: "Waiting"
+workflow.node_ready:
+  en: "Ready"
+workflow.node_running:
+  en: "Running"
+workflow.node_awaiting:
+  en: "Needs input"
+workflow.node_done:
+  en: "Done"
+workflow.node_failed:
+  en: "Failed"
+workflow.node_skipped:
+  en: "Skipped"
+workflow.node_canceled:
+  en: "Canceled"
+workflow.start:
+  en: "Start"
+workflow.pause:
+  en: "Pause"
+workflow.resume:
+  en: "Resume"
+workflow.open_session:
+  en: "Open session"
+workflow.run_started:
+  en: "Workflow started: %{title}"
+workflow.run_finished:
+  en: "Workflow finished: %{title}"
+workflow.run_failed:
+  en: "Workflow failed: %{title}"
+workflow.budget_hit:
+  en: "Workflow paused: %{reason}"
+workflow.budget_nodes:
+  en: "stage limit reached"
+workflow.budget_planner:
+  en: "planner call limit reached"
+workflow.budget_wall:
+  en: "time limit reached"
+workflow.budget_balance:
+  en: "balance below the floor you set"
+workflow.stopped_by_user:
+  en: "A stage was stopped, so the workflow is paused"
+workflow.agent_unavailable:
+  en: "the agent for this stage is not available"
+workflow.turn_failed:
+  en: "the agent's turn failed"
+workflow.relayout:
+  en: "Re-layout"
+workflow.reset_view:
+  en: "Reset view"
+workflow.close:
+  en: "Close"
+workflow.inspector_prompt:
+  en: "Prompt"
+workflow.inspector_summary:
+  en: "Result"
+workflow.inspector_config:
+  en: "Configuration"
+workflow.inspector_deps:
+  en: "Runs"
+workflow.no_summary_yet:
+  en: "Nothing reported yet."
+workflow.canvas_hint:
+  en: "Drag to pan · drag a stage to move it · double-click a stage to open its session"
+workflow.replan:
+  en: "Ask planner"
+workflow.planning:
+  en: "Planning…"
+workflow.gate_title:
+  en: "The planner proposes %{count} new stage(s)"
+workflow.gate_approve:
+  en: "Approve and continue"
+workflow.gate_discard:
+  en: "Discard"
+workflow.planner_failed:
+  en: "Planner failed: %{error}"
+workflow.planner_message:
+  en: "Planner: %{message}"
+workflow.planner_no_gateway:
+  en: "Sign in to the cloud account to use the planner"
+workflow.planner_done:
+  en: "The planner considers the goal met"
+workflow.check_label:
+  en: "Check command"
+workflow.check_placeholder:
+  en: "e.g. cargo test, pnpm test — optional"
+workflow.check_detail:
+  en: "Runs in the worktree after every stage that writes files; a non-zero exit fails that stage regardless of what the agent reported."
+workflow.check_failed:
+  en: "The check command failed"
+workflow.check_timed_out:
+  en: "The check command did not finish in time"
+workflow.check_no_workspace:
+  en: "No worktree to run the check in"
+workflow.retry_node:
+  en: "Retry from here"
+workflow.skip_node:
+  en: "Skip"
+workflow.skipped_by_user:
+  en: "(skipped by user)"
+workflow.task_chip_tooltip:
+  en: "Workflow: %{title}"
+workflow.inspector_changes:
+  en: "Changed files"

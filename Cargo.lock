@@ -8379,6 +8379,7 @@ dependencies = [
  "windows 0.61.3",
  "windows-core 0.61.2",
  "windows-sys 0.61.2",
+ "workflow-engine",
  "wry",
 ]
 
@@ -9552,6 +9553,16 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "workflow-engine"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "sub2api",
+]
 
 [[package]]
 name = "writeable"

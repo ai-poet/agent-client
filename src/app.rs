@@ -226,6 +226,8 @@ enum SettingsPage {
     ModelPlaza,
     /// Fork addition: the managed account's request history.
     CloudUsage,
+    /// Fork addition: staged multi-agent workflows.
+    Workflow,
 }
 
 impl SettingsPage {
@@ -1441,6 +1443,8 @@ pub struct Waku {
     cloud_usage: cloud_usage::CloudUsageState,
     /// Fork addition: model plaza view state.
     model_plaza: model_plaza::ModelPlazaState,
+    /// Fork addition: workflow page view state.
+    workflow: workflow::WorkflowState,
     /// Fork addition: search field on the Model Plaza page.
     plaza_search_input: Entity<TextInput>,
     /// Fork addition: the native top-up modal, present while open.
@@ -1667,6 +1671,7 @@ mod drafts;
 mod file_search;
 mod image_preview;
 mod model_plaza;
+mod workflow;
 mod onboarding;
 mod message_resend;
 mod task_rows;
@@ -3078,6 +3083,7 @@ impl Waku {
                 custom_api_inputs,
                 cloud_usage: cloud_usage::CloudUsageState::default(),
                 model_plaza: model_plaza::ModelPlazaState::default(),
+                workflow: workflow::WorkflowState::default(),
                 plaza_search_input,
                 cloud_pay: None,
                 cloud_pay_request: false,

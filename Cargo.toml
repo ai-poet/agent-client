@@ -8,6 +8,7 @@ license = "GPL-3.0-only"
 [workspace]
 members = [
     "crates/sub2api",
+    "crates/workflow-engine",
     "crates/waku-client",
     "crates/waku-core",
     "crates/waku-daemon",
@@ -16,6 +17,7 @@ members = [
 default-members = [
     ".",
     "crates/sub2api",
+    "crates/workflow-engine",
     "crates/waku-client",
     "crates/waku-core",
     "crates/waku-daemon",
@@ -48,6 +50,7 @@ rquickjs = "0.12.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sub2api = { path = "crates/sub2api" }
+workflow-engine = { path = "crates/workflow-engine" }
 unicode-segmentation = "1.12"
 url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }
