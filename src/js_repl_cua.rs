@@ -413,6 +413,7 @@ impl CuaAdapter {
             let rows = apps.as_deref().expect("listed above");
             candidates = match_windows_by_app_name(query, rows, &windows, false);
         }
+        let launched: Vec<WindowRow>;
         if candidates.is_empty() {
             // Nothing running answers to that name: launch it, the way the
             // macOS helper launches an installed app on first use. Only an
@@ -426,7 +427,8 @@ impl CuaAdapter {
                      sky.list_apps() to see what is running and installed"
                 );
             };
-            candidates = self.launch(launch, deadline)?;
+            launched = self.launch(launch, deadline)?;
+            candidates = launched.iter().collect();
         }
 
         let Some(window) = pick_window(&candidates) else {
@@ -854,8 +856,9 @@ impl CuaAdapter {
         self.with_target(&app, deadline, |this, target| {
             // The driver types characters only; a line break is the Return
             // key, which is what `sky.type_text` promises for "\n".
+            let normalized = text.replace("\r\n", "\n");
             let mut first = true;
-            for segment in text.split(['\n', '\r']).filter(|s| !(s.is_empty() && first) || true) {
+            for segment in normalized.split(['\n', '\r']) {
                 if !first {
                     this.act(
                         target,
@@ -1457,7 +1460,7 @@ fn is_masked(value: &str) -> bool {
         if character.is_whitespace() {
             continue;
         }
-        if !matches!(character, '•' | '●' | '*' | '·' | '○' | '\u{25CF}' | '\u{2022}') {
+        if !matches!(character, '•' | '●' | '*' | '·' | '○') {
             return false;
         }
         glyphs += 1;
