@@ -6,6 +6,8 @@ target
 # six figures of files to a repo that has nothing to do with it.
 old-code/
 cc-switch-main/
+codeg-main/
+claurst-main/
 
 .DS_Store
 *.log

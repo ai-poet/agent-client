@@ -28,12 +28,17 @@ pub(super) fn start_driver(
     mut request: DriverStartRequest,
     cwd: PathBuf,
 ) -> anyhow::Result<PreparedDriver> {
-    // Fork addition: a warm start already booting for this session hands its
-    // process over instead of a second one being spawned.
-    if let Some(handoff) = request.prewarmed.take()
-        && let Some(prepared) = super::runtime_prewarm::await_prewarmed_driver(handoff)
-    {
-        return prepared;
+    // Fork addition: a warm process for this session is taken over instead
+    // of a second one being spawned. One still booting is waited for; the
+    // wait giving up falls through to an ordinary start.
+    match request.prewarmed.take() {
+        Some(super::runtime_prewarm::PrewarmClaim::Ready(prepared)) => return Ok(prepared),
+        Some(super::runtime_prewarm::PrewarmClaim::InFlight(handoff)) => {
+            if let Some(prepared) = super::runtime_prewarm::await_prewarmed_driver(handoff) {
+                return prepared;
+            }
+        }
+        None => {}
     }
     request.options.cwd = cwd;
     let (event_tx, events) = driver::event_channel(request.event_wake);
@@ -3222,11 +3227,11 @@ impl Waku {
                 .unwrap_or_default();
             self.driver_start_request_for_session(session, provisional_cwd)
         });
-        // Fork addition: a warm start already in flight hands its process to
-        // this submission rather than a second one booting beside it.
+        // Fork addition: a warm process for this session is handed to this
+        // submission rather than a second one booting beside it.
         let driver_start = driver_start.map(|request| {
             request.map(|mut request| {
-                request.prewarmed = self.take_prewarm_handoff(session_id);
+                request.prewarmed = self.take_prewarm_claim(session_id);
                 request
             })
         });
@@ -3474,11 +3479,7 @@ impl Waku {
         let driver_prompt = self.resolve_provider_submission(provider, &prompt);
         let mut failed_to_start = false;
         match driver {
-            Ok(driver) => {
-                // Fork addition: a warmed runtime is a working one from here.
-                self.note_runtime_prompted(session_id);
-                driver.prompt(driver_prompt)
-            }
+            Ok(driver) => driver.prompt(driver_prompt),
             Err(error) => {
                 failed_to_start = true;
                 let message = tr!("errors.start_agent", error = error);
