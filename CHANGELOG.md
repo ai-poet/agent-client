@@ -16,6 +16,11 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.1.20]
+
+- Fix the app reacting to a draft before it is sent: typing in the composer could make the task appear in the sidebar, replace the empty state, and raise a "Waku daemon disconnected" notice once per few characters. The provider is still warmed up while you type, but nothing about the session changes until you press Enter, and a warm process started for a different model or mode is discarded rather than used
+- An agent that ends a turn without answering now says so: a turn that produces nothing reports whatever the agent wrote to its error output, with the reason on the task's failure badge, instead of the bare "Turn completed" line
+
 ## [0.1.19]
 
 - Terminal, Files, Browser and Review buttons now sit in the window header: one click opens the surface, switches to its tab, or hides the panel when it is already in front. Shortcuts ⇧⌘T / E / O / D (Ctrl+Shift on Windows and Linux), plus View-menu and command-palette entries; the old right-panel toggle button is gone (⇧⌘B still toggles the panel)
