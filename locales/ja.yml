@@ -649,6 +649,7 @@ errors.remote_project_picker: デーモンホスト上のプロジェクトを�
 
 session.stopped: 停止しました
 session.turn_completed: ターンが完了しました
+session.agent_returned_nothing: "エージェントは応答を返さずにターンを終了し、エラーも報告しませんでした。CLI 自身のログに手がかりがあるかもしれません。"
 session.stopped_before_response: エージェントは回答を返す前に停止しました
 session.codex_exited_before_response: Codex app-server は回答を返す前に終了しました
 session.steer_rejected: エージェントに追加の指示を送れませんでした（%{error}）。メッセージはフォローアップとしてキューに追加されました

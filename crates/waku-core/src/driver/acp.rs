@@ -30,6 +30,8 @@ use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 
 use super::activity;
+// Fork addition: an empty turn's cause, read from the agent's own trace.
+use super::turn_diagnosis::{ProviderStderr, empty_turn_failure};
 use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
@@ -151,7 +153,7 @@ impl AcpDriver {
             .as_ref()
             .and_then(super::support::HeadlessComputerUseRuntime::grok_home)
             .map(ToOwned::to_owned);
-        let stderr_lines = Arc::new(Mutex::new(Vec::<String>::new()));
+        let stderr_lines = Arc::new(Mutex::new(ProviderStderr::default()));
         let agent = sdk_agent(
             &binary,
             &cwd,
@@ -186,9 +188,10 @@ impl AcpDriver {
                     grok_title_home,
                     command_rx,
                     thread_events.clone(),
+                    stderr_lines.clone(),
                 ));
                 if let Err(error) = result {
-                    let stderr = super::support::provider_stderr_error(stderr_lines.lock().clone());
+                    let stderr = super::support::provider_stderr_error(stderr_lines.lock().tail());
                     let detail = stderr.unwrap_or_else(|| error.to_string());
                     let _ = thread_events
                         .send(DriverEvent::Error(format!("{provider_name}: {detail}")));
@@ -212,7 +215,7 @@ fn sdk_agent(
     cwd: &Path,
     mut launch: AcpLaunch,
     computer_use: Option<&super::support::HeadlessComputerUseConfig>,
-    stderr_lines: Arc<Mutex<Vec<String>>>,
+    stderr_lines: Arc<Mutex<ProviderStderr>>,
 ) -> anyhow::Result<AcpAgent> {
     let binary = binary
         .to_str()
@@ -237,7 +240,10 @@ fn sdk_agent(
     // `/usr/bin/env node` shebang needing `node` on the child's `PATH`) only
     // work when the agent runs with the directories Waku itself searched.
     if let Some(search_path) = crate::command_env::child_search_path(Path::new(binary)) {
-        environment.push(("PATH".to_owned(), search_path.to_string_lossy().into_owned()));
+        environment.push((
+            "PATH".to_owned(),
+            search_path.to_string_lossy().into_owned(),
+        ));
     }
     environment.append(&mut launch.env);
     environment.extend(computer_env);
@@ -265,11 +271,7 @@ fn sdk_agent(
         if direction != LineDirection::Stderr || line.trim().is_empty() {
             return;
         }
-        let mut lines = stderr_lines.lock();
-        if lines.len() == 128 {
-            lines.remove(0);
-        }
-        lines.push(line.to_owned());
+        stderr_lines.lock().push(line.to_owned());
     }))
 }
 
@@ -285,7 +287,13 @@ pub(crate) fn catalog_agent(
     cwd: &Path,
 ) -> anyhow::Result<AcpAgent> {
     let launch = launch_for(provider, None)?;
-    sdk_agent(binary, cwd, launch, None, Arc::new(Mutex::new(Vec::new())))
+    sdk_agent(
+        binary,
+        cwd,
+        launch,
+        None,
+        Arc::new(Mutex::new(ProviderStderr::default())),
+    )
 }
 
 type PermissionResponder = Responder<RequestPermissionResponse>;
@@ -368,6 +376,7 @@ async fn run_sdk_connection(
     grok_title_home: Option<std::path::PathBuf>,
     commands: smol::channel::Receiver<CommandMessage>,
     events: DriverEventSender,
+    stderr_lines: Arc<Mutex<ProviderStderr>>,
 ) -> agent_client_protocol::Result<()> {
     let suppress_session_updates = Arc::new(AtomicBool::new(false));
     let stream_state = Arc::new(Mutex::new(AcpStreamState::default()));
@@ -405,12 +414,16 @@ async fn run_sdk_connection(
                 let prompt_requests = prompt_requests.clone();
                 let grok_title_home = grok_title_home.clone();
                 let title_refresh = title_refresh.clone();
+                let stream_state = stream_state.clone();
+                let stderr_lines = stderr_lines.clone();
                 async move |notification: UntypedMessage, _connection| {
                     if notification.method() == "_x.ai/session/prompt_complete" {
                         if let Some(session_id) = finish_xai_prompt_complete(
                             notification.params(),
                             &prompt_requests,
                             &events,
+                            &stream_state,
+                            &stderr_lines,
                         ) {
                             start_grok_title_refresh(
                                 grok_title_home.as_deref(),
@@ -577,6 +590,7 @@ async fn run_sdk_connection(
                             grok_title_home.clone(),
                             title_refresh.clone(),
                             stream_state.clone(),
+                            stderr_lines.clone(),
                         ) {
                             let _ = events.send(DriverEvent::Error(error.to_string()));
                             let _ = events.send(DriverEvent::TurnFinished {
@@ -607,6 +621,7 @@ async fn run_sdk_connection(
                             grok_title_home.clone(),
                             title_refresh.clone(),
                             stream_state.clone(),
+                            stderr_lines.clone(),
                         ) {
                             Ok(()) => {
                                 let _ = events.send(DriverEvent::SteerAccepted { message: text });
@@ -1174,12 +1189,17 @@ fn send_prompt(
     grok_title_home: Option<std::path::PathBuf>,
     title_refresh: super::title_refresh::NativeTitleRefresh,
     stream_state: Arc<Mutex<AcpStreamState>>,
+    stderr_lines: Arc<Mutex<ProviderStderr>>,
 ) -> agent_client_protocol::Result<()> {
-    stream_state.lock().produced_content = false;
-    // Read before the turn runs, so the failure lookup cannot mistake an
-    // earlier turn's record for this one's.
-    let wire_offset = (provider == ProviderKind::Kimi)
-        .then(|| crate::kimi_session::wire_offset(native_session_id));
+    {
+        // Read before the turn runs, so a diagnosis cannot mistake an earlier
+        // turn's evidence for this one's.
+        let mut state = stream_state.lock();
+        state.produced_content = false;
+        state.stderr_mark = stderr_lines.lock().mark();
+        state.wire_offset = (provider == ProviderKind::Kimi)
+            .then(|| crate::kimi_session::wire_offset(native_session_id));
+    }
     let extension_id =
         (provider == ProviderKind::Grok).then(|| format!("waku-{}", uuid::Uuid::new_v4()));
     let mut request = PromptRequest::new(
@@ -1205,12 +1225,20 @@ fn send_prompt(
     let native_session_id = native_session_id.to_owned();
     let registered = sent.on_receiving_result(async move |result| {
         if settle_prompt_request(&callback_requests, &callback_request_id) {
-            // Only an empty turn pays for this lookup, so a healthy turn never
-            // waits on Kimi's records.
-            let native_failure = wire_offset
-                .filter(|_| !stream_state.lock().produced_content)
-                .and_then(|offset| crate::kimi_session::turn_failure(&native_session_id, offset));
-            let success = finish_prompt(result, native_failure, &callback_events);
+            let (produced_content, stderr_mark, wire_offset) = {
+                let state = stream_state.lock();
+                (state.produced_content, state.stderr_mark, state.wire_offset)
+            };
+            let native_failure = (!produced_content)
+                .then(|| {
+                    empty_turn_failure(
+                        &stderr_lines,
+                        stderr_mark,
+                        wire_offset.map(|offset| (native_session_id.as_str(), offset)),
+                    )
+                })
+                .flatten();
+            let success = finish_prompt(result, native_failure, produced_content, &callback_events);
             if provider == ProviderKind::Grok && success {
                 start_grok_title_refresh(
                     grok_title_home.as_deref(),
@@ -1236,6 +1264,8 @@ fn finish_xai_prompt_complete(
     params: &Value,
     prompt_requests: &Mutex<PendingPrompts>,
     events: &DriverEventSender,
+    stream_state: &Mutex<AcpStreamState>,
+    stderr_lines: &Mutex<ProviderStderr>,
 ) -> Option<String> {
     let Some(session_id) = params.get("sessionId").and_then(Value::as_str) else {
         return None;
@@ -1255,7 +1285,26 @@ fn finish_xai_prompt_complete(
         Some("refusal") => StopReason::Refusal,
         _ => StopReason::EndTurn,
     };
-    finish_prompt(Ok(PromptResponse::new(stop_reason)), None, events).then(|| session_id.to_owned())
+    let (produced_content, stderr_mark, wire_offset) = {
+        let state = stream_state.lock();
+        (state.produced_content, state.stderr_mark, state.wire_offset)
+    };
+    let native_failure = (!produced_content)
+        .then(|| {
+            empty_turn_failure(
+                stderr_lines,
+                stderr_mark,
+                wire_offset.map(|offset| (session_id, offset)),
+            )
+        })
+        .flatten();
+    finish_prompt(
+        Ok(PromptResponse::new(stop_reason)),
+        native_failure,
+        produced_content,
+        events,
+    )
+    .then(|| session_id.to_owned())
 }
 
 fn start_grok_title_refresh(
@@ -1289,6 +1338,7 @@ fn start_grok_title_refresh(
 fn finish_prompt(
     result: agent_client_protocol::Result<PromptResponse>,
     native_failure: Option<String>,
+    produced_content: bool,
     events: &impl DriverEventSink,
 ) -> bool {
     let response = match result {
@@ -1315,6 +1365,13 @@ fn finish_prompt(
         return false;
     }
     let (success, summary) = match response.stop_reason {
+        // A turn that ends normally having sent nothing at all is reported as
+        // what it is. Upstream's fallback line for an empty turn is "Turn
+        // completed", which reads as success and leaves the user with nothing
+        // to go on; nothing above found a cause, so say that too.
+        StopReason::EndTurn if !produced_content => {
+            (true, Some(tr!("session.agent_returned_nothing")))
+        }
         StopReason::EndTurn | StopReason::Cancelled => (true, None),
         StopReason::MaxTokens => (false, Some(tr!("session.agent_ran_out_of_context"))),
         StopReason::Refusal => (false, Some(tr!("session.agent_declined_turn"))),
@@ -1795,6 +1852,10 @@ struct AcpStreamState {
     /// ends having produced nothing is the shape a swallowed provider error
     /// takes, which is what makes a native failure worth looking up.
     produced_content: bool,
+    /// Where this turn's stderr starts, so a diagnosis reads only its own.
+    stderr_mark: usize,
+    /// Where this turn's record starts in Kimi's wire log, when it keeps one.
+    wire_offset: Option<u64>,
 }
 
 /// Pull the agent's explanation out of a permission request's tool call.
@@ -2318,6 +2379,8 @@ mod tests {
                 }),
                 &requests,
                 &events,
+                &spoke(true),
+                &Mutex::new(ProviderStderr::default()),
             ),
             Some("grok-session".into())
         );
@@ -2332,6 +2395,36 @@ mod tests {
         assert!(event_rx.try_recv().is_err());
     }
 
+    /// A stream state that says whether the turn produced anything.
+    fn spoke(produced_content: bool) -> Mutex<AcpStreamState> {
+        Mutex::new(AcpStreamState {
+            produced_content,
+            ..AcpStreamState::default()
+        })
+    }
+
+    /// The reported shape: Grok Build ends the turn cleanly, sends nothing,
+    /// and the user is told "Turn completed" with no way to tell what broke.
+    #[test]
+    fn an_empty_clean_turn_says_so_instead_of_reporting_plain_success() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+
+        assert!(finish_prompt(
+            Ok(PromptResponse::new(StopReason::EndTurn)),
+            None,
+            false,
+            &events
+        ));
+
+        let DriverEvent::TurnFinished { success, summary } = event_rx.try_recv().unwrap() else {
+            panic!("expected the turn to finish");
+        };
+        assert!(success);
+        let summary = summary.expect("an empty turn explains itself");
+        assert_ne!(summary, tr!("session.turn_completed"));
+        assert!(!summary.trim().is_empty());
+    }
+
     /// Kimi ends a failed turn with `end_turn` and no content at all, so the
     /// provider's own record is the only thing that can name the cause.
     #[test]
@@ -2341,6 +2434,7 @@ mod tests {
         assert!(!finish_prompt(
             Ok(PromptResponse::new(StopReason::EndTurn)),
             Some("402 membership inactive".to_owned()),
+            false,
             &events
         ));
 
@@ -2363,6 +2457,7 @@ mod tests {
         assert!(finish_prompt(
             Ok(PromptResponse::new(StopReason::EndTurn)),
             None,
+            true,
             &events
         ));
         assert!(matches!(

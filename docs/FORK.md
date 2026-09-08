@@ -66,6 +66,8 @@ lines below.
 | `src/app/task_switcher.rs` | failed-task glyph is `circle-x` | 1 |
 | `crates/waku-core/src/driver/claude.rs` | spawn uses `command_for_provider(.., "claude")` | 1 |
 | `crates/waku-core/src/driver/codex.rs` | same, at both spawn sites (session + title turn) | 2 |
+| `crates/waku-core/src/driver/mod.rs` | `mod turn_diagnosis;` | 2 |
+| `crates/waku-core/src/driver/acp.rs` | the captured stderr is a `turn_diagnosis::ProviderStderr` ring instead of a bare `Vec` (its 128-line cap moves into that type), threaded into `run_sdk_connection`, `send_prompt` and the `_x.ai/session/prompt_complete` handler; `AcpStreamState` records this turn's `stderr_mark` and `wire_offset`; both prompt-settle paths call `turn_diagnosis::empty_turn_failure` (generalizing the Kimi-only lookup) and pass `produced_content` to `finish_prompt`, whose `EndTurn` arm now names an empty turn instead of leaving upstream's "Turn completed" fallback | ~117 |
 | `src/app.rs` | fork `mod` lines, `SettingsPage::{CloudAccount, ModelPlaza, CloudUsage}`, fork struct fields + initializers (cloud account, cli setup, custom API inputs, plaza, pay modal, confirm dialog, onboarding, runtime prewarms), `DriverStartRequest.prewarmed`, `init_confirm_dialog_keys` re-export, startup refresh loop (also kicks off CLI detection and loads onboarding state), `subscribe_custom_api_inputs` beside the other input subscriptions, `maybe_prewarm_selected_runtime` in the composer's `Edited` arm; `update_ui` field + `on_updater_event` call in `handle_updater_event`; `mod surface_bar` and its `surface_key_bindings` / `surface_menu_items` re-export | ~96 |
 | `src/app/render.rs` | pay-modal, announcements-modal and confirm-dialog composites in both render branches; onboarding strip above the composer; update banner above the header (main) and above the settings page (settings branch is now a flex column); `open_surface_action` registered beside `toggle_right_panel_action` | ~23 |
 | `src/app/tests.rs` | `settings_search_filters_pages_for_arrow_cycling` expects the fork's nav pages | 3 |
@@ -107,6 +109,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `src/app/providers_page.rs`, `src/app/confirm_dialog.rs`,
 `src/app/onboarding.rs`, `src/app/message_resend.rs`, `src/app/task_rows.rs`,
 `src/app/runtime_prewarm.rs`, `src/app/update_banner.rs`, `src/app/surface_bar.rs`,
+`crates/waku-core/src/driver/turn_diagnosis.rs`,
 `src/app/cloud_usage.rs`, `src/app/model_plaza.rs`, `src/app/cloud_pay.rs`,
 `src/app/announcements.rs`, `assets/icons/{bell,circle-x,store,wallet}.svg`,
 `NOTICE.md`, `docs/FORK.md`.

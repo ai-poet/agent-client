@@ -1264,6 +1264,8 @@ session.stopped:
   en: Stopped
 session.turn_completed:
   en: Turn completed
+session.agent_returned_nothing:
+  en: "The agent ended the turn without sending a response, and reported no error. Its own log may say more."
 session.stopped_before_response:
   en: The agent stopped before returning a response
 session.codex_exited_before_response:
