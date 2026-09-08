@@ -9,8 +9,8 @@ polled off disk, and the one Waku generates itself — is in
 [titles.md](titles.md).
 
 Every provider is reached through the same driver abstraction in
-[driver/mod.rs](../crates/waku-core/src/driver/mod.rs). There are seven
-transport implementations behind eleven providers, and **every one of them holds a
+[driver/mod.rs](../crates/waku-core/src/driver/mod.rs). There are eight
+transport implementations behind twelve providers, and **every one of them holds a
 session that spans the whole conversation**:
 
 | Transport | File | Providers |
@@ -22,6 +22,7 @@ session that spans the whole conversation**:
 | Claude streaming-input session (NDJSON over stdio) | [driver/claude.rs](../crates/waku-core/src/driver/claude.rs) | Claude Code |
 | Amp streaming-JSON session (NDJSON over stdio) | [driver/amp.rs](../crates/waku-core/src/driver/amp.rs) | Amp |
 | Harness client API (typed HTTP + downlink streams) | [driver/deepseek.rs](../crates/waku-core/src/driver/deepseek.rs) | DeepSeek Harness |
+| In-process library call (no transport at all) | [driver/native.rs](../crates/waku-core/src/driver/native.rs) | Waku Agent |
 
 DeepSeek Harness has no dedicated section below yet; its driver's module
 comment is the current reference.
@@ -778,6 +779,82 @@ independent, so the ACP session reuses the same builder the headless driver used
 (`--permission-mode dontAsk` existed because the one-shot stream had no response
 channel), Cursor's no longer means `--force`, and **Cursor streams reasoning**,
 which its `--print` transport did not emit at all.
+
+---
+
+## Waku Agent (the built-in one)
+
+**Launch** — none. The engine is compiled into the daemon
+([crates/waku-agent](../crates/waku-agent), vendored from Claurst; driven by
+[waku-agent-bridge](../crates/waku-agent-bridge)). `DriverStartOptions::binary`
+is unused, `ProviderKind::is_builtin` is true, and every detection, install and
+PATH-probing path is skipped rather than satisfied with a placeholder.
+
+**Protocol** — a function call:
+
+```rust
+run_query_loop(client, messages: &mut Vec<Message>, tools, ctx, config, events, cancel, …)
+```
+
+Everything below follows from that signature, and it is why this provider needs
+no negotiation for the things the CLIs have to be asked for.
+
+**Lifetime** — the session outlives every turn, like the others. There is no
+process to close stdin against; dropping the driver cancels any running turn
+and releases anything blocked on an approval.
+
+**The conversation belongs to Waku.** The loop takes `&mut Vec<Message>`, so
+the driver holds the transcript and hands the loop a working copy per turn.
+Rewind is a truncation, branch is a clone-and-truncate, and resume is a file
+read — see [driver/native.rs](../crates/waku-core/src/driver/native.rs) and
+`waku-agent-bridge/src/history.rs`. A turn boundary is a user message carrying
+no tool result, so rewinding one turn can never split a `tool_use` from its
+`tool_result`.
+
+Transcripts live beside the daemon's state database, in `agent-sessions/`,
+one JSON file per session, written atomically after each turn and owner-only on
+Unix. `ProviderResumeCursor::Native` names that file and nothing else: unlike
+every other cursor here it points at no provider-side session, because the
+engine keeps none.
+
+**Per turn** — a fresh `QueryConfig`. Model, reasoning effort and access mode
+are read at the start of every turn, so `apply_options` always returns true and
+no option change can require a restart.
+
+**Inbound stream** — `QueryEvent`, decoded by
+`waku-agent-bridge/src/events.rs`:
+
+| `QueryEvent` | Becomes |
+| --- | --- |
+| `Stream(MessageStart)` | `TurnStarted`, once per prompt rather than per model step |
+| `Stream(ContentBlockDelta{text})` | `TextDelta` |
+| `Stream(ContentBlockDelta{thinking})` | `ReasoningDelta` |
+| `ToolStart` / `ToolEnd` | `RichActivity`, correlated by tool id |
+| `TurnComplete { usage }` | `UsageUpdated` — real token counts, not an estimate |
+| `Status` | dropped — it is the TUI's spinner line, not assistant content |
+
+**Approvals** — the engine's `PermissionManager` decides first: it already
+resolves mode, persistent and session rules, read/write levels and workspace
+boundaries. Only what it reports as undecided becomes a `Permission` event.
+Answering "always" writes a rule back through that same manager, so it persists
+and is visible to the Permissions settings page rather than evaporating with
+the session.
+
+The handler blocks the calling task until the answer arrives, inside
+`tokio::task::block_in_place` so the worker's other tasks move to another
+thread. That is why the runtime is multi-threaded, and why `cancel` releases
+every waiter — a dialog must never outlive the turn that raised it.
+
+**Steer** — the engine's command queue, drained at each turn boundary. The
+message therefore lands after the tools now running finish and before the next
+request goes out; `SteerAccepted` is reported when the queue is observed
+drained, and anything still queued when the turn ends is reported as
+`SteerRejected` so Waku's own follow-up queue takes it.
+
+**Commit messages** — not offered. `agent_arguments` has no command line to
+build for a provider that is not a process, and `commit_dialog` only builds an
+`AgentInvocation` when the provider probe yields a binary. Generating one in
+process is a different shape of call and is deliberately not done here.
 
 ---
 

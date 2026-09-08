@@ -924,6 +924,8 @@ permission.allow_for_session:
   en: Allow for session
 permission.always_allow:
   en: Always allow
+permission.always_deny:
+  en: Always deny
 permission.a_tool:
   en: a tool
 permission.run_a_tool:
@@ -2370,6 +2372,8 @@ cli_setup.hint_network:
   en: "The registry could not be reached. Check the network or proxy, then retry"
 providers.status_installed:
   en: "Installed"
+providers.built_in:
+  en: "Built in - nothing to install"
 providers.status_not_runnable:
   en: "Installed, but it does not run"
 providers.route_title:
@@ -2441,19 +2445,13 @@ cli_setup.env_conflict_copy_unset:
 cli_setup.env_conflict_copied:
   en: "Command copied"
 onboarding.checklist_title:
-  en: "Three steps to get going"
+  en: "Two steps to get going"
 onboarding.progress:
   en: "%{done} / %{total}"
 onboarding.step_sign_in:
   en: "Sign in to your %{name} account"
-onboarding.step_install_cli:
-  en: "Install an agent CLI"
 onboarding.step_first_message:
   en: "Open a project and send your first message"
-onboarding.install_defaults:
-  en: "Install Claude Code + Codex"
-onboarding.open_providers:
-  en: "Provider settings"
 onboarding.write_first_message:
   en: "Write a message"
 onboarding.later:

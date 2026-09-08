@@ -25,7 +25,13 @@ pub const LEGACY_SETTINGS_KEY: &str = "sub2apiCustomApi";
 
 /// The CLIs a custom endpoint can be set for, in display order — the
 /// intersection of what this app runs and what cc-switch manages.
-pub const CUSTOM_API_PROVIDERS: [&str; 5] = ["claude", "codex", "grok", "opencode", "pi"];
+/// Providers whose routing the user can point somewhere else.
+///
+/// `native` is the built-in agent. It is the only entry that is not a CLI -
+/// nothing is written to a config file on its behalf; the driver reads the
+/// endpoint directly at session start.
+pub const CUSTOM_API_PROVIDERS: [&str; 6] =
+    ["native", "claude", "codex", "grok", "opencode", "pi"];
 
 /// One CLI's endpoint override.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -301,6 +307,11 @@ where
 /// profiles and the one in use.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CustomApiConfig {
+    /// The built-in agent. Listed first because it is the default provider,
+    /// and the only one whose endpoint is read at session start rather than
+    /// written into some CLI's own configuration file.
+    #[serde(default, deserialize_with = "deserialize_slot")]
+    pub native: ProviderProfiles,
     #[serde(default, deserialize_with = "deserialize_slot")]
     pub claude: ProviderProfiles,
     #[serde(default, deserialize_with = "deserialize_slot")]
@@ -323,6 +334,7 @@ impl CustomApiConfig {
     /// One CLI's profiles. `None` for ids this feature does not cover.
     pub fn profiles(&self, provider_id: &str) -> Option<&ProviderProfiles> {
         match provider_id {
+            "native" => Some(&self.native),
             "claude" => Some(&self.claude),
             "codex" => Some(&self.codex),
             "grok" => Some(&self.grok),
@@ -334,6 +346,7 @@ impl CustomApiConfig {
 
     pub fn profiles_mut(&mut self, provider_id: &str) -> Option<&mut ProviderProfiles> {
         match provider_id {
+            "native" => Some(&mut self.native),
             "claude" => Some(&mut self.claude),
             "codex" => Some(&mut self.codex),
             "grok" => Some(&mut self.grok),

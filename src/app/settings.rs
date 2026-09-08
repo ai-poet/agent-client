@@ -1617,11 +1617,17 @@ impl Waku {
         let provider_count = ProviderKind::ALL.len();
         for (index, kind) in ProviderKind::ALL.into_iter().enumerate() {
             let probe = self.provider_probe(kind);
-            let installed = probe.is_some_and(|probe| probe.installed);
-            let binary_path = probe
-                .filter(|probe| probe.installed)
-                .and_then(|probe| probe.path.as_deref())
-                .map(|path| abbreviate_home_path(path, self.home_directory.as_deref()));
+            // A built-in provider is present by construction; there is no
+            // probe result that could say otherwise, and no path to show.
+            let installed = kind.is_builtin() || probe.is_some_and(|probe| probe.installed);
+            let binary_path = (!kind.is_builtin())
+                .then(|| {
+                    probe
+                        .filter(|probe| probe.installed)
+                        .and_then(|probe| probe.path.as_deref())
+                        .map(|path| abbreviate_home_path(path, self.home_directory.as_deref()))
+                })
+                .flatten();
             let model_count = probe.map(|probe| probe.models.len()).unwrap_or(0);
             let version = self
                 .provider_versions

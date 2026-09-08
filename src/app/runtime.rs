@@ -563,7 +563,11 @@ fn perform_provider_rewind(
                 .cursor;
             Ok((Some(cursor), None, None))
         }
-        ProviderKind::Codex | ProviderKind::DeepSeek | ProviderKind::OhMyPi | ProviderKind::Pi => {
+        ProviderKind::Codex
+        | ProviderKind::DeepSeek
+        | ProviderKind::Native
+        | ProviderKind::OhMyPi
+        | ProviderKind::Pi => {
             let mut prepared_driver = None;
             let driver = if let Some(driver) = request.driver.as_ref() {
                 driver.clone()
@@ -840,6 +844,13 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
                     None,
                     None,
                 ))
+            }
+            // The built-in agent's branch is a copy of a transcript Waku
+            // already holds, so unlike the CLIs there is no native session
+            // file to check for first.
+            ProviderKind::Native => {
+                let (cursor, prepared_driver) = fork_response_with_driver(&mut request)?;
+                Ok((cursor, None, prepared_driver))
             }
             ProviderKind::Pi => {
                 if !matches!(
@@ -1907,7 +1918,11 @@ impl Waku {
         }
         let driver_start = if matches!(
             provider,
-            ProviderKind::Codex | ProviderKind::DeepSeek | ProviderKind::OhMyPi | ProviderKind::Pi
+            ProviderKind::Codex
+                | ProviderKind::DeepSeek
+                | ProviderKind::Native
+                | ProviderKind::OhMyPi
+                | ProviderKind::Pi
         ) && driver.is_none()
         {
             match self.driver_start_request_for_session(&source, source_workspace_path.clone()) {
@@ -2282,6 +2297,7 @@ impl Waku {
                 source.provider,
                 ProviderKind::Codex
                     | ProviderKind::DeepSeek
+                    | ProviderKind::Native
                     | ProviderKind::OhMyPi
                     | ProviderKind::Pi
             )
@@ -2706,17 +2722,24 @@ impl Waku {
         session: &AgentSession,
         cwd: PathBuf,
     ) -> anyhow::Result<DriverStartRequest> {
-        let binary = self
-            .probes
-            .iter()
-            .find(|probe| probe.provider == session.provider)
-            .and_then(|probe| probe.path.clone())
-            .ok_or_else(|| {
-                anyhow::anyhow!(tr!(
-                    "errors.provider_not_found",
-                    provider = session.provider.display_name()
-                ))
-            })?;
+        // A built-in provider has nothing on disk to find, so the check that
+        // would otherwise refuse to start it is skipped rather than satisfied
+        // with a placeholder path. `DriverStartOptions::binary` is simply
+        // unused on that path — see `driver::native`.
+        let binary = if session.provider.is_builtin() {
+            PathBuf::new()
+        } else {
+            self.probes
+                .iter()
+                .find(|probe| probe.provider == session.provider)
+                .and_then(|probe| probe.path.clone())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(tr!(
+                        "errors.provider_not_found",
+                        provider = session.provider.display_name()
+                    ))
+                })?
+        };
         let agent_preset = self.agent_preset_for_session(session);
         let SessionOptions {
             mode,

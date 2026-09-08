@@ -90,6 +90,18 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // configured LLM providers. A fabricated fallback would make
         // unavailable models look selectable.
         ProviderKind::Kimi | ProviderKind::OhMyPi | ProviderKind::Pi => Vec::new(),
+        // The built-in agent reaches the same Anthropic API, so it offers the
+        // same ladder — but not the context-window choice: the 1M window is
+        // reached through Claude Code's `[1m]` model-id suffix, which is a
+        // trait of that CLI and not of the API.
+        ProviderKind::Native => vec![
+            claude_ultracode_model("claude-fable-5-1", "Claude Fable 5.1"),
+            claude_ultracode_model("claude-opus-5", "Claude Opus 5"),
+            claude_ultracode_model("claude-sonnet-5", "Claude Sonnet 5").default(),
+            claude_reasoning_model("claude-opus-4-6", "Claude Opus 4.6"),
+            claude_reasoning_model("claude-sonnet-4-6", "Claude Sonnet 4.6"),
+            ProviderModel::new("claude-haiku-4-5", "Claude Haiku 4.5"),
+        ],
     }
 }
 
@@ -131,6 +143,11 @@ pub fn discover_catalog(
         ProviderKind::Kimi => (discover_kimi_models(binary), None),
         ProviderKind::Pi => (discover_pi_models(binary, PiDialect::Pi), None),
         ProviderKind::OhMyPi => (discover_pi_models(binary, PiDialect::OhMyPi), None),
+        // No binary to probe. What the built-in agent can actually reach is
+        // decided by the signed-in account, so its catalog comes from the
+        // gateway rather than from a CLI listing; until that lands the
+        // fallback below is the whole picker.
+        ProviderKind::Native => (Vec::new(), None),
     };
     let models = if discovered.is_empty() {
         // A failed or empty probe keeps the last successful discovery over

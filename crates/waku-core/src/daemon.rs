@@ -476,6 +476,9 @@ impl Backend for WakuBackend {
                     ProviderKind::OhMyPi | ProviderKind::Pi => {
                         crate::pi_session::list_provider_sessions(provider, limit)?
                     }
+                    // Nothing to import: the built-in agent has no session
+                    // store of its own. Waku's task list is the only one.
+                    ProviderKind::Native => Vec::new(),
                 };
                 sessions.sort_by(|a, b| {
                     b.updated_at
@@ -1132,6 +1135,7 @@ impl WakuBackend {
             }
             ProviderKind::Codex
             | ProviderKind::DeepSeek
+            | ProviderKind::Native
             | ProviderKind::OhMyPi
             | ProviderKind::Pi => Ok((
                 self.fork_response_with_driver(source, cwd, turns_to_remove)?,
@@ -1386,6 +1390,7 @@ impl WakuBackend {
             }
             ProviderKind::Codex
             | ProviderKind::DeepSeek
+            | ProviderKind::Native
             | ProviderKind::OhMyPi
             | ProviderKind::Pi => Ok((
                 self.rollback_response_with_driver(source, cwd, binary, rollback_turns)?,
@@ -1442,6 +1447,12 @@ impl WakuBackend {
     }
 
     fn provider_binary(&self, provider: ProviderKind) -> anyhow::Result<PathBuf> {
+        // Nothing to look for, and nothing to fail on. Callers pass the result
+        // straight into `DriverStartOptions::binary`, which the built-in
+        // driver ignores.
+        if provider.is_builtin() {
+            return Ok(PathBuf::new());
+        }
         ensure_shell_environment();
         let settings = self.settings.get();
         let binary_override = settings

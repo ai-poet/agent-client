@@ -44,6 +44,10 @@ pub(crate) fn discover(
         | ProviderKind::DeepSeek
         | ProviderKind::Fx
         | ProviderKind::Grok
+        // The built-in agent has no binary to interrogate: its commands are
+        // compiled in, and the file-backed ones are picked up by
+        // `assemble_slash_commands` like every other provider's.
+        | ProviderKind::Native
         | ProviderKind::Kimi => None,
     }
 }

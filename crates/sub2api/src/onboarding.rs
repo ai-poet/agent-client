@@ -1,13 +1,18 @@
-//! The first-run checklist's state: three steps, what "done" means for each,
+//! The first-run checklist's state: two steps, what "done" means for each,
 //! and whether the card should show at all.
 //!
-//! Fork addition. The README promises "三步上手" — sign in, install a CLI,
-//! open a project and send a message — and this is the in-app form of it.
+//! Fork addition. It used to be three — sign in, install a CLI, send a
+//! message — because every agent Waku could drive was a Node package the user
+//! had to install first. The built-in agent removed that step rather than
+//! automating it: there is nothing to install, so the checklist stops asking.
+//! Installing an external CLI is still possible, but it now belongs in
+//! Settings → Providers as a choice, not in the path to a first message.
+//!
 //! Everything here is pure; the desktop feeds it what it already knows
-//! (signed in? any provider detected? any user message anywhere?) and
-//! renders the answer. Only the dismissal and the completion are persisted,
-//! in `~/.cheaprouter/onboarding.json`, so the card stays gone once the user
-//! has either finished or said "later".
+//! (signed in? any user message anywhere?) and renders the answer. Only the
+//! dismissal and the completion are persisted, in
+//! `~/.cheaprouter/onboarding.json`, so the card stays gone once the user has
+//! either finished or said "later".
 
 use std::path::PathBuf;
 
@@ -28,33 +33,32 @@ pub struct OnboardingState {
     pub completed_at: Option<u64>,
 }
 
-/// The three steps, in order.
+/// The two steps, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Step {
     SignIn,
-    InstallCli,
     FirstMessage,
 }
 
 impl Step {
-    pub const ALL: [Step; 3] = [Step::SignIn, Step::InstallCli, Step::FirstMessage];
+    pub const ALL: [Step; 2] = [Step::SignIn, Step::FirstMessage];
 }
+
+/// How many steps the checklist has. Named so the desktop's array types read
+/// as "the checklist" rather than as a bare number repeated at every call.
+pub const STEP_COUNT: usize = Step::ALL.len();
 
 /// Which steps are done, from what the app already knows.
-pub fn steps(signed_in: bool, cli_installed: bool, message_sent: bool) -> [(Step, bool); 3] {
-    [
-        (Step::SignIn, signed_in),
-        (Step::InstallCli, cli_installed),
-        (Step::FirstMessage, message_sent),
-    ]
+pub fn steps(signed_in: bool, message_sent: bool) -> [(Step, bool); STEP_COUNT] {
+    [(Step::SignIn, signed_in), (Step::FirstMessage, message_sent)]
 }
 
-pub fn all_done(steps: &[(Step, bool); 3]) -> bool {
+pub fn all_done(steps: &[(Step, bool); STEP_COUNT]) -> bool {
     steps.iter().all(|(_, done)| *done)
 }
 
 /// The first step still to do, for the strip's single call to action.
-pub fn next_step(steps: &[(Step, bool); 3]) -> Option<Step> {
+pub fn next_step(steps: &[(Step, bool); STEP_COUNT]) -> Option<Step> {
     steps.iter().find(|(_, done)| !done).map(|(step, _)| *step)
 }
 
@@ -62,7 +66,7 @@ pub fn next_step(steps: &[(Step, bool); 3]) -> Option<Step> {
 /// recorded complete, and something left to do. A completion recorded
 /// earlier keeps it hidden even if a step regresses (signing out), which is
 /// the point of recording it — the user has seen the flow through once.
-pub fn visible(state: &OnboardingState, steps: &[(Step, bool); 3]) -> bool {
+pub fn visible(state: &OnboardingState, steps: &[(Step, bool); STEP_COUNT]) -> bool {
     !state.dismissed && state.completed_at.is_none() && !all_done(steps)
 }
 
@@ -103,31 +107,38 @@ mod tests {
     #[test]
     fn visibility_matrix() {
         let fresh = OnboardingState::default();
-        assert!(visible(&fresh, &steps(false, false, false)));
-        assert!(visible(&fresh, &steps(true, true, false)));
-        assert!(!visible(&fresh, &steps(true, true, true)));
+        assert!(visible(&fresh, &steps(false, false)));
+        assert!(visible(&fresh, &steps(true, false)));
+        assert!(!visible(&fresh, &steps(true, true)));
 
         let dismissed = OnboardingState {
             dismissed: true,
             ..OnboardingState::default()
         };
-        assert!(!visible(&dismissed, &steps(false, false, false)));
+        assert!(!visible(&dismissed, &steps(false, false)));
 
         let completed = OnboardingState {
             completed_at: Some(1),
             ..OnboardingState::default()
         };
         // Signing out afterwards does not bring the card back.
-        assert!(!visible(&completed, &steps(false, true, true)));
+        assert!(!visible(&completed, &steps(false, true)));
     }
 
     #[test]
     fn next_step_is_the_first_unfinished_one() {
-        assert_eq!(next_step(&steps(false, true, false)), Some(Step::SignIn));
-        assert_eq!(next_step(&steps(true, false, false)), Some(Step::InstallCli));
-        assert_eq!(next_step(&steps(true, true, false)), Some(Step::FirstMessage));
-        assert_eq!(next_step(&steps(true, true, true)), None);
-        assert!(all_done(&steps(true, true, true)));
+        assert_eq!(next_step(&steps(false, false)), Some(Step::SignIn));
+        assert_eq!(next_step(&steps(true, false)), Some(Step::FirstMessage));
+        assert_eq!(next_step(&steps(true, true)), None);
+        assert!(all_done(&steps(true, true)));
+    }
+
+    #[test]
+    fn installing_a_cli_is_not_on_the_path_to_a_first_message() {
+        // The built-in agent needs nothing installed, so a signed-in user with
+        // no CLI on the machine is one step from done.
+        assert_eq!(Step::ALL.len(), 2);
+        assert_eq!(next_step(&steps(true, false)), Some(Step::FirstMessage));
     }
 
     #[test]

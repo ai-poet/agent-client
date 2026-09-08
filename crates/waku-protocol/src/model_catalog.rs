@@ -60,6 +60,14 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         ProviderKind::Cursor => {
             vec![ProviderModel::new("auto", tr!("model_option.auto")).default()]
         }
+        // The daemon's table in `waku-core` is the one the picker reads; this
+        // shorter list is what the client falls back to before the daemon has
+        // answered.
+        ProviderKind::Native => vec![
+            claude_reasoning_model("claude-sonnet-5", "Claude Sonnet 5").default(),
+            claude_reasoning_model("claude-opus-5", "Claude Opus 5"),
+            ProviderModel::new("claude-haiku-4-5", "Claude Haiku 4.5"),
+        ],
         ProviderKind::DeepSeek
         | ProviderKind::Fx
         | ProviderKind::Grok

@@ -451,6 +451,7 @@ common.deny: 拒绝
 permission.allow_once: 仅允许一次
 permission.allow_for_session: 本次任务允许
 permission.always_allow: 始终允许
+permission.always_deny: 始终拒绝
 permission.a_tool: 某个工具
 permission.run_a_tool: 运行工具
 permission.run_a_tool_lower: 运行工具
@@ -1157,6 +1158,7 @@ cli_setup.installed_not_runnable: "已安装到 %{path}，但无法运行：%{de
 cli_setup.hint_permission: "npm 无法写入全局目录。请把 prefix 改到可写位置后重试："
 cli_setup.hint_network: "无法访问软件源。请检查网络或代理后重试"
 providers.status_installed: "已安装"
+providers.built_in: "内置 - 无需安装"
 providers.status_not_runnable: "已安装但无法运行"
 providers.route_title: "路由"
 providers.route_cloud: "云路由（网关）"
@@ -1192,13 +1194,10 @@ cli_setup.env_source_file: "%{path}:%{line}"
 cli_setup.env_conflict_open_settings: "打开环境变量设置"
 cli_setup.env_conflict_copy_unset: "复制 unset 命令"
 cli_setup.env_conflict_copied: "命令已复制"
-onboarding.checklist_title: "三步上手"
+onboarding.checklist_title: "两步上手"
 onboarding.progress: "%{done} / %{total}"
 onboarding.step_sign_in: "登录 %{name} 账号"
-onboarding.step_install_cli: "安装一个 Agent CLI"
 onboarding.step_first_message: "打开项目并发送第一条消息"
-onboarding.install_defaults: "安装 Claude Code + Codex"
-onboarding.open_providers: "供应商设置"
 onboarding.write_first_message: "开始输入"
 onboarding.later: "稍后"
 session.edit_and_resend: "编辑并重新发送"

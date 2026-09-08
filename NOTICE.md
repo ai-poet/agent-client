@@ -77,6 +77,11 @@ This fork remains licensed under GPL-3.0-only.
 | 2026-09-07 | Workflow stage controls and the objective gate: added `crates/workflow-engine/src/check.rs` (runs a stage's check command in the worktree; only its exit status decides), a run-level check command in the form applied to every writing stage, retry-from-here and skip in the inspector, per-stage changed-file capture through the daemon's review diff, and a "workflow · role" chip on sidebar rows that belong to a stage (rendered from the fork-owned `task_rows.rs`, no upstream lines). |
 | 2026-09-07 | The workflow code moved out of `sub2api` into its own crate, `crates/workflow-engine` (`model`, `planner`, `check`), which depends on `sub2api` for the gateway HTTP client, base-URL rules, data directory and the process helper; `sub2api::global_config::atomic_write_private` became `pub` for it. |
 
+| 2026-09-08 | Vendored the Claurst agent engine into `crates/waku-agent/{core,api,tools,query,mcp,plugins}` (GPL-3.0, upstream <https://github.com/kuberwastaken/claurst>), with three deliberate departures from that source: `rusqlite` bumped 0.31 → 0.37 so `libsqlite3-sys` does not collide with `waku-core`'s copy, the `wreq`/BoringSSL TLS-impersonation client replaced by `reqwest` in `api/src/bun_tls.rs`, and the `enigo`/`xcap`/`image`/`cpal` optional features left off. |
+| 2026-09-08 | Added `crates/waku-agent-bridge`: drives that engine as an in-process provider — a shared multi-threaded Tokio runtime, the permission bridge that blocks a tool until the GUI answers, transcript ownership (`Vec<Message>`, with rewind and branch as truncations), steering through the engine's command queue, and the `QueryEvent` decoder. Depends on neither `waku-core` nor `waku-protocol`. |
+| 2026-09-08 | Added `ProviderKind::Native` ("Waku Agent") and `crates/waku-core/src/driver/native.rs`: an eighth driver transport that is a library call rather than a process. Upstream files carry only hook points — one match arm in `driver/mod.rs`, the `is_builtin()` predicate, and the built-in short-circuits in `provider_probe`, `provider_binary` and `driver_start_request_for_session`, each of which exists because a built-in provider has no binary to find. |
+| 2026-09-08 | Made the built-in agent the default provider and cut the first-run checklist from three steps to two: installing an agent CLI is no longer on the path to a first message (`crates/sub2api/src/onboarding.rs`, `src/app/onboarding.rs`, README). External CLIs remain available in Settings → Providers. |
+
 ## Upstream attribution
 
 Waku is developed by egoist and contributors. Upstream source, issue tracker,
@@ -84,3 +89,8 @@ and releases: <https://github.com/egoist/waku>.
 
 The GPUI framework is developed by Zed Industries:
 <https://github.com/zed-industries/zed>.
+
+The agent engine vendored under `crates/waku-agent` is Claurst by
+kuberwastaken and contributors, licensed GPL-3.0:
+<https://github.com/kuberwastaken/claurst>. Its licence text is preserved
+alongside the vendored sources; the modifications listed above are this fork's.

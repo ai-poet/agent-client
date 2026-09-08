@@ -7,6 +7,7 @@ mod claude;
 mod codex;
 mod computer_use;
 mod deepseek;
+mod native;
 mod opencode;
 mod pi;
 mod support;
@@ -235,6 +236,10 @@ pub(crate) fn start_local(
         // Amp reads newline-delimited user messages on stdin and stays alive
         // until stdin closes, so it too serves the whole conversation.
         ProviderKind::Amp => Arc::new(amp::AmpDriver::start(options, events)?),
+        // The only provider that is not a process. `binary` is unused, and
+        // there is nothing to launch, wait on, or close stdin against — the
+        // engine is a library call on the daemon's own runtime.
+        ProviderKind::Native => Arc::new(native::NativeDriver::start(options, events)?),
     };
     Ok(DriverHandle { inner })
 }

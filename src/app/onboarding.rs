@@ -42,22 +42,28 @@ impl Waku {
         .detach();
     }
 
-    /// The three steps, judged from what the app already holds in memory.
-    fn onboarding_steps(&self) -> [(Step, bool); 3] {
+    /// The steps, judged from what the app already holds in memory.
+    ///
+    /// There is deliberately no "is an agent installed?" question left: the
+    /// built-in agent is always there, so the only things between a new user
+    /// and a working session are an account and a project.
+    fn onboarding_steps(&self) -> [(Step, bool); sub2api::onboarding::STEP_COUNT] {
         let signed_in = self.cloud_account.credentials.is_some();
-        let cli_installed = self.probes.iter().any(|probe| probe.installed);
         let message_sent = self.state.sessions.iter().any(|session| {
             session
                 .messages
                 .iter()
                 .any(|message| message.role == MessageRole::User)
         });
-        sub2api::onboarding::steps(signed_in, cli_installed, message_sent)
+        sub2api::onboarding::steps(signed_in, message_sent)
     }
 
     /// The steps when the checklist should be on screen, else `None`.
     /// Also the seam where completion is noticed and recorded.
-    fn visible_onboarding_steps(&self, cx: &mut Context<Self>) -> Option<[(Step, bool); 3]> {
+    fn visible_onboarding_steps(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<[(Step, bool); sub2api::onboarding::STEP_COUNT]> {
         let persisted = self.onboarding.persisted.as_ref()?;
         let steps = self.onboarding_steps();
         if sub2api::onboarding::all_done(&steps)
@@ -106,21 +112,9 @@ impl Waku {
         cx.notify();
     }
 
-    /// The two agents this product is built around, in one click.
-    fn install_default_clis(&mut self, cx: &mut Context<Self>) {
-        {
-            let mut selected = self.cli_setup.selected.borrow_mut();
-            selected.clear();
-            selected.insert("claude".to_owned());
-            selected.insert("codex".to_owned());
-        }
-        self.run_selected_cli_installs(cx);
-    }
-
     fn onboarding_step_label(step: Step) -> String {
         match step {
             Step::SignIn => tr!("onboarding.step_sign_in", name = sub2api::brand::DISPLAY_NAME),
-            Step::InstallCli => tr!("onboarding.step_install_cli"),
             Step::FirstMessage => tr!("onboarding.step_first_message"),
         }
     }
@@ -132,7 +126,6 @@ impl Waku {
         theme: Theme,
         cx: &mut Context<Self>,
     ) -> Vec<Stateful<Div>> {
-        let installing = self.cli_setup.running.is_some();
         match step {
             Step::SignIn => {
                 let pending = self.cloud_account.pending;
@@ -150,35 +143,6 @@ impl Waku {
                     |this, _, cx| this.start_cloud_sign_in(cx),
                 )]
             }
-            Step::InstallCli => vec![
-                onboarding_button(
-                    theme,
-                    "onboarding-install-defaults",
-                    if installing {
-                        self.cli_setup
-                            .node_stage
-                            .lock()
-                            .unwrap()
-                            .clone()
-                            .unwrap_or_else(|| tr!("cli_setup.installing"))
-                    } else {
-                        tr!("onboarding.install_defaults")
-                    },
-                    true,
-                    installing,
-                    cx,
-                    |this, _, cx| this.install_default_clis(cx),
-                ),
-                onboarding_button(
-                    theme,
-                    "onboarding-open-providers",
-                    tr!("onboarding.open_providers"),
-                    false,
-                    false,
-                    cx,
-                    |this, _, cx| this.open_settings_page(SettingsPage::Providers, cx),
-                ),
-            ],
             Step::FirstMessage => {
                 if self.selected_project().is_some() {
                     vec![onboarding_button(

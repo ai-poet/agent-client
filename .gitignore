@@ -7,6 +7,7 @@ target
 old-code/
 cc-switch-main/
 codeg-main/
+claurst-main/
 
 .DS_Store
 *.log

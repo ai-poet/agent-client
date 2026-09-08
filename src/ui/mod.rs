@@ -164,6 +164,9 @@ pub fn provider_color(theme: &Theme, provider: ProviderKind) -> Hsla {
         ProviderKind::Amp => rgb(0xF34E3F).into(),
         ProviderKind::Claude => rgb(0xD97757).into(),
         ProviderKind::DeepSeek => rgb(0x4D6BFE).into(),
+        // Waku's own agent wears Waku's accent: it is the one provider that is
+        // not somebody else's product.
+        ProviderKind::Native => theme.accent,
         ProviderKind::Codex
         | ProviderKind::Cursor
         | ProviderKind::Fx
@@ -192,6 +195,7 @@ pub fn provider_icon(provider: ProviderKind) -> &'static str {
         ProviderKind::Fx => "icons/provider-fx.svg",
         ProviderKind::OpenCode => "icons/provider-opencode.svg",
         ProviderKind::Grok => "icons/provider-grok.svg",
+        ProviderKind::Native => "icons/provider-waku.svg",
         ProviderKind::Kimi => "icons/provider-kimi.svg",
         ProviderKind::OhMyPi => "icons/provider-ohmypi.svg",
         ProviderKind::Pi => "icons/provider-pi.svg",

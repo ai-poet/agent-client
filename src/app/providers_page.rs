@@ -1609,38 +1609,73 @@ impl Waku {
         use sub2api::cli_detect::Probe;
 
         let provider_id: &'static str = kind.id();
+        // A built-in provider has no binary, so every detection question below
+        // is meaningless for it: it is always present, never installable, and
+        // has no path or version to show. Answering them this way is what
+        // collapses its card to the parts that do apply - routing and models.
+        let builtin = kind.is_builtin();
         let probe = self.provider_probe(kind);
         let daemon_installed = probe.is_some_and(|probe| probe.installed);
         // The fork's own pass runs the binary; the daemon only finds it.
-        let detection = snapshot.and_then(|snapshot| snapshot.detection(provider_id));
+        let detection = (!builtin)
+            .then(|| snapshot.and_then(|snapshot| snapshot.detection(provider_id)))
+            .flatten();
         let not_runnable = detection.and_then(|detection| match &detection.probe {
             Probe::FoundButFailed { diagnostic, .. } => Some(diagnostic.clone()),
             _ => None,
         });
-        let installed = daemon_installed || detection.is_some_and(|detection| detection.is_installed());
+        let installed =
+            builtin || daemon_installed || detection.is_some_and(|detection| detection.is_installed());
         let disabled = self.state.disabled_providers.contains(&kind);
-        let descriptor = sub2api::cli_install::descriptor(provider_id);
+        let descriptor = (!builtin)
+            .then(|| sub2api::cli_install::descriptor(provider_id))
+            .flatten();
         let installable = descriptor.is_some() && !installed;
         let running = self.cli_setup.running.as_deref() == Some(provider_id);
         let busy = self.cli_setup.running.is_some();
 
-        let version = self
-            .provider_versions
-            .get(&kind)
-            .and_then(|version| version.clone())
-            .or_else(|| {
-                detection
-                    .and_then(|detection| detection.probe.version())
-                    .map(|version| version.trim_start_matches('v').to_owned())
-            });
-        let binary_path = probe
-            .filter(|probe| probe.installed)
-            .and_then(|probe| probe.path.as_deref())
-            .or_else(|| detection.and_then(|detection| detection.path()))
-            .map(|path| abbreviate_home_path(path, self.home_directory.as_deref()));
+        let version = (!builtin)
+            .then(|| {
+                self.provider_versions
+                    .get(&kind)
+                    .and_then(|version| version.clone())
+                    .or_else(|| {
+                        detection
+                            .and_then(|detection| detection.probe.version())
+                            .map(|version| version.trim_start_matches('v').to_owned())
+                    })
+            })
+            .flatten();
+        let binary_path = (!builtin)
+            .then(|| {
+                probe
+                    .filter(|probe| probe.installed)
+                    .and_then(|probe| probe.path.as_deref())
+                    .or_else(|| detection.and_then(|detection| detection.path()))
+                    .map(|path| abbreviate_home_path(path, self.home_directory.as_deref()))
+            })
+            .flatten();
         let model_count = probe.map(|probe| probe.models.len()).unwrap_or(0);
 
-        let (dot_color, status_text, status_color) = if let Some(diagnostic) = &not_runnable {
+        let (dot_color, status_text, status_color) = if builtin {
+            let mut parts = vec![tr!("providers.built_in")];
+            if model_count > 0 {
+                parts.push(if model_count == 1 {
+                    tr!("providers.model_count_one", count = model_count)
+                } else {
+                    tr!("providers.model_count_many", count = model_count)
+                });
+            }
+            (
+                if disabled { theme.warning } else { theme.success },
+                if disabled {
+                    tr!("providers.disabled_for_new_tasks")
+                } else {
+                    parts.join("  \u{00b7}  ")
+                },
+                theme.text_tertiary,
+            )
+        } else if let Some(diagnostic) = &not_runnable {
             (
                 theme.warning,
                 format!("{}: {diagnostic}", tr!("providers.status_not_runnable")),
@@ -1835,7 +1870,12 @@ impl Waku {
         }
 
         if expanded {
-            card = card.child(self.render_provider_expanded_settings(kind, theme, cx));
+            // The binary-path editor is the whole of the expanded settings for
+            // a CLI, and a built-in provider has no binary to point anywhere.
+            // Its expanded row is the routing form alone.
+            if !builtin {
+                card = card.child(self.render_provider_expanded_settings(kind, theme, cx));
+            }
             if sub2api::custom_api::CUSTOM_API_PROVIDERS.contains(&provider_id) {
                 card = card
                     .child(self.render_route_section(kind, provider_id, theme, cx))

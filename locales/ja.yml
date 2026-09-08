@@ -474,6 +474,7 @@ common.deny: 拒否
 permission.allow_once: 1 回だけ許可
 permission.allow_for_session: このセッションで許可
 permission.always_allow: 常に許可
+permission.always_deny: 常に拒否
 permission.a_tool: ツール
 permission.run_a_tool: ツールを実行
 permission.run_a_tool_lower: ツールを実行
@@ -1209,6 +1210,7 @@ cli_setup.installed_not_runnable: "%{path} にインストールされました�
 cli_setup.hint_permission: "npm がグローバルディレクトリに書き込めません。prefix を書き込み可能な場所に変更して再試行してください:"
 cli_setup.hint_network: "レジストリに接続できません。ネットワークまたはプロキシを確認して再試行してください"
 providers.status_installed: "インストール済み"
+providers.built_in: "組み込み - インストール不要"
 providers.status_not_runnable: "インストール済みですが実行できません"
 providers.route_title: "ルーティング"
 providers.route_cloud: "クラウドゲートウェイ"
@@ -1244,13 +1246,10 @@ cli_setup.env_source_file: "%{path}:%{line}"
 cli_setup.env_conflict_open_settings: "環境変数の設定を開く"
 cli_setup.env_conflict_copy_unset: "unset コマンドをコピー"
 cli_setup.env_conflict_copied: "コマンドをコピーしました"
-onboarding.checklist_title: "3 ステップで始める"
+onboarding.checklist_title: "2 ステップで始める"
 onboarding.progress: "%{done} / %{total}"
 onboarding.step_sign_in: "%{name} アカウントにサインイン"
-onboarding.step_install_cli: "エージェント CLI をインストール"
 onboarding.step_first_message: "プロジェクトを開いて最初のメッセージを送る"
-onboarding.install_defaults: "Claude Code + Codex をインストール"
-onboarding.open_providers: "プロバイダー設定"
 onboarding.write_first_message: "メッセージを書く"
 onboarding.later: "あとで"
 session.edit_and_resend: "編集して再送信"

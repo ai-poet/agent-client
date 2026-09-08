@@ -329,6 +329,23 @@ fn agent_arguments(
             }
             return args;
         }
+        // The built-in agent has no command line: it is a library call, not a
+        // process. `commit_dialog` only builds an `AgentInvocation` when the
+        // provider probe yields a binary path, and a built-in provider never
+        // does — so a Native session's commit dialog opens with an empty
+        // message for the user to write, rather than a generated one.
+        //
+        // Generating it in process is worth doing (the engine can answer a
+        // one-shot prompt), but it is a different shape of call than shelling
+        // out and is deliberately out of scope here. Reaching this arm means
+        // something bypassed that check.
+        ProviderKind::Native => {
+            debug_assert!(
+                false,
+                "the built-in agent has no CLI to generate a commit message with"
+            );
+            return args;
+        }
         // Kimi carries the prompt as `--prompt`'s value rather than a trailing
         // positional, so it returns early. It has no tool or session switches
         // to turn off; the commit prompt is what forbids tool use.
@@ -727,9 +744,24 @@ mod tests {
     }
 
     #[test]
+    fn the_builtin_agent_builds_no_command_line() {
+        // `debug_assert` fires in a debug test build, which is the point: the
+        // release behaviour is an empty argument list, and reaching it at all
+        // means a caller skipped the binary check.
+        assert!(ProviderKind::Native.is_builtin());
+        assert!(ProviderKind::Native.command().is_empty());
+    }
+
+    #[test]
     fn every_provider_uses_a_noninteractive_generation_mode() {
         let prompt = "Generate subject";
         for provider in ProviderKind::ALL {
+            // The built-in agent is not launched, so it has no arguments to
+            // check. Its absence here is asserted by
+            // `the_builtin_agent_builds_no_command_line` below.
+            if provider.is_builtin() {
+                continue;
+            }
             let args = agent_arguments(
                 provider,
                 Some("model"),

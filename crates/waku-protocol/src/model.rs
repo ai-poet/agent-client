@@ -12,7 +12,6 @@ use uuid::Uuid;
 pub enum ProviderKind {
     Amp,
     Claude,
-    #[default]
     Codex,
     Cursor,
     DeepSeek,
@@ -20,12 +19,20 @@ pub enum ProviderKind {
     OpenCode,
     Grok,
     Kimi,
+    /// The built-in agent: the vendored engine, running inside the daemon.
+    /// The only provider with no binary to find and nothing to install, which
+    /// is why it is the default.
+    #[default]
+    Native,
     OhMyPi,
     Pi,
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
+        // First, and first in the model picker: the one that works with
+        // nothing installed.
+        Self::Native,
         Self::Amp,
         Self::Claude,
         Self::Codex,
@@ -50,6 +57,7 @@ impl ProviderKind {
             Self::OpenCode => "opencode",
             Self::Grok => "grok",
             Self::Kimi => "kimi",
+            Self::Native => "native",
             Self::OhMyPi => "ohmypi",
             Self::Pi => "pi",
         }
@@ -66,6 +74,7 @@ impl ProviderKind {
             Self::OpenCode => "OpenCode",
             Self::Grok => "Grok Build",
             Self::Kimi => "Kimi Code",
+            Self::Native => "Waku Agent",
             Self::OhMyPi => "Oh My Pi",
             Self::Pi => "Pi",
         }
@@ -82,6 +91,7 @@ impl ProviderKind {
             Self::OpenCode => "OpenCode",
             Self::Grok => "Grok",
             Self::Kimi => "Kimi",
+            Self::Native => "Waku",
             Self::OhMyPi => "Oh My Pi",
             Self::Pi => "Pi",
         }
@@ -100,9 +110,21 @@ impl ProviderKind {
             Self::OpenCode => "opencode",
             Self::Grok => "grok",
             Self::Kimi => "kimi",
+            // No external command. `is_builtin` is what callers should branch
+            // on; this exists only so the match stays total, and any code that
+            // hands it to `find_executable` is asking the wrong question.
+            Self::Native => "",
             Self::OhMyPi => "omp",
             Self::Pi => "pi",
         }
+    }
+
+    /// Whether this provider runs inside Waku rather than as a CLI it
+    /// launches. Detection, installation, binary overrides and PATH probing
+    /// are all meaningless for a built-in provider, and every one of those
+    /// call sites should ask this first.
+    pub fn is_builtin(self) -> bool {
+        matches!(self, Self::Native)
     }
 
     /// Kimi Code and Fx are deliberately absent from this list and from
@@ -118,6 +140,7 @@ impl ProviderKind {
                 | Self::Codex
                 | Self::Cursor
                 | Self::DeepSeek
+                | Self::Native
                 | Self::OpenCode
                 | Self::Grok
                 | Self::OhMyPi
@@ -133,6 +156,7 @@ impl ProviderKind {
                 | Self::Codex
                 | Self::Cursor
                 | Self::DeepSeek
+                | Self::Native
                 | Self::OpenCode
                 | Self::Grok
                 | Self::OhMyPi
@@ -148,6 +172,7 @@ impl ProviderKind {
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::Fx
+                | Self::Native
                 | Self::OpenCode
                 | Self::Grok
                 | Self::Kimi
@@ -197,6 +222,12 @@ pub enum ProviderResumeCursor {
     Kimi {
         session_id: String,
     },
+    /// Waku's own id for the transcript it stores on the built-in agent's
+    /// behalf. Unlike every other cursor here this names nothing inside a
+    /// provider — the engine keeps no session of its own.
+    Native {
+        session_id: String,
+    },
     OhMyPi {
         session_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -230,6 +261,7 @@ impl ProviderResumeCursor {
             ProviderKind::OpenCode => Self::OpenCode { session_id: id },
             ProviderKind::Grok => Self::Grok { session_id: id },
             ProviderKind::Kimi => Self::Kimi { session_id: id },
+            ProviderKind::Native => Self::Native { session_id: id },
             ProviderKind::OhMyPi => Self::OhMyPi {
                 session_id: id,
                 session_file: None,
@@ -252,6 +284,7 @@ impl ProviderResumeCursor {
             Self::OpenCode { .. } => ProviderKind::OpenCode,
             Self::Grok { .. } => ProviderKind::Grok,
             Self::Kimi { .. } => ProviderKind::Kimi,
+            Self::Native { .. } => ProviderKind::Native,
             Self::OhMyPi { .. } => ProviderKind::OhMyPi,
             Self::Pi { .. } => ProviderKind::Pi,
         }
@@ -267,6 +300,7 @@ impl ProviderResumeCursor {
             | Self::OpenCode { session_id }
             | Self::Grok { session_id }
             | Self::Kimi { session_id }
+            | Self::Native { session_id }
             | Self::OhMyPi { session_id, .. }
             | Self::Pi { session_id, .. } => session_id,
             Self::Codex { thread_id } => thread_id,

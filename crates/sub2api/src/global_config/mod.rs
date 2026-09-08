@@ -27,6 +27,7 @@
 pub mod claude;
 pub mod codex;
 pub mod grok;
+pub mod native;
 pub mod opencode;
 pub mod pi;
 
@@ -50,6 +51,9 @@ pub const PROVIDER_ID: &str = "cheaprouter";
 pub struct Paths {
     /// Our own state directory (`~/.cheaprouter`), holding the takeover ledger.
     pub data_dir: PathBuf,
+    /// The built-in agent's config directory. Not a CLI, but its routing is
+    /// written the same way so it is just as verifiable.
+    pub native_dir: PathBuf,
     pub claude_dir: PathBuf,
     pub codex_dir: PathBuf,
     pub grok_dir: PathBuf,
@@ -63,6 +67,7 @@ impl Paths {
         let home = dirs::home_dir()?;
         Some(Self {
             data_dir: brand::data_dir()?,
+            native_dir: native::config_dir()?,
             claude_dir: home.join(".claude"),
             codex_dir: home.join(".codex"),
             grok_dir: home.join(".grok"),
@@ -95,6 +100,7 @@ pub struct RouteTarget {
 /// The routing every CLI should end up with. `None` = leave alone / restore.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DesiredRoutes {
+    pub native: Option<RouteTarget>,
     pub claude: Option<RouteTarget>,
     pub codex: Option<RouteTarget>,
     pub grok: Option<RouteTarget>,
@@ -128,6 +134,11 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
         })
     };
     DesiredRoutes {
+        // The built-in agent speaks the Anthropic API, so it routes on the
+        // same key Claude Code does. This is what makes "sign in, then send a
+        // message" true with nothing installed.
+        native: cloud_target(cloud.and_then(|config| config.key_for("claude")))
+            .or_else(|| custom_target("native")),
         claude: cloud_target(cloud.and_then(|config| config.key_for("claude")))
             .or_else(|| custom_target("claude")),
         codex: cloud_target(cloud.and_then(|config| config.key_for("codex")))
@@ -161,6 +172,7 @@ pub fn active_route_kind(
 ) -> RouteKind {
     let cloud_only = desired_routes(cloud, &CustomApiConfig::default());
     let cloud_covers = match provider_id {
+        "native" => cloud_only.native.is_some(),
         "claude" => cloud_only.claude.is_some(),
         "codex" => cloud_only.codex.is_some(),
         "grok" => cloud_only.grok.is_some(),
@@ -190,6 +202,8 @@ pub type CliBackups = BTreeMap<String, FileBackup>;
 /// files looked like before we did.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TakeoverState {
+    #[serde(default)]
+    pub native: Option<CliBackups>,
     #[serde(default)]
     pub claude: Option<CliBackups>,
     #[serde(default)]
@@ -231,6 +245,14 @@ pub fn reconcile_at(paths: &Paths, desired: &DesiredRoutes) -> Result<Vec<String
     let mut warnings = Vec::new();
 
     // Switching-mode CLIs: take over (capturing backups once) or restore.
+    reconcile_switching(
+        "native",
+        desired.native.as_ref(),
+        &mut state.native,
+        &mut warnings,
+        |target, backups| native::take_over(&paths.native_dir, target, backups),
+        |backups| native::restore(&paths.native_dir, backups),
+    );
     reconcile_switching(
         "claude",
         desired.claude.as_ref(),
@@ -317,6 +339,7 @@ fn reconcile_switching(
 pub fn config_file_for(provider_id: &str) -> Option<PathBuf> {
     let paths = Paths::resolve()?;
     Some(match provider_id {
+        "native" => native::settings_path(&paths.native_dir),
         "claude" => paths.claude_dir.join("settings.json"),
         "codex" => paths.codex_dir.join("config.toml"),
         "grok" => paths.grok_dir.join("config.toml"),

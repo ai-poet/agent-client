@@ -1,0 +1,29 @@
+[package]
+name = "waku-agent-bridge"
+version = "0.1.0"
+edition = "2024"
+description = "Drives the vendored agent engine as an in-process Waku provider"
+license = "GPL-3.0-only"
+
+# Deliberately depends on neither `waku-core` nor `waku-protocol`.
+#
+# `waku-core` owns the `DriverControl` trait and calls into this crate from
+# `driver::start_local`, so a dependency in that direction would close a cycle.
+# `waku-protocol` is avoided for a different reason: keeping `AgentEvent` this
+# crate's own type is what stops Waku's wire format from leaking into the
+# engine adapter. The translation into `DriverEvent` lives in
+# `waku-core/src/driver/native.rs`, which is the only file that knows both.
+[dependencies]
+anyhow = "1.0"
+claurst-api = { workspace = true }
+claurst-core = { workspace = true }
+claurst-mcp = { workspace = true }
+claurst-query = { workspace = true }
+claurst-tools = { workspace = true }
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+serde_json = "1.0"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tokio-util = { version = "0.7" }
+tracing = "0.1"
+uuid = { version = "1.18", features = ["v4"] }

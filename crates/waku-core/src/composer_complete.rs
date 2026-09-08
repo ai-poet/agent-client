@@ -318,6 +318,14 @@ fn assemble_slash_commands(
         // and Kimi Code likewise publishes its whole command set over ACP
         // rather than from files Waku could scan.
         ProviderKind::DeepSeek | ProviderKind::Grok | ProviderKind::Kimi => {}
+        // The engine reads `CLAURST_HOME` first and falls back to `~/.claurst`;
+        // both are scanned so a user who set the override still sees their
+        // skills listed.
+        ProviderKind::Native => {
+            for root in builtin_agent_skill_roots(home.as_deref()) {
+                scan_skill_files(provider, &root, &mut commands);
+            }
+        }
     }
     // The cross-tool skill standard, read by Amp and OpenCode among others;
     // Waku lists it for every provider.
@@ -489,6 +497,23 @@ fn scan_command_files(
             });
         }
     }
+}
+
+/// Where the built-in agent looks for user skills.
+///
+/// Mirrors the engine's own resolver: an explicit `CLAURST_HOME` wins outright,
+/// otherwise the conventional home directory. Both are returned when the
+/// override is set so a user who moved their config still sees skills left
+/// behind at the old path rather than silently losing them.
+fn builtin_agent_skill_roots(home: Option<&Path>) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(explicit) = std::env::var_os("CLAURST_HOME").filter(|value| !value.is_empty()) {
+        roots.push(PathBuf::from(explicit).join("skills"));
+    }
+    if let Some(home) = home {
+        roots.push(home.join(".claurst").join("skills"));
+    }
+    roots
 }
 
 /// Collect skills — one directory per skill with a `SKILL.md` — as provider
