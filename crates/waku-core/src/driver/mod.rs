@@ -12,6 +12,8 @@ mod opencode;
 mod pi;
 mod support;
 mod title_refresh;
+// Fork addition: naming an empty turn's cause.
+mod turn_diagnosis;
 
 pub(crate) use acp::catalog_agent;
 

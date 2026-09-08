@@ -22,6 +22,10 @@ the original feature bullet instead of adding separate entries for them.
 - Fill an endpoint's model list from the endpoint itself
 - Remove the environment variables that override routing, from the warning that reports them. Values are backed up first and can be restored; machine-wide Windows variables still hand you the command to run as administrator
 - Optional automatic failover per platform: when the group you are on reports an outage, switch to a healthy one and switch back once yours recovers
+## [0.1.20]
+
+- Fix the app reacting to a draft before it is sent: typing in the composer could make the task appear in the sidebar, replace the empty state, and raise a "Waku daemon disconnected" notice once per few characters. The provider is still warmed up while you type, but nothing about the session changes until you press Enter, and a warm process started for a different model or mode is discarded rather than used
+- An agent that ends a turn without answering now says so: a turn that produces nothing reports whatever the agent wrote to its error output, with the reason on the task's failure badge, instead of the bare "Turn completed" line
 
 ## [0.1.19]
 

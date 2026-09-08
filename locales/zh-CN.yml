@@ -616,6 +616,7 @@ project.add_project: 添加项目
 errors.remote_project_picker: 添加守护进程主机上的项目需要远程路径选择器，但该功能尚不可用
 session.stopped: 已停止
 session.turn_completed: 本轮已完成
+session.agent_returned_nothing: "代理结束了本轮，但没有返回任何内容，也没有报错。可以查看该 CLI 自己的日志。"
 session.stopped_before_response: 智能体在返回回复前停止了
 session.codex_exited_before_response: Codex app-server 在返回回复前退出了
 session.steer_rejected: 无法向智能体补充指示（%{error}）；消息已排队，将作为后续消息发送

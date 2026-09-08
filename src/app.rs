@@ -569,9 +569,9 @@ struct DriverStartRequest {
     options: DriverStartOptions,
     event_wake: smol::channel::Sender<()>,
     daemon: waku_client::DaemonSupervisor,
-    /// Fork addition: a warm start already in flight for this session. When
-    /// set, `start_driver` waits for that process instead of spawning one.
-    prewarmed: Option<std::sync::mpsc::Receiver<anyhow::Result<PreparedDriver>>>,
+    /// Fork addition: a warm process for this session — booted already, or
+    /// still booting. When set, `start_driver` takes it instead of spawning.
+    prewarmed: Option<runtime_prewarm::PrewarmClaim>,
 }
 
 /// A provider process that has started off-thread but is not installed into
