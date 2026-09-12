@@ -901,11 +901,16 @@ authorizes it — the routing writer files every gateway key by platform under
 the engine's anthropic provider entry, and `select_route` in the bridge picks
 the one for the session's platform.
 
-The model's "service tier" slot is the **wire format**: Anthropic Messages,
-OpenAI Responses, or OpenAI Chat Completions, defaulting to the platform's
-native one (Responses for OpenAI-keyed groups, Messages otherwise). The
-gateway translates each format for every platform, so this is the user's
-choice rather than the model's. Each format is a different engine adapter —
+The **wire format** — Anthropic Messages, OpenAI Responses, or OpenAI Chat
+Completions — is chosen in the picker itself: the built-in agent's tab is
+sectioned by format, the current one open above the models, and choosing a
+model under a section writes that format into the session's tier slot
+(`native_wire_format` in `composer.rs` decides which section opens: the
+session's current format, else the model's native one — Responses for
+OpenAI-platform models, Messages otherwise; the daemon applies the same
+default when no tier was chosen). The gateway translates each format for
+every platform, so this is the user's choice rather than the model's. Rows
+carry the product brand and the platform as their subtitle. Each format is a different engine adapter —
 `anthropic`, `codex`, `openai` — pointed at the gateway origin; switching
 format or platform rebuilds the session's clients, a plain model switch does
 not. The Responses adapter upstream only knew the ChatGPT backend; the fork

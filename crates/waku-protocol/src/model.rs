@@ -74,7 +74,7 @@ impl ProviderKind {
             Self::OpenCode => "OpenCode",
             Self::Grok => "Grok Build",
             Self::Kimi => "Kimi Code",
-            Self::Native => "Waku Agent",
+            Self::Native => "内置 Agent",
             Self::OhMyPi => "Oh My Pi",
             Self::Pi => "Pi",
         }
@@ -91,7 +91,7 @@ impl ProviderKind {
             Self::OpenCode => "OpenCode",
             Self::Grok => "Grok",
             Self::Kimi => "Kimi",
-            Self::Native => "Waku",
+            Self::Native => "内置 Agent",
             Self::OhMyPi => "Oh My Pi",
             Self::Pi => "Pi",
         }

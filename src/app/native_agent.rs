@@ -7,13 +7,14 @@
 //! listing the Model Plaza page shows, every platform of it, and lands in the
 //! provider probe the picker already reads.
 //!
-//! Two things ride on each entry. The id carries the platform ahead of a
-//! `::`, which is how the daemon knows which of the account's keys to use;
-//! the picker never shows an id, only the name and the platform subtitle.
-//! And the "service tier" slot carries the wire format — Anthropic Messages,
-//! OpenAI Responses, OpenAI Chat Completions — defaulting to the platform's
-//! native one. The gateway translates each of them for every platform, so
-//! the format is the user's choice rather than the model's.
+//! The id carries the platform ahead of a `::`, which is how the daemon
+//! knows which of the account's keys to use; the picker never shows an id,
+//! only the name and the brand-and-platform subtitle. The wire format —
+//! Anthropic Messages, OpenAI Responses, OpenAI Chat Completions — is not a
+//! per-model option here: the picker sections the built-in agent's list by
+//! format and writes the chosen section into the session's tier slot, so
+//! model and API are always chosen together. The gateway translates each
+//! format for every platform, which is what makes that a free choice.
 //!
 //! Pure mapping plus one hook; the fetch is the Plaza's.
 
@@ -23,14 +24,6 @@ use super::*;
 // Explicit rather than relying on the glob: `ProviderModelOption` is used by
 // no other view, so nothing guarantees `app.rs` re-exports it.
 use crate::model::{ProviderModel, ProviderModelOption};
-
-/// The three formats, as tier ids the daemon reads back. Kept in step with
-/// `waku_agent_bridge::WireFormat`, which the desktop does not link.
-const WIRE_FORMATS: [(&str, &str, &str); 3] = [
-    ("messages", "model_option.wire_messages", "model_option.wire_messages_description"),
-    ("responses", "model_option.wire_responses", "model_option.wire_responses_description"),
-    ("chat", "model_option.wire_chat", "model_option.wire_chat_description"),
-];
 
 /// The models the built-in agent may offer, from the gateway catalog.
 ///
@@ -66,13 +59,7 @@ pub(super) fn native_models_from_catalog(items: &[ModelCatalogItem]) -> Vec<Prov
                     "high",
                 );
             }
-            model.service_tiers(
-                WIRE_FORMATS.iter().map(|(id, label, description)| {
-                    ProviderModelOption::new(*id, crate::i18n::translate(label))
-                        .description(crate::i18n::translate(description))
-                }),
-                native_format(&platform),
-            )
+            model
         })
         .collect();
 
@@ -101,13 +88,6 @@ fn platform_of(item: &ModelCatalogItem) -> String {
 
 fn is_token_model(item: &ModelCatalogItem) -> bool {
     matches!(item.billing_mode.trim(), "" | "token")
-}
-
-/// OpenAI-keyed groups are Codex groups, whose native route is Responses;
-/// everything else speaks the engine's primary path natively through the
-/// gateway. Mirrors `WireFormat::default_for_platform`.
-fn native_format(platform: &str) -> &'static str {
-    if platform == "openai" { "responses" } else { "messages" }
 }
 
 fn has_reasoning_ladder(platform: &str, model: &str) -> bool {
@@ -192,15 +172,10 @@ mod tests {
     }
 
     #[test]
-    fn the_wire_format_defaults_to_the_platforms_native_one() {
-        let models = native_models_from_catalog(&[
-            item("claude-sonnet-5", "anthropic"),
-            item("gpt-5.6-sol", "openai"),
-        ]);
-        assert_eq!(models[0].default_service_tier.as_deref(), Some("messages"));
-        assert_eq!(models[1].default_service_tier.as_deref(), Some("responses"));
-        let tiers: Vec<&str> = models[0].service_tiers.iter().map(|tier| tier.id.as_str()).collect();
-        assert_eq!(tiers, ["messages", "responses", "chat"]);
+    fn the_format_is_the_pickers_section_not_a_per_model_tier() {
+        let models = native_models_from_catalog(&[item("gpt-5.6-sol", "openai")]);
+        assert!(models[0].service_tiers.is_empty());
+        assert!(models[0].default_service_tier.is_none());
     }
 
     #[test]

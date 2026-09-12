@@ -826,6 +826,9 @@ impl Waku {
         let searching = !normalized_query.is_empty();
         let selected_tab = self.model_picker_tab;
         let selected_model = selected_model.map(str::to_owned);
+        // The built-in agent's tab is sectioned by wire format; the section
+        // that opens is the session's current one, or the model's native one.
+        let selected_tier = session.and_then(|session| session.service_tier.clone());
         let probes = self.probes.clone();
         let disabled_providers = self.state.disabled_providers.clone();
         let pending_discoveries = self.provider_model_discoveries_pending.clone();
@@ -1121,10 +1124,35 @@ impl Waku {
                     );
                 }
 
+                // The built-in agent's list is grouped by wire format: one
+                // header per format, the current one expanded above the
+                // models, the others collapsed. Choosing a model under a
+                // header chooses that format with it, so a session's model
+                // and API are always picked together and read together.
+                let native_sections = (selected_tab == ModelPickerTab::Provider(ProviderKind::Native)
+                    && !searching)
+                    .then(|| {
+                        native_wire_format(selected_tier.as_deref(), selected_model.as_deref())
+                    });
+                if let Some(active) = native_sections.as_deref() {
+                    for (format, label) in NATIVE_WIRE_FORMATS {
+                        if format == active {
+                            rows = rows.child(native_section_header(
+                                theme,
+                                format,
+                                crate::i18n::translate(label),
+                                true,
+                                weak.clone(),
+                            ));
+                            break;
+                        }
+                    }
+                }
                 for (row_index, (kind, model)) in available_models.iter().enumerate() {
                     let kind = *kind;
                     let is_selected =
                         kind == provider && selected_model.as_deref() == Some(model.id.as_str());
+                    let row_format = native_sections.clone();
                     let is_highlighted = highlight == Some(row_index);
                     let is_favorite = favorites
                         .iter()
@@ -1235,10 +1263,26 @@ impl Waku {
                             .on_click(move |_, window, cx| {
                                 let _ = select_weak.update(cx, |this, cx| {
                                     this.choose_model(kind, model_id.clone(), cx);
+                                    if let Some(format) = row_format.clone() {
+                                        this.set_service_tier(format, cx);
+                                    }
                                 });
                                 select_popover.close(window, cx);
                             }),
                     );
+                }
+                if let Some(active) = native_sections.as_deref() {
+                    for (format, label) in NATIVE_WIRE_FORMATS {
+                        if format != active {
+                            rows = rows.child(native_section_header(
+                                theme,
+                                format,
+                                crate::i18n::translate(label),
+                                false,
+                                weak.clone(),
+                            ));
+                        }
+                    }
                 }
 
                 let next_models = available_models.clone();
@@ -3914,12 +3958,108 @@ pub(super) fn picker_rail_shows_provider(
 }
 
 pub(super) fn model_picker_subtitle(provider: ProviderKind, sub_provider: Option<&str>) -> String {
+    // The built-in agent is this product's own, so its rows carry the brand
+    // rather than an engine name, and the platform the model belongs to.
+    if provider.is_builtin() {
+        let brand = sub2api::brand::DISPLAY_NAME;
+        return match sub_provider.map(str::trim).filter(|name| !name.is_empty()) {
+            Some(platform) => format!("{brand} · {platform}"),
+            None => brand.to_owned(),
+        };
+    }
     let provider_name = provider.short_name();
     match sub_provider.map(str::trim).filter(|name| !name.is_empty()) {
         Some(name) if name.eq_ignore_ascii_case(provider_name) => provider_name.to_owned(),
         Some(name) => format!("{name} · {provider_name}"),
         None => provider_name.to_owned(),
     }
+}
+
+/// The wire formats the built-in agent can speak, in the order the picker
+/// lists them. Ids match `waku_agent_bridge::WireFormat`, which the desktop
+/// does not link; the daemon reads them back from the session's tier.
+const NATIVE_WIRE_FORMATS: [(&str, &str); 3] = [
+    ("messages", "model_option.wire_messages"),
+    ("responses", "model_option.wire_responses"),
+    ("chat", "model_option.wire_chat"),
+];
+
+/// Which section the built-in agent's tab opens on: the session's current
+/// format when it is one of ours, else the selected model's native one —
+/// Responses for OpenAI-platform models, Messages for everything else. The
+/// same rule the daemon applies when no format was chosen.
+pub(super) fn native_wire_format(selected_tier: Option<&str>, selected_model: Option<&str>) -> String {
+    if let Some(tier) = selected_tier
+        && NATIVE_WIRE_FORMATS.iter().any(|(id, _)| *id == tier)
+    {
+        return tier.to_owned();
+    }
+    let platform = selected_model
+        .and_then(|id| id.split_once("::"))
+        .map(|(platform, _)| platform.trim().to_ascii_lowercase());
+    if platform.as_deref() == Some("openai") {
+        "responses".to_owned()
+    } else {
+        "messages".to_owned()
+    }
+}
+
+/// A section header in the built-in agent's model list. The open one is a
+/// heading; a closed one is a row that switches the session's format and
+/// opens itself.
+fn native_section_header(
+    theme: Theme,
+    format: &'static str,
+    label: String,
+    open: bool,
+    weak: gpui::WeakEntity<Waku>,
+) -> Stateful<Div> {
+    div()
+        .id(SharedString::from(format!("model-format-{format}")))
+        .h(px(34.0))
+        .px(px(12.0))
+        .mt(px(4.0))
+        .rounded(px(9.0))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .cursor_default()
+        .when(!open, |element| {
+            element
+                .hover(|element| element.bg(theme.overlay))
+                .on_click(move |_, _, cx| {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.set_service_tier(format.to_owned(), cx);
+                    });
+                })
+        })
+        .child(icon(
+            if open {
+                "icons/chevron-down.svg"
+            } else {
+                "icons/chevron-right.svg"
+            },
+            12.0,
+            theme.text_tertiary,
+        ))
+        .child(
+            div()
+                .text_size(sp(11.5))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(if open { theme.text } else { theme.text_secondary })
+                .child(SharedString::from(label)),
+        )
+        .child(
+            div()
+                .ml(px(2.0))
+                .px(px(6.0))
+                .py(px(1.0))
+                .rounded(px(5.0))
+                .bg(theme.overlay)
+                .text_size(sp(10.5))
+                .text_color(theme.text_tertiary)
+                .child(sub2api::brand::DISPLAY_NAME),
+        )
 }
 
 /// Whether the picker has nothing left to offer, so the composer's trigger
