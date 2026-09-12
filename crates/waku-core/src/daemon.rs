@@ -552,6 +552,11 @@ impl Backend for WakuBackend {
                             VISIBLE_TURN_LIMIT,
                         )?
                     }
+                    // No binary and no provider-side store: the transcript is
+                    // the file the built-in driver wrote, named by the cursor.
+                    ProviderResumeCursor::Native { session_id } => {
+                        crate::driver::native_session_history(session_id, VISIBLE_TURN_LIMIT)?
+                    }
                     ProviderResumeCursor::OhMyPi {
                         session_id,
                         session_file,

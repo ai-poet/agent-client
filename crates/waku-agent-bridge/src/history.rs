@@ -83,6 +83,55 @@ pub fn fork(messages: &[Message], turns_to_remove: usize) -> Vec<Message> {
     branched
 }
 
+/// One user turn as a reader would see it: what they wrote, and what the
+/// assistant said back — tool calls, tool results and thinking left out.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TranscriptTurn {
+    pub user: String,
+    pub assistant: String,
+}
+
+/// The conversation as display turns, for importing a stored transcript
+/// into a client that keeps its own transcript format.
+pub fn turns_for_display(messages: &[Message]) -> Vec<TranscriptTurn> {
+    let starts = turn_starts(messages);
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, &start)| {
+            let end = starts.get(index + 1).copied().unwrap_or(messages.len());
+            let assistant = messages[start + 1..end]
+                .iter()
+                .filter(|message| message.role == Role::Assistant)
+                .map(visible_text)
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            TranscriptTurn {
+                user: visible_text(&messages[start]),
+                assistant,
+            }
+        })
+        .collect()
+}
+
+/// The text a person would read in a message: text blocks only.
+pub fn visible_text(message: &Message) -> String {
+    match &message.content {
+        MessageContent::Text(text) => text.trim().to_owned(),
+        MessageContent::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,5 +214,27 @@ mod tests {
     fn an_unreadable_payload_restores_an_empty_conversation() {
         assert!(deserialize(b"{not json").is_empty());
         assert!(deserialize(b"").is_empty());
+    }
+
+    #[test]
+    fn display_turns_pair_each_prompt_with_the_answer_and_hide_the_tools() {
+        let turns = turns_for_display(&conversation());
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].user, "first");
+        assert_eq!(turns[0].assistant, "done one");
+        assert_eq!(turns[1].user, "second");
+        assert_eq!(turns[1].assistant, "done two");
+    }
+
+    #[test]
+    fn a_turn_still_running_has_an_empty_answer_rather_than_none() {
+        let turns = turns_for_display(&[Message::user("hello")]);
+        assert_eq!(
+            turns,
+            vec![TranscriptTurn {
+                user: "hello".into(),
+                assistant: String::new(),
+            }]
+        );
     }
 }

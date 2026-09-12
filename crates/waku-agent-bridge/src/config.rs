@@ -9,10 +9,71 @@ use std::path::PathBuf;
 
 use claurst_core::config::{Config, Settings};
 use claurst_core::effort::EffortLevel;
-use claurst_core::PermissionMode;
+use claurst_core::{PermissionMode, ProviderConfig};
 use claurst_query::QueryConfig;
 
 use crate::events::PermissionChoice;
+
+/// Which API a session speaks. The gateway translates every one of them for
+/// every platform, so this is the user's choice, not the model's.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WireFormat {
+    /// Anthropic Messages — the engine's primary path.
+    Messages,
+    /// OpenAI Responses — what Codex speaks.
+    Responses,
+    /// OpenAI Chat Completions.
+    Chat,
+}
+
+impl WireFormat {
+    pub const ALL: [Self; 3] = [Self::Messages, Self::Responses, Self::Chat];
+
+    /// Stable id, used as the model picker's tier id and on the wire.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Messages => "messages",
+            Self::Responses => "responses",
+            Self::Chat => "chat",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|format| format.id() == id)
+    }
+
+    /// The engine provider that speaks this format.
+    pub fn engine_provider(self) -> &'static str {
+        match self {
+            Self::Messages => "anthropic",
+            Self::Responses => "codex",
+            Self::Chat => "openai",
+        }
+    }
+
+    /// What a platform speaks natively. OpenAI-keyed groups are Codex
+    /// groups, whose native route is Responses; everything else defaults to
+    /// the engine's primary path, which the gateway serves for every
+    /// platform.
+    pub fn default_for_platform(platform: Option<&str>) -> Self {
+        match platform.map(|platform| platform.trim().to_ascii_lowercase()) {
+            Some(platform) if platform == "openai" => Self::Responses,
+            _ => Self::Messages,
+        }
+    }
+}
+
+/// The model id the picker sends carries the platform ahead of a `::`, so a
+/// bare id — the fallback list, a session from before this existed — reads
+/// as Anthropic. Nothing downstream ever sees the prefix.
+pub fn split_model(id: &str) -> (Option<String>, String) {
+    match id.split_once("::") {
+        Some((platform, model)) if !platform.is_empty() && !model.is_empty() => {
+            (Some(platform.to_owned()), model.to_owned())
+        }
+        _ => (None, id.to_owned()),
+    }
+}
 
 /// How much the agent may do without asking. Mirrors Waku's `RuntimeMode`,
 /// which this crate cannot name without depending on `waku-core`.
@@ -66,7 +127,13 @@ pub struct AgentStartOptions {
     pub access_mode: AccessMode,
     /// Waku's `InteractionMode::Plan`.
     pub plan_mode: bool,
+    /// The bare model id, without the platform prefix.
     pub model: Option<String>,
+    /// The gateway platform the model belongs to (`anthropic`, `openai`,
+    /// `gemini`, …). Decides which of the account's keys is used.
+    pub platform: Option<String>,
+    /// `None` takes the platform's native format.
+    pub wire_format: Option<WireFormat>,
     /// Waku's reasoning-effort id (`low`, `medium`, `high`, `xhigh`, `max`).
     pub reasoning_effort: Option<String>,
     /// A previous conversation to resume, as written by
@@ -81,9 +148,18 @@ impl Default for AgentStartOptions {
             access_mode: AccessMode::Ask,
             plan_mode: false,
             model: None,
+            platform: None,
+            wire_format: None,
             reasoning_effort: None,
             history: Vec::new(),
         }
+    }
+}
+
+impl AgentStartOptions {
+    pub fn wire_format(&self) -> WireFormat {
+        self.wire_format
+            .unwrap_or_else(|| WireFormat::default_for_platform(self.platform.as_deref()))
     }
 }
 
@@ -93,6 +169,8 @@ pub struct TurnOptions {
     pub access_mode: Option<AccessMode>,
     pub plan_mode: Option<bool>,
     pub model: Option<String>,
+    pub platform: Option<Option<String>>,
+    pub wire_format: Option<Option<WireFormat>>,
     pub reasoning_effort: Option<String>,
 }
 
@@ -121,8 +199,63 @@ pub fn build_config(options: &AgentStartOptions) -> Config {
         config.model = Some(model.clone());
     }
 
+    select_route(&mut config, options);
     config
 }
+
+/// Point the session at the engine provider for its wire format, with the
+/// key for its model's platform.
+///
+/// The routing writer stores every gateway key under the anthropic entry's
+/// `options.gateway_keys`, filed by platform; this reads the right one and
+/// makes it the key for the provider entry the format uses — and the
+/// top-level key, which the engine resolves first. An entry the format needs
+/// but the writer did not create (a self-hosted setup) inherits the anthropic
+/// entry's base, so a custom endpoint works for all three formats too.
+fn select_route(config: &mut Config, options: &AgentStartOptions) {
+    let format = options.wire_format();
+    let provider = format.engine_provider();
+
+    let anthropic = config.provider_configs.get("anthropic").cloned();
+    let gateway_keys = anthropic
+        .as_ref()
+        .and_then(|entry| entry.options.get(GATEWAY_KEYS_OPTION))
+        .and_then(|value| value.as_object().cloned());
+    let platform = options
+        .platform
+        .as_deref()
+        .map(|platform| platform.trim().to_ascii_lowercase());
+    let key = gateway_keys.as_ref().and_then(|keys| {
+        platform
+            .as_deref()
+            .and_then(|platform| keys.get(platform))
+            .or_else(|| keys.get("default"))
+            .or_else(|| keys.get("anthropic"))
+            .and_then(|value| value.as_str())
+            .map(str::to_owned)
+    });
+
+    config.provider = Some(provider.to_owned());
+    let entry = config
+        .provider_configs
+        .entry(provider.to_owned())
+        .or_insert_with(ProviderConfig::default);
+    if entry.api_base.as_deref().is_none_or(str::is_empty) {
+        entry.api_base = anthropic.as_ref().and_then(|entry| entry.api_base.clone());
+    }
+    entry.enabled = true;
+    if let Some(key) = key {
+        entry.api_key = Some(key.clone());
+        config.api_key = Some(key);
+    } else if provider != "anthropic" && entry.api_key.as_deref().is_none_or(str::is_empty) {
+        entry.api_key = anthropic.as_ref().and_then(|entry| entry.api_key.clone());
+    }
+}
+
+/// Where the routing writer files the per-platform keys. Kept in step with
+/// `sub2api::global_config::native::GATEWAY_KEYS_OPTION`, which this crate
+/// cannot import.
+pub const GATEWAY_KEYS_OPTION: &str = "gateway_keys";
 
 /// Build the per-turn config from the project config plus this turn's options.
 pub fn build_query_config(config: &Config, options: &AgentStartOptions) -> QueryConfig {
@@ -158,6 +291,69 @@ mod tests {
         ] {
             assert_eq!(mode.permission_mode(true), PermissionMode::Plan);
         }
+    }
+
+    #[test]
+    fn a_platform_prefix_is_split_off_and_a_bare_id_is_anthropic() {
+        assert_eq!(
+            split_model("openai::gpt-5.6-sol"),
+            (Some("openai".into()), "gpt-5.6-sol".into())
+        );
+        assert_eq!(split_model("claude-sonnet-5"), (None, "claude-sonnet-5".into()));
+        // A model namespace with a single slash is not a platform prefix.
+        assert_eq!(
+            split_model("meta-llama/Llama-3.3"),
+            (None, "meta-llama/Llama-3.3".into())
+        );
+    }
+
+    #[test]
+    fn openai_platforms_default_to_responses_and_the_rest_to_messages() {
+        assert_eq!(
+            WireFormat::default_for_platform(Some("openai")),
+            WireFormat::Responses
+        );
+        assert_eq!(
+            WireFormat::default_for_platform(Some("anthropic")),
+            WireFormat::Messages
+        );
+        assert_eq!(WireFormat::default_for_platform(Some("gemini")), WireFormat::Messages);
+        assert_eq!(WireFormat::default_for_platform(None), WireFormat::Messages);
+    }
+
+    #[test]
+    fn the_route_takes_the_platforms_key_and_the_formats_provider() {
+        let mut config = Config::default();
+        let mut anthropic = ProviderConfig::default();
+        anthropic.api_key = Some("sk-claude".into());
+        anthropic.api_base = Some("https://gw.example".into());
+        anthropic.options.insert(
+            GATEWAY_KEYS_OPTION.into(),
+            serde_json::json!({"anthropic": "sk-claude", "openai": "sk-codex", "default": "sk-general"}),
+        );
+        config.provider_configs.insert("anthropic".into(), anthropic);
+
+        let options = AgentStartOptions {
+            platform: Some("openai".into()),
+            wire_format: None,
+            ..AgentStartOptions::default()
+        };
+        select_route(&mut config, &options);
+        assert_eq!(config.provider.as_deref(), Some("codex"));
+        assert_eq!(config.api_key.as_deref(), Some("sk-codex"));
+        let codex = config.provider_configs.get("codex").unwrap();
+        assert_eq!(codex.api_key.as_deref(), Some("sk-codex"));
+        assert_eq!(codex.api_base.as_deref(), Some("https://gw.example"));
+
+        // A platform without its own key falls back to the general one.
+        let options = AgentStartOptions {
+            platform: Some("gemini".into()),
+            wire_format: Some(WireFormat::Chat),
+            ..AgentStartOptions::default()
+        };
+        select_route(&mut config, &options);
+        assert_eq!(config.provider.as_deref(), Some("openai"));
+        assert_eq!(config.api_key.as_deref(), Some("sk-general"));
     }
 
     #[test]

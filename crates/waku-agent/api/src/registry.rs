@@ -26,6 +26,14 @@ fn normalize_openai_compat_base(override_base: &str) -> String {
     }
 }
 
+/// Fork: the Responses route on a gateway or OpenAI-compatible base. A base
+/// pasted with or without `/v1` lands on the same path.
+fn responses_endpoint(base: &str) -> String {
+    let trimmed = base.trim_end_matches('/');
+    let root = trimmed.strip_suffix("/v1").unwrap_or(trimmed);
+    format!("{root}/v1/responses")
+}
+
 fn normalize_openai_base(override_base: &str) -> String {
     let trimmed = override_base.trim_end_matches('/');
     if trimmed.ends_with("/v1") {
@@ -263,9 +271,20 @@ pub fn provider_from_config(
         "github-copilot" => {
             api_key.map(|key| Arc::new(CopilotProvider::new(key)) as Arc<dyn LlmProvider>)
         }
-        "codex" | "openai-codex" => {
-            CodexProvider::from_stored().map(|provider| Arc::new(provider) as Arc<dyn LlmProvider>)
-        }
+        // Fork: a configured key + base URL selects the gateway path — the
+        // same Responses client, pointed at `<base>/v1/responses`. Without
+        // both, the upstream OAuth path applies.
+        "codex" | "openai-codex" => match (
+            api_key.as_deref().filter(|key| !key.trim().is_empty()),
+            api_base.as_deref(),
+        ) {
+            (Some(key), Some(base)) => Some(Arc::new(CodexProvider::with_gateway(
+                responses_endpoint(base),
+                key.to_string(),
+            )) as Arc<dyn LlmProvider>),
+            _ => CodexProvider::from_stored()
+                .map(|provider| Arc::new(provider) as Arc<dyn LlmProvider>),
+        },
         _ => api_key.and_then(|key| provider_from_key(provider_id, key)),
     }
 }

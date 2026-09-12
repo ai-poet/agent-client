@@ -10,10 +10,23 @@
 //! need the daemon to hold gateway keys — which the fork deliberately avoids
 //! (see the crate docs).
 //!
+//! # What is written
+//!
+//! Three provider entries, one per wire format the engine can speak against
+//! the gateway — `anthropic` (Messages), `openai` (Chat Completions) and
+//! `codex` (Responses) — all pointed at the gateway origin, plus every gateway
+//! key the account has, filed by the platform it authorizes under
+//! `provider_configs.anthropic.options.gateway_keys`. A session picks the key
+//! for its model's platform and the entry for its wire format at start; the
+//! file itself names no default provider, so the engine's own precedence
+//! (`config.provider`, then a `provider/` prefix, then Anthropic) is
+//! undisturbed for anyone running the engine outside Waku.
+//!
 //! Only the keys below are touched. The engine's own model pin, MCP roster,
 //! permission rules, hooks and agent definitions live in the same file and are
 //! left exactly as the user left them.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
@@ -23,6 +36,13 @@ use super::{CliBackups, RouteTarget, atomic_write_private, capture_backup, remov
 use crate::gateway::anthropic_base_url;
 
 const SETTINGS_FILE: &str = "settings.json";
+
+/// The engine provider entries this writer owns, one per wire format.
+pub const MANAGED_PROVIDERS: [&str; 3] = ["anthropic", "openai", "codex"];
+
+/// Where the per-platform keys live inside the anthropic entry's free-form
+/// options. The bridge reads the same path.
+pub const GATEWAY_KEYS_OPTION: &str = "gateway_keys";
 
 /// Where the engine looks for its global settings.
 ///
@@ -55,7 +75,12 @@ pub fn settings_path(config_dir: &Path) -> PathBuf {
     config_dir.join(SETTINGS_FILE)
 }
 
-pub fn take_over(config_dir: &Path, target: &RouteTarget, backups: &mut CliBackups) -> Result<()> {
+pub fn take_over(
+    config_dir: &Path,
+    target: &RouteTarget,
+    platform_keys: &BTreeMap<String, String>,
+    backups: &mut CliBackups,
+) -> Result<()> {
     let path = settings_path(config_dir);
     capture_backup(backups, SETTINGS_FILE, &path)?;
 
@@ -74,7 +99,6 @@ pub fn take_over(config_dir: &Path, target: &RouteTarget, backups: &mut CliBacku
     // provider entry alone would be outranked by a key the user typed into
     // the engine's own settings earlier.
     config.insert("api_key".to_owned(), json!(target.api_key));
-    config.insert("provider".to_owned(), json!("anthropic"));
 
     let providers = config
         .entry("provider_configs")
@@ -82,15 +106,30 @@ pub fn take_over(config_dir: &Path, target: &RouteTarget, backups: &mut CliBacku
     let providers = providers
         .as_object_mut()
         .ok_or_else(|| anyhow!("`provider_configs` in {} is not an object", path.display()))?;
-    let anthropic = providers
-        .entry("anthropic")
-        .or_insert_with(|| Value::Object(Map::new()));
-    let anthropic = anthropic
-        .as_object_mut()
-        .ok_or_else(|| anyhow!("the anthropic provider entry in {} is not an object", path.display()))?;
-    anthropic.insert("api_key".to_owned(), json!(target.api_key));
-    anthropic.insert("api_base".to_owned(), json!(anthropic_base_url(&target.base_url)));
-    anthropic.insert("enabled".to_owned(), json!(true));
+    // The adapters append their own paths (`/v1/messages`,
+    // `/v1/chat/completions`, `/v1/responses`), so every entry gets the bare
+    // origin.
+    let base = anthropic_base_url(&target.base_url);
+    for provider in MANAGED_PROVIDERS {
+        let entry = providers
+            .entry(provider)
+            .or_insert_with(|| Value::Object(Map::new()));
+        let entry = entry.as_object_mut().ok_or_else(|| {
+            anyhow!("the {provider} provider entry in {} is not an object", path.display())
+        })?;
+        entry.insert("api_key".to_owned(), json!(target.api_key));
+        entry.insert("api_base".to_owned(), json!(base));
+        entry.insert("enabled".to_owned(), json!(true));
+        if provider == "anthropic" {
+            let options = entry
+                .entry("options")
+                .or_insert_with(|| Value::Object(Map::new()));
+            let options = options.as_object_mut().ok_or_else(|| {
+                anyhow!("the anthropic provider options in {} are not an object", path.display())
+            })?;
+            options.insert(GATEWAY_KEYS_OPTION.to_owned(), json!(platform_keys));
+        }
+    }
 
     write_settings(&path, &root)
 }
@@ -128,6 +167,7 @@ pub fn restore(config_dir: &Path, backups: &CliBackups) -> Result<()> {
 
     if let Some(config) = object.get_mut("config").and_then(Value::as_object_mut) {
         restore_key(config, "api_key", &previous);
+        // Older builds of this writer pinned the provider; clear that too.
         restore_key(config, "provider", &previous);
 
         let previous_providers = previous
@@ -139,17 +179,30 @@ pub fn restore(config_dir: &Path, backups: &CliBackups) -> Result<()> {
             .get_mut("provider_configs")
             .and_then(Value::as_object_mut)
         {
-            let previous_anthropic = previous_providers
-                .get("anthropic")
-                .and_then(Value::as_object)
-                .cloned()
-                .unwrap_or_default();
-            if let Some(entry) = providers.get_mut("anthropic").and_then(Value::as_object_mut) {
-                for key in ["api_key", "api_base", "enabled"] {
-                    restore_key(entry, key, &previous_anthropic);
-                }
-                if entry.is_empty() {
-                    providers.remove("anthropic");
+            for provider in MANAGED_PROVIDERS {
+                let previous_entry = previous_providers
+                    .get(provider)
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default();
+                if let Some(entry) = providers.get_mut(provider).and_then(Value::as_object_mut) {
+                    for key in ["api_key", "api_base", "enabled"] {
+                        restore_key(entry, key, &previous_entry);
+                    }
+                    let previous_options = previous_entry
+                        .get("options")
+                        .and_then(Value::as_object)
+                        .cloned()
+                        .unwrap_or_default();
+                    if let Some(options) = entry.get_mut("options").and_then(Value::as_object_mut) {
+                        restore_key(options, GATEWAY_KEYS_OPTION, &previous_options);
+                        if options.is_empty() {
+                            entry.remove("options");
+                        }
+                    }
+                    if entry.is_empty() {
+                        providers.remove(provider);
+                    }
                 }
             }
             if providers.is_empty() {
@@ -207,9 +260,17 @@ mod tests {
     fn target() -> RouteTarget {
         RouteTarget {
             base_url: "https://gateway.example.org".into(),
-            api_key: "sk-gateway".into(),
+            api_key: "sk-claude".into(),
             models: Vec::new(),
         }
+    }
+
+    fn keys() -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("anthropic".to_owned(), "sk-claude".to_owned()),
+            ("openai".to_owned(), "sk-codex".to_owned()),
+            ("default".to_owned(), "sk-general".to_owned()),
+        ])
     }
 
     fn read(path: &Path) -> Value {
@@ -217,22 +278,28 @@ mod tests {
     }
 
     #[test]
-    fn taking_over_writes_the_keys_the_engine_reads() {
+    fn taking_over_writes_one_entry_per_wire_format_and_every_key() {
         let dir = tempdir();
         let mut backups = CliBackups::default();
-        take_over(&dir, &target(), &mut backups).unwrap();
+        take_over(&dir, &target(), &keys(), &mut backups).unwrap();
 
         let root = read(&settings_path(&dir));
         let config = root.get("config").unwrap();
-        assert_eq!(config.get("api_key").unwrap(), "sk-gateway");
-        assert_eq!(config.get("provider").unwrap(), "anthropic");
-        let anthropic = config
-            .pointer("/provider_configs/anthropic")
-            .expect("the anthropic entry");
-        assert_eq!(anthropic.get("api_key").unwrap(), "sk-gateway");
+        assert_eq!(config.get("api_key").unwrap(), "sk-claude");
+        // No provider pin: the session chooses.
+        assert!(config.get("provider").is_none());
+        for provider in MANAGED_PROVIDERS {
+            let entry = config
+                .pointer(&format!("/provider_configs/{provider}"))
+                .unwrap_or_else(|| panic!("{provider} entry"));
+            assert_eq!(entry.get("api_base").unwrap(), "https://gateway.example.org");
+            assert_eq!(entry.get("enabled").unwrap(), &json!(true));
+        }
         assert_eq!(
-            anthropic.get("api_base").unwrap(),
-            &json!(anthropic_base_url("https://gateway.example.org"))
+            config
+                .pointer("/provider_configs/anthropic/options/gateway_keys/openai")
+                .unwrap(),
+            "sk-codex"
         );
     }
 
@@ -241,16 +308,17 @@ mod tests {
         let dir = tempdir();
         std::fs::write(
             settings_path(&dir),
-            r#"{"config":{"model":"claude-opus-5","auto_compact":true},"permissionRules":[{"keep":1}]}"#,
+            r#"{"config":{"model":"claude-opus-5","auto_compact":true,"provider_configs":{"google":{"api_key":"g"}}},"permissionRules":[{"keep":1}]}"#,
         )
         .unwrap();
 
         let mut backups = CliBackups::default();
-        take_over(&dir, &target(), &mut backups).unwrap();
+        take_over(&dir, &target(), &keys(), &mut backups).unwrap();
 
         let root = read(&settings_path(&dir));
         assert_eq!(root.pointer("/config/model").unwrap(), "claude-opus-5");
         assert_eq!(root.pointer("/config/auto_compact").unwrap(), &json!(true));
+        assert_eq!(root.pointer("/config/provider_configs/google/api_key").unwrap(), "g");
         assert!(root.get("permissionRules").is_some());
     }
 
@@ -259,38 +327,32 @@ mod tests {
         let dir = tempdir();
         std::fs::write(
             settings_path(&dir),
-            r#"{"config":{"api_key":"sk-user-own","model":"claude-opus-5"}}"#,
+            r#"{"config":{"api_key":"sk-user-own","model":"claude-opus-5","provider":"openai"}}"#,
         )
         .unwrap();
 
         let mut backups = CliBackups::default();
-        take_over(&dir, &target(), &mut backups).unwrap();
+        take_over(&dir, &target(), &keys(), &mut backups).unwrap();
         assert_eq!(
             read(&settings_path(&dir)).pointer("/config/api_key").unwrap(),
-            "sk-gateway"
+            "sk-claude"
         );
 
         restore(&dir, &backups).unwrap();
         let root = read(&settings_path(&dir));
         assert_eq!(root.pointer("/config/api_key").unwrap(), "sk-user-own");
-        // Untouched throughout.
+        assert_eq!(root.pointer("/config/provider").unwrap(), "openai");
         assert_eq!(root.pointer("/config/model").unwrap(), "claude-opus-5");
-        // Nothing we added is left behind.
         assert!(root.pointer("/config/provider_configs").is_none());
-        assert!(root.pointer("/config/provider").is_none());
     }
 
     #[test]
     fn releasing_a_file_we_created_deletes_it_again() {
         let dir = tempdir();
         let mut backups = CliBackups::default();
-        take_over(&dir, &target(), &mut backups).unwrap();
+        take_over(&dir, &target(), &keys(), &mut backups).unwrap();
         restore(&dir, &backups).unwrap();
-
-        assert!(
-            !settings_path(&dir).exists(),
-            "a settings file that only existed because of us should be gone"
-        );
+        assert!(!settings_path(&dir).exists());
     }
 
     fn tempdir() -> PathBuf {

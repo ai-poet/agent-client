@@ -55,7 +55,10 @@ struct Inner {
     events: EventSink,
     id: String,
     cwd: PathBuf,
-    client: Arc<AnthropicClient>,
+    /// Rebuilt with the registry when the route changes — a different key,
+    /// platform or wire format — so an option change never sends the next
+    /// turn through the previous one's credentials.
+    client: Mutex<Arc<AnthropicClient>>,
     /// Replaced, not mutated, when the MCP roster connects: a turn already
     /// running keeps the set it started with.
     tools: Mutex<ToolSet>,
@@ -96,23 +99,8 @@ impl AgentSession {
         let config = build_config(&options);
         let mut query = build_query_config(&config, &options);
 
-        // Resolving the key may refresh an OAuth token, so it is async. Every
-        // other part of construction is not.
-        let (api_key, use_bearer_auth) = rt
-            .block_on(config.resolve_anthropic_auth_async())
-            .unwrap_or_default();
-
-        let client_config = ClientConfig {
-            api_key,
-            api_base: config.resolve_anthropic_api_base(),
-            use_bearer_auth,
-            ..Default::default()
-        };
-        let client = Arc::new(AnthropicClient::new(client_config.clone())?);
-        query.provider_registry = Some(Arc::new(claurst_api::ProviderRegistry::from_config(
-            &config,
-            client_config,
-        )));
+        let (client, registry) = build_clients(&config)?;
+        query.provider_registry = Some(registry);
 
         let manager = Arc::new(std::sync::Mutex::new(PermissionManager::new(
             config.permission_mode.clone(),
@@ -130,7 +118,7 @@ impl AgentSession {
             events,
             id: uuid::Uuid::new_v4().to_string(),
             cwd: options.cwd.clone(),
-            client,
+            client: Mutex::new(client),
             tools: Mutex::new(tools),
             cost_tracker: CostTracker::new(),
             file_history: Arc::new(Mutex::new(
@@ -276,12 +264,39 @@ impl AgentSession {
         if changes.model.is_some() {
             options.model = changes.model;
         }
+        if let Some(platform) = changes.platform {
+            options.platform = platform;
+        }
+        if let Some(format) = changes.wire_format {
+            options.wire_format = format;
+        }
         if changes.reasoning_effort.is_some() {
             options.reasoning_effort = changes.reasoning_effort;
         }
 
         let config = build_config(&options);
-        let query = build_query_config(&config, &options);
+        let mut query = build_query_config(&config, &options);
+        let route_changed = {
+            let current = self.inner.config.lock();
+            current.provider != config.provider
+                || current.api_key != config.api_key
+                || current.provider_configs.get("anthropic").map(|entry| entry.api_base.clone())
+                    != config.provider_configs.get("anthropic").map(|entry| entry.api_base.clone())
+        };
+        if route_changed {
+            match build_clients(&config) {
+                Ok((client, registry)) => {
+                    *self.inner.client.lock() = client;
+                    query.provider_registry = Some(registry);
+                }
+                Err(error) => {
+                    self.inner.events.emit(AgentEvent::Error(format!(
+                        "could not switch the agent's route: {error:#}"
+                    )));
+                    return true;
+                }
+            }
+        }
         self.inner.bridge.set_auto(options.access_mode.auto_answer());
         if let Ok(mut manager) = self.inner.manager.lock() {
             // The manager caches the mode it evaluates against; rebuild it so
@@ -297,11 +312,12 @@ impl AgentSession {
             // Held one at a time, and in the same order `run_turn` reads them,
             // so the two can never wait on each other.
             let mut current_query = self.inner.query.lock();
-            // The registry owns live provider clients; rebuilding it on every
-            // option change would drop connection pools for a model switch.
-            let registry = current_query.provider_registry.clone();
+            // The registry owns live provider clients; it is only rebuilt when
+            // the route changed, so a plain model switch keeps its pools.
+            if query.provider_registry.is_none() {
+                query.provider_registry = current_query.provider_registry.clone();
+            }
             *current_query = query;
-            current_query.provider_registry = registry;
         }
         *self.inner.config.lock() = config;
         true
@@ -344,6 +360,30 @@ impl Drop for Inner {
         self.bridge.release_all();
         self.questions.lock().clear();
     }
+}
+
+/// The Anthropic client and the provider registry for a route.
+///
+/// Both come from the same `Config`, so whichever wire format the route
+/// selects, the credentials are the ones `select_route` chose. Resolving the
+/// key may refresh an OAuth token, hence the `block_on`; the caller is never
+/// on the runtime.
+fn build_clients(
+    config: &Config,
+) -> anyhow::Result<(Arc<AnthropicClient>, Arc<claurst_api::ProviderRegistry>)> {
+    let rt = runtime::shared()?;
+    let (api_key, use_bearer_auth) = rt
+        .block_on(config.resolve_anthropic_auth_async())
+        .unwrap_or_default();
+    let client_config = ClientConfig {
+        api_key,
+        api_base: config.resolve_anthropic_api_base(),
+        use_bearer_auth,
+        ..Default::default()
+    };
+    let client = Arc::new(AnthropicClient::new(client_config.clone())?);
+    let registry = Arc::new(claurst_api::ProviderRegistry::from_config(config, client_config));
+    Ok((client, registry))
 }
 
 /// The built-in tools, minus the ones the user switched off, plus every
@@ -460,6 +500,7 @@ async fn run_turn(
     let tools = inner.tools.lock().clone();
     let context_window = claurst_query::context_window_for_model(&query.model);
 
+    let client = inner.client.lock().clone();
     let handler: Arc<dyn claurst_core::PermissionHandler> =
         Arc::new(GuiPermissionHandler::new(inner.bridge.clone()));
 
@@ -493,7 +534,7 @@ async fn run_turn(
     let forwarder = tokio::spawn(forward_events(inner.clone(), rx, context_window));
 
     let outcome = claurst_query::run_query_loop(
-        inner.client.as_ref(),
+        client.as_ref(),
         &mut messages,
         tools.as_slice(),
         &tool_ctx,

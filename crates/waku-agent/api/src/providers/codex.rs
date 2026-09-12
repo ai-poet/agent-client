@@ -48,6 +48,10 @@ pub struct CodexProvider {
     http_client: reqwest::Client,
     /// Mutable token cache: updated in-place when a refresh succeeds.
     tokens: Arc<Mutex<CodexTokens>>,
+    /// Where `/responses` requests go. Upstream this is always the ChatGPT
+    /// Codex backend; the Waku fork also points it at a gateway that speaks
+    /// the same API (see [`CodexProvider::with_gateway`]).
+    endpoint: String,
 }
 
 impl CodexProvider {
@@ -61,7 +65,24 @@ impl CodexProvider {
             id: ProviderId::new(ProviderId::CODEX),
             http_client,
             tokens: Arc::new(Mutex::new(tokens)),
+            endpoint: CODEX_API_ENDPOINT.to_string(),
         }
+    }
+
+    /// Fork addition: the Responses API against an arbitrary endpoint with a
+    /// plain API key. The key rides as the bearer token; no expiry, no
+    /// refresh, no ChatGPT account id. Everything else — request shape,
+    /// streaming, tool translation — is unchanged, which is the point: a
+    /// gateway that implements `/responses` gets the same client the
+    /// ChatGPT backend does.
+    pub fn with_gateway(endpoint: impl Into<String>, api_key: String) -> Self {
+        let tokens = CodexTokens {
+            access_token: api_key,
+            ..CodexTokens::default()
+        };
+        let mut provider = Self::new(tokens);
+        provider.endpoint = endpoint.into();
+        provider
     }
 
     /// Construct from stored tokens; returns `None` if no tokens are saved.
@@ -325,7 +346,7 @@ impl CodexProvider {
 
         let builder = self
             .http_client
-            .post(CODEX_API_ENDPOINT)
+            .post(self.endpoint.as_str())
             .header("Content-Type", "application/json")
             .header("Accept", "application/json");
         let builder = self.codex_headers(builder, &token, account_id.as_deref());
@@ -375,7 +396,7 @@ impl CodexProvider {
 
         let builder = self
             .http_client
-            .post(CODEX_API_ENDPOINT)
+            .post(self.endpoint.as_str())
             .header("Content-Type", "application/json")
             .header("Accept", "text/event-stream");
         let builder = self.codex_headers(builder, &token, account_id.as_deref());

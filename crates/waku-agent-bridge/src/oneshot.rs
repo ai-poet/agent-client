@@ -20,7 +20,9 @@ use claurst_query::QueryOutcome;
 use claurst_tools::{Tool, ToolContext};
 use tokio_util::sync::CancellationToken;
 
-use crate::config::{AccessMode, AgentStartOptions, build_config, build_query_config};
+use crate::config::{
+    AccessMode, AgentStartOptions, WireFormat, build_config, build_query_config, split_model,
+};
 use crate::runtime;
 
 /// Ask the model `prompt` and return what it said, trimmed.
@@ -30,13 +32,20 @@ use crate::runtime;
 /// otherwise commit with no message.
 pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result<String> {
     let rt = runtime::shared()?;
+    let (platform, model) = model.map(split_model).map_or((None, None), |(platform, model)| {
+        (platform, Some(model))
+    });
     let options = AgentStartOptions {
         cwd: cwd.to_path_buf(),
         // Irrelevant with no tools, but the most restrictive reading is the
         // right default for a call that should never touch anything.
         access_mode: AccessMode::Ask,
         plan_mode: false,
-        model: model.map(str::to_owned),
+        model,
+        platform,
+        // One prompt, one answer: the engine's primary path is the one to
+        // trust for it, whatever the session itself speaks.
+        wire_format: Some(WireFormat::Messages),
         reasoning_effort: None,
         history: Vec::new(),
     };

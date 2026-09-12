@@ -3098,3 +3098,16 @@ common.save:
   en: "Save"
 common.add:
   en: "Add"
+
+model_option.wire_messages:
+  en: "Anthropic Messages"
+model_option.wire_messages_description:
+  en: "The engine's primary API. The gateway serves it for every platform."
+model_option.wire_responses:
+  en: "OpenAI Responses"
+model_option.wire_responses_description:
+  en: "What Codex speaks; native for OpenAI-keyed groups."
+model_option.wire_chat:
+  en: "OpenAI Chat Completions"
+model_option.wire_chat_description:
+  en: "The widest-supported OpenAI-compatible API."

@@ -27,7 +27,7 @@ use serde_json::Value;
 use uuid::Uuid;
 use waku_agent_bridge::{
     AccessMode, AgentEvent, AgentSession, AgentStartOptions, BackgroundEntry, BackgroundKind,
-    BackgroundStatus, TurnOptions,
+    BackgroundStatus, TurnOptions, WireFormat, split_model,
 };
 
 use super::activity;
@@ -35,9 +35,10 @@ use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
 use crate::model::{
-    ActivityKind, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey, BackgroundWorkKind,
-    BackgroundWorkStatus, DriverEvent, InteractionMode, PermissionOption, ProviderResumeCursor,
-    RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion, unix_time_millis,
+    ActivityKind, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey,
+    BackgroundWorkKind, BackgroundWorkStatus, DriverEvent, InteractionMode, Message, MessageRole,
+    PermissionOption, ProviderResumeCursor, ProviderSessionHistory, RuntimeMode, TurnStatus,
+    UserInputAnswer, UserInputOption, UserInputQuestion, unix_time_millis,
 };
 
 pub struct NativeDriver {
@@ -72,11 +73,14 @@ impl NativeDriver {
             Vec::new()
         };
 
+        let (platform, model) = route_of(options.model.as_deref());
         let start = AgentStartOptions {
             cwd: options.cwd.clone(),
             access_mode: access_mode(options.mode),
             plan_mode: options.interaction_mode == InteractionMode::Plan,
-            model: options.model.clone(),
+            model,
+            platform,
+            wire_format: wire_format_of(options.service_tier.as_deref()),
             reasoning_effort: options.reasoning_effort.clone(),
             history,
         };
@@ -154,10 +158,13 @@ impl DriverControl for NativeDriver {
     /// `QueryConfig` at the start of every turn, so none of them can require a
     /// restart the way a launch argument would.
     fn apply_options(&self, options: SessionOptions) -> bool {
+        let (platform, model) = route_of(options.model.as_deref());
         self.session.apply_options(TurnOptions {
             access_mode: Some(access_mode(options.mode)),
             plan_mode: Some(options.interaction_mode == InteractionMode::Plan),
-            model: options.model,
+            model,
+            platform: Some(platform),
+            wire_format: Some(wire_format_of(options.service_tier.as_deref())),
             reasoning_effort: options.reasoning_effort,
         })
     }
@@ -190,6 +197,23 @@ impl DriverControl for NativeDriver {
 // Options
 // ---------------------------------------------------------------------------
 
+/// The picker's model id is `<platform>::<model>`; a bare id is Anthropic.
+fn route_of(model: Option<&str>) -> (Option<String>, Option<String>) {
+    match model {
+        Some(id) => {
+            let (platform, model) = split_model(id);
+            (platform, Some(model))
+        }
+        None => (None, None),
+    }
+}
+
+/// The picker's "service tier" slot carries the wire format for the built-in
+/// agent. An unknown or absent tier means the platform's native format.
+fn wire_format_of(tier: Option<&str>) -> Option<WireFormat> {
+    tier.and_then(WireFormat::from_id)
+}
+
 fn access_mode(mode: RuntimeMode) -> AccessMode {
     match mode {
         RuntimeMode::Ask => AccessMode::Ask,
@@ -206,6 +230,63 @@ fn access_mode(mode: RuntimeMode) -> AccessMode {
 // ---------------------------------------------------------------------------
 // Persistence
 // ---------------------------------------------------------------------------
+
+/// Read a stored transcript back as Waku turns and messages, for
+/// `LoadProviderSession`.
+///
+/// Every turn shell is kept so provider turn numbering stays exact; only the
+/// text of the last `turn_limit` turns is imported, the same bound the CLI
+/// importers apply. Tool calls, results and thinking are not text a reader
+/// would see, so they are left out — the engine's own transcript file
+/// remains the full record.
+pub(crate) fn provider_session_history(
+    transcript_id: &str,
+    turn_limit: usize,
+) -> anyhow::Result<ProviderSessionHistory> {
+    let id = Uuid::parse_str(transcript_id)
+        .with_context(|| format!("`{transcript_id}` is not a transcript id"))?;
+    let store = SessionStore::new(id);
+    let bytes = store.load();
+    if bytes.is_empty() {
+        anyhow::bail!(
+            "the built-in agent has no transcript for {transcript_id} at {}",
+            store.path.display()
+        );
+    }
+    let stored = waku_agent_bridge::history::deserialize(&bytes);
+    let display = waku_agent_bridge::history::turns_for_display(&stored);
+    let first_visible = display.len().saturating_sub(turn_limit);
+    let now = unix_time_millis() / 1000;
+
+    let mut history = ProviderSessionHistory::default();
+    for (index, turn) in display.into_iter().enumerate() {
+        let turn_id = Uuid::new_v4();
+        history.turns.push(AgentTurn {
+            id: turn_id,
+            turn_count: index + 1,
+            status: TurnStatus::Completed,
+            provider_turn_started: true,
+            provider_resume_at: None,
+            started_at: now,
+            completed_at: Some(now),
+            checkpoint: None,
+        });
+        if index < first_visible {
+            continue;
+        }
+        history
+            .messages
+            .push(Message::new_for_turn(MessageRole::User, turn.user, turn_id));
+        if !turn.assistant.is_empty() {
+            history.messages.push(Message::new_for_turn(
+                MessageRole::Assistant,
+                turn.assistant,
+                turn_id,
+            ));
+        }
+    }
+    Ok(history)
+}
 
 /// Delete the transcript file for a session Waku has removed. A file that is
 /// already gone is not an error; an id that is not a UUID is refused rather
@@ -526,6 +607,18 @@ fn permission_label(choice: waku_agent_bridge::PermissionChoice) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_picker_id_carries_the_platform_and_the_tier_carries_the_format() {
+        assert_eq!(
+            route_of(Some("openai::gpt-5.6-sol")),
+            (Some("openai".into()), Some("gpt-5.6-sol".into()))
+        );
+        assert_eq!(route_of(Some("claude-sonnet-5")), (None, Some("claude-sonnet-5".into())));
+        assert_eq!(wire_format_of(Some("responses")), Some(WireFormat::Responses));
+        assert_eq!(wire_format_of(Some("default")), None);
+        assert_eq!(wire_format_of(None), None);
+    }
 
     #[test]
     fn the_legacy_plan_runtime_mode_degrades_to_asking() {

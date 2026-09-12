@@ -892,9 +892,25 @@ persisted approval rules — touching only the keys it owns. A tool switched
 off there is filtered out of the session's tool set before the model ever
 sees it.
 
-**Models** — the picker's list comes from the gateway catalog the Model
-Plaza fetches, filtered to Anthropic-API models (`src/app/native_agent.rs`),
-and falls back to the built-in list until that lands. No CLI is asked.
+**Models and wire formats** — the picker's list is the gateway catalog the
+Model Plaza fetches, every token-billed model on every platform
+(`src/app/native_agent.rs`); it falls back to the built-in Anthropic list
+until that lands. No CLI is asked. Each entry's id carries its platform
+(`openai::gpt-5.6-sol`), which is how the daemon picks the account key that
+authorizes it — the routing writer files every gateway key by platform under
+the engine's anthropic provider entry, and `select_route` in the bridge picks
+the one for the session's platform.
+
+The model's "service tier" slot is the **wire format**: Anthropic Messages,
+OpenAI Responses, or OpenAI Chat Completions, defaulting to the platform's
+native one (Responses for OpenAI-keyed groups, Messages otherwise). The
+gateway translates each format for every platform, so this is the user's
+choice rather than the model's. Each format is a different engine adapter —
+`anthropic`, `codex`, `openai` — pointed at the gateway origin; switching
+format or platform rebuilds the session's clients, a plain model switch does
+not. The Responses adapter upstream only knew the ChatGPT backend; the fork
+gives it an endpoint and a bearer key (`CodexProvider::with_gateway`), one of
+the recorded departures in the vendored tree.
 
 **Deletion** — removing a session sends `DeleteAgentTranscript` for the
 cursor's file, alongside the checkpoint-ref cleanup every provider gets.

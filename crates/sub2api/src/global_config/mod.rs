@@ -101,6 +101,11 @@ pub struct RouteTarget {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DesiredRoutes {
     pub native: Option<RouteTarget>,
+    /// The built-in agent can reach any platform the account has a key for,
+    /// so alongside its primary target it gets every gateway key, by the
+    /// platform it authorizes: `anthropic`, `openai`, and `default` (the
+    /// account's general key). Empty when routing is off or custom.
+    pub native_platform_keys: BTreeMap<String, String>,
     pub claude: Option<RouteTarget>,
     pub codex: Option<RouteTarget>,
     pub grok: Option<RouteTarget>,
@@ -133,12 +138,25 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
             models: endpoint.models.clone(),
         })
     };
+    let mut native_platform_keys = BTreeMap::new();
+    if let Some(config) = cloud {
+        for (platform, key) in [
+            ("anthropic", config.key_for("claude")),
+            ("openai", config.key_for("codex")),
+            ("default", config.api_key.as_deref()),
+        ] {
+            if let Some(key) = key.map(str::trim).filter(|key| !key.is_empty()) {
+                native_platform_keys.insert(platform.to_owned(), key.to_owned());
+            }
+        }
+    }
     DesiredRoutes {
-        // The built-in agent speaks the Anthropic API, so it routes on the
-        // same key Claude Code does. This is what makes "sign in, then send a
-        // message" true with nothing installed.
+        // The built-in agent's primary target is the Anthropic route, the
+        // same key Claude Code gets — "sign in, then send a message" with
+        // nothing installed. The other platforms' keys ride alongside.
         native: cloud_target(cloud.and_then(|config| config.key_for("claude")))
             .or_else(|| custom_target("native")),
+        native_platform_keys,
         claude: cloud_target(cloud.and_then(|config| config.key_for("claude")))
             .or_else(|| custom_target("claude")),
         codex: cloud_target(cloud.and_then(|config| config.key_for("codex")))
@@ -250,7 +268,9 @@ pub fn reconcile_at(paths: &Paths, desired: &DesiredRoutes) -> Result<Vec<String
         desired.native.as_ref(),
         &mut state.native,
         &mut warnings,
-        |target, backups| native::take_over(&paths.native_dir, target, backups),
+        |target, backups| {
+            native::take_over(&paths.native_dir, target, &desired.native_platform_keys, backups)
+        },
         |backups| native::restore(&paths.native_dir, backups),
     );
     reconcile_switching(
@@ -525,6 +545,7 @@ mod tests {
         ));
         Paths {
             data_dir: root.join("waku"),
+            native_dir: root.join("claurst"),
             claude_dir: root.join("claude"),
             codex_dir: root.join("codex"),
             grok_dir: root.join("grok"),
@@ -608,6 +629,11 @@ mod tests {
         .unwrap();
 
         let desired = DesiredRoutes {
+            native: Some(target("https://gw.example.org", "sk-c")),
+            native_platform_keys: BTreeMap::from([
+                ("anthropic".to_owned(), "sk-c".to_owned()),
+                ("openai".to_owned(), "sk-x".to_owned()),
+            ]),
             claude: Some(target("https://gw.example.org", "sk-c")),
             codex: Some(target("https://gw.example.org", "sk-x")),
             grok: Some(target("https://gw.example.org", "sk-g")),
