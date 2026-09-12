@@ -156,7 +156,9 @@ fn process_is_alive(pid: u32) -> bool {
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if handle.is_null() {
-            return false;
+            // Read before any other call can overwrite the thread's last error.
+            let open_error = std::io::Error::last_os_error().raw_os_error();
+            return !parent_is_gone(open_error);
         }
         let mut exit_code = 0_u32;
         let read = GetExitCodeProcess(handle, &mut exit_code);
@@ -165,6 +167,17 @@ fn process_is_alive(pid: u32) -> bool {
         // is the safer error than shutting a live daemon down.
         read == 0 || exit_code == STILL_ACTIVE as u32
     }
+}
+
+/// Only "no such process" means the parent is gone. `ERROR_ACCESS_DENIED`
+/// and every other `OpenProcess` failure leave its state unknown, and
+/// outliving the app is the safer error than shutting a live daemon down —
+/// the same call the Unix branch makes for `EPERM`.
+#[cfg(windows)]
+fn parent_is_gone(open_error: Option<i32>) -> bool {
+    use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
+
+    open_error == Some(ERROR_INVALID_PARAMETER as i32)
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -206,5 +219,27 @@ mod tests {
     fn parses_explicit_non_loopback_opt_in() {
         let arguments = Arguments::parse(["--allow-non-loopback".into()]).unwrap();
         assert!(arguments.allow_non_loopback);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn only_a_missing_process_counts_as_a_dead_parent() {
+        // ERROR_INVALID_PARAMETER: the pid names no process.
+        assert!(parent_is_gone(Some(87)));
+        // ERROR_ACCESS_DENIED, ERROR_INVALID_HANDLE, or no code at all: unknown.
+        assert!(!parent_is_gone(Some(5)));
+        assert!(!parent_is_gone(Some(6)));
+        assert!(!parent_is_gone(None));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn liveness_probe_answers_for_real_processes() {
+        assert!(process_is_alive(std::process::id()));
+        // The System Idle Process cannot be opened; OpenProcess reports
+        // ERROR_INVALID_PARAMETER for it, which is the "gone" answer.
+        assert!(!process_is_alive(0));
+        // The System process may refuse the handle; refusal means alive.
+        assert!(process_is_alive(4));
     }
 }

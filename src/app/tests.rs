@@ -1,17 +1,23 @@
+use super::background_work::should_refresh_background_work;
 use super::composer::{
     ComposerSubmitAction, composer_submit_action, dropped_file_mention, merged_submission,
     next_picker_highlight, visible_branch_entries,
 };
+use super::daemon_banner::{
+    DAEMON_BANNER_GRACE, DAEMON_RESTART_OFFER_AFTER, DaemonBannerStage, DaemonConnectionPhase,
+    daemon_banner_stage, next_connection_phase,
+};
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::settings::visible_settings_pages;
 use super::{
-    ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
-    NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, PendingUserInput, SessionNavigation,
-    StreamDeltaKind, TranscriptRowKind::*, active_navigation_turn_index,
-    append_text_delta_to_session, assistant_response_footer, assistant_response_footer_index,
-    assistant_response_footer_time, compact_driver_error, disclosure_leading_space, fenced_code,
-    fitted_file_tree_width, fitted_panel_widths, folded_transcript_row_kinds,
-    format_worked_duration, format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
+    DEFAULT_TOAST_DURATION, ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation,
+    EscapeStopPress, EscapeStopTarget, NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT,
+    PendingUserInput, SessionNavigation, StreamDeltaKind, ToastState, ToastTone,
+    TranscriptRowKind::*, active_navigation_turn_index, append_text_delta_to_session,
+    assistant_response_footer, assistant_response_footer_index, assistant_response_footer_time,
+    compact_driver_error, disclosure_leading_space, fenced_code, fitted_file_tree_width,
+    fitted_panel_widths, folded_transcript_row_kinds, format_worked_duration,
+    format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
     message_starts_followup_turn, navigation_preview_snippet, navigation_rail_fade_visibility,
     navigation_rail_height, navigation_rail_scale, paused_toast_duration, pop_stream_batch,
     push_transcript_activity, response_footer_message_index, response_row_turn_id,
@@ -230,6 +236,122 @@ fn escape_stop_requires_a_matching_second_press_and_expires() {
     assert!(!confirmation.expire(first_arm));
     assert!(!confirmation.expire(second_arm));
     assert!(confirmation.expire(replacement_arm));
+}
+
+#[test]
+fn a_repeated_toast_restarts_its_countdown_without_a_new_element() {
+    let mut toast = ToastState {
+        message: "x".into(),
+        tone: ToastTone::Alert,
+        id: 1,
+        timer_generation: 1,
+        duration_remaining: Duration::from_millis(300),
+        timer_started: Some(Instant::now()),
+        hovered: false,
+    };
+    assert!(toast.refresh_if_same("x", ToastTone::Alert, 2));
+    assert_eq!(
+        toast.id, 1,
+        "the element id is what keeps the entrance from replaying"
+    );
+    assert_eq!(
+        toast.timer_generation, 2,
+        "the running dismiss timer becomes inert"
+    );
+    assert_eq!(toast.duration_remaining, DEFAULT_TOAST_DURATION);
+    assert!(
+        toast.timer_started.is_none(),
+        "render re-arms the countdown"
+    );
+    assert!(!toast.refresh_if_same("y", ToastTone::Alert, 3));
+    assert!(!toast.refresh_if_same("x", ToastTone::Success, 3));
+}
+
+#[test]
+fn background_refresh_waits_for_the_daemon() {
+    // Selected session, interval elapsed, daemon down: nothing is asked.
+    assert!(!should_refresh_background_work(true, false, true, false));
+    assert!(should_refresh_background_work(true, false, true, true));
+    assert!(should_refresh_background_work(false, true, true, true));
+    assert!(!should_refresh_background_work(false, false, true, true));
+    assert!(!should_refresh_background_work(true, false, false, true));
+}
+
+#[test]
+fn connection_phase_follows_the_socket() {
+    let now = Instant::now();
+    assert_eq!(
+        next_connection_phase(&DaemonConnectionPhase::Connected, true, now),
+        Some(DaemonConnectionPhase::Reconnecting { since: now })
+    );
+    assert_eq!(
+        next_connection_phase(&DaemonConnectionPhase::Connected, false, now),
+        None
+    );
+    let reconnecting = DaemonConnectionPhase::Reconnecting { since: now };
+    assert_eq!(
+        next_connection_phase(&reconnecting, true, now + Duration::from_secs(3)),
+        None,
+        "an outage keeps its start time"
+    );
+    assert_eq!(
+        next_connection_phase(&reconnecting, false, now),
+        Some(DaemonConnectionPhase::Connected)
+    );
+    assert_eq!(
+        next_connection_phase(&DaemonConnectionPhase::Failed("boom".into()), false, now),
+        Some(DaemonConnectionPhase::Connected)
+    );
+    assert_eq!(
+        next_connection_phase(&DaemonConnectionPhase::Failed("boom".into()), true, now),
+        None
+    );
+}
+
+#[test]
+fn daemon_banner_waits_out_short_outages_then_offers_a_restart() {
+    let since = Instant::now();
+    let reconnecting = DaemonConnectionPhase::Reconnecting { since };
+    let stage = |at: Duration| daemon_banner_stage(&reconnecting, since + at, false, false);
+    assert_eq!(stage(Duration::from_secs(1)), DaemonBannerStage::Hidden);
+    assert_eq!(stage(DAEMON_BANNER_GRACE), DaemonBannerStage::Reconnecting);
+    assert_eq!(
+        stage(Duration::from_secs(2)),
+        DaemonBannerStage::Reconnecting
+    );
+    assert_eq!(
+        stage(DAEMON_RESTART_OFFER_AFTER),
+        DaemonBannerStage::OfferRestart
+    );
+    assert_eq!(
+        stage(Duration::from_secs(11)),
+        DaemonBannerStage::OfferRestart
+    );
+
+    let later = since + Duration::from_secs(11);
+    assert_eq!(
+        daemon_banner_stage(&reconnecting, later, true, false),
+        DaemonBannerStage::Hidden,
+        "a user-driven reconfigure already says restarting in Settings"
+    );
+    assert_eq!(
+        daemon_banner_stage(&reconnecting, later, false, true),
+        DaemonBannerStage::Hidden,
+        "a dismissed strip stays away"
+    );
+    assert_eq!(
+        daemon_banner_stage(
+            &DaemonConnectionPhase::Failed("boom".into()),
+            later,
+            false,
+            false
+        ),
+        DaemonBannerStage::Failed
+    );
+    assert_eq!(
+        daemon_banner_stage(&DaemonConnectionPhase::Connected, later, false, false),
+        DaemonBannerStage::Hidden
+    );
 }
 
 #[test]

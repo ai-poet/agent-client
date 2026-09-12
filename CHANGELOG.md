@@ -16,6 +16,8 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- Fix the app losing its daemon for good when only the connection to it dropped (a "Waku daemon disconnected" notice that came back every few seconds until a relaunch): the app now reconnects to the still-running daemon and running tasks carry on. While it reconnects, a strip across the top says so and offers a restart if it takes too long, nothing else repeats the notice, and state and drafts that could not be saved meanwhile are written once the connection is back
+
 ## [0.1.20]
 
 - Fix the app reacting to a draft before it is sent: typing in the composer could make the task appear in the sidebar, replace the empty state, and raise a "Waku daemon disconnected" notice once per few characters. The provider is still warmed up while you type, but nothing about the session changes until you press Enter, and a warm process started for a different model or mode is discarded rather than used

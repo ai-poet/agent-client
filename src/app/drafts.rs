@@ -205,7 +205,12 @@ impl Waku {
                 .background_executor()
                 .spawn(async move { store.save(drafts, generation) })
                 .await;
-            if let Err(error) = result {
+            // Fork addition: a dropped daemon socket is not reported here. The
+            // draft stays in memory and the store only advances its snapshot
+            // on success, so the save after reconnecting carries the changes.
+            if let Err(error) = result
+                && !waku_client::is_daemon_transport_error(&error.to_string())
+            {
                 let _ = waku.update(cx, |waku, cx| {
                     waku.show_toast(tr!("errors.save_local_state", error = error));
                     cx.notify();

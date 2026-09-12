@@ -143,6 +143,9 @@ daemon.invalid_settings: デーモン設定が無効です：%{error}
 daemon.stop_active_tasks: デーモンのアクセス設定を変更する前に実行中のタスクを停止してください
 daemon.settings_applied: デーモンのアクセス設定を更新しました
 daemon.restart_failed: デーモンを再起動できませんでした：%{error}
+daemon.restart: デーモンを再起動
+daemon.banner_reconnecting_detail: デーモンとの接続が切れました。再接続中も実行中のタスクは続行します。
+daemon.banner_unreachable_detail: デーモンがしばらく応答していません。再起動すると復旧しますが、実行中のタスクは停止します。
 daemon.url_copied: WebSocket URL をコピーしました
 daemon.token_copied: デーモントークンをコピーしました
 web.connect_title: デーモンに接続

@@ -139,6 +139,9 @@ daemon.invalid_settings: 守护进程设置无效：%{error}
 daemon.stop_active_tasks: 更改守护进程访问设置前请先停止进行中的任务
 daemon.settings_applied: 守护进程访问设置已更新
 daemon.restart_failed: 无法重启守护进程：%{error}
+daemon.restart: 重启守护进程
+daemon.banner_reconnecting_detail: 与守护进程的连接已断开。重新连接期间，进行中的任务会继续运行。
+daemon.banner_unreachable_detail: 守护进程已较长时间无响应。重启可恢复连接，但进行中的任务会停止。
 daemon.url_copied: 已复制 WebSocket 地址
 daemon.token_copied: 已复制守护进程令牌
 web.connect_title: 连接守护进程
