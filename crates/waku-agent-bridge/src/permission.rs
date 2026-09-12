@@ -132,8 +132,13 @@ impl PermissionBridge {
         let Ok(mut manager) = self.manager.lock() else {
             return;
         };
-        let result = match action {
-            PermissionAction::Allow => manager.add_persistent_allow(tool_name, &mut settings),
+        // The engine reports through its own `ClaudeError`, `save_sync`
+        // through `anyhow`; both arms land on `anyhow` so one `if let`
+        // reports either.
+        let result: anyhow::Result<()> = match action {
+            PermissionAction::Allow => manager
+                .add_persistent_allow(tool_name, &mut settings)
+                .map_err(anyhow::Error::from),
             // There is no `add_persistent_deny` upstream, so this does what
             // `add_persistent_allow` does: register the rule with the live
             // manager and append the same rule to the settings file the

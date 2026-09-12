@@ -11,8 +11,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use claurst_core::{PermissionLevel, ToolDefinition};
-use claurst_tools::{Tool, ToolContext, ToolResult};
+use claurst_core::ToolDefinition;
+// `PermissionLevel` exists in both `claurst_core` and `claurst_tools` as
+// distinct types; the `Tool` trait is written against the tools crate's.
+use claurst_tools::{PermissionLevel, Tool, ToolContext, ToolResult};
 use serde_json::Value;
 
 pub struct McpTool {
