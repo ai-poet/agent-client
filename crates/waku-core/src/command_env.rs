@@ -1079,8 +1079,12 @@ mod tests {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         let mut child = spawn(&mut command).expect("spawn PowerShell probe");
+        // Fork: sixty seconds rather than ten. This asserts that the probe
+        // finishes at all, and a cold Windows PowerShell start on a shared CI
+        // runner, with the rest of the suite spawning processes beside it,
+        // has been seen to need more than ten.
         assert!(
-            wait_for_child(&mut child, Duration::from_secs(10)),
+            wait_for_child(&mut child, Duration::from_secs(60)),
             "PowerShell probe did not finish in time"
         );
         let environment =
