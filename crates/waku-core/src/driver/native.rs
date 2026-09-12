@@ -25,18 +25,24 @@ use anyhow::{Context as _, anyhow};
 use parking_lot::Mutex;
 use serde_json::Value;
 use uuid::Uuid;
-use waku_agent_bridge::{AccessMode, AgentEvent, AgentSession, AgentStartOptions, TurnOptions};
+use waku_agent_bridge::{
+    AccessMode, AgentEvent, AgentSession, AgentStartOptions, BackgroundEntry, BackgroundKind,
+    BackgroundStatus, TurnOptions,
+};
 
 use super::activity;
 use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
 use crate::model::{
-    ActivityKind, DriverEvent, InteractionMode, PermissionOption, ProviderResumeCursor, RuntimeMode,
+    ActivityKind, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey, BackgroundWorkKind,
+    BackgroundWorkStatus, DriverEvent, InteractionMode, PermissionOption, ProviderResumeCursor,
+    RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion, unix_time_millis,
 };
 
 pub struct NativeDriver {
     session: AgentSession,
+    events: DriverEventSender,
     /// Where this conversation is persisted, so a resume finds it again.
     store: SessionStore,
     /// This provider's resume cursor. The engine has no session identity of
@@ -89,6 +95,7 @@ impl NativeDriver {
 
         Ok(Self {
             session,
+            events,
             store,
             session_id,
         })
@@ -117,6 +124,30 @@ impl DriverControl for NativeDriver {
 
     fn respond(&self, request_id: String, option_id: String) {
         self.session.respond(&request_id, &option_id);
+    }
+
+    /// One question per request, so the first answer is the whole answer.
+    /// The engine's `AskUserQuestion` takes a single string; a multi-select
+    /// is joined the way a person would type it.
+    fn respond_user_input(&self, request_id: String, answers: Vec<UserInputAnswer>) {
+        let text = answers
+            .into_iter()
+            .find(|answer| answer.question_id == request_id)
+            .map(|answer| answer.answers.join(", "))
+            .unwrap_or_default();
+        self.session.answer(&request_id, text);
+    }
+
+    fn refresh_background_work(&self) {
+        self.session.refresh_background_work();
+    }
+
+    fn stop_background_work(&self, key: BackgroundWorkKey, control_id: String) {
+        if let Err(message) = self.session.stop_background_work(&control_id) {
+            let _ = self.events.send(DriverEvent::BackgroundWork(
+                BackgroundWorkEvent::StopFailed { key, message },
+            ));
+        }
     }
 
     /// Always absorbed. Model, effort and access mode are read from a fresh
@@ -175,6 +206,20 @@ fn access_mode(mode: RuntimeMode) -> AccessMode {
 // ---------------------------------------------------------------------------
 // Persistence
 // ---------------------------------------------------------------------------
+
+/// Delete the transcript file for a session Waku has removed. A file that is
+/// already gone is not an error; an id that is not a UUID is refused rather
+/// than turned into a path.
+pub(crate) fn delete_agent_transcript(transcript_id: &str) -> anyhow::Result<()> {
+    let id = Uuid::parse_str(transcript_id)
+        .with_context(|| format!("`{transcript_id}` is not a transcript id"))?;
+    let store = SessionStore::new(id);
+    match std::fs::remove_file(&store.path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("could not delete {}", store.path.display())),
+    }
+}
 
 #[derive(Clone)]
 struct SessionStore {
@@ -283,7 +328,7 @@ impl EventTranslator {
             AgentEvent::Text(text) => self.send(DriverEvent::TextDelta(text)),
             AgentEvent::Reasoning(text) => self.send(DriverEvent::ReasoningDelta(text)),
             AgentEvent::ToolStarted { id, name, input } => {
-                let kind = ActivityKind::from_tool_name(&name);
+                let kind = activity_kind(&name);
                 let title = tool_title(&name, &input);
                 self.send(DriverEvent::RichActivity(activity::tool_activity(
                     Some(id.clone()),
@@ -308,7 +353,7 @@ impl EventTranslator {
                 // A completion whose start was never seen still deserves a
                 // row; falling back on the tool name keeps it readable.
                 let call = self.tools.lock().remove(&id).unwrap_or_else(|| ToolCall {
-                    kind: ActivityKind::from_tool_name(&name),
+                    kind: activity_kind(&name),
                     title: name.clone(),
                     input: Value::Null,
                 });
@@ -352,6 +397,35 @@ impl EventTranslator {
                     options,
                 });
             }
+            AgentEvent::UserInput {
+                request_id,
+                question,
+                options,
+            } => {
+                let options = options
+                    .into_iter()
+                    .map(|label| UserInputOption {
+                        label,
+                        description: None,
+                    })
+                    .collect();
+                self.send(DriverEvent::UserInputRequested {
+                    request_id: request_id.clone(),
+                    questions: vec![UserInputQuestion {
+                        id: request_id,
+                        header: String::new(),
+                        question,
+                        options,
+                        multi_select: false,
+                    }],
+                });
+            }
+            AgentEvent::BackgroundWork(entries) => {
+                let items = entries.into_iter().map(background_item).collect();
+                self.send(DriverEvent::BackgroundWork(
+                    BackgroundWorkEvent::ReconcileLive { items },
+                ));
+            }
             AgentEvent::SteerAccepted { message } => {
                 self.send(DriverEvent::SteerAccepted { message })
             }
@@ -370,6 +444,49 @@ impl EventTranslator {
     fn send(&self, event: DriverEvent) {
         let _ = DriverEventSink::send(&self.events, event);
     }
+}
+
+/// The engine's tool names that `ActivityKind::from_tool_name` does not
+/// recognise, checked first. Everything else — Read, Edit, Bash, Grep, Glob,
+/// TodoWrite, WebFetch — is already covered by the generic classifier.
+fn activity_kind(name: &str) -> ActivityKind {
+    match name {
+        "PowerShell" | "REPL" => ActivityKind::Command,
+        "BatchEdit" => ActivityKind::FileChange,
+        "EnterPlanMode" | "ExitPlanMode" => ActivityKind::Plan,
+        "ToolSearch" => ActivityKind::Search,
+        _ => ActivityKind::from_tool_name(name),
+    }
+}
+
+/// One background entry as the panel files it. The engine's task id is both
+/// the provider id and the control id: it is what `stop` takes back.
+fn background_item(entry: BackgroundEntry) -> BackgroundWorkItem {
+    let kind = match entry.kind {
+        BackgroundKind::Process => BackgroundWorkKind::Process,
+        BackgroundKind::Subagent => BackgroundWorkKind::Subagent,
+    };
+    let status = match entry.status {
+        BackgroundStatus::Running => BackgroundWorkStatus::Running,
+        BackgroundStatus::Completed => BackgroundWorkStatus::Completed,
+        BackgroundStatus::Failed => BackgroundWorkStatus::Failed,
+        BackgroundStatus::Stopped => BackgroundWorkStatus::Stopped,
+    };
+    let mut item = BackgroundWorkItem::new(kind, entry.id.clone(), entry.title.clone(), status);
+    if kind == BackgroundWorkKind::Process {
+        item.command = Some(entry.title);
+    }
+    item.detail = entry.detail.or_else(|| entry.pid.map(|pid| format!("PID {pid}")));
+    item.output = entry.output;
+    item.started_at_ms = entry.started_at_ms;
+    item.updated_at_ms = entry.finished_at_ms.unwrap_or_else(unix_time_millis);
+    item.duration_ms = entry
+        .finished_at_ms
+        .map(|finished| finished.saturating_sub(entry.started_at_ms));
+    item.background = true;
+    item.can_stop = status.is_stoppable();
+    item.control_id = Some(entry.id);
+    item
 }
 
 /// The row's headline.
@@ -435,6 +552,56 @@ mod tests {
             tool_title("Bash", &serde_json::json!({ "command": "   " })),
             "Bash"
         );
+    }
+
+    #[test]
+    fn the_engines_own_tool_names_classify_before_the_generic_table() {
+        assert_eq!(activity_kind("PowerShell"), ActivityKind::Command);
+        assert_eq!(activity_kind("REPL"), ActivityKind::Command);
+        assert_eq!(activity_kind("BatchEdit"), ActivityKind::FileChange);
+        assert_eq!(activity_kind("ExitPlanMode"), ActivityKind::Plan);
+        // Still the generic classifier's answer for names it knows.
+        assert_eq!(activity_kind("Read"), ActivityKind::FileRead);
+        assert_eq!(activity_kind("TodoWrite"), ActivityKind::Plan);
+    }
+
+    #[test]
+    fn a_running_background_shell_is_stoppable_by_its_task_id() {
+        let item = background_item(BackgroundEntry {
+            id: "task-1".into(),
+            kind: BackgroundKind::Process,
+            title: "cargo test".into(),
+            status: BackgroundStatus::Running,
+            detail: None,
+            pid: Some(4242),
+            output: None,
+            started_at_ms: 1_000,
+            finished_at_ms: None,
+        });
+        assert_eq!(item.key.kind, BackgroundWorkKind::Process);
+        assert!(item.can_stop);
+        assert_eq!(item.control_id.as_deref(), Some("task-1"));
+        assert_eq!(item.command.as_deref(), Some("cargo test"));
+        assert_eq!(item.detail.as_deref(), Some("PID 4242"));
+    }
+
+    #[test]
+    fn a_finished_sub_agent_carries_its_duration_and_cannot_be_stopped() {
+        let item = background_item(BackgroundEntry {
+            id: "agent-1".into(),
+            kind: BackgroundKind::Subagent,
+            title: "review the diff".into(),
+            status: BackgroundStatus::Completed,
+            detail: None,
+            pid: None,
+            output: Some("done".into()),
+            started_at_ms: 1_000,
+            finished_at_ms: Some(4_000),
+        });
+        assert_eq!(item.key.kind, BackgroundWorkKind::Subagent);
+        assert_eq!(item.duration_ms, Some(3_000));
+        assert!(!item.can_stop);
+        assert!(item.command.is_none());
     }
 
     #[test]

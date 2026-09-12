@@ -1996,6 +1996,12 @@ impl Waku {
         let (label, color) = match route {
             RouteKind::Cloud => (tr!("providers.route_cloud"), theme.accent),
             RouteKind::Custom => (tr!("providers.route_custom"), theme.success),
+            // "The CLI's own configuration" is the wrong sentence for a
+            // provider that is not a CLI: what it falls back to is the
+            // engine's own settings file.
+            RouteKind::CliOwn if kind.is_builtin() => {
+                (tr!("providers.route_engine_default"), theme.text_tertiary)
+            }
             RouteKind::CliOwn => (tr!("providers.route_cli_own"), theme.text_tertiary),
         };
         let _ = kind;

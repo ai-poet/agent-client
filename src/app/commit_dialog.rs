@@ -126,15 +126,20 @@ impl Waku {
             return;
         };
 
-        let invocation = self
-            .provider_probe(provider)
-            .and_then(|probe| probe.path.clone())
-            .map(|binary| crate::git_commit::AgentInvocation {
-                provider,
-                binary,
-                model,
-                reasoning_effort,
-            });
+        // A built-in provider has no binary and needs none; the daemon asks
+        // the engine directly. Every CLI still has to be found on disk.
+        let binary = if provider.is_builtin() {
+            Some(std::path::PathBuf::new())
+        } else {
+            self.provider_probe(provider)
+                .and_then(|probe| probe.path.clone())
+        };
+        let invocation = binary.map(|binary| crate::git_commit::AgentInvocation {
+            provider,
+            binary,
+            model,
+            reasoning_effort,
+        });
         let cached_branch = self
             .visible_branch_snapshot
             .as_ref()

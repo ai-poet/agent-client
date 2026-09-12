@@ -1881,6 +1881,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::General,
         SettingsPage::Appearance,
         SettingsPage::Providers,
+        SettingsPage::Agent,
         SettingsPage::Skills,
         SettingsPage::Usage,
         SettingsPage::CloudAccount,

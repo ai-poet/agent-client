@@ -240,6 +240,8 @@ impl Waku {
                         this.model_plaza.summary = catalog.summary;
                         this.model_plaza.statuses = statuses;
                         this.model_plaza.error = None;
+                        // The built-in agent's picker reads this same listing.
+                        this.adopt_native_models_from_catalog();
                     }
                     Err(error) => this.model_plaza.error = Some(format!("{error:#}")),
                 }

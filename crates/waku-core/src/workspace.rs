@@ -197,6 +197,10 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             crate::checkpoint::delete_all_session_refs(&cwd, session_id)?;
             WorkspaceResult::Ack
         }
+        WorkspaceOperation::DeleteAgentTranscript { transcript_id } => {
+            crate::driver::delete_agent_transcript(&transcript_id)?;
+            WorkspaceResult::Ack
+        }
         WorkspaceOperation::CopySessionRefs {
             cwd,
             source_session_id,

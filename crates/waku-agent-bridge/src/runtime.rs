@@ -16,13 +16,17 @@ use tokio::runtime::{Builder, Runtime};
 
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
-/// Worker threads for the engine. Turns are I/O bound (one streaming HTTP
-/// request plus tool subprocesses), so this is about concurrent sessions and
-/// parallel tool execution rather than CPU parallelism. Four is enough for
-/// several live sessions without competing with GPUI's own pools in the
-/// desktop process — and the daemon, where this actually runs, has no
-/// rendering to protect.
-const WORKER_THREADS: usize = 4;
+/// Worker threads for the engine.
+///
+/// The number that matters is not throughput — turns are I/O bound — but how
+/// many approvals and questions can be *pending at once*. Each one parks the
+/// worker its tool is running on (`block_in_place` moves the worker's other
+/// tasks away, but the thread itself is spent until the user answers), so
+/// with N workers the N+1th session to raise a dialog would stall until one
+/// of the others is answered. Sixteen idle threads cost nothing measurable;
+/// a session that cannot start because four dialogs are open would be a bug
+/// report.
+const WORKER_THREADS: usize = 16;
 
 /// Borrow the shared runtime, creating it on first call.
 ///

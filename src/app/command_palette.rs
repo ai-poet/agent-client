@@ -853,6 +853,12 @@ impl Waku {
                 "settings preferences usage tokens cost history",
             ),
             (
+                SettingsPage::Agent,
+                "settings.agent",
+                "icons/provider-waku.svg",
+                "settings preferences agent built-in mcp tools permissions rules prompt",
+            ),
+            (
                 SettingsPage::Daemon,
                 "settings.daemon",
                 "icons/server.svg",

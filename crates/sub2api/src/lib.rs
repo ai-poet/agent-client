@@ -21,6 +21,7 @@
 //!
 //! OAuth tokens never reach the daemon; only derived gateway keys do.
 
+pub mod agent_settings;
 pub mod auth;
 pub mod brand;
 pub mod cli_detect;

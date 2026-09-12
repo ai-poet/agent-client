@@ -2993,3 +2993,102 @@ workflow.task_chip_tooltip:
   en: "Workflow: %{title}"
 workflow.inspector_changes:
   en: "Changed files"
+
+settings.agent:
+  en: "Agent"
+settings.agent_keywords:
+  en: "agent built-in mcp tools permissions rules system prompt compact turns"
+providers.route_engine_default:
+  en: "Engine settings"
+agent.title_hint:
+  en: "Built-in agent"
+agent.description:
+  en: "How the built-in agent behaves, which tools it may use, the MCP servers it connects to, and the approvals it remembers. Changes save as you make them, into the engine's own settings file."
+agent.reload:
+  en: "Reload from file"
+agent.saved:
+  en: "Saved"
+agent.save_failed:
+  en: "Could not save: %{error}"
+agent.behaviour:
+  en: "Behaviour"
+agent.system_prompt:
+  en: "Standing instructions"
+agent.system_prompt_description:
+  en: "Appended to every session's system prompt. House rules, language, conventions."
+agent.system_prompt_placeholder:
+  en: "e.g. Reply in Chinese. Never run destructive git commands without asking."
+agent.system_prompt_empty:
+  en: "None set."
+agent.max_turns:
+  en: "Steps per turn"
+agent.max_turns_description:
+  en: "How many model steps one message may take before the agent is asked to wrap up."
+agent.default:
+  en: "Default"
+agent.auto_compact:
+  en: "Compact long conversations"
+agent.auto_compact_description:
+  en: "Summarise older messages automatically when the context window fills."
+agent.compact_threshold:
+  en: "Compact at"
+agent.compact_threshold_description:
+  en: "How full the context window is when compaction runs."
+agent.tools:
+  en: "Tools"
+agent.tools_description:
+  en: "A tool switched off is not offered to the model at all. The ones the agent cannot work without stay on."
+agent.tool_locked:
+  en: "always on"
+agent.mcp:
+  en: "MCP servers"
+agent.mcp_description:
+  en: "Every tool these servers advertise becomes available to the agent. Servers connect in the background when a session starts."
+agent.mcp_empty:
+  en: "No servers configured."
+agent.mcp_trust_project:
+  en: "Trust servers declared inside repositories"
+agent.mcp_trust_project_description:
+  en: "Off, a server defined in a project's own settings is not launched until you approve it. Leave it off for repositories you did not write."
+agent.mcp_add:
+  en: "Add server"
+agent.mcp_name:
+  en: "Name"
+agent.mcp_command:
+  en: "Command, e.g. npx -y @modelcontextprotocol/server-filesystem ."
+agent.mcp_url:
+  en: "URL, e.g. https://mcp.example.com/sse"
+agent.mcp_transport_stdio:
+  en: "Command"
+agent.mcp_transport_http:
+  en: "URL"
+agent.mcp_invalid:
+  en: "A name and a command or URL are needed."
+agent.mcp_duplicate:
+  en: "A server named %{name} already exists."
+agent.rules:
+  en: "Standing approvals"
+agent.rules_description:
+  en: "Answering \"Always allow\" or \"Always deny\" in a session adds a rule here. Remove one to be asked again."
+agent.rules_empty:
+  en: "No rules yet."
+agent.rule_allow:
+  en: "Allow"
+agent.rule_deny:
+  en: "Deny"
+agent.rule_add:
+  en: "Add rule"
+agent.rule_tool:
+  en: "Tool name, e.g. Bash"
+agent.rule_invalid:
+  en: "A tool name is needed."
+common.saving:
+  en: "Saving…"
+common.loading:
+  en: "Loading…"
+common.edit:
+  en: "Edit"
+common.save:
+  en: "Save"
+common.add:
+  en: "Add"

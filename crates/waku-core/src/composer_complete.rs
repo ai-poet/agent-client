@@ -135,6 +135,12 @@ pub fn discover_slash_commands(
     project_root: &Path,
     binary_override: Option<&str>,
 ) -> Vec<SlashCommand> {
+    // A built-in provider has no binary to interrogate, and `find_executable`
+    // with its empty command name would resolve every PATH directory as a
+    // candidate. Its commands are the file-backed ones alone.
+    if provider.is_builtin() {
+        return assemble_slash_commands(provider, project_root, Vec::new());
+    }
     let cli_commands = match binary_override {
         Some(binary) => crate::command_env::resolve_binary_override(binary),
         None => crate::command_env::find_executable(provider.command()),

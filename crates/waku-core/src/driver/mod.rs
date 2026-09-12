@@ -16,6 +16,7 @@ mod title_refresh;
 mod turn_diagnosis;
 
 pub(crate) use acp::catalog_agent;
+pub(crate) use native::delete_agent_transcript;
 
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -87,6 +87,14 @@ pub fn generate_message(
     invocation: &AgentInvocation,
 ) -> anyhow::Result<String> {
     let prompt = commit_prompt(cwd, include_unstaged)?;
+    // The built-in agent is a library, not a command line: ask it directly.
+    // Same prompt, same normalization, no process.
+    if invocation.provider.is_builtin() {
+        let output = waku_agent_bridge::one_shot(cwd, invocation.model.as_deref(), &prompt)
+            .context("the built-in agent could not generate a commit message")?;
+        return normalize_message(&output)
+            .ok_or_else(|| anyhow::anyhow!("the built-in agent returned no usable message"));
+    }
     let amp_settings = if invocation.provider == ProviderKind::Amp {
         let path = std::env::temp_dir().join(format!("waku-amp-commit-{}.json", Uuid::new_v4()));
         fs::write(
@@ -329,16 +337,9 @@ fn agent_arguments(
             }
             return args;
         }
-        // The built-in agent has no command line: it is a library call, not a
-        // process. `commit_dialog` only builds an `AgentInvocation` when the
-        // provider probe yields a binary path, and a built-in provider never
-        // does — so a Native session's commit dialog opens with an empty
-        // message for the user to write, rather than a generated one.
-        //
-        // Generating it in process is worth doing (the engine can answer a
-        // one-shot prompt), but it is a different shape of call than shelling
-        // out and is deliberately out of scope here. Reaching this arm means
-        // something bypassed that check.
+        // The built-in agent has no command line: `generate_message` answers
+        // it through `waku_agent_bridge::one_shot` before ever building
+        // arguments. Reaching this arm means a caller skipped that branch.
         ProviderKind::Native => {
             debug_assert!(
                 false,

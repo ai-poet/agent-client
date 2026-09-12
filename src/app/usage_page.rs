@@ -39,6 +39,9 @@ impl Waku {
     /// Switch the settings view to `page`, warming the Usage scan when that
     /// is where the user is heading.
     pub(super) fn open_settings_page(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
+        if page == SettingsPage::Agent {
+            self.ensure_agent_settings_loaded(cx);
+        }
         // Secrets are revealed only for the current visit to the page. This
         // also masks the token again when the Daemon row is reselected.
         self.daemon_token_revealed = false;

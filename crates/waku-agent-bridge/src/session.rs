@@ -11,6 +11,7 @@
 //! which is what makes rewind, branch and resume ordinary vector operations
 //! (see [`crate::history`]) instead of a protocol negotiation.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
@@ -21,15 +22,19 @@ use claurst_api::client::ClientConfig;
 use claurst_core::config::{Config, Settings};
 use claurst_core::types::Message;
 use claurst_core::{CostTracker, PermissionManager};
-use claurst_query::{CommandPriority, CommandQueue, QueryConfig, QueryEvent, QueryOutcome, QueuedCommand};
-use claurst_tools::{Tool, ToolContext};
+use claurst_query::{
+    CommandPriority, CommandQueue, QueryConfig, QueryEvent, QueryOutcome, QueuedCommand,
+};
+use claurst_tools::{Tool, ToolContext, UserQuestionEvent};
 use parking_lot::Mutex;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
+use crate::background;
 use crate::config::{AgentStartOptions, TurnOptions, build_config, build_query_config};
 use crate::events::{AgentEvent, EventSink, PermissionChoice, StreamDecoder};
 use crate::history;
+use crate::mcp_tool::McpTool;
 use crate::permission::{GuiPermissionHandler, PermissionBridge};
 use crate::runtime;
 
@@ -44,19 +49,23 @@ pub struct AgentSession {
     inner: Arc<Inner>,
 }
 
+type ToolSet = Arc<Vec<Box<dyn Tool>>>;
+
 struct Inner {
     events: EventSink,
     id: String,
     cwd: PathBuf,
     client: Arc<AnthropicClient>,
-    tools: Arc<Vec<Box<dyn Tool>>>,
+    /// Replaced, not mutated, when the MCP roster connects: a turn already
+    /// running keeps the set it started with.
+    tools: Mutex<ToolSet>,
     cost_tracker: Arc<CostTracker>,
     file_history: Arc<Mutex<claurst_core::file_history::FileHistory>>,
     manager: Arc<std::sync::Mutex<PermissionManager>>,
     bridge: Arc<PermissionBridge>,
     /// Filled in the background once the MCP roster has connected. A turn that
-    /// starts before then simply runs without MCP resources rather than
-    /// waiting for servers that may never come up.
+    /// starts before then simply runs without MCP rather than waiting for
+    /// servers that may never come up.
     mcp: Mutex<Option<Arc<claurst_mcp::McpManager>>>,
     config: Mutex<Config>,
     query: Mutex<QueryConfig>,
@@ -64,6 +73,8 @@ struct Inner {
     history: Mutex<Vec<Message>>,
     turn: Mutex<Option<Turn>>,
     turn_counter: Arc<AtomicUsize>,
+    /// `AskUserQuestion` calls waiting on the user, by request id.
+    questions: Mutex<HashMap<String, oneshot::Sender<String>>>,
 }
 
 /// The parts of a running turn that outside callers need to reach.
@@ -83,11 +94,13 @@ impl AgentSession {
         let rt = runtime::shared()?;
         let settings = Arc::new(Mutex::new(Settings::load_sync().unwrap_or_default()));
         let config = build_config(&options);
-        let query = build_query_config(&config, &options);
+        let mut query = build_query_config(&config, &options);
 
         // Resolving the key may refresh an OAuth token, so it is async. Every
         // other part of construction is not.
-        let (api_key, use_bearer_auth) = rt.block_on(config.resolve_anthropic_auth_async()).unwrap_or_default();
+        let (api_key, use_bearer_auth) = rt
+            .block_on(config.resolve_anthropic_auth_async())
+            .unwrap_or_default();
 
         let client_config = ClientConfig {
             api_key,
@@ -96,6 +109,10 @@ impl AgentSession {
             ..Default::default()
         };
         let client = Arc::new(AnthropicClient::new(client_config.clone())?);
+        query.provider_registry = Some(Arc::new(claurst_api::ProviderRegistry::from_config(
+            &config,
+            client_config,
+        )));
 
         let manager = Arc::new(std::sync::Mutex::new(PermissionManager::new(
             config.permission_mode.clone(),
@@ -108,21 +125,13 @@ impl AgentSession {
             options.access_mode.auto_answer(),
         );
 
-        let mut tools: Vec<Box<dyn Tool>> = claurst_tools::all_tools();
-        tools.push(Box::new(claurst_query::AgentTool));
-
-        let mut query = query;
-        query.provider_registry = Some(Arc::new(claurst_api::ProviderRegistry::from_config(
-            &config,
-            client_config,
-        )));
-
+        let tools = builtin_tools(&config.disallowed_tools, None);
         let inner = Arc::new(Inner {
             events,
             id: uuid::Uuid::new_v4().to_string(),
             cwd: options.cwd.clone(),
             client,
-            tools: Arc::new(tools),
+            tools: Mutex::new(tools),
             cost_tracker: CostTracker::new(),
             file_history: Arc::new(Mutex::new(
                 claurst_core::file_history::FileHistory::new(),
@@ -136,6 +145,7 @@ impl AgentSession {
             options: Mutex::new(options),
             turn: Mutex::new(None),
             turn_counter: Arc::new(AtomicUsize::new(0)),
+            questions: Mutex::new(HashMap::new()),
         });
 
         connect_mcp_in_background(&inner);
@@ -150,26 +160,33 @@ impl AgentSession {
     /// Start a turn. While one is running this is delivered as steering
     /// instead, which is what the composer means by sending during a turn.
     pub fn prompt(&self, text: String) {
-        if self.is_busy() {
-            self.steer(text);
-            return;
-        }
         let inner = self.inner.clone();
         let Ok(rt) = runtime::shared() else {
-            inner.events.emit(AgentEvent::Error(
-                "the agent runtime is unavailable".to_string(),
-            ));
+            inner
+                .events
+                .emit(AgentEvent::Error("the agent runtime is unavailable".to_string()));
             return;
         };
 
-        let cancel = CancellationToken::new();
-        let queue = CommandQueue::new();
-        *inner.turn.lock() = Some(Turn {
-            cancel: cancel.clone(),
-            queue: queue.clone(),
-            steers: Arc::new(Mutex::new(Vec::new())),
-            watching: false,
-        });
+        // Decide and claim the turn under one lock, so two prompts arriving
+        // together cannot both see "idle" and both start a loop over the same
+        // transcript.
+        let (cancel, queue) = {
+            let mut guard = inner.turn.lock();
+            if let Some(turn) = guard.as_mut() {
+                push_steer(&inner, turn, text);
+                return;
+            }
+            let cancel = CancellationToken::new();
+            let queue = CommandQueue::new();
+            *guard = Some(Turn {
+                cancel: cancel.clone(),
+                queue: queue.clone(),
+                steers: Arc::new(Mutex::new(Vec::new())),
+                watching: false,
+            });
+            (cancel, queue)
+        };
 
         rt.spawn(async move {
             run_turn(inner, text, cancel, queue).await;
@@ -188,25 +205,25 @@ impl AgentSession {
             });
             return;
         };
-        turn.queue.push(
-            QueuedCommand::InjectUserMessage(text.clone()),
-            CommandPriority::Normal,
-        );
-        turn.steers.lock().push(text);
-        if !turn.watching {
-            turn.watching = true;
-            spawn_steer_watcher(self.inner.clone(), turn.queue.clone(), turn.steers.clone());
-        }
+        push_steer(&self.inner, turn, text);
     }
 
-    /// Stop the running turn. Releases anything blocked on an approval so no
-    /// tool is left waiting on a dialog that is going away.
+    /// Stop the running turn. Releases anything blocked on an approval or a
+    /// question so no tool is left waiting on a dialog that is going away.
     pub fn cancel(&self) {
-        let cancel = self.inner.turn.lock().as_ref().map(|turn| turn.cancel.clone());
+        let cancel = self
+            .inner
+            .turn
+            .lock()
+            .as_ref()
+            .map(|turn| turn.cancel.clone());
         if let Some(cancel) = cancel {
             cancel.cancel();
         }
         self.inner.bridge.release_all();
+        // Dropping the reply senders makes each waiting `AskUserQuestion`
+        // return an error to the model, which the cancelled loop discards.
+        self.inner.questions.lock().clear();
     }
 
     /// Answer a [`AgentEvent::Permission`].
@@ -216,6 +233,31 @@ impl AgentSession {
             return;
         };
         self.inner.bridge.resolve(request_id, choice);
+    }
+
+    /// Answer a [`AgentEvent::UserInput`]. A late answer to a question the
+    /// cancel path already released is dropped, not an error.
+    pub fn answer(&self, request_id: &str, text: String) {
+        let reply = self.inner.questions.lock().remove(request_id);
+        if let Some(reply) = reply {
+            let _ = reply.send(text);
+        }
+    }
+
+    /// Publish the current state of every piece of background work.
+    pub fn refresh_background_work(&self) {
+        self.inner
+            .events
+            .emit(AgentEvent::BackgroundWork(background::snapshot()));
+    }
+
+    /// Stop one piece of background work by the id the snapshot reported.
+    /// The refreshed snapshot follows either way, so the panel shows the
+    /// entry's real state rather than an optimistic one.
+    pub fn stop_background_work(&self, id: &str) -> Result<(), String> {
+        let outcome = background::stop(id);
+        self.refresh_background_work();
+        outcome
     }
 
     /// Apply changed turn options in place.
@@ -300,10 +342,31 @@ impl Drop for Inner {
             turn.cancel.cancel();
         }
         self.bridge.release_all();
+        self.questions.lock().clear();
     }
 }
 
-/// Connect the configured MCP servers without holding up session start.
+/// The built-in tools, minus the ones the user switched off, plus every
+/// tool the connected MCP servers advertise.
+///
+/// Filtering here rather than in the prompt is what makes the Tools page
+/// reliable: a tool that is not in this list is not sent to the model at all,
+/// so there is nothing for it to be talked into.
+fn builtin_tools(
+    disallowed: &[String],
+    mcp: Option<&Arc<claurst_mcp::McpManager>>,
+) -> ToolSet {
+    let mut tools: Vec<Box<dyn Tool>> = claurst_tools::all_tools();
+    tools.push(Box::new(claurst_query::AgentTool));
+    tools.retain(|tool| !disallowed.iter().any(|name| name == tool.name()));
+    if let Some(manager) = mcp {
+        tools.extend(McpTool::all(manager));
+    }
+    Arc::new(tools)
+}
+
+/// Connect the configured MCP servers without holding up session start, and
+/// swap in a tool set that includes theirs once they are up.
 fn connect_mcp_in_background(inner: &Arc<Inner>) {
     let servers = inner.config.lock().mcp_servers.clone();
     if servers.is_empty() {
@@ -314,8 +377,27 @@ fn connect_mcp_in_background(inner: &Arc<Inner>) {
     rt.spawn(async move {
         let manager = Arc::new(claurst_mcp::McpManager::connect_all(&servers).await);
         manager.clone().spawn_notification_poll_loop();
+        for (server, error) in manager.failed_servers() {
+            inner.events.emit(AgentEvent::Error(format!(
+                "MCP server `{server}` did not connect: {error}"
+            )));
+        }
+        let disallowed = inner.config.lock().disallowed_tools.clone();
+        *inner.tools.lock() = builtin_tools(&disallowed, Some(&manager));
         *inner.mcp.lock() = Some(manager);
     });
+}
+
+fn push_steer(inner: &Arc<Inner>, turn: &mut Turn, text: String) {
+    turn.queue.push(
+        QueuedCommand::InjectUserMessage(text.clone()),
+        CommandPriority::Normal,
+    );
+    turn.steers.lock().push(text);
+    if !turn.watching {
+        turn.watching = true;
+        spawn_steer_watcher(inner.clone(), turn.queue.clone(), turn.steers.clone());
+    }
 }
 
 /// Emit `SteerAccepted` once the engine has taken the queue.
@@ -328,9 +410,8 @@ fn spawn_steer_watcher(inner: Arc<Inner>, queue: CommandQueue, steers: Arc<Mutex
     rt.spawn(async move {
         loop {
             tokio::time::sleep(STEER_POLL).await;
-            // The turn ending is handled by `run_turn`, which reports whatever
-            // is still pending as rejected. Stopping here avoids a double
-            // report.
+            // The turn ending is handled by `run_turn`, which settles whatever
+            // is still pending. Stopping here avoids a double report.
             if inner.turn.lock().is_none() {
                 return;
             }
@@ -343,6 +424,22 @@ fn spawn_steer_watcher(inner: Arc<Inner>, queue: CommandQueue, steers: Arc<Mutex
             }
         }
     });
+}
+
+/// Forward `AskUserQuestion` calls to the GUI and park their replies.
+async fn forward_questions(inner: Arc<Inner>, mut rx: mpsc::UnboundedReceiver<UserQuestionEvent>) {
+    while let Some(event) = rx.recv().await {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        inner
+            .questions
+            .lock()
+            .insert(request_id.clone(), event.reply_tx);
+        inner.events.emit(AgentEvent::UserInput {
+            request_id,
+            question: event.question,
+            options: event.options.unwrap_or_default(),
+        });
+    }
 }
 
 async fn run_turn(
@@ -360,9 +457,14 @@ async fn run_turn(
     let config = inner.config.lock().clone();
     let mut query = inner.query.lock().clone();
     query.command_queue = Some(queue.clone());
+    let tools = inner.tools.lock().clone();
+    let context_window = claurst_query::context_window_for_model(&query.model);
 
     let handler: Arc<dyn claurst_core::PermissionHandler> =
         Arc::new(GuiPermissionHandler::new(inner.bridge.clone()));
+
+    let (question_tx, question_rx) = mpsc::unbounded_channel::<UserQuestionEvent>();
+    let questions = tokio::spawn(forward_questions(inner.clone(), question_rx));
 
     let tool_ctx = ToolContext {
         working_dir: inner.cwd.clone(),
@@ -383,20 +485,17 @@ async fn run_turn(
         // only thing that routes a request into this queue.
         pending_permissions: None,
         permission_manager: Some(inner.manager.clone()),
-        user_question_tx: None,
+        user_question_tx: Some(question_tx),
         cancel_token: cancel.clone(),
     };
 
     let (tx, rx) = mpsc::unbounded_channel::<QueryEvent>();
-    let forwarder = {
-        let inner = inner.clone();
-        tokio::spawn(forward_events(inner, rx))
-    };
+    let forwarder = tokio::spawn(forward_events(inner.clone(), rx, context_window));
 
     let outcome = claurst_query::run_query_loop(
         inner.client.as_ref(),
         &mut messages,
-        inner.tools.as_slice(),
+        tools.as_slice(),
         &tool_ctx,
         &query,
         inner.cost_tracker.clone(),
@@ -406,19 +505,28 @@ async fn run_turn(
     )
     .await;
 
-    // The forwarder ends when the loop drops its sender.
+    // Both forwarders end when their senders go: the loop dropped its event
+    // sender on return, and the question sender lives in `tool_ctx`.
+    drop(tool_ctx);
     let _ = forwarder.await;
+    let _ = questions.await;
 
-    // Take the turn down before reporting, so a `TurnFinished` handler that
-    // immediately prompts again is not treated as steering.
+    // Write the transcript back *before* the turn is taken down. `prompt`
+    // treats "no turn" as "idle" and clones the history to start the next
+    // loop; if that could happen between these two steps the next turn would
+    // start from a transcript missing this one, and then overwrite it.
+    *inner.history.lock() = messages;
+
+    // Now let the next prompt in. Whatever steering was still queued is
+    // settled below, once the engine can no longer drain it.
     let leftover = {
         let mut guard = inner.turn.lock();
-        let turn = guard.take();
-        turn.map(|turn| turn.steers.lock().drain(..).collect::<Vec<_>>())
+        guard
+            .take()
+            .map(|turn| turn.steers.lock().drain(..).collect::<Vec<_>>())
             .unwrap_or_default()
     };
-
-    *inner.history.lock() = messages;
+    inner.questions.lock().clear();
 
     let (success, summary) = describe(outcome);
     if !success && let Some(reason) = summary.clone() {
@@ -428,6 +536,11 @@ async fn run_turn(
     inner.events.emit(AgentEvent::HistoryCommitted(history::serialize(
         &inner.history.lock(),
     )));
+    // A turn is the only thing that creates background work, so this is the
+    // moment the panel needs a fresh level signal.
+    inner
+        .events
+        .emit(AgentEvent::BackgroundWork(background::snapshot()));
 
     // Steering messages the watcher had not yet accounted for. The queue
     // itself is the authority, not the watcher's 120ms poll: `drain` empties
@@ -447,8 +560,12 @@ async fn run_turn(
     }
 }
 
-async fn forward_events(inner: Arc<Inner>, mut rx: mpsc::UnboundedReceiver<QueryEvent>) {
-    let mut decoder = StreamDecoder::new();
+async fn forward_events(
+    inner: Arc<Inner>,
+    mut rx: mpsc::UnboundedReceiver<QueryEvent>,
+    context_window: u64,
+) {
+    let mut decoder = StreamDecoder::new(Some(context_window));
     while let Some(event) = rx.recv().await {
         for translated in decoder.push(event) {
             inner.events.emit(translated);
@@ -511,5 +628,19 @@ mod tests {
         });
         assert!(success);
         assert!(summary.is_some(), "the user should still be told why it stopped");
+    }
+
+    #[test]
+    fn the_builtin_tool_set_includes_the_sub_agent_tool() {
+        let tools = builtin_tools(&[], None);
+        assert!(tools.iter().any(|tool| tool.name() == "Agent"));
+        assert!(tools.iter().any(|tool| tool.name() == "Read"));
+    }
+
+    #[test]
+    fn a_disallowed_tool_is_not_offered_at_all() {
+        let tools = builtin_tools(&["WebSearch".to_string()], None);
+        assert!(!tools.iter().any(|tool| tool.name() == "WebSearch"));
+        assert!(tools.iter().any(|tool| tool.name() == "Read"));
     }
 }

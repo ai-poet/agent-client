@@ -177,6 +177,12 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         session_id: Uuid,
     },
+    /// Remove the transcript the built-in agent stored for a session.
+    /// `transcript_id` is the `ProviderResumeCursor::Native` session id, which
+    /// names the file; it is not Waku's session id.
+    DeleteAgentTranscript {
+        transcript_id: String,
+    },
     CopySessionRefs {
         #[ts(type = "string")]
         cwd: PathBuf,

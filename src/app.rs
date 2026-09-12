@@ -228,6 +228,9 @@ enum SettingsPage {
     CloudUsage,
     /// Fork addition: staged multi-agent workflows.
     Workflow,
+    /// Fork addition: the built-in agent's behaviour, tools, MCP servers and
+    /// permission rules — the engine's own settings file, editable in the app.
+    Agent,
 }
 
 impl SettingsPage {
@@ -1429,6 +1432,7 @@ pub struct Waku {
     cli_setup: cli_setup::CliSetupState,
     /// Fork addition: first-run checklist state.
     onboarding: onboarding::OnboardingViewState,
+    agent_page: agent_page::AgentPageState,
     /// Fork addition: provider processes warmed while the user types.
     runtime_prewarms: runtime_prewarm::RuntimePrewarms,
     /// Fork addition: per-CLI custom endpoint fields on the Providers page —
@@ -1672,6 +1676,8 @@ mod file_search;
 mod image_preview;
 mod model_plaza;
 mod workflow;
+mod agent_page;
+mod native_agent;
 mod onboarding;
 mod message_resend;
 mod task_rows;
@@ -3079,6 +3085,7 @@ impl Waku {
                 cloud_account: cloud_account::CloudAccountState::default(),
                 cli_setup: cli_setup::CliSetupState::default(),
                 onboarding: onboarding::OnboardingViewState::default(),
+                agent_page: agent_page::AgentPageState::default(),
                 runtime_prewarms: runtime_prewarm::RuntimePrewarms::default(),
                 custom_api_inputs,
                 cloud_usage: cloud_usage::CloudUsageState::default(),

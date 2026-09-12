@@ -19,7 +19,7 @@ const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 11] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 12] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -37,6 +37,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 11] = [
         "settings.providers",
         "icons/bot.svg",
         "settings.providers_keywords",
+    ),
+    (
+        SettingsPage::Agent,
+        "settings.agent",
+        "icons/provider-waku.svg",
+        "settings.agent_keywords",
     ),
     (
         SettingsPage::Skills,
@@ -393,6 +399,7 @@ impl Waku {
                         SettingsPage::ModelPlaza => tr!("settings.model_plaza"),
                         SettingsPage::CloudUsage => tr!("settings.cloud_usage"),
                         SettingsPage::Workflow => tr!("settings.workflow"),
+                        SettingsPage::Agent => tr!("settings.agent"),
                     }),
             )
             .child(match page {
@@ -407,6 +414,7 @@ impl Waku {
                 SettingsPage::ModelPlaza => self.render_model_plaza_settings(window, cx),
                 SettingsPage::CloudUsage => self.render_cloud_usage_settings(cx),
                 SettingsPage::Workflow => self.render_workflow_settings(window, cx),
+                SettingsPage::Agent => self.render_agent_settings(cx),
             });
 
         div()

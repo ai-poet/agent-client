@@ -15,6 +15,7 @@ license = "GPL-3.0-only"
 # `waku-core/src/driver/native.rs`, which is the only file that knows both.
 [dependencies]
 anyhow = "1.0"
+async-trait = { workspace = true }
 claurst-api = { workspace = true }
 claurst-core = { workspace = true }
 claurst-mcp = { workspace = true }

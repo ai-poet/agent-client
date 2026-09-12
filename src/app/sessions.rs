@@ -320,6 +320,12 @@ impl Waku {
         let project_path = self
             .workspace_path_for_session(&self.state.sessions[index])
             .map(std::path::Path::to_path_buf);
+        // The built-in agent keeps its transcript in a file the daemon owns,
+        // named by the cursor. Capture it now; the session is gone below.
+        let agent_transcript = match &self.state.sessions[index].provider_cursor {
+            Some(ProviderResumeCursor::Native { session_id }) => Some(session_id.clone()),
+            _ => None,
+        };
         let was_selected = self.state.selected_session == Some(session_id);
         self.submission_preparations.remove(&session_id);
         self.goal_runtime_starts.remove(&session_id);
@@ -366,6 +372,16 @@ impl Waku {
                         cwd: project_path,
                         session_id,
                     });
+                })
+                .detach();
+        }
+        if let Some(transcript_id) = agent_transcript {
+            let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+            cx.background_executor()
+                .spawn(async move {
+                    let _ = workspace.request(
+                        waku_client::WorkspaceOperation::DeleteAgentTranscript { transcript_id },
+                    );
                 })
                 .detach();
         }

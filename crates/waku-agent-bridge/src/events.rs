@@ -9,6 +9,8 @@
 
 use serde_json::Value;
 
+use crate::background::BackgroundEntry;
+
 /// One thing that happened inside a session.
 #[derive(Clone, Debug)]
 pub enum AgentEvent {
@@ -32,7 +34,7 @@ pub enum AgentEvent {
         output: Value,
         failed: bool,
     },
-    /// Context-window occupancy after a turn settled.
+    /// Context-window occupancy after a model step settled.
     Usage {
         context_tokens: Option<u64>,
         context_window: Option<u64>,
@@ -46,6 +48,22 @@ pub enum AgentEvent {
         detail: String,
         options: Vec<PermissionChoice>,
     },
+    /// The model asked the user something through `AskUserQuestion` and the
+    /// turn is parked until [`crate::AgentSession::answer`] arrives. Unlike a
+    /// permission this is never auto-answered: the content has to come from
+    /// the user.
+    UserInput {
+        request_id: String,
+        question: String,
+        /// Predefined choices, when the model offered any. Free text is
+        /// always acceptable too.
+        options: Vec<String>,
+    },
+    /// Everything the engine's background registry holds — a level signal,
+    /// sent on demand and after each turn. Stop failures are not an event:
+    /// [`crate::AgentSession::stop_background_work`] answers synchronously,
+    /// because only the caller holds the key the panel filed the entry under.
+    BackgroundWork(Vec<BackgroundEntry>),
     /// A steering message reached the conversation.
     SteerAccepted { message: String },
     /// A steering message could not be delivered — the turn ended first.
@@ -134,18 +152,21 @@ impl std::fmt::Debug for EventSink {
 /// an id, and the transcript needs the name on both; and a single prompt
 /// produces many `message_start` frames as tools are called, of which only the
 /// first is the user's turn beginning.
-#[derive(Default)]
 pub struct StreamDecoder {
     tool_names: std::collections::HashMap<String, String>,
-    /// Set once per prompt so `TurnStarted` is reported for the user's turn
-    /// rather than for each of the model's internal steps — a single prompt
-    /// can produce many `message_start` frames as tools are called.
     turn_open: bool,
+    /// The window of the model this turn runs on, so the context gauge has
+    /// a denominator. The engine reports occupancy but not capacity.
+    context_window: Option<u64>,
 }
 
 impl StreamDecoder {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(context_window: Option<u64>) -> Self {
+        Self {
+            tool_names: std::collections::HashMap::new(),
+            turn_open: false,
+            context_window,
+        }
     }
 
     /// Translate one engine event. Returns the events to forward, in order.
@@ -189,15 +210,12 @@ impl StreamDecoder {
                 result,
                 is_error,
             } => {
-                let name = self
-                    .tool_names
-                    .remove(&tool_id)
-                    .unwrap_or(tool_name);
+                let name = self.tool_names.remove(&tool_id).unwrap_or(tool_name);
                 // Tool results are text by contract, but tools that return
                 // JSON produce a far better detail view when it is kept
                 // structured rather than shown as an escaped string.
-                let output = serde_json::from_str(&result)
-                    .unwrap_or_else(|_| Value::String(result));
+                let output =
+                    serde_json::from_str(&result).unwrap_or_else(|_| Value::String(result));
                 vec![AgentEvent::ToolFinished {
                     id: tool_id,
                     name,
@@ -211,7 +229,7 @@ impl StreamDecoder {
                 });
                 vec![AgentEvent::Usage {
                     context_tokens,
-                    context_window: None,
+                    context_window: self.context_window,
                 }]
             }
             Q::TokenWarning { .. } => Vec::new(),

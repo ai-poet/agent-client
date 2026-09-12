@@ -18,6 +18,9 @@
 //! | real context and cost figures | `TurnComplete { usage }` |
 //! | mid-turn steering | the engine's shared command queue |
 //! | approvals that persist | the engine's own `PermissionManager` |
+//! | background work, stoppable | the engine's task registry ([`background`]) |
+//! | questions to the user | `AskUserQuestion`'s reply channel |
+//! | MCP server tools | [`mcp_tool`], the adapter upstream keeps in its CLI |
 //!
 //! Routing — which endpoint and key a session uses — is *not* decided here.
 //! `sub2api::global_config::native` writes it into the engine's own settings
@@ -34,26 +37,64 @@
 //! presentation half lives there instead: see `waku-core/src/driver/native.rs`.
 //! Depending on `waku-core` from here would close that cycle.
 
+pub mod background;
 mod config;
 mod events;
 pub mod history;
+mod mcp_tool;
+mod oneshot;
 mod permission;
 mod runtime;
 mod session;
 
+pub use background::{BackgroundEntry, BackgroundKind, BackgroundStatus};
 pub use config::{AccessMode, AgentStartOptions, TurnOptions};
 pub use events::{AgentEvent, EventSink, PermissionChoice};
+pub use oneshot::one_shot;
 pub use session::AgentSession;
 
-/// Names of the tools a Native session loads, for the Tools settings page.
+/// Names of the built-in tools a session loads.
 ///
-/// Built from the same list the session builds, so the page can never drift
-/// from what the model is actually offered.
+/// The Tools settings page cannot call this — the desktop does not link the
+/// engine — so it carries its own copy, `sub2api::agent_settings::BUILTIN_TOOLS`.
+/// The test below is what keeps that copy honest.
 pub fn tool_names() -> Vec<String> {
     let mut names: Vec<String> = claurst_tools::all_tools()
         .iter()
         .map(|tool| tool.name().to_string())
         .collect();
     names.push(claurst_tools::Tool::name(&claurst_query::AgentTool).to_string());
+    names.sort();
     names
+}
+
+#[cfg(test)]
+mod tests {
+    /// The Tools page lists `sub2api::agent_settings::BUILTIN_TOOLS`; the
+    /// engine offers `tool_names()`. If a vendored engine update adds or
+    /// renames a tool, this is what fails.
+    #[test]
+    fn the_settings_pages_tool_list_matches_the_engine() {
+        let engine = super::tool_names();
+        let mut page: Vec<String> = BUILTIN_TOOLS_FROM_SETTINGS
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
+        page.sort();
+        assert_eq!(engine, page);
+    }
+
+    // Duplicated here rather than imported: `sub2api` is not a dependency of
+    // this crate, and must not become one. Keep in step with
+    // `sub2api::agent_settings::BUILTIN_TOOLS`.
+    const BUILTIN_TOOLS_FROM_SETTINGS: [&str; 45] = [
+        "Agent", "ApplyPatch", "AskUserQuestion", "Bash", "BatchEdit", "Brief",
+        "Config", "CronCreate", "CronDelete", "CronList", "Edit", "EnterPlanMode",
+        "EnterWorktree", "ExitPlanMode", "ExitWorktree", "Glob", "GoalComplete",
+        "Grep", "LSP", "ListMcpResources", "NotebookEdit", "PowerShell", "REPL",
+        "Read", "ReadMcpResource", "RemoteTrigger", "SendMessage", "Skill", "Sleep",
+        "StructuredOutput", "TaskCreate", "TaskGet", "TaskList", "TaskOutput",
+        "TaskStop", "TaskUpdate", "TeamCreate", "TeamDelete", "TodoWrite",
+        "ToolSearch", "WebFetch", "WebSearch", "Write", "mcp__auth", "monitor",
+    ];
 }

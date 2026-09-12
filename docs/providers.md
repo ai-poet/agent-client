@@ -851,10 +851,53 @@ request goes out; `SteerAccepted` is reported when the queue is observed
 drained, and anything still queued when the turn ends is reported as
 `SteerRejected` so Waku's own follow-up queue takes it.
 
-**Commit messages** — not offered. `agent_arguments` has no command line to
-build for a provider that is not a process, and `commit_dialog` only builds an
-`AgentInvocation` when the provider probe yields a binary. Generating one in
-process is a different shape of call and is deliberately not done here.
+**Questions to the user** — the engine's `AskUserQuestion` tool sends on a
+per-turn channel; the bridge parks the reply sender under a request id and
+raises `UserInputRequested`. `respond_user_input` answers it; cancel drops the
+sender, which the tool reports to the model as an unanswered question.
+
+**Background work** — the engine keeps one process-global registry of
+background shells (`bg: <command>`) and background sub-agents
+(`subagent: <description>`). `refresh_background_work` and the end of every
+turn snapshot it as `ReconcileLive`; the task id is the control id. Stopping a
+sub-agent goes through the registry's cancel token. Stopping a shell cannot —
+the engine holds the child in a detached task that never drops it — so the
+driver signals the pid (`kill -TERM` / `taskkill /T /F`) and reports
+`StopFailed` with the reason when it cannot.
+
+**MCP** — the engine's `McpManager` connects the configured servers in the
+background after session start; a turn that begins before they are up runs
+without them. Once connected, every advertised tool is wrapped as an ordinary
+`Tool` (`waku-agent-bridge/src/mcp_tool.rs`) and the session's tool set is
+swapped, so the next turn sees them. The wrapper declares `self_gates` because
+it raises its own, server-naming approval — without that the engine's central
+backstop would ask a second time. Servers that fail to connect are reported as
+`Error` events with the server's name.
+
+**Sub-agent transcripts** — the engine forwards no events from a sub-agent's
+own loop, so a foreground `Agent` call is one tool row that completes when the
+sub-agent does. What it did in between is in its result, not in the transcript.
+Background sub-agents appear in the background-work panel instead.
+
+**Commit messages** — `generate_message` asks the engine directly through
+`waku_agent_bridge::one_shot`: the same prompt every CLI gets, run through the
+same loop a session uses with an empty tool set, normalized the same way.
+`agent_arguments` still carries a Native arm only so the match stays total.
+
+**Settings** — the built-in agent is the one provider whose configuration is
+the app's to edit: Settings → Agent (`src/app/agent_page.rs`, logic in
+`sub2api::agent_settings`) writes the engine's own `settings.json` — standing
+instructions, step cap, compaction, the tool set, MCP servers and the
+persisted approval rules — touching only the keys it owns. A tool switched
+off there is filtered out of the session's tool set before the model ever
+sees it.
+
+**Models** — the picker's list comes from the gateway catalog the Model
+Plaza fetches, filtered to Anthropic-API models (`src/app/native_agent.rs`),
+and falls back to the built-in list until that lands. No CLI is asked.
+
+**Deletion** — removing a session sends `DeleteAgentTranscript` for the
+cursor's file, alongside the checkpoint-ref cleanup every provider gets.
 
 ---
 
