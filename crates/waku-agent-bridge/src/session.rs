@@ -94,7 +94,6 @@ struct Turn {
 impl AgentSession {
     /// Build a session and its engine runtime. Does not contact the model.
     pub fn start(options: AgentStartOptions, events: EventSink) -> anyhow::Result<Self> {
-        let rt = runtime::shared()?;
         let settings = Arc::new(Mutex::new(Settings::load_sync().unwrap_or_default()));
         let config = build_config(&options);
         let mut query = build_query_config(&config, &options);
