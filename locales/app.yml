@@ -282,6 +282,12 @@ daemon.settings_applied:
   en: Daemon access updated
 daemon.restart_failed:
   en: "Could not restart daemon: %{error}"
+daemon.restart:
+  en: Restart daemon
+daemon.banner_reconnecting_detail:
+  en: The connection to the daemon dropped. Running tasks continue while Waku reconnects.
+daemon.banner_unreachable_detail:
+  en: The daemon has not answered for a while. Restart it to recover; running tasks will stop.
 daemon.url_copied:
   en: WebSocket URL copied
 daemon.token_copied:

@@ -1010,6 +1010,11 @@ impl Waku {
         };
         match result {
             Ok(snapshot) => {
+                // Fork addition: the sync worker reloads on every replacement
+                // connection, so this is the earliest the UI can learn that a
+                // dropped socket is back — a second before the maintenance
+                // clock would.
+                self.maintain_daemon_connection(cx);
                 self.apply_remote_task_state(snapshot, cx);
                 true
             }
@@ -1646,10 +1651,15 @@ impl Waku {
             .save(&mut self.state)
             .err()
             .map(|error| error.to_string());
-        if let Some(error) = daemon_error.or(app_error) {
-            self.show_toast(tr!("errors.save_local_state", error = error));
-        } else {
-            self.stream_state_dirty = false;
+        match daemon_error.or(app_error) {
+            None => self.stream_state_dirty = false,
+            // Fork addition: a dropped daemon socket is not a save failure to
+            // report. The JSON halves are on disk, the daemon half stays
+            // queued (`StateStore::save` returns before clearing the dirty
+            // sessions, and the stream flag stays set), and the reconnect
+            // replays it. The connection banner says why.
+            Some(error) if waku_client::is_daemon_transport_error(&error) => {}
+            Some(error) => self.show_toast(tr!("errors.save_local_state", error = error)),
         }
     }
 
@@ -3718,7 +3728,10 @@ impl Waku {
         if selected_changed {
             self.remeasure_transcript_tail();
         }
+        // Fork addition: while the daemon socket is down the periodic save
+        // could only fail; the reconnect replays it.
         if self.stream_state_dirty
+            && self.daemon_connection.is_connected()
             && (force_save || self.last_stream_save.elapsed() >= STREAM_SAVE_INTERVAL)
         {
             self.save();

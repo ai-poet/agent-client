@@ -13,7 +13,10 @@ pub mod persistence;
 mod process;
 mod workspace_client;
 
-pub use client::DaemonClient;
+pub use client::{
+    DAEMON_CONNECTION_CLOSED, DAEMON_DISCONNECTED, DAEMON_DROPPED, DaemonClient,
+    is_daemon_transport_error,
+};
 pub use process::{
     DEFAULT_EXPOSED_DAEMON_PORT, DaemonExposureSettings, DaemonProcess, DaemonSupervisor,
     parse_allowed_origins,

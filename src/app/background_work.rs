@@ -499,6 +499,20 @@ fn work_elapsed(item: &BackgroundWorkItem) -> String {
     }
 }
 
+/// Whether the maintenance clock asks a runtime for its background work this
+/// tick. Pure, so the policy is testable. Nothing is asked of a daemon whose
+/// socket is down: the poll could only fail, and its failure used to raise a
+/// notice every tick. A skipped refresh does not advance the runtime's timer,
+/// so the first tick after reconnecting refreshes at once.
+pub(super) fn should_refresh_background_work(
+    selected: bool,
+    has_live_work: bool,
+    interval_elapsed: bool,
+    daemon_connected: bool,
+) -> bool {
+    daemon_connected && interval_elapsed && (selected || has_live_work)
+}
+
 impl Waku {
     pub(super) fn background_output_refresh_delay(&self) -> Option<Duration> {
         self.background_work
@@ -615,15 +629,18 @@ impl Waku {
             cx.notify();
         }
         let selected = self.state.selected_session;
+        let daemon_connected = self.daemon_connection.is_connected();
         for (session_id, runtime) in &mut self.runtimes {
-            let should_refresh = selected == Some(*session_id)
-                || self
-                    .background_work
-                    .get(session_id)
-                    .is_some_and(BackgroundWorkRegistry::has_live);
-            if should_refresh
-                && runtime.last_background_refresh_at.elapsed() >= BACKGROUND_WORK_REFRESH_INTERVAL
-            {
+            let has_live_work = self
+                .background_work
+                .get(session_id)
+                .is_some_and(BackgroundWorkRegistry::has_live);
+            if should_refresh_background_work(
+                selected == Some(*session_id),
+                has_live_work,
+                runtime.last_background_refresh_at.elapsed() >= BACKGROUND_WORK_REFRESH_INTERVAL,
+                daemon_connected,
+            ) {
                 runtime.last_background_refresh_at = Instant::now();
                 runtime.driver.refresh_background_work();
             }

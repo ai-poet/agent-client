@@ -23,6 +23,32 @@ const READ_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_BUFFERED_EVENTS_PER_RUNTIME: usize = 4096;
 
+/// A request refused because this connection's socket already closed.
+pub const DAEMON_DISCONNECTED: &str = "Waku daemon is disconnected";
+/// A request that was in flight when the socket closed.
+pub const DAEMON_DROPPED: &str = "Waku daemon disconnected";
+/// The socket thread is gone, so nothing can be written any more.
+pub const DAEMON_CONNECTION_CLOSED: &str = "Waku daemon connection is closed";
+
+/// Whether an error describes the desktop's socket to the daemon rather than
+/// an answer from the daemon. Substring match, so the message still qualifies
+/// after it has been wrapped by `io::Error`, an `anyhow` context, or a
+/// localized "could not save" template.
+///
+/// Request timeouts ("timed out waiting for Waku daemon") are deliberately not
+/// transport errors: they arrive on an open socket and describe a daemon that
+/// stopped answering, which the user should hear about. A socket that closes
+/// fails every pending request with [`DAEMON_DROPPED`] instead.
+pub fn is_daemon_transport_error(message: &str) -> bool {
+    [
+        DAEMON_DISCONNECTED,
+        DAEMON_DROPPED,
+        DAEMON_CONNECTION_CLOSED,
+    ]
+    .iter()
+    .any(|marker| message.contains(marker))
+}
+
 enum Outgoing {
     Message(ClientMessage),
     Shutdown,
@@ -167,7 +193,7 @@ impl DaemonClient {
         command: Command,
     ) -> anyhow::Result<ResponsePayload> {
         if self.inner.disconnected.load(Ordering::Acquire) {
-            bail!("Waku daemon is disconnected");
+            bail!("{DAEMON_DISCONNECTED}");
         }
         let request_id = Uuid::new_v4();
         let (response, response_rx) = bounded(1);
@@ -185,7 +211,7 @@ impl DaemonClient {
             .is_err()
         {
             self.inner.pending.lock().remove(&request_id);
-            bail!("Waku daemon connection is closed");
+            bail!("{DAEMON_CONNECTION_CLOSED}");
         }
         match response_rx.recv_timeout(REQUEST_TIMEOUT) {
             Ok(Ok(payload)) => Ok(payload),
@@ -204,7 +230,7 @@ impl DaemonClient {
         command: Command,
     ) -> anyhow::Result<()> {
         if self.inner.disconnected.load(Ordering::Acquire) {
-            bail!("Waku daemon is disconnected");
+            bail!("{DAEMON_DISCONNECTED}");
         }
         self.inner
             .outgoing
@@ -217,7 +243,7 @@ impl DaemonClient {
                 runtime_id,
                 command,
             })))
-            .map_err(|_| anyhow!("Waku daemon connection is closed"))
+            .map_err(|_| anyhow!("{DAEMON_CONNECTION_CLOSED}"))
     }
 
     pub fn last_sequences(&self) -> Vec<ReplayCursor> {
@@ -236,6 +262,36 @@ impl DaemonClient {
 
     pub fn shutdown(&self) {
         let _ = self.inner.outgoing.send(Outgoing::Shutdown);
+    }
+
+    /// A client whose socket is already gone, carrying the replay cursors a
+    /// real one would have accumulated. Lets supervisor tests exercise the
+    /// reconnect decision without a daemon.
+    #[cfg(test)]
+    pub(crate) fn disconnected_for_test(last_sequences: Vec<ReplayCursor>) -> Self {
+        let last_sequences = last_sequences
+            .into_iter()
+            .map(|cursor| {
+                (
+                    (cursor.session_id, cursor.runtime_id),
+                    LastSequence {
+                        epoch: cursor.epoch,
+                        sequence: cursor.sequence,
+                    },
+                )
+            })
+            .collect();
+        Self {
+            inner: Arc::new(ClientInner {
+                outgoing: unbounded().0,
+                pending: Mutex::new(HashMap::new()),
+                sessions: Mutex::new(HashMap::new()),
+                pending_events: Mutex::new(HashMap::new()),
+                task_state_subscribers: Mutex::new(Vec::new()),
+                last_sequences: Mutex::new(last_sequences),
+                disconnected: AtomicBool::new(true),
+            }),
+        }
     }
 }
 
@@ -349,7 +405,7 @@ fn run_client(
     let pending = std::mem::take(&mut *inner.pending.lock());
     for (_, response) in pending {
         let _ = response.send(Err(RpcError {
-            message: "Waku daemon disconnected".into(),
+            message: DAEMON_DROPPED.into(),
         }));
     }
     // Closing the desktop transport is not evidence that a daemon-owned
@@ -420,6 +476,44 @@ fn read_server_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transport_errors_are_recognized_by_their_wire_text() {
+        assert!(is_daemon_transport_error(DAEMON_DISCONNECTED));
+        assert!(is_daemon_transport_error(DAEMON_DROPPED));
+        assert!(is_daemon_transport_error(DAEMON_CONNECTION_CLOSED));
+        assert!(is_daemon_transport_error(&format!(
+            "Could not save local state: {DAEMON_DISCONNECTED}"
+        )));
+        assert!(!is_daemon_transport_error(
+            "timed out waiting for Waku daemon: receiving on an empty channel"
+        ));
+        assert!(!is_daemon_transport_error(
+            "daemon rejected connection: bad token"
+        ));
+        assert!(!is_daemon_transport_error(""));
+    }
+
+    #[test]
+    fn a_test_client_is_born_disconnected_with_its_cursors() {
+        let cursor = ReplayCursor {
+            session_id: Uuid::from_u128(1),
+            runtime_id: Uuid::from_u128(2),
+            epoch: Uuid::from_u128(3),
+            sequence: 5,
+        };
+        let client = DaemonClient::disconnected_for_test(vec![cursor]);
+        assert!(client.is_disconnected());
+        assert!(
+            client
+                .request(Uuid::nil(), Uuid::nil(), Command::GetSettings)
+                .is_err()
+        );
+        let cursors = client.last_sequences();
+        assert_eq!(cursors.len(), 1);
+        assert_eq!(cursors[0].sequence, 5);
+        assert_eq!(cursors[0].epoch, Uuid::from_u128(3));
+    }
 
     #[test]
     fn daemon_endpoint_accepts_addresses_and_secure_urls() {

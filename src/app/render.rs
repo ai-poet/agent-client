@@ -269,6 +269,7 @@ impl Render for Waku {
                 .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
                 // Fork addition: an available update announces itself here too.
                 .children(self.render_update_banner(cx))
+                .children(self.render_daemon_connection_banner(cx))
                 .child(
                     div()
                         .flex_1()
@@ -383,6 +384,7 @@ impl Render for Waku {
                     })
                     // Fork addition: an available update announces itself here.
                     .children(self.render_update_banner(cx))
+                    .children(self.render_daemon_connection_banner(cx))
                     .child(self.render_header(window, cx))
                     .child(if empty {
                         self.render_empty_state(cx).into_any_element()

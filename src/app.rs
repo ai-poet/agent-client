@@ -296,6 +296,21 @@ enum ToastTone {
     Success,
 }
 
+impl ToastState {
+    /// A repeat of the notice already on screen keeps its element id, so it
+    /// does not play its entrance again, and only restarts the countdown.
+    /// Render re-arms the dismiss timer for the new generation.
+    fn refresh_if_same(&mut self, message: &str, tone: ToastTone, timer_generation: u64) -> bool {
+        if self.message != message || self.tone != tone {
+            return false;
+        }
+        self.timer_generation = timer_generation;
+        self.duration_remaining = DEFAULT_TOAST_DURATION;
+        self.timer_started = None;
+        true
+    }
+}
+
 fn paused_toast_duration(remaining: Duration, elapsed: Duration) -> Duration {
     remaining
         .saturating_sub(elapsed)
@@ -1080,6 +1095,11 @@ pub struct Waku {
     daemon_origins_input: Entity<TextInput>,
     daemon_reconfigure_pending: bool,
     daemon_token_revealed: bool,
+    /// Fork addition: the daemon connection as the UI understands it, and the
+    /// banner stage derived from it on the maintenance clock.
+    daemon_connection: daemon_banner::DaemonConnectionPhase,
+    daemon_banner_stage: daemon_banner::DaemonBannerStage,
+    daemon_banner_dismissed: bool,
     settings_focus: FocusHandle,
     onboarding_add_project_focus: FocusHandle,
     onboarding_projectless_focus: FocusHandle,
@@ -1682,6 +1702,7 @@ mod onboarding;
 mod message_resend;
 mod task_rows;
 mod update_banner;
+mod daemon_banner;
 mod surface_bar;
 mod providers_page;
 mod render;
@@ -1879,14 +1900,32 @@ impl Waku {
     }
 
     fn show_toast_with_tone(&mut self, message: impl Into<String>, tone: ToastTone) {
+        let mut message = message.into();
+        if tone == ToastTone::Alert && waku_client::is_daemon_transport_error(&message) {
+            // Fork addition: a dropped daemon socket is one condition with one
+            // notice. The connection banner owns it while it shows; otherwise
+            // the raw wire text becomes the localized message.
+            if self.daemon_banner_stage != daemon_banner::DaemonBannerStage::Hidden {
+                return;
+            }
+            message = tr!("errors.daemon_disconnected");
+        }
+        self.toast_generation = self.toast_generation.wrapping_add(1);
+        let generation = self.toast_generation;
+        if self
+            .toast
+            .as_mut()
+            .is_some_and(|toast| toast.refresh_if_same(&message, tone, generation))
+        {
+            return;
+        }
         self.toast_selection.selection.borrow_mut().clear();
         self.toast_selection.registry.borrow_mut().clear();
-        self.toast_generation = self.toast_generation.wrapping_add(1);
         self.toast = Some(ToastState {
-            message: message.into(),
+            message,
             tone,
-            id: self.toast_generation,
-            timer_generation: self.toast_generation,
+            id: generation,
+            timer_generation: generation,
             duration_remaining: DEFAULT_TOAST_DURATION,
             timer_started: None,
             hovered: false,
@@ -2792,7 +2831,12 @@ impl Waku {
                         .timer(BACKGROUND_WORK_TICK_INTERVAL)
                         .await;
                     if this
-                        .update(cx, |this, cx| this.maybe_refresh_background_work(cx))
+                        .update(cx, |this, cx| {
+                            // Fork addition: the connection phase is read on
+                            // the same clock, ahead of the poll it gates.
+                            this.maintain_daemon_connection(cx);
+                            this.maybe_refresh_background_work(cx);
+                        })
                         .is_err()
                     {
                         break;
@@ -2897,6 +2941,9 @@ impl Waku {
                 daemon_origins_input,
                 daemon_reconfigure_pending: false,
                 daemon_token_revealed: false,
+                daemon_connection: daemon_banner::DaemonConnectionPhase::Connected,
+                daemon_banner_stage: daemon_banner::DaemonBannerStage::Hidden,
+                daemon_banner_dismissed: false,
                 settings_focus,
                 onboarding_add_project_focus,
                 onboarding_projectless_focus,

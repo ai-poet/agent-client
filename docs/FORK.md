@@ -100,6 +100,21 @@ lines below.
 | `crates/waku-protocol/src/i18n.rs` | Windows `system_locale()` via `GetUserDefaultLocaleName` (upstream's env-var probe always yielded English on Windows); two test expectations follow the brand | ~25 |
 | `crates/waku-core/src/driver/codex.rs` | `app-server` args resolved per binary via `sub2api::codex_compat` (old Codex rejects `--stdio`) | 2 sites |
 | `src/daemon.rs`, `src/driver/mod.rs`, `src/app/runtime.rs`, `src/analytics.rs`, `src/js_repl.rs`, `src/bin/waku_js_repl.rs` | user-visible "Waku" strings neutralized or branded | ~14 lines |
+| `crates/waku-client/src/client.rs` | `DAEMON_DISCONNECTED` / `DAEMON_DROPPED` / `DAEMON_CONNECTION_CLOSED` wire-text constants (the five literals read them) + `is_daemon_transport_error`; `disconnected_for_test` | ~30 |
+| `crates/waku-client/src/lib.rs` | re-exports of the above | 4 |
+| `crates/waku-client/src/process.rs` | local socket reconnect: `DaemonProcess` keeps `client_address`/`token` (`endpoint`, `adopt_client`); `DaemonTarget::reconnect_endpoint`; `publish_client`, `reopen_socket`, `plan_local_recovery`, `RedialState` + `redial_backoff`; `monitor_daemon` rewritten around them (the remote branch redials through the same path, the dial never runs under the target lock, six refused redials fall back to `replace_local_daemon`); `DaemonSupervisor::restart`; lifecycle tests against an in-test fake daemon. Upstream PR egoist/waku#218 fixes the same bug differently (dials under the target lock, no backoff or fallback): keep ours | ~180 + tests |
+| `crates/waku-core/src/server.rs` | the accept loop survives transient errors (`accept_error_is_transient`, `descriptor_exhausted`) instead of exiting the daemon | ~40 |
+| `crates/waku-daemon/src/main.rs` | Windows `process_is_alive` treats only `ERROR_INVALID_PARAMETER` as a dead parent (`parent_is_gone`) | ~15 |
+| `src/driver/mod.rs` | `RemoteDriverControl::notify` reports failures through `transport_failure_notice` (a dropped socket raises no `DriverEvent::Error`) | ~15 |
+| `src/app.rs` (daemon banner) | `daemon_connection` / `daemon_banner_stage` / `daemon_banner_dismissed` fields + initializers, `mod daemon_banner`, `ToastState::refresh_if_same`, transport-aware `show_toast_with_tone` (same text only restarts the countdown; transport text is localized or left to the banner), `maintain_daemon_connection` on the maintenance clock | ~45 |
+| `src/app/background_work.rs` | `should_refresh_background_work` gate: no background-work poll while the socket is down | ~20 |
+| `src/app/runtime.rs` (daemon banner) | `save` swallows transport errors and keeps the dirty flag; the periodic save is gated on the connection; `drain_task_state_sync_events` calls `maintain_daemon_connection` | ~12 |
+| `src/app/drafts.rs` | the draft-save toast is skipped for transport errors | 5 |
+| `src/app/render.rs` (daemon banner) | `render_daemon_connection_banner` under the update banner in both branches | 2 |
+| `src/app/settings.rs` (daemon banner) | the daemon status pill reads `daemon.phase_connecting` while the socket is down | 3 |
+| `src/app/tests.rs` (daemon banner) | toast de-dup, refresh gate, connection phase and banner stage tests | ~115 |
+| `locales/{app,ja,zh-CN}.yml` (daemon banner) | `daemon.restart`, `daemon.banner_reconnecting_detail`, `daemon.banner_unreachable_detail` | 3 keys |
+| `crates/waku-core/src/command_env.rs` (test) | `windows_environment_probe_captures_the_inherited_path_without_a_profile` waits 60 s instead of 10 s for the PowerShell probe (the ten-second ceiling flaked on the `windows-latest` runner under the parallel suite) | 1 |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `CheapRouter` in `locales/` and the two i18n test expectations.
@@ -110,6 +125,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `src/app/providers_page.rs`, `src/app/confirm_dialog.rs`,
 `src/app/onboarding.rs`, `src/app/message_resend.rs`, `src/app/task_rows.rs`,
 `src/app/runtime_prewarm.rs`, `src/app/update_banner.rs`, `src/app/surface_bar.rs`,
+`src/app/daemon_banner.rs`,
 `crates/waku-core/src/driver/turn_diagnosis.rs`,
 `src/app/cloud_usage.rs`, `src/app/model_plaza.rs`, `src/app/cloud_pay.rs`,
 `src/app/announcements.rs`, `src/app/workflow.rs`, `assets/icons/{bell,circle-x,store,wallet}.svg`,

@@ -505,11 +505,51 @@ pub fn serve(
                 std::thread::sleep(ACCEPT_POLL_INTERVAL);
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) if accept_error_is_transient(&error) => {
+                // A peer that aborted between SYN and accept (Windows reports
+                // it as WSAECONNRESET from `accept` itself) or a momentarily
+                // exhausted descriptor table must not take every other
+                // connection down with the listener.
+                eprintln!("waku-daemon accept failed: {error}");
+                std::thread::sleep(ACCEPT_POLL_INTERVAL);
+            }
             Err(error) => return Err(error).context("Waku daemon listener failed"),
         }
     }
     backend.shutdown();
     Ok(())
+}
+
+/// Accept errors that describe one incoming connection or a passing resource
+/// shortage rather than the listener itself.
+fn accept_error_is_transient(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::ConnectionRefused
+            | io::ErrorKind::NotConnected
+            | io::ErrorKind::TimedOut
+    ) || descriptor_exhausted(error)
+}
+
+#[cfg(unix)]
+fn descriptor_exhausted(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(libc::EMFILE | libc::ENFILE | libc::ENOBUFS)
+    )
+}
+
+#[cfg(windows)]
+fn descriptor_exhausted(error: &io::Error) -> bool {
+    const WSAENOBUFS: i32 = 10055;
+    error.raw_os_error() == Some(WSAENOBUFS)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn descriptor_exhausted(_error: &io::Error) -> bool {
+    false
 }
 
 fn handle_connection(
@@ -1435,6 +1475,30 @@ mod tests {
 
         source.shutdown();
         server.join().unwrap();
+    }
+
+    #[test]
+    fn accept_errors_from_aborted_peers_are_transient() {
+        assert!(accept_error_is_transient(&io::Error::from(
+            io::ErrorKind::ConnectionReset
+        )));
+        assert!(accept_error_is_transient(&io::Error::from(
+            io::ErrorKind::ConnectionAborted
+        )));
+        assert!(!accept_error_is_transient(&io::Error::from(
+            io::ErrorKind::InvalidInput
+        )));
+        assert!(!accept_error_is_transient(&io::Error::from(
+            io::ErrorKind::PermissionDenied
+        )));
+        #[cfg(unix)]
+        assert!(accept_error_is_transient(&io::Error::from_raw_os_error(
+            libc::EMFILE
+        )));
+        #[cfg(windows)]
+        assert!(accept_error_is_transient(&io::Error::from_raw_os_error(
+            10055
+        )));
     }
 
     #[test]

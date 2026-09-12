@@ -225,12 +225,24 @@ struct RemoteDriverControl {
 impl RemoteDriverControl {
     fn notify(&self, command: waku_client::Command) {
         let client = self.client.lock().clone();
-        if let Err(error) = client.notify(self.session_id, self.runtime_id, command) {
-            let _ = self.events.send(DriverEvent::Error(format!(
-                "the daemon command failed: {error}"
-            )));
+        if let Err(error) = client.notify(self.session_id, self.runtime_id, command)
+            && let Some(notice) = transport_failure_notice(&error.to_string())
+        {
+            let _ = self.events.send(DriverEvent::Error(notice));
         }
     }
+}
+
+/// What a failed fire-and-forget command tells the session.
+///
+/// Fork addition. A daemon answer is always reported. A dropped socket is
+/// not: the supervisor is already redialing or restarting, the connection
+/// banner says so, and every command sent during the outage would otherwise
+/// raise the same notice again. The background-work poll alone did it every
+/// five seconds, and each notice also marked the task failed.
+fn transport_failure_notice(error: &str) -> Option<String> {
+    (!waku_client::is_daemon_transport_error(error))
+        .then(|| format!("the daemon command failed: {error}"))
 }
 
 impl DriverControl for RemoteDriverControl {
@@ -377,5 +389,27 @@ impl Drop for RemoteDriverControl {
         let _ = self.shutdown.try_send(());
         let client = self.client.lock().clone();
         client.unsubscribe(self.session_id, self.runtime_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::transport_failure_notice;
+
+    #[test]
+    fn a_dropped_socket_is_not_a_command_failure_but_a_daemon_answer_is() {
+        assert_eq!(
+            transport_failure_notice(waku_client::DAEMON_DISCONNECTED),
+            None
+        );
+        assert_eq!(transport_failure_notice(waku_client::DAEMON_DROPPED), None);
+        assert_eq!(
+            transport_failure_notice(waku_client::DAEMON_CONNECTION_CLOSED),
+            None
+        );
+        assert_eq!(
+            transport_failure_notice("provider said no").as_deref(),
+            Some("the daemon command failed: provider said no")
+        );
     }
 }

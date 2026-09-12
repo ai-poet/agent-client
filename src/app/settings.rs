@@ -637,6 +637,7 @@ impl Waku {
 
         let enabled = self.state.daemon_exposure.enabled;
         let pending = self.daemon_reconfigure_pending;
+        let daemon_connected = self.daemon_connection.is_connected();
         let fields_dirty = self.daemon_exposure_fields_dirty(cx);
         let port = self.state.daemon_exposure.port;
         let websocket_url = format!("ws://{}:{port}", self.daemon_hostname);
@@ -905,6 +906,8 @@ impl Waku {
                                             .bg(theme.overlay)
                                             .child(if pending {
                                                 tr!("daemon.status_restarting")
+                                            } else if !daemon_connected {
+                                                tr!("daemon.phase_connecting")
                                             } else if enabled {
                                                 tr!("daemon.status_exposed")
                                             } else {
