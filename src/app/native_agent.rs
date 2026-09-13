@@ -171,7 +171,10 @@ pub(super) struct WireFormatOption {
     pub description: &'static str,
 }
 
-pub(super) const NATIVE_WIRE_FORMATS: [WireFormatOption; 3] = [
+// A `static`, not a `const`: `native_wire_formats` hands out `'static`
+// references into it, and a const would be copied into a temporary at
+// every use site with nothing to borrow from.
+pub(super) static NATIVE_WIRE_FORMATS: [WireFormatOption; 3] = [
     WireFormatOption {
         id: "messages",
         label: "model_option.wire_messages",

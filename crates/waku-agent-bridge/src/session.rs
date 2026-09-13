@@ -531,6 +531,14 @@ async fn run_turn(
     let config = inner.config.lock().clone();
     let mut query = inner.query.lock().clone();
     query.command_queue = Some(queue.clone());
+    // Read while `config` is still here: it moves into the tool context
+    // below, and a turn that ends up saying nothing has to name the route it
+    // tried.
+    let route = Route {
+        provider: config.selected_provider_id().to_owned(),
+        model: query.model.clone(),
+        api_base: config.resolve_anthropic_api_base(),
+    };
     let tools = inner.tools.lock().clone();
     let context_window = claurst_query::context_window_for_model(&query.model);
 
@@ -603,11 +611,6 @@ async fn run_turn(
     };
     inner.questions.lock().clear();
 
-    let route = Route {
-        provider: config.selected_provider_id().to_owned(),
-        model: query.model.clone(),
-        api_base: config.resolve_anthropic_api_base(),
-    };
     let produced_output = history::produced_visible_output(&inner.history.lock(), turn_start);
     // Only a turn the engine called *finished* counts as empty. A cancel
     // produces nothing either, and saying "the model ended without saying
@@ -783,10 +786,14 @@ mod tests {
 
     #[test]
     fn a_spend_cap_names_both_numbers() {
-        let (success, summary) = describe(QueryOutcome::BudgetExceeded {
-            cost_usd: 12.5,
-            limit_usd: 10.0,
-        });
+        let (success, summary) = describe(
+            QueryOutcome::BudgetExceeded {
+                cost_usd: 12.5,
+                limit_usd: 10.0,
+            },
+            false,
+            &route(),
+        );
         assert!(!success);
         let summary = summary.unwrap();
         assert!(summary.contains("$12.50"), "{summary}");
@@ -795,10 +802,14 @@ mod tests {
 
     #[test]
     fn hitting_the_output_limit_still_counts_as_an_answer() {
-        let (success, summary) = describe(QueryOutcome::MaxTokens {
-            partial_message: Message::assistant("half an answer"),
-            usage: Default::default(),
-        });
+        let (success, summary) = describe(
+            QueryOutcome::MaxTokens {
+                partial_message: Message::assistant("half an answer"),
+                usage: Default::default(),
+            },
+            true,
+            &route(),
+        );
         assert!(success);
         assert!(summary.is_some(), "the user should still be told why it stopped");
     }
