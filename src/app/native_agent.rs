@@ -11,12 +11,13 @@
 //! knows which of the account's keys to use; the picker never shows an id,
 //! only the name and the brand-and-platform subtitle. The wire format —
 //! Anthropic Messages, OpenAI Responses, OpenAI Chat Completions — is not a
-//! per-model option here: the picker sections the built-in agent's list by
-//! format and writes the chosen section into the session's tier slot, so
-//! model and API are always chosen together. The gateway translates each
-//! format for every platform, which is what makes that a free choice.
+//! per-model option here: the picker shows a format bar above the built-in
+//! agent's list and writes the current format into the session's tier slot
+//! when a model is chosen, so model and API are always chosen together. The
+//! gateway translates each format for every platform, which is what makes
+//! that a free choice.
 //!
-//! Pure mapping plus one hook; the fetch is the Plaza's.
+//! Pure mapping plus the hooks that apply it; the fetch is the Plaza's.
 
 use sub2api::client::ModelCatalogItem;
 
@@ -115,22 +116,50 @@ fn reasoning_effort_label(effort: &str) -> String {
     }
 }
 
+/// What the built-in agent's probe lists: the catalog when the account
+/// offers one, the engine's fallback list otherwise. Never empty, so a
+/// signed-out picker still has rows and a signed-in one never blanks
+/// between a sign-out and the next catalog.
+pub(super) fn native_probe_models(items: &[ModelCatalogItem]) -> Vec<ProviderModel> {
+    let models = native_models_from_catalog(items);
+    if models.is_empty() {
+        crate::model_catalog::fallback_models(ProviderKind::Native)
+    } else {
+        models
+    }
+}
+
 impl Waku {
-    /// Replace the built-in agent's model list with what the gateway
-    /// catalog offers. Called when the Plaza catalog lands; an empty
-    /// selection leaves the fallback list in place rather than blanking the
-    /// picker.
-    pub(super) fn adopt_native_models_from_catalog(&mut self) {
-        let models = native_models_from_catalog(&self.model_plaza.items);
-        if models.is_empty() {
-            return;
-        }
+    /// Re-derive the built-in agent's model list from the catalog held in
+    /// `model_plaza.items`, the one source of truth for it.
+    ///
+    /// Idempotent and cheap, so it runs after anything that could have
+    /// replaced the probe's list: a catalog landing, a sign-out clearing
+    /// it, a daemon probe answering with the fallback list, a language
+    /// change relabelling the reasoning ladder.
+    pub(super) fn sync_native_models(&mut self) {
+        let models = native_probe_models(&self.model_plaza.items);
         if let Some(probe) = self
             .probes
             .iter_mut()
             .find(|probe| probe.provider == ProviderKind::Native)
         {
             probe.models = models;
+        }
+    }
+
+    /// Bring the built-in agent's catalog up to date with the account.
+    ///
+    /// Signed in, this is the Plaza's own fetch — same request, same token
+    /// adoption, same freshness window, so the picker and the Plaza page
+    /// never disagree; `force` skips the window for events that changed
+    /// what the account can reach (a sign-in, a group switch). Signed out,
+    /// the list is re-derived at once so it drops back to the fallback.
+    pub(super) fn refresh_native_catalog(&mut self, force: bool, cx: &mut Context<Self>) {
+        if self.cloud_account.credentials.is_some() {
+            self.load_model_plaza_if_needed(force, cx);
+        } else {
+            self.sync_native_models();
         }
     }
 }
@@ -176,6 +205,27 @@ mod tests {
         let models = native_models_from_catalog(&[item("gpt-5.6-sol", "openai")]);
         assert!(models[0].service_tiers.is_empty());
         assert!(models[0].default_service_tier.is_none());
+    }
+
+    #[test]
+    fn an_empty_catalog_lists_the_fallback_rather_than_nothing() {
+        let ids = |models: Vec<ProviderModel>| -> Vec<String> {
+            models.into_iter().map(|model| model.id).collect()
+        };
+        let fallback = ids(crate::model_catalog::fallback_models(ProviderKind::Native));
+        assert!(!fallback.is_empty());
+        assert_eq!(ids(native_probe_models(&[])), fallback);
+        // A catalog with nothing a coding agent can drive counts as empty.
+        let mut image = item("gpt-image-2", "openai");
+        image.billing_mode = "image".into();
+        assert_eq!(ids(native_probe_models(&[image])), fallback);
+    }
+
+    #[test]
+    fn a_catalog_replaces_the_fallback_list_outright() {
+        let models = native_probe_models(&[item("gemini-3-pro", "gemini")]);
+        let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
+        assert_eq!(ids, ["gemini::gemini-3-pro"]);
     }
 
     #[test]

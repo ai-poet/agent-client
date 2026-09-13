@@ -7,6 +7,7 @@
 
 use std::path::PathBuf;
 
+use anyhow::Context as _;
 use claurst_core::config::{Config, Settings};
 use claurst_core::effort::EffortLevel;
 use claurst_core::{PermissionMode, ProviderConfig};
@@ -186,8 +187,33 @@ pub struct TurnOptions {
 /// account or a custom endpoint wins. Resolving it a second time here would be
 /// a second answer to that question, and the two would disagree the moment a
 /// user has both.
-pub fn build_config(options: &AgentStartOptions) -> Config {
-    let settings = Settings::load_sync().unwrap_or_default();
+pub fn build_config(options: &AgentStartOptions) -> anyhow::Result<Config> {
+    Ok(build_config_from(load_settings()?, options))
+}
+
+/// The engine's global settings.
+///
+/// A file that does not exist is the engine's own defaults, exactly as the
+/// engine treats it. A file that exists but cannot be parsed is an error
+/// carrying its path: continuing with defaults would run the session with no
+/// key, no MCP roster and no permission rules, and fail later with a message
+/// that names none of that.
+pub(crate) fn load_settings() -> anyhow::Result<Settings> {
+    let path = Settings::global_settings_path();
+    if !path.exists() {
+        return Ok(Settings::default());
+    }
+    Settings::load_sync().with_context(|| {
+        format!(
+            "the built-in agent's settings file {} could not be read",
+            path.display()
+        )
+    })
+}
+
+/// [`build_config`] on settings the caller already loaded — the seam the
+/// tests drive with a settings document rather than a file.
+pub(crate) fn build_config_from(settings: Settings, options: &AgentStartOptions) -> Config {
     let mut config = settings.effective_config();
 
     config.project_dir = Some(options.cwd.clone());
@@ -257,6 +283,62 @@ fn select_route(config: &mut Config, options: &AgentStartOptions) {
 /// cannot import.
 pub const GATEWAY_KEYS_OPTION: &str = "gateway_keys";
 
+/// A route with nothing to authenticate it.
+///
+/// Raised before any request is made, so the user reads which route lacks a
+/// key and where a key would go — rather than the engine's own "run `claurst
+/// auth login`" advice, which names a CLI this product does not ship.
+#[derive(Clone, Debug)]
+pub struct MissingApiKey {
+    /// The engine provider the wire format selected (`anthropic`, `codex`,
+    /// `openai`).
+    pub provider: String,
+    /// The model's platform, when the session named one.
+    pub platform: Option<String>,
+    pub settings_path: PathBuf,
+}
+
+impl std::fmt::Display for MissingApiKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "no API key for the built-in agent's `{}` route",
+            self.provider
+        )?;
+        if let Some(platform) = &self.platform {
+            write!(f, " (platform `{platform}`)")?;
+        }
+        write!(
+            f,
+            ": sign in, or set provider_configs.{}.api_key in {}",
+            self.provider,
+            self.settings_path.display()
+        )
+    }
+}
+
+impl std::error::Error for MissingApiKey {}
+
+/// The gate a route has to pass before a client is built for it.
+///
+/// `resolved` is the key the caller resolved for the selected provider
+/// through the engine's own precedence (config, provider entry, environment,
+/// stored OAuth tokens). Pure, so it is tested without touching any of those.
+pub(crate) fn missing_route_key(
+    config: &Config,
+    platform: Option<&str>,
+    resolved: Option<&str>,
+) -> Option<MissingApiKey> {
+    if resolved.is_some_and(|key| !key.trim().is_empty()) {
+        return None;
+    }
+    Some(MissingApiKey {
+        provider: config.selected_provider_id().to_owned(),
+        platform: platform.map(str::to_owned),
+        settings_path: Settings::global_settings_path(),
+    })
+}
+
 /// Build the per-turn config from the project config plus this turn's options.
 pub fn build_query_config(config: &Config, options: &AgentStartOptions) -> QueryConfig {
     let mut query = QueryConfig::from_config(config);
@@ -290,6 +372,131 @@ mod tests {
             AccessMode::FullAccess,
         ] {
             assert_eq!(mode.permission_mode(true), PermissionMode::Plan);
+        }
+    }
+
+    /// Byte-for-byte what `sub2api::global_config::native::take_over` writes
+    /// into an empty config directory for a signed-in account. Duplicated
+    /// here because `sub2api` is not — and must not become — a dependency of
+    /// this crate; `sub2api`'s own test asserts its writer still produces
+    /// this document. This is the JSON → `Settings` hop that used to fail.
+    const FRESH_TAKEOVER_SETTINGS: &str = r#"{
+  "config": {
+    "api_key": "sk-claude",
+    "provider_configs": {
+      "anthropic": {
+        "api_key": "sk-claude",
+        "api_base": "https://gateway.example.org",
+        "enabled": true,
+        "options": {
+          "gateway_keys": {
+            "anthropic": "sk-claude",
+            "default": "sk-general",
+            "openai": "sk-codex"
+          }
+        }
+      },
+      "codex": {
+        "api_key": "sk-claude",
+        "api_base": "https://gateway.example.org",
+        "enabled": true
+      },
+      "openai": {
+        "api_key": "sk-claude",
+        "api_base": "https://gateway.example.org",
+        "enabled": true
+      }
+    }
+  }
+}"#;
+
+    fn fresh_settings() -> Settings {
+        serde_json::from_str(FRESH_TAKEOVER_SETTINGS)
+            .expect("the routing writer's document must load as engine settings")
+    }
+
+    #[test]
+    fn a_fresh_takeover_file_parses_and_routes_every_format() {
+        for (platform, format, provider, key) in [
+            ("anthropic", WireFormat::Messages, "anthropic", "sk-claude"),
+            ("openai", WireFormat::Responses, "codex", "sk-codex"),
+            ("gemini", WireFormat::Chat, "openai", "sk-general"),
+        ] {
+            let options = AgentStartOptions {
+                platform: Some(platform.into()),
+                wire_format: Some(format),
+                ..AgentStartOptions::default()
+            };
+            let config = build_config_from(fresh_settings(), &options);
+            assert_eq!(config.provider.as_deref(), Some(provider), "{platform}");
+            assert_eq!(config.api_key.as_deref(), Some(key), "{platform}");
+            let entry = config.provider_configs.get(provider).unwrap();
+            assert_eq!(
+                entry.api_base.as_deref(),
+                Some("https://gateway.example.org"),
+                "{platform}"
+            );
+            assert_eq!(
+                config.resolve_provider_api_key(config.selected_provider_id()).as_deref(),
+                Some(key),
+                "{platform}"
+            );
+            assert!(missing_route_key(&config, Some(platform), Some(key)).is_none());
+        }
+    }
+
+    #[test]
+    fn a_partial_config_block_keeps_the_engines_defaults() {
+        let config = build_config_from(fresh_settings(), &AgentStartOptions::default());
+        // Never written by the routing writer; must come from the engine's
+        // defaults rather than fail the document.
+        let defaults = Config::default();
+        assert_eq!(config.auto_compact, defaults.auto_compact);
+        assert_eq!(config.compact_threshold, defaults.compact_threshold);
+        assert_eq!(config.verbose, defaults.verbose);
+        assert!(config.mcp_servers.is_empty());
+    }
+
+    #[test]
+    fn missing_route_key_names_the_provider_and_the_platform() {
+        let mut config = Config::default();
+        config.provider = Some("codex".into());
+        let missing = missing_route_key(&config, Some("openai"), None).expect("no key");
+        assert_eq!(missing.provider, "codex");
+        assert_eq!(missing.platform.as_deref(), Some("openai"));
+        let text = missing.to_string();
+        assert!(text.contains("codex"), "{text}");
+        assert!(text.contains("openai"), "{text}");
+        assert!(missing_route_key(&config, None, Some("   ")).is_some());
+        assert!(missing_route_key(&config, None, Some("sk")).is_none());
+    }
+
+    /// Reads the settings file actually installed on this machine and prints
+    /// what each format would route with. A manual aid for the verification
+    /// steps, not part of the suite.
+    #[test]
+    #[ignore]
+    fn parses_the_installed_settings_file() {
+        let settings = load_settings().expect("installed settings");
+        for (platform, format) in [
+            ("anthropic", WireFormat::Messages),
+            ("openai", WireFormat::Responses),
+            ("openai", WireFormat::Chat),
+        ] {
+            let options = AgentStartOptions {
+                platform: Some(platform.into()),
+                wire_format: Some(format),
+                ..AgentStartOptions::default()
+            };
+            let config = build_config_from(settings.clone(), &options);
+            let key = config.resolve_provider_api_key(config.selected_provider_id());
+            println!(
+                "{platform} / {:?} -> provider {:?}, base {:?}, key resolved: {}",
+                format,
+                config.provider,
+                config.resolve_anthropic_api_base(),
+                key.is_some_and(|key| !key.is_empty())
+            );
         }
     }
 

@@ -164,6 +164,10 @@ impl ProviderKind {
         )
     }
 
+    /// Providers whose catalog is read from their CLI at runtime. The
+    /// built-in provider is deliberately absent: it has no CLI to ask, and
+    /// its list comes from the gateway account on the desktop side — a
+    /// discovery answer would only replace that list with the fallback.
     pub fn supports_model_discovery(self) -> bool {
         matches!(
             self,
@@ -172,7 +176,6 @@ impl ProviderKind {
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::Fx
-                | Self::Native
                 | Self::OpenCode
                 | Self::Grok
                 | Self::Kimi
@@ -4047,6 +4050,8 @@ mod tests {
         assert!(ProviderKind::OpenCode.supports_model_discovery());
         assert!(ProviderKind::Grok.supports_model_discovery());
         assert!(ProviderKind::Pi.supports_model_discovery());
+        // Built in: no CLI to ask, and its catalog is the account's.
+        assert!(!ProviderKind::Native.supports_model_discovery());
     }
 
     #[test]

@@ -1573,6 +1573,9 @@ impl Waku {
             self.request_provider_model_discovery(provider);
         }
         if changed {
+            // A detection answer for the built-in agent carries the fallback
+            // list; its real list is the gateway catalog, so put that back.
+            self.sync_native_models();
             self.request_provider_version_probes();
         }
         changed
@@ -3613,6 +3616,11 @@ impl Waku {
                 self.probes.push(probe);
             }
             changed = true;
+        }
+        if changed {
+            // Same guard as detection: a probe answer must not replace the
+            // built-in agent's catalog list with the fallback.
+            self.sync_native_models();
         }
         changed
     }

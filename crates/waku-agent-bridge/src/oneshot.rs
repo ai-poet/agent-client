@@ -12,8 +12,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 
-use claurst_api::AnthropicClient;
-use claurst_api::client::ClientConfig;
 use claurst_core::types::{ContentBlock, Message, MessageContent};
 use claurst_core::{AutoPermissionHandler, CostTracker, PermissionMode};
 use claurst_query::QueryOutcome;
@@ -24,6 +22,7 @@ use crate::config::{
     AccessMode, AgentStartOptions, WireFormat, build_config, build_query_config, split_model,
 };
 use crate::runtime;
+use crate::session::build_clients;
 
 /// Ask the model `prompt` and return what it said, trimmed.
 ///
@@ -49,25 +48,13 @@ pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result
         reasoning_effort: None,
         history: Vec::new(),
     };
-    let config = build_config(&options);
+    let config = build_config(&options)?;
     let mut query = build_query_config(&config, &options);
     // One reply is the whole job.
     query.max_turns = 1;
 
-    let (api_key, use_bearer_auth) = rt
-        .block_on(config.resolve_anthropic_auth_async())
-        .unwrap_or_default();
-    let client_config = ClientConfig {
-        api_key,
-        api_base: config.resolve_anthropic_api_base(),
-        use_bearer_auth,
-        ..Default::default()
-    };
-    let client = AnthropicClient::new(client_config.clone())?;
-    query.provider_registry = Some(Arc::new(claurst_api::ProviderRegistry::from_config(
-        &config,
-        client_config,
-    )));
+    let (client, registry) = build_clients(&config, options.platform.as_deref())?;
+    query.provider_registry = Some(registry);
 
     let cost_tracker = CostTracker::new();
     let tool_ctx = ToolContext {
@@ -96,7 +83,7 @@ pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result
     let tools: Vec<Box<dyn Tool>> = Vec::new();
     let mut messages = vec![Message::user(prompt)];
     let outcome = rt.block_on(claurst_query::run_query_loop(
-        &client,
+        client.as_ref(),
         &mut messages,
         &tools,
         &tool_ctx,

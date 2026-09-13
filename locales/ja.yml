@@ -1581,3 +1581,8 @@ model_option.wire_responses: "OpenAI Responses"
 model_option.wire_responses_description: "Codex が話す API。OpenAI プラットフォームのネイティブ形式。"
 model_option.wire_chat: "OpenAI Chat Completions"
 model_option.wire_chat_description: "最も広く対応された OpenAI 互換 API。"
+
+native.no_api_key: "内蔵エージェントの %{provider} ルートに API キーがありません。%{name} にサインインするか、%{path} の provider_configs.%{provider}.api_key を設定してください。"
+model_option.wire_messages_short: "Messages"
+model_option.wire_responses_short: "Responses"
+model_option.wire_chat_short: "Chat"

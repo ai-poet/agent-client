@@ -2135,6 +2135,67 @@ fn model_picker_subtitle_deduplicates_the_provider_name() {
 }
 
 #[test]
+fn model_picker_subtitle_brands_the_built_in_agent() {
+    use super::composer::model_picker_subtitle;
+
+    let brand = sub2api::brand::DISPLAY_NAME;
+    assert_eq!(
+        model_picker_subtitle(ProviderKind::Native, Some("anthropic")),
+        format!("{brand} · anthropic")
+    );
+    assert_eq!(model_picker_subtitle(ProviderKind::Native, None), brand);
+}
+
+#[test]
+fn the_built_in_agents_format_follows_the_session_then_the_models_platform() {
+    use super::composer::native_wire_format;
+
+    // The session's own format wins whenever it is one of ours.
+    assert_eq!(
+        native_wire_format(Some("chat"), Some("anthropic::claude-sonnet-5")),
+        "chat"
+    );
+    // Otherwise the model's native one: Responses for the OpenAI platform,
+    // Messages for everything else, a bare id included.
+    assert_eq!(
+        native_wire_format(None, Some("openai::gpt-5.6-sol")),
+        "responses"
+    );
+    assert_eq!(
+        native_wire_format(None, Some("anthropic::claude-sonnet-5")),
+        "messages"
+    );
+    assert_eq!(native_wire_format(None, Some("claude-sonnet-5")), "messages");
+    assert_eq!(native_wire_format(None, None), "messages");
+    // A tier that is not a format (an inherited "default", say) is ignored.
+    assert_eq!(
+        native_wire_format(Some("default"), Some("openai::gpt-5.6-sol")),
+        "responses"
+    );
+}
+
+#[test]
+fn the_rail_always_draws_the_built_in_provider() {
+    use super::composer::picker_rail_shows_provider;
+
+    // Nothing to detect: it is installed by being compiled in, so it is in
+    // the rail before the first detection pass lands.
+    assert!(picker_rail_shows_provider(
+        &[],
+        &[],
+        None,
+        ProviderKind::Native
+    ));
+    // Switching it off in the settings still removes it.
+    assert!(!picker_rail_shows_provider(
+        &[],
+        &[ProviderKind::Native],
+        None,
+        ProviderKind::Native
+    ));
+}
+
+#[test]
 fn tab_cycle_walks_favorites_then_usable_providers_in_rail_order() {
     use super::ModelPickerTab;
     use super::composer::visible_picker_tabs;

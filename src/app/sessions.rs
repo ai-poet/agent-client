@@ -1023,6 +1023,11 @@ impl Waku {
                 // so each tab is fresh when viewed without probing every
                 // provider on open.
                 self.refresh_provider_model_discovery(provider);
+                // The built-in agent has no CLI to ask; its list is the
+                // account's catalog, refreshed within the Plaza's window.
+                if provider.is_builtin() {
+                    self.refresh_native_catalog(false, cx);
+                }
             }
             // A different tab renumbers the rows under the keyboard cursor,
             // and would otherwise inherit the old tab's scroll offset.

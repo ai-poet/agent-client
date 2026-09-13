@@ -48,7 +48,7 @@ mod runtime;
 mod session;
 
 pub use background::{BackgroundEntry, BackgroundKind, BackgroundStatus};
-pub use config::{AccessMode, AgentStartOptions, TurnOptions, WireFormat, split_model};
+pub use config::{AccessMode, AgentStartOptions, MissingApiKey, TurnOptions, WireFormat, split_model};
 pub use events::{AgentEvent, EventSink, PermissionChoice};
 pub use oneshot::one_shot;
 pub use session::AgentSession;

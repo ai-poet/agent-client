@@ -31,7 +31,10 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::background;
-use crate::config::{AgentStartOptions, TurnOptions, build_config, build_query_config};
+use crate::config::{
+    AgentStartOptions, TurnOptions, build_config, build_config_from, build_query_config,
+    load_settings, missing_route_key,
+};
 use crate::events::{AgentEvent, EventSink, PermissionChoice, StreamDecoder};
 use crate::history;
 use crate::mcp_tool::McpTool;
@@ -66,6 +69,10 @@ struct Inner {
     file_history: Arc<Mutex<claurst_core::file_history::FileHistory>>,
     manager: Arc<std::sync::Mutex<PermissionManager>>,
     bridge: Arc<PermissionBridge>,
+    /// The settings document the session started from, shared with the
+    /// permission bridge (which appends rules to it). The fallback when the
+    /// file cannot be re-read mid-session.
+    settings: Arc<Mutex<Settings>>,
     /// Filled in the background once the MCP roster has connected. A turn that
     /// starts before then simply runs without MCP rather than waiting for
     /// servers that may never come up.
@@ -94,11 +101,12 @@ struct Turn {
 impl AgentSession {
     /// Build a session and its engine runtime. Does not contact the model.
     pub fn start(options: AgentStartOptions, events: EventSink) -> anyhow::Result<Self> {
-        let settings = Arc::new(Mutex::new(Settings::load_sync().unwrap_or_default()));
-        let config = build_config(&options);
+        let loaded = load_settings()?;
+        let config = build_config_from(loaded.clone(), &options);
+        let settings = Arc::new(Mutex::new(loaded));
         let mut query = build_query_config(&config, &options);
 
-        let (client, registry) = build_clients(&config)?;
+        let (client, registry) = build_clients(&config, options.platform.as_deref())?;
         query.provider_registry = Some(registry);
 
         let manager = Arc::new(std::sync::Mutex::new(PermissionManager::new(
@@ -125,6 +133,7 @@ impl AgentSession {
             )),
             manager,
             bridge,
+            settings,
             mcp: Mutex::new(None),
             config: Mutex::new(config),
             query: Mutex::new(query),
@@ -273,7 +282,15 @@ impl AgentSession {
             options.reasoning_effort = changes.reasoning_effort;
         }
 
-        let config = build_config(&options);
+        let config = match build_config(&options) {
+            Ok(config) => config,
+            Err(error) => {
+                self.inner
+                    .events
+                    .emit(AgentEvent::Error(format!("{error:#}")));
+                return true;
+            }
+        };
         let mut query = build_query_config(&config, &options);
         let route_changed = {
             let current = self.inner.config.lock();
@@ -283,7 +300,7 @@ impl AgentSession {
                     != config.provider_configs.get("anthropic").map(|entry| entry.api_base.clone())
         };
         if route_changed {
-            match build_clients(&config) {
+            match build_clients(&config, options.platform.as_deref()) {
                 Ok((client, registry)) => {
                     *self.inner.client.lock() = client;
                     query.provider_registry = Some(registry);
@@ -301,10 +318,14 @@ impl AgentSession {
             // The manager caches the mode it evaluates against; rebuild it so
             // a switch to Full Access stops asking immediately rather than at
             // the next session.
-            *manager = PermissionManager::new(
-                config.permission_mode.clone(),
-                &Settings::load_sync().unwrap_or_default(),
-            );
+            // Re-read so rules persisted by another session count; an
+            // unreadable file keeps the rules this session already has
+            // rather than dropping to none.
+            let settings = load_settings().unwrap_or_else(|error| {
+                tracing::warn!(%error, "agent: settings unreadable; keeping this session's rules");
+                self.inner.settings.lock().clone()
+            });
+            *manager = PermissionManager::new(config.permission_mode.clone(), &settings);
         }
 
         {
@@ -367,13 +388,24 @@ impl Drop for Inner {
 /// selects, the credentials are the ones `select_route` chose. Resolving the
 /// key may refresh an OAuth token, hence the `block_on`; the caller is never
 /// on the runtime.
-fn build_clients(
+pub(crate) fn build_clients(
     config: &Config,
+    platform: Option<&str>,
 ) -> anyhow::Result<(Arc<AnthropicClient>, Arc<claurst_api::ProviderRegistry>)> {
     let rt = runtime::shared()?;
     let (api_key, use_bearer_auth) = rt
         .block_on(config.resolve_anthropic_auth_async())
         .unwrap_or_default();
+    // Refuse to build a keyless client. The engine would accept one and fail
+    // on the first request with advice about a CLI this product does not
+    // ship; failing here names the route and the file instead.
+    let resolved = Some(api_key.as_str())
+        .filter(|key| !key.trim().is_empty())
+        .map(str::to_owned)
+        .or_else(|| config.resolve_provider_api_key(config.selected_provider_id()));
+    if let Some(missing) = missing_route_key(config, platform, resolved.as_deref()) {
+        return Err(missing.into());
+    }
     let client_config = ClientConfig {
         api_key,
         api_base: config.resolve_anthropic_api_base(),

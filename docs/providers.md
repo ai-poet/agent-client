@@ -895,22 +895,29 @@ sees it.
 **Models and wire formats** — the picker's list is the gateway catalog the
 Model Plaza fetches, every token-billed model on every platform
 (`src/app/native_agent.rs`); it falls back to the built-in Anthropic list
-until that lands. No CLI is asked. Each entry's id carries its platform
+until that lands, and again when signed out. No CLI is asked: the provider
+is excluded from `supports_model_discovery`, the catalog is fetched at
+start-up, sign-in and after a group switch (`refresh_native_catalog`, the
+Plaza's own fetch behind its freshness window), and `sync_native_models`
+re-applies it after every daemon probe answer and language change so the
+daemon's fallback never replaces it. Each entry's id carries its platform
 (`openai::gpt-5.6-sol`), which is how the daemon picks the account key that
 authorizes it — the routing writer files every gateway key by platform under
 the engine's anthropic provider entry, and `select_route` in the bridge picks
 the one for the session's platform.
 
 The **wire format** — Anthropic Messages, OpenAI Responses, or OpenAI Chat
-Completions — is chosen in the picker itself: the built-in agent's tab is
-sectioned by format, the current one open above the models, and choosing a
-model under a section writes that format into the session's tier slot
-(`native_wire_format` in `composer.rs` decides which section opens: the
-session's current format, else the model's native one — Responses for
-OpenAI-platform models, Messages otherwise; the daemon applies the same
-default when no tier was chosen). The gateway translates each format for
-every platform, so this is the user's choice rather than the model's. Rows
-carry the product brand and the platform as their subtitle. Each format is a different engine adapter —
+Completions — is chosen in the picker itself: the built-in agent's tab has
+a fixed bar above its list (the brand chip, then one segment per format
+with the current one filled; `native_format_bar` in `composer.rs`), and
+choosing a model writes the current format into the session's tier slot
+(`native_wire_format` decides which segment is current: the session's own
+format, else the model's native one — Responses for OpenAI-platform
+models, Messages otherwise; the daemon applies the same default when no
+tier was chosen). The bar sits outside the scrolling list so it reads at
+any scroll position. The gateway translates each format for every
+platform, so this is the user's choice rather than the model's. Rows carry
+the product brand and the platform as their subtitle. Each format is a different engine adapter —
 `anthropic`, `codex`, `openai` — pointed at the gateway origin; switching
 format or platform rebuilds the session's clients, a plain model switch does
 not. The Responses adapter upstream only knew the ChatGPT backend; the fork

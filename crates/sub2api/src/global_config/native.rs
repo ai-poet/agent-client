@@ -25,6 +25,13 @@
 //! Only the keys below are touched. The engine's own model pin, MCP roster,
 //! permission rules, hooks and agent definitions live in the same file and are
 //! left exactly as the user left them.
+//!
+//! A partial `config` block is only legal because the vendored engine's
+//! `Config` carries a container-level `#[serde(default)]` — a recorded fork
+//! departure in `crates/waku-agent/core/src/lib.rs`. A future engine re-sync
+//! that drops it would make every file this writer creates unreadable to the
+//! engine again; `waku-agent-bridge`'s `a_fresh_takeover_file_parses_and_routes_every_format`
+//! is the test that would catch it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -344,6 +351,27 @@ mod tests {
         assert_eq!(root.pointer("/config/provider").unwrap(), "openai");
         assert_eq!(root.pointer("/config/model").unwrap(), "claude-opus-5");
         assert!(root.pointer("/config/provider_configs").is_none());
+    }
+
+    /// The document the bridge's tests load as engine settings. Kept in
+    /// step with `waku-agent-bridge/src/config.rs::FRESH_TAKEOVER_SETTINGS`;
+    /// the bridge cannot depend on this crate, so the contract is a literal
+    /// on each side and this assertion.
+    #[test]
+    fn a_fresh_takeover_matches_the_bridges_fixture() {
+        let dir = tempdir();
+        let mut backups = CliBackups::default();
+        take_over(&dir, &target(), &keys(), &mut backups).unwrap();
+        let written = read(&settings_path(&dir));
+        let expected: Value = serde_json::from_str(
+            r#"{"config":{"api_key":"sk-claude","provider_configs":{
+              "anthropic":{"api_key":"sk-claude","api_base":"https://gateway.example.org","enabled":true,
+                "options":{"gateway_keys":{"anthropic":"sk-claude","default":"sk-general","openai":"sk-codex"}}},
+              "codex":{"api_key":"sk-claude","api_base":"https://gateway.example.org","enabled":true},
+              "openai":{"api_key":"sk-claude","api_base":"https://gateway.example.org","enabled":true}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(written, expected);
     }
 
     #[test]

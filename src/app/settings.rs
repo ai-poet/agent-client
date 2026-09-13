@@ -2465,6 +2465,9 @@ impl Waku {
         for probe in &mut self.probes {
             probe.models = crate::model_catalog::fallback_models(probe.provider);
         }
+        // The built-in agent's list is the catalog, relabelled in the new
+        // language rather than reset to the fallback.
+        self.sync_native_models();
         self.refresh_provider_detection(None);
         self.invalidate_composer_sources(cx);
 

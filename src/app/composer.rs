@@ -875,6 +875,12 @@ impl Waku {
                         // authored since launch appear without a restart; the
                         // other rails refresh when selected, not all at once.
                         this.refresh_provider_model_discovery(provider);
+                        // The built-in agent has no CLI to ask; its list is
+                        // the account's catalog, refreshed within the
+                        // Plaza's freshness window.
+                        if provider.is_builtin() {
+                            this.refresh_native_catalog(false, cx);
+                        }
                         this.model_picker_highlight = None;
                         reset_search.update(cx, |search, cx| search.clear(cx));
                         this.reveal_selected_picker_model();
@@ -1124,35 +1130,21 @@ impl Waku {
                     );
                 }
 
-                // The built-in agent's list is grouped by wire format: one
-                // header per format, the current one expanded above the
-                // models, the others collapsed. Choosing a model under a
-                // header chooses that format with it, so a session's model
+                // The built-in agent's tab carries a format bar above the
+                // list — the wire format the session speaks, chosen next to
+                // the model rather than per model. A built-in row takes the
+                // current format with it when chosen, so a session's model
                 // and API are always picked together and read together.
-                let native_sections = (selected_tab == ModelPickerTab::Provider(ProviderKind::Native)
+                let builtin_format =
+                    native_wire_format(selected_tier.as_deref(), selected_model.as_deref());
+                let native_format = (selected_tab == ModelPickerTab::Provider(ProviderKind::Native)
                     && !searching)
-                    .then(|| {
-                        native_wire_format(selected_tier.as_deref(), selected_model.as_deref())
-                    });
-                if let Some(active) = native_sections.as_deref() {
-                    for (format, label) in NATIVE_WIRE_FORMATS {
-                        if format == active {
-                            rows = rows.child(native_section_header(
-                                theme,
-                                format,
-                                crate::i18n::translate(label),
-                                true,
-                                weak.clone(),
-                            ));
-                            break;
-                        }
-                    }
-                }
+                    .then(|| builtin_format.clone());
                 for (row_index, (kind, model)) in available_models.iter().enumerate() {
                     let kind = *kind;
                     let is_selected =
                         kind == provider && selected_model.as_deref() == Some(model.id.as_str());
-                    let row_format = native_sections.clone();
+                    let row_format = kind.is_builtin().then(|| builtin_format.clone());
                     let is_highlighted = highlight == Some(row_index);
                     let is_favorite = favorites
                         .iter()
@@ -1271,20 +1263,6 @@ impl Waku {
                             }),
                     );
                 }
-                if let Some(active) = native_sections.as_deref() {
-                    for (format, label) in NATIVE_WIRE_FORMATS {
-                        if format != active {
-                            rows = rows.child(native_section_header(
-                                theme,
-                                format,
-                                crate::i18n::translate(label),
-                                false,
-                                weak.clone(),
-                            ));
-                        }
-                    }
-                }
-
                 let next_models = available_models.clone();
                 let previous_models = available_models.clone();
                 let confirm_models = available_models.clone();
@@ -1347,6 +1325,11 @@ impl Waku {
                             .rounded_br(px(12.0))
                             .bg(theme.surface)
                             .child(search_input)
+                            .children(
+                                native_format
+                                    .as_deref()
+                                    .map(|active| native_format_bar(theme, active, weak.clone())),
+                            )
                             .child(
                                 div()
                                     .flex_1()
@@ -3950,9 +3933,12 @@ pub(super) fn picker_rail_shows_provider(
     locked_provider: Option<ProviderKind>,
     kind: ProviderKind,
 ) -> bool {
-    let installed = probes
-        .iter()
-        .any(|probe| probe.provider == kind && probe.installed);
+    // A built-in provider is installed by being compiled in; it must not
+    // wait for the first detection pass to land before it has a tab.
+    let installed = kind.is_builtin()
+        || probes
+            .iter()
+            .any(|probe| probe.provider == kind && probe.installed);
     let switched_off = disabled_providers.contains(&kind) && locked_provider != Some(kind);
     installed && !switched_off
 }
@@ -3976,21 +3962,22 @@ pub(super) fn model_picker_subtitle(provider: ProviderKind, sub_provider: Option
 }
 
 /// The wire formats the built-in agent can speak, in the order the picker
-/// lists them. Ids match `waku_agent_bridge::WireFormat`, which the desktop
-/// does not link; the daemon reads them back from the session's tier.
-const NATIVE_WIRE_FORMATS: [(&str, &str); 3] = [
-    ("messages", "model_option.wire_messages"),
-    ("responses", "model_option.wire_responses"),
-    ("chat", "model_option.wire_chat"),
+/// lists them: tier id, label key, short label key. Ids match
+/// `waku_agent_bridge::WireFormat`, which the desktop does not link; the
+/// daemon reads them back from the session's tier.
+const NATIVE_WIRE_FORMATS: [(&str, &str, &str); 3] = [
+    ("messages", "model_option.wire_messages", "model_option.wire_messages_short"),
+    ("responses", "model_option.wire_responses", "model_option.wire_responses_short"),
+    ("chat", "model_option.wire_chat", "model_option.wire_chat_short"),
 ];
 
-/// Which section the built-in agent's tab opens on: the session's current
-/// format when it is one of ours, else the selected model's native one —
+/// Which format the built-in agent's bar shows as current: the session's
+/// own when it is one of ours, else the selected model's native one —
 /// Responses for OpenAI-platform models, Messages for everything else. The
 /// same rule the daemon applies when no format was chosen.
 pub(super) fn native_wire_format(selected_tier: Option<&str>, selected_model: Option<&str>) -> String {
     if let Some(tier) = selected_tier
-        && NATIVE_WIRE_FORMATS.iter().any(|(id, _)| *id == tier)
+        && NATIVE_WIRE_FORMATS.iter().any(|(id, _, _)| *id == tier)
     {
         return tier.to_owned();
     }
@@ -4004,62 +3991,78 @@ pub(super) fn native_wire_format(selected_tier: Option<&str>, selected_model: Op
     }
 }
 
-/// A section header in the built-in agent's model list. The open one is a
-/// heading; a closed one is a row that switches the session's format and
-/// opens itself.
-fn native_section_header(
-    theme: Theme,
-    format: &'static str,
-    label: String,
-    open: bool,
-    weak: gpui::WeakEntity<Waku>,
-) -> Stateful<Div> {
-    div()
-        .id(SharedString::from(format!("model-format-{format}")))
-        .h(px(34.0))
+/// The bar above the built-in agent's model list: the brand the models come
+/// through, then one segment per wire format with the session's current one
+/// filled. It sits outside the scrolling list on purpose — a header inside
+/// the list was scrolled out of view by the reveal of the selected model,
+/// and a chip drawn in `overlay` on a `raised` panel had no contrast.
+fn native_format_bar(theme: Theme, active: &str, weak: gpui::WeakEntity<Waku>) -> Div {
+    let mut bar = div()
+        .h(px(32.0))
         .px(px(12.0))
-        .mt(px(4.0))
-        .rounded(px(9.0))
+        .flex_none()
         .flex()
         .items_center()
-        .gap(px(8.0))
-        .cursor_default()
-        .when(!open, |element| {
-            element
-                .hover(|element| element.bg(theme.overlay))
-                .on_click(move |_, _, cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.set_service_tier(format.to_owned(), cx);
-                    });
-                })
-        })
-        .child(icon(
-            if open {
-                "icons/chevron-down.svg"
-            } else {
-                "icons/chevron-right.svg"
-            },
-            12.0,
-            theme.text_tertiary,
-        ))
+        .gap(px(4.0))
         .child(
             div()
-                .text_size(sp(11.5))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(if open { theme.text } else { theme.text_secondary })
-                .child(SharedString::from(label)),
-        )
-        .child(
-            div()
-                .ml(px(2.0))
+                .flex_none()
+                .mr(px(4.0))
                 .px(px(6.0))
                 .py(px(1.0))
                 .rounded(px(5.0))
-                .bg(theme.overlay)
+                .bg(theme.overlay_strong)
+                .border_1()
+                .border_color(theme.border_strong)
                 .text_size(sp(10.5))
-                .text_color(theme.text_tertiary)
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text_secondary)
                 .child(sub2api::brand::DISPLAY_NAME),
-        )
+        );
+    for (format, label, short) in NATIVE_WIRE_FORMATS {
+        let selected = format == active;
+        let weak = weak.clone();
+        let description_key = format!("{label}_description");
+        let tooltip = format!(
+            "{} · {}",
+            crate::i18n::translate(label),
+            crate::i18n::translate(description_key.as_str())
+        );
+        bar = bar.child(
+            div()
+                .id(SharedString::from(format!("model-format-{format}")))
+                .h(px(24.0))
+                .px(px(8.0))
+                .rounded(px(6.0))
+                .flex()
+                .items_center()
+                .cursor_default()
+                .text_size(sp(11.5))
+                .font_weight(if selected {
+                    FontWeight::SEMIBOLD
+                } else {
+                    FontWeight::NORMAL
+                })
+                .text_color(if selected {
+                    theme.text
+                } else {
+                    theme.text_secondary
+                })
+                .when(selected, |element| element.bg(theme.overlay_strong))
+                .when(!selected, |element| {
+                    element
+                        .hover(|element| element.bg(theme.overlay))
+                        .on_click(move |_, _, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_service_tier(format.to_owned(), cx);
+                            });
+                        })
+                })
+                .tooltip(Tooltip::text(tooltip))
+                .child(SharedString::from(crate::i18n::translate(short))),
+        );
+    }
+    bar
 }
 
 /// Whether the picker has nothing left to offer, so the composer's trigger

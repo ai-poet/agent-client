@@ -1012,7 +1012,14 @@ pub mod config {
     // ---- Config ----------------------------------------------------------
 
     /// Top-level configuration values, merged from CLI args + settings file + env.
+    //
+    // Fork departure (Waku): Waku's routing writer and its Agent settings page
+    // edit only the keys they own, so `config` in settings.json may be a
+    // partial object. Missing keys take their defaults instead of failing the
+    // whole file — without this, a settings file that only ever held routing
+    // failed with `missing field permission_mode` and the engine ran keyless.
     #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+    #[serde(default)]
     pub struct Config {
         pub api_key: Option<String>,
         pub model: Option<String>,

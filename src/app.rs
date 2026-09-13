@@ -2341,7 +2341,9 @@ impl Waku {
             .into_iter()
             .map(|provider| ProviderProbe {
                 provider,
-                installed: false,
+                // A built-in provider is installed by construction; seeding
+                // it as absent would hide its tab until detection lands.
+                installed: provider.is_builtin(),
                 path: None,
                 models: crate::model_catalog::fallback_models(provider),
                 agent_presets: crate::model_catalog::fallback_agent_presets(provider),

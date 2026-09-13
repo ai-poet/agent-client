@@ -126,6 +126,9 @@ impl Waku {
         self.refresh_cloud_account(cx);
         self.load_cloud_details(cx);
         self.poll_cloud_failover(cx);
+        // The built-in agent's model list is this account's catalog; fetch
+        // it now rather than the first time the Model Plaza page is opened.
+        self.refresh_native_catalog(false, cx);
     }
 
     /// Drain the injection-era routing transport out of daemon settings.
@@ -380,6 +383,7 @@ impl Waku {
         self.apply_cloud_routing();
         // The model list is served by the domain that was just swapped.
         self.refresh_provider_detection(None);
+        self.refresh_native_catalog(false, cx);
         cx.notify();
     }
 
@@ -678,6 +682,8 @@ impl Waku {
                         this.cloud_account.routing_enabled = true;
                         this.apply_cloud_routing();
                         this.load_cloud_details(cx);
+                        // A new account reaches a different set of models.
+                        this.refresh_native_catalog(true, cx);
                     }
                     Err(error) => this.cloud_account.error = Some(format!("{error:#}")),
                 }
@@ -697,6 +703,10 @@ impl Waku {
         self.cloud_account.routing_enabled = false;
         self.cloud_account.error = None;
         self.apply_cloud_routing();
+        // The catalog was this account's; the built-in agent drops back to
+        // its fallback list until someone signs in again.
+        self.clear_model_plaza();
+        self.sync_native_models();
         cx.notify();
     }
 
@@ -882,6 +892,9 @@ impl Waku {
                         // Re-read the CLI's catalog under the new route;
                         // routing has already dropped Codex's manifest cache.
                         this.refresh_provider_detection(probe_scope);
+                        // The built-in agent's catalog changes with the group
+                        // as well, and is not the daemon's to re-read.
+                        this.refresh_native_catalog(true, cx);
                         let name = group_id
                             .and_then(|id| {
                                 this.cloud_account

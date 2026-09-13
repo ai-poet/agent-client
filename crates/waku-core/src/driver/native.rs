@@ -27,7 +27,7 @@ use serde_json::Value;
 use uuid::Uuid;
 use waku_agent_bridge::{
     AccessMode, AgentEvent, AgentSession, AgentStartOptions, BackgroundEntry, BackgroundKind,
-    BackgroundStatus, TurnOptions, WireFormat, split_model,
+    BackgroundStatus, MissingApiKey, TurnOptions, WireFormat, split_model,
 };
 
 use super::activity;
@@ -86,7 +86,19 @@ impl NativeDriver {
         };
 
         let sink = EventTranslator::new(events.clone(), store.clone());
-        let session = AgentSession::start(start, sink.into_sink())?;
+        // A missing key is the one start failure a user can fix without
+        // reading code: say which route, and that signing in is the fix.
+        let session = AgentSession::start(start, sink.into_sink()).map_err(|error| {
+            match error.downcast_ref::<MissingApiKey>() {
+                Some(missing) => anyhow!(tr!(
+                    "native.no_api_key",
+                    name = sub2api::brand::DISPLAY_NAME,
+                    provider = missing.provider.clone(),
+                    path = missing.settings_path.display().to_string()
+                )),
+                None => error,
+            }
+        })?;
 
         // Report the cursor immediately rather than after the first turn: the
         // transcript file is named by it, so a session closed before it ever

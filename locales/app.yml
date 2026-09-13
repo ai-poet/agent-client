@@ -3111,3 +3111,12 @@ model_option.wire_chat:
   en: "OpenAI Chat Completions"
 model_option.wire_chat_description:
   en: "The widest-supported OpenAI-compatible API."
+
+native.no_api_key:
+  en: "The built-in agent has no API key for its %{provider} route. Sign in to %{name}, or set provider_configs.%{provider}.api_key in %{path}."
+model_option.wire_messages_short:
+  en: "Messages"
+model_option.wire_responses_short:
+  en: "Responses"
+model_option.wire_chat_short:
+  en: "Chat"

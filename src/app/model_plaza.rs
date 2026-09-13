@@ -196,6 +196,17 @@ fn billing_mode_label(mode: &str) -> String {
 }
 
 impl Waku {
+    /// Forget the catalog along with the account it came from, so the next
+    /// load starts from nothing rather than a signed-out user seeing the
+    /// previous account's models.
+    pub(super) fn clear_model_plaza(&mut self) {
+        self.model_plaza.items.clear();
+        self.model_plaza.summary = None;
+        self.model_plaza.statuses.clear();
+        self.model_plaza.error = None;
+        self.model_plaza.loaded_at = None;
+    }
+
     /// Fetch the catalog and group health when stale.
     pub(super) fn load_model_plaza_if_needed(&mut self, force: bool, cx: &mut Context<Self>) {
         self.model_plaza.load_scheduled.set(false);
@@ -241,7 +252,7 @@ impl Waku {
                         this.model_plaza.statuses = statuses;
                         this.model_plaza.error = None;
                         // The built-in agent's picker reads this same listing.
-                        this.adopt_native_models_from_catalog();
+                        this.sync_native_models();
                     }
                     Err(error) => this.model_plaza.error = Some(format!("{error:#}")),
                 }
