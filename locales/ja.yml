@@ -1588,6 +1588,7 @@ model_option.wire_responses_short: "Responses"
 model_option.wire_chat_short: "Chat"
 
 native.empty_turn: "%{model} は何も返さずにターンを終了しました。リクエストは %{provider} API 経由で %{endpoint} に送られています。このモデルで別の API 形式を試すか、別のモデルを選んでください。"
-model_option.wire_unavailable: "このモデルでは %{name} を利用できません。"
 
 models.wire_format: "API 形式"
+
+models.declare_your_own: "まだ何もありません。設定 → プロバイダーで独自エンドポイントのモデル名を書くと、ここに並びます。"

@@ -1463,6 +1463,11 @@ pub struct Waku {
         Entity<TextInput>,
         Option<Entity<TextInput>>,
     )>,
+    /// Fork addition: which section of the built-in agent's model list is
+    /// open in the picker. Every model there has exactly one API, so the
+    /// format bar partitions the list rather than switching a setting; this
+    /// is picker state, not session state, and is not persisted.
+    model_picker_format: String,
     /// Fork addition: cloud usage view state.
     cloud_usage: cloud_usage::CloudUsageState,
     /// Fork addition: model plaza view state.
@@ -2161,8 +2166,13 @@ impl Waku {
                     input
                 });
                 // OpenCode and Pi declare models in their config, so their
-                // cards carry an optional model-list field.
-                let models_input = matches!(provider_id, "opencode" | "pi" | "grok").then(|| {
+                // cards carry an optional model-list field. The built-in
+                // agent takes one for a different reason: nothing discovers
+                // the models behind somebody else's endpoint, so the list is
+                // the user's to declare, and it is what the picker's Chat
+                // Completions section holds.
+                let models_input =
+                    matches!(provider_id, "native" | "opencode" | "pi" | "grok").then(|| {
                     cx.new(|cx| {
                         let mut input = TextInput::new(window, cx)
                             .select_all_on_focus_click()
@@ -3136,6 +3146,7 @@ impl Waku {
                 onboarding: onboarding::OnboardingViewState::default(),
                 agent_page: agent_page::AgentPageState::default(),
                 runtime_prewarms: runtime_prewarm::RuntimePrewarms::default(),
+                model_picker_format: "messages".to_owned(),
                 custom_api_inputs,
                 cloud_usage: cloud_usage::CloudUsageState::default(),
                 model_plaza: model_plaza::ModelPlazaState::default(),

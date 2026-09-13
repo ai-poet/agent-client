@@ -1536,6 +1536,7 @@ model_option.wire_responses_short: "Responses"
 model_option.wire_chat_short: "Chat"
 
 native.empty_turn: "%{model} 结束了这一轮，但什么也没说。请求发往 %{endpoint}，走的是 %{provider} 接口。可以给这个模型换一种接口格式，或者换个模型。"
-model_option.wire_unavailable: "这个模型不能用 %{name}。"
 
 models.wire_format: "接口格式"
+
+models.declare_your_own: "这里还没有模型。在「设置 → 服务商」里填上自定义接入点的模型名，它们就会出现在这里。"

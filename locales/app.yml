@@ -3123,8 +3123,9 @@ model_option.wire_chat_short:
 
 native.empty_turn:
   en: "%{model} ended the turn without saying anything. The request went to %{endpoint} over the %{provider} API. Try this model over a different API, or a different model."
-model_option.wire_unavailable:
-  en: "%{name} is not available for this model."
 
 models.wire_format:
   en: "API"
+
+models.declare_your_own:
+  en: "Nothing here yet. Models on your own endpoint are listed after you name them in Settings → Providers."

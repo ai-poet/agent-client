@@ -17,9 +17,9 @@ use crate::events::PermissionChoice;
 
 /// Which API a session speaks.
 ///
-/// Not a free choice: the gateway serves all three endpoints but routes each
-/// by the key's group platform, and what waits on the other side differs.
-/// [`WireFormat::supported_for`] is where that is written down.
+/// Not a free choice: each model family is served over one of them, and
+/// [`WireFormat::for_model`] is where that is written down. Chat Completions
+/// carries only what a user declared on their own endpoint.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WireFormat {
     /// Anthropic Messages — the engine's primary path.
@@ -55,109 +55,53 @@ impl WireFormat {
         }
     }
 
-    /// The route a platform is served over natively.
+    /// The one API a model from the managed catalog is reachable over.
     ///
-    /// The gateway splits platforms in two: the OpenAI-compatible ones reach
-    /// their upstream through the Responses API, everything else through
-    /// Anthropic Messages. Picking the native one means no translation in
-    /// the middle, which is both faster and the path least likely to differ
-    /// from what the upstream actually supports.
-    pub fn default_for_platform(platform: Option<&str>) -> Self {
-        if openai_compatible_platform(platform) {
-            Self::Responses
-        } else {
-            Self::Messages
+    /// The model's family decides, not the group's platform: a composite
+    /// group reports `composite` for every model in it, so the platform is
+    /// only a tie-breaker for a name that gives nothing away. A model that
+    /// matches neither is one the user declared on their own endpoint, and
+    /// this side has no business guessing what it speaks — hence `None`.
+    pub fn for_model(platform: Option<&str>, model: &str) -> Option<Self> {
+        let model = model.trim().to_ascii_lowercase();
+        if model.starts_with("claude") {
+            return Some(Self::Messages);
         }
-    }
-
-    /// Whether this format can carry `model` on `platform` at all.
-    ///
-    /// Two things rule a combination out, and both are facts about code that
-    /// exists rather than guesses:
-    ///
-    /// - The gateway has no Responses translator for Gemini groups. A
-    ///   Responses request from one is forwarded as Anthropic Messages to a
-    ///   Gemini upstream, which is not a thing that can work.
-    /// - The engine's own Chat Completions client refuses `gpt-5*`, `o3*`
-    ///   and `o4*`, which is most of what an OpenAI group offers.
-    ///
-    /// Messages on an OpenAI group is deliberately *not* excluded: it
-    /// depends on a per-group setting this side cannot see, so it stays
-    /// offered and answers with the gateway's own 403 when it is off.
-    pub fn supported_for(self, platform: Option<&str>, model: &str) -> bool {
-        let platform = normalized_platform(platform);
-        match self {
-            Self::Responses => platform.as_deref() != Some("gemini"),
-            Self::Chat => !model_needs_responses_api(model),
-            Self::Messages => true,
-        }
-    }
-
-    /// The formats that can carry `model` on `platform`, in listing order.
-    pub fn available_for(platform: Option<&str>, model: &str) -> Vec<Self> {
-        Self::ALL
-            .into_iter()
-            .filter(|format| format.supported_for(platform, model))
-            .collect()
-    }
-
-    /// The format a session should speak: the one asked for when it can
-    /// carry this model, otherwise the platform's native one, otherwise
-    /// whatever is left. Never returns a combination that cannot work.
-    pub fn resolve(
-        requested: Option<Self>,
-        platform: Option<&str>,
-        model: &str,
-    ) -> Self {
-        if let Some(format) = requested
-            && format.supported_for(platform, model)
+        if model.starts_with("gpt-")
+            || model.starts_with("gpt5")
+            || model.starts_with("o1")
+            || model.starts_with("o3")
+            || model.starts_with("o4")
+            || model.starts_with("codex")
+            || model.starts_with("grok")
         {
-            return format;
+            return Some(Self::Responses);
         }
-        let native = Self::default_for_platform(platform);
-        if native.supported_for(platform, model) {
-            return native;
+        match normalized_platform(platform).as_deref() {
+            Some("anthropic") => Some(Self::Messages),
+            Some("openai") | Some("grok") => Some(Self::Responses),
+            _ => None,
         }
-        Self::ALL
-            .into_iter()
-            .find(|format| format.supported_for(platform, model))
-            // Messages is unconditional above, so this is unreachable; it
-            // costs one line to not have to prove that at every call site.
-            .unwrap_or(Self::Messages)
     }
-}
 
-/// Platforms the gateway forwards through its OpenAI stack rather than its
-/// Anthropic one. Mirrors `isOpenAIResponsesCompatibleGatewayPlatform` in the
-/// service's `routes/gateway.go`; a platform missing here is served as
-/// Anthropic, which is the safe way to be wrong about a new one.
-fn openai_compatible_platform(platform: Option<&str>) -> bool {
-    matches!(
-        normalized_platform(platform).as_deref(),
-        Some(
-            "openai"
-                | "grok"
-                | "kimi"
-                | "zhipu"
-                | "deepseek"
-                | "minimax"
-                | "opencode_go"
-                | "opencodego"
-        )
-    )
+    /// The format a session speaks.
+    ///
+    /// A catalog model has exactly one, and it wins over whatever the
+    /// session stored — that is what heals a session persisted before this
+    /// rule, and what stops a stale tier reaching the wire. Only a model the
+    /// catalog does not place falls back to the request, which is the case a
+    /// user-declared endpoint model is in.
+    pub fn resolve(requested: Option<Self>, platform: Option<&str>, model: &str) -> Self {
+        Self::for_model(platform, model)
+            .or(requested)
+            .unwrap_or(Self::Chat)
+    }
 }
 
 fn normalized_platform(platform: Option<&str>) -> Option<String> {
     platform
         .map(|platform| platform.trim().to_ascii_lowercase())
         .filter(|platform| !platform.is_empty())
-}
-
-/// Models the engine's Chat Completions client refuses outright, because
-/// OpenAI serves them over Responses. Mirrors `OpenAiProvider::use_responses_api`.
-fn model_needs_responses_api(model: &str) -> bool {
-    let model = model.trim().to_ascii_lowercase();
-    model.starts_with("gpt-5") || model.starts_with("o3") || model.starts_with("o4")
 }
 
 /// The model id the picker sends carries the platform ahead of a `::`, so a
@@ -612,104 +556,85 @@ mod tests {
     }
 
     #[test]
-    fn a_platform_is_served_over_the_route_its_upstream_speaks() {
-        for platform in [
-            "openai",
-            "grok",
-            "kimi",
-            "zhipu",
-            "deepseek",
-            "minimax",
-            "opencode_go",
-        ] {
+    fn a_models_family_decides_its_api() {
+        for model in ["claude-sonnet-5", "claude-opus-4-6"] {
             assert_eq!(
-                WireFormat::default_for_platform(Some(platform)),
-                WireFormat::Responses,
-                "{platform}"
+                WireFormat::for_model(Some("anthropic"), model),
+                Some(WireFormat::Messages),
+                "{model}"
             );
         }
-        for platform in ["anthropic", "gemini", "antigravity", "composite"] {
+        for model in ["gpt-5.6-sol", "o3-mini", "o4-mini", "codex-mini", "grok-4.6"] {
             assert_eq!(
-                WireFormat::default_for_platform(Some(platform)),
-                WireFormat::Messages,
-                "{platform}"
+                WireFormat::for_model(Some("openai"), model),
+                Some(WireFormat::Responses),
+                "{model}"
             );
         }
-        // Unknown platforms are served as Anthropic, the conservative half.
+        // The family wins over the group's platform, which is what makes a
+        // composite group — every model in it reports `composite` — work.
         assert_eq!(
-            WireFormat::default_for_platform(Some("something-new")),
-            WireFormat::Messages
+            WireFormat::for_model(Some("composite"), "grok-4.6"),
+            Some(WireFormat::Responses)
         );
-        assert_eq!(WireFormat::default_for_platform(None), WireFormat::Messages);
+        assert_eq!(
+            WireFormat::for_model(Some("composite"), "claude-sonnet-5"),
+            Some(WireFormat::Messages)
+        );
+        // A name that says nothing falls back to the platform.
+        assert_eq!(
+            WireFormat::for_model(Some("anthropic"), "some-internal-alias"),
+            Some(WireFormat::Messages)
+        );
+        // And a model the catalog does not place is the user's own.
+        assert_eq!(WireFormat::for_model(Some("gemini"), "gemini-3-pro"), None);
+        assert_eq!(WireFormat::for_model(None, "my-local-model"), None);
     }
 
     #[test]
-    fn gemini_has_no_responses_translator_and_gpt_5_has_no_chat_client() {
-        assert!(!WireFormat::Responses.supported_for(Some("gemini"), "gemini-3-pro"));
-        assert!(WireFormat::Messages.supported_for(Some("gemini"), "gemini-3-pro"));
-        assert!(WireFormat::Chat.supported_for(Some("gemini"), "gemini-3-pro"));
-
-        for model in ["gpt-5.6-sol", "o3-mini", "o4-mini"] {
-            assert!(!WireFormat::Chat.supported_for(Some("openai"), model), "{model}");
-            assert!(WireFormat::Responses.supported_for(Some("openai"), model), "{model}");
-        }
-        // Older OpenAI models still have a Chat client.
-        assert!(WireFormat::Chat.supported_for(Some("openai"), "gpt-4o"));
-
-        // Messages is never ruled out here: whether an OpenAI group accepts it
-        // is a per-group setting this side cannot read.
-        assert!(WireFormat::Messages.supported_for(Some("openai"), "gpt-5.6-sol"));
-    }
-
-    #[test]
-    fn a_route_that_cannot_work_is_replaced_rather_than_sent() {
-        // A session that had picked Responses before gemini models existed.
+    fn a_catalog_models_family_outranks_whatever_the_session_stored() {
+        // A session persisted before the rule existed heals on the next turn
+        // rather than failing on the wire.
         assert_eq!(
-            WireFormat::resolve(Some(WireFormat::Responses), Some("gemini"), "gemini-3-pro"),
-            WireFormat::Messages
+            WireFormat::resolve(Some(WireFormat::Messages), Some("grok"), "grok-4.6"),
+            WireFormat::Responses
         );
-        // Chat on a model whose only route is Responses.
         assert_eq!(
             WireFormat::resolve(Some(WireFormat::Chat), Some("openai"), "gpt-5.6-sol"),
             WireFormat::Responses
         );
-        // A workable choice is always kept, native or not.
         assert_eq!(
-            WireFormat::resolve(Some(WireFormat::Messages), Some("grok"), "grok-4.6"),
+            WireFormat::resolve(Some(WireFormat::Responses), Some("anthropic"), "claude-sonnet-5"),
             WireFormat::Messages
-        );
-        // Nothing chosen falls to the platform's own route.
-        assert_eq!(
-            WireFormat::resolve(None, Some("grok"), "grok-4.6"),
-            WireFormat::Responses
         );
     }
 
     #[test]
-    fn the_offered_formats_are_the_ones_that_can_carry_the_model() {
+    fn a_user_declared_model_keeps_the_format_it_was_given() {
         assert_eq!(
-            WireFormat::available_for(Some("gemini"), "gemini-3-pro"),
-            vec![WireFormat::Messages, WireFormat::Chat]
+            WireFormat::resolve(Some(WireFormat::Chat), None, "my-local-model"),
+            WireFormat::Chat
         );
         assert_eq!(
-            WireFormat::available_for(Some("openai"), "gpt-5.6-sol"),
-            vec![WireFormat::Messages, WireFormat::Responses]
+            WireFormat::resolve(Some(WireFormat::Messages), None, "my-local-model"),
+            WireFormat::Messages
         );
+        // Nothing asked for: Chat Completions is where a declared model goes.
         assert_eq!(
-            WireFormat::available_for(Some("anthropic"), "claude-sonnet-5"),
-            vec![WireFormat::Messages, WireFormat::Responses, WireFormat::Chat]
+            WireFormat::resolve(None, None, "my-local-model"),
+            WireFormat::Chat
         );
     }
 
     #[test]
     fn a_stale_session_option_is_clamped_before_it_reaches_the_wire() {
         let options = AgentStartOptions {
-            platform: Some("gemini".into()),
-            model: Some("gemini-3-pro".into()),
-            wire_format: Some(WireFormat::Responses),
+            platform: Some("grok".into()),
+            model: Some("grok-4.6".into()),
+            wire_format: Some(WireFormat::Messages),
             ..AgentStartOptions::default()
         };
-        assert_eq!(options.wire_format(), WireFormat::Messages);
+        assert_eq!(options.wire_format(), WireFormat::Responses);
     }
 
     #[test]
@@ -724,20 +649,6 @@ mod tests {
             split_model("meta-llama/Llama-3.3"),
             (None, "meta-llama/Llama-3.3".into())
         );
-    }
-
-    #[test]
-    fn openai_platforms_default_to_responses_and_the_rest_to_messages() {
-        assert_eq!(
-            WireFormat::default_for_platform(Some("openai")),
-            WireFormat::Responses
-        );
-        assert_eq!(
-            WireFormat::default_for_platform(Some("anthropic")),
-            WireFormat::Messages
-        );
-        assert_eq!(WireFormat::default_for_platform(Some("gemini")), WireFormat::Messages);
-        assert_eq!(WireFormat::default_for_platform(None), WireFormat::Messages);
     }
 
     #[test]

@@ -912,33 +912,37 @@ picture model billed by the token is indistinguishable from a chat model
 by every other signal.
 
 The **wire format** — Anthropic Messages, OpenAI Responses, or OpenAI Chat
-Completions — belongs to the model, not to the session. The gateway serves
-all three endpoints but routes each by the key's group platform, and what
-waits on the other side differs, so a model carries the formats that can
-carry *it*:
+Completions — is a property of the model, and each model has exactly one:
 
-| platform | route | not available |
-|---|---|---|
-| `openai` `grok` `kimi` `zhipu` `deepseek` `minimax` `opencode_go` | Responses | Chat, for `gpt-5*` / `o3*` / `o4*` |
-| `anthropic` `antigravity` `composite` and anything unknown | Messages | — |
-| `gemini` | Messages | Responses — the gateway has no translator, and would forward an Anthropic body to a Gemini upstream |
+| API | models |
+|---|---|
+| Anthropic Messages | the Claude family |
+| OpenAI Responses | the GPT family (`gpt-*`, `o1`/`o3`/`o4`, `codex-*`) and Grok |
+| OpenAI Chat Completions | only what the user declared on their own endpoint — empty otherwise |
 
-Messages on an OpenAI group is deliberately still offered: whether that
-group accepts it is its own `allow_messages_dispatch` setting, which the
-desktop cannot read, so it answers with the gateway's 403 rather than being
-hidden on a guess.
+The model's *name* decides, with the group's platform as a tie-breaker for
+a name that carries no family. That order matters: a composite group
+reports `composite` as the platform of every model in it, so a
+platform-first rule would mis-route all of them. A catalog model matching
+neither is not offered at all — there is no API to send it over, and
+listing it would only promise something that fails.
 
 Three places hold that rule and they must agree.
-`native_wire_formats` / `native_default_wire_format` in `native_agent.rs`
-fill each model's "service tier" slot, which is what the composer's traits
-menu lists. `native_format_bar` in `composer.rs` draws the same set above
-the picker's list — outside the scrolling container, so it reads at any
-scroll position — with unavailable formats dimmed in place and a tooltip
-saying why. And `WireFormat::resolve` in the bridge clamps whatever
-arrives before a request is built, so a session persisted before a rule
-existed heals instead of failing on the wire. Choosing a model brings its
-own format with it (`choose_model` in `sessions.rs`): what that model was
-last used with when that still works, its own route otherwise.
+`native_format_for_model` in `native_agent.rs` fills each model's "service
+tier" slot, which is what the composer's traits menu names.
+`native_format_bar` in `composer.rs` draws the three as a partition of the
+picker's list — outside the scrolling container, so it reads at any scroll
+position — and clicking one opens that section; the section that opens is
+the one holding the session's current model. And `WireFormat::resolve` in
+the bridge applies the same rule before a request is built, so a session
+persisted before it existed heals instead of failing on the wire. Choosing
+a model brings its own API with it (`choose_model` in `sessions.rs`).
+
+The user's own endpoint is the one case this app cannot discover: nothing
+lists the models behind somebody else's base URL, so the built-in agent's
+custom-endpoint card takes a model list, and those are the Chat Completions
+section. They carry a bare id with no platform ahead of a `::`, which is
+how everything downstream tells them from a catalog model.
 
 Rows carry the product brand and the platform as their subtitle. Each format is a different engine adapter —
 `anthropic`, `codex`, `openai` — pointed at the gateway origin; switching

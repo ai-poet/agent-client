@@ -12,12 +12,16 @@
 //! only the name and the brand-and-platform subtitle.
 //!
 //! The wire format — Anthropic Messages, OpenAI Responses, OpenAI Chat
-//! Completions — belongs to the model, not to the session. Each platform is
-//! served over the route its upstream actually speaks, and two combinations
-//! do not exist at all: the gateway has no Responses translator for Gemini
-//! groups, and the engine's Chat client refuses `gpt-5*`/`o3*`/`o4*`. So
-//! every model carries the formats that can carry *it*, in the "service
-//! tier" slot the picker and the composer's traits menu both read.
+//! Completions — is a property of the model, and each model has exactly one.
+//! Claude is served over Messages; the GPT and Grok families over Responses;
+//! Chat Completions is for models the user declared on their own endpoint,
+//! and is empty until they do. A model belonging to none of those is not
+//! offered at all — there is no API to send it over, so listing it would
+//! only promise something that fails.
+//!
+//! That one format lands in the model's "service tier" slot, which is what
+//! the picker's format bar partitions the list by and what the composer's
+//! traits menu names.
 //!
 //! Pure mapping plus the hooks that apply it; the fetch is the Plaza's.
 
@@ -41,8 +45,11 @@ pub(super) fn native_models_from_catalog(items: &[ModelCatalogItem]) -> Vec<Prov
         .iter()
         .filter(|item| is_chat_model(item) && !item.model.trim().is_empty())
         .filter(|item| seen.insert((platform_of(item), item.model.clone())))
-        .map(|item| {
+        .filter_map(|item| {
             let platform = platform_of(item);
+            // No API to send it over means it is not a choice, however well
+            // it reads in a catalog.
+            let format = native_format_for_model(&platform, &item.model)?;
             let name = if item.display_name.trim().is_empty() {
                 item.model.clone()
             } else {
@@ -50,14 +57,15 @@ pub(super) fn native_models_from_catalog(items: &[ModelCatalogItem]) -> Vec<Prov
             };
             let mut model = ProviderModel::new(format!("{platform}::{}", item.model), name);
             model.sub_provider = Some(platform.clone());
-            let formats = native_wire_formats(&platform, &item.model);
-            model = model.service_tiers(
-                formats.iter().map(|format| {
-                    ProviderModelOption::new(format.id, crate::i18n::translate(format.label))
-                        .description(crate::i18n::translate(format.description))
-                }),
-                native_default_wire_format(&platform, &item.model),
-            );
+            if let Some(entry) = native_format_option(format) {
+                model = model.service_tiers(
+                    [
+                        ProviderModelOption::new(entry.id, crate::i18n::translate(entry.label))
+                            .description(crate::i18n::translate(entry.description)),
+                    ],
+                    entry.id,
+                );
+            }
             if has_reasoning_ladder(&platform, &item.model) {
                 let mut ladder = vec!["low", "medium", "high", "xhigh", "max"];
                 if supports_ultracode(&item.model) {
@@ -70,7 +78,7 @@ pub(super) fn native_models_from_catalog(items: &[ModelCatalogItem]) -> Vec<Prov
                     "high",
                 );
             }
-            model
+            Some(model)
         })
         .collect();
 
@@ -145,9 +153,29 @@ fn is_non_conversational_name(model: &str) -> bool {
         .any(|word| matches!(word, "embedding" | "embeddings" | "moderation" | "rerank"))
 }
 
+/// A reasoning ladder only where the engine maps effort onto a request field
+/// the upstream understands: the Anthropic and OpenAI families. Grok takes
+/// the Responses route but has no effort field, and a ladder that changed
+/// nothing would look connected while doing nothing.
+///
+/// Name first, platform second, for the same reason the API is chosen that
+/// way: a composite group reports `composite` for every model in it.
 fn has_reasoning_ladder(platform: &str, model: &str) -> bool {
     let model = model.to_ascii_lowercase();
-    platform == "anthropic" || platform == "openai" || model.starts_with("claude")
+    if model.starts_with("claude")
+        || model.starts_with("gpt-")
+        || model.starts_with("gpt5")
+        || model.starts_with("o1")
+        || model.starts_with("o3")
+        || model.starts_with("o4")
+        || model.starts_with("codex")
+    {
+        return true;
+    }
+    if model.starts_with("grok") {
+        return false;
+    }
+    platform == "anthropic" || platform == "openai"
 }
 
 /// The engine resolves `ultracode` to its top reasoning budget, which only
@@ -163,15 +191,15 @@ fn supports_ultracode(model: &str) -> bool {
 /// Kept in step with `waku_agent_bridge::WireFormat`, which the desktop does
 /// not link — the bridge is the daemon's dependency, not the app's. The
 /// bridge clamps whatever it receives, so a disagreement here costs a
-/// surprising default, never a broken request. `available_for` there is the
-/// same rule as [`native_wire_formats`] below.
+/// surprising default, never a broken request. `WireFormat::resolve` there
+/// is the same rule as [`native_format_for_model`] below.
 pub(super) struct WireFormatOption {
     pub id: &'static str,
     pub label: &'static str,
     pub description: &'static str,
 }
 
-// A `static`, not a `const`: `native_wire_formats` hands out `'static`
+// A `static`, not a `const`: `native_format_option` hands out `'static`
 // references into it, and a const would be copied into a temporary at
 // every use site with nothing to borrow from.
 pub(super) static NATIVE_WIRE_FORMATS: [WireFormatOption; 3] = [
@@ -192,58 +220,43 @@ pub(super) static NATIVE_WIRE_FORMATS: [WireFormatOption; 3] = [
     },
 ];
 
-/// Platforms the gateway forwards through its OpenAI stack. Everything else
-/// it serves as Anthropic, which is also the safe way to be wrong about a
-/// platform this build has never heard of.
-fn openai_compatible_platform(platform: &str) -> bool {
-    matches!(
-        platform.trim().to_ascii_lowercase().as_str(),
-        "openai" | "grok" | "kimi" | "zhipu" | "deepseek" | "minimax" | "opencode_go" | "opencodego"
-    )
-}
-
-/// Whether one format can carry one model on one platform.
+/// The one API a catalog model is reachable over, or `None` when it is
+/// reachable over none of them and should not be offered.
 ///
-/// Both exclusions are facts about code that exists: the gateway has no
-/// Responses translator for Gemini groups, and the engine's Chat client
-/// refuses the models OpenAI serves over Responses. Messages on an OpenAI
-/// group is *not* excluded — whether that group accepts it is a per-group
-/// setting the desktop cannot see, so it stays offered.
-pub(super) fn native_format_supported(format: &str, platform: &str, model: &str) -> bool {
-    let platform = platform.trim().to_ascii_lowercase();
+/// The model's own family decides, not the group's platform: a composite
+/// group reports `composite` for everything in it, so the platform is only
+/// consulted as a tie-breaker for a name that gives nothing away.
+///
+/// Chat Completions is deliberately absent here. It carries the models a
+/// user declared on their own endpoint ([`native_custom_models`]), nothing
+/// from the managed catalog.
+pub(super) fn native_format_for_model(platform: &str, model: &str) -> Option<&'static str> {
     let model = model.trim().to_ascii_lowercase();
-    match format {
-        "responses" => platform != "gemini",
-        "chat" => {
-            !(model.starts_with("gpt-5") || model.starts_with("o3") || model.starts_with("o4"))
-        }
-        _ => true,
+    if model.starts_with("claude") {
+        return Some("messages");
+    }
+    if model.starts_with("gpt-")
+        || model.starts_with("gpt5")
+        || model.starts_with("o1")
+        || model.starts_with("o3")
+        || model.starts_with("o4")
+        || model.starts_with("codex")
+        || model.starts_with("grok")
+    {
+        return Some("responses");
+    }
+    // A name that says nothing: fall back to the group's platform, for the
+    // rare model whose id carries no family at all.
+    match platform.trim().to_ascii_lowercase().as_str() {
+        "anthropic" => Some("messages"),
+        "openai" | "grok" => Some("responses"),
+        _ => None,
     }
 }
 
-/// The formats offered for one model, in listing order. Never empty:
-/// Messages has no exclusions.
-pub(super) fn native_wire_formats(platform: &str, model: &str) -> Vec<&'static WireFormatOption> {
-    NATIVE_WIRE_FORMATS
-        .iter()
-        .filter(|format| native_format_supported(format.id, platform, model))
-        .collect()
-}
-
-/// The route this model's platform is served over, when it can carry the
-/// model; otherwise the first format that can.
-pub(super) fn native_default_wire_format(platform: &str, model: &str) -> &'static str {
-    let native = if openai_compatible_platform(platform) {
-        "responses"
-    } else {
-        "messages"
-    };
-    if native_format_supported(native, platform, model) {
-        return native;
-    }
-    native_wire_formats(platform, model)
-        .first()
-        .map_or("messages", |format| format.id)
+/// The format entry for one id, for labelling.
+pub(super) fn native_format_option(format: &str) -> Option<&'static WireFormatOption> {
+    NATIVE_WIRE_FORMATS.iter().find(|entry| entry.id == format)
 }
 
 fn reasoning_effort_label(effort: &str) -> String {
@@ -258,12 +271,42 @@ fn reasoning_effort_label(effort: &str) -> String {
     }
 }
 
-/// What the built-in agent's probe lists: the catalog when the account
-/// offers one, the engine's fallback list otherwise. Never empty, so a
-/// signed-out picker still has rows and a signed-in one never blanks
-/// between a sign-out and the next catalog.
-pub(super) fn native_probe_models(items: &[ModelCatalogItem]) -> Vec<ProviderModel> {
-    let models = native_models_from_catalog(items);
+/// The models a user declared on their own endpoint for the built-in agent.
+///
+/// These are the Chat Completions list: the managed catalog never puts
+/// anything there, because the gateway's own model families each have a
+/// better route. An endpoint the user points somewhere else is the one case
+/// where this app cannot know what the models are called or what they speak,
+/// so it takes their word for it.
+pub(super) fn native_custom_models(models: &[String]) -> Vec<ProviderModel> {
+    let mut seen = std::collections::HashSet::new();
+    models
+        .iter()
+        .map(|model| model.trim())
+        .filter(|model| !model.is_empty())
+        .filter(|model| seen.insert(model.to_string()))
+        .map(|model| {
+            let mut entry = ProviderModel::new(model, model);
+            entry.sub_provider = Some("custom".to_owned());
+            entry.service_tiers(
+                [ProviderModelOption::new("chat", crate::i18n::translate("model_option.wire_chat"))
+                    .description(crate::i18n::translate("model_option.wire_chat_description"))],
+                "chat",
+            )
+        })
+        .collect()
+}
+
+/// What the built-in agent's probe lists: the catalog plus the user's own
+/// endpoint models, or the engine's fallback list when both are empty. Never
+/// empty, so a signed-out picker still has rows and a signed-in one never
+/// blanks between a sign-out and the next catalog.
+pub(super) fn native_probe_models(
+    items: &[ModelCatalogItem],
+    custom: &[String],
+) -> Vec<ProviderModel> {
+    let mut models = native_models_from_catalog(items);
+    models.extend(native_custom_models(custom));
     if models.is_empty() {
         crate::model_catalog::fallback_models(ProviderKind::Native)
     } else {
@@ -280,7 +323,12 @@ impl Waku {
     /// it, a daemon probe answering with the fallback list, a language
     /// change relabelling the reasoning ladder.
     pub(super) fn sync_native_models(&mut self) {
-        let models = native_probe_models(&self.model_plaza.items);
+        let custom = self
+            .custom_api_snapshot()
+            .get("native")
+            .map(|endpoint| endpoint.models.clone())
+            .unwrap_or_default();
+        let models = native_probe_models(&self.model_plaza.items, &custom);
         if let Some(probe) = self
             .probes
             .iter_mut()
@@ -346,35 +394,72 @@ mod tests {
     }
 
     #[test]
-    fn each_model_carries_the_formats_that_can_carry_it() {
-        let tiers = |model: &ProviderModel| -> Vec<String> {
-            model
-                .service_tiers
-                .iter()
-                .map(|tier| tier.id.clone())
-                .collect()
+    fn each_model_carries_the_one_api_it_is_served_over() {
+        let format = |models: &[ProviderModel]| -> Option<String> {
+            let model = models.first()?;
+            let tiers: Vec<&str> = model.service_tiers.iter().map(|t| t.id.as_str()).collect();
+            assert_eq!(tiers.len(), 1, "a model has exactly one API");
+            assert_eq!(model.default_service_tier.as_deref(), Some(tiers[0]));
+            Some(tiers[0].to_owned())
         };
 
-        // OpenAI serves gpt-5 over Responses; the engine's Chat client
-        // refuses it outright, so Chat is not offered.
-        let openai = native_models_from_catalog(&[item("gpt-5.6-sol", "openai")]);
-        assert_eq!(tiers(&openai[0]), ["messages", "responses"]);
-        assert_eq!(openai[0].default_service_tier.as_deref(), Some("responses"));
+        assert_eq!(
+            format(&native_models_from_catalog(&[item("claude-sonnet-5", "anthropic")])),
+            Some("messages".into())
+        );
+        assert_eq!(
+            format(&native_models_from_catalog(&[item("gpt-5.6-sol", "openai")])),
+            Some("responses".into())
+        );
+        // The combination that used to default to Messages and get hijacked
+        // to the engine's own xai provider.
+        assert_eq!(
+            format(&native_models_from_catalog(&[item("grok-4.6", "grok")])),
+            Some("responses".into())
+        );
+        // The family beats the group's platform, which is what makes a
+        // composite group — every model in it reports `composite` — work.
+        assert_eq!(
+            format(&native_models_from_catalog(&[item("grok-4.6", "composite")])),
+            Some("responses".into())
+        );
+        assert_eq!(
+            format(&native_models_from_catalog(&[item("claude-sonnet-5", "composite")])),
+            Some("messages".into())
+        );
+    }
 
-        // The gateway has no Responses translator for Gemini groups.
-        let gemini = native_models_from_catalog(&[item("gemini-3-pro", "gemini")]);
-        assert_eq!(tiers(&gemini[0]), ["messages", "chat"]);
-        assert_eq!(gemini[0].default_service_tier.as_deref(), Some("messages"));
+    #[test]
+    fn a_model_with_no_api_to_send_it_over_is_not_offered() {
+        // There is no Gemini route here: the gateway has no Responses
+        // translator for those groups, and this app holds no Gemini key.
+        // Listing it would promise something that fails.
+        assert!(native_models_from_catalog(&[item("gemini-3-pro", "gemini")]).is_empty());
+        assert!(native_models_from_catalog(&[item("some-unknown-model", "")]).is_empty());
+    }
 
-        // Grok is OpenAI-compatible at the gateway, so Responses is its
-        // native route. This is the combination that used to default to
-        // Messages and get hijacked to the engine's own xai provider.
-        let grok = native_models_from_catalog(&[item("grok-4.6", "grok")]);
-        assert_eq!(tiers(&grok[0]), ["messages", "responses", "chat"]);
-        assert_eq!(grok[0].default_service_tier.as_deref(), Some("responses"));
+    #[test]
+    fn the_chat_section_holds_the_users_own_models_and_nothing_else() {
+        // Nothing from the managed catalog lands in Chat Completions.
+        let catalog = native_models_from_catalog(&[
+            item("claude-sonnet-5", "anthropic"),
+            item("gpt-5.6-sol", "openai"),
+            item("grok-4.6", "grok"),
+        ]);
+        assert!(
+            catalog
+                .iter()
+                .all(|model| model.default_service_tier.as_deref() != Some("chat")),
+            "the catalog never fills Chat Completions"
+        );
 
-        let claude = native_models_from_catalog(&[item("claude-sonnet-5", "anthropic")]);
-        assert_eq!(claude[0].default_service_tier.as_deref(), Some("messages"));
+        let declared = native_custom_models(&["my-model".into(), " ".into(), "my-model".into()]);
+        let ids: Vec<&str> = declared.iter().map(|model| model.id.as_str()).collect();
+        assert_eq!(ids, ["my-model"], "blank and duplicate entries are dropped");
+        assert_eq!(declared[0].default_service_tier.as_deref(), Some("chat"));
+        // A bare id, with no platform ahead of a `::`: nothing on the
+        // gateway claims it.
+        assert!(!declared[0].id.contains("::"));
     }
 
     #[test]
@@ -429,18 +514,28 @@ mod tests {
         };
         let fallback = ids(crate::model_catalog::fallback_models(ProviderKind::Native));
         assert!(!fallback.is_empty());
-        assert_eq!(ids(native_probe_models(&[])), fallback);
+        assert_eq!(ids(native_probe_models(&[], &[])), fallback);
         // A catalog with nothing a coding agent can drive counts as empty.
         let mut image = item("gpt-image-2", "openai");
         image.billing_mode = "image".into();
-        assert_eq!(ids(native_probe_models(&[image])), fallback);
+        assert_eq!(ids(native_probe_models(&[image], &[])), fallback);
     }
 
     #[test]
     fn a_catalog_replaces_the_fallback_list_outright() {
-        let models = native_probe_models(&[item("gemini-3-pro", "gemini")]);
+        let models = native_probe_models(&[item("claude-sonnet-5", "anthropic")], &[]);
         let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
-        assert_eq!(ids, ["gemini::gemini-3-pro"]);
+        assert_eq!(ids, ["anthropic::claude-sonnet-5"]);
+    }
+
+    #[test]
+    fn the_users_own_models_are_enough_to_replace_the_fallback() {
+        // Signed out of the managed service but pointed at an endpoint of
+        // their own: the picker lists what they declared, not the built-in
+        // Anthropic list they cannot reach.
+        let models = native_probe_models(&[], &["my-model".into()]);
+        let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
+        assert_eq!(ids, ["my-model"]);
     }
 
     #[test]
@@ -460,6 +555,16 @@ mod tests {
             item("claude-sonnet-5", "anthropic"),
         ]);
         assert_eq!(models.len(), 1);
+    }
+
+    #[test]
+    fn grok_gets_no_reasoning_ladder_it_cannot_use() {
+        let ladder = |models: &[ProviderModel]| !models[0].reasoning_efforts.is_empty();
+        assert!(!ladder(&native_models_from_catalog(&[item("grok-4.6", "grok")])));
+        assert!(ladder(&native_models_from_catalog(&[item("claude-sonnet-5", "anthropic")])));
+        // The family carries it through a composite group, where the
+        // platform says nothing.
+        assert!(ladder(&native_models_from_catalog(&[item("gpt-5.6-sol", "composite")])));
     }
 
     #[test]

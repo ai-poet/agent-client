@@ -1027,6 +1027,37 @@ impl Waku {
 
     /// Discovery is not requested here: launch already requested it for every
     /// installed provider, so tabs only ever switch between loaded lists.
+    /// Open one section of the built-in agent's model list.
+    ///
+    /// A section is an API, and every model has exactly one, so this filters
+    /// the list rather than changing anything about the session. Picking a
+    /// model out of a section is what sets the session's format.
+    pub(super) fn show_model_picker_format(&mut self, format: &str, cx: &mut Context<Self>) {
+        if self.model_picker_format == format {
+            return;
+        }
+        self.model_picker_format = format.to_owned();
+        // A different section is a different set of rows under the keyboard
+        // cursor, and would otherwise inherit the old section's offset.
+        self.model_picker_highlight = None;
+        self.reveal_selected_picker_model();
+        cx.notify();
+    }
+
+    /// The section that should be open for a session: the one holding its
+    /// current model.
+    pub(super) fn sync_model_picker_format(&mut self) {
+        let model = self
+            .selected_session()
+            .and_then(|session| self.model_for_session(session))
+            .map(str::to_owned);
+        let tier = self
+            .selected_session()
+            .and_then(|session| session.service_tier.clone());
+        self.model_picker_format =
+            super::composer::native_wire_format(tier.as_deref(), model.as_deref());
+    }
+
     pub(super) fn select_model_picker_tab(&mut self, tab: ModelPickerTab, cx: &mut Context<Self>) {
         if self.model_picker_tab != tab {
             self.model_picker_tab = tab;
@@ -1039,6 +1070,7 @@ impl Waku {
                 // account's catalog, refreshed within the Plaza's window.
                 if provider.is_builtin() {
                     self.refresh_native_catalog(false, cx);
+                    self.sync_model_picker_format();
                 }
             }
             // A different tab renumbers the rows under the keyboard cursor,

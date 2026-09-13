@@ -877,9 +877,11 @@ impl Waku {
                         this.refresh_provider_model_discovery(provider);
                         // The built-in agent has no CLI to ask; its list is
                         // the account's catalog, refreshed within the
-                        // Plaza's freshness window.
+                        // Plaza's freshness window. The section that opens is
+                        // the one holding the session's current model.
                         if provider.is_builtin() {
                             this.refresh_native_catalog(false, cx);
+                            this.sync_model_picker_format();
                         }
                         this.model_picker_highlight = None;
                         reset_search.update(cx, |search, cx| search.clear(cx));
@@ -922,15 +924,28 @@ impl Waku {
         // Built out here rather than in the body so the key handler and the
         // rendered rows index one ordering and cannot disagree about what
         // `enter` selects.
+        //
+        // `picker_format` is which section of the built-in agent's list is
+        // open. Every model there has exactly one API, so the format bar
+        // partitions the list rather than switching a setting on one model,
+        // and the filter belongs here so the keyboard cursor and the drawn
+        // rows agree about what is in the section.
+        let picker_format = self.model_picker_format.clone();
         let available_models = Rc::new(if handle.is_open() {
-            visible_picker_models(
+            let mut models = visible_picker_models(
                 &probes,
                 &favorites,
                 &disabled_providers,
                 locked_provider,
                 selected_tab,
                 &normalized_query,
-            )
+            );
+            if selected_tab == ModelPickerTab::Provider(ProviderKind::Native) && !searching {
+                models.retain(|(_, model)| {
+                    model.default_service_tier.as_deref() == Some(picker_format.as_str())
+                });
+            }
+            models
         } else {
             Vec::new()
         });
@@ -1098,6 +1113,12 @@ impl Waku {
                             .child(div().flex_1().min_w_0().child(search.clone())),
                     );
 
+                // Which section of the built-in agent's list is open. Read
+                // before the rows so the empty state can name it.
+                let native_format = (selected_tab == ModelPickerTab::Provider(ProviderKind::Native)
+                    && !searching)
+                    .then(|| picker_format.clone());
+
                 let mut rows = div()
                     .id("model-picker-list")
                     .size_full()
@@ -1115,6 +1136,12 @@ impl Waku {
                             if pending_discoveries.contains(&provider)
                     ) {
                         tr!("models.loading")
+                    } else if native_format.as_deref() == Some("chat") {
+                        // Empty by design: nothing on the managed service is
+                        // served over Chat Completions, and nothing can
+                        // discover what sits behind an endpoint of the
+                        // user's own. Say where to declare them.
+                        tr!("models.declare_your_own")
                     } else {
                         tr!("models.none_reported")
                     };
@@ -1130,18 +1157,6 @@ impl Waku {
                     );
                 }
 
-                // The built-in agent's tab carries a format bar above the
-                // list. The format belongs to the model — each platform is
-                // served over the route its upstream speaks, and two
-                // combinations do not exist at all — so choosing a model
-                // brings its own format with it, and the bar changes the
-                // format of the model already selected.
-                let native_format = (selected_tab == ModelPickerTab::Provider(ProviderKind::Native)
-                    && !searching)
-                    .then(|| {
-                        native_wire_format(selected_tier.as_deref(), selected_model.as_deref())
-                    });
-                let bar_model = selected_model.clone();
                 for (row_index, (kind, model)) in available_models.iter().enumerate() {
                     let kind = *kind;
                     let is_selected =
@@ -1327,14 +1342,11 @@ impl Waku {
                             .rounded_br(px(12.0))
                             .bg(theme.surface)
                             .child(search_input)
-                            .children(native_format.as_deref().map(|active| {
-                                native_format_bar(
-                                    theme,
-                                    active,
-                                    bar_model.as_deref(),
-                                    weak.clone(),
-                                )
-                            }))
+                            .children(
+                                native_format
+                                    .as_deref()
+                                    .map(|active| native_format_bar(theme, active, weak.clone())),
+                            )
                             .child(
                                 div()
                                     .flex_1()
@@ -3995,32 +4007,36 @@ fn native_format_short_label(format: &str) -> String {
 }
 
 /// Split a picker model id into the platform ahead of the `::` and the model
-/// after it. A bare id is Anthropic's, which is what the daemon assumes too.
+/// after it. A bare id carries no platform — that is what a model the user
+/// declared on their own endpoint looks like.
 fn native_platform_and_model(id: Option<&str>) -> (String, String) {
     match id.and_then(|id| id.split_once("::")) {
         Some((platform, model)) => (platform.trim().to_ascii_lowercase(), model.to_owned()),
-        None => ("anthropic".to_owned(), id.unwrap_or_default().to_owned()),
+        None => (String::new(), id.unwrap_or_default().to_owned()),
     }
 }
 
-/// Which format the built-in agent is speaking: the session's own when that
-/// one can carry this model, else the model's native route. The same rule
-/// `waku_agent_bridge::WireFormat::resolve` applies before the request goes
-/// out, so what the bar shows is what is sent.
+/// Which API the built-in agent uses for one model.
+///
+/// The model decides, not the session: Claude is served over Messages, the
+/// GPT and Grok families over Responses, and a model the user declared on
+/// their own endpoint over Chat Completions. The session's stored tier is
+/// only consulted for a model the catalog does not place — which is what a
+/// user-declared model is. `waku_agent_bridge::WireFormat::resolve` applies
+/// the same rule before the request goes out, so what the picker shows is
+/// what is sent.
 pub(super) fn native_wire_format(
     selected_tier: Option<&str>,
     selected_model: Option<&str>,
 ) -> String {
     let (platform, model) = native_platform_and_model(selected_model);
-    if let Some(tier) = selected_tier
-        && super::native_agent::native_format_supported(tier, &platform, &model)
-        && super::native_agent::NATIVE_WIRE_FORMATS
-            .iter()
-            .any(|format| format.id == tier)
-    {
-        return tier.to_owned();
+    if let Some(format) = super::native_agent::native_format_for_model(&platform, &model) {
+        return format.to_owned();
     }
-    super::native_agent::native_default_wire_format(&platform, &model).to_owned()
+    selected_tier
+        .filter(|tier| super::native_agent::native_format_option(tier).is_some())
+        .unwrap_or("chat")
+        .to_owned()
 }
 
 /// The bar above the built-in agent's model list: the brand the models come
@@ -4029,17 +4045,13 @@ pub(super) fn native_wire_format(
 /// the list was scrolled out of view by the reveal of the selected model,
 /// and a chip drawn in `overlay` on a `raised` panel had no contrast.
 ///
-/// A format the current model cannot be carried over stays in place, dimmed
-/// and inert, with a tooltip saying so. Removing it would leave the user
-/// wondering where it went and make the bar's width jump between models.
-/// The current one is marked by fill *and* weight, never colour alone.
-fn native_format_bar(
-    theme: Theme,
-    active: &str,
-    selected_model: Option<&str>,
-    weak: gpui::WeakEntity<Waku>,
-) -> Div {
-    let (platform, model) = native_platform_and_model(selected_model);
+/// Each model has exactly one API, so the bar is a partition of the list
+/// rather than a switch on one model: Messages holds Claude, Responses the
+/// GPT and Grok families, Chat whatever the user declared on their own
+/// endpoint. Clicking a segment shows that section. The open one is marked
+/// by fill *and* weight, never colour alone; a section with nothing in it
+/// still gets a segment, so its emptiness is visible rather than implied.
+fn native_format_bar(theme: Theme, active: &str, weak: gpui::WeakEntity<Waku>) -> Div {
     let mut bar = div()
         .h(px(32.0))
         .px(px(12.0))
@@ -4065,14 +4077,9 @@ fn native_format_bar(
     for option in super::native_agent::NATIVE_WIRE_FORMATS.iter() {
         let format = option.id;
         let name = crate::i18n::translate(option.label);
-        let available = super::native_agent::native_format_supported(format, &platform, &model);
-        let selected = available && format == active;
+        let selected = format == active;
         let weak = weak.clone();
-        let tooltip = if available {
-            format!("{name} · {}", crate::i18n::translate(option.description))
-        } else {
-            tr!("model_option.wire_unavailable", name = name.clone())
-        };
+        let tooltip = format!("{name} · {}", crate::i18n::translate(option.description));
         bar = bar.child(
             div()
                 .id(SharedString::from(format!("model-format-{format}")))
@@ -4090,24 +4097,19 @@ fn native_format_bar(
                 })
                 .text_color(if selected {
                     theme.text
-                } else if available {
-                    theme.text_secondary
                 } else {
-                    theme.text_ghost
+                    theme.text_secondary
                 })
                 .when(selected, |element| element.bg(theme.overlay_strong))
-                .when(available && !selected, |element| {
+                .when(!selected, |element| {
                     element
                         .hover(|element| element.bg(theme.overlay))
                         .on_click(move |_, _, cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.set_service_tier(format.to_owned(), cx);
+                                this.show_model_picker_format(format, cx);
                             });
                         })
                 })
-                // Same treatment the rail gives a provider it cannot open:
-                // dimmed, inert, and explained by its tooltip.
-                .when(!available, |element| element.opacity(0.45))
                 .tooltip(Tooltip::text(tooltip))
                 .child(SharedString::from(native_format_short_label(format))),
         );
