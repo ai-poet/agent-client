@@ -73,6 +73,10 @@ lines below.
 | `src/app/render.rs` | pay-modal, announcements-modal and confirm-dialog composites in both render branches; onboarding strip above the composer; update banner above the header (main) and above the settings page (settings branch is now a flex column); `open_surface_action` registered beside `toggle_right_panel_action` | ~23 |
 | `src/app/tests.rs` | `settings_search_filters_pages_for_arrow_cycling` expects the fork's nav pages (Workflow included) | 4 |
 | `crates/waku-agent/core/src/lib.rs` | vendored engine, recorded departure: `#[serde(default)]` on `Config` so a partial `config` block in settings.json loads | 1 + comment |
+| `crates/waku-agent/query/src/lib.rs` | vendored engine, recorded departure: an explicit `config.provider` outranks the model-name family table; a stream `error` event ends the turn | ~14 |
+| `crates/waku-agent/api/src/lib.rs` | vendored engine, recorded departure: `StreamAccumulator` keeps the first stream `error` instead of discarding it | ~18 |
+| `crates/waku-agent/core/src/system_prompt.rs` | vendored engine, recorded departure: the agent is named after the product, not after the engine or Anthropic | ~25 |
+| `src/assets.rs` | `provider-waku` in the embedded icon list — the built-in provider's icon had never been registered | 1 |
 | `crates/waku-protocol/src/model.rs` | `ProviderKind::Native` and its `is_builtin()`; Native excluded from `supports_model_discovery` (its catalog comes from the gateway, not a CLI) | ~8 |
 | `src/app/runtime.rs` | `sync_native_models()` after `drain_provider_detection_events` / `drain_provider_probe_events`, so daemon probes never replace the built-in agent's catalog list | 2 |
 | `src/app/settings.rs` | `sync_native_models()` after the language-change fallback reset | 1 |

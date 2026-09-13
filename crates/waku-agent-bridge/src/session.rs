@@ -524,6 +524,9 @@ async fn run_turn(
     // by a cancel — and the result is what gets written back.
     let mut messages = inner.history.lock().clone();
     messages.push(Message::user(prompt));
+    // Everything from here on is this turn's, which is what lets a turn that
+    // produced nothing be told apart from one that answered.
+    let turn_start = messages.len();
 
     let config = inner.config.lock().clone();
     let mut query = inner.query.lock().clone();
@@ -600,9 +603,30 @@ async fn run_turn(
     };
     inner.questions.lock().clear();
 
-    let (success, summary) = describe(outcome);
+    let route = Route {
+        provider: config.selected_provider_id().to_owned(),
+        model: query.model.clone(),
+        api_base: config.resolve_anthropic_api_base(),
+    };
+    let produced_output = history::produced_visible_output(&inner.history.lock(), turn_start);
+    // Only a turn the engine called *finished* counts as empty. A cancel
+    // produces nothing either, and saying "the model ended without saying
+    // anything" to someone who just pressed stop would be a lie.
+    let ended_empty = !produced_output && matches!(outcome, QueryOutcome::EndTurn { .. });
+    let (success, summary) = describe(outcome, produced_output, &route);
     if !success && let Some(reason) = summary.clone() {
-        inner.events.emit(AgentEvent::Error(reason));
+        // The empty turn gets its own event so the desktop can say it in the
+        // user's language; the sentence in `summary` is the fallback for any
+        // client that does not.
+        if ended_empty {
+            inner.events.emit(AgentEvent::ProducedNothing {
+                provider: route.provider.clone(),
+                model: route.model.clone(),
+                api_base: route.api_base.clone(),
+            });
+        } else {
+            inner.events.emit(AgentEvent::Error(reason));
+        }
     }
     inner.events.emit(AgentEvent::TurnFinished { success, summary });
     inner.events.emit(AgentEvent::HistoryCommitted(history::serialize(
@@ -647,12 +671,36 @@ async fn forward_events(
 
 /// What to tell the transcript about how the turn ended.
 ///
+/// What a turn was pointed at, for the message an empty turn has to write.
+struct Route {
+    provider: String,
+    model: String,
+    api_base: String,
+}
+
 /// `MaxTokens` counts as a success: the model produced an answer and the
 /// engine's own recovery already ran. Everything else that is not `EndTurn`
 /// carries a reason the user can act on — reporting a turn that produced
 /// nothing as a success is the failure mode this exists to avoid.
-fn describe(outcome: QueryOutcome) -> (bool, Option<String>) {
+///
+/// `produced_output` is what closes the last hole in that: a clean `EndTurn`
+/// that added no assistant text is not a success either, whatever the stop
+/// reason said. It names the route it tried, because the thing that went
+/// wrong is upstream of here and that is the only handle the user has on it.
+fn describe(
+    outcome: QueryOutcome,
+    produced_output: bool,
+    route: &Route,
+) -> (bool, Option<String>) {
     match outcome {
+        QueryOutcome::EndTurn { .. } if !produced_output => (
+            false,
+            Some(format!(
+                "The model ended the turn without saying anything. \
+                 Route: {} · {} · {}",
+                route.provider, route.model, route.api_base
+            )),
+        ),
         QueryOutcome::EndTurn { .. } => (true, None),
         QueryOutcome::MaxTokens { .. } => (
             true,
@@ -673,11 +721,64 @@ fn describe(outcome: QueryOutcome) -> (bool, Option<String>) {
 mod tests {
     use super::*;
 
+    fn route() -> Route {
+        Route {
+            provider: "anthropic".into(),
+            model: "claude-sonnet-5".into(),
+            api_base: "https://gateway.example.org".into(),
+        }
+    }
+
     #[test]
     fn a_cancelled_turn_is_never_reported_as_a_success() {
-        let (success, summary) = describe(QueryOutcome::Cancelled);
+        let (success, summary) = describe(QueryOutcome::Cancelled, true, &route());
         assert!(!success);
         assert!(summary.is_some());
+    }
+
+    /// The shape a swallowed upstream failure takes: the engine reports a
+    /// clean end_turn, the transcript gained nothing. Reporting that as a
+    /// success is what left the user reading "turn completed" and no answer.
+    #[test]
+    fn a_turn_that_said_nothing_is_a_failure_that_names_its_route() {
+        let (success, summary) = describe(
+            QueryOutcome::EndTurn {
+                message: Message::assistant_blocks(Vec::new()),
+                usage: Default::default(),
+            },
+            false,
+            &route(),
+        );
+        assert!(!success);
+        let summary = summary.expect("an empty turn must explain itself");
+        assert!(summary.contains("anthropic"), "{summary}");
+        assert!(summary.contains("claude-sonnet-5"), "{summary}");
+        assert!(summary.contains("gateway.example.org"), "{summary}");
+    }
+
+    /// A cancel produces nothing either. It must keep reading as a stop,
+    /// not as the model having gone quiet.
+    #[test]
+    fn a_cancel_is_not_reported_as_an_empty_turn() {
+        let (success, summary) = describe(QueryOutcome::Cancelled, false, &route());
+        assert!(!success);
+        let summary = summary.expect("a cancel says so");
+        assert!(summary.contains("Stopped"), "{summary}");
+        assert!(!summary.contains("without saying anything"), "{summary}");
+    }
+
+    #[test]
+    fn a_turn_that_answered_stays_a_success() {
+        let (success, summary) = describe(
+            QueryOutcome::EndTurn {
+                message: Message::assistant_blocks(Vec::new()),
+                usage: Default::default(),
+            },
+            true,
+            &route(),
+        );
+        assert!(success);
+        assert!(summary.is_none());
     }
 
     #[test]

@@ -526,6 +526,19 @@ impl EventTranslator {
                 self.send(DriverEvent::SteerRejected { message, reason })
             }
             AgentEvent::HistoryCommitted(bytes) => self.store.save(&bytes),
+            // The gateway accepted the request and returned nothing usable.
+            // Name the route: the cause is upstream, and which model over
+            // which API is the only part of it the user can change.
+            AgentEvent::ProducedNothing {
+                provider,
+                model,
+                api_base,
+            } => self.send(DriverEvent::Error(tr!(
+                "native.empty_turn",
+                model = model,
+                provider = provider,
+                endpoint = api_base
+            ))),
             AgentEvent::Error(message) => self.send(DriverEvent::Error(message)),
             AgentEvent::TurnFinished { success, summary } => {
                 self.tools.lock().clear();

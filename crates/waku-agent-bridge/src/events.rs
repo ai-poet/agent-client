@@ -72,6 +72,18 @@ pub enum AgentEvent {
     /// Emitted once per turn, after `TurnFinished`, so a crash between turns
     /// costs at most the turn that was running.
     HistoryCommitted(Vec<u8>),
+    /// The turn ended cleanly and said nothing.
+    ///
+    /// Structured rather than a sentence because the desktop writes this one
+    /// in the user's language, and because the route is the only handle the
+    /// user has on a failure that happened upstream of the engine.
+    ProducedNothing {
+        /// The engine provider the wire format selected.
+        provider: String,
+        model: String,
+        /// Where the request went.
+        api_base: String,
+    },
     /// Something went wrong. A turn may still settle afterwards.
     Error(String),
     /// The turn is over. `success` is false for cancellation, an unrecoverable

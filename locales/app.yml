@@ -3120,3 +3120,11 @@ model_option.wire_responses_short:
   en: "Responses"
 model_option.wire_chat_short:
   en: "Chat"
+
+native.empty_turn:
+  en: "%{model} ended the turn without saying anything. The request went to %{endpoint} over the %{provider} API. Try this model over a different API, or a different model."
+model_option.wire_unavailable:
+  en: "%{name} is not available for this model."
+
+models.wire_format:
+  en: "API"

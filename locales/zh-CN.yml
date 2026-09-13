@@ -1534,3 +1534,8 @@ native.no_api_key: "内置 Agent 没有可用于 %{provider} 接口的 API 密�
 model_option.wire_messages_short: "Messages"
 model_option.wire_responses_short: "Responses"
 model_option.wire_chat_short: "Chat"
+
+native.empty_turn: "%{model} 结束了这一轮，但什么也没说。请求发往 %{endpoint}，走的是 %{provider} 接口。可以给这个模型换一种接口格式，或者换个模型。"
+model_option.wire_unavailable: "这个模型不能用 %{name}。"
+
+models.wire_format: "接口格式"

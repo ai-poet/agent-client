@@ -122,7 +122,18 @@ impl OutputStyle {
 // System prompt prefix variants
 // ---------------------------------------------------------------------------
 
-/// Which entrypoint context Claurst is running in.
+/// The product this agent is part of.
+///
+/// Fork addition (Waku): mirrors `sub2api::brand::DISPLAY_NAME`, which this
+/// crate cannot depend on — the engine is vendored and knows nothing about
+/// the app around it. Both read the same build-time variable, so one
+/// `SUB2API_BRAND_NAME` renames the product and the agent together.
+const BRAND_NAME: &str = match option_env!("SUB2API_BRAND_NAME") {
+    Some(name) => name,
+    None => "CheapRouter",
+};
+
+/// Which entrypoint context the agent is running in.
 /// Determines the opening attribution line of the system prompt.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SystemPromptPrefix {
@@ -171,17 +182,27 @@ impl SystemPromptPrefix {
     }
 
     /// The opening attribution string for this prefix variant.
-    pub fn attribution_text(self) -> &'static str {
+    ///
+    /// Fork departure (Waku): the engine is compiled into a product of its
+    /// own, reached through that product's gateway. It is not a CLI, and it
+    /// is not Anthropic's — saying so was simply false, and the model
+    /// repeated it when asked what it was. The name follows the same
+    /// build-time brand variable the rest of the fork reads, so a rebranded
+    /// build renames the agent with everything else.
+    pub fn attribution_text(self) -> String {
+        let brand = BRAND_NAME;
         match self {
             Self::Cli | Self::Vertex | Self::Bedrock | Self::Remote => {
-                "You are Claurst, Anthropic's official CLI for Claude."
+                format!("You are {brand} Agent, the coding agent built into {brand}.")
             }
             Self::SdkPreset => {
-                "You are Claurst, Anthropic's official CLI for Claude, \
-                running within the Claude Agent SDK."
+                format!(
+                    "You are {brand} Agent, the coding agent built into {brand}, \
+                     running within the Claude Agent SDK."
+                )
             }
             Self::Sdk => {
-                "You are a Claude agent, built on Anthropic's Claude Agent SDK."
+                "You are a Claude agent, built on Anthropic's Claude Agent SDK.".to_owned()
             }
         }
     }
@@ -265,7 +286,7 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
     // ------------------------------------------------------------------ //
     let mut parts: Vec<String> = vec![
         // 1. Attribution header
-        prefix.attribution_text().to_string(),
+        prefix.attribution_text(),
         // 2. Core capabilities
         CORE_CAPABILITIES.to_string(),
         // 3. Tool use guidelines (per-tool blocks are conditional on the enabled set)
@@ -632,7 +653,14 @@ mod tests {
     #[test]
     fn test_default_prompt_contains_attribution() {
         let prompt = build_system_prompt(&default_opts());
-        assert!(prompt.contains("Claurst"), "Default prompt must contain attribution");
+        assert!(
+            prompt.contains(BRAND_NAME),
+            "Default prompt must contain attribution"
+        );
+        assert!(
+            !prompt.contains("Claurst"),
+            "the engine must not name itself in a product that is not it"
+        );
     }
 
     #[test]

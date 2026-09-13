@@ -9,13 +9,15 @@
 //!
 //! The id carries the platform ahead of a `::`, which is how the daemon
 //! knows which of the account's keys to use; the picker never shows an id,
-//! only the name and the brand-and-platform subtitle. The wire format —
-//! Anthropic Messages, OpenAI Responses, OpenAI Chat Completions — is not a
-//! per-model option here: the picker shows a format bar above the built-in
-//! agent's list and writes the current format into the session's tier slot
-//! when a model is chosen, so model and API are always chosen together. The
-//! gateway translates each format for every platform, which is what makes
-//! that a free choice.
+//! only the name and the brand-and-platform subtitle.
+//!
+//! The wire format — Anthropic Messages, OpenAI Responses, OpenAI Chat
+//! Completions — belongs to the model, not to the session. Each platform is
+//! served over the route its upstream actually speaks, and two combinations
+//! do not exist at all: the gateway has no Responses translator for Gemini
+//! groups, and the engine's Chat client refuses `gpt-5*`/`o3*`/`o4*`. So
+//! every model carries the formats that can carry *it*, in the "service
+//! tier" slot the picker and the composer's traits menu both read.
 //!
 //! Pure mapping plus the hooks that apply it; the fetch is the Plaza's.
 
@@ -37,7 +39,7 @@ pub(super) fn native_models_from_catalog(items: &[ModelCatalogItem]) -> Vec<Prov
     let mut seen = std::collections::HashSet::new();
     let mut models: Vec<ProviderModel> = items
         .iter()
-        .filter(|item| is_token_model(item) && !item.model.trim().is_empty())
+        .filter(|item| is_chat_model(item) && !item.model.trim().is_empty())
         .filter(|item| seen.insert((platform_of(item), item.model.clone())))
         .map(|item| {
             let platform = platform_of(item);
@@ -48,6 +50,14 @@ pub(super) fn native_models_from_catalog(items: &[ModelCatalogItem]) -> Vec<Prov
             };
             let mut model = ProviderModel::new(format!("{platform}::{}", item.model), name);
             model.sub_provider = Some(platform.clone());
+            let formats = native_wire_formats(&platform, &item.model);
+            model = model.service_tiers(
+                formats.iter().map(|format| {
+                    ProviderModelOption::new(format.id, crate::i18n::translate(format.label))
+                        .description(crate::i18n::translate(format.description))
+                }),
+                native_default_wire_format(&platform, &item.model),
+            );
             if has_reasoning_ladder(&platform, &item.model) {
                 let mut ladder = vec!["low", "medium", "high", "xhigh", "max"];
                 if supports_ultracode(&item.model) {
@@ -87,8 +97,52 @@ fn platform_of(item: &ModelCatalogItem) -> String {
     }
 }
 
-fn is_token_model(item: &ModelCatalogItem) -> bool {
-    matches!(item.billing_mode.trim(), "" | "token")
+/// Whether this catalog entry is something a coding agent can hold a
+/// conversation with.
+///
+/// The catalog has no modality field, so this reads three weaker signals in
+/// order. The first two are what the service knows; the third is what its own
+/// gateway does — `IsGPTImageGenerationModel` there is a name prefix too,
+/// because a picture model billed by the token looks like a chat model from
+/// every angle except its name.
+fn is_chat_model(item: &ModelCatalogItem) -> bool {
+    let mode = item.billing_mode.trim().to_ascii_lowercase();
+    // Empty means token; the service normalizes it that way on the way out.
+    if !matches!(mode.as_str(), "" | "token") {
+        return false;
+    }
+    // Priced per picture and not per token: whatever it is billed as, it is
+    // not answering questions.
+    let pricing = &item.effective_pricing_usd;
+    if pricing.per_image_usd.is_some()
+        && pricing.input_per_mtok_usd.is_none()
+        && pricing.output_per_mtok_usd.is_none()
+    {
+        return false;
+    }
+    !is_non_conversational_name(&item.model)
+}
+
+/// Families that produce pictures, video, speech or vectors. Matched as
+/// prefixes and whole hyphen-separated words rather than substrings, so a
+/// conversational model whose name merely mentions images is left alone.
+fn is_non_conversational_name(model: &str) -> bool {
+    let model = model.trim().to_ascii_lowercase();
+    const PREFIXES: [&str; 7] = [
+        "gpt-image",
+        "dall-e",
+        "sora",
+        "tts-",
+        "gpt-4o-mini-tts",
+        "whisper",
+        "grok-image",
+    ];
+    if PREFIXES.iter().any(|prefix| model.starts_with(prefix)) {
+        return true;
+    }
+    model
+        .split(['-', '.', '/', ':'])
+        .any(|word| matches!(word, "embedding" | "embeddings" | "moderation" | "rerank"))
 }
 
 fn has_reasoning_ladder(platform: &str, model: &str) -> bool {
@@ -102,6 +156,91 @@ fn has_reasoning_ladder(platform: &str, model: &str) -> bool {
 fn supports_ultracode(model: &str) -> bool {
     let model = model.to_ascii_lowercase();
     model.contains("opus-5") || model.contains("sonnet-5") || model.contains("fable")
+}
+
+/// One wire format, as the picker and the traits menu name it.
+///
+/// Kept in step with `waku_agent_bridge::WireFormat`, which the desktop does
+/// not link — the bridge is the daemon's dependency, not the app's. The
+/// bridge clamps whatever it receives, so a disagreement here costs a
+/// surprising default, never a broken request. `available_for` there is the
+/// same rule as [`native_wire_formats`] below.
+pub(super) struct WireFormatOption {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub description: &'static str,
+}
+
+pub(super) const NATIVE_WIRE_FORMATS: [WireFormatOption; 3] = [
+    WireFormatOption {
+        id: "messages",
+        label: "model_option.wire_messages",
+        description: "model_option.wire_messages_description",
+    },
+    WireFormatOption {
+        id: "responses",
+        label: "model_option.wire_responses",
+        description: "model_option.wire_responses_description",
+    },
+    WireFormatOption {
+        id: "chat",
+        label: "model_option.wire_chat",
+        description: "model_option.wire_chat_description",
+    },
+];
+
+/// Platforms the gateway forwards through its OpenAI stack. Everything else
+/// it serves as Anthropic, which is also the safe way to be wrong about a
+/// platform this build has never heard of.
+fn openai_compatible_platform(platform: &str) -> bool {
+    matches!(
+        platform.trim().to_ascii_lowercase().as_str(),
+        "openai" | "grok" | "kimi" | "zhipu" | "deepseek" | "minimax" | "opencode_go" | "opencodego"
+    )
+}
+
+/// Whether one format can carry one model on one platform.
+///
+/// Both exclusions are facts about code that exists: the gateway has no
+/// Responses translator for Gemini groups, and the engine's Chat client
+/// refuses the models OpenAI serves over Responses. Messages on an OpenAI
+/// group is *not* excluded — whether that group accepts it is a per-group
+/// setting the desktop cannot see, so it stays offered.
+pub(super) fn native_format_supported(format: &str, platform: &str, model: &str) -> bool {
+    let platform = platform.trim().to_ascii_lowercase();
+    let model = model.trim().to_ascii_lowercase();
+    match format {
+        "responses" => platform != "gemini",
+        "chat" => {
+            !(model.starts_with("gpt-5") || model.starts_with("o3") || model.starts_with("o4"))
+        }
+        _ => true,
+    }
+}
+
+/// The formats offered for one model, in listing order. Never empty:
+/// Messages has no exclusions.
+pub(super) fn native_wire_formats(platform: &str, model: &str) -> Vec<&'static WireFormatOption> {
+    NATIVE_WIRE_FORMATS
+        .iter()
+        .filter(|format| native_format_supported(format.id, platform, model))
+        .collect()
+}
+
+/// The route this model's platform is served over, when it can carry the
+/// model; otherwise the first format that can.
+pub(super) fn native_default_wire_format(platform: &str, model: &str) -> &'static str {
+    let native = if openai_compatible_platform(platform) {
+        "responses"
+    } else {
+        "messages"
+    };
+    if native_format_supported(native, platform, model) {
+        return native;
+    }
+    native_wire_formats(platform, model)
+        .first()
+        .map_or("messages", |format| format.id)
 }
 
 fn reasoning_effort_label(effort: &str) -> String {
@@ -192,6 +331,9 @@ mod tests {
         assert_eq!(models[2].sub_provider.as_deref(), Some("gemini"));
     }
 
+    /// The easy half: an operator priced it as pictures. This passed the
+    /// whole time the picker was listing `gpt-image-2`, because the live
+    /// catalog does not mark them — the name-based test below is that shape.
     #[test]
     fn image_products_are_not_offered_to_a_coding_agent() {
         let mut image = item("gpt-image-2", "openai");
@@ -201,10 +343,80 @@ mod tests {
     }
 
     #[test]
-    fn the_format_is_the_pickers_section_not_a_per_model_tier() {
-        let models = native_models_from_catalog(&[item("gpt-5.6-sol", "openai")]);
-        assert!(models[0].service_tiers.is_empty());
-        assert!(models[0].default_service_tier.is_none());
+    fn each_model_carries_the_formats_that_can_carry_it() {
+        let tiers = |model: &ProviderModel| -> Vec<String> {
+            model
+                .service_tiers
+                .iter()
+                .map(|tier| tier.id.clone())
+                .collect()
+        };
+
+        // OpenAI serves gpt-5 over Responses; the engine's Chat client
+        // refuses it outright, so Chat is not offered.
+        let openai = native_models_from_catalog(&[item("gpt-5.6-sol", "openai")]);
+        assert_eq!(tiers(&openai[0]), ["messages", "responses"]);
+        assert_eq!(openai[0].default_service_tier.as_deref(), Some("responses"));
+
+        // The gateway has no Responses translator for Gemini groups.
+        let gemini = native_models_from_catalog(&[item("gemini-3-pro", "gemini")]);
+        assert_eq!(tiers(&gemini[0]), ["messages", "chat"]);
+        assert_eq!(gemini[0].default_service_tier.as_deref(), Some("messages"));
+
+        // Grok is OpenAI-compatible at the gateway, so Responses is its
+        // native route. This is the combination that used to default to
+        // Messages and get hijacked to the engine's own xai provider.
+        let grok = native_models_from_catalog(&[item("grok-4.6", "grok")]);
+        assert_eq!(tiers(&grok[0]), ["messages", "responses", "chat"]);
+        assert_eq!(grok[0].default_service_tier.as_deref(), Some("responses"));
+
+        let claude = native_models_from_catalog(&[item("claude-sonnet-5", "anthropic")]);
+        assert_eq!(claude[0].default_service_tier.as_deref(), Some("messages"));
+    }
+
+    #[test]
+    fn picture_and_speech_products_are_not_offered_to_a_coding_agent() {
+        // The shape the live catalog actually has: the service only marks a
+        // model `image` when an operator priced it that way, so these arrive
+        // billed by the token and have to be recognised by name.
+        for name in [
+            "gpt-image-2",
+            "gpt-image-2.5-flare",
+            "gpt-image-2.5-sunburst",
+            "dall-e-3",
+            "sora-2",
+            "whisper-1",
+            "tts-1-hd",
+            "text-embedding-3-large",
+        ] {
+            assert!(
+                native_models_from_catalog(&[item(name, "openai")]).is_empty(),
+                "{name} should not be offered"
+            );
+        }
+
+        // A conversational model is caught by none of that.
+        for name in ["gpt-5.6-sol", "claude-sonnet-5", "gemini-3-pro"] {
+            assert_eq!(
+                native_models_from_catalog(&[item(name, "openai")]).len(),
+                1,
+                "{name} should be offered"
+            );
+        }
+    }
+
+    #[test]
+    fn a_model_priced_only_per_picture_is_not_offered() {
+        let mut priced = item("some-new-renderer", "openai");
+        priced.effective_pricing_usd.per_image_usd = Some(0.04);
+        assert!(native_models_from_catalog(&[priced]).is_empty());
+    }
+
+    #[test]
+    fn video_billing_is_excluded_too() {
+        let mut video = item("some-video-model", "grok");
+        video.billing_mode = "video".into();
+        assert!(native_models_from_catalog(&[video]).is_empty());
     }
 
     #[test]

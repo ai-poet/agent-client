@@ -1389,6 +1389,11 @@ pub struct StreamAccumulator {
     partials: std::collections::HashMap<usize, PartialBlock>,
     stop_reason: Option<String>,
     usage: UsageInfo,
+    /// Fork departure (Waku): the first `error` event the stream carried.
+    /// A 200 response whose SSE says `error` used to leave no trace at all —
+    /// empty content, no stop reason, reported to the user as a turn that
+    /// finished with nothing to say. The caller decides what to do with it.
+    stream_error: Option<(String, String)>,
 }
 
 #[derive(Debug)]
@@ -1420,7 +1425,19 @@ impl StreamAccumulator {
             partials: Default::default(),
             stop_reason: None,
             usage: UsageInfo::default(),
+            stream_error: None,
         }
+    }
+
+    /// Take the first `error` event this stream carried, as (type, message).
+    pub fn take_stream_error(&mut self) -> Option<(String, String)> {
+        self.stream_error.take()
+    }
+
+    /// Whether anything at all has been accumulated — a completed block or a
+    /// block still being streamed when the stream ended.
+    pub fn has_content(&self) -> bool {
+        !self.content_blocks.is_empty() || !self.partials.is_empty()
     }
 
     /// Feed a stream event. Call this for every event received from the stream.
@@ -1516,7 +1533,16 @@ impl StreamAccumulator {
 
             AnthropicStreamEvent::MessageStop => {}
             AnthropicStreamEvent::Ping => {}
-            AnthropicStreamEvent::Error { .. } => {}
+            AnthropicStreamEvent::Error {
+                error_type,
+                message,
+            } => {
+                // Fork departure (Waku): keep the first one. Later events on a
+                // failed stream are usually noise about the same cause.
+                if self.stream_error.is_none() {
+                    self.stream_error = Some((error_type.clone(), message.clone()));
+                }
+            }
         }
     }
 

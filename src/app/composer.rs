@@ -1131,20 +1131,21 @@ impl Waku {
                 }
 
                 // The built-in agent's tab carries a format bar above the
-                // list — the wire format the session speaks, chosen next to
-                // the model rather than per model. A built-in row takes the
-                // current format with it when chosen, so a session's model
-                // and API are always picked together and read together.
-                let builtin_format =
-                    native_wire_format(selected_tier.as_deref(), selected_model.as_deref());
+                // list. The format belongs to the model — each platform is
+                // served over the route its upstream speaks, and two
+                // combinations do not exist at all — so choosing a model
+                // brings its own format with it, and the bar changes the
+                // format of the model already selected.
                 let native_format = (selected_tab == ModelPickerTab::Provider(ProviderKind::Native)
                     && !searching)
-                    .then(|| builtin_format.clone());
+                    .then(|| {
+                        native_wire_format(selected_tier.as_deref(), selected_model.as_deref())
+                    });
+                let bar_model = selected_model.clone();
                 for (row_index, (kind, model)) in available_models.iter().enumerate() {
                     let kind = *kind;
                     let is_selected =
                         kind == provider && selected_model.as_deref() == Some(model.id.as_str());
-                    let row_format = kind.is_builtin().then(|| builtin_format.clone());
                     let is_highlighted = highlight == Some(row_index);
                     let is_favorite = favorites
                         .iter()
@@ -1254,10 +1255,11 @@ impl Waku {
                             )
                             .on_click(move |_, window, cx| {
                                 let _ = select_weak.update(cx, |this, cx| {
+                                    // The format rides with the model:
+                                    // `choose_model` restores what this model
+                                    // was last used with and reconciles it
+                                    // against what this model can speak.
                                     this.choose_model(kind, model_id.clone(), cx);
-                                    if let Some(format) = row_format.clone() {
-                                        this.set_service_tier(format, cx);
-                                    }
                                 });
                                 select_popover.close(window, cx);
                             }),
@@ -1325,11 +1327,14 @@ impl Waku {
                             .rounded_br(px(12.0))
                             .bg(theme.surface)
                             .child(search_input)
-                            .children(
-                                native_format
-                                    .as_deref()
-                                    .map(|active| native_format_bar(theme, active, weak.clone())),
-                            )
+                            .children(native_format.as_deref().map(|active| {
+                                native_format_bar(
+                                    theme,
+                                    active,
+                                    bar_model.as_deref(),
+                                    weak.clone(),
+                                )
+                            }))
                             .child(
                                 div()
                                     .flex_1()
@@ -1435,6 +1440,12 @@ impl Waku {
         let theme = Theme::current(cx);
         let session = self.selected_session()?;
         let model = self.model_metadata_for_session(session)?;
+        // The built-in agent's tier slot carries the wire format, which is
+        // what this menu is for it: the same list the picker's format bar
+        // draws, reachable from the keyboard. There is no "standard" one —
+        // every format is a named API, and the model's own route is already
+        // marked as the default.
+        let tiers_are_wire_formats = session.provider.is_builtin();
         if model.reasoning_efforts.is_empty()
             && model.service_tiers.is_empty()
             && model.context_windows.is_empty()
@@ -1574,21 +1585,30 @@ impl Waku {
                     if !reasoning_efforts.is_empty() {
                         items.push(MenuItem::Separator);
                     }
-                    items.push(MenuItem::Header(tr!("models.service_tier").into()));
-                    let weak_standard = weak.clone();
-                    items.push(
-                        traits_choice(
-                            theme,
-                            tr!("models.standard"),
-                            default_tier == "default",
-                            selected_tier == "default",
-                        )
-                        .on_click(move |_, cx| {
-                            let _ = weak_standard.update(cx, |this, cx| {
-                                this.set_service_tier("default".to_owned(), cx);
-                            });
-                        }),
-                    );
+                    items.push(MenuItem::Header(
+                        if tiers_are_wire_formats {
+                            tr!("models.wire_format")
+                        } else {
+                            tr!("models.service_tier")
+                        }
+                        .into(),
+                    ));
+                    if !tiers_are_wire_formats {
+                        let weak_standard = weak.clone();
+                        items.push(
+                            traits_choice(
+                                theme,
+                                tr!("models.standard"),
+                                default_tier == "default",
+                                selected_tier == "default",
+                            )
+                            .on_click(move |_, cx| {
+                                let _ = weak_standard.update(cx, |this, cx| {
+                                    this.set_service_tier("default".to_owned(), cx);
+                                });
+                            }),
+                        );
+                    }
                     for option in service_tiers.clone() {
                         let weak = weak.clone();
                         let tier = option.id;
@@ -3965,30 +3985,42 @@ pub(super) fn model_picker_subtitle(provider: ProviderKind, sub_provider: Option
 /// lists them: tier id, label key, short label key. Ids match
 /// `waku_agent_bridge::WireFormat`, which the desktop does not link; the
 /// daemon reads them back from the session's tier.
-const NATIVE_WIRE_FORMATS: [(&str, &str, &str); 3] = [
-    ("messages", "model_option.wire_messages", "model_option.wire_messages_short"),
-    ("responses", "model_option.wire_responses", "model_option.wire_responses_short"),
-    ("chat", "model_option.wire_chat", "model_option.wire_chat_short"),
-];
+/// The short label for one wire format, for the bar's segments.
+fn native_format_short_label(format: &str) -> String {
+    crate::i18n::translate(match format {
+        "responses" => "model_option.wire_responses_short",
+        "chat" => "model_option.wire_chat_short",
+        _ => "model_option.wire_messages_short",
+    })
+}
 
-/// Which format the built-in agent's bar shows as current: the session's
-/// own when it is one of ours, else the selected model's native one —
-/// Responses for OpenAI-platform models, Messages for everything else. The
-/// same rule the daemon applies when no format was chosen.
-pub(super) fn native_wire_format(selected_tier: Option<&str>, selected_model: Option<&str>) -> String {
+/// Split a picker model id into the platform ahead of the `::` and the model
+/// after it. A bare id is Anthropic's, which is what the daemon assumes too.
+fn native_platform_and_model(id: Option<&str>) -> (String, String) {
+    match id.and_then(|id| id.split_once("::")) {
+        Some((platform, model)) => (platform.trim().to_ascii_lowercase(), model.to_owned()),
+        None => ("anthropic".to_owned(), id.unwrap_or_default().to_owned()),
+    }
+}
+
+/// Which format the built-in agent is speaking: the session's own when that
+/// one can carry this model, else the model's native route. The same rule
+/// `waku_agent_bridge::WireFormat::resolve` applies before the request goes
+/// out, so what the bar shows is what is sent.
+pub(super) fn native_wire_format(
+    selected_tier: Option<&str>,
+    selected_model: Option<&str>,
+) -> String {
+    let (platform, model) = native_platform_and_model(selected_model);
     if let Some(tier) = selected_tier
-        && NATIVE_WIRE_FORMATS.iter().any(|(id, _, _)| *id == tier)
+        && super::native_agent::native_format_supported(tier, &platform, &model)
+        && super::native_agent::NATIVE_WIRE_FORMATS
+            .iter()
+            .any(|format| format.id == tier)
     {
         return tier.to_owned();
     }
-    let platform = selected_model
-        .and_then(|id| id.split_once("::"))
-        .map(|(platform, _)| platform.trim().to_ascii_lowercase());
-    if platform.as_deref() == Some("openai") {
-        "responses".to_owned()
-    } else {
-        "messages".to_owned()
-    }
+    super::native_agent::native_default_wire_format(&platform, &model).to_owned()
 }
 
 /// The bar above the built-in agent's model list: the brand the models come
@@ -3996,7 +4028,18 @@ pub(super) fn native_wire_format(selected_tier: Option<&str>, selected_model: Op
 /// filled. It sits outside the scrolling list on purpose — a header inside
 /// the list was scrolled out of view by the reveal of the selected model,
 /// and a chip drawn in `overlay` on a `raised` panel had no contrast.
-fn native_format_bar(theme: Theme, active: &str, weak: gpui::WeakEntity<Waku>) -> Div {
+///
+/// A format the current model cannot be carried over stays in place, dimmed
+/// and inert, with a tooltip saying so. Removing it would leave the user
+/// wondering where it went and make the bar's width jump between models.
+/// The current one is marked by fill *and* weight, never colour alone.
+fn native_format_bar(
+    theme: Theme,
+    active: &str,
+    selected_model: Option<&str>,
+    weak: gpui::WeakEntity<Waku>,
+) -> Div {
+    let (platform, model) = native_platform_and_model(selected_model);
     let mut bar = div()
         .h(px(32.0))
         .px(px(12.0))
@@ -4019,15 +4062,17 @@ fn native_format_bar(theme: Theme, active: &str, weak: gpui::WeakEntity<Waku>) -
                 .text_color(theme.text_secondary)
                 .child(sub2api::brand::DISPLAY_NAME),
         );
-    for (format, label, short) in NATIVE_WIRE_FORMATS {
-        let selected = format == active;
+    for option in super::native_agent::NATIVE_WIRE_FORMATS.iter() {
+        let format = option.id;
+        let name = crate::i18n::translate(option.label);
+        let available = super::native_agent::native_format_supported(format, &platform, &model);
+        let selected = available && format == active;
         let weak = weak.clone();
-        let description_key = format!("{label}_description");
-        let tooltip = format!(
-            "{} · {}",
-            crate::i18n::translate(label),
-            crate::i18n::translate(description_key.as_str())
-        );
+        let tooltip = if available {
+            format!("{name} · {}", crate::i18n::translate(option.description))
+        } else {
+            tr!("model_option.wire_unavailable", name = name.clone())
+        };
         bar = bar.child(
             div()
                 .id(SharedString::from(format!("model-format-{format}")))
@@ -4045,11 +4090,13 @@ fn native_format_bar(theme: Theme, active: &str, weak: gpui::WeakEntity<Waku>) -
                 })
                 .text_color(if selected {
                     theme.text
-                } else {
+                } else if available {
                     theme.text_secondary
+                } else {
+                    theme.text_ghost
                 })
                 .when(selected, |element| element.bg(theme.overlay_strong))
-                .when(!selected, |element| {
+                .when(available && !selected, |element| {
                     element
                         .hover(|element| element.bg(theme.overlay))
                         .on_click(move |_, _, cx| {
@@ -4058,8 +4105,11 @@ fn native_format_bar(theme: Theme, active: &str, weak: gpui::WeakEntity<Waku>) -
                             });
                         })
                 })
+                // Same treatment the rail gives a provider it cannot open:
+                // dimmed, inert, and explained by its tooltip.
+                .when(!available, |element| element.opacity(0.45))
                 .tooltip(Tooltip::text(tooltip))
-                .child(SharedString::from(crate::i18n::translate(short))),
+                .child(SharedString::from(native_format_short_label(format))),
         );
     }
     bar

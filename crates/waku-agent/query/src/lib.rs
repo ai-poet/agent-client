@@ -790,13 +790,21 @@ pub async fn run_query_loop(
         // format and the registry has that provider, use it directly.
         //
         // Provider resolution priority:
-        //   1. Explicit "provider/model" format in the model string
-        //   2. config.provider setting (from --provider flag or settings.json)
+        //   1. config.provider setting (from --provider flag or settings.json)
+        //   2. Explicit "provider/model" format in the model string
         //   3. Model registry lookup (e.g. "gemini-3-flash-preview" → google)
         //   4. Default to "anthropic"
+        //
+        // Fork departure (Waku): `anthropic` used to be filtered out of step 1,
+        // which handed every session on the Anthropic route to the family table
+        // below — `grok-*` to xai, `gemini-*` to google, neither of which the
+        // product configures. Waku picks the route itself (one gateway, three
+        // wire formats) and writes it to `config.provider`, so an explicit
+        // provider is the answer, not a hint. Left as-is when unset, which is
+        // every CLI user.
         if let Some(ref registry) = config.provider_registry {
-            let (provider_id_str, model_id_str) = if let Some(p) = tool_ctx.config.provider.as_deref().filter(|p| *p != "anthropic") {
-                // Explicit non-Anthropic provider in config — use it.
+            let (provider_id_str, model_id_str) = if let Some(p) = tool_ctx.config.provider.as_deref() {
+                // Explicit provider in config — use it.
                 // If the stored model is in canonical "provider/model" form,
                 // strip the top-level provider prefix before sending it to the
                 // provider adapter. If it contains an additional slash
@@ -1450,6 +1458,23 @@ pub async fn run_query_loop(
             }
             turn -= 1; // don't count this stalled attempt
             continue;
+        }
+
+        // Fork departure (Waku): an `error` event mid-stream ends the turn as
+        // an error. It used to be logged and dropped, so an upstream failure
+        // behind a 200 became an empty assistant message and a turn that
+        // claimed to have ended normally. The non-Anthropic branch above has
+        // had its own guard against exactly this since "agent randomly stops".
+        if let Some((error_type, message)) = accumulator.take_stream_error() {
+            if accumulator.has_content() {
+                // Content did arrive before the error; keep it and let the
+                // normal path finish the turn rather than discarding an answer
+                // the user can see is there.
+                warn!(%error_type, %message, "Stream error after partial content");
+            } else {
+                error!(%error_type, %message, "Stream error ended the turn");
+                return QueryOutcome::Error(ClaudeError::Api(format!("{error_type}: {message}")));
+            }
         }
 
         let (mut assistant_msg, usage, stop_reason) = accumulator.finish();

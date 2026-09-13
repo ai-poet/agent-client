@@ -2147,30 +2147,53 @@ fn model_picker_subtitle_brands_the_built_in_agent() {
 }
 
 #[test]
-fn the_built_in_agents_format_follows_the_session_then_the_models_platform() {
+fn the_built_in_agents_format_follows_the_model_it_has_to_carry() {
     use super::composer::native_wire_format;
 
-    // The session's own format wins whenever it is one of ours.
+    // The session's own format wins whenever this model can be carried
+    // over it.
     assert_eq!(
         native_wire_format(Some("chat"), Some("anthropic::claude-sonnet-5")),
         "chat"
     );
-    // Otherwise the model's native one: Responses for the OpenAI platform,
-    // Messages for everything else, a bare id included.
+    // Otherwise the route the model's platform is served over: Responses for
+    // the gateway's OpenAI-compatible platforms, Messages for the rest — a
+    // bare id, which is Anthropic's, included.
     assert_eq!(
         native_wire_format(None, Some("openai::gpt-5.6-sol")),
         "responses"
     );
+    assert_eq!(native_wire_format(None, Some("grok::grok-4.6")), "responses");
     assert_eq!(
         native_wire_format(None, Some("anthropic::claude-sonnet-5")),
         "messages"
     );
+    assert_eq!(native_wire_format(None, Some("gemini::gemini-3-pro")), "messages");
     assert_eq!(native_wire_format(None, Some("claude-sonnet-5")), "messages");
     assert_eq!(native_wire_format(None, None), "messages");
     // A tier that is not a format (an inherited "default", say) is ignored.
     assert_eq!(
         native_wire_format(Some("default"), Some("openai::gpt-5.6-sol")),
         "responses"
+    );
+    // A format this model cannot be carried over is replaced rather than
+    // kept: the gateway has no Responses translator for Gemini groups, and
+    // the engine's Chat client refuses the models OpenAI serves over
+    // Responses. Both used to be offered, and both failed on the wire.
+    assert_eq!(
+        native_wire_format(Some("responses"), Some("gemini::gemini-3-pro")),
+        "messages"
+    );
+    assert_eq!(
+        native_wire_format(Some("chat"), Some("openai::gpt-5.6-sol")),
+        "responses"
+    );
+    // Grok over Messages is a real combination, so a user who picked it keeps
+    // it. This is the one that used to be the *default* and get hijacked to
+    // the engine's own xai provider.
+    assert_eq!(
+        native_wire_format(Some("messages"), Some("grok::grok-4.6")),
+        "messages"
     );
 }
 

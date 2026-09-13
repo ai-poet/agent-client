@@ -132,9 +132,64 @@ pub fn visible_text(message: &Message) -> String {
     }
 }
 
+/// Whether the messages appended from `start` onwards contain anything the
+/// user would recognise as an answer: assistant text, or reasoning.
+///
+/// A turn that ends cleanly and adds none of that has failed at something,
+/// however cheerful its stop reason. Tool calls alone do not count — a turn
+/// that only ran tools and then stopped left the user with nothing either.
+pub fn produced_visible_output(messages: &[Message], start: usize) -> bool {
+    messages
+        .iter()
+        .skip(start)
+        .filter(|message| message.role == Role::Assistant)
+        .any(|message| {
+            !visible_text(message).is_empty()
+                || match &message.content {
+                    MessageContent::Blocks(blocks) => blocks
+                        .iter()
+                        .any(|block| matches!(block, ContentBlock::Thinking { .. })),
+                    MessageContent::Text(_) => false,
+                }
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_turn_that_only_ran_tools_counts_as_having_said_nothing() {
+        // The shape a swallowed upstream failure takes, and the shape of a
+        // turn that stopped mid-work: neither left the user an answer.
+        let messages = vec![Message::user("go"), tool_use("call-1"), tool_result("call-1")];
+        assert!(!produced_visible_output(&messages, 1));
+    }
+
+    #[test]
+    fn assistant_text_and_reasoning_both_count() {
+        let text = vec![Message::user("go"), Message::assistant("here you go")];
+        assert!(produced_visible_output(&text, 1));
+
+        let thinking = vec![
+            Message::user("go"),
+            Message::assistant_blocks(vec![ContentBlock::Thinking {
+                thinking: "hmm".into(),
+                signature: String::new(),
+            }]),
+        ];
+        assert!(produced_visible_output(&thinking, 1));
+    }
+
+    #[test]
+    fn only_this_turns_messages_are_looked_at() {
+        let messages = vec![
+            Message::assistant("an answer from the turn before"),
+            Message::user("go"),
+            tool_use("call-1"),
+        ];
+        assert!(!produced_visible_output(&messages, 2));
+    }
 
     fn tool_use(id: &str) -> Message {
         Message::assistant_blocks(vec![ContentBlock::ToolUse {

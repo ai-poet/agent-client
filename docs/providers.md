@@ -893,7 +893,7 @@ off there is filtered out of the session's tool set before the model ever
 sees it.
 
 **Models and wire formats** — the picker's list is the gateway catalog the
-Model Plaza fetches, every token-billed model on every platform
+Model Plaza fetches, every conversational model on every platform
 (`src/app/native_agent.rs`); it falls back to the built-in Anthropic list
 until that lands, and again when signed out. No CLI is asked: the provider
 is excluded from `supports_model_discovery`, the catalog is fetched at
@@ -904,25 +904,68 @@ daemon's fallback never replaces it. Each entry's id carries its platform
 (`openai::gpt-5.6-sol`), which is how the daemon picks the account key that
 authorizes it — the routing writer files every gateway key by platform under
 the engine's anthropic provider entry, and `select_route` in the bridge picks
-the one for the session's platform.
+the one for the session's platform. Picture, video, speech and embedding
+products are filtered out: the catalog has no modality field, so
+`is_chat_model` reads the billing mode, then the pricing shape, then the
+model's name — the same name test the gateway itself uses, because a
+picture model billed by the token is indistinguishable from a chat model
+by every other signal.
 
 The **wire format** — Anthropic Messages, OpenAI Responses, or OpenAI Chat
-Completions — is chosen in the picker itself: the built-in agent's tab has
-a fixed bar above its list (the brand chip, then one segment per format
-with the current one filled; `native_format_bar` in `composer.rs`), and
-choosing a model writes the current format into the session's tier slot
-(`native_wire_format` decides which segment is current: the session's own
-format, else the model's native one — Responses for OpenAI-platform
-models, Messages otherwise; the daemon applies the same default when no
-tier was chosen). The bar sits outside the scrolling list so it reads at
-any scroll position. The gateway translates each format for every
-platform, so this is the user's choice rather than the model's. Rows carry
-the product brand and the platform as their subtitle. Each format is a different engine adapter —
+Completions — belongs to the model, not to the session. The gateway serves
+all three endpoints but routes each by the key's group platform, and what
+waits on the other side differs, so a model carries the formats that can
+carry *it*:
+
+| platform | route | not available |
+|---|---|---|
+| `openai` `grok` `kimi` `zhipu` `deepseek` `minimax` `opencode_go` | Responses | Chat, for `gpt-5*` / `o3*` / `o4*` |
+| `anthropic` `antigravity` `composite` and anything unknown | Messages | — |
+| `gemini` | Messages | Responses — the gateway has no translator, and would forward an Anthropic body to a Gemini upstream |
+
+Messages on an OpenAI group is deliberately still offered: whether that
+group accepts it is its own `allow_messages_dispatch` setting, which the
+desktop cannot read, so it answers with the gateway's 403 rather than being
+hidden on a guess.
+
+Three places hold that rule and they must agree.
+`native_wire_formats` / `native_default_wire_format` in `native_agent.rs`
+fill each model's "service tier" slot, which is what the composer's traits
+menu lists. `native_format_bar` in `composer.rs` draws the same set above
+the picker's list — outside the scrolling container, so it reads at any
+scroll position — with unavailable formats dimmed in place and a tooltip
+saying why. And `WireFormat::resolve` in the bridge clamps whatever
+arrives before a request is built, so a session persisted before a rule
+existed heals instead of failing on the wire. Choosing a model brings its
+own format with it (`choose_model` in `sessions.rs`): what that model was
+last used with when that still works, its own route otherwise.
+
+Rows carry the product brand and the platform as their subtitle. Each format is a different engine adapter —
 `anthropic`, `codex`, `openai` — pointed at the gateway origin; switching
 format or platform rebuilds the session's clients, a plain model switch does
 not. The Responses adapter upstream only knew the ChatGPT backend; the fork
 gives it an endpoint and a bearer key (`CodexProvider::with_gateway`), one of
 the recorded departures in the vendored tree.
+
+A second departure keeps the chosen format from being overruled. The
+engine's query loop only honoured `config.provider` when it was *not*
+`anthropic`, falling through to a hard-coded family table otherwise —
+`grok-*` to xai, `gemini-*` to google, neither of which this product
+configures — so every session on the Messages route was re-routed by model
+name to a provider with no key. Waku picks the route itself, so an explicit
+provider is now the answer rather than a hint.
+
+**When a turn says nothing** — a 200 response whose SSE carries an `error`
+event used to leave no trace: the accumulator ignored it, the loop logged it,
+and the turn ended as a clean `end_turn` with empty content, which the
+desktop rendered as "turn completed". Three layers now close that. The
+engine's accumulator keeps the first stream error and the loop ends the turn
+with it (a third departure, matching what the non-Anthropic branch already
+did). The bridge checks whether the turn added any assistant text at all and
+reports a clean-but-empty turn as a failure. And `AgentEvent::ProducedNothing`
+carries the provider, model and endpoint so the driver can say it in the
+user's language (`native.empty_turn`) rather than shipping an English
+sentence.
 
 **Deletion** — removing a session sends `DeleteAgentTranscript` for the
 cursor's file, alongside the checkpoint-ref cleanup every provider gets.

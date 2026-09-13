@@ -15,8 +15,11 @@ use claurst_query::QueryConfig;
 
 use crate::events::PermissionChoice;
 
-/// Which API a session speaks. The gateway translates every one of them for
-/// every platform, so this is the user's choice, not the model's.
+/// Which API a session speaks.
+///
+/// Not a free choice: the gateway serves all three endpoints but routes each
+/// by the key's group platform, and what waits on the other side differs.
+/// [`WireFormat::supported_for`] is where that is written down.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WireFormat {
     /// Anthropic Messages — the engine's primary path.
@@ -52,16 +55,109 @@ impl WireFormat {
         }
     }
 
-    /// What a platform speaks natively. OpenAI-keyed groups are Codex
-    /// groups, whose native route is Responses; everything else defaults to
-    /// the engine's primary path, which the gateway serves for every
-    /// platform.
+    /// The route a platform is served over natively.
+    ///
+    /// The gateway splits platforms in two: the OpenAI-compatible ones reach
+    /// their upstream through the Responses API, everything else through
+    /// Anthropic Messages. Picking the native one means no translation in
+    /// the middle, which is both faster and the path least likely to differ
+    /// from what the upstream actually supports.
     pub fn default_for_platform(platform: Option<&str>) -> Self {
-        match platform.map(|platform| platform.trim().to_ascii_lowercase()) {
-            Some(platform) if platform == "openai" => Self::Responses,
-            _ => Self::Messages,
+        if openai_compatible_platform(platform) {
+            Self::Responses
+        } else {
+            Self::Messages
         }
     }
+
+    /// Whether this format can carry `model` on `platform` at all.
+    ///
+    /// Two things rule a combination out, and both are facts about code that
+    /// exists rather than guesses:
+    ///
+    /// - The gateway has no Responses translator for Gemini groups. A
+    ///   Responses request from one is forwarded as Anthropic Messages to a
+    ///   Gemini upstream, which is not a thing that can work.
+    /// - The engine's own Chat Completions client refuses `gpt-5*`, `o3*`
+    ///   and `o4*`, which is most of what an OpenAI group offers.
+    ///
+    /// Messages on an OpenAI group is deliberately *not* excluded: it
+    /// depends on a per-group setting this side cannot see, so it stays
+    /// offered and answers with the gateway's own 403 when it is off.
+    pub fn supported_for(self, platform: Option<&str>, model: &str) -> bool {
+        let platform = normalized_platform(platform);
+        match self {
+            Self::Responses => platform.as_deref() != Some("gemini"),
+            Self::Chat => !model_needs_responses_api(model),
+            Self::Messages => true,
+        }
+    }
+
+    /// The formats that can carry `model` on `platform`, in listing order.
+    pub fn available_for(platform: Option<&str>, model: &str) -> Vec<Self> {
+        Self::ALL
+            .into_iter()
+            .filter(|format| format.supported_for(platform, model))
+            .collect()
+    }
+
+    /// The format a session should speak: the one asked for when it can
+    /// carry this model, otherwise the platform's native one, otherwise
+    /// whatever is left. Never returns a combination that cannot work.
+    pub fn resolve(
+        requested: Option<Self>,
+        platform: Option<&str>,
+        model: &str,
+    ) -> Self {
+        if let Some(format) = requested
+            && format.supported_for(platform, model)
+        {
+            return format;
+        }
+        let native = Self::default_for_platform(platform);
+        if native.supported_for(platform, model) {
+            return native;
+        }
+        Self::ALL
+            .into_iter()
+            .find(|format| format.supported_for(platform, model))
+            // Messages is unconditional above, so this is unreachable; it
+            // costs one line to not have to prove that at every call site.
+            .unwrap_or(Self::Messages)
+    }
+}
+
+/// Platforms the gateway forwards through its OpenAI stack rather than its
+/// Anthropic one. Mirrors `isOpenAIResponsesCompatibleGatewayPlatform` in the
+/// service's `routes/gateway.go`; a platform missing here is served as
+/// Anthropic, which is the safe way to be wrong about a new one.
+fn openai_compatible_platform(platform: Option<&str>) -> bool {
+    matches!(
+        normalized_platform(platform).as_deref(),
+        Some(
+            "openai"
+                | "grok"
+                | "kimi"
+                | "zhipu"
+                | "deepseek"
+                | "minimax"
+                | "opencode_go"
+                | "opencodego"
+        )
+    )
+}
+
+fn normalized_platform(platform: Option<&str>) -> Option<String> {
+    platform
+        .map(|platform| platform.trim().to_ascii_lowercase())
+        .filter(|platform| !platform.is_empty())
+}
+
+/// Models the engine's Chat Completions client refuses outright, because
+/// OpenAI serves them over Responses. Mirrors `OpenAiProvider::use_responses_api`.
+fn model_needs_responses_api(model: &str) -> bool {
+    let model = model.trim().to_ascii_lowercase();
+    model.starts_with("gpt-5") || model.starts_with("o3") || model.starts_with("o4")
 }
 
 /// The model id the picker sends carries the platform ahead of a `::`, so a
@@ -158,9 +254,18 @@ impl Default for AgentStartOptions {
 }
 
 impl AgentStartOptions {
+    /// The format this session actually speaks.
+    ///
+    /// Clamped, not merely defaulted: a session persisted before a rule
+    /// existed, or restored from a client that lets the user pick freely,
+    /// must not be able to hold a combination the gateway cannot serve. It
+    /// heals here rather than failing on the wire.
     pub fn wire_format(&self) -> WireFormat {
-        self.wire_format
-            .unwrap_or_else(|| WireFormat::default_for_platform(self.platform.as_deref()))
+        WireFormat::resolve(
+            self.wire_format,
+            self.platform.as_deref(),
+            self.model.as_deref().unwrap_or_default(),
+        )
     }
 }
 
@@ -343,6 +448,12 @@ pub(crate) fn missing_route_key(
 pub fn build_query_config(config: &Config, options: &AgentStartOptions) -> QueryConfig {
     let mut query = QueryConfig::from_config(config);
     query.working_directory = Some(options.cwd.display().to_string());
+    // `QueryConfig::from_config` copies neither of these, so the Agent
+    // settings page wrote house rules into a file nothing read. The engine
+    // has always known what to do with them once they arrive
+    // (`claurst_query::runner::prompt`).
+    query.system_prompt = config.custom_system_prompt.clone();
+    query.append_system_prompt = config.append_system_prompt.clone();
     if let Some(model) = &options.model {
         query.model = model.clone();
     }
@@ -498,6 +609,107 @@ mod tests {
                 key.is_some_and(|key| !key.is_empty())
             );
         }
+    }
+
+    #[test]
+    fn a_platform_is_served_over_the_route_its_upstream_speaks() {
+        for platform in [
+            "openai",
+            "grok",
+            "kimi",
+            "zhipu",
+            "deepseek",
+            "minimax",
+            "opencode_go",
+        ] {
+            assert_eq!(
+                WireFormat::default_for_platform(Some(platform)),
+                WireFormat::Responses,
+                "{platform}"
+            );
+        }
+        for platform in ["anthropic", "gemini", "antigravity", "composite"] {
+            assert_eq!(
+                WireFormat::default_for_platform(Some(platform)),
+                WireFormat::Messages,
+                "{platform}"
+            );
+        }
+        // Unknown platforms are served as Anthropic, the conservative half.
+        assert_eq!(
+            WireFormat::default_for_platform(Some("something-new")),
+            WireFormat::Messages
+        );
+        assert_eq!(WireFormat::default_for_platform(None), WireFormat::Messages);
+    }
+
+    #[test]
+    fn gemini_has_no_responses_translator_and_gpt_5_has_no_chat_client() {
+        assert!(!WireFormat::Responses.supported_for(Some("gemini"), "gemini-3-pro"));
+        assert!(WireFormat::Messages.supported_for(Some("gemini"), "gemini-3-pro"));
+        assert!(WireFormat::Chat.supported_for(Some("gemini"), "gemini-3-pro"));
+
+        for model in ["gpt-5.6-sol", "o3-mini", "o4-mini"] {
+            assert!(!WireFormat::Chat.supported_for(Some("openai"), model), "{model}");
+            assert!(WireFormat::Responses.supported_for(Some("openai"), model), "{model}");
+        }
+        // Older OpenAI models still have a Chat client.
+        assert!(WireFormat::Chat.supported_for(Some("openai"), "gpt-4o"));
+
+        // Messages is never ruled out here: whether an OpenAI group accepts it
+        // is a per-group setting this side cannot read.
+        assert!(WireFormat::Messages.supported_for(Some("openai"), "gpt-5.6-sol"));
+    }
+
+    #[test]
+    fn a_route_that_cannot_work_is_replaced_rather_than_sent() {
+        // A session that had picked Responses before gemini models existed.
+        assert_eq!(
+            WireFormat::resolve(Some(WireFormat::Responses), Some("gemini"), "gemini-3-pro"),
+            WireFormat::Messages
+        );
+        // Chat on a model whose only route is Responses.
+        assert_eq!(
+            WireFormat::resolve(Some(WireFormat::Chat), Some("openai"), "gpt-5.6-sol"),
+            WireFormat::Responses
+        );
+        // A workable choice is always kept, native or not.
+        assert_eq!(
+            WireFormat::resolve(Some(WireFormat::Messages), Some("grok"), "grok-4.6"),
+            WireFormat::Messages
+        );
+        // Nothing chosen falls to the platform's own route.
+        assert_eq!(
+            WireFormat::resolve(None, Some("grok"), "grok-4.6"),
+            WireFormat::Responses
+        );
+    }
+
+    #[test]
+    fn the_offered_formats_are_the_ones_that_can_carry_the_model() {
+        assert_eq!(
+            WireFormat::available_for(Some("gemini"), "gemini-3-pro"),
+            vec![WireFormat::Messages, WireFormat::Chat]
+        );
+        assert_eq!(
+            WireFormat::available_for(Some("openai"), "gpt-5.6-sol"),
+            vec![WireFormat::Messages, WireFormat::Responses]
+        );
+        assert_eq!(
+            WireFormat::available_for(Some("anthropic"), "claude-sonnet-5"),
+            vec![WireFormat::Messages, WireFormat::Responses, WireFormat::Chat]
+        );
+    }
+
+    #[test]
+    fn a_stale_session_option_is_clamped_before_it_reaches_the_wire() {
+        let options = AgentStartOptions {
+            platform: Some("gemini".into()),
+            model: Some("gemini-3-pro".into()),
+            wire_format: Some(WireFormat::Responses),
+            ..AgentStartOptions::default()
+        };
+        assert_eq!(options.wire_format(), WireFormat::Messages);
     }
 
     #[test]

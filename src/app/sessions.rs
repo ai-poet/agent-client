@@ -944,8 +944,20 @@ impl Waku {
         };
 
         self.remember_selected_model_traits();
-        let (reasoning_effort, service_tier, context_window) =
+        let (reasoning_effort, mut service_tier, context_window) =
             self.state.model_traits_for(provider, &model);
+        // The built-in agent's "service tier" is the wire format, and which
+        // formats exist depends on the model: the gateway serves each
+        // platform over the route its upstream speaks, and two combinations
+        // do not exist at all. So the format follows the model rather than
+        // staying put — what this model was last used with when that still
+        // works, its own route otherwise.
+        if provider.is_builtin() {
+            service_tier = Some(super::composer::native_wire_format(
+                service_tier.as_deref(),
+                Some(model.as_str()),
+            ));
+        }
         if let Some(session) = self.selected_session_mut() {
             session.provider = provider;
             session.model = Some(model.clone());
