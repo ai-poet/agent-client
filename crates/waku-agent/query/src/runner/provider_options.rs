@@ -49,6 +49,13 @@ pub(crate) fn is_openai_reasoning_model(model_id: &str) -> bool {
         || model_id.starts_with("o1")
         || model_id.starts_with("o3")
         || model_id.starts_with("o4")
+        // Fork departure (Waku): Grok reasons over the Responses API too, and
+        // leaving it out of this list was the whole reason its effort picker
+        // did nothing — the options object came back empty and the adapter
+        // wrote no `reasoning` field at all. The gateway normalizes the value
+        // per model and drops it for the ones that cannot use it, so naming
+        // the family here is safe.
+        || model_id.starts_with("grok")
 }
 
 pub(crate) fn is_openaiish_provider(provider_id: &str) -> bool {
@@ -213,7 +220,12 @@ pub(crate) fn build_provider_options(
         // request an auto reasoning summary and carry encrypted reasoning state
         // across stateless turns. Scoped to Codex so other OpenAI-compatible
         // providers that ignore these fields are unaffected.
-        if matches!(provider_id, "codex" | "openai-codex") {
+        //
+        // Fork departure (Waku): and scoped away from Grok, which reaches the
+        // same adapter now. These two are gpt-5 Codex's own; xAI rejects
+        // encrypted reasoning, and there is no reason to make the gateway
+        // strip and retry what we could simply not send.
+        if matches!(provider_id, "codex" | "openai-codex") && !model_id.starts_with("grok") {
             options.insert("reasoningSummary".to_string(), serde_json::json!("auto"));
             options.insert(
                 "include".to_string(),

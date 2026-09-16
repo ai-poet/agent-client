@@ -41,6 +41,20 @@ impl AppLanguage {
         }
     }
 
+    /// The language's name *in English*, for instructing a model.
+    ///
+    /// [`Self::label`] is an autonym, which is right for a menu and wrong
+    /// here: an instruction naming the target language is read best when the
+    /// instruction and the name are in the same language.
+    pub fn english_name(self) -> &'static str {
+        match self.resolved() {
+            Self::System => unreachable!("system language always resolves to a shipped locale"),
+            Self::English => "English",
+            Self::SimplifiedChinese => "Simplified Chinese",
+            Self::Japanese => "Japanese",
+        }
+    }
+
     pub fn resolved(self) -> Self {
         match self {
             Self::System => Self::from_system(),
@@ -52,7 +66,7 @@ impl AppLanguage {
         Self::from_locale_id(&system_locale())
     }
 
-    fn from_locale_id(locale: &str) -> Self {
+    pub fn from_locale_id(locale: &str) -> Self {
         let locale = locale.replace('_', "-").to_ascii_lowercase();
         if locale == "zh-cn" || locale == "zh-sg" || locale.starts_with("zh-hans") {
             Self::SimplifiedChinese
@@ -76,6 +90,17 @@ pub fn set_language(language: AppLanguage) {
 
 pub fn translate(key: &str) -> String {
     rust_i18n::t!(key).into_owned()
+}
+
+/// Which language this process is currently rendering in.
+///
+/// `rust_i18n`'s locale is one process-wide value, so this is meaningful
+/// only after someone has called [`set_language`]. The desktop does that at
+/// start-up and on every change; the daemon learns it from the settings the
+/// desktop pushes, and until then answers English — which is also what it
+/// renders, so the two never disagree.
+pub fn current_language() -> AppLanguage {
+    AppLanguage::from_locale_id(&rust_i18n::locale())
 }
 
 pub fn uses_east_asian_date_format() -> bool {

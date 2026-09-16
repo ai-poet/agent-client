@@ -82,6 +82,7 @@ impl NativeDriver {
             platform,
             wire_format: wire_format_of(options.service_tier.as_deref()),
             reasoning_effort: options.reasoning_effort.clone(),
+            narration_language: narration_language(),
             history,
         };
 
@@ -224,6 +225,17 @@ fn route_of(model: Option<&str>) -> (Option<String>, Option<String>) {
 /// agent. An unknown or absent tier means the platform's native format.
 fn wire_format_of(tier: Option<&str>) -> Option<WireFormat> {
     tier.and_then(WireFormat::from_id)
+}
+
+/// The language to tell the agent to narrate in, or `None` when that is
+/// English and the instruction would be a line of prompt saying nothing.
+///
+/// Read from this process's locale, which the desktop pushes down with the
+/// rest of its settings (`DaemonSettings::LOCALE_KEY`).
+fn narration_language() -> Option<String> {
+    let language = crate::i18n::current_language();
+    (language.resolved() != crate::i18n::AppLanguage::English)
+        .then(|| language.english_name().to_owned())
 }
 
 fn access_mode(mode: RuntimeMode) -> AccessMode {

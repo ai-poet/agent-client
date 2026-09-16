@@ -23,15 +23,38 @@ use crate::global_config::atomic_write_private;
 /// Key the legacy daemon-settings transport used; read once for migration.
 pub const LEGACY_SETTINGS_KEY: &str = "sub2apiCustomApi";
 
-/// The CLIs a custom endpoint can be set for, in display order — the
-/// intersection of what this app runs and what cc-switch manages.
-/// Providers whose routing the user can point somewhere else.
+/// Everything a custom endpoint can be set for, in display order.
 ///
-/// `native` is the built-in agent. It is the only entry that is not a CLI -
-/// nothing is written to a config file on its behalf; the driver reads the
-/// endpoint directly at session start.
-pub const CUSTOM_API_PROVIDERS: [&str; 6] =
-    ["native", "claude", "codex", "grok", "opencode", "pi"];
+/// The first three are the built-in agent, which is not a CLI: it speaks
+/// three APIs and each one is reached separately, so it holds three
+/// endpoints rather than one. The rest are CLIs, one endpoint each, written
+/// into that CLI's own configuration file.
+pub const CUSTOM_API_PROVIDERS: [&str; 8] = [
+    "native_messages",
+    "native_responses",
+    "native_chat",
+    "claude",
+    "codex",
+    "grok",
+    "opencode",
+    "pi",
+];
+
+/// The built-in agent's three endpoints, in the order the picker lists the
+/// APIs they serve. Each maps to one entry in the engine's own settings:
+/// `anthropic`, `codex`, `openai` respectively.
+pub const NATIVE_SLOTS: [&str; 3] = ["native_messages", "native_responses", "native_chat"];
+
+/// The single built-in-agent endpoint earlier builds kept, before it was
+/// split in three. Read once, copied into the three, and then left empty —
+/// see [`CustomApiConfig::normalize`].
+pub const LEGACY_NATIVE_PROVIDER: &str = "native";
+
+/// Whether an endpoint speaks Anthropic's wire format, which decides how its
+/// connectivity test is shaped and what the form's protocol hint says.
+pub fn uses_anthropic_shape(provider_id: &str) -> bool {
+    matches!(provider_id, "claude" | "native_messages")
+}
 
 /// One CLI's endpoint override.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -307,9 +330,24 @@ where
 /// profiles and the one in use.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CustomApiConfig {
-    /// The built-in agent. Listed first because it is the default provider,
-    /// and the only one whose endpoint is read at session start rather than
-    /// written into some CLI's own configuration file.
+    /// The built-in agent over Anthropic Messages — the engine's
+    /// `anthropic` provider entry.
+    #[serde(default, deserialize_with = "deserialize_slot")]
+    pub native_messages: ProviderProfiles,
+    /// The built-in agent over OpenAI Responses — the engine's `codex`
+    /// provider entry.
+    #[serde(default, deserialize_with = "deserialize_slot")]
+    pub native_responses: ProviderProfiles,
+    /// The built-in agent over OpenAI Chat Completions — the engine's
+    /// `openai` provider entry. The only one that carries a model list:
+    /// nothing discovers what sits behind somebody else's endpoint.
+    #[serde(default, deserialize_with = "deserialize_slot")]
+    pub native_chat: ProviderProfiles,
+    /// The built-in agent's single endpoint, as earlier builds stored it.
+    /// Kept so those files still load; emptied into the three above on the
+    /// first read. A build that predates the split ignores the three new
+    /// keys and finds this one empty, which loses the custom route but
+    /// cannot corrupt anything.
     #[serde(default, deserialize_with = "deserialize_slot")]
     pub native: ProviderProfiles,
     #[serde(default, deserialize_with = "deserialize_slot")]
@@ -326,14 +364,55 @@ pub struct CustomApiConfig {
 
 impl CustomApiConfig {
     pub fn is_empty(&self) -> bool {
-        CUSTOM_API_PROVIDERS
-            .into_iter()
-            .all(|provider| self.get(provider).is_none())
+        // The legacy slot counts: a file holding only that one is not empty,
+        // it is un-migrated, and calling it empty would throw the user's
+        // endpoint away.
+        self.get(LEGACY_NATIVE_PROVIDER).is_none()
+            && CUSTOM_API_PROVIDERS
+                .into_iter()
+                .all(|provider| self.get(provider).is_none())
+    }
+
+    /// Bring a stored document up to the current shape.
+    ///
+    /// Today that means splitting the built-in agent's old single endpoint
+    /// into the three it now has. That is behaviour-preserving: the writer
+    /// already pointed all three of the engine's provider entries at that
+    /// one address, so three copies of it route exactly where one did. Only
+    /// the model list is not copied three ways — it describes models reached
+    /// over Chat Completions, and that is the one slot that lists models.
+    ///
+    /// Idempotent, and it cannot resurrect anything: the guard is the legacy
+    /// slot being non-empty, and the last thing it does is empty it.
+    pub fn normalize(&mut self) -> bool {
+        if self.native.is_empty() {
+            return false;
+        }
+        let legacy = std::mem::take(&mut self.native);
+        for slot in NATIVE_SLOTS {
+            let Some(target) = self.profiles_mut(slot) else {
+                continue;
+            };
+            if !target.is_empty() {
+                continue;
+            }
+            let mut copy = legacy.clone();
+            if slot != "native_chat" {
+                for profile in &mut copy.profiles {
+                    profile.endpoint.models.clear();
+                }
+            }
+            *target = copy;
+        }
+        true
     }
 
     /// One CLI's profiles. `None` for ids this feature does not cover.
     pub fn profiles(&self, provider_id: &str) -> Option<&ProviderProfiles> {
         match provider_id {
+            "native_messages" => Some(&self.native_messages),
+            "native_responses" => Some(&self.native_responses),
+            "native_chat" => Some(&self.native_chat),
             "native" => Some(&self.native),
             "claude" => Some(&self.claude),
             "codex" => Some(&self.codex),
@@ -346,6 +425,9 @@ impl CustomApiConfig {
 
     pub fn profiles_mut(&mut self, provider_id: &str) -> Option<&mut ProviderProfiles> {
         match provider_id {
+            "native_messages" => Some(&mut self.native_messages),
+            "native_responses" => Some(&mut self.native_responses),
+            "native_chat" => Some(&mut self.native_chat),
             "native" => Some(&mut self.native),
             "claude" => Some(&mut self.claude),
             "codex" => Some(&mut self.codex),
@@ -408,10 +490,14 @@ pub fn config_path() -> Option<PathBuf> {
 
 /// Load the stored configuration; absent or unreadable means "none set".
 pub fn load() -> CustomApiConfig {
-    config_path()
+    let mut config: CustomApiConfig = config_path()
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // Every read goes through here, so no caller can see the pre-split
+    // shape. The write back is incidental — the next save records it.
+    config.normalize();
+    config
 }
 
 /// Persist the configuration (atomically, private).
@@ -429,7 +515,9 @@ pub fn save(config: &CustomApiConfig) -> Result<()> {
 /// `extra` is always cleaned of the legacy key.
 pub fn migrate_from_extra(extra: &mut BTreeMap<String, Value>) -> Option<CustomApiConfig> {
     let value = extra.remove(LEGACY_SETTINGS_KEY)?;
-    serde_json::from_value(value).ok()
+    let mut config: CustomApiConfig = serde_json::from_value(value).ok()?;
+    config.normalize();
+    Some(config)
 }
 
 // --- validation and connectivity -------------------------------------------
@@ -540,7 +628,7 @@ pub fn probe_request_with_timeout(
 ) -> (String, crate::http::Request) {
     let key = api_key.trim();
     let mut request = crate::http::Request::new().timeout_seconds(timeout_secs);
-    if provider_id == "claude" {
+    if uses_anthropic_shape(provider_id) {
         let url = format!(
             "{}/v1/models",
             crate::gateway::anthropic_base_url(base_url)
@@ -704,6 +792,91 @@ mod tests {
         config.set("pi", Some(endpoint("https://x.example.org", "")));
         assert!(config.get("pi").is_some());
         assert!(config.endpoint_for("pi").is_none());
+    }
+
+    /// The built-in agent used to hold one endpoint that the writer fanned
+    /// out to all three of the engine's provider entries. Three copies of it
+    /// route exactly where that one did, so the split is behaviour-
+    /// preserving — and the model list goes only to the slot that has one.
+    /// The Messages route talks to an Anthropic server, so its connectivity
+    /// test has to be shaped like one — the other two are OpenAI-shaped.
+    #[test]
+    fn each_native_route_is_probed_with_its_own_wire_shape() {
+        let (url, request) = probe_request("native_messages", "https://mine.example.org", "sk-a");
+        assert_eq!(url, "https://mine.example.org/v1/models");
+        let anthropic = format!("{request:?}");
+        assert!(anthropic.contains("anthropic-version"), "{anthropic}");
+        assert!(anthropic.contains("x-api-key"), "{anthropic}");
+
+        for slot in ["native_responses", "native_chat"] {
+            let (url, request) = probe_request(slot, "https://mine.example.org", "sk-a");
+            assert_eq!(url, "https://mine.example.org/v1/models", "{slot}");
+            let openai = format!("{request:?}");
+            assert!(!openai.contains("anthropic-version"), "{slot}: {openai}");
+        }
+    }
+
+    #[test]
+    fn the_legacy_native_endpoint_splits_into_three_routes() {
+        let mut config: CustomApiConfig = serde_json::from_str(
+            r#"{"native":{"base_url":"https://mine.example.org","api_key":"sk-mine","models":["m1"]}}"#,
+        )
+        .unwrap();
+        assert!(config.normalize());
+
+        for slot in NATIVE_SLOTS {
+            let endpoint = config.get(slot).unwrap_or_else(|| panic!("{slot}"));
+            assert_eq!(endpoint.base_url, "https://mine.example.org", "{slot}");
+            assert_eq!(endpoint.api_key, "sk-mine", "{slot}");
+        }
+        assert_eq!(config.get("native_chat").unwrap().models, ["m1"]);
+        assert!(config.get("native_messages").unwrap().models.is_empty());
+        assert!(config.get("native_responses").unwrap().models.is_empty());
+        assert!(config.get(LEGACY_NATIVE_PROVIDER).is_none());
+    }
+
+    /// The split must not undo a later edit, and must not come back after the
+    /// user clears the three slots.
+    #[test]
+    fn the_split_runs_once_and_never_resurrects() {
+        let mut config: CustomApiConfig = serde_json::from_str(
+            r#"{"native":{"base_url":"https://old.example.org","api_key":"sk-old"}}"#,
+        )
+        .unwrap();
+        assert!(config.normalize());
+        // A second pass has nothing left to do.
+        assert!(!config.normalize());
+
+        config.set("native_messages", None);
+        config.set("native_responses", None);
+        config.set("native_chat", None);
+        assert!(!config.normalize());
+        assert!(config.is_empty());
+    }
+
+    /// A slot the user already filled in is not overwritten by the old one.
+    #[test]
+    fn the_split_leaves_a_slot_the_user_already_set() {
+        let mut config: CustomApiConfig = serde_json::from_str(
+            r#"{"native":{"base_url":"https://old.example.org","api_key":"sk-old"},
+                "native_chat":{"profiles":[{"id":"p1","name":"mine",
+                  "base_url":"https://new.example.org","api_key":"sk-new"}],"active":"p1"}}"#,
+        )
+        .unwrap();
+        assert!(config.normalize());
+        assert_eq!(config.get("native_chat").unwrap().base_url, "https://new.example.org");
+        assert_eq!(config.get("native_messages").unwrap().base_url, "https://old.example.org");
+    }
+
+    /// A file holding only the pre-split slot is not empty — calling it that
+    /// would throw the user's endpoint away.
+    #[test]
+    fn a_file_holding_only_the_legacy_slot_is_not_empty() {
+        let config: CustomApiConfig = serde_json::from_str(
+            r#"{"native":{"base_url":"https://mine.example.org","api_key":"sk-mine"}}"#,
+        )
+        .unwrap();
+        assert!(!config.is_empty());
     }
 
     #[test]

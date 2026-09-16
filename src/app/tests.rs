@@ -2075,6 +2075,7 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
         &disabled,
         None,
         ModelPickerTab::Provider(ProviderKind::Claude),
+        "messages",
         "",
     );
     assert!(models.is_empty());
@@ -2084,6 +2085,7 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
         &disabled,
         None,
         ModelPickerTab::Favorites,
+        "messages",
         "",
     );
     assert!(models.is_empty());
@@ -2093,6 +2095,7 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
         &disabled,
         None,
         ModelPickerTab::Provider(ProviderKind::Codex),
+        "messages",
         "",
     );
     assert_eq!(models.len(), 1);
@@ -2104,6 +2107,7 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
         &disabled,
         None,
         ModelPickerTab::Provider(ProviderKind::Codex),
+        "messages",
         "claude",
     );
     assert!(models.is_empty());
@@ -2115,6 +2119,7 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
         &disabled,
         Some(ProviderKind::Claude),
         ModelPickerTab::Provider(ProviderKind::Claude),
+        "messages",
         "",
     );
     assert_eq!(models.len(), 1);
@@ -2191,6 +2196,42 @@ fn the_built_in_agents_api_is_decided_by_the_model() {
         "chat"
     );
     assert_eq!(native_wire_format(None, None), "chat");
+}
+
+/// The section bar partitions the built-in agent's list, and the fallback
+/// list it shows while signed out carries no tier field at all. Reading the
+/// field alone emptied every section — the picker had nothing in it until a
+/// catalog landed.
+#[test]
+fn every_section_still_has_rows_while_signed_out() {
+    use super::ModelPickerTab;
+    use super::composer::visible_picker_models;
+    use crate::model::ProviderProbe;
+
+    let probes = [ProviderProbe {
+        provider: ProviderKind::Native,
+        installed: true,
+        path: None,
+        models: crate::model_catalog::fallback_models(ProviderKind::Native),
+        agent_presets: Vec::new(),
+    }];
+    let section = |format: &str| {
+        visible_picker_models(
+            &probes,
+            &[],
+            &[],
+            None,
+            ModelPickerTab::Provider(ProviderKind::Native),
+            format,
+            "",
+        )
+    };
+
+    // The fallback list is Claude, so Messages holds all of it and the other
+    // two are empty by construction rather than by accident.
+    assert!(!section("messages").is_empty());
+    assert!(section("responses").is_empty());
+    assert!(section("chat").is_empty());
 }
 
 #[test]

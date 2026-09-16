@@ -177,6 +177,14 @@ pub struct AgentStartOptions {
     pub wire_format: Option<WireFormat>,
     /// Waku's reasoning-effort id (`low`, `medium`, `high`, `xhigh`, `max`).
     pub reasoning_effort: Option<String>,
+    /// The language the user reads the app in, named in English
+    /// (`Simplified Chinese`). `None` for English, where saying so would add
+    /// a line of prompt that changes nothing.
+    ///
+    /// The engine's own prompt is English and models answer in kind, so an
+    /// agent narrating its work would explain itself in English to someone
+    /// using the app in another language.
+    pub narration_language: Option<String>,
     /// A previous conversation to resume, as written by
     /// [`crate::history::serialize`]. Empty for a fresh session.
     pub history: Vec<u8>,
@@ -192,6 +200,7 @@ impl Default for AgentStartOptions {
             platform: None,
             wire_format: None,
             reasoning_effort: None,
+            narration_language: None,
             history: Vec::new(),
         }
     }
@@ -327,6 +336,23 @@ fn select_route(config: &mut Config, options: &AgentStartOptions) {
     }
 }
 
+/// How much of the conversation may be tool output before the engine starts
+/// shedding the oldest of it.
+///
+/// The engine's own default is 50 000 characters, which is half of what a
+/// single Bash call is allowed to return — and its shedding pass replaces a
+/// whole result with a one-line notice rather than trimming it, oldest
+/// first, checking whether the result covers the debt only *after* wiping
+/// it. So one large command wiped its own output before the model ever read
+/// it, while the transcript still showed it: the picker and the model were
+/// looking at different conversations.
+///
+/// Raising it past several times the per-call cap keeps that from firing on
+/// ordinary work. Running out of context is still handled, just by the
+/// mechanism meant for it: auto-compact summarises at 90% of the window
+/// instead of blanking individual results.
+const TOOL_RESULT_BUDGET: usize = 600_000;
+
 /// Where the routing writer files the per-platform keys. Kept in step with
 /// `sub2api::global_config::native::GATEWAY_KEYS_OPTION`, which this crate
 /// cannot import.
@@ -397,7 +423,8 @@ pub fn build_query_config(config: &Config, options: &AgentStartOptions) -> Query
     // has always known what to do with them once they arrive
     // (`claurst_query::runner::prompt`).
     query.system_prompt = config.custom_system_prompt.clone();
-    query.append_system_prompt = config.append_system_prompt.clone();
+    query.append_system_prompt = narration_rule(options, config.append_system_prompt.as_deref());
+    query.tool_result_budget = TOOL_RESULT_BUDGET;
     if let Some(model) = &options.model {
         query.model = model.clone();
     }
@@ -414,9 +441,50 @@ pub fn build_query_config(config: &Config, options: &AgentStartOptions) -> Query
     query
 }
 
+/// The appended system prompt: the language rule this product adds, then
+/// whatever the user wrote on the Agent settings page.
+///
+/// The user's text comes last so it can overrule the rule above it — a house
+/// rule that says "always answer in English" should win. The instruction
+/// itself is written in English even when it names another language, because
+/// the rest of the prompt around it is.
+fn narration_rule(options: &AgentStartOptions, house_rules: Option<&str>) -> Option<String> {
+    let language = options.narration_language.as_deref().map(|language| {
+        format!(
+            "Write everything the user reads in {language}: your explanations, \
+             your summaries of what you did, and the questions you ask. Code, \
+             file paths, commands and identifiers stay as they are."
+        )
+    });
+    match (language, house_rules.map(str::trim).filter(|rules| !rules.is_empty())) {
+        (Some(language), Some(rules)) => Some(format!("{language}\n\n{rules}")),
+        (Some(language), None) => Some(language),
+        (None, rules) => rules.map(str::to_owned),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_language_rule_comes_first_so_house_rules_can_overrule_it() {
+        let options = AgentStartOptions {
+            narration_language: Some("Simplified Chinese".into()),
+            ..AgentStartOptions::default()
+        };
+        let combined = narration_rule(&options, Some("  Prefer tabs.  ")).expect("both");
+        assert!(combined.starts_with("Write everything the user reads in Simplified Chinese"));
+        assert!(combined.trim_end().ends_with("Prefer tabs."));
+
+        // Either one alone is the whole thing.
+        assert_eq!(narration_rule(&options, None), Some(combined[..combined.find("\n\n").unwrap()].to_owned()));
+        let english = AgentStartOptions::default();
+        assert_eq!(narration_rule(&english, Some("Prefer tabs.")), Some("Prefer tabs.".to_owned()));
+        assert_eq!(narration_rule(&english, None), None);
+        // Blank house rules are not house rules.
+        assert_eq!(narration_rule(&english, Some("   ")), None);
+    }
 
     #[test]
     fn plan_mode_outranks_every_access_mode() {
@@ -437,7 +505,6 @@ mod tests {
     /// this document. This is the JSON → `Settings` hop that used to fail.
     const FRESH_TAKEOVER_SETTINGS: &str = r#"{
   "config": {
-    "api_key": "sk-claude",
     "provider_configs": {
       "anthropic": {
         "api_key": "sk-claude",

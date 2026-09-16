@@ -378,9 +378,11 @@ impl Tool for WebFetchTool {
         // Truncate very long content
         const MAX_LEN: usize = 100_000;
         let text = if text.len() > MAX_LEN {
+            // Fork departure (Waku): character boundary, not byte offset. A
+            // page in any non-Latin script would otherwise panic here.
             format!(
                 "{}\n\n... (truncated, {} total characters)",
-                &text[..MAX_LEN],
+                &text[..crate::pty_bash::floor_char_boundary(&text, MAX_LEN)],
                 text.len()
             )
         } else {

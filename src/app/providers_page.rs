@@ -384,6 +384,12 @@ impl Waku {
                         if clearing {
                             form.key_revealed = false;
                         }
+                        // The Chat route's model list is the picker's Chat
+                        // section. Nothing else would notice until the next
+                        // catalog or probe landed.
+                        if provider_id == "native_chat" {
+                            this.sync_native_models();
+                        }
                         this.show_toast(if clearing {
                             tr!("cli_setup.custom_cleared")
                         } else {
@@ -1876,7 +1882,9 @@ impl Waku {
             if !builtin {
                 card = card.child(self.render_provider_expanded_settings(kind, theme, cx));
             }
-            if sub2api::custom_api::CUSTOM_API_PROVIDERS.contains(&provider_id) {
+            if builtin {
+                card = card.child(self.render_native_routes(kind, theme, cx));
+            } else if sub2api::custom_api::CUSTOM_API_PROVIDERS.contains(&provider_id) {
                 card = card
                     .child(self.render_route_section(kind, provider_id, theme, cx))
                     .child(self.render_endpoint_form(kind, provider_id, theme, cx));
@@ -2475,10 +2483,80 @@ impl Waku {
         )
     }
 
+    /// The built-in agent's three routes, one section each.
+    ///
+    /// It is not a CLI with one endpoint: it speaks three APIs, each reached
+    /// separately, so it holds three. A section left blank falls back to the
+    /// managed gateway, which is why the group says so once rather than each
+    /// section repeating it.
+    fn render_native_routes(&self, kind: ProviderKind, theme: Theme, cx: &mut Context<Self>) -> Div {
+        let mut section = div()
+            .pl(px(42.0))
+            .pr(px(16.0))
+            .pb(px(14.0))
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(tr!("cli_setup.native_routes_title")),
+            )
+            .child(
+                div()
+                    .text_size(sp(12.0))
+                    .line_height(sp(16.0))
+                    .text_color(theme.text_ghost)
+                    .child(tr!("cli_setup.native_routes_detail")),
+            );
+        for (provider_id, label) in [
+            ("native_messages", "cli_setup.native_route_messages"),
+            ("native_responses", "cli_setup.native_route_responses"),
+            ("native_chat", "cli_setup.native_route_chat"),
+        ] {
+            section = section
+                .child(div().h(px(1.0)).mt(px(10.0)).bg(theme.border))
+                .child(self.render_route_section(kind, provider_id, theme, cx))
+                .child(self.render_endpoint_form_titled(
+                    kind,
+                    provider_id,
+                    crate::i18n::translate(label),
+                    None,
+                    theme,
+                    cx,
+                ));
+        }
+        section
+    }
+
     fn render_endpoint_form(
         &self,
         kind: ProviderKind,
         provider_id: &'static str,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        self.render_endpoint_form_titled(
+            kind,
+            provider_id,
+            tr!("cli_setup.custom_title"),
+            Some(tr!("cli_setup.custom_detail")),
+            theme,
+            cx,
+        )
+    }
+
+    /// [`Self::render_endpoint_form`] under a caller-chosen heading, for the
+    /// built-in agent — where one card holds three of these and the shared
+    /// "custom endpoint" wording belongs to the group rather than to each.
+    fn render_endpoint_form_titled(
+        &self,
+        kind: ProviderKind,
+        provider_id: &'static str,
+        title: String,
+        detail: Option<String>,
         theme: Theme,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -2500,7 +2578,7 @@ impl Waku {
             .and_then(|form| form.test.as_ref())
             .is_some_and(|test| test.running);
 
-        let hint = if provider_id == "claude" {
+        let hint = if sub2api::custom_api::uses_anthropic_shape(provider_id) {
             tr!("cli_setup.custom_hint_anthropic")
         } else {
             tr!("cli_setup.custom_hint_openai")
@@ -2586,15 +2664,15 @@ impl Waku {
                     .text_size(sp(12.5))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
-                    .child(tr!("cli_setup.custom_title")),
+                    .child(title),
             )
-            .child(
+            .children(detail.map(|detail| {
                 div()
                     .text_size(sp(12.0))
                     .line_height(sp(16.0))
                     .text_color(theme.text_ghost)
-                    .child(tr!("cli_setup.custom_detail")),
-            )
+                    .child(detail)
+            }))
             .child(
                 div()
                     .text_size(sp(11.5))

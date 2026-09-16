@@ -826,9 +826,6 @@ impl Waku {
         let searching = !normalized_query.is_empty();
         let selected_tab = self.model_picker_tab;
         let selected_model = selected_model.map(str::to_owned);
-        // The built-in agent's tab is sectioned by wire format; the section
-        // that opens is the session's current one, or the model's native one.
-        let selected_tier = session.and_then(|session| session.service_tier.clone());
         let probes = self.probes.clone();
         let disabled_providers = self.state.disabled_providers.clone();
         let pending_discoveries = self.provider_model_discoveries_pending.clone();
@@ -932,20 +929,15 @@ impl Waku {
         // rows agree about what is in the section.
         let picker_format = self.model_picker_format.clone();
         let available_models = Rc::new(if handle.is_open() {
-            let mut models = visible_picker_models(
+            visible_picker_models(
                 &probes,
                 &favorites,
                 &disabled_providers,
                 locked_provider,
                 selected_tab,
+                &picker_format,
                 &normalized_query,
-            );
-            if selected_tab == ModelPickerTab::Provider(ProviderKind::Native) && !searching {
-                models.retain(|(_, model)| {
-                    model.default_service_tier.as_deref() == Some(picker_format.as_str())
-                });
-            }
-            models
+            )
         } else {
             Vec::new()
         });
@@ -1426,6 +1418,7 @@ impl Waku {
             &self.state.disabled_providers,
             locked_provider,
             self.model_picker_tab,
+            &self.model_picker_format,
             "",
         )
         .iter()
@@ -4140,12 +4133,17 @@ pub(super) fn picker_has_no_providers(
 ///
 /// Shared by the panel body and by `enter`'s handler so a keyboard cursor index
 /// always means the same row in both.
+/// `native_format` is which section of the built-in agent's list is open.
+/// Every model there has exactly one API, so the format bar partitions the
+/// list rather than switching a setting; the filter lives here so that the
+/// rows drawn and the rows the keyboard cursor counts are the same rows.
 pub(super) fn visible_picker_models(
     probes: &[ProviderProbe],
     favorites: &[FavoriteModel],
     disabled_providers: &[ProviderKind],
     locked_provider: Option<ProviderKind>,
     selected_tab: ModelPickerTab,
+    native_format: &str,
     normalized_query: &str,
 ) -> Vec<(ProviderKind, ProviderModel)> {
     let searching = !normalized_query.is_empty();
@@ -4181,6 +4179,17 @@ pub(super) fn visible_picker_models(
                 ModelPickerTab::Favorites => favorites
                     .iter()
                     .any(|favorite| favorite.provider == *kind && favorite.model == model.id),
+                // Read the section off the model rather than off its tier
+                // field: the fallback list the picker shows while signed out
+                // carries no tier at all, and reading the field alone emptied
+                // every section.
+                ModelPickerTab::Provider(provider) if provider.is_builtin() => {
+                    provider == *kind
+                        && native_wire_format(
+                            model.default_service_tier.as_deref(),
+                            Some(model.id.as_str()),
+                        ) == native_format
+                }
                 ModelPickerTab::Provider(provider) => provider == *kind,
             }
         })

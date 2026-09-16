@@ -836,6 +836,11 @@ mod tests {
                     assert!(has_pair(&args, "--output-format", "text"));
                     assert!(has_pair(&args, "--model", "model"));
                 }
+                // Skipped by the `is_builtin` guard above, which the
+                // dedicated test below covers instead. Named rather than
+                // wildcarded so a new provider still has to be accounted
+                // for here.
+                ProviderKind::Native => unreachable!("built-in providers are skipped above"),
             }
         }
     }

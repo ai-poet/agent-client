@@ -542,13 +542,20 @@ impl PersistedState {
     }
 
     pub fn daemon_settings(&self) -> DaemonSettings {
-        DaemonSettings {
+        let mut settings = DaemonSettings {
             computer_use_enabled: self.computer_use_enabled,
             computer_use_allowed_apps: self.computer_use_allowed_apps.clone(),
             disabled_providers: self.disabled_providers.clone(),
             provider_binary_overrides: self.provider_binary_overrides.clone(),
             extra: self.daemon_settings_extra.clone(),
-        }
+        };
+        // Fork addition: the daemon renders text of its own — every driver's
+        // error and permission wording — and had no way of knowing which
+        // language to render it in. It reads this back when the settings
+        // land, so a language change reaches it on the same push that
+        // carries everything else.
+        settings.set_locale(self.language.locale());
+        settings
     }
 
     pub fn apply_daemon_settings(&mut self, settings: DaemonSettings) {

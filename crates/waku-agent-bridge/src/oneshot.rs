@@ -46,6 +46,9 @@ pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result
         // trust for it, whatever the session itself speaks.
         wire_format: Some(WireFormat::Messages),
         reasoning_effort: None,
+        // A commit message is read by git, not by the user, and the caller
+        // asks for the wording it wants.
+        narration_language: None,
         history: Vec::new(),
     };
     let config = build_config(&options)?;

@@ -2172,7 +2172,7 @@ impl Waku {
                 // the user's to declare, and it is what the picker's Chat
                 // Completions section holds.
                 let models_input =
-                    matches!(provider_id, "native" | "opencode" | "pi" | "grok").then(|| {
+                    matches!(provider_id, "native_chat" | "opencode" | "pi" | "grok").then(|| {
                     cx.new(|cx| {
                         let mut input = TextInput::new(window, cx)
                             .select_all_on_focus_click()

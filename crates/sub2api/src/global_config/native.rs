@@ -33,13 +33,15 @@
 //! engine again; `waku-agent-bridge`'s `a_fresh_takeover_file_parses_and_routes_every_format`
 //! is the test that would catch it.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use serde_json::{Map, Value, json};
 
-use super::{CliBackups, RouteTarget, atomic_write_private, capture_backup, remove_if_exists};
+use super::{
+    CliBackups, FileBackup, NativeRoutes, atomic_write_private, capture_backup,
+    remove_if_exists,
+};
 use crate::gateway::anthropic_base_url;
 
 const SETTINGS_FILE: &str = "settings.json";
@@ -84,12 +86,12 @@ pub fn settings_path(config_dir: &Path) -> PathBuf {
 
 pub fn take_over(
     config_dir: &Path,
-    target: &RouteTarget,
-    platform_keys: &BTreeMap<String, String>,
+    routes: &NativeRoutes,
     backups: &mut CliBackups,
 ) -> Result<()> {
     let path = settings_path(config_dir);
     capture_backup(backups, SETTINGS_FILE, &path)?;
+    let previous = previous_config(backups.get(SETTINGS_FILE));
 
     let mut root = read_settings(&path)?;
     let object = root
@@ -102,22 +104,33 @@ pub fn take_over(
         .as_object_mut()
         .ok_or_else(|| anyhow!("`config` in {} is not an object", path.display()))?;
 
-    // The engine resolves a key from the top-level field first, so the
-    // provider entry alone would be outranked by a key the user typed into
-    // the engine's own settings earlier.
-    config.insert("api_key".to_owned(), json!(target.api_key));
+    // The engine resolves the top-level key first, for whichever provider
+    // the session selected — so any value here outranks all three provider
+    // entries and collapses three routes into one. Earlier builds wrote our
+    // own key here precisely to outrank one the user had typed in; removing
+    // it achieves that without also outranking ourselves. `restore` reads
+    // the backup, so the user's value comes back when routing is released.
+    config.remove("api_key");
 
+    let previous_providers = previous
+        .get("provider_configs")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
     let providers = config
         .entry("provider_configs")
         .or_insert_with(|| Value::Object(Map::new()));
     let providers = providers
         .as_object_mut()
         .ok_or_else(|| anyhow!("`provider_configs` in {} is not an object", path.display()))?;
-    // The adapters append their own paths (`/v1/messages`,
-    // `/v1/chat/completions`, `/v1/responses`), so every entry gets the bare
-    // origin.
-    let base = anthropic_base_url(&target.base_url);
     for provider in MANAGED_PROVIDERS {
+        // A route the user cleared goes back to what it was before we ever
+        // touched it. Releasing the whole file only happens when all three
+        // are gone, so a single line retiring has to be handled here.
+        let Some(target) = routes.target(provider) else {
+            restore_provider_entry(providers, provider, &previous_providers);
+            continue;
+        };
         let entry = providers
             .entry(provider)
             .or_insert_with(|| Value::Object(Map::new()));
@@ -125,20 +138,103 @@ pub fn take_over(
             anyhow!("the {provider} provider entry in {} is not an object", path.display())
         })?;
         entry.insert("api_key".to_owned(), json!(target.api_key));
-        entry.insert("api_base".to_owned(), json!(base));
+        // The adapters append their own paths (`/v1/messages`,
+        // `/v1/chat/completions`, `/v1/responses`), so every entry gets the
+        // bare origin.
+        entry.insert(
+            "api_base".to_owned(),
+            json!(anthropic_base_url(&target.base_url)),
+        );
         entry.insert("enabled".to_owned(), json!(true));
-        if provider == "anthropic" {
+    }
+
+    // The per-platform key table rides on the anthropic entry. It is empty
+    // whenever any route is the user's own — it is consulted by platform,
+    // and a leftover table from a previous all-gateway state would hand a
+    // gateway key to a request aimed at somebody else's server.
+    let anthropic_exists = providers.contains_key("anthropic");
+    if !routes.platform_keys.is_empty() || anthropic_exists {
+        let entry = providers
+            .entry("anthropic")
+            .or_insert_with(|| Value::Object(Map::new()));
+        let entry = entry.as_object_mut().ok_or_else(|| {
+            anyhow!("the anthropic provider entry in {} is not an object", path.display())
+        })?;
+        if routes.platform_keys.is_empty() {
+            let previous_options = previous_providers
+                .get("anthropic")
+                .and_then(Value::as_object)
+                .and_then(|entry| entry.get("options"))
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            if let Some(options) = entry.get_mut("options").and_then(Value::as_object_mut) {
+                restore_key(options, GATEWAY_KEYS_OPTION, &previous_options);
+                if options.is_empty() {
+                    entry.remove("options");
+                }
+            }
+        } else {
             let options = entry
                 .entry("options")
                 .or_insert_with(|| Value::Object(Map::new()));
             let options = options.as_object_mut().ok_or_else(|| {
                 anyhow!("the anthropic provider options in {} are not an object", path.display())
             })?;
-            options.insert(GATEWAY_KEYS_OPTION.to_owned(), json!(platform_keys));
+            options.insert(GATEWAY_KEYS_OPTION.to_owned(), json!(routes.platform_keys));
         }
+        if entry.is_empty() {
+            providers.remove("anthropic");
+        }
+    }
+    if providers.is_empty() {
+        config.remove("provider_configs");
     }
 
     write_settings(&path, &root)
+}
+
+/// The `config` block as it stood before we took over, from the backup.
+fn previous_config(backup: Option<&FileBackup>) -> Map<String, Value> {
+    backup
+        .filter(|backup| backup.existed)
+        .and_then(|backup| serde_json::from_str::<Value>(&backup.content).ok())
+        .and_then(|value| value.get("config").and_then(Value::as_object).cloned())
+        .unwrap_or_default()
+}
+
+/// Put one provider entry back the way the backup had it, removing it
+/// outright when the backup had nothing there.
+fn restore_provider_entry(
+    providers: &mut Map<String, Value>,
+    provider: &str,
+    previous_providers: &Map<String, Value>,
+) {
+    let previous_entry = previous_providers
+        .get(provider)
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let Some(entry) = providers.get_mut(provider).and_then(Value::as_object_mut) else {
+        return;
+    };
+    for key in ["api_key", "api_base", "enabled"] {
+        restore_key(entry, key, &previous_entry);
+    }
+    let previous_options = previous_entry
+        .get("options")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(options) = entry.get_mut("options").and_then(Value::as_object_mut) {
+        restore_key(options, GATEWAY_KEYS_OPTION, &previous_options);
+        if options.is_empty() {
+            entry.remove("options");
+        }
+    }
+    if entry.is_empty() {
+        providers.remove(provider);
+    }
 }
 
 /// Put the managed keys back to what the backup recorded, leaving everything
@@ -165,12 +261,7 @@ pub fn restore(config_dir: &Path, backups: &CliBackups) -> Result<()> {
     };
 
     // What our keys held before we took over, if the file existed at all.
-    let previous: Map<String, Value> = backup
-        .existed
-        .then(|| serde_json::from_str::<Value>(&backup.content).ok())
-        .flatten()
-        .and_then(|value| value.get("config").and_then(Value::as_object).cloned())
-        .unwrap_or_default();
+    let previous = previous_config(Some(backup));
 
     if let Some(config) = object.get_mut("config").and_then(Value::as_object_mut) {
         restore_key(config, "api_key", &previous);
@@ -187,30 +278,7 @@ pub fn restore(config_dir: &Path, backups: &CliBackups) -> Result<()> {
             .and_then(Value::as_object_mut)
         {
             for provider in MANAGED_PROVIDERS {
-                let previous_entry = previous_providers
-                    .get(provider)
-                    .and_then(Value::as_object)
-                    .cloned()
-                    .unwrap_or_default();
-                if let Some(entry) = providers.get_mut(provider).and_then(Value::as_object_mut) {
-                    for key in ["api_key", "api_base", "enabled"] {
-                        restore_key(entry, key, &previous_entry);
-                    }
-                    let previous_options = previous_entry
-                        .get("options")
-                        .and_then(Value::as_object)
-                        .cloned()
-                        .unwrap_or_default();
-                    if let Some(options) = entry.get_mut("options").and_then(Value::as_object_mut) {
-                        restore_key(options, GATEWAY_KEYS_OPTION, &previous_options);
-                        if options.is_empty() {
-                            entry.remove("options");
-                        }
-                    }
-                    if entry.is_empty() {
-                        providers.remove(provider);
-                    }
-                }
+                restore_provider_entry(providers, provider, &previous_providers);
             }
             if providers.is_empty() {
                 config.remove("provider_configs");
@@ -262,13 +330,27 @@ fn write_settings(path: &Path, root: &Value) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::BTreeMap;
 
-    fn target() -> RouteTarget {
-        RouteTarget {
-            base_url: "https://gateway.example.org".into(),
-            api_key: "sk-claude".into(),
+    use super::*;
+    use crate::global_config::RouteTarget;
+
+    fn at(base: &str, key: &str) -> Option<RouteTarget> {
+        Some(RouteTarget {
+            base_url: base.into(),
+            api_key: key.into(),
             models: Vec::new(),
+        })
+    }
+
+    /// Every route on the managed gateway, which is what signing in and
+    /// touching nothing else produces.
+    fn routes() -> NativeRoutes {
+        NativeRoutes {
+            messages: at("https://gateway.example.org", "sk-claude"),
+            responses: at("https://gateway.example.org", "sk-claude"),
+            chat: at("https://gateway.example.org", "sk-claude"),
+            platform_keys: keys(),
         }
     }
 
@@ -288,12 +370,15 @@ mod tests {
     fn taking_over_writes_one_entry_per_wire_format_and_every_key() {
         let dir = tempdir();
         let mut backups = CliBackups::default();
-        take_over(&dir, &target(), &keys(), &mut backups).unwrap();
+        take_over(&dir, &routes(), &mut backups).unwrap();
 
         let root = read(&settings_path(&dir));
         let config = root.get("config").unwrap();
-        assert_eq!(config.get("api_key").unwrap(), "sk-claude");
-        // No provider pin: the session chooses.
+        // No top-level key: the engine resolves that one first, for whichever
+        // provider the session picked, so a value here would outrank all
+        // three entries and collapse the three routes into one.
+        assert!(config.get("api_key").is_none());
+        // No provider pin either: the session chooses.
         assert!(config.get("provider").is_none());
         for provider in MANAGED_PROVIDERS {
             let entry = config
@@ -320,7 +405,7 @@ mod tests {
         .unwrap();
 
         let mut backups = CliBackups::default();
-        take_over(&dir, &target(), &keys(), &mut backups).unwrap();
+        take_over(&dir, &routes(), &mut backups).unwrap();
 
         let root = read(&settings_path(&dir));
         assert_eq!(root.pointer("/config/model").unwrap(), "claude-opus-5");
@@ -339,10 +424,13 @@ mod tests {
         .unwrap();
 
         let mut backups = CliBackups::default();
-        take_over(&dir, &target(), &keys(), &mut backups).unwrap();
-        assert_eq!(
-            read(&settings_path(&dir)).pointer("/config/api_key").unwrap(),
-            "sk-claude"
+        take_over(&dir, &routes(), &mut backups).unwrap();
+        // Out of the way while managed — left in place it would outrank the
+        // provider entries and every route would use it.
+        assert!(
+            read(&settings_path(&dir))
+                .pointer("/config/api_key")
+                .is_none()
         );
 
         restore(&dir, &backups).unwrap();
@@ -361,10 +449,10 @@ mod tests {
     fn a_fresh_takeover_matches_the_bridges_fixture() {
         let dir = tempdir();
         let mut backups = CliBackups::default();
-        take_over(&dir, &target(), &keys(), &mut backups).unwrap();
+        take_over(&dir, &routes(), &mut backups).unwrap();
         let written = read(&settings_path(&dir));
         let expected: Value = serde_json::from_str(
-            r#"{"config":{"api_key":"sk-claude","provider_configs":{
+            r#"{"config":{"provider_configs":{
               "anthropic":{"api_key":"sk-claude","api_base":"https://gateway.example.org","enabled":true,
                 "options":{"gateway_keys":{"anthropic":"sk-claude","default":"sk-general","openai":"sk-codex"}}},
               "codex":{"api_key":"sk-claude","api_base":"https://gateway.example.org","enabled":true},
@@ -374,11 +462,126 @@ mod tests {
         assert_eq!(written, expected);
     }
 
+    /// The point of three slots: three addresses and three keys that do not
+    /// bleed into one another.
+    #[test]
+    fn three_routes_write_three_keys_and_three_bases() {
+        let dir = tempdir();
+        let mut backups = CliBackups::default();
+        let routes = NativeRoutes {
+            messages: at("https://anthropic.example.org", "sk-messages"),
+            responses: at("https://responses.example.org", "sk-responses"),
+            chat: at("https://chat.example.org", "sk-chat"),
+            platform_keys: BTreeMap::new(),
+        };
+        take_over(&dir, &routes, &mut backups).unwrap();
+
+        let root = read(&settings_path(&dir));
+        for (provider, base, key) in [
+            ("anthropic", "https://anthropic.example.org", "sk-messages"),
+            ("codex", "https://responses.example.org", "sk-responses"),
+            ("openai", "https://chat.example.org", "sk-chat"),
+        ] {
+            let entry = root
+                .pointer(&format!("/config/provider_configs/{provider}"))
+                .unwrap_or_else(|| panic!("{provider} entry"));
+            assert_eq!(entry.get("api_base").unwrap(), base, "{provider}");
+            assert_eq!(entry.get("api_key").unwrap(), key, "{provider}");
+        }
+        assert!(root.pointer("/config/api_key").is_none());
+        // No per-platform table beside somebody else's endpoint: it is read
+        // by platform and would hand that server a gateway key.
+        assert!(
+            root.pointer("/config/provider_configs/anthropic/options")
+                .is_none()
+        );
+    }
+
+    /// Switching from the managed gateway to an endpoint of your own has to
+    /// drop the key table the gateway left behind, or every session keeps
+    /// authenticating with the gateway's key against your server.
+    #[test]
+    fn a_stale_gateway_key_table_is_dropped_when_a_route_goes_custom() {
+        let dir = tempdir();
+        let mut backups = CliBackups::default();
+        take_over(&dir, &routes(), &mut backups).unwrap();
+        assert!(
+            read(&settings_path(&dir))
+                .pointer("/config/provider_configs/anthropic/options/gateway_keys")
+                .is_some()
+        );
+
+        let custom = NativeRoutes {
+            messages: at("https://mine.example.org", "sk-mine"),
+            responses: None,
+            chat: None,
+            platform_keys: BTreeMap::new(),
+        };
+        take_over(&dir, &custom, &mut backups).unwrap();
+        let root = read(&settings_path(&dir));
+        assert!(
+            root.pointer("/config/provider_configs/anthropic/options")
+                .is_none()
+        );
+        assert_eq!(
+            root.pointer("/config/provider_configs/anthropic/api_key")
+                .unwrap(),
+            "sk-mine"
+        );
+    }
+
+    /// Clearing one route retires that entry alone. Releasing the whole file
+    /// only happens when all three are gone, so this has to work on its own.
+    #[test]
+    fn clearing_one_route_reverts_only_its_entry() {
+        let dir = tempdir();
+        let mut backups = CliBackups::default();
+        take_over(&dir, &routes(), &mut backups).unwrap();
+
+        let without_chat = NativeRoutes {
+            chat: None,
+            ..routes()
+        };
+        take_over(&dir, &without_chat, &mut backups).unwrap();
+        let root = read(&settings_path(&dir));
+        // The backup had nothing there, so the entry goes away entirely.
+        assert!(root.pointer("/config/provider_configs/openai").is_none());
+        // The other two are untouched.
+        assert_eq!(
+            root.pointer("/config/provider_configs/codex/api_key").unwrap(),
+            "sk-claude"
+        );
+        assert_eq!(
+            root.pointer("/config/provider_configs/anthropic/api_key")
+                .unwrap(),
+            "sk-claude"
+        );
+    }
+
+    /// A file written by a build that still pinned the top-level key heals
+    /// on the next reconcile rather than staying hijacked.
+    #[test]
+    fn an_upgrade_removes_the_top_level_key_an_earlier_build_wrote() {
+        let dir = tempdir();
+        std::fs::write(
+            settings_path(&dir),
+            r#"{"config":{"api_key":"sk-old-managed","provider_configs":{"anthropic":{"api_key":"sk-old-managed"}}}}"#,
+        )
+        .unwrap();
+        let mut backups = CliBackups::default();
+        take_over(&dir, &routes(), &mut backups).unwrap();
+        assert!(
+            read(&settings_path(&dir))
+                .pointer("/config/api_key")
+                .is_none()
+        );
+    }
+
     #[test]
     fn releasing_a_file_we_created_deletes_it_again() {
         let dir = tempdir();
         let mut backups = CliBackups::default();
-        take_over(&dir, &target(), &keys(), &mut backups).unwrap();
+        take_over(&dir, &routes(), &mut backups).unwrap();
         restore(&dir, &backups).unwrap();
         assert!(!settings_path(&dir).exists());
     }

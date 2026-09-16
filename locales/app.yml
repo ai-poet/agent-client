@@ -3129,3 +3129,14 @@ models.wire_format:
 
 models.declare_your_own:
   en: "Nothing here yet. Models on your own endpoint are listed after you name them in Settings → Providers."
+
+cli_setup.native_routes_title:
+  en: "Custom endpoints"
+cli_setup.native_routes_detail:
+  en: "The built-in agent speaks three APIs and reaches each one separately. Fill in the ones you want to point somewhere of your own; the rest keep using the managed gateway."
+cli_setup.native_route_messages:
+  en: "Anthropic Messages"
+cli_setup.native_route_responses:
+  en: "OpenAI Responses"
+cli_setup.native_route_chat:
+  en: "OpenAI Chat Completions"

@@ -1592,3 +1592,9 @@ native.empty_turn: "%{model} は何も返さずにターンを終了しました
 models.wire_format: "API 形式"
 
 models.declare_your_own: "まだ何もありません。設定 → プロバイダーで独自エンドポイントのモデル名を書くと、ここに並びます。"
+
+cli_setup.native_routes_title: "カスタムエンドポイント"
+cli_setup.native_routes_detail: "内蔵エージェントは 3 種類の API を話し、それぞれ別々に接続します。自分のサーバーに向けたいものだけ入力してください。残りはマネージドゲートウェイのままです。"
+cli_setup.native_route_messages: "Anthropic Messages"
+cli_setup.native_route_responses: "OpenAI Responses"
+cli_setup.native_route_chat: "OpenAI Chat Completions"

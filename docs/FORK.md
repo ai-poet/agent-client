@@ -76,6 +76,12 @@ lines below.
 | `crates/waku-agent/query/src/lib.rs` | vendored engine, recorded departure: an explicit `config.provider` outranks the model-name family table; a stream `error` event ends the turn | ~14 |
 | `crates/waku-agent/api/src/lib.rs` | vendored engine, recorded departure: `StreamAccumulator` keeps the first stream `error` instead of discarding it | ~18 |
 | `crates/waku-agent/core/src/system_prompt.rs` | vendored engine, recorded departure: the agent is named after the product, not after the engine or Anthropic | ~25 |
+| `crates/waku-agent/query/src/runner/provider_options.rs` | vendored engine, recorded departure: Grok counts as a reasoning model, so its effort tier reaches the request; gpt-5 Codex's summary/include fields stay off it | ~14 |
+| `crates/waku-agent/tools/src/{pty_bash,powershell,web_fetch}.rs` | vendored engine, recorded departure: truncate on character boundaries (`floor_char_boundary` / `ceil_char_boundary` in `pty_bash`) — the byte slices panicked on long non-ASCII output | ~30 |
+| `crates/waku-core/src/settings.rs` | the daemon adopts the interface language the desktop pushes, so its own `tr!` strings are not always English | ~12 |
+| `crates/waku-core/src/git_commit.rs` | its provider-argument test names `ProviderKind::Native` (skipped by the `is_builtin` guard above it); without the arm the crate's tests do not compile | 1 |
+| `crates/waku-protocol/src/settings.rs` | `DaemonSettings::LOCALE_KEY` and its accessors — the language the daemon renders in | ~14 |
+| `crates/waku-client/src/persistence.rs` | `daemon_settings()` stamps the interface language into the push | ~6 |
 | `src/assets.rs` | `provider-waku` in the embedded icon list — the built-in provider's icon had never been registered | 1 |
 | `crates/waku-protocol/src/model.rs` | `ProviderKind::Native` and its `is_builtin()`; Native excluded from `supports_model_discovery` (its catalog comes from the gateway, not a CLI) | ~8 |
 | `src/app/runtime.rs` | `sync_native_models()` after `drain_provider_detection_events` / `drain_provider_probe_events`, so daemon probes never replace the built-in agent's catalog list | 2 |

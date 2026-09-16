@@ -269,9 +269,14 @@ impl Tool for PowerShellTool {
                 // Truncate very long output (same limit as BashTool)
                 const MAX_OUTPUT_LEN: usize = 100_000;
                 if output.len() > MAX_OUTPUT_LEN {
+                    // Fork departure (Waku): character boundaries, not byte
+                    // offsets. See `pty_bash::truncate_output`.
                     let half = MAX_OUTPUT_LEN / 2;
-                    let start = &output[..half];
-                    let end = &output[output.len() - half..];
+                    let start = &output[..crate::pty_bash::floor_char_boundary(&output, half)];
+                    let end = &output[crate::pty_bash::ceil_char_boundary(
+                        &output,
+                        output.len() - half,
+                    )..];
                     output = format!(
                         "{}\n\n... ({} characters truncated) ...\n\n{}",
                         start,

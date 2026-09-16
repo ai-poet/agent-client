@@ -38,7 +38,7 @@ use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
 use crate::brand;
-use crate::custom_api::CustomApiConfig;
+use crate::custom_api::{CustomApiConfig, NATIVE_SLOTS};
 use crate::gateway::GatewayConfig;
 
 /// The provider entry name we own in additive configs and the Codex provider
@@ -97,15 +97,46 @@ pub struct RouteTarget {
     pub models: Vec<String>,
 }
 
+/// The built-in agent's routing: one line per API it can speak, because
+/// each is reached separately and may be pointed somewhere different.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NativeRoutes {
+    /// Anthropic Messages — the engine's `anthropic` provider entry.
+    pub messages: Option<RouteTarget>,
+    /// OpenAI Responses — the engine's `codex` provider entry.
+    pub responses: Option<RouteTarget>,
+    /// OpenAI Chat Completions — the engine's `openai` provider entry.
+    pub chat: Option<RouteTarget>,
+    /// Every gateway key the account holds, by the platform it authorizes:
+    /// `anthropic`, `openai`, and `default` (the general key). The session
+    /// picks from these by the model's platform.
+    ///
+    /// Invariant: empty whenever any line above is the user's own endpoint.
+    /// This table is consulted by platform and would otherwise hand a
+    /// gateway key to a request aimed at somebody else's server.
+    pub platform_keys: BTreeMap<String, String>,
+}
+
+impl NativeRoutes {
+    pub fn is_empty(&self) -> bool {
+        self.messages.is_none() && self.responses.is_none() && self.chat.is_none()
+    }
+
+    /// The line feeding one engine provider entry.
+    pub fn target(&self, engine_provider: &str) -> Option<&RouteTarget> {
+        match engine_provider {
+            "anthropic" => self.messages.as_ref(),
+            "codex" => self.responses.as_ref(),
+            "openai" => self.chat.as_ref(),
+            _ => None,
+        }
+    }
+}
+
 /// The routing every CLI should end up with. `None` = leave alone / restore.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DesiredRoutes {
-    pub native: Option<RouteTarget>,
-    /// The built-in agent can reach any platform the account has a key for,
-    /// so alongside its primary target it gets every gateway key, by the
-    /// platform it authorizes: `anthropic`, `openai`, and `default` (the
-    /// account's general key). Empty when routing is off or custom.
-    pub native_platform_keys: BTreeMap<String, String>,
+    pub native: Option<NativeRoutes>,
     pub claude: Option<RouteTarget>,
     pub codex: Option<RouteTarget>,
     pub grok: Option<RouteTarget>,
@@ -120,6 +151,13 @@ pub struct DesiredRoutes {
 /// gateway key — the Electron client's managed login set Grok up the same
 /// way. OpenCode and Pi are custom-only for now; their writers are generic,
 /// so extending cloud coverage later is a matter of adding two lines here.
+///
+/// The built-in agent is the one exception, and deliberately so: there the
+/// **custom endpoint wins**. Its three lines are individually configurable,
+/// and a line the user has filled in is an instruction about that API — "use
+/// this one" — which a signed-in session has no business overriding. Lines
+/// left blank still fall back to the gateway, so signing in and filling in
+/// one box are not mutually exclusive.
 pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -> DesiredRoutes {
     let cloud = cloud.filter(|config| config.is_usable());
     let cloud_target = |key: Option<&str>| {
@@ -138,25 +176,37 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
             models: endpoint.models.clone(),
         })
     };
-    let mut native_platform_keys = BTreeMap::new();
-    if let Some(config) = cloud {
-        for (platform, key) in [
-            ("anthropic", config.key_for("claude")),
-            ("openai", config.key_for("codex")),
-            ("default", config.api_key.as_deref()),
-        ] {
-            if let Some(key) = key.map(str::trim).filter(|key| !key.is_empty()) {
-                native_platform_keys.insert(platform.to_owned(), key.to_owned());
+    let native = {
+        let any_custom = NATIVE_SLOTS
+            .into_iter()
+            .any(|slot| custom.endpoint_for(slot).is_some());
+        let mut platform_keys = BTreeMap::new();
+        // Only while every line is the gateway's. A per-platform table next
+        // to somebody else's endpoint would hand that server our key.
+        if let Some(config) = cloud.filter(|_| !any_custom) {
+            for (platform, key) in [
+                ("anthropic", config.key_for("claude")),
+                ("openai", config.key_for("codex")),
+                ("default", config.api_key.as_deref()),
+            ] {
+                if let Some(key) = key.map(str::trim).filter(|key| !key.is_empty()) {
+                    platform_keys.insert(platform.to_owned(), key.to_owned());
+                }
             }
         }
-    }
+        let routes = NativeRoutes {
+            messages: custom_target("native_messages")
+                .or_else(|| cloud_target(cloud.and_then(|config| config.key_for("claude")))),
+            responses: custom_target("native_responses")
+                .or_else(|| cloud_target(cloud.and_then(|config| config.key_for("codex")))),
+            chat: custom_target("native_chat")
+                .or_else(|| cloud_target(cloud.and_then(|config| config.api_key.as_deref()))),
+            platform_keys,
+        };
+        (!routes.is_empty()).then_some(routes)
+    };
     DesiredRoutes {
-        // The built-in agent's primary target is the Anthropic route, the
-        // same key Claude Code gets — "sign in, then send a message" with
-        // nothing installed. The other platforms' keys ride alongside.
-        native: cloud_target(cloud.and_then(|config| config.key_for("claude")))
-            .or_else(|| custom_target("native")),
-        native_platform_keys,
+        native,
         claude: cloud_target(cloud.and_then(|config| config.key_for("claude")))
             .or_else(|| custom_target("claude")),
         codex: cloud_target(cloud.and_then(|config| config.key_for("codex")))
@@ -179,18 +229,35 @@ pub enum RouteKind {
     CliOwn,
 }
 
-/// The route a CLI is on, for the Providers page. Same precedence as
-/// [`desired_routes`]: the cloud wins while it covers the CLI, the custom
-/// endpoint applies otherwise. A custom entry the cloud outranks is still
-/// stored, which is why the page says so next to it.
+/// The route an endpoint is on, for the Providers page. Same precedence as
+/// [`desired_routes`], including its one asymmetry: for a CLI the cloud wins
+/// while it covers it, and a custom entry the cloud outranks is still stored
+/// (which is why the page says so next to it) — but for the built-in agent's
+/// three lines the user's own endpoint wins, so a filled-in box always reads
+/// as Custom.
 pub fn active_route_kind(
     provider_id: &str,
     cloud: Option<&GatewayConfig>,
     custom: &CustomApiConfig,
 ) -> RouteKind {
+    if NATIVE_SLOTS.contains(&provider_id) {
+        if custom.endpoint_for(provider_id).is_some() {
+            return RouteKind::Custom;
+        }
+        let cloud_only = desired_routes(cloud, &CustomApiConfig::default());
+        let covered = cloud_only.native.as_ref().is_some_and(|routes| match provider_id {
+            "native_messages" => routes.messages.is_some(),
+            "native_responses" => routes.responses.is_some(),
+            _ => routes.chat.is_some(),
+        });
+        return if covered {
+            RouteKind::Cloud
+        } else {
+            RouteKind::CliOwn
+        };
+    }
     let cloud_only = desired_routes(cloud, &CustomApiConfig::default());
     let cloud_covers = match provider_id {
-        "native" => cloud_only.native.is_some(),
         "claude" => cloud_only.claude.is_some(),
         "codex" => cloud_only.codex.is_some(),
         "grok" => cloud_only.grok.is_some(),
@@ -268,9 +335,7 @@ pub fn reconcile_at(paths: &Paths, desired: &DesiredRoutes) -> Result<Vec<String
         desired.native.as_ref(),
         &mut state.native,
         &mut warnings,
-        |target, backups| {
-            native::take_over(&paths.native_dir, target, &desired.native_platform_keys, backups)
-        },
+        |routes, backups| native::take_over(&paths.native_dir, routes, backups),
         |backups| native::restore(&paths.native_dir, backups),
     );
     reconcile_switching(
@@ -328,12 +393,12 @@ pub fn reconcile_at(paths: &Paths, desired: &DesiredRoutes) -> Result<Vec<String
 
 /// One switching-mode CLI's reconcile step. On a failed restore the backups
 /// are kept so a later attempt can still put the user's file back.
-fn reconcile_switching(
+fn reconcile_switching<T>(
     cli: &str,
-    target: Option<&RouteTarget>,
+    target: Option<&T>,
     slot: &mut Option<CliBackups>,
     warnings: &mut Vec<String>,
-    take_over: impl FnOnce(&RouteTarget, &mut CliBackups) -> Result<()>,
+    take_over: impl FnOnce(&T, &mut CliBackups) -> Result<()>,
     restore: impl FnOnce(&CliBackups) -> Result<()>,
 ) {
     match target {
@@ -359,7 +424,9 @@ fn reconcile_switching(
 pub fn config_file_for(provider_id: &str) -> Option<PathBuf> {
     let paths = Paths::resolve()?;
     Some(match provider_id {
-        "native" => native::settings_path(&paths.native_dir),
+        // All three of the built-in agent's lines live in the one file the
+        // engine reads, as three entries inside it.
+        provider if NATIVE_SLOTS.contains(&provider) => native::settings_path(&paths.native_dir),
         "claude" => paths.claude_dir.join("settings.json"),
         "codex" => paths.codex_dir.join("config.toml"),
         "grok" => paths.grok_dir.join("config.toml"),
@@ -629,11 +696,15 @@ mod tests {
         .unwrap();
 
         let desired = DesiredRoutes {
-            native: Some(target("https://gw.example.org", "sk-c")),
-            native_platform_keys: BTreeMap::from([
-                ("anthropic".to_owned(), "sk-c".to_owned()),
-                ("openai".to_owned(), "sk-x".to_owned()),
-            ]),
+            native: Some(NativeRoutes {
+                messages: Some(target("https://gw.example.org", "sk-c")),
+                responses: Some(target("https://gw.example.org", "sk-x")),
+                chat: Some(target("https://gw.example.org", "sk-c")),
+                platform_keys: BTreeMap::from([
+                    ("anthropic".to_owned(), "sk-c".to_owned()),
+                    ("openai".to_owned(), "sk-x".to_owned()),
+                ]),
+            }),
             claude: Some(target("https://gw.example.org", "sk-c")),
             codex: Some(target("https://gw.example.org", "sk-x")),
             grok: Some(target("https://gw.example.org", "sk-g")),

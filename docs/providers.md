@@ -940,9 +940,35 @@ a model brings its own API with it (`choose_model` in `sessions.rs`).
 
 The user's own endpoint is the one case this app cannot discover: nothing
 lists the models behind somebody else's base URL, so the built-in agent's
-custom-endpoint card takes a model list, and those are the Chat Completions
-section. They carry a bare id with no platform ahead of a `::`, which is
-how everything downstream tells them from a catalog model.
+Chat Completions route takes a model list, and those are the Chat section.
+They carry a bare id with no platform ahead of a `::`, which is how
+everything downstream tells them from a catalog model.
+
+**Custom endpoints** — the built-in agent is not a CLI with one endpoint. It
+speaks three APIs and reaches each separately, so it holds three:
+`native_messages`, `native_responses` and `native_chat`
+(`crates/sub2api/src/custom_api.rs`), each with its own base URL, key and
+saved profiles, each probed in the wire shape it actually speaks
+(`uses_anthropic_shape`). A route left blank falls back to the managed
+gateway, so signing in and pointing one API somewhere of your own are not
+mutually exclusive. This is also the one place the usual precedence is
+inverted: for a CLI the gateway outranks a stored custom endpoint, but here
+a filled-in box is an instruction about that API and wins.
+
+Two things make three keys actually work, and both are easy to undo by
+accident. The writer no longer pins the top-level `config.api_key`
+(`global_config/native.rs`): the engine resolves that one first, for
+whichever provider the session picked, so any value there outranks all three
+provider entries and collapses the routes into one — `restore` puts the
+user's own value back when routing is released. And the per-platform key
+table on the anthropic entry is written *only* while every route is the
+gateway's; it is read by platform, so a leftover table would hand a gateway
+key to a request aimed at somebody else's server.
+
+An earlier build kept a single `native` endpoint that the writer fanned out
+to all three provider entries. It is split into the three on first read
+(`CustomApiConfig::normalize`), which is behaviour-preserving, with the model
+list going only to the Chat route.
 
 Rows carry the product brand and the platform as their subtitle. Each format is a different engine adapter —
 `anthropic`, `codex`, `openai` — pointed at the gateway origin; switching
@@ -970,6 +996,34 @@ reports a clean-but-empty turn as a failure. And `AgentEvent::ProducedNothing`
 carries the provider, model and endpoint so the driver can say it in the
 user's language (`native.empty_turn`) rather than shipping an English
 sentence.
+
+**Reasoning effort** — every family the picker offers has a working ladder:
+Claude over Messages turns it into a thinking budget, and the GPT and Grok
+families over Responses turn it into `reasoning.effort`. Grok was the
+exception until the engine's reasoning-model list stopped leaving it out — a
+recorded departure — and the gateway normalizes the value per model and
+drops it for the ones that cannot use it, so the ladder is honest rather
+than decorative. A model the user declared on their own endpoint gets no
+ladder: the engine decides by model name, an arbitrary name does not match,
+and guessing would send a field the upstream may reject.
+
+**Tool results** — the bridge sets `tool_result_budget` well above what a
+single tool call may return. The engine's own default is half of one Bash
+call's cap, and its shedding pass replaces a whole result with a one-line
+notice rather than trimming it, checking whether that result covers the debt
+only after blanking it — so one large command erased its own output before
+the model read it, while the transcript still showed the full text, because
+the event that feeds the transcript is emitted before the budget runs.
+Running out of context is handled by auto-compact instead, which summarises
+at 90% of the window.
+
+**Language** — the daemon renders user-facing text of its own (every driver's
+`tr!` call) and had no way to know which language to use, so those strings
+were always English however the app was set. The desktop now stamps the
+interface language into the settings it pushes
+(`DaemonSettings::LOCALE_KEY`), the daemon adopts it, and the built-in
+agent's driver passes it on as a narration instruction so the model explains
+its work in the same language the interface is in.
 
 **Deletion** — removing a session sends `DeleteAgentTranscript` for the
 cursor's file, alongside the checkpoint-ref cleanup every provider gets.

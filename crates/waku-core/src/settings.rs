@@ -8,6 +8,19 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 pub use waku_protocol::settings::DaemonSettings;
 
+/// Fork addition: render this process's own text in the user's language.
+///
+/// The daemon draws every driver's error and permission wording through
+/// `tr!`, and `rust_i18n`'s locale is one process-wide value that nothing
+/// here ever set — so those strings came out English however the app was
+/// configured, and the translations for them sat unused. The desktop pushes
+/// the language with the rest of its settings; this is where it lands.
+fn adopt_locale(settings: &DaemonSettings) {
+    if let Some(locale) = settings.locale() {
+        waku_protocol::i18n::set_language(waku_protocol::i18n::AppLanguage::from_locale_id(locale));
+    }
+}
+
 pub struct DaemonSettingsStore {
     path: PathBuf,
     settings: Mutex<DaemonSettings>,
@@ -60,6 +73,7 @@ impl DaemonSettingsStore {
             Err(error) => return Err(error),
         };
         settings.discard_legacy_app_keys();
+        adopt_locale(&settings);
         if write_current {
             write_atomic(&path, &settings)?;
         }
@@ -75,6 +89,7 @@ impl DaemonSettingsStore {
 
     pub fn replace(&self, mut settings: DaemonSettings) -> io::Result<()> {
         settings.discard_legacy_app_keys();
+        adopt_locale(&settings);
         let mut current = self.settings.lock();
         write_atomic(&self.path, &settings)?;
         *current = settings;

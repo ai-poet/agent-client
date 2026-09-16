@@ -153,10 +153,15 @@ fn is_non_conversational_name(model: &str) -> bool {
         .any(|word| matches!(word, "embedding" | "embeddings" | "moderation" | "rerank"))
 }
 
-/// A reasoning ladder only where the engine maps effort onto a request field
-/// the upstream understands: the Anthropic and OpenAI families. Grok takes
-/// the Responses route but has no effort field, and a ladder that changed
-/// nothing would look connected while doing nothing.
+/// A reasoning ladder wherever the engine maps effort onto a request field
+/// the upstream understands.
+///
+/// That is every family the picker offers: Claude over Messages turns it
+/// into a thinking budget, and the GPT and Grok families over Responses
+/// turn it into `reasoning.effort`. Grok was the exception until the engine
+/// stopped leaving it out of that second list; the gateway normalizes the
+/// value per model and drops it for the ones that cannot use it, so the
+/// ladder is honest for all of them.
 ///
 /// Name first, platform second, for the same reason the API is chosen that
 /// way: a composite group reports `composite` for every model in it.
@@ -169,13 +174,11 @@ fn has_reasoning_ladder(platform: &str, model: &str) -> bool {
         || model.starts_with("o3")
         || model.starts_with("o4")
         || model.starts_with("codex")
+        || model.starts_with("grok")
     {
         return true;
     }
-    if model.starts_with("grok") {
-        return false;
-    }
-    platform == "anthropic" || platform == "openai"
+    platform == "anthropic" || platform == "openai" || platform == "grok"
 }
 
 /// The engine resolves `ultracode` to its top reasoning budget, which only
@@ -325,7 +328,7 @@ impl Waku {
     pub(super) fn sync_native_models(&mut self) {
         let custom = self
             .custom_api_snapshot()
-            .get("native")
+            .get("native_chat")
             .map(|endpoint| endpoint.models.clone())
             .unwrap_or_default();
         let models = native_probe_models(&self.model_plaza.items, &custom);
@@ -558,13 +561,16 @@ mod tests {
     }
 
     #[test]
-    fn grok_gets_no_reasoning_ladder_it_cannot_use() {
+    fn every_offered_family_carries_a_reasoning_ladder() {
         let ladder = |models: &[ProviderModel]| !models[0].reasoning_efforts.is_empty();
-        assert!(!ladder(&native_models_from_catalog(&[item("grok-4.6", "grok")])));
+        // Grok reaches the same Responses adapter as the GPT family and the
+        // gateway accepts an effort for it, so it gets the ladder too.
+        assert!(ladder(&native_models_from_catalog(&[item("grok-4.6", "grok")])));
         assert!(ladder(&native_models_from_catalog(&[item("claude-sonnet-5", "anthropic")])));
         // The family carries it through a composite group, where the
         // platform says nothing.
         assert!(ladder(&native_models_from_catalog(&[item("gpt-5.6-sol", "composite")])));
+        assert!(ladder(&native_models_from_catalog(&[item("grok-4.6", "composite")])));
     }
 
     #[test]

@@ -632,18 +632,47 @@ async fn run_windows_fallback(
 // Shared output truncation helper
 // ---------------------------------------------------------------------------
 
+/// Fork addition (Waku): the largest character boundary at or below `index`.
+///
+/// `str::floor_char_boundary` is still unstable, and every truncation in this
+/// crate used to slice on a raw byte offset instead. That is fine for ASCII
+/// and panics on everything else, which made a long command in any non-Latin
+/// script crash the tool call rather than truncate it.
+pub(crate) fn floor_char_boundary(text: &str, index: usize) -> usize {
+    if index >= text.len() {
+        return text.len();
+    }
+    let mut index = index;
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+/// The smallest character boundary at or above `index`.
+pub(crate) fn ceil_char_boundary(text: &str, index: usize) -> usize {
+    if index >= text.len() {
+        return text.len();
+    }
+    let mut index = index;
+    while index < text.len() && !text.is_char_boundary(index) {
+        index += 1;
+    }
+    index
+}
+
 fn truncate_output(mut output: String, exit_code: i32) -> ToolResult {
     const MAX_OUTPUT_LEN: usize = 100_000;
     if output.len() > MAX_OUTPUT_LEN {
+        // Fork departure (Waku): keep the halves on character boundaries.
+        // These were byte slices, and any command whose output is not ASCII
+        // — which is most of them outside English — eventually lands the cut
+        // inside a multi-byte character and panics the tool call.
         let half = MAX_OUTPUT_LEN / 2;
-        let start = output[..half].to_string();
-        let end = output[output.len() - half..].to_string();
-        output = format!(
-            "{}\n\n... ({} characters truncated) ...\n\n{}",
-            start,
-            output.len() - MAX_OUTPUT_LEN,
-            end
-        );
+        let dropped = output.len() - MAX_OUTPUT_LEN;
+        let start = &output[..floor_char_boundary(&output, half)];
+        let end = &output[ceil_char_boundary(&output, output.len() - half)..];
+        output = format!("{start}\n\n... ({dropped} characters truncated) ...\n\n{end}");
     }
 
     if exit_code != 0 {
