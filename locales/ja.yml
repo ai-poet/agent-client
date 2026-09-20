@@ -1606,3 +1606,6 @@ commands.plan_description: "変更する前に計画する"
 commands.plan_argument_hint: "[off | 計画したいこと]"
 commands.plan_entered: "計画モード — 何も適用されません"
 commands.plan_exited: "ビルドモード — 変更が適用されます"
+
+native.plan_mode_denied: "実行されていません — 計画モードのため何も適用されません。下でビルドに切り替えてからもう一度依頼してください。"
+native.keep_planning: "計画を続けることを選んだので、エージェントは計画の改善を続けます。"

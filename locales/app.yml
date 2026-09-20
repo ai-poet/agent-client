@@ -3154,3 +3154,8 @@ commands.plan_entered:
   en: "Plan mode — nothing will be applied"
 commands.plan_exited:
   en: "Build mode — changes will be applied"
+
+native.plan_mode_denied:
+  en: "Not run — plan mode is on, so nothing is applied. Switch to Build below and ask again."
+native.keep_planning:
+  en: "You chose to keep planning, so the agent will carry on refining the plan."

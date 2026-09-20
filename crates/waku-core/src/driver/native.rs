@@ -688,6 +688,36 @@ fn permission_label(choice: waku_agent_bridge::PermissionChoice) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The two refusals the fork owns the wording of are recognised by their
+    /// exported markers, not by matching prose — a reworded engine string
+    /// breaks the build rather than silently shipping English to everyone.
+    #[test]
+    fn our_own_refusals_are_translated_and_others_are_left_alone() {
+        let denial = Value::String(format!(
+            "Permission denied for tool 'Bash'{}",
+            waku_agent_bridge::PLAN_MODE_DENIAL_SUFFIX
+        ));
+        assert!(localize_refusal(&denial).is_some());
+        assert!(
+            localize_refusal(&Value::String(
+                waku_agent_bridge::KEEP_PLANNING_DENIAL.to_owned()
+            ))
+            .is_some()
+        );
+
+        // A refusal that names the specific thing the engine objected to is
+        // the useful part, and not ours to restate.
+        assert!(
+            localize_refusal(&Value::String(
+                "Permission denied for tool 'Bash'".to_owned()
+            ))
+            .is_none()
+        );
+        assert!(localize_refusal(&Value::String("ok".to_owned())).is_none());
+        // A structured result is some tool's own payload.
+        assert!(localize_refusal(&serde_json::json!({"files": []})).is_none());
+    }
     use super::*;
 
     #[test]
