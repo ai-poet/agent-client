@@ -250,7 +250,19 @@ impl PartialBlock {
             },
             PartialBlock::ToolUse { id, name, json_buf, thought_signature } => {
                 let input =
-                    serde_json::from_str(&json_buf).unwrap_or(Value::Object(Default::default()));
+                    serde_json::from_str(&json_buf).unwrap_or_else(|error| {
+                        // Fork: same reasoning as the accumulator in `lib.rs`
+                        // — `{}` reads as "no arguments", so a truncated
+                        // stream must not pass for one in silence.
+                        if !json_buf.trim().is_empty() {
+                            tracing::warn!(
+                                tool = %name,
+                                %error,
+                                "tool-call arguments did not parse; running with none"
+                            );
+                        }
+                        Value::Object(Default::default())
+                    });
                 ContentBlock::ToolUse { id, name, input, thought_signature }
             }
             PartialBlock::Passthrough(block) => block,

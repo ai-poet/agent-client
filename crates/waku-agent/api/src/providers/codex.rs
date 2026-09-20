@@ -54,6 +54,39 @@ pub struct CodexProvider {
     endpoint: String,
 }
 
+/// Read a Responses `function_call`'s arguments.
+///
+/// Fork: the API specifies `arguments` as a JSON *string*, but a gateway that
+/// normalizes a response can hand back the object it already parsed. Reading
+/// only the string form dropped those arguments and ran the tool with
+/// nothing — silently, because `{}` is indistinguishable from a call that
+/// genuinely takes no arguments.
+///
+/// A parse failure still yields `{}`, since this decoder has no error channel
+/// (the agent loop's `parse_tool_args` does, and surfaces a tool error
+/// instead — issue #215). What changed is that it is no longer silent: a
+/// truncated stream now leaves a trail.
+fn decode_tool_arguments(arguments: Option<&Value>, tool: &str) -> Value {
+    match arguments {
+        Some(Value::String(encoded)) => {
+            let trimmed = encoded.trim();
+            if trimmed.is_empty() {
+                return json!({});
+            }
+            serde_json::from_str(trimmed).unwrap_or_else(|error| {
+                warn!(
+                    %tool,
+                    %error,
+                    "tool-call arguments did not parse; running with none"
+                );
+                json!({})
+            })
+        }
+        Some(object @ Value::Object(_)) => object.clone(),
+        _ => json!({}),
+    }
+}
+
 impl CodexProvider {
     pub fn new(tokens: CodexTokens) -> Self {
         let http_client = reqwest::Client::builder()
@@ -508,11 +541,7 @@ impl CodexProvider {
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string();
-                    let args = item
-                        .get("arguments")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("{}");
-                    let input = serde_json::from_str(args).unwrap_or_else(|_| json!({}));
+                    let input = decode_tool_arguments(item.get("arguments"), &name);
                     content.push(ContentBlock::ToolUse {
                         id,
                         name,
@@ -977,5 +1006,40 @@ impl LlmProvider for CodexProvider {
             structured_output: false,
             system_prompt_style: SystemPromptStyle::SystemMessage,
         }
+    }
+}
+
+#[cfg(test)]
+mod fork_argument_decoding_tests {
+    use super::*;
+
+    #[test]
+    fn the_specified_string_form_is_decoded() {
+        let decoded = decode_tool_arguments(Some(&json!(r#"{"limit": 120}"#)), "Read");
+        assert_eq!(decoded, json!({"limit": 120}));
+    }
+
+    /// A gateway that already parsed the response hands back an object. This
+    /// used to be dropped, and the tool ran with no arguments at all.
+    #[test]
+    fn an_already_parsed_object_is_kept() {
+        let decoded = decode_tool_arguments(Some(&json!({"limit": 120})), "Read");
+        assert_eq!(decoded, json!({"limit": 120}));
+    }
+
+    /// A call that genuinely takes no arguments, in both spellings.
+    #[test]
+    fn nothing_and_empty_both_mean_no_arguments() {
+        assert_eq!(decode_tool_arguments(None, "Pwd"), json!({}));
+        assert_eq!(decode_tool_arguments(Some(&json!("")), "Pwd"), json!({}));
+        assert_eq!(decode_tool_arguments(Some(&json!("   ")), "Pwd"), json!({}));
+    }
+
+    /// Truncated mid-stream. `{}` is all this decoder can return, but the
+    /// warning it now logs is what makes the cause findable.
+    #[test]
+    fn a_truncated_argument_string_does_not_crash() {
+        let decoded = decode_tool_arguments(Some(&json!(r#"{"limit": 12"#)), "Read");
+        assert_eq!(decoded, json!({}));
     }
 }

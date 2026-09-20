@@ -1504,8 +1504,23 @@ impl StreamAccumulator {
                     let block = match partial {
                         PartialBlock::Text(text) => ContentBlock::Text { text },
                         PartialBlock::ToolUse { id, name, json_buf } => {
+                            // Fork: `{}` is indistinguishable from a
+                            // no-argument call, so a truncated stream used to
+                            // look like the model simply asked for nothing.
+                            // The agent loop has a real error channel for this
+                            // (`parse_tool_args`, issue #215); this accumulator
+                            // does not, so at least say so.
                             let input = serde_json::from_str(&json_buf)
-                                .unwrap_or(Value::Object(Default::default()));
+                                .unwrap_or_else(|error| {
+                                    if !json_buf.trim().is_empty() {
+                                        warn!(
+                                            tool = %name,
+                                            %error,
+                                            "tool-call arguments did not parse; running with none"
+                                        );
+                                    }
+                                    Value::Object(Default::default())
+                                });
                             ContentBlock::ToolUse { id, name, input, thought_signature: None }
                         }
                         PartialBlock::Thinking {

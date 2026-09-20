@@ -44,6 +44,60 @@ pub(crate) fn synthesize_permission_description(name: &str, input: &Value) -> St
 }
 
 /// Execute a single tool invocation.
+/// Rewrite every float with nothing after the decimal point as an integer.
+///
+/// Fork: tools parse their arguments with `serde_json::from_value` into
+/// concrete structs, so a field declared `usize` rejects `120.0` outright —
+/// `invalid type: floating point `120.0`, expected usize`. The value is the
+/// one the model meant; only its JSON spelling is wrong, and which spelling a
+/// model reaches for is a property of the model rather than of the prompt.
+/// Claude writes `120`; several others write `120.0` often enough that a long
+/// session is likely to hit it, and instructing a model about number
+/// formatting does not make it reliable. The built-in agent can be pointed at
+/// any of them, so the repair belongs where the arguments arrive.
+///
+/// Placed at this one dispatch point because it is the only one: sub-agents
+/// build their own tool sets but still call tools through here, so a fix in
+/// the tool set alone would have left them broken.
+///
+/// The whole argument tree is rewritten rather than the fields a schema calls
+/// `integer`, because it does not need to be that careful: serde reads `120`
+/// into an `f64` field just as happily as `120.0`, and JSON has one number
+/// type, so `120` is the same value to whatever parses it next — an MCP
+/// server included. A float with an actual fraction is left alone: it was
+/// never going to fit an integer field, and turning `0.5` into `0` would
+/// answer a type error with a wrong number.
+fn whole_floats_to_integers(value: Value) -> Value {
+    match value {
+        // `is_f64` is the question, not whether the value looks whole — an
+        // integer that arrived as an integer is already right.
+        Value::Number(number) if number.is_f64() => match number.as_f64() {
+            // `as i64` saturates rather than wrapping, so without the range
+            // check `1e30` would silently become `i64::MAX` — a number nobody
+            // wrote. Out of range keeps its spelling and fails downstream,
+            // which is the honest outcome.
+            Some(float)
+                if float.fract() == 0.0
+                    && float >= i64::MIN as f64
+                    && float <= i64::MAX as f64 =>
+            {
+                Value::Number(serde_json::Number::from(float as i64))
+            }
+            _ => Value::Number(number),
+        },
+        Value::Array(items) => {
+            Value::Array(items.into_iter().map(whole_floats_to_integers).collect())
+        }
+        Value::Object(fields) => Value::Object(
+            fields
+                .into_iter()
+                .map(|(name, field)| (name, whole_floats_to_integers(field)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
 pub(crate) async fn execute_tool(
     name: &str,
     input: &Value,
@@ -69,7 +123,7 @@ pub(crate) async fn execute_tool(
                     return ToolResult::error(e.to_string());
                 }
             }
-            tool.execute(input.clone(), ctx).await
+            tool.execute(whole_floats_to_integers(input.clone()), ctx).await
         }
         None => {
             warn!(tool = name, "Unknown tool requested");
@@ -123,5 +177,70 @@ pub(crate) fn build_todo_nudge(session_id: &str) -> String {
             incomplete_count,
             if incomplete_count == 1 { "" } else { "s" }
         )
+    }
+}
+
+#[cfg(test)]
+mod fork_number_repair_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The three shapes this was reported as: a top-level `limit`, a nested
+    /// one, and numbers inside an array.
+    #[test]
+    fn whole_floats_become_integers_anywhere_in_the_tree() {
+        let repaired = whole_floats_to_integers(json!({
+            "limit": 120.0,
+            "nested": {"head_limit": 80.0},
+            "offset": [1.0, 2.0],
+        }));
+        assert_eq!(
+            repaired,
+            json!({"limit": 120, "nested": {"head_limit": 80}, "offset": [1, 2]})
+        );
+        // And the repaired form is what the failing parse wanted.
+        assert_eq!(
+            serde_json::from_value::<usize>(repaired["limit"].clone()).unwrap(),
+            120
+        );
+    }
+
+    /// Rounding it would answer a type error with a wrong number. The call
+    /// still fails, and its message still says what was wrong.
+    #[test]
+    fn a_real_fraction_is_left_alone() {
+        assert_eq!(
+            whole_floats_to_integers(json!({"ratio": 0.5})),
+            json!({"ratio": 0.5})
+        );
+    }
+
+    #[test]
+    fn nothing_else_is_touched() {
+        let original = json!({
+            "path": r"D:\\Projects\\types.ts",
+            "count": 7,
+            "enabled": true,
+            "missing": null,
+        });
+        assert_eq!(whole_floats_to_integers(original.clone()), original);
+    }
+
+    /// `as i64` saturates, so an out-of-range float would otherwise become
+    /// `i64::MAX` — a number nobody wrote.
+    #[test]
+    fn an_out_of_range_float_keeps_its_own_value() {
+        let repaired = whole_floats_to_integers(json!({"huge": 1e30}));
+        assert_eq!(repaired["huge"].as_f64(), Some(1e30));
+    }
+
+    /// Why the whole tree can be rewritten without consulting each schema.
+    #[test]
+    fn a_float_field_still_reads_a_repaired_integer() {
+        let repaired = whole_floats_to_integers(json!({"seconds": 30.0}));
+        assert_eq!(
+            serde_json::from_value::<f64>(repaired["seconds"].clone()).unwrap(),
+            30.0
+        );
     }
 }

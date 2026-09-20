@@ -1025,6 +1025,36 @@ interface language into the settings it pushes
 agent's driver passes it on as a narration instruction so the model explains
 its work in the same language the interface is in.
 
+**Tool arguments** — every tool parses its arguments into a concrete struct,
+so a field declared `usize` rejects `120.0` outright. Claude writes `120`;
+several of the other models the picker offers write `120.0` often enough to
+break a long session, and which spelling a model reaches for is a property of
+the model, not of the prompt — so the repair is at the one `.execute()` call
+site in `query/src/runner/tools.rs` rather than in the instructions. Whole
+floats become integers anywhere in the argument tree; a real fraction is left
+alone, because rounding it would answer a type error with a wrong number.
+
+That dispatch point is also the only one: sub-agents assemble their own tool
+sets but still call tools through it, so repairing the tool set instead would
+have left them broken.
+
+Arguments can also fail earlier, while being decoded off the wire, and there
+the failure used to be invisible: `{}` is indistinguishable from a call that
+genuinely takes no arguments, so a truncated stream looked like a model asking
+for nothing. The agent loop already handles this properly (`parse_tool_args`
+returns an error and the call is reported to the model rather than executed —
+issue #215); the two stream accumulators in `api/` do not have an error
+channel, so they now at least log instead of swallowing. The Responses decoder
+additionally accepts `arguments` as an object, which a gateway that normalizes
+a response returns — the API specifies a JSON string, and reading only that
+form dropped the arguments entirely.
+
+Worth knowing when this comes up: the engine already tells the model what
+platform it is on. `system_prompt.rs` injects OS, shell, date and
+platform-specific command guidance unless `skip_env_info` is set, which the
+fork never sets. Argument-typing failures are not an environment problem and
+adding environment text does not affect them.
+
 **Plan mode** — two things decide it, and they now agree. Waku's composer
 switch sets it at session start (`driver/native.rs`), and the engine's own
 `EnterPlanMode` / `ExitPlanMode` tools move it mid-turn; the bridge follows
