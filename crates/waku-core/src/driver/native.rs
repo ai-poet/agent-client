@@ -421,14 +421,16 @@ struct ToolCall {
 ///
 /// Other refusals pass through: they name the specific command or path the
 /// engine objected to, which is the useful part and not ours to restate.
-fn localize_refusal(output: &str) -> Option<String> {
-    let trimmed = output.trim();
-    if trimmed == claurst_tools::KEEP_PLANNING_DENIAL {
-        return Some(tr!("native.keep_planning"));
+fn localize_refusal(output: &Value) -> Option<Value> {
+    // Only a plain-string result can be one of these; a structured output is
+    // some tool's own payload.
+    let trimmed = output.as_str()?.trim();
+    if trimmed == waku_agent_bridge::KEEP_PLANNING_DENIAL {
+        return Some(Value::String(tr!("native.keep_planning")));
     }
     trimmed
-        .strip_suffix(claurst_tools::PLAN_MODE_DENIAL_SUFFIX)
-        .map(|_| tr!("native.plan_mode_denied"))
+        .strip_suffix(waku_agent_bridge::PLAN_MODE_DENIAL_SUFFIX)
+        .map(|_| Value::String(tr!("native.plan_mode_denied")))
 }
 
 impl EventTranslator {
