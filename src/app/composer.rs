@@ -2234,8 +2234,44 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> bool {
         self.execute_resume_composer_command(prompt, cx)
+            || self.execute_plan_mode_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
             || self.execute_goal_composer_command(prompt, cx)
+    }
+
+    /// `/plan`, `/plan off`, `/plan <description>` — the composer's
+    /// Plan/Build switch, reachable by typing.
+    ///
+    /// A description is left in the composer rather than sent: it was typed
+    /// as a command argument, and sending on the user's behalf is a bigger
+    /// assumption than switching a mode they asked to switch.
+    fn execute_plan_mode_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+        use crate::composer_complete::PlanModeCommand;
+
+        let Some(command) =
+            crate::composer_complete::plan_mode_submission(prompt, &self.slash_command_index)
+        else {
+            return false;
+        };
+        let (mode, carried) = match command {
+            PlanModeCommand::Exit => (InteractionMode::Build, None),
+            PlanModeCommand::Enter { prompt } => (InteractionMode::Plan, prompt),
+        };
+        // Clear first: setting the mode can refresh the draft, which would
+        // otherwise repaint the command text over what we carry across.
+        self.composer.update(cx, |input, cx| input.clear(cx));
+        self.set_interaction_mode(mode, cx);
+        if let Some(carried) = carried {
+            self.composer
+                .update(cx, |input, cx| input.set_content(&carried, cx));
+        }
+        self.show_success_toast(tr!(if mode == InteractionMode::Plan {
+            "commands.plan_entered"
+        } else {
+            "commands.plan_exited"
+        }));
+        cx.notify();
+        true
     }
 
     fn execute_resume_composer_command(

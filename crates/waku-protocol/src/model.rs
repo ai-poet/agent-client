@@ -1793,6 +1793,10 @@ pub enum DriverEvent {
     /// fresh Harness session may resolve its deployment default when Waku did
     /// not name one explicitly, so the driver reports the resolved value.
     AgentPresetSelected(Option<String>),
+    /// The agent itself moved between Build and Plan (EnterPlanMode /
+    /// ExitPlanMode tool calls), so the composer's mode chip — normally the
+    /// source of truth — has to follow.
+    InteractionModeUpdated(InteractionMode),
     /// A provider-owned, automatically generated session title. `None`
     /// clears that fallback but never overwrites a user-owned title.
     AutoTitleUpdated(Option<String>),

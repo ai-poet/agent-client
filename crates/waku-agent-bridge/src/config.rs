@@ -148,7 +148,7 @@ impl AccessMode {
         }
     }
 
-    fn permission_mode(self, plan: bool) -> PermissionMode {
+    pub(crate) fn permission_mode(self, plan: bool) -> PermissionMode {
         if plan {
             // Plan outranks access: the point of Plan is that nothing is
             // applied, whatever the access mode says.

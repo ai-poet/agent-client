@@ -12,7 +12,9 @@
 
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult, session_shell_state};
 use async_trait::async_trait;
-use claurst_core::bash_classifier::{BashRiskLevel, classify_bash_command};
+use claurst_core::bash_classifier::{
+    BashRiskLevel, classify_bash_command, is_read_only_bash_command,
+};
 use claurst_core::tasks::{BackgroundTask, global_registry};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -747,11 +749,15 @@ impl Tool for PtyBashTool {
             .unwrap_or("This will execute a shell command.")
             .to_string();
 
+        // Permission check. A command whose every segment the classifier
+        // proved read-only applies nothing, which is what lets plan mode
+        // let `ls -la | head -30` through while still denying real writes.
+        let is_read_only = is_read_only_bash_command(&params.command);
         if let Err(e) = ctx.check_permission_for_path(
             self.name(),
             &reason,
             std::path::PathBuf::from(&params.command),
-            false,
+            is_read_only,
         ) {
             return ToolResult::error(e.to_string());
         }

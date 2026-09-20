@@ -315,6 +315,20 @@ pub struct ToolContext {
     pub cancel_token: tokio_util::sync::CancellationToken,
 }
 
+/// Everything after the tool name in a plan-mode refusal.
+///
+/// Fork: exported so a UI can recognise one *exactly* instead of matching
+/// prose — `waku-core`'s native driver tests for this suffix and swaps in
+/// copy in the user's own language. Change it and that translation stops
+/// firing (silently), so the two move together.
+pub const PLAN_MODE_DENIAL_SUFFIX: &str =
+    ": plan mode is active, so nothing is applied. Switch to Build to run this.";
+
+/// The whole refusal when the user declined to leave plan mode. Same
+/// contract as [`PLAN_MODE_DENIAL_SUFFIX`]: matched verbatim by the driver.
+pub const KEEP_PLANNING_DENIAL: &str =
+    "The user chose to keep planning. Refine the plan and wait for them to ask before proposing to leave plan mode again.";
+
 impl ToolContext {
     /// Resolve a potentially relative path against the working directory.
     pub fn resolve_path(&self, path: &str) -> PathBuf {
@@ -409,10 +423,14 @@ impl ToolContext {
     /// name for certain, and it was by far the most common cause of the
     /// confusion, so name it.
     fn denial_message(&self, tool_name: &str) -> String {
+        // Refusing to leave plan mode is not a refusal to work — it is the
+        // user saying the plan is not ready. Saying "switch to Build" here
+        // would tell the model to retry the very thing just turned down.
+        if tool_name == claurst_core::constants::TOOL_NAME_EXIT_PLAN_MODE {
+            return KEEP_PLANNING_DENIAL.to_owned();
+        }
         if self.permission_mode == claurst_core::config::PermissionMode::Plan {
-            return format!(
-                "Permission denied for tool '{tool_name}': plan mode is active, so nothing is                  applied. Switch to Build to run this."
-            );
+            return format!("Permission denied for tool '{tool_name}'{PLAN_MODE_DENIAL_SUFFIX}");
         }
         format!("Permission denied for tool '{tool_name}'")
     }

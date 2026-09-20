@@ -97,7 +97,34 @@ impl PermissionBridge {
         if let Some(auto) = *self.auto.lock() {
             return auto;
         }
+        self.prompt(
+            request,
+            title_for(request),
+            detail_for(request, reason),
+            vec![
+                PermissionChoice::AllowOnce,
+                PermissionChoice::AllowAlways,
+                PermissionChoice::RejectOnce,
+                PermissionChoice::RejectAlways,
+            ],
+        )
+    }
 
+    /// Raise a dialog and block for the answer, with no standing-answer
+    /// short-circuit.
+    ///
+    /// [`Self::ask`] arrives here after consulting the access mode. A caller
+    /// that comes straight here is saying this question is the user's to
+    /// answer whatever that mode says — leaving plan mode being the one case,
+    /// since "never ask me about tool calls" was never a decision to skip
+    /// reading the plan.
+    fn prompt(
+        &self,
+        request: &PermissionRequest,
+        title: String,
+        detail: String,
+        options: Vec<PermissionChoice>,
+    ) -> PermissionChoice {
         let request_id = uuid::Uuid::new_v4().to_string();
         let (tx, rx): (Sender<PermissionChoice>, Receiver<PermissionChoice>) = bounded(1);
         self.pending.lock().insert(request_id.clone(), tx);
@@ -105,14 +132,9 @@ impl PermissionBridge {
         self.events.emit(AgentEvent::Permission {
             request_id: request_id.clone(),
             tool_name: request.tool_name.clone(),
-            title: title_for(request),
-            detail: detail_for(request, reason),
-            options: vec![
-                PermissionChoice::AllowOnce,
-                PermissionChoice::AllowAlways,
-                PermissionChoice::RejectOnce,
-                PermissionChoice::RejectAlways,
-            ],
+            title,
+            detail,
+            options,
         });
 
         let answer = wait(&rx);
@@ -214,12 +236,46 @@ pub struct GuiPermissionHandler {
     bridge: Arc<PermissionBridge>,
 }
 
+/// Fallback copy for the "planning is done" dialog.
+///
+/// The driver localizes this by tool name before it reaches any UI
+/// (`waku-core::driver::native`), so these strings are what a client that
+/// skips that translation would show. The bridge has no i18n of its own on
+/// purpose — it depends on neither `waku-core` nor `waku-protocol`.
+const EXIT_PLAN_MODE_TITLE: &str = "Finished planning";
+const EXIT_PLAN_MODE_DETAIL: &str =
+    "The agent says the plan is ready and wants to start applying it. Switch to Build, or keep planning.";
+
 impl GuiPermissionHandler {
     pub fn new(bridge: Arc<PermissionBridge>) -> Self {
         Self { bridge }
     }
 
     fn decide(&self, request: &PermissionRequest) -> PermissionDecision {
+        // Leaving plan mode is the user's call, not the model's — the whole
+        // point of planning is that the plan is read before anything is
+        // applied. The permission rules deliberately do not settle this one
+        // (the tool is allowed there, so the model is never blocked from
+        // *proposing* that planning is done); the question is raised here
+        // instead, and raised whatever the access mode says.
+        //
+        // Only once-scoped answers are offered: remembering "always leave
+        // plan mode" would retire plan mode permanently, which is not a
+        // preference anyone means to express.
+        if request.tool_name == claurst_core::constants::TOOL_NAME_EXIT_PLAN_MODE {
+            let choice = self.bridge.prompt(
+                request,
+                EXIT_PLAN_MODE_TITLE.to_owned(),
+                EXIT_PLAN_MODE_DETAIL.to_owned(),
+                vec![PermissionChoice::AllowOnce, PermissionChoice::RejectOnce],
+            );
+            return if choice.is_allow() {
+                PermissionDecision::Allow
+            } else {
+                PermissionDecision::Deny
+            };
+        }
+
         let evaluated = {
             let Ok(manager) = self.bridge.manager.lock() else {
                 // A poisoned manager means another thread panicked while
@@ -232,6 +288,7 @@ impl GuiPermissionHandler {
                 request.path.as_deref(),
                 request.working_dir.as_deref(),
                 &request.allowed_roots,
+                request.is_read_only,
             )
         };
 
@@ -281,6 +338,108 @@ impl PermissionHandler for GuiPermissionHandler {
 mod tests {
     use super::*;
     use claurst_core::PermissionMode;
+
+    /// Answer whatever dialog appears, from another thread, and hand back the
+    /// events that were raised.
+    fn answer_one_dialog(
+        bridge: Arc<PermissionBridge>,
+        choice: PermissionChoice,
+    ) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || {
+            for _ in 0..200 {
+                let pending: Vec<String> = bridge.pending.lock().keys().cloned().collect();
+                if let Some(id) = pending.first() {
+                    bridge.resolve(id, choice);
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            panic!("no dialog was raised");
+        })
+    }
+
+    fn exit_plan_request() -> PermissionRequest {
+        PermissionRequest {
+            tool_name: "ExitPlanMode".into(),
+            description: "finish planning".into(),
+            context_description: None,
+            ..request()
+        }
+    }
+
+    /// "Never ask me about tool calls" was not a decision to skip reading the
+    /// plan, so the standing answer must not swallow this one dialog.
+    #[test]
+    fn leaving_plan_mode_is_asked_even_when_the_access_mode_never_asks() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let settings = Settings::default();
+        let manager = Arc::new(std::sync::Mutex::new(PermissionManager::new(
+            PermissionMode::BypassPermissions,
+            &settings,
+        )));
+        let sink = {
+            let seen = seen.clone();
+            EventSink::new(move |event: AgentEvent| seen.lock().push(event))
+        };
+        // Bypass plus a standing allow: every other tool sails through.
+        let bridge = PermissionBridge::new(
+            sink,
+            manager,
+            Arc::new(Mutex::new(settings)),
+            Some(PermissionChoice::AllowOnce),
+        );
+        let handler = GuiPermissionHandler::new(bridge.clone());
+
+        let answering = answer_one_dialog(bridge.clone(), PermissionChoice::RejectOnce);
+        let decision = handler.request_permission(&exit_plan_request());
+        answering.join().unwrap();
+
+        // The user's answer won over the standing allow.
+        assert_eq!(decision, PermissionDecision::Deny);
+        assert_eq!(seen.lock().len(), 1, "exactly one dialog");
+
+        // And the contrast: an ordinary tool in the same bridge never asks.
+        seen.lock().clear();
+        assert_eq!(
+            handler.request_permission(&request()),
+            PermissionDecision::Allow
+        );
+        assert!(seen.lock().is_empty(), "bypass must not raise a dialog");
+    }
+
+    /// Remembering "always leave plan mode" would retire plan mode for good,
+    /// so the dialog must not offer it.
+    #[test]
+    fn leaving_plan_mode_offers_only_once_scoped_answers() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let settings = Settings::default();
+        let manager = Arc::new(std::sync::Mutex::new(PermissionManager::new(
+            PermissionMode::Plan,
+            &settings,
+        )));
+        let sink = {
+            let seen = seen.clone();
+            EventSink::new(move |event: AgentEvent| seen.lock().push(event))
+        };
+        let bridge = PermissionBridge::new(sink, manager, Arc::new(Mutex::new(settings)), None);
+        let handler = GuiPermissionHandler::new(bridge.clone());
+
+        let answering = answer_one_dialog(bridge.clone(), PermissionChoice::AllowOnce);
+        assert_eq!(
+            handler.request_permission(&exit_plan_request()),
+            PermissionDecision::Allow
+        );
+        answering.join().unwrap();
+
+        let events = seen.lock();
+        let AgentEvent::Permission { options, .. } = events.first().expect("a dialog") else {
+            panic!("expected a permission event");
+        };
+        assert_eq!(
+            *options,
+            vec![PermissionChoice::AllowOnce, PermissionChoice::RejectOnce]
+        );
+    }
 
     fn bridge_with(auto: Option<PermissionChoice>, mode: PermissionMode) -> Arc<PermissionBridge> {
         let settings = Settings::default();

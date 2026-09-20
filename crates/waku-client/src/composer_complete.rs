@@ -93,6 +93,45 @@ pub fn is_resume_submission(prompt: &str) -> bool {
     prompt.trim() == "/resume"
 }
 
+/// What a submitted `/plan` asks for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PlanModeCommand {
+    /// Switch to Plan. `prompt` is the rest of the line, which the composer
+    /// keeps for the user to send rather than sending for them — the text was
+    /// typed as a command argument, not as a message.
+    Enter { prompt: Option<String> },
+    /// `/plan off` — back to Build.
+    Exit,
+}
+
+/// Whether the submitted text is Waku's `/plan`, and what it asks for.
+///
+/// Checking the resolved entry preserves project/user precedence when one of
+/// them intentionally owns `/plan`, the same way `/fast` does. Returns `None`
+/// for anything else, including `/plan` resolved to a provider's own command.
+pub fn plan_mode_submission(prompt: &str, commands: &[SlashCommand]) -> Option<PlanModeCommand> {
+    let rest = prompt.trim().strip_prefix("/plan")?;
+    // `/planning something` is not `/plan`.
+    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let owned_by_waku = commands.iter().any(|command| {
+        command.name == "plan"
+            && command.scope == CommandScope::Builtin
+            && command.template.is_none()
+    });
+    if !owned_by_waku {
+        return None;
+    }
+    let rest = rest.trim();
+    if rest.eq_ignore_ascii_case("off") {
+        return Some(PlanModeCommand::Exit);
+    }
+    Some(PlanModeCommand::Enter {
+        prompt: (!rest.is_empty()).then(|| rest.to_owned()),
+    })
+}
+
 /// Whether the submitted text resolves to Codex's native fast-mode command,
 /// which Waku bridges to the provider's service-tier control. Checking the
 /// resolved entry preserves project/user command precedence when one of them
@@ -374,6 +413,70 @@ pub fn highlight_byte_ranges(
 
 #[cfg(test)]
 mod tests {
+
+    fn waku_plan_command() -> Vec<SlashCommand> {
+        vec![SlashCommand {
+            name: "plan".to_owned(),
+            description: String::new(),
+            scope: CommandScope::Builtin,
+            argument_hint: None,
+            template: None,
+        }]
+    }
+
+    #[test]
+    fn plan_parses_its_three_forms() {
+        let commands = waku_plan_command();
+        assert_eq!(
+            plan_mode_submission("/plan", &commands),
+            Some(PlanModeCommand::Enter { prompt: None })
+        );
+        assert_eq!(
+            plan_mode_submission("  /plan   ", &commands),
+            Some(PlanModeCommand::Enter { prompt: None })
+        );
+        assert_eq!(
+            plan_mode_submission("/plan off", &commands),
+            Some(PlanModeCommand::Exit)
+        );
+        assert_eq!(
+            plan_mode_submission("/plan OFF", &commands),
+            Some(PlanModeCommand::Exit)
+        );
+        assert_eq!(
+            plan_mode_submission("/plan fix the auth bug", &commands),
+            Some(PlanModeCommand::Enter {
+                prompt: Some("fix the auth bug".to_owned())
+            })
+        );
+    }
+
+    /// A command that merely starts with the same letters is a different
+    /// command, and a message that mentions it is not a command at all.
+    #[test]
+    fn plan_does_not_swallow_neighbouring_text() {
+        let commands = waku_plan_command();
+        assert_eq!(plan_mode_submission("/planning", &commands), None);
+        assert_eq!(plan_mode_submission("/plans off", &commands), None);
+        assert_eq!(plan_mode_submission("tell me the /plan", &commands), None);
+        assert_eq!(plan_mode_submission("", &commands), None);
+    }
+
+    /// A project or user command that owns `/plan` keeps it — the same rule
+    /// `/fast` follows.
+    #[test]
+    fn a_project_command_named_plan_keeps_the_name() {
+        let project = vec![SlashCommand {
+            name: "plan".to_owned(),
+            description: String::new(),
+            scope: CommandScope::Project,
+            argument_hint: None,
+            template: Some("do the thing".to_owned()),
+        }];
+        assert_eq!(plan_mode_submission("/plan", &project), None);
+        // And with nothing registered at all there is nothing to toggle.
+        assert_eq!(plan_mode_submission("/plan", &[]), None);
+    }
     use super::*;
 
     #[test]

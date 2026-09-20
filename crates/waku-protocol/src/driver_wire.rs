@@ -30,6 +30,9 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         DriverEvent::AgentPresetSelected(preset) => {
             ("agentPresetSelected", serde_json::to_value(preset)?)
         }
+        DriverEvent::InteractionModeUpdated(mode) => {
+            ("interactionModeUpdated", serde_json::to_value(mode)?)
+        }
         DriverEvent::AutoTitleUpdated(title) => ("autoTitleUpdated", serde_json::to_value(title)?),
         DriverEvent::AvailableCommands(commands) => {
             ("availableCommands", serde_json::to_value(commands)?)
@@ -122,6 +125,9 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
             provider_cursor: serde_json::from_value(payload)?,
         },
         "agentPresetSelected" => DriverEvent::AgentPresetSelected(serde_json::from_value(payload)?),
+        "interactionModeUpdated" => {
+            DriverEvent::InteractionModeUpdated(serde_json::from_value(payload)?)
+        }
         "autoTitleUpdated" => DriverEvent::AutoTitleUpdated(serde_json::from_value(payload)?),
         "availableCommands" => DriverEvent::AvailableCommands(serde_json::from_value(payload)?),
         "turnStarted" => DriverEvent::TurnStarted,
@@ -261,7 +267,22 @@ struct TurnFinishedWire {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ThreadGoal, ThreadGoalStatus, UserInputOption, UserInputQuestion};
+    use crate::model::{
+        InteractionMode, ThreadGoal, ThreadGoalStatus, UserInputOption, UserInputQuestion,
+    };
+
+    #[test]
+    fn interaction_mode_update_round_trips_through_the_daemon_wire() {
+        let wire = event_to_wire(DriverEvent::InteractionModeUpdated(InteractionMode::Plan))
+            .unwrap();
+        assert_eq!(wire.kind, "interactionModeUpdated");
+        assert_eq!(wire.payload, Value::String("plan".into()));
+
+        let DriverEvent::InteractionModeUpdated(mode) = event_from_wire(wire).unwrap() else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert_eq!(mode, InteractionMode::Plan);
+    }
 
     #[test]
     fn goal_updates_round_trip_through_the_daemon_wire() {

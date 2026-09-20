@@ -673,6 +673,28 @@ async fn forward_events(
     let mut decoder = StreamDecoder::new(context_window);
     while let Some(event) = rx.recv().await {
         for translated in decoder.push(event) {
+            if let AgentEvent::PlanModeChanged(plan) = &translated {
+                // The model entered or left plan mode mid-turn. Move the
+                // engine's permission policy now — waiting for the next
+                // turn would let a just-approved plan sit unexecutable
+                // behind a manager that still says Plan.
+                let permission_mode = {
+                    let mut options = inner.options.lock();
+                    options.plan_mode = *plan;
+                    options.access_mode.permission_mode(*plan)
+                };
+                inner.config.lock().permission_mode = permission_mode.clone();
+                if let Ok(mut manager) = inner.manager.lock() {
+                    // Same reasoning as apply_options: the manager caches the
+                    // mode it evaluates against, so rebuild it rather than
+                    // patching the field.
+                    let settings = load_settings().unwrap_or_else(|error| {
+                        tracing::warn!(%error, "agent: settings unreadable; keeping this session's rules");
+                        inner.settings.lock().clone()
+                    });
+                    *manager = PermissionManager::new(permission_mode, &settings);
+                }
+            }
             inner.events.emit(translated);
         }
     }

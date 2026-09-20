@@ -253,6 +253,14 @@ impl Waku {
                     session.agent_preset = agent_preset;
                 }
             }
+            DriverEvent::InteractionModeUpdated(mode) => {
+                // The agent moved itself between Build and Plan
+                // (EnterPlanMode / ExitPlanMode); the composer chip follows
+                // the engine, not the other way around.
+                if let Some(session) = self.state.session_mut(session_id) {
+                    session.interaction_mode = mode;
+                }
+            }
             DriverEvent::AutoTitleUpdated(title) => {
                 if let Some(session) = self.state.session_mut(session_id) {
                     session.set_auto_title(title);

@@ -1546,3 +1546,11 @@ cli_setup.native_routes_detail: "内置 Agent 会说三种接口，每一种分�
 cli_setup.native_route_messages: "Anthropic Messages"
 cli_setup.native_route_responses: "OpenAI Responses"
 cli_setup.native_route_chat: "OpenAI Chat Completions"
+
+native.exit_plan_title: "规划完成"
+native.exit_plan_detail: "Agent 认为计划已经就绪，想开始执行。可以切到构建模式，也可以让它继续规划。"
+
+commands.plan_description: "先规划，不做任何改动"
+commands.plan_argument_hint: "[off | 要规划什么]"
+commands.plan_entered: "已切到计划模式，不会改动任何东西"
+commands.plan_exited: "已切到构建模式，改动会真的执行"

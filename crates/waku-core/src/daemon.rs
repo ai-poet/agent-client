@@ -1779,6 +1779,9 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         DriverEvent::AgentPresetSelected(preset) => {
             ("agentPresetSelected", serde_json::to_value(preset)?)
         }
+        DriverEvent::InteractionModeUpdated(mode) => {
+            ("interactionModeUpdated", serde_json::to_value(mode)?)
+        }
         DriverEvent::AutoTitleUpdated(title) => ("autoTitleUpdated", serde_json::to_value(title)?),
         DriverEvent::AvailableCommands(commands) => {
             ("availableCommands", serde_json::to_value(commands)?)

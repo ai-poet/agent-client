@@ -243,8 +243,9 @@ pub enum QueryEvent {
     Stream(AnthropicStreamEvent),
     /// A tool is about to be executed.
     ToolStart { tool_name: String, tool_id: String, input_json: String },
-    /// A tool has finished executing.
-    ToolEnd { tool_name: String, tool_id: String, result: String, is_error: bool },
+    /// A tool has finished executing. `metadata` is the tool's structured
+    /// sideband (diffs, mode switches) that never reaches the model.
+    ToolEnd { tool_name: String, tool_id: String, result: String, is_error: bool, metadata: Option<serde_json::Value> },
     /// The model finished a turn.
     TurnComplete { turn: u32, stop_reason: String, usage: Option<UsageInfo> },
     /// An informational status message.
@@ -1276,6 +1277,7 @@ pub async fn run_query_loop(
                                     tool_id: tool_id.clone(),
                                     result: result.content.clone(),
                                     is_error: result.is_error,
+                                    metadata: result.metadata.clone(),
                                 });
                             }
                             tool_results.push(ContentBlock::ToolResult {
@@ -2023,6 +2025,7 @@ pub async fn run_query_loop(
                             tool_id: p.id.clone(),
                             result: result.content.clone(),
                             is_error: result.is_error,
+                            metadata: result.metadata.clone(),
                         });
                     }
 

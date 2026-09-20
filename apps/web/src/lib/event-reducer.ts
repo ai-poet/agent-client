@@ -84,6 +84,11 @@ export function reduceRuntimeEvent(
     case 'agentPresetSelected':
       session.agent_preset = typeof payload === 'string' ? payload : null
       break
+    case 'interactionModeUpdated':
+      // The agent moved itself between Build and Plan (EnterPlanMode /
+      // ExitPlanMode); the composer chip follows the engine.
+      if (payload === 'plan' || payload === 'build') session.interaction_mode = payload
+      break
     case 'autoTitleUpdated':
       session.auto_title = typeof payload === 'string' && payload.trim() ? payload.trim() : null
       break

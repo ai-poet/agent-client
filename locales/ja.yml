@@ -1598,3 +1598,11 @@ cli_setup.native_routes_detail: "内蔵エージェントは 3 種類の API を
 cli_setup.native_route_messages: "Anthropic Messages"
 cli_setup.native_route_responses: "OpenAI Responses"
 cli_setup.native_route_chat: "OpenAI Chat Completions"
+
+native.exit_plan_title: "計画が完了しました"
+native.exit_plan_detail: "エージェントは計画が整ったので実行に移りたいと言っています。ビルドに切り替えるか、計画を続けさせてください。"
+
+commands.plan_description: "変更する前に計画する"
+commands.plan_argument_hint: "[off | 計画したいこと]"
+commands.plan_entered: "計画モード — 何も適用されません"
+commands.plan_exited: "ビルドモード — 変更が適用されます"

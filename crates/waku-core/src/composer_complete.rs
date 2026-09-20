@@ -384,6 +384,20 @@ fn assemble_slash_commands(
         argument_hint: None,
         template: None,
     });
+    // `/plan` mirrors the composer's Plan/Build switch, so a user arriving
+    // from any of these CLIs finds the command they already type. Unlike
+    // `/resume` it is not reserved: a project or user command that owns the
+    // name keeps it, and the submission check in `waku-client` only fires on
+    // a plain built-in — same rule `/fast` follows.
+    if !commands.iter().any(|command| command.name == "plan") {
+        commands.push(SlashCommand {
+            name: "plan".to_owned(),
+            description: crate::i18n::translate("commands.plan_description"),
+            scope: CommandScope::Builtin,
+            argument_hint: Some(crate::i18n::translate("commands.plan_argument_hint")),
+            template: None,
+        });
+    }
     sort_commands_for_display(&mut commands);
     commands
 }

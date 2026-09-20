@@ -2555,12 +2555,11 @@ pub mod permissions {
     /// their place because researching is what planning is, and neither can
     /// write. The other three are what lets the agent keep notes, ask a
     /// question, and hand the plan back.
-    pub const PLAN_SAFE_TOOLS: [&str; 5] = [
-        "ExitPlanMode",
-        "TodoWrite",
-        "AskUserQuestion",
-        "WebSearch",
-        "WebFetch",
+    pub const PLAN_SAFE_TOOLS: [&str; 4] = [
+        crate::constants::TOOL_NAME_TODO_WRITE,
+        crate::constants::TOOL_NAME_ASK_USER,
+        crate::constants::TOOL_NAME_WEB_SEARCH,
+        crate::constants::TOOL_NAME_WEB_FETCH,
     ];
 
     impl PermissionLevel {
@@ -2820,8 +2819,9 @@ pub mod permissions {
         /// 3. Check allow rules (persistent first, then session) → if any
         ///    matched, Allow.
         /// 4. AcceptEdits → Allow (auto-accept file edits).
-        /// 5. Plan mode → Allow reads and the plan-safe tools
-        ///    ([`PLAN_SAFE_TOOLS`]); deny everything else.
+        /// 5. Plan mode → Allow reads, invocations the caller marked
+        ///    read-only, and the plan-safe tools ([`PLAN_SAFE_TOOLS`]);
+        ///    deny everything else.
         /// 6. Default → derive from tool danger level.
         pub fn evaluate(
             &self,
@@ -2830,6 +2830,7 @@ pub mod permissions {
             path: Option<&str>,
             working_dir: Option<&std::path::Path>,
             allowed_roots: &[std::path::PathBuf],
+            is_read_only: bool,
         ) -> PermissionDecision {
             use crate::config::PermissionMode;
 
@@ -2875,6 +2876,17 @@ pub mod permissions {
                     if !matches!(
                         tool_name,
                         "Read" | "Glob" | "Grep" | "ListMcpResources" | "ReadMcpResource" | "LSP" | "Skill"
+                        // Fork: the two plan-mode switches. Neither touches
+                        // the workspace — they only tighten the policy or put
+                        // it back — so treating them as `Execute` meant the
+                        // model had to ask permission before it could
+                        // volunteer to restrict itself. Whether *leaving* plan
+                        // mode needs the user's blessing is a separate
+                        // question, answered in the bridge's
+                        // `GuiPermissionHandler`, which asks regardless of
+                        // what this says.
+                        | crate::constants::TOOL_NAME_ENTER_PLAN_MODE
+                        | crate::constants::TOOL_NAME_EXIT_PLAN_MODE
                     ) => PermissionLevel::Execute,
                 other => other,
             };
@@ -2910,6 +2922,11 @@ pub mod permissions {
             if self.mode == PermissionMode::Plan {
                 return match level {
                     PermissionLevel::Read => PermissionDecision::Allow,
+                    // The tool vouched that this invocation changes nothing
+                    // (e.g. a shell command whose every segment the bash
+                    // classifier proved read-only), so plan mode's promise
+                    // that nothing is applied still holds.
+                    _ if is_read_only => PermissionDecision::Allow,
                     _ if PLAN_SAFE_TOOLS.contains(&tool_name) => PermissionDecision::Allow,
                     _ => PermissionDecision::Deny,
                 };
@@ -3187,6 +3204,7 @@ pub mod permissions {
                     request.path.as_deref(),
                     request.working_dir.as_deref(),
                     &request.allowed_roots,
+                    request.is_read_only,
                 );
                 return match decision {
                     PermissionDecision::Ask { .. } => PermissionDecision::Deny,
@@ -3224,6 +3242,7 @@ pub mod permissions {
                     request.path.as_deref(),
                     request.working_dir.as_deref(),
                     &request.allowed_roots,
+                    request.is_read_only,
                 );
             }
             // If the lock is poisoned fall back to allow (user is watching)
@@ -3271,7 +3290,7 @@ pub mod permissions {
         fn bypass_always_allows() {
             let m = mgr(PermissionMode::BypassPermissions);
             assert_eq!(
-                m.evaluate("Bash", "rm -rf /", None, None, &[]),
+                m.evaluate("Bash", "rm -rf /", None, None, &[], false),
                 PermissionDecision::Allow
             );
         }
@@ -3287,6 +3306,7 @@ pub mod permissions {
                     Some("/workspace/src/lib.rs"),
                     Some(cwd),
                     &[],
+                    false,
                 ),
                 PermissionDecision::Allow
             );
@@ -3302,6 +3322,7 @@ pub mod permissions {
                 Some("/tmp/outside.txt"),
                 Some(cwd),
                 &[],
+                false,
             ) {
                 PermissionDecision::Ask { .. } => {}
                 other => panic!("Expected Ask, got {:?}", other),
@@ -3320,6 +3341,7 @@ pub mod permissions {
                     Some("/external/notes.txt"),
                     Some(cwd),
                     &extra,
+                    false,
                 ),
                 PermissionDecision::Allow
             );
@@ -3328,7 +3350,7 @@ pub mod permissions {
         #[test]
         fn default_bash_asks() {
             let m = mgr(PermissionMode::Default);
-            match m.evaluate("Bash", "echo hello", None, None, &[]) {
+            match m.evaluate("Bash", "echo hello", None, None, &[], false) {
                 PermissionDecision::Ask { .. } => {}
                 other => panic!("Expected Ask, got {:?}", other),
             }
@@ -3339,7 +3361,7 @@ pub mod permissions {
             let mut m = mgr(PermissionMode::Default);
             m.add_session_allow("Bash");
             assert_eq!(
-                m.evaluate("Bash", "echo hi", None, None, &[]),
+                m.evaluate("Bash", "echo hi", None, None, &[], false),
                 PermissionDecision::Allow
             );
         }
@@ -3354,14 +3376,14 @@ pub mod permissions {
                 action: PermissionAction::Deny,
                 scope: PermissionScope::Session,
             });
-            assert_eq!(m.evaluate("Bash", "echo hi", None, None, &[]), PermissionDecision::Deny);
+            assert_eq!(m.evaluate("Bash", "echo hi", None, None, &[], false), PermissionDecision::Deny);
         }
 
         #[test]
         fn plan_denies_writes() {
             let m = mgr(PermissionMode::Plan);
             assert_eq!(
-                m.evaluate("Write", "write file", Some("/tmp/foo"), None, &[]),
+                m.evaluate("Write", "write file", Some("/tmp/foo"), None, &[], false),
                 PermissionDecision::Deny
             );
         }
@@ -3370,7 +3392,7 @@ pub mod permissions {
         fn plan_allows_reads() {
             let m = mgr(PermissionMode::Plan);
             assert_eq!(
-                m.evaluate("Read", "read file", Some("/tmp/foo"), None, &[]),
+                m.evaluate("Read", "read file", Some("/tmp/foo"), None, &[], false),
                 PermissionDecision::Allow
             );
         }
@@ -3379,10 +3401,10 @@ pub mod permissions {
         fn accept_edits_only_allows_edit() {
             let m = mgr(PermissionMode::AcceptEdits);
             assert_eq!(
-                m.evaluate("Edit", "edit file", Some("/workspace/src/lib.rs"), None, &[]),
+                m.evaluate("Edit", "edit file", Some("/workspace/src/lib.rs"), None, &[], false),
                 PermissionDecision::Allow
             );
-            match m.evaluate("Bash", "rm -rf /tmp", None, None, &[]) {
+            match m.evaluate("Bash", "rm -rf /tmp", None, None, &[], false) {
                 PermissionDecision::Ask { .. } => {}
                 other => panic!("Expected Ask, got {:?}", other),
             }
@@ -3398,7 +3420,7 @@ pub mod permissions {
                 scope: PermissionScope::Session,
             });
             assert_eq!(
-                m.evaluate("Write", "write", Some("/tmp/foo/bar.txt"), None, &[]),
+                m.evaluate("Write", "write", Some("/tmp/foo/bar.txt"), None, &[], false),
                 PermissionDecision::Allow
             );
         }
@@ -3412,7 +3434,7 @@ pub mod permissions {
                 action: PermissionAction::Allow,
                 scope: PermissionScope::Session,
             });
-            match m.evaluate("Write", "write", Some("/etc/hosts"), None, &[]) {
+            match m.evaluate("Write", "write", Some("/etc/hosts"), None, &[], false) {
                 PermissionDecision::Ask { .. } => {}
                 other => panic!("Expected Ask, got {:?}", other),
             }
@@ -4646,7 +4668,7 @@ mod tests {
 
         let settings = Settings::default();
         let manager = PermissionManager::new(PermissionMode::Plan, &settings);
-        let decide = |tool: &str| manager.evaluate(tool, "", None, None, &[]);
+        let decide = |tool: &str| manager.evaluate(tool, "", None, None, &[], false);
 
         for tool in ["ExitPlanMode", "TodoWrite", "AskUserQuestion", "WebSearch", "WebFetch"] {
             assert_eq!(decide(tool), PermissionDecision::Allow, "{tool}");
@@ -4657,6 +4679,66 @@ mod tests {
         for tool in ["Bash", "PowerShell", "Write", "Edit"] {
             assert_eq!(decide(tool), PermissionDecision::Deny, "{tool}");
         }
+    }
+
+    /// Plan mode used to deny the shell wholesale — even `ls -la | head -30`
+    /// came back as "plan mode is active, so nothing is applied". A command
+    /// the bash classifier proved read-only applies nothing, so the tool's
+    /// `is_read_only` flag must carry it past the plan-mode arm.
+    #[test]
+    fn plan_mode_allows_read_only_invocations() {
+        use crate::config::{PermissionMode, Settings};
+        use crate::permissions::{PermissionDecision, PermissionManager};
+
+        let settings = Settings::default();
+        let manager = PermissionManager::new(PermissionMode::Plan, &settings);
+        assert_eq!(
+            manager.evaluate("Bash", "list files", None, None, &[], true),
+            PermissionDecision::Allow
+        );
+        // The flag is the only thing that changed; without it the shell
+        // stays denied.
+        assert_eq!(
+            manager.evaluate("Bash", "delete files", None, None, &[], false),
+            PermissionDecision::Deny
+        );
+    }
+
+    /// Volunteering to restrict itself is not something the model should
+    /// have to ask about. Before the plan switches joined the read-level
+    /// whitelist, `EnterPlanMode` came out as `Execute` and raised a
+    /// permission dialog in Default mode.
+    #[test]
+    fn entering_plan_mode_never_needs_permission() {
+        use crate::config::{PermissionMode, Settings};
+        use crate::permissions::{PermissionDecision, PermissionManager};
+
+        let settings = Settings::default();
+        for mode in [PermissionMode::Default, PermissionMode::Plan, PermissionMode::AcceptEdits] {
+            let manager = PermissionManager::new(mode.clone(), &settings);
+            assert_eq!(
+                manager.evaluate("EnterPlanMode", "", None, None, &[], false),
+                PermissionDecision::Allow,
+                "{mode:?}"
+            );
+        }
+    }
+
+    /// `ExitPlanMode` is allowed here too — the rules never block the model
+    /// from *proposing* that planning is done. Whether it actually happens is
+    /// the user's answer, raised in the bridge's `GuiPermissionHandler`, which
+    /// asks whatever this says.
+    #[test]
+    fn the_rules_do_not_settle_leaving_plan_mode() {
+        use crate::config::{PermissionMode, Settings};
+        use crate::permissions::{PermissionDecision, PermissionManager};
+
+        let settings = Settings::default();
+        let manager = PermissionManager::new(PermissionMode::Plan, &settings);
+        assert_eq!(
+            manager.evaluate("ExitPlanMode", "", None, None, &[], false),
+            PermissionDecision::Allow
+        );
     }
 
     /// The exemption lives in the plan-mode arm on purpose. Had it been added
@@ -4672,7 +4754,7 @@ mod tests {
         for tool in ["WebSearch", "WebFetch", "TodoWrite"] {
             assert!(
                 matches!(
-                    manager.evaluate(tool, "", None, None, &[]),
+                    manager.evaluate(tool, "", None, None, &[], false),
                     PermissionDecision::Ask { .. }
                 ),
                 "{tool} should still prompt in Default mode"

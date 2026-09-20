@@ -34,6 +34,11 @@ pub enum AgentEvent {
         output: Value,
         failed: bool,
     },
+    /// The model entered or left plan mode through the EnterPlanMode /
+    /// ExitPlanMode tools. Carried as an event (not folded into the tool
+    /// row) because both the engine's permission policy and the client's
+    /// mode badge have to move with it.
+    PlanModeChanged(bool),
     /// Context-window occupancy after a model step settled.
     Usage {
         context_tokens: Option<u64>,
@@ -221,6 +226,7 @@ impl StreamDecoder {
                 tool_id,
                 result,
                 is_error,
+                metadata,
             } => {
                 let name = self.tool_names.remove(&tool_id).unwrap_or(tool_name);
                 // Tool results are text by contract, but tools that return
@@ -228,12 +234,26 @@ impl StreamDecoder {
                 // structured rather than shown as an escaped string.
                 let output =
                     serde_json::from_str(&result).unwrap_or_else(|_| Value::String(result));
-                vec![AgentEvent::ToolFinished {
+                let mut events = vec![AgentEvent::ToolFinished {
                     id: tool_id,
                     name,
                     output,
                     failed: is_error,
-                }]
+                }];
+                // EnterPlanMode / ExitPlanMode report the switch through
+                // their metadata sideband; a failed call changed nothing.
+                if !is_error {
+                    match metadata
+                        .as_ref()
+                        .and_then(|m| m.get("type"))
+                        .and_then(Value::as_str)
+                    {
+                        Some("enter_plan_mode") => events.push(AgentEvent::PlanModeChanged(true)),
+                        Some("exit_plan_mode") => events.push(AgentEvent::PlanModeChanged(false)),
+                        _ => {}
+                    }
+                }
+                events
             }
             Q::TurnComplete { usage, .. } => {
                 let context_tokens = usage.as_ref().map(|usage| {
@@ -266,5 +286,60 @@ fn decode_delta(delta: claurst_api::streaming::ContentDelta) -> Vec<AgentEvent> 
         // forwarding the partial JSON would only produce a flickering,
         // unparseable argument view.
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use claurst_query::QueryEvent;
+
+    fn tool_end(name: &str, is_error: bool, metadata: Option<Value>) -> QueryEvent {
+        QueryEvent::ToolEnd {
+            tool_name: name.to_string(),
+            tool_id: format!("id-{name}"),
+            result: String::new(),
+            is_error,
+            metadata,
+        }
+    }
+
+    #[test]
+    fn plan_mode_tools_surface_a_mode_change_event() {
+        let mut decoder = StreamDecoder::new(None);
+
+        let events = decoder.push(tool_end(
+            "EnterPlanMode",
+            false,
+            Some(serde_json::json!({ "type": "enter_plan_mode" })),
+        ));
+        assert!(matches!(events[0], AgentEvent::ToolFinished { .. }));
+        assert!(matches!(events[1], AgentEvent::PlanModeChanged(true)));
+
+        let events = decoder.push(tool_end(
+            "ExitPlanMode",
+            false,
+            Some(serde_json::json!({ "type": "exit_plan_mode" })),
+        ));
+        assert!(matches!(events[1], AgentEvent::PlanModeChanged(false)));
+    }
+
+    #[test]
+    fn a_failed_plan_mode_tool_changed_nothing() {
+        let mut decoder = StreamDecoder::new(None);
+        let events = decoder.push(tool_end(
+            "EnterPlanMode",
+            true,
+            Some(serde_json::json!({ "type": "enter_plan_mode" })),
+        ));
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], AgentEvent::ToolFinished { .. }));
+    }
+
+    #[test]
+    fn tools_without_mode_metadata_stay_plain_tool_rows() {
+        let mut decoder = StreamDecoder::new(None);
+        let events = decoder.push(tool_end("Bash", false, None));
+        assert_eq!(events.len(), 1);
     }
 }

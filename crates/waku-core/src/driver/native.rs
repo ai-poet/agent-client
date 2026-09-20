@@ -410,6 +410,27 @@ struct ToolCall {
     input: Value,
 }
 
+/// Replace an engine refusal the fork owns the wording of with the user's
+/// own language, or `None` for anything else.
+///
+/// The engine has no i18n — every message it produces is English — but these
+/// two are ours (see `claurst_tools`), and they are the ones a user meets
+/// while simply using plan mode, so they are the ones worth translating. The
+/// match is against exported constants rather than prose, so a reworded
+/// engine string is a compile-time concern rather than a silent regression.
+///
+/// Other refusals pass through: they name the specific command or path the
+/// engine objected to, which is the useful part and not ours to restate.
+fn localize_refusal(output: &str) -> Option<String> {
+    let trimmed = output.trim();
+    if trimmed == claurst_tools::KEEP_PLANNING_DENIAL {
+        return Some(tr!("native.keep_planning"));
+    }
+    trimmed
+        .strip_suffix(claurst_tools::PLAN_MODE_DENIAL_SUFFIX)
+        .map(|_| tr!("native.plan_mode_denied"))
+}
+
 impl EventTranslator {
     fn new(events: DriverEventSender, store: SessionStore) -> Self {
         Self {
@@ -432,6 +453,13 @@ impl EventTranslator {
             }
             AgentEvent::Text(text) => self.send(DriverEvent::TextDelta(text)),
             AgentEvent::Reasoning(text) => self.send(DriverEvent::ReasoningDelta(text)),
+            AgentEvent::PlanModeChanged(plan) => {
+                self.send(DriverEvent::InteractionModeUpdated(if plan {
+                    InteractionMode::Plan
+                } else {
+                    InteractionMode::Build
+                }));
+            }
             AgentEvent::ToolStarted { id, name, input } => {
                 let kind = activity_kind(&name);
                 let title = tool_title(&name, &input);
@@ -462,6 +490,7 @@ impl EventTranslator {
                     title: name.clone(),
                     input: Value::Null,
                 });
+                let output = localize_refusal(&output).unwrap_or(output);
                 self.send(DriverEvent::RichActivity(activity::tool_activity(
                     Some(id),
                     call.kind,
@@ -482,11 +511,25 @@ impl EventTranslator {
             }),
             AgentEvent::Permission {
                 request_id,
-                tool_name: _,
+                tool_name,
                 title,
                 detail,
                 options,
             } => {
+                // The bridge has no i18n of its own (it depends on neither
+                // this crate nor `waku-protocol`), so the one dialog whose
+                // wording is ours rather than the engine's gets translated
+                // here. Everything else keeps the engine's description, which
+                // names the actual command and is the specific thing to
+                // decide on.
+                let (title, detail) = if tool_name == "ExitPlanMode" {
+                    (
+                        tr!("native.exit_plan_title"),
+                        tr!("native.exit_plan_detail"),
+                    )
+                } else {
+                    (title, detail)
+                };
                 let options = options
                     .into_iter()
                     .map(|choice| PermissionOption {

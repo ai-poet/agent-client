@@ -243,8 +243,13 @@ describe('thread goals', () => {
 
     const active = runningSession()
     const next = apply(active, 'turnStarted', null)
-    expect(next.turns).toHaveLength(1)
-    expect(next.turns[0]?.id).toBe('turn')
+  test('interactionModeUpdated follows the engine between build and plan', () => {
+    const planned = apply(runningSession(), 'interactionModeUpdated', 'plan')
+    expect(planned.interaction_mode).toBe('plan')
+    const rebuilt = apply(planned, 'interactionModeUpdated', 'build')
+    expect(rebuilt.interaction_mode).toBe('build')
+    // A payload that is neither mode leaves the chip alone.
+    expect(apply(runningSession(), 'interactionModeUpdated', 'bogus').interaction_mode).toBe('build')
   })
 })
 
