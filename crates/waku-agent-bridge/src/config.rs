@@ -483,7 +483,7 @@ pub fn build_query_config(config: &Config, options: &AgentStartOptions) -> Query
     // has always known what to do with them once they arrive
     // (`claurst_query::runner::prompt`).
     query.system_prompt = config.custom_system_prompt.clone();
-    query.append_system_prompt = narration_rule(options, config.append_system_prompt.as_deref());
+    query.append_system_prompt = session_rules(options, config.append_system_prompt.as_deref());
     query.tool_result_budget = TOOL_RESULT_BUDGET;
     if let Some(model) = &options.model {
         query.model = model.clone();
@@ -508,19 +508,50 @@ pub fn build_query_config(config: &Config, options: &AgentStartOptions) -> Query
 /// rule that says "always answer in English" should win. The instruction
 /// itself is written in English even when it names another language, because
 /// the rest of the prompt around it is.
-fn narration_rule(options: &AgentStartOptions, house_rules: Option<&str>) -> Option<String> {
-    let language = options.narration_language.as_deref().map(|language| {
+fn narration_rule(options: &AgentStartOptions) -> Option<String> {
+    options.narration_language.as_deref().map(|language| {
         format!(
             "Write everything the user reads in {language}: your explanations, \
              your summaries of what you did, and the questions you ask. Code, \
              file paths, commands and identifiers stay as they are."
         )
-    });
-    match (language, house_rules.map(str::trim).filter(|rules| !rules.is_empty())) {
-        (Some(language), Some(rules)) => Some(format!("{language}\n\n{rules}")),
-        (Some(language), None) => Some(language),
-        (None, rules) => rules.map(str::to_owned),
-    }
+    })
+}
+
+/// What plan mode is, and how to hand a plan back.
+///
+/// Fork: nothing in the engine's prompt mentions plan mode at all, so a model
+/// that has not been trained to call `ExitPlanMode` (most of the non-Claude
+/// ones) writes its plan as prose and ends the turn - and the "finished
+/// planning" dialog, which is keyed on that tool, never appears. The model
+/// has to be told the tool exists, what its `summary` is for, and that the
+/// user reads the plan before anything runs.
+fn plan_mode_rule(options: &AgentStartOptions) -> Option<String> {
+    options.plan_mode.then(|| {
+        "You are in plan mode: nothing you propose is applied yet. Read, search \
+         and reason freely, then write the plan out for the user. When the plan \
+         is ready, call ExitPlanMode with a short `summary` of it - that hands \
+         the plan to the user, who will approve it or send you back to keep \
+         planning. Do not call ExitPlanMode before the plan is written, and do \
+         not try to edit files or run commands while planning."
+            .to_owned()
+    })
+}
+
+/// Everything appended to the system prompt for this session, in order:
+/// plan mode, the narration language, then whatever the user wrote on the
+/// Agent settings page. The user's text comes last so it can overrule the
+/// rules above it.
+fn session_rules(options: &AgentStartOptions, house_rules: Option<&str>) -> Option<String> {
+    let parts: Vec<String> = [
+        plan_mode_rule(options),
+        narration_rule(options),
+        house_rules.map(str::trim).filter(|r| !r.is_empty()).map(str::to_owned),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!parts.is_empty()).then(|| parts.join("\n\n"))
 }
 
 #[cfg(test)]
@@ -580,23 +611,54 @@ mod tests {
     }
     use super::*;
 
+    /// Nothing in the engine's prompt mentions plan mode, so the bridge has
+    /// to. The rule is present exactly when the session is planning, and it
+    /// names the tool the model must call to hand the plan back.
+    #[test]
+    fn plan_mode_is_explained_only_while_planning() {
+        let planning = AgentStartOptions { plan_mode: true, ..AgentStartOptions::default() };
+        let rule = session_rules(&planning, None).expect("a rule while planning");
+        assert!(rule.contains("ExitPlanMode"), "{rule}");
+        assert!(rule.contains("summary"), "{rule}");
+
+        let building = AgentStartOptions { plan_mode: false, ..AgentStartOptions::default() };
+        assert_eq!(session_rules(&building, None), None);
+    }
+
+    /// Order matters: plan mode first, then the language, then the user's
+    /// own text last so it can overrule both.
+    #[test]
+    fn session_rules_keep_the_users_text_last() {
+        let options = AgentStartOptions {
+            plan_mode: true,
+            narration_language: Some("Simplified Chinese".into()),
+            ..AgentStartOptions::default()
+        };
+        let combined = session_rules(&options, Some("Prefer tabs.")).expect("all three");
+        let plan = combined.find("plan mode").expect("plan rule");
+        let language = combined.find("Simplified Chinese").expect("language rule");
+        let house = combined.find("Prefer tabs.").expect("house rule");
+        assert!(plan < language && language < house, "{combined}");
+        assert!(combined.ends_with("Prefer tabs."));
+    }
+
     #[test]
     fn the_language_rule_comes_first_so_house_rules_can_overrule_it() {
         let options = AgentStartOptions {
             narration_language: Some("Simplified Chinese".into()),
             ..AgentStartOptions::default()
         };
-        let combined = narration_rule(&options, Some("  Prefer tabs.  ")).expect("both");
+        let combined = session_rules(&options, Some("  Prefer tabs.  ")).expect("both");
         assert!(combined.starts_with("Write everything the user reads in Simplified Chinese"));
         assert!(combined.trim_end().ends_with("Prefer tabs."));
 
         // Either one alone is the whole thing.
-        assert_eq!(narration_rule(&options, None), Some(combined[..combined.find("\n\n").unwrap()].to_owned()));
+        assert_eq!(session_rules(&options, None), Some(combined[..combined.find("\n\n").unwrap()].to_owned()));
         let english = AgentStartOptions::default();
-        assert_eq!(narration_rule(&english, Some("Prefer tabs.")), Some("Prefer tabs.".to_owned()));
-        assert_eq!(narration_rule(&english, None), None);
+        assert_eq!(session_rules(&english, Some("Prefer tabs.")), Some("Prefer tabs.".to_owned()));
+        assert_eq!(session_rules(&english, None), None);
         // Blank house rules are not house rules.
-        assert_eq!(narration_rule(&english, Some("   ")), None);
+        assert_eq!(session_rules(&english, Some("   ")), None);
     }
 
     #[test]

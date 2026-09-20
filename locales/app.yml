@@ -3159,3 +3159,6 @@ native.plan_mode_denied:
   en: "Not run — plan mode is on, so nothing is applied. Switch to Build below and ask again."
 native.keep_planning:
   en: "You chose to keep planning, so the agent will carry on refining the plan."
+
+native.exit_plan_summary_lead:
+  en: "The agent's plan. Approve it to switch to Build, or send it back to keep planning."

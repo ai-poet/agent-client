@@ -53,6 +53,7 @@ pub use events::{AgentEvent, EventSink, PermissionChoice};
 // The two refusals whose wording is the fork's rather than the engine's, so
 // the driver can recognise them exactly and say them in the user's language.
 pub use claurst_tools::{KEEP_PLANNING_DENIAL, PLAN_MODE_DENIAL_SUFFIX};
+pub use permission::EXIT_PLAN_MODE_DETAIL;
 pub use oneshot::one_shot;
 pub use session::AgentSession;
 

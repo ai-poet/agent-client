@@ -433,6 +433,23 @@ fn localize_refusal(output: &Value) -> Option<Value> {
         .map(|_| Value::String(tr!("native.plan_mode_denied")))
 }
 
+/// The "finished planning" dialog's body, in the user's language.
+///
+/// The bridge sends either its generic line or the plan summary the model
+/// wrote. The former is translated outright; the latter is kept under a
+/// translated lead-in, since the plan is what the user is here to read. The
+/// two are told apart by comparing against the bridge's exported constant
+/// rather than by guessing at the content.
+fn localize_exit_plan_detail(detail: String) -> String {
+    if detail == waku_agent_bridge::EXIT_PLAN_MODE_DETAIL {
+        tr!("native.exit_plan_detail")
+    } else {
+        format!("{}
+
+{detail}", tr!("native.exit_plan_summary_lead"))
+    }
+}
+
 impl EventTranslator {
     fn new(events: DriverEventSender, store: SessionStore) -> Self {
         Self {
@@ -525,10 +542,7 @@ impl EventTranslator {
                 // names the actual command and is the specific thing to
                 // decide on.
                 let (title, detail) = if tool_name == "ExitPlanMode" {
-                    (
-                        tr!("native.exit_plan_title"),
-                        tr!("native.exit_plan_detail"),
-                    )
+                    (tr!("native.exit_plan_title"), localize_exit_plan_detail(detail))
                 } else {
                     (title, detail)
                 };
@@ -688,6 +702,28 @@ fn permission_label(choice: waku_agent_bridge::PermissionChoice) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The generic line is translated as a whole; a plan summary is kept
+    /// under a lead-in, so the user reads the plan and not a stand-in for it.
+    ///
+    /// Asserted on shape rather than on wording: under the English locale the
+    /// generic line's translation is the constant itself, so "differs from
+    /// the constant" would be a false test. What holds in every locale is
+    /// that only the summary gets a lead-in prepended.
+    #[test]
+    fn the_plan_summary_survives_localization_and_the_generic_line_does_not() {
+        let generic = localize_exit_plan_detail(waku_agent_bridge::EXIT_PLAN_MODE_DETAIL.to_owned());
+        assert!(!generic.contains("
+
+"), "generic line must not get a lead-in: {generic}");
+
+        let summary = "1. Add the field. 2. Wire the picker.";
+        let kept = localize_exit_plan_detail(summary.to_owned());
+        assert!(kept.contains("
+
+"), "summary must sit under a lead-in: {kept}");
+        assert!(kept.ends_with(summary), "the plan itself must be intact: {kept}");
+    }
 
     /// The two refusals the fork owns the wording of are recognised by their
     /// exported markers, not by matching prose — a reworded engine string

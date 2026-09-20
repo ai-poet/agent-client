@@ -242,8 +242,8 @@ pub struct GuiPermissionHandler {
 /// (`waku-core::driver::native`), so these strings are what a client that
 /// skips that translation would show. The bridge has no i18n of its own on
 /// purpose — it depends on neither `waku-core` nor `waku-protocol`.
-const EXIT_PLAN_MODE_TITLE: &str = "Finished planning";
-const EXIT_PLAN_MODE_DETAIL: &str =
+pub const EXIT_PLAN_MODE_TITLE: &str = "Finished planning";
+pub const EXIT_PLAN_MODE_DETAIL: &str =
     "The agent says the plan is ready and wants to start applying it. Switch to Build, or keep planning.";
 
 impl GuiPermissionHandler {
@@ -263,10 +263,20 @@ impl GuiPermissionHandler {
         // plan mode" would retire plan mode permanently, which is not a
         // preference anyone means to express.
         if request.tool_name == claurst_core::constants::TOOL_NAME_EXIT_PLAN_MODE {
+            // The tool passes its plan summary as the request's description.
+            // Show it when there is one - reading the plan is the point of
+            // this dialog - and fall back to the generic line otherwise. The
+            // driver tells the two apart by comparing against the constant.
+            let summary = request.description.trim();
+            let detail = if summary.is_empty() {
+                EXIT_PLAN_MODE_DETAIL.to_owned()
+            } else {
+                summary.to_owned()
+            };
             let choice = self.bridge.prompt(
                 request,
                 EXIT_PLAN_MODE_TITLE.to_owned(),
-                EXIT_PLAN_MODE_DETAIL.to_owned(),
+                detail,
                 vec![PermissionChoice::AllowOnce, PermissionChoice::RejectOnce],
             );
             return if choice.is_allow() {
@@ -405,6 +415,56 @@ mod tests {
             PermissionDecision::Allow
         );
         assert!(seen.lock().is_empty(), "bypass must not raise a dialog");
+    }
+
+    /// The plan is what the user is here to read. The tool passes its
+    /// summary as the request's description; the dialog must carry it, and
+    /// fall back to the generic line only when there is none.
+    #[test]
+    fn the_dialog_carries_the_plan_summary_when_there_is_one() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let settings = Settings::default();
+        let manager = Arc::new(std::sync::Mutex::new(PermissionManager::new(
+            PermissionMode::Plan,
+            &settings,
+        )));
+        let sink = {
+            let seen = seen.clone();
+            EventSink::new(move |event: AgentEvent| seen.lock().push(event))
+        };
+        let bridge = PermissionBridge::new(sink, manager, Arc::new(Mutex::new(settings)), None);
+        let handler = GuiPermissionHandler::new(bridge.clone());
+
+        // With a summary: the description is what shows.
+        let with_summary = PermissionRequest {
+            description: "1. Add the field. 2. Wire the picker.".into(),
+            ..exit_plan_request()
+        };
+        let answering = answer_one_dialog(bridge.clone(), PermissionChoice::AllowOnce);
+        handler.request_permission(&with_summary);
+        answering.join().unwrap();
+
+        // Without one: the generic line, so the driver can recognise it.
+        let without = PermissionRequest {
+            description: String::new(),
+            ..exit_plan_request()
+        };
+        let answering = answer_one_dialog(bridge.clone(), PermissionChoice::AllowOnce);
+        handler.request_permission(&without);
+        answering.join().unwrap();
+
+        let events = seen.lock();
+        let details: Vec<&str> = events
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::Permission { detail, .. } => Some(detail.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            details,
+            vec!["1. Add the field. 2. Wire the picker.", EXIT_PLAN_MODE_DETAIL]
+        );
     }
 
     /// Remembering "always leave plan mode" would retire plan mode for good,

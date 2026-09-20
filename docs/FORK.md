@@ -83,6 +83,7 @@ lines below.
 | `crates/waku-agent/api/src/providers/codex.rs` | vendored engine, recorded departure: `decode_tool_arguments` accepts the object form a normalizing gateway returns, not only the specified JSON string | ~35 |
 | `crates/waku-agent/api/src/{lib,provider_types}.rs` | vendored engine, recorded departure: the two stream accumulators warn instead of silently turning unparseable tool arguments into `{}` (the agent loop already errors — issue #215) | ~20 |
 | `crates/waku-agent/query/src/runner/tools.rs` | vendored engine, recorded departure: `whole_floats_to_integers` at the one `.execute()` call site — repairs `120.0` for `usize` fields, which several non-Claude models emit | ~45 |
+| `crates/waku-agent/tools/src/exit_plan_mode.rs` | vendored engine, recorded departure: `self_gates` and asks through `check_permission` with the plan summary as the description — its declared level is `None`, which the central backstop never gates, so the bridge's "finished planning" dialog was unreachable | ~20 |
 | `crates/waku-agent/tools/src/lib.rs` | vendored engine, recorded departure: refusals name their reason, and the two the fork words itself are exported as markers for the driver to localize | ~40 |
 | `crates/waku-core/src/settings.rs` | the daemon adopts the interface language the desktop pushes, so its own `tr!` strings are not always English | ~12 |
 | `crates/waku-core/src/git_commit.rs` | its provider-argument test names `ProviderKind::Native` (skipped by the `is_builtin` guard above it); without the arm the crate's tests do not compile | 1 |

@@ -1071,11 +1071,21 @@ plan mode on its own; without the second `ls -la | head` was refused.
 `find -delete` and `git fetch` as safe.
 
 Leaving plan mode is the one question the access mode cannot answer for the
-user. The permission rules allow `ExitPlanMode` — the model is never blocked
-from *proposing* that planning is done — and `GuiPermissionHandler` then asks,
-even under "never ask", offering only once-scoped answers so nobody can
-accidentally retire plan mode for good. Declining returns a refusal that tells
-the model to keep planning rather than to retry.
+user, and three things had to line up before it was actually asked. The tool
+declares `PermissionLevel::None` — honest, it changes nothing on disk — but
+the central backstop only gates *gated* levels, so nothing ever consulted the
+permission handler; `ExitPlanModeTool` now `self_gates` and calls
+`check_permission` itself, passing its `summary` as the description. That
+reaches `GuiPermissionHandler`, which asks even under "never ask", shows the
+summary when there is one (the plan is what the user is here to read), and
+offers only once-scoped answers so nobody can accidentally retire plan mode
+for good. Declining returns a refusal with no metadata, so the bridge's mode
+does not move, and the text tells the model to keep planning rather than to
+retry. And because the engine's prompt never mentions plan mode at all, the
+bridge appends a rule (`plan_mode_rule` in `config.rs`) telling the model what
+plan mode is and to hand the plan back through `ExitPlanMode` — without it,
+models not trained on that tool write the plan as prose and the dialog never
+appears.
 
 `/plan`, `/plan off` and `/plan <description>` reach the same switch by
 typing; a project or user command that owns the name keeps it, as with
