@@ -1025,6 +1025,32 @@ interface language into the settings it pushes
 agent's driver passes it on as a narration instruction so the model explains
 its work in the same language the interface is in.
 
+**Plan mode** — two things decide it, and they now agree. Waku's composer
+switch sets it at session start (`driver/native.rs`), and the engine's own
+`EnterPlanMode` / `ExitPlanMode` tools move it mid-turn; the bridge follows
+the second by rebuilding the `PermissionManager` on `PlanModeChanged` and
+reporting `DriverEvent::InteractionModeUpdated`, so the chip never lies about
+what the next tool call will be allowed to do.
+
+What plan mode allows is wider than "reads": the tools planning itself needs
+(`PLAN_SAFE_TOOLS` — notes, questions, web research), plus any shell command
+the classifier proves read-only. Without the first the agent could not leave
+plan mode on its own; without the second `ls -la | head` was refused.
+`is_read_only_bash_command` is deliberately stricter than the classifier's
+`Safe` tier, which ranks risk rather than guarding a boundary and counts
+`find -delete` and `git fetch` as safe.
+
+Leaving plan mode is the one question the access mode cannot answer for the
+user. The permission rules allow `ExitPlanMode` — the model is never blocked
+from *proposing* that planning is done — and `GuiPermissionHandler` then asks,
+even under "never ask", offering only once-scoped answers so nobody can
+accidentally retire plan mode for good. Declining returns a refusal that tells
+the model to keep planning rather than to retry.
+
+`/plan`, `/plan off` and `/plan <description>` reach the same switch by
+typing; a project or user command that owns the name keeps it, as with
+`/fast`.
+
 **Deletion** — removing a session sends `DeleteAgentTranscript` for the
 cursor's file, alongside the checkpoint-ref cleanup every provider gets.
 

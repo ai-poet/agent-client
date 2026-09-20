@@ -78,6 +78,9 @@ lines below.
 | `crates/waku-agent/core/src/system_prompt.rs` | vendored engine, recorded departure: the agent is named after the product, not after the engine or Anthropic | ~25 |
 | `crates/waku-agent/query/src/runner/provider_options.rs` | vendored engine, recorded departure: Grok counts as a reasoning model, so its effort tier reaches the request; gpt-5 Codex's summary/include fields stay off it | ~14 |
 | `crates/waku-agent/tools/src/{pty_bash,powershell,web_fetch}.rs` | vendored engine, recorded departure: truncate on character boundaries (`floor_char_boundary` / `ceil_char_boundary` in `pty_bash`) — the byte slices panicked on long non-ASCII output | ~30 |
+| `crates/waku-agent/core/src/lib.rs` | vendored engine, recorded departure: the plan-mode arm allows the plan-safe tools and read-only invocations; the two plan switches stay read-level so the model never asks permission to restrict itself | ~30 |
+| `crates/waku-agent/core/src/bash_classifier.rs` | vendored engine, recorded departure: `is_read_only_bash_command` — stricter than the `Safe` tier, splits on every separator and denies on doubt | ~100 |
+| `crates/waku-agent/tools/src/lib.rs` | vendored engine, recorded departure: refusals name their reason, and the two the fork words itself are exported as markers for the driver to localize | ~40 |
 | `crates/waku-core/src/settings.rs` | the daemon adopts the interface language the desktop pushes, so its own `tr!` strings are not always English | ~12 |
 | `crates/waku-core/src/git_commit.rs` | its provider-argument test names `ProviderKind::Native` (skipped by the `is_builtin` guard above it); without the arm the crate's tests do not compile | 1 |
 | `crates/waku-protocol/src/settings.rs` | `DaemonSettings::LOCALE_KEY` and its accessors — the language the daemon renders in | ~14 |
