@@ -1615,14 +1615,37 @@ impl Waku {
         })
     }
 
+    /// One model out of a provider's probe, tolerating a `platform::` prefix
+    /// on either side of the comparison.
+    ///
+    /// The built-in agent's catalog mints ids as `platform::model`
+    /// (`native_agent::native_models_from_catalog`), while every fallback
+    /// list carries the bare name. They are the same model, so a lookup that
+    /// only accepts an exact match loses it whenever the session and the
+    /// probe disagree about the prefix — which is every launch before the
+    /// catalog lands (it is fetched, never persisted) and permanently while
+    /// signed out.
+    ///
+    /// Losing it costs far more than a label: [`Self::session_options`] uses
+    /// this lookup to validate the session's reasoning effort and service
+    /// tier, and silently drops both when it comes back empty.
+    pub(super) fn probe_model(
+        &self,
+        provider: ProviderKind,
+        model: &str,
+    ) -> Option<&ProviderModel> {
+        find_model(&self.provider_probe(provider)?.models, model)
+    }
+
     pub(super) fn model_display_name(&self, provider: ProviderKind, model: Option<&str>) -> String {
         let Some(model) = model else {
             return provider.short_name().to_owned();
         };
-        self.provider_probe(provider)
-            .and_then(|probe| probe.models.iter().find(|candidate| candidate.id == model))
+        self.probe_model(provider, model)
             .map(|candidate| candidate.name.clone())
-            .unwrap_or_else(|| model.to_owned())
+            // Still nothing known about it — a user-declared model, say. The
+            // bare name reads as a model; the full id reads as a bug.
+            .unwrap_or_else(|| bare_model_name(model).to_owned())
     }
 
     pub(super) fn model_metadata_for_session(
@@ -1630,10 +1653,7 @@ impl Waku {
         session: &AgentSession,
     ) -> Option<&ProviderModel> {
         let model = self.model_for_session(session)?;
-        self.provider_probe(session.provider)?
-            .models
-            .iter()
-            .find(|candidate| candidate.id == model)
+        self.probe_model(session.provider, model)
     }
 
     pub(super) fn selected_transcript_blocks(&self) -> &[TranscriptBlock] {
@@ -3811,4 +3831,25 @@ mod version_tests {
             Some("2025.09.12-4f8d8e2".to_owned())
         );
     }
+}
+
+/// A picker model id without its `platform::` prefix, or the whole string
+/// when it carries none — which is what a model the user declared on their
+/// own endpoint looks like.
+pub(super) fn bare_model_name(model: &str) -> &str {
+    model.rsplit_once("::").map_or(model, |(_, name)| name)
+}
+
+/// Find `model` among `models`, tolerating a `platform::` prefix on either
+/// side. See [`Waku::probe_model`] for why the tolerance is needed.
+pub(super) fn find_model<'a>(models: &'a [ProviderModel], model: &str) -> Option<&'a ProviderModel> {
+    // Exact first, so two platforms offering the same model name cannot
+    // shadow one another.
+    if let Some(found) = models.iter().find(|candidate| candidate.id == model) {
+        return Some(found);
+    }
+    let bare = bare_model_name(model);
+    models
+        .iter()
+        .find(|candidate| bare_model_name(&candidate.id).eq_ignore_ascii_case(bare))
 }

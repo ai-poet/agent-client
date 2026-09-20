@@ -2548,6 +2548,21 @@ pub mod permissions {
         Network,
     }
 
+    /// Fork: the tools plan mode allows despite their `Execute` level,
+    /// because planning needs them and none of them changes anything.
+    ///
+    /// `WebFetch` and `WebSearch` are the two that reach outward; they earn
+    /// their place because researching is what planning is, and neither can
+    /// write. The other three are what lets the agent keep notes, ask a
+    /// question, and hand the plan back.
+    pub const PLAN_SAFE_TOOLS: [&str; 5] = [
+        "ExitPlanMode",
+        "TodoWrite",
+        "AskUserQuestion",
+        "WebSearch",
+        "WebFetch",
+    ];
+
     impl PermissionLevel {
         /// Derive the permission level from a well-known tool name.
         pub fn for_tool(tool_name: &str) -> Self {
@@ -2805,7 +2820,8 @@ pub mod permissions {
         /// 3. Check allow rules (persistent first, then session) → if any
         ///    matched, Allow.
         /// 4. AcceptEdits → Allow (auto-accept file edits).
-        /// 5. Plan mode → Allow reads; deny everything else.
+        /// 5. Plan mode → Allow reads and the plan-safe tools
+        ///    ([`PLAN_SAFE_TOOLS`]); deny everything else.
         /// 6. Default → derive from tool danger level.
         pub fn evaluate(
             &self,
@@ -2876,10 +2892,25 @@ pub mod permissions {
                 return PermissionDecision::Allow;
             }
 
-            // Step 5 — Plan mode: reads only
+            // Step 5 — Plan mode: reads, plus the tools planning itself needs.
+            //
+            // Fork: the level remap above pushes every tool outside its
+            // seven-name whitelist to `Execute`, which used to take
+            // `ExitPlanMode`, `TodoWrite` and `AskUserQuestion` down with the
+            // shell tools — leaving the agent unable to take notes, unable to
+            // ask a question, and unable to say it had finished planning. It
+            // could not leave plan mode on its own. None of these touch the
+            // workspace, so plan mode's promise that nothing is applied still
+            // holds.
+            //
+            // The exemption is deliberately kept here rather than added to the
+            // remap whitelist: that whitelist also feeds Step 6, where
+            // widening it would stop `WebSearch` prompting in Default mode —
+            // a change nobody asked for.
             if self.mode == PermissionMode::Plan {
                 return match level {
                     PermissionLevel::Read => PermissionDecision::Allow,
+                    _ if PLAN_SAFE_TOOLS.contains(&tool_name) => PermissionDecision::Allow,
                     _ => PermissionDecision::Deny,
                 };
             }
@@ -4602,6 +4633,52 @@ pub mod tasks {
 
 #[cfg(test)]
 mod tests {
+
+    /// Fork: plan mode used to take the agent's own planning tools down with
+    /// the shell — the level remap pushes everything outside its seven-name
+    /// whitelist to `Execute`, and plan mode denied every `Execute`. The
+    /// agent could not take notes, could not ask a question, and could not
+    /// leave plan mode.
+    #[test]
+    fn plan_mode_allows_the_tools_planning_needs_but_still_stops_the_shell() {
+        use crate::config::{PermissionMode, Settings};
+        use crate::permissions::{PermissionDecision, PermissionManager};
+
+        let settings = Settings::default();
+        let manager = PermissionManager::new(PermissionMode::Plan, &settings);
+        let decide = |tool: &str| manager.evaluate(tool, "", None, None, &[]);
+
+        for tool in ["ExitPlanMode", "TodoWrite", "AskUserQuestion", "WebSearch", "WebFetch"] {
+            assert_eq!(decide(tool), PermissionDecision::Allow, "{tool}");
+        }
+        // Reading is what plan mode is for.
+        assert_eq!(decide("Read"), PermissionDecision::Allow);
+        // And nothing is applied: both shells and every writer stay denied.
+        for tool in ["Bash", "PowerShell", "Write", "Edit"] {
+            assert_eq!(decide(tool), PermissionDecision::Deny, "{tool}");
+        }
+    }
+
+    /// The exemption lives in the plan-mode arm on purpose. Had it been added
+    /// to the level-remap whitelist instead, it would also have stopped these
+    /// prompting in Default mode — a change nobody asked for.
+    #[test]
+    fn default_mode_still_asks_before_the_plan_safe_tools() {
+        use crate::config::{PermissionMode, Settings};
+        use crate::permissions::{PermissionDecision, PermissionManager};
+
+        let settings = Settings::default();
+        let manager = PermissionManager::new(PermissionMode::Default, &settings);
+        for tool in ["WebSearch", "WebFetch", "TodoWrite"] {
+            assert!(
+                matches!(
+                    manager.evaluate(tool, "", None, None, &[]),
+                    PermissionDecision::Ask { .. }
+                ),
+                "{tool} should still prompt in Default mode"
+            );
+        }
+    }
     use super::*;
 
     #[test]

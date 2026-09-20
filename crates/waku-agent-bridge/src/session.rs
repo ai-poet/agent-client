@@ -540,7 +540,11 @@ async fn run_turn(
         api_base: config.resolve_anthropic_api_base(),
     };
     let tools = inner.tools.lock().clone();
-    let context_window = claurst_query::context_window_for_model(&query.model);
+    // `None` means "nobody here knows", and the meter then shows a token
+    // count with no percentage rather than a percentage of the wrong number.
+    // The engine's heuristic would have answered 100k for every model this
+    // app offers, which is the bug being fixed.
+    let context_window = crate::config::registry_context_window(&query.model, &route.provider);
 
     let client = inner.client.lock().clone();
     let handler: Arc<dyn claurst_core::PermissionHandler> =
@@ -662,9 +666,11 @@ async fn run_turn(
 async fn forward_events(
     inner: Arc<Inner>,
     mut rx: mpsc::UnboundedReceiver<QueryEvent>,
-    context_window: u64,
+    // `None` when no source knows this model's window — the meter then omits
+    // the percentage rather than showing one against a guess.
+    context_window: Option<u64>,
 ) {
-    let mut decoder = StreamDecoder::new(Some(context_window));
+    let mut decoder = StreamDecoder::new(context_window);
     while let Some(event) = rx.recv().await {
         for translated in decoder.push(event) {
             inner.events.emit(translated);

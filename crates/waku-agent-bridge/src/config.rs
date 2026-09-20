@@ -6,6 +6,7 @@
 //! model change take effect on the next turn without restarting anything.
 
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::Context as _;
 use claurst_core::config::{Config, Settings};
@@ -414,9 +415,68 @@ pub(crate) fn missing_route_key(
     })
 }
 
+/// The models.dev snapshot the engine ships, parsed once.
+///
+/// `ModelRegistry::new` parses a 1.8 MB bundle compiled into the binary, so
+/// it is built once for the process rather than per session. It carries the
+/// real context window of every model it knows, which is the only reason the
+/// usage meter can show anything better than a guess.
+pub fn model_registry() -> &'static Arc<claurst_api::ModelRegistry> {
+    static REGISTRY: OnceLock<Arc<claurst_api::ModelRegistry>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Arc::new(claurst_api::ModelRegistry::new()))
+}
+
+/// Smallest registry window treated as real.
+///
+/// models.dev omits a limit for some models and the registry stores a 4096
+/// placeholder instead; sizing a meter against that would be worse than
+/// admitting we do not know. Mirrors the engine's own private constant in
+/// `claurst_query::compact`.
+const MIN_PLAUSIBLE_REGISTRY_WINDOW: u64 = 8192;
+
+/// The model's real context window, or `None` when nothing here knows it.
+///
+/// Deliberately not `claurst_query::resolve_context_window`: that one returns
+/// a plain `u64` because it always falls back to a Claude-only heuristic that
+/// answers 100k for everything it does not recognise — which is every model
+/// this app actually offers, and precisely the number the usage meter was
+/// wrong about. A meter that says nothing beats a meter that says 100k.
+///
+/// The engine's auto-compact keeps using the heuristic, and should: it needs
+/// *a* threshold to act on, where the meter needs the truth or silence.
+pub fn registry_context_window(model: &str, fallback_provider: &str) -> Option<u64> {
+    let provider = registry_provider_for(model, fallback_provider);
+    model_registry()
+        .get(&provider, model)
+        .map(|entry| entry.info.context_window as u64)
+        .filter(|window| *window >= MIN_PLAUSIBLE_REGISTRY_WINDOW)
+}
+
+/// The models.dev provider that owns `model`, which is not the provider this
+/// app routes through.
+///
+/// `WireFormat::engine_provider` answers `anthropic` / `codex` / `openai`,
+/// and the gateway's platform adds `grok` / `composite` / `default`. The
+/// registry is keyed by models.dev ids, where Grok lives under `xai` and
+/// `codex` does not exist at all — so passing either one straight through
+/// silently misses and falls back to a guess. The registry's own family
+/// table knows the mapping; only fall back to the caller's provider when it
+/// does not recognise the name.
+pub fn registry_provider_for(model: &str, fallback: &str) -> String {
+    model_registry()
+        .find_provider_for_model(model)
+        .map(|provider| provider.to_string())
+        .unwrap_or_else(|| fallback.to_owned())
+}
+
 /// Build the per-turn config from the project config plus this turn's options.
 pub fn build_query_config(config: &Config, options: &AgentStartOptions) -> QueryConfig {
-    let mut query = QueryConfig::from_config(config);
+    let mut query = QueryConfig::from_config_with_registry(config, model_registry());
+    // `from_config_with_registry` consults the registry to resolve the model
+    // name but does not keep it, so hand it over as well: that is what sizes
+    // the engine's own auto-compact against the model's real window instead
+    // of the Claude-only heuristic's 100k.
+    query.model_registry = Some(model_registry().clone());
     query.working_directory = Some(options.cwd.display().to_string());
     // `QueryConfig::from_config` copies neither of these, so the Agent
     // settings page wrote house rules into a file nothing read. The engine
@@ -465,6 +525,59 @@ fn narration_rule(options: &AgentStartOptions, house_rules: Option<&str>) -> Opt
 
 #[cfg(test)]
 mod tests {
+
+    /// The bundled snapshot is a compile-time file that stops at the -4-5
+    /// generation, so it is a fallback and not the answer. Assert against a
+    /// model it actually carries — asserting on `claude-sonnet-5` here is
+    /// what hid the staleness in the first place.
+    #[test]
+    fn the_bundled_registry_answers_for_the_models_it_carries() {
+        let window = registry_context_window("claude-sonnet-4-5", "anthropic");
+        assert_eq!(window, Some(200_000));
+    }
+
+    /// The whole point of returning an `Option`: the models this app actually
+    /// offers are newer than the snapshot, and a wrong 100k is worse than no
+    /// percentage at all. The gateway is what fills these in.
+    #[test]
+    fn a_model_no_source_knows_reports_nothing_rather_than_a_guess() {
+        for (model, provider) in [
+            ("claude-sonnet-5", "anthropic"),
+            ("grok-4.6", "grok"),
+            ("my-own-model", "openai"),
+        ] {
+            assert_eq!(
+                registry_context_window(model, provider),
+                None,
+                "{model} should report an unknown window, not a guess"
+            );
+            // The heuristic this replaced would have answered 100k for every
+            // one of them.
+            assert_eq!(claurst_query::context_window_for_model(model), 100_000);
+        }
+    }
+
+    /// The provider this app routes through is not the one models.dev keys
+    /// by: Grok is `xai` there, and `codex` does not exist at all. Passing
+    /// either straight through misses and silently falls back to a guess.
+    #[test]
+    fn the_routing_provider_is_translated_to_the_registrys_own() {
+        assert_eq!(registry_provider_for("grok-4.6", "grok"), "xai");
+        assert_eq!(registry_provider_for("gpt-5.6-sol", "codex"), "openai");
+        assert_eq!(registry_provider_for("claude-sonnet-5", "anthropic"), "anthropic");
+        // A model the registry has never heard of — one the user declared on
+        // their own endpoint — keeps the caller's provider rather than
+        // inventing one.
+        assert_eq!(registry_provider_for("my-own-model", "openai"), "openai");
+    }
+
+    /// A placeholder window is not knowledge. models.dev omits the limit for
+    /// some models and the registry stores 4096 instead; sizing a meter
+    /// against that would be worse than saying nothing.
+    #[test]
+    fn a_placeholder_window_counts_as_unknown() {
+        assert!(MIN_PLAUSIBLE_REGISTRY_WINDOW > 4096);
+    }
     use super::*;
 
     #[test]

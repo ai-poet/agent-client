@@ -2402,3 +2402,64 @@ fn the_rail_draws_only_installed_providers_the_settings_left_on() {
         ProviderKind::Claude
     ));
 }
+
+/// The catalog mints `platform::model`; every fallback list carries the bare
+/// name. They are the same model, and before the catalog lands (it is
+/// fetched, never persisted) the probe holds only the bare form — so a
+/// session that stored the prefixed id must still find itself.
+#[test]
+fn a_prefixed_session_model_matches_the_bare_fallback_entry() {
+    use super::runtime::find_model;
+    use crate::model::ProviderModel;
+
+    let fallback = vec![
+        ProviderModel::new("claude-sonnet-5", "Claude Sonnet 5"),
+        ProviderModel::new("claude-haiku-4-5", "Claude Haiku 4.5"),
+    ];
+    let found = find_model(&fallback, "anthropic::claude-sonnet-5").expect("prefixed id");
+    assert_eq!(found.name, "Claude Sonnet 5");
+
+    // And the other direction: a bare session id against a catalog that has
+    // already landed with prefixed ids.
+    let catalog = vec![ProviderModel::new(
+        "anthropic::claude-sonnet-5",
+        "Claude Sonnet 5",
+    )];
+    assert_eq!(
+        find_model(&catalog, "claude-sonnet-5").map(|model| model.name.as_str()),
+        Some("Claude Sonnet 5")
+    );
+}
+
+/// Tolerance must not let one platform's model shadow another's: an exact id
+/// always wins over a suffix match.
+#[test]
+fn an_exact_model_id_wins_over_a_suffix_match() {
+    use super::runtime::find_model;
+    use crate::model::ProviderModel;
+
+    let models = vec![
+        ProviderModel::new("composite::gpt-5.6-sol", "Sol (composite)"),
+        ProviderModel::new("openai::gpt-5.6-sol", "Sol (OpenAI)"),
+    ];
+    assert_eq!(
+        find_model(&models, "openai::gpt-5.6-sol").map(|model| model.name.as_str()),
+        Some("Sol (OpenAI)")
+    );
+    // A bare id has no platform to disambiguate with, so it takes the first
+    // match rather than nothing at all.
+    assert!(find_model(&models, "gpt-5.6-sol").is_some());
+}
+
+/// A model nothing knows about — one the user declared on their own endpoint
+/// — still has to read as a model rather than as a raw id.
+#[test]
+fn an_unknown_model_falls_back_to_its_bare_name() {
+    use super::runtime::{bare_model_name, find_model};
+    use crate::model::ProviderModel;
+
+    let models = vec![ProviderModel::new("claude-sonnet-5", "Claude Sonnet 5")];
+    assert!(find_model(&models, "anthropic::something-else").is_none());
+    assert_eq!(bare_model_name("anthropic::something-else"), "something-else");
+    assert_eq!(bare_model_name("my-own-model"), "my-own-model");
+}

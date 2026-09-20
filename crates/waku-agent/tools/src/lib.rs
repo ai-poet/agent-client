@@ -369,10 +369,9 @@ impl ToolContext {
             ),
             PermissionDecision::Ask { reason } => {
                 let Some(queue) = &self.pending_permissions else {
-                    return Err(claurst_core::error::ClaudeError::PermissionDenied(format!(
-                        "Permission denied for tool '{}'",
-                        request.tool_name
-                    )));
+                    return Err(claurst_core::error::ClaudeError::PermissionDenied(
+                        self.denial_message(&request.tool_name),
+                    ));
                 };
 
                 let (tx, rx) = tokio::sync::oneshot::channel();
@@ -395,11 +394,27 @@ impl ToolContext {
                     )),
                 }
             }
-            _ => Err(claurst_core::error::ClaudeError::PermissionDenied(format!(
-                "Permission denied for tool '{}'",
-                request.tool_name
-            ))),
+            _ => Err(claurst_core::error::ClaudeError::PermissionDenied(
+                self.denial_message(&request.tool_name),
+            )),
         }
+    }
+
+    /// Why a `Deny` happened, as far as this layer can tell.
+    ///
+    /// Fork: `PermissionDecision::Deny` carries no reason, so plan mode, a
+    /// user pressing reject and a stored deny rule all used to arrive here as
+    /// the same bare sentence — which reads as the permission system being
+    /// broken rather than as any of them. Plan mode is the one this layer can
+    /// name for certain, and it was by far the most common cause of the
+    /// confusion, so name it.
+    fn denial_message(&self, tool_name: &str) -> String {
+        if self.permission_mode == claurst_core::config::PermissionMode::Plan {
+            return format!(
+                "Permission denied for tool '{tool_name}': plan mode is active, so nothing is                  applied. Switch to Build to run this."
+            );
+        }
+        format!("Permission denied for tool '{tool_name}'")
     }
 
     /// Check permissions for a tool invocation.
