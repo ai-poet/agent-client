@@ -1593,8 +1593,6 @@ models.wire_format: "API 形式"
 
 models.declare_your_own: "まだ何もありません。設定 → プロバイダーで独自エンドポイントのモデル名を書くと、ここに並びます。"
 
-cli_setup.native_routes_title: "カスタムエンドポイント"
-cli_setup.native_routes_detail: "内蔵エージェントは 3 種類の API を話し、それぞれ別々に接続します。自分のサーバーに向けたいものだけ入力してください。残りはマネージドゲートウェイのままです。"
 cli_setup.native_route_messages: "Anthropic Messages"
 cli_setup.native_route_responses: "OpenAI Responses"
 cli_setup.native_route_chat: "OpenAI Chat Completions"
@@ -1635,3 +1633,6 @@ skills.update: "更新"
 skills.installed: "インストール済み"
 skills.installed_toast: "%{name} をインストールしました"
 skills.install_failed: "スキルをインストールできませんでした：%{error}"
+
+agent.endpoints_title: "エンドポイント"
+agent.endpoints_description: "内蔵エージェントは 3 種類の API を話し、それぞれ別々に接続します。自分のサーバーに向けたいものだけ設定してください。残りはマネージドゲートウェイのままです。"

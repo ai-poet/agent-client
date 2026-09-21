@@ -1266,6 +1266,14 @@ impl Waku {
         }
 
         for kind in ProviderKind::ALL {
+            // The built-in agent has no card here: it has no binary to find,
+            // no version to report and no installer to run, and everything
+            // that *is* configurable about it — endpoints, behaviour, tools,
+            // MCP servers, permission rules — lives on the Agent page. A
+            // card carrying only a name would just be one more place to look.
+            if kind.is_builtin() {
+                continue;
+            }
             page = page.child(self.render_provider_card(kind, snapshot.as_deref(), theme, cx));
         }
 
@@ -1619,69 +1627,42 @@ impl Waku {
         // is meaningless for it: it is always present, never installable, and
         // has no path or version to show. Answering them this way is what
         // collapses its card to the parts that do apply - routing and models.
-        let builtin = kind.is_builtin();
+        // Only CLIs reach this: the built-in agent is skipped by the caller,
+        // because it has no binary to detect, version or install.
+        debug_assert!(!kind.is_builtin());
         let probe = self.provider_probe(kind);
         let daemon_installed = probe.is_some_and(|probe| probe.installed);
         // The fork's own pass runs the binary; the daemon only finds it.
-        let detection = (!builtin)
-            .then(|| snapshot.and_then(|snapshot| snapshot.detection(provider_id)))
-            .flatten();
+        let detection = snapshot.and_then(|snapshot| snapshot.detection(provider_id));
         let not_runnable = detection.and_then(|detection| match &detection.probe {
             Probe::FoundButFailed { diagnostic, .. } => Some(diagnostic.clone()),
             _ => None,
         });
         let installed =
-            builtin || daemon_installed || detection.is_some_and(|detection| detection.is_installed());
+            daemon_installed || detection.is_some_and(|detection| detection.is_installed());
         let disabled = self.state.disabled_providers.contains(&kind);
-        let descriptor = (!builtin)
-            .then(|| sub2api::cli_install::descriptor(provider_id))
-            .flatten();
+        let descriptor = sub2api::cli_install::descriptor(provider_id);
         let installable = descriptor.is_some() && !installed;
         let running = self.cli_setup.running.as_deref() == Some(provider_id);
         let busy = self.cli_setup.running.is_some();
 
-        let version = (!builtin)
-            .then(|| {
-                self.provider_versions
-                    .get(&kind)
-                    .and_then(|version| version.clone())
-                    .or_else(|| {
-                        detection
-                            .and_then(|detection| detection.probe.version())
-                            .map(|version| version.trim_start_matches('v').to_owned())
-                    })
-            })
-            .flatten();
-        let binary_path = (!builtin)
-            .then(|| {
-                probe
-                    .filter(|probe| probe.installed)
-                    .and_then(|probe| probe.path.as_deref())
-                    .or_else(|| detection.and_then(|detection| detection.path()))
-                    .map(|path| abbreviate_home_path(path, self.home_directory.as_deref()))
-            })
-            .flatten();
+        let version = self
+            .provider_versions
+            .get(&kind)
+            .and_then(|version| version.clone())
+            .or_else(|| {
+                detection
+                    .and_then(|detection| detection.probe.version())
+                    .map(|version| version.trim_start_matches('v').to_owned())
+            });
+        let binary_path = probe
+            .filter(|probe| probe.installed)
+            .and_then(|probe| probe.path.as_deref())
+            .or_else(|| detection.and_then(|detection| detection.path()))
+            .map(|path| abbreviate_home_path(path, self.home_directory.as_deref()));
         let model_count = probe.map(|probe| probe.models.len()).unwrap_or(0);
 
-        let (dot_color, status_text, status_color) = if builtin {
-            let mut parts = vec![tr!("providers.built_in")];
-            if model_count > 0 {
-                parts.push(if model_count == 1 {
-                    tr!("providers.model_count_one", count = model_count)
-                } else {
-                    tr!("providers.model_count_many", count = model_count)
-                });
-            }
-            (
-                if disabled { theme.warning } else { theme.success },
-                if disabled {
-                    tr!("providers.disabled_for_new_tasks")
-                } else {
-                    parts.join("  \u{00b7}  ")
-                },
-                theme.text_tertiary,
-            )
-        } else if let Some(diagnostic) = &not_runnable {
+        let (dot_color, status_text, status_color) = if let Some(diagnostic) = &not_runnable {
             (
                 theme.warning,
                 format!("{}: {diagnostic}", tr!("providers.status_not_runnable")),
@@ -1877,14 +1858,10 @@ impl Waku {
 
         if expanded {
             // The binary-path editor is the whole of the expanded settings for
-            // a CLI, and a built-in provider has no binary to point anywhere.
-            // Its expanded row is the routing form alone.
-            if !builtin {
-                card = card.child(self.render_provider_expanded_settings(kind, theme, cx));
-            }
-            if builtin {
-                card = card.child(self.render_native_routes(kind, theme, cx));
-            } else if sub2api::custom_api::CUSTOM_API_PROVIDERS.contains(&provider_id) {
+            // a CLI, and this page only renders CLIs now — the built-in
+            // agent's settings all live on the Agent page.
+            card = card.child(self.render_provider_expanded_settings(kind, theme, cx));
+            if sub2api::custom_api::CUSTOM_API_PROVIDERS.contains(&provider_id) {
                 card = card
                     .child(self.render_route_section(kind, provider_id, theme, cx))
                     .child(self.render_endpoint_form(kind, provider_id, theme, cx));
@@ -1988,7 +1965,7 @@ impl Waku {
     }
 
     /// Which configuration the CLI runs with, and where to change it.
-    fn render_route_section(
+    pub(super) fn render_route_section(
         &self,
         kind: ProviderKind,
         provider_id: &'static str,
@@ -2483,54 +2460,6 @@ impl Waku {
         )
     }
 
-    /// The built-in agent's three routes, one section each.
-    ///
-    /// It is not a CLI with one endpoint: it speaks three APIs, each reached
-    /// separately, so it holds three. A section left blank falls back to the
-    /// managed gateway, which is why the group says so once rather than each
-    /// section repeating it.
-    fn render_native_routes(&self, kind: ProviderKind, theme: Theme, cx: &mut Context<Self>) -> Div {
-        let mut section = div()
-            .pl(px(42.0))
-            .pr(px(16.0))
-            .pb(px(14.0))
-            .flex()
-            .flex_col()
-            .gap(px(6.0))
-            .child(
-                div()
-                    .text_size(sp(12.5))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text)
-                    .child(tr!("cli_setup.native_routes_title")),
-            )
-            .child(
-                div()
-                    .text_size(sp(12.0))
-                    .line_height(sp(16.0))
-                    .text_color(theme.text_ghost)
-                    .child(tr!("cli_setup.native_routes_detail")),
-            );
-        for (provider_id, label) in [
-            ("native_messages", "cli_setup.native_route_messages"),
-            ("native_responses", "cli_setup.native_route_responses"),
-            ("native_chat", "cli_setup.native_route_chat"),
-        ] {
-            section = section
-                .child(div().h(px(1.0)).mt(px(10.0)).bg(theme.border))
-                .child(self.render_route_section(kind, provider_id, theme, cx))
-                .child(self.render_endpoint_form_titled(
-                    kind,
-                    provider_id,
-                    crate::i18n::translate(label),
-                    None,
-                    theme,
-                    cx,
-                ));
-        }
-        section
-    }
-
     fn render_endpoint_form(
         &self,
         kind: ProviderKind,
@@ -2551,7 +2480,7 @@ impl Waku {
     /// [`Self::render_endpoint_form`] under a caller-chosen heading, for the
     /// built-in agent — where one card holds three of these and the shared
     /// "custom endpoint" wording belongs to the group rather than to each.
-    fn render_endpoint_form_titled(
+    pub(super) fn render_endpoint_form_titled(
         &self,
         kind: ProviderKind,
         provider_id: &'static str,

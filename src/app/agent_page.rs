@@ -53,6 +53,45 @@ pub(super) struct AgentPageState {
     pub mcp_form: Option<McpForm>,
     /// The add-rule form, while open.
     pub rule_form: Option<RuleForm>,
+    /// Which of the built-in agent's three endpoints the detail pane shows.
+    /// Messages leads because it is the route Claude models take, which is
+    /// what a signed-in session uses by default.
+    pub selected_endpoint: NativeEndpoint,
+}
+
+/// One of the built-in agent's three routes.
+///
+/// It speaks three APIs and reaches each separately, so each has its own
+/// address, key and saved profiles — unlike a CLI, which has one endpoint.
+/// The ids are the ones `sub2api::custom_api` stores them under.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) enum NativeEndpoint {
+    #[default]
+    Messages,
+    Responses,
+    Chat,
+}
+
+impl NativeEndpoint {
+    pub(super) const ALL: [Self; 3] = [Self::Messages, Self::Responses, Self::Chat];
+
+    /// The storage id, which is also what the routing writer files it under.
+    pub(super) fn id(self) -> &'static str {
+        match self {
+            Self::Messages => "native_messages",
+            Self::Responses => "native_responses",
+            Self::Chat => "native_chat",
+        }
+    }
+
+    /// The API it speaks, which is the only thing that distinguishes them.
+    pub(super) fn label(self) -> String {
+        match self {
+            Self::Messages => tr!("cli_setup.native_route_messages"),
+            Self::Responses => tr!("cli_setup.native_route_responses"),
+            Self::Chat => tr!("cli_setup.native_route_chat"),
+        }
+    }
 }
 
 pub(super) struct McpForm {
@@ -314,11 +353,101 @@ impl Waku {
             .flex_col()
             .gap(px(14.0))
             .child(self.render_agent_header(theme, cx))
+            .child(self.render_agent_endpoints(theme, cx))
             .child(self.render_agent_behaviour(settings, theme, cx))
             .child(self.render_agent_tools(settings, theme, cx))
             .child(self.render_agent_mcp(settings, theme, cx))
             .child(self.render_agent_rules(settings, theme, cx))
             .into_any_element()
+    }
+
+    /// The three APIs the built-in agent speaks, and where each one goes.
+    ///
+    /// A list of the three beside one form, rather than three stacked forms:
+    /// they are alternatives, only one is being edited at a time, and
+    /// stacking them made the page scroll past what the user came for.
+    /// Each carries its own address, key and saved profiles — a route left
+    /// blank falls back to the managed gateway, so filling one in is not a
+    /// commitment about the other two.
+    fn render_agent_endpoints(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
+        let selected = self.agent_page.selected_endpoint;
+        let stored = self.custom_api_snapshot();
+
+        let mut list = div().flex().flex_col().gap(px(2.0)).w(px(188.0));
+        for endpoint in NativeEndpoint::ALL {
+            let active = endpoint == selected;
+            // The dot says "pointed somewhere of your own" — the gateway
+            // needs no mention, it is the default.
+            let custom = stored.get(endpoint.id()).is_some();
+            list = list.child(
+                div()
+                    .id(SharedString::from(format!("agent-endpoint-{}", endpoint.id())))
+                    .px(px(10.0))
+                    .py(px(7.0))
+                    .rounded(px(7.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(7.0))
+                    .cursor_default()
+                    .when(active, |row| row.bg(theme.surface))
+                    .child(
+                        div()
+                            .w(px(5.0))
+                            .h(px(5.0))
+                            .rounded_full()
+                            .bg(if custom { theme.accent } else { theme.border_strong }),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .text_color(if active { theme.text } else { theme.text_secondary })
+                            .child(SharedString::from(endpoint.label())),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.agent_page.selected_endpoint = endpoint;
+                        cx.notify();
+                    })),
+            );
+        }
+
+        section_card(theme)
+            .child(section_title(theme, tr!("agent.endpoints_title")))
+            .child(section_description(theme, tr!("agent.endpoints_description")))
+            .child(
+                div()
+                    .mt(px(10.0))
+                    .flex()
+                    .gap(px(16.0))
+                    .items_start()
+                    .child(list)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(6.0))
+                            // Both come from the Providers page, which owns
+                            // the endpoint form every provider shares.
+                            .child(self.render_route_section(
+                                crate::model::ProviderKind::Native,
+                                selected.id(),
+                                theme,
+                                cx,
+                            ))
+                            .child(self.render_endpoint_form_titled(
+                                crate::model::ProviderKind::Native,
+                                selected.id(),
+                                selected.label(),
+                                None,
+                                theme,
+                                cx,
+                            )),
+                    ),
+            )
     }
 
     fn render_agent_header(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
@@ -339,8 +468,39 @@ impl Waku {
             None
         };
 
+        // The built-in agent is the only provider with no card on the
+        // Providers page — everything about it lives here — so its
+        // enable switch does too. Off, it stops offering models to new
+        // sessions; ones already locked to it keep working.
+        let disabled = self
+            .state
+            .disabled_providers
+            .contains(&crate::model::ProviderKind::Native);
+        let enable = crate::ui::toggle_switch(
+            SharedString::from("agent-enabled"),
+            !disabled,
+            false,
+            theme,
+            cx,
+            move |this, _, cx| {
+                this.set_provider_enabled(crate::model::ProviderKind::Native, disabled, cx)
+            },
+        );
+
         section_card(theme)
-            .child(section_title(theme, tr!("agent.title_hint")))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(section_title(theme, tr!("agent.title_hint"))),
+                    )
+                    .child(enable),
+            )
             .child(section_description(theme, tr!("agent.description")))
             .child(
                 div()

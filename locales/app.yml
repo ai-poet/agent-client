@@ -3130,10 +3130,6 @@ models.wire_format:
 models.declare_your_own:
   en: "Nothing here yet. Models on your own endpoint are listed after you name them in Settings → Providers."
 
-cli_setup.native_routes_title:
-  en: "Custom endpoints"
-cli_setup.native_routes_detail:
-  en: "The built-in agent speaks three APIs and reaches each one separately. Fill in the ones you want to point somewhere of your own; the rest keep using the managed gateway."
 cli_setup.native_route_messages:
   en: "Anthropic Messages"
 cli_setup.native_route_responses:
@@ -3207,3 +3203,8 @@ skills.installed_toast:
   en: "Installed %{name}"
 skills.install_failed:
   en: "Could not install the skill: %{error}"
+
+agent.endpoints_title:
+  en: "Endpoints"
+agent.endpoints_description:
+  en: "The built-in agent speaks three APIs and reaches each one separately. Point the ones you want at a server of your own; the rest keep using the managed gateway."

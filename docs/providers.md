@@ -944,6 +944,20 @@ Chat Completions route takes a model list, and those are the Chat section.
 They carry a bare id with no platform ahead of a `::`, which is how
 everything downstream tells them from a catalog model.
 
+**Where its settings live** — the built-in agent has no card on the Providers
+page. It has no binary to detect, no version to report and no installer to
+run, so a card there would carry only a name; everything configurable about
+it — endpoints, behaviour, tools, MCP servers, permission rules, and the
+enable switch — is on the Agent page instead. `render_provider_card` now
+asserts it never sees a built-in provider.
+
+The three endpoints are a list beside one form rather than three stacked
+forms (`agent_page::render_agent_endpoints`): they are alternatives, only one
+is edited at a time, and stacking them pushed the rest of the page out of
+reach. The form itself is the one every provider shares
+(`providers_page::render_endpoint_form_titled`), so a change to it reaches
+both pages.
+
 **Custom endpoints** — the built-in agent is not a CLI with one endpoint. It
 speaks three APIs and reaches each separately, so it holds three:
 `native_messages`, `native_responses` and `native_chat`

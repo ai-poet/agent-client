@@ -2465,3 +2465,41 @@ fn an_unknown_model_falls_back_to_its_bare_name() {
     assert_eq!(bare_model_name("anthropic::something-else"), "something-else");
     assert_eq!(bare_model_name("my-own-model"), "my-own-model");
 }
+
+/// The three endpoints are alternatives, and the Agent page shows one at a
+/// time — so their storage ids have to stay distinct and keep matching what
+/// `sub2api::custom_api` files them under. A rename on either side would
+/// silently point the form at a slot nobody reads.
+#[test]
+fn every_native_endpoint_has_its_own_stored_slot() {
+    use super::agent_page::NativeEndpoint;
+
+    let ids: Vec<&str> = NativeEndpoint::ALL.iter().map(|e| e.id()).collect();
+    assert_eq!(ids, ["native_messages", "native_responses", "native_chat"]);
+    for id in &ids {
+        assert!(
+            sub2api::custom_api::CUSTOM_API_PROVIDERS.contains(id),
+            "{id} is not a slot the store knows"
+        );
+    }
+    // Messages leads: it is the route Claude models take, which is what a
+    // signed-in session uses by default.
+    assert_eq!(NativeEndpoint::default(), NativeEndpoint::Messages);
+}
+
+/// Everything configurable about the built-in agent lives on the Agent page
+/// now, so the Providers page must not grow a card for it again — that was
+/// the split this move removed.
+#[test]
+fn the_providers_page_lists_only_clis() {
+    use crate::model::ProviderKind;
+
+    let listed: Vec<ProviderKind> = ProviderKind::ALL
+        .into_iter()
+        .filter(|kind| !kind.is_builtin())
+        .collect();
+    assert!(!listed.contains(&ProviderKind::Native));
+    assert!(!listed.is_empty(), "the page would otherwise be empty");
+    // Exactly one provider is built in; the rest are CLIs with binaries.
+    assert_eq!(ProviderKind::ALL.len() - listed.len(), 1);
+}
