@@ -2487,6 +2487,27 @@ fn every_native_endpoint_has_its_own_stored_slot() {
     assert_eq!(NativeEndpoint::default(), NativeEndpoint::Messages);
 }
 
+/// The paths shown in the form are what the adapters actually request. A
+/// user reads them to decide whether their own server can serve a route, so
+/// a drift here sends them to configure the wrong path — and nothing else
+/// would catch it, since the adapters compose their URLs independently.
+#[test]
+fn each_route_names_the_path_its_adapter_requests() {
+    use super::agent_page::NativeEndpoint;
+
+    assert_eq!(NativeEndpoint::Messages.request_path(), "/v1/messages");
+    assert_eq!(NativeEndpoint::Responses.request_path(), "/v1/responses");
+    assert_eq!(NativeEndpoint::Chat.request_path(), "/v1/chat/completions");
+
+    // Distinct, and each one absolute — they are appended to an origin.
+    let paths: Vec<&str> = NativeEndpoint::ALL.iter().map(|e| e.request_path()).collect();
+    assert!(paths.iter().all(|path| path.starts_with('/')));
+    let mut unique = paths.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(unique.len(), paths.len());
+}
+
 /// Everything configurable about the built-in agent lives on the Agent page
 /// now, so the Providers page must not grow a card for it again — that was
 /// the split this move removed.

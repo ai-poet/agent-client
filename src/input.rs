@@ -588,6 +588,10 @@ pub struct TextInput {
     active_search_match: Option<usize>,
     content: SharedString,
     placeholder: SharedString,
+    /// Render the content as asterisks. Set on fields holding a secret, so
+    /// one is not left in cleartext on screen while it is being entered —
+    /// the stored-value case was already hidden, the entry case was not.
+    masked: bool,
     selected_range: Range<usize>,
     selection_reversed: bool,
     marked_range: Option<Range<usize>>,
@@ -673,6 +677,7 @@ impl TextInput {
             active_search_match: None,
             content: "".into(),
             placeholder: "".into(),
+            masked: false,
             selected_range: 0..0,
             selection_reversed: false,
             marked_range: None,
@@ -752,6 +757,24 @@ impl TextInput {
     }
 
     /// Placeholder shown while the field is empty.
+    /// Show the content as asterisks rather than as itself.
+    pub fn masked(mut self, masked: bool) -> Self {
+        self.masked = masked;
+        self
+    }
+
+    /// Flip masking after construction, for a reveal control.
+    pub fn set_masked(&mut self, masked: bool, cx: &mut Context<Self>) {
+        if self.masked != masked {
+            self.masked = masked;
+            cx.notify();
+        }
+    }
+
+    pub fn is_masked(&self) -> bool {
+        self.masked
+    }
+
     pub fn placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.placeholder = placeholder.into();
         self
@@ -1839,6 +1862,26 @@ fn visual_row_count(layout: &TextLayout) -> usize {
 }
 
 /// Resolve the closest caret offset on one rendered row for a desired x.
+/// What to draw for `content` when the field holds a secret.
+///
+/// One ASCII byte per byte, so every offset into the content — selection,
+/// IME marking, mouse hit-testing, search — still addresses the same
+/// position in what is drawn. That invariant is why masking can live at the
+/// single point where the display string is built, instead of being threaded
+/// through the ten places that convert between the two.
+///
+/// Non-ASCII content is left alone rather than masked: a multi-byte
+/// character has no single-byte stand-in, and shifting every offset after it
+/// would put the caret in the wrong place. API keys are ASCII in practice,
+/// and failing this way shows the text rather than corrupting the field.
+fn masked_display(content: &SharedString, masked: bool) -> SharedString {
+    if masked && content.is_ascii() && !content.is_empty() {
+        SharedString::from("*".repeat(content.len()))
+    } else {
+        content.clone()
+    }
+}
+
 /// GPUI's whole-text `position_for_index` intentionally gives a soft-wrap
 /// boundary to the preceding row, so this works against the concrete wrapped
 /// row and returns its unambiguous caret x as well as the byte offset.
@@ -2182,11 +2225,12 @@ impl Element for InputElement {
         let style = window.text_style();
         let theme = Theme::current(cx);
         let content_is_empty = content.is_empty();
+
         let (display_text, text_color, selected_range, marked_range) = if content_is_empty {
             (input.placeholder.clone(), theme.text_ghost, None, None)
         } else {
             (
-                content,
+                masked_display(&content, input.masked),
                 style.color,
                 Some(&input.selected_range),
                 input.marked_range.as_ref(),
@@ -3521,5 +3565,41 @@ mod tests {
             ),
             px(300.)
         );
+    }
+}
+
+#[cfg(test)]
+mod masking_tests {
+    use super::masked_display;
+    use gpui::SharedString;
+
+    /// The invariant the whole design rests on: masking must not move a
+    /// single byte. Selection, IME marking and mouse hit-testing all index
+    /// the content and are drawn against this string.
+    #[test]
+    fn masking_preserves_every_byte_offset() {
+        for key in ["sk-abcdef0123456789", "a", "", "0123456789abcdef"] {
+            let content = SharedString::from(key);
+            let shown = masked_display(&content, true);
+            assert_eq!(shown.len(), content.len(), "{key:?} changed length");
+        }
+        assert_eq!(masked_display(&SharedString::from("sk-abc"), true), "******");
+    }
+
+    /// A multi-byte character has no single-byte stand-in, so masking would
+    /// shift every offset after it and put the caret in the wrong place.
+    /// Showing the text is the safe failure.
+    #[test]
+    fn non_ascii_content_is_shown_rather_than_shifted() {
+        let content = SharedString::from("密钥-abc");
+        assert_eq!(masked_display(&content, true), content);
+    }
+
+    #[test]
+    fn an_unmasked_field_is_untouched() {
+        let content = SharedString::from("plain text");
+        assert_eq!(masked_display(&content, false), content);
+        // Empty stays empty, so the placeholder branch still fires.
+        assert_eq!(masked_display(&SharedString::from(""), true), "");
     }
 }

@@ -2177,6 +2177,8 @@ impl Waku {
                 let key_input = cx.new(|cx| {
                     let mut input = TextInput::new(window, cx)
                         .select_all_on_focus_click()
+                        // Masked from the start: the reveal control unmasks.
+                        .masked(true)
                         .placeholder(tr!("cli_setup.custom_key_placeholder"));
                     if let Some(endpoint) = stored {
                         input.set_content(endpoint.api_key.clone(), cx);

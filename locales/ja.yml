@@ -1636,3 +1636,5 @@ skills.install_failed: "スキルをインストールできませんでした�
 
 agent.endpoints_title: "エンドポイント"
 agent.endpoints_description: "内蔵エージェントは 3 種類の API を話し、それぞれ別々に接続します。自分のサーバーに向けたいものだけ設定してください。残りはマネージドゲートウェイのままです。"
+
+agent.endpoint_path_hint: "リクエストは下のアドレスの %{path} に送られます。接続先はこのパスに応答する必要があります。"

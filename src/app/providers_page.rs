@@ -373,6 +373,7 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                let mut clear_the_key = false;
                 let form = this.cli_setup.page.forms.entry(provider_id).or_default();
                 form.saving = false;
                 match outcome {
@@ -382,7 +383,7 @@ impl Waku {
                             form.last_warning = Some(warnings.join("\n"));
                         }
                         if clearing {
-                            form.key_revealed = false;
+                            clear_the_key = true;
                         }
                         // The Chat route's model list is the picker's Chat
                         // section. Nothing else would notice until the next
@@ -397,6 +398,10 @@ impl Waku {
                         });
                     }
                     Err(error) => form.error = Some(format!("{error:#}")),
+                }
+                // After the `form` borrow, which the mask helper also needs.
+                if clear_the_key {
+                    this.remask_endpoint_key(provider_id, cx);
                 }
                 cx.notify();
             });
@@ -506,6 +511,20 @@ impl Waku {
     /// Apply a change to one CLI's profiles and re-route it: load, mutate,
     /// save, reconcile — all off the UI thread — then refresh the cache and,
     /// when the active profile may have changed, the form fields.
+    /// Put a key back behind its mask.
+    ///
+    /// Kept beside the flag it mirrors: `key_revealed` decides what the
+    /// button says, the input decides what is drawn, and the two going out
+    /// of step is exactly how a secret ends up on screen under a control
+    /// that claims it is hidden.
+    fn remask_endpoint_key(&mut self, provider_id: &'static str, cx: &mut Context<Self>) {
+        self.cli_setup.page.forms.entry(provider_id).or_default().key_revealed = false;
+        let Some((_, key, _)) = self.endpoint_inputs(provider_id) else {
+            return;
+        };
+        key.clone().update(cx, |input, cx| input.set_masked(true, cx));
+    }
+
     fn commit_profiles(
         &mut self,
         provider_id: &'static str,
@@ -514,6 +533,10 @@ impl Waku {
         mutate: impl FnOnce(&mut sub2api::custom_api::ProviderProfiles) + Send + 'static,
         cx: &mut Context<Self>,
     ) {
+        // Every profile operation lands a different key in the field, and
+        // none of them should leave it on screen. The form flag alone would
+        // only relabel the button — the input is what actually hides it.
+        self.remask_endpoint_key(provider_id, cx);
         if self
             .cli_setup
             .page
@@ -2513,74 +2536,45 @@ impl Waku {
             tr!("cli_setup.custom_hint_openai")
         };
 
-        // The key: a masked stub with a reveal button until the user asks,
-        // or the field itself while there is nothing to hide.
-        let key_row: Div = if key_revealed || key_content.is_empty() {
-            div()
-                .flex()
-                .items_center()
-                .gap(px(8.0))
-                .child(
-                    TextField::new(
-                        SharedString::from(format!("custom-api-key-{provider_id}")),
-                        key_input.clone(),
-                    )
-                    .flex_1(),
+        // The key stays masked until asked for, entry included — a stub
+        // would have hidden a stored key but left a new one in cleartext
+        // while it was being typed, which is when a screen is most likely
+        // being shared.
+        let key_row: Div = div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(
+                TextField::new(
+                    SharedString::from(format!("custom-api-key-{provider_id}")),
+                    key_input.clone(),
                 )
-                .when(key_revealed && !key_content.is_empty(), |row| {
-                    row.child(card_button(
-                        theme,
-                        SharedString::from(format!("custom-api-hide-{provider_id}")),
-                        tr!("cli_setup.custom_hide"),
-                        false,
-                        false,
-                        cx,
-                        move |this, _, cx| {
-                            this.cli_setup.page.forms.entry(provider_id).or_default().key_revealed =
-                                false;
-                            cx.notify();
-                        },
-                    ))
-                })
-        } else {
-            div()
-                .flex()
-                .items_center()
-                .gap(px(8.0))
-                .child(
-                    div()
-                        .flex_1()
-                        .h(px(28.0))
-                        .px(px(8.0))
-                        .rounded(px(6.0))
-                        .border_1()
-                        .border_color(theme.border_strong)
-                        .bg(theme.inset)
-                        .flex()
-                        .items_center()
-                        .font_family(crate::md::render::MONO_FAMILY)
-                        .text_size(sp(12.5))
-                        .text_color(theme.text_secondary)
-                        .child(super::cli_setup::mask_api_key(&key_content)),
-                )
-                .child(card_button(
+                .flex_1(),
+            )
+            .when(!key_content.is_empty(), |row| {
+                row.child(card_button(
                     theme,
                     SharedString::from(format!("custom-api-reveal-{provider_id}")),
-                    tr!("cli_setup.custom_reveal"),
+                    if key_revealed {
+                        tr!("cli_setup.custom_hide")
+                    } else {
+                        tr!("cli_setup.custom_reveal")
+                    },
                     false,
                     false,
                     cx,
-                    move |this, window, cx| {
-                        this.cli_setup.page.forms.entry(provider_id).or_default().key_revealed =
-                            true;
+                    move |this, _, cx| {
+                        let form =
+                            this.cli_setup.page.forms.entry(provider_id).or_default();
+                        form.key_revealed = !form.key_revealed;
+                        let revealed = form.key_revealed;
                         if let Some((_, key, _)) = this.endpoint_inputs(provider_id) {
-                            let focus = key.read(cx).focus();
-                            window.focus(&focus, cx);
+                            key.update(cx, |input, cx| input.set_masked(!revealed, cx));
                         }
                         cx.notify();
                     },
                 ))
-        };
+            });
 
         let mut section = div()
             .mt(px(10.0))

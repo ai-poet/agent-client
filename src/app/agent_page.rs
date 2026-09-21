@@ -84,6 +84,21 @@ impl NativeEndpoint {
         }
     }
 
+    /// The path the adapter appends to whatever address is entered.
+    ///
+    /// Worth showing: pointing a route at a third-party service means that
+    /// service has to implement *this* path, and a server that answers
+    /// `/v1/chat/completions` very often does not answer `/v1/responses`.
+    /// Verified against the adapters — `registry::responses_endpoint`,
+    /// `providers/openai.rs`, and the Messages client in `api/src/lib.rs`.
+    pub(super) fn request_path(self) -> &'static str {
+        match self {
+            Self::Messages => "/v1/messages",
+            Self::Responses => "/v1/responses",
+            Self::Chat => "/v1/chat/completions",
+        }
+    }
+
     /// The API it speaks, which is the only thing that distinguishes them.
     pub(super) fn label(self) -> String {
         match self {
@@ -442,7 +457,10 @@ impl Waku {
                                 crate::model::ProviderKind::Native,
                                 selected.id(),
                                 selected.label(),
-                                None,
+                                Some(tr!(
+                                    "agent.endpoint_path_hint",
+                                    path = selected.request_path()
+                                )),
                                 theme,
                                 cx,
                             )),

@@ -85,16 +85,6 @@ fn cli_search_dirs() -> Vec<std::path::PathBuf> {
     dirs
 }
 
-/// `sk-abcdef...xyz` — the Electron client's masking, enough to recognise a
-/// key without exposing it.
-pub(super) fn mask_api_key(key: &str) -> String {
-    let trimmed = key.trim();
-    if trimmed.len() <= 12 {
-        return "***".to_owned();
-    }
-    format!("{}...{}", &trimmed[..8], &trimmed[trimmed.len() - 4..])
-}
-
 /// Human label for a CLI install stage.
 fn install_stage_label(reported: sub2api::cli_install::InstallStage) -> String {
     match reported {

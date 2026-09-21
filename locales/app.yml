@@ -3208,3 +3208,6 @@ agent.endpoints_title:
   en: "Endpoints"
 agent.endpoints_description:
   en: "The built-in agent speaks three APIs and reaches each one separately. Point the ones you want at a server of your own; the rest keep using the managed gateway."
+
+agent.endpoint_path_hint:
+  en: "Requests go to %{path} on the address below, so the service has to answer that path."
