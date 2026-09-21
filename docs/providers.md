@@ -1055,6 +1055,85 @@ platform-specific command guidance unless `skip_env_info` is set, which the
 fork never sets. Argument-typing failures are not an environment problem and
 adding environment text does not affect them.
 
+**How each agent receives Computer Use.** Three shapes, chosen by what the
+agent accepts rather than by preference:
+
+| Agent | Server | Skill |
+| --- | --- | --- |
+| Waku Agent | pushed into `Config.mcp_servers` | written to the engine's config dir |
+| Codex | `-c mcp_servers.waku_js_repl.command=…` | `skills/extraRoots/set` |
+| Claude Code | `--mcp-config <json>` | `--plugin-dir <throwaway>` |
+| Cursor, Fx | `session/new` `mcpServers` | Skills page installer |
+| OpenCode | `OPENCODE_CONFIG_CONTENT` | `instructions[]` |
+| Grok | isolated `GROK_HOME` | `--rules` |
+| Pi | `--extension` | `--skill` |
+| Amp | *not wired* | Skills page installer |
+
+Claude Code takes both on the command line for one run, so nothing reaches
+`~/.claude`; `--strict-mcp-config` is deliberately **not** passed, or the
+user's own servers would stop loading beside ours. `--plugin-dir` only goes to
+a build whose `--help` advertises it (`sub2api::claude_compat`), because an
+unknown flag is fatal at spawn and losing the skill beats losing the session.
+
+Cursor and Fx need nothing on disk at all: ACP carries `mcpServers` in
+`session/new`, `session/load` and `session/resume`. Grok is excluded from that
+list even though it is an ACP agent — it already has the server through its
+isolated home, and sending it twice would register it twice.
+
+Amp is the one gap. Its in-session launch has no settings flag Waku can verify
+(`amp --help` was not available to check whether `--settings-file` replaces or
+overlays the user's own file), so replacing that file was not worth guessing
+at. Amp gets the skill from the Skills page and no server.
+
+**Installing a bundled skill.** The Skills page offers the app's own skills
+for the CLIs with no other route — Shared, Cursor, Fx, Amp. The daemon checks
+every requested root against `bundled_skill_targets()` before writing: the
+command carries paths from the desktop, and a daemon that wrote wherever it
+was told would be a way to drop a file anywhere on its host. Only `SKILL.md`
+is touched, through a sibling temporary file, so anything else in that
+directory survives.
+
+**Computer Use and image generation** — the built-in agent reaches both
+through the same `waku_js_repl` MCP server every wired CLI uses, registered
+into the session's `Config.mcp_servers` at start rather than written to
+`settings.json`: the toggle is a live preference, and a crashed session would
+otherwise leave an entry pointing at a process directory that no longer
+exists. `McpTool` then wraps whatever it advertises as `waku_js_repl_*`.
+
+Turning the feature on is the consent for those tools. `GuiPermissionHandler`
+promotes an *undecided* request for them to `Allow` — a plan-mode refusal or a
+deny rule the user wrote still stands, and nothing is persisted. A ten-step
+desktop task would otherwise be ten dialogs.
+
+The engine's `Skill` tool reads flat `<name>.md` files from its own config
+directory, not the `SKILL.md` directories the app ships, so the bundled skill
+is written out there at session start and removed when the toggle is off.
+Reading it is consented too: it lives outside the workspace and would
+otherwise raise a prompt for a file this app just wrote.
+
+Unlike the CLI drivers, a helper that will not start does not fail the
+session. `generate_image` needs no desktop access, so the driver reports what
+was lost and carries on with the REPL registered but no
+`WAKU_COMPUTER_USE_SERVER`.
+
+`generate_image` lives in the REPL rather than the bridge so one
+implementation serves every agent, and so the picture arrives as a real MCP
+image block. Credentials come from the engine's `settings.json`
+(`provider_configs.anthropic.api_base` plus `options.gateway_keys`) rather
+than the environment — Codex registers servers with `-c …env.X=`, which would
+put a gateway key on a command line. The key is the `openai` one, falling back
+to `default`, and **never** `anthropic`: the gateway dispatches images on the
+key's group platform, and an Anthropic group has no image endpoint. When no
+key table exists — a route pointed at the user's own endpoint — the tool is
+not advertised at all.
+
+Images reach the transcript on their own sideband. `McpTool` lifts MCP image
+content into `ToolResult.metadata`, the bridge carries it as
+`AgentEvent::ToolFinished { image_source }`, and the driver hands it to
+`activity::tool_activity` as `image_source` rather than folding it into the
+text — that text is also what the model reads back, and base64 there would
+flood the context.
+
 **Plan mode** — two things decide it, and they now agree. Waku's composer
 switch sets it at session start (`driver/native.rs`), and the engine's own
 `EnterPlanMode` / `ExitPlanMode` tools move it mid-turn; the bridge follows

@@ -2185,6 +2185,7 @@ impl Waku {
                         move |this, _, cx| this.set_computer_use_enabled(!enabled, cx),
                     )),
             )
+            .children(self.render_cua_driver_card(theme, cx))
             .child(
                 div()
                     .px(px(20.0))
@@ -2196,17 +2197,18 @@ impl Waku {
                             .text_size(sp(13.5))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.text)
-                            .child(tr!("computer_use.macos_access")),
+                            .child(tr!("computer_use.system_access")),
                     )
                     .child(
                         div()
                             .mt(px(4.0))
                             .text_size(sp(12.5))
                             .text_color(theme.text_secondary)
-                            .child(SharedString::from(tr!(
-                                "computer_use.helper_access",
-                                helper = helper_name
-                            ))),
+                            .child(SharedString::from(if cfg!(windows) {
+                                tr!("computer_use.driver_access", helper = helper_name)
+                            } else {
+                                tr!("computer_use.helper_access", helper = helper_name)
+                            })),
                     )
                     .child(permission_status_row(
                         tr!("computer_use.screen_recording"),
@@ -2282,6 +2284,186 @@ impl Waku {
             self.request_computer_permissions(true, cx);
         }
         cx.notify();
+    }
+
+    /// The driver card, on the platforms that install one.
+    ///
+    /// macOS bundles its helper inside the app, so there is nothing to
+    /// install and no card. Windows downloads a pinned `cua-driver`, and
+    /// until it is there desktop control cannot start at all — image
+    /// generation still can, which is why the toggle above stays useful.
+    fn render_cua_driver_card(&self, theme: Theme, cx: &mut Context<Self>) -> Option<Div> {
+        if !sub2api::cua_install::install_supported() {
+            return None;
+        }
+        self.probe_cua_driver(cx);
+
+        let helper = crate::computer_use::helper_display_name();
+        let detection = self.cua_driver.lock().unwrap().clone().flatten();
+        let up_to_date = detection
+            .as_ref()
+            .is_some_and(|found| found.is_pinned_version());
+        let status = match &detection {
+            None => tr!("computer_use.driver_missing"),
+            Some(found) => match (&found.version, up_to_date) {
+                (Some(version), true) => tr!("computer_use.driver_installed", version = version),
+                (Some(version), false) => tr!("computer_use.driver_outdated", version = version),
+                (None, _) => tr!("computer_use.driver_installed_unknown"),
+            },
+        };
+        // The install lands on this machine; a remote daemon drives another.
+        let remote = self.daemon.is_remote();
+        let busy = self.cua_install_running;
+        let stage = self.cua_install_stage.lock().unwrap().clone();
+
+        let mut card = div()
+            .px(px(20.0))
+            .py(px(14.0))
+            .rounded(px(13.0))
+            .bg(theme.raised)
+            .child(
+                div()
+                    .text_size(sp(13.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(tr!("computer_use.windows_driver")),
+            )
+            .child(
+                div()
+                    .mt(px(4.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .child(SharedString::from(tr!(
+                        "computer_use.driver_description",
+                        helper = helper
+                    ))),
+            )
+            .child(
+                div()
+                    .mt(px(9.0))
+                    .text_size(sp(12.5))
+                    .text_color(if up_to_date {
+                        theme.success
+                    } else {
+                        theme.text_secondary
+                    })
+                    .child(SharedString::from(stage.clone().unwrap_or(status))),
+            );
+
+        if remote {
+            return Some(card.child(
+                div()
+                    .mt(px(9.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.warning)
+                    .child(tr!("computer_use.remote_note")),
+            ));
+        }
+
+        if !up_to_date {
+            card = card.child(
+                div().mt(px(11.0)).child(
+                    div()
+                        .id("install-cua-driver")
+                        .h(px(28.0))
+                        .px(px(11.0))
+                        .rounded(px(7.0))
+                        .border_1()
+                        .border_color(theme.border_strong)
+                        .text_color(theme.text_secondary)
+                        .flex()
+                        .items_center()
+                        .cursor_default()
+                        .text_size(sp(12.5))
+                        .opacity(if busy { 0.6 } else { 1.0 })
+                        .child(if detection.is_some() {
+                            tr!("computer_use.update_driver")
+                        } else {
+                            tr!("computer_use.install_driver")
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| this.install_cua_driver(cx))),
+                ),
+            );
+        }
+        if let Some(error) = &self.cua_install_error {
+            card = card.child(
+                div()
+                    .mt(px(9.0))
+                    .text_size(sp(12.0))
+                    .text_color(theme.danger)
+                    .child(SharedString::from(error.clone())),
+            );
+        }
+        Some(card)
+    }
+
+    /// Find the Computer Use driver, once per visit to this page.
+    ///
+    /// The probe asks the driver its version by running it, so it belongs on
+    /// a background thread even though the answer is one line.
+    pub(super) fn probe_cua_driver(&self, cx: &mut Context<Self>) {
+        use std::sync::atomic::Ordering;
+        // Scheduled from `render`, so claim the slot before spawning: a
+        // second frame must not queue a second probe.
+        if self
+            .cua_probe_started
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return;
+        }
+        let slot = self.cua_driver.clone();
+        cx.spawn(async move |this, cx| {
+            let found = cx
+                .background_executor()
+                .spawn(async move { sub2api::cua_install::detect_driver() })
+                .await;
+            *slot.lock().unwrap() = Some(found);
+            let _ = this.update(cx, |_, cx| cx.notify());
+        })
+        .detach();
+    }
+
+    /// Download and unpack the pinned driver, then re-probe.
+    ///
+    /// Runs in this process, which is why the button is disabled against a
+    /// remote daemon: the driver has to land on the machine whose desktop
+    /// will be driven, and that is the daemon's, not this one.
+    pub(super) fn install_cua_driver(&mut self, cx: &mut Context<Self>) {
+        if self.cua_install_running {
+            return;
+        }
+        self.cua_install_running = true;
+        self.cua_install_error = None;
+        let stage = self.cua_install_stage.clone();
+        cx.spawn(async move |this, cx| {
+            let outcome = cx
+                .background_executor()
+                .spawn(async move {
+                    sub2api::cua_install::install_driver(|reported| {
+                        *stage.lock().unwrap() = Some(cua_stage_label(reported));
+                    })
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.cua_install_running = false;
+                *this.cua_install_stage.lock().unwrap() = None;
+                if outcome.success {
+                    // Re-probe from scratch, then ask the fresh driver what
+                    // the system has granted it.
+                    *this.cua_driver.lock().unwrap() = None;
+                    this.cua_probe_started
+                        .store(false, std::sync::atomic::Ordering::SeqCst);
+                    this.probe_cua_driver(cx);
+                    this.request_computer_permissions(false, cx);
+                    this.show_toast(tr!("computer_use.driver_installed_toast"));
+                } else {
+                    this.cua_install_error = Some(outcome.output);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub(super) fn request_computer_permissions(&mut self, prompt: bool, cx: &mut Context<Self>) {
@@ -2606,5 +2788,17 @@ mod tests {
             abbreviate_home_path(Path::new("/opt/homebrew/bin/codex"), Some(home)),
             "/opt/homebrew/bin/codex"
         );
+    }
+}
+
+/// The driver installer's stages, in the same words the CLI installer uses —
+/// they are the same four steps, and a download is a download.
+fn cua_stage_label(reported: sub2api::cua_install::CuaStage) -> String {
+    use sub2api::cua_install::CuaStage;
+    match reported {
+        CuaStage::ResolvingDownload => tr!("cli_setup.stage_resolving"),
+        CuaStage::Downloading => tr!("cli_setup.stage_downloading"),
+        CuaStage::Installing => tr!("computer_use.stage_installing_driver"),
+        CuaStage::Verifying => tr!("cli_setup.stage_verifying"),
     }
 }

@@ -2800,7 +2800,12 @@ impl Waku {
                 service_tier,
                 context_window,
                 agent_preset,
-                computer_use_enabled: cfg!(target_os = "macos") && self.state.computer_use_enabled,
+                // Fork: upstream pinned this to macOS while Computer Use was
+                // macOS-only. The Windows backend (`cua-driver`) landed after
+                // it, and without this the daemon never heard the toggle, so
+                // no driver ever started one.
+                computer_use_enabled: cfg!(any(target_os = "macos", windows))
+                    && self.state.computer_use_enabled,
                 provider_cursor: session.provider_cursor.clone(),
             },
             event_wake: self.event_wake_tx.clone(),

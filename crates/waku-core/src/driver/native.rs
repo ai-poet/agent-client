@@ -27,7 +27,7 @@ use serde_json::Value;
 use uuid::Uuid;
 use waku_agent_bridge::{
     AccessMode, AgentEvent, AgentSession, AgentStartOptions, BackgroundEntry, BackgroundKind,
-    BackgroundStatus, MissingApiKey, TurnOptions, WireFormat, split_model,
+    BackgroundStatus, ComputerUseWiring, MissingApiKey, TurnOptions, WireFormat, split_model,
 };
 
 use super::activity;
@@ -50,6 +50,34 @@ pub struct NativeDriver {
     /// its own, so the driver mints one and reports it through `Connected` —
     /// the same shape every other provider's thread id takes.
     session_id: Uuid,
+    /// Held for its `Drop`, which reaps the helper processes this session
+    /// registered and removes their directory.
+    _computer_use: Option<super::computer_use::ComputerUseRuntime>,
+}
+
+/// Translate the runtime's resolved paths into what the bridge needs.
+///
+/// The bridge cannot call `crate::computer_use`'s resolvers itself — it
+/// depends on neither this crate nor `waku-protocol` — so the paths cross as
+/// plain values. The skill travels as its text rather than its path because
+/// the engine's `Skill` tool reads flat files from its own config directory,
+/// not the `SKILL.md` directories the app ships.
+fn computer_use_wiring(config: &super::computer_use::ComputerUseConfig) -> ComputerUseWiring {
+    ComputerUseWiring {
+        repl_server: config.repl_path.clone(),
+        native_helper: Some(config.server_path.clone()),
+        process_directory: Some(config.process_directory.clone()),
+        // A skill that cannot be read is not worth failing the session over;
+        // the tools still work, only their manual is missing.
+        skill_markdown: std::fs::read_to_string(&config.skill_path)
+            .inspect_err(|error| {
+                report_warning(&format!(
+                    "the computer-use skill at {} could not be read: {error}",
+                    config.skill_path.display()
+                ));
+            })
+            .ok(),
+    }
 }
 
 impl NativeDriver {
@@ -73,6 +101,34 @@ impl NativeDriver {
             Vec::new()
         };
 
+        // Unlike the CLI drivers, a helper that will not start does not fail
+        // the session here: the REPL also carries image generation, which
+        // needs no desktop access at all. Say what was lost and go on.
+        let (computer_use, wiring) = if options.computer_use_enabled {
+            match super::computer_use::ComputerUseRuntime::start(events.clone()) {
+                Ok(runtime) => {
+                    let wiring = computer_use_wiring(&runtime.config);
+                    (Some(runtime), Some(wiring))
+                }
+                Err(error) => {
+                    let _ = events.send(DriverEvent::Error(tr!(
+                        "native.computer_use_unavailable",
+                        reason = error.to_string()
+                    )));
+                    let repl = crate::computer_use::js_repl_server_path().ok();
+                    let wiring = repl.map(|repl_server| ComputerUseWiring {
+                        repl_server,
+                        native_helper: None,
+                        process_directory: None,
+                        skill_markdown: None,
+                    });
+                    (None, wiring)
+                }
+            }
+        } else {
+            (None, None)
+        };
+
         let (platform, model) = route_of(options.model.as_deref());
         let start = AgentStartOptions {
             cwd: options.cwd.clone(),
@@ -84,6 +140,7 @@ impl NativeDriver {
             reasoning_effort: options.reasoning_effort.clone(),
             narration_language: narration_language(),
             history,
+            computer_use: wiring,
         };
 
         let sink = EventTranslator::new(events.clone(), store.clone());
@@ -115,6 +172,7 @@ impl NativeDriver {
             events,
             store,
             session_id,
+            _computer_use: computer_use,
         })
     }
 }
@@ -501,6 +559,7 @@ impl EventTranslator {
                 name,
                 output,
                 failed,
+                image_source,
             } => {
                 // A completion whose start was never seen still deserves a
                 // row; falling back on the tool name keeps it readable.
@@ -510,13 +569,15 @@ impl EventTranslator {
                     input: Value::Null,
                 });
                 let output = localize_refusal(&output).unwrap_or(output);
+                // Images arrive on their own sideband rather than inside
+                // `output`, which is also what the model reads back.
                 self.send(DriverEvent::RichActivity(activity::tool_activity(
                     Some(id),
                     call.kind,
                     call.title,
                     Some(&call.input),
                     Some(&output),
-                    None,
+                    image_source.as_ref(),
                     failed,
                     true,
                 )));
@@ -631,6 +692,9 @@ fn activity_kind(name: &str) -> ActivityKind {
         "PowerShell" | "REPL" => ActivityKind::Command,
         "BatchEdit" => ActivityKind::FileChange,
         "EnterPlanMode" | "ExitPlanMode" => ActivityKind::Plan,
+        // The Computer Use REPL: driving the desktop reads as a command,
+        // drawing reads as a tool.
+        "waku_js_repl_js" | "waku_js_repl_js_reset" => ActivityKind::Command,
         "ToolSearch" => ActivityKind::Search,
         _ => ActivityKind::from_tool_name(name),
     }
@@ -702,6 +766,44 @@ fn permission_label(choice: waku_agent_bridge::PermissionChoice) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The bridge cannot resolve bundle paths itself, so the driver hands
+    /// them over as values — and the skill as text, because the engine's
+    /// `Skill` tool reads flat files rather than the `SKILL.md` directories
+    /// the app ships.
+    #[test]
+    fn the_wiring_carries_paths_across_and_reads_the_skill() {
+        let dir = std::env::temp_dir().join(format!("waku-wiring-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let skill_path = dir.join("SKILL.md");
+        std::fs::write(&skill_path, "# how to drive the desktop").expect("write skill");
+
+        let config = super::super::computer_use::ComputerUseConfig {
+            server_path: PathBuf::from("/opt/helper"),
+            repl_path: PathBuf::from("/opt/waku_js_repl"),
+            skill_path: skill_path.clone(),
+            process_directory: dir.clone(),
+        };
+        let wiring = computer_use_wiring(&config);
+        assert_eq!(wiring.repl_server, PathBuf::from("/opt/waku_js_repl"));
+        assert_eq!(wiring.native_helper, Some(PathBuf::from("/opt/helper")));
+        assert_eq!(wiring.process_directory, Some(dir.clone()));
+        assert_eq!(wiring.skill_markdown.as_deref(), Some("# how to drive the desktop"));
+
+        // An unreadable skill costs the manual, not the session.
+        std::fs::remove_file(&skill_path).expect("remove skill");
+        assert!(computer_use_wiring(&config).skill_markdown.is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Driving the desktop reads as a command in the transcript, not as the
+    /// generic tool row the name would otherwise fall through to.
+    #[test]
+    fn the_repl_tools_classify_as_commands() {
+        assert!(matches!(activity_kind("waku_js_repl_js"), ActivityKind::Command));
+        assert!(matches!(activity_kind("waku_js_repl_js_reset"), ActivityKind::Command));
+    }
 
     /// The generic line is translated as a whole; a plan summary is kept
     /// under a lead-in, so the user reads the plan and not a stand-in for it.

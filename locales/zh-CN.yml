@@ -1559,3 +1559,27 @@ native.plan_mode_denied: "没有执行——当前是计划模式，不会改动
 native.keep_planning: "你选择了继续规划，Agent 会接着完善计划。"
 
 native.exit_plan_summary_lead: "Agent 给出的计划。同意就切到构建模式，不满意就让它继续规划。"
+
+native.computer_use_unavailable: "本次会话无法控制桌面：%{reason}。图像生成仍然可用。"
+
+computer_use.system_access: "系统访问"
+computer_use.driver_access: "授予 %{helper} 访问权限，它是隔离的控制驱动"
+computer_use.windows_driver: "控制驱动"
+computer_use.driver_description: "真正移动指针、读取屏幕的是 %{helper}。只下载一次，版本已固定。"
+computer_use.driver_installed: "已安装，版本 %{version}"
+computer_use.driver_installed_unknown: "已安装"
+computer_use.driver_missing: "未安装"
+computer_use.driver_outdated: "已安装版本 %{version}，与此版本预期的不一致"
+computer_use.install_driver: "安装"
+computer_use.update_driver: "更新"
+computer_use.driver_installed_toast: "控制驱动已安装"
+computer_use.stage_installing_driver: "正在安装驱动"
+computer_use.remote_note: "Computer Use 操作的是守护进程所在的那台电脑，不是这一台。请在那台机器上安装驱动。"
+
+skills.section_bundled: "内置"
+skills.bundled_caption: "随应用分发。Codex、Claude Code、OpenCode、Grok 和 Pi 每次会话自动获得；其余需要在磁盘上放一份。"
+skills.install: "安装"
+skills.update: "更新"
+skills.installed: "已安装"
+skills.installed_toast: "已安装 %{name}"
+skills.install_failed: "安装 skill 失败：%{error}"

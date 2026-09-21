@@ -50,6 +50,20 @@ pub struct PermissionBridge {
     auto: Mutex<Option<PermissionChoice>>,
     manager: Arc<std::sync::Mutex<PermissionManager>>,
     settings: Arc<Mutex<Settings>>,
+    /// Capabilities the user consented to by turning a feature on, so the
+    /// dialog is not raised per call. Set once at session start.
+    consented: Mutex<Consented>,
+}
+
+/// What the Computer Use toggle stands in for.
+#[derive(Default)]
+struct Consented {
+    /// Tool names, matched exactly.
+    tools: Vec<String>,
+    /// The installed skill file. `Skill` reads it from the engine's config
+    /// directory, which is outside the workspace and would otherwise raise
+    /// a read prompt for a file this app just wrote itself.
+    skill: Option<std::path::PathBuf>,
 }
 
 impl PermissionBridge {
@@ -65,6 +79,7 @@ impl PermissionBridge {
             auto: Mutex::new(auto),
             manager,
             settings,
+            consented: Mutex::new(Consented::default()),
         })
     }
 
@@ -72,6 +87,29 @@ impl PermissionBridge {
     /// the access mode changes between turns.
     pub fn set_auto(&self, auto: Option<PermissionChoice>) {
         *self.auto.lock() = auto;
+    }
+
+    /// Record what this session's feature toggles already approved.
+    pub(crate) fn set_consented(&self, tools: Vec<String>, skill: Option<std::path::PathBuf>) {
+        *self.consented.lock() = Consented { tools, skill };
+    }
+
+    /// Whether this request is covered by a toggle the user already turned
+    /// on, and so should not raise a dialog of its own.
+    fn is_consented(&self, request: &PermissionRequest) -> bool {
+        let consented = self.consented.lock();
+        if consented.tools.iter().any(|tool| *tool == request.tool_name) {
+            return true;
+        }
+        consented.skill.as_ref().is_some_and(|skill| {
+            // No `TOOL_NAME_*` constant exists for this one; the engine
+            // returns the literal from `SkillTool::name`.
+            request.tool_name == "Skill"
+                && request
+                    .path
+                    .as_deref()
+                    .is_some_and(|path| std::path::Path::new(path) == skill)
+        })
     }
 
     /// Deliver the user's answer. Unknown ids are ignored: a late answer to a
@@ -310,6 +348,12 @@ impl GuiPermissionHandler {
             PermissionDecision::Deny | PermissionDecision::DenyPermanently => {
                 return PermissionDecision::Deny;
             }
+            // Undecided, but covered by a toggle the user turned on. Only
+            // `Ask` is promoted: a plan-mode refusal or a deny rule above
+            // has already settled the request and still stands.
+            PermissionDecision::Ask { .. } if self.bridge.is_consented(request) => {
+                return PermissionDecision::Allow;
+            }
             PermissionDecision::Ask { reason } => reason,
         };
 
@@ -375,6 +419,123 @@ mod tests {
             context_description: None,
             ..request()
         }
+    }
+
+    fn recording_bridge(mode: PermissionMode) -> (Arc<PermissionBridge>, Arc<Mutex<Vec<AgentEvent>>>) {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let settings = Settings::default();
+        let manager = Arc::new(std::sync::Mutex::new(PermissionManager::new(mode, &settings)));
+        let sink = {
+            let seen = seen.clone();
+            EventSink::new(move |event: AgentEvent| seen.lock().push(event))
+        };
+        let bridge = PermissionBridge::new(sink, manager, Arc::new(Mutex::new(settings)), None);
+        (bridge, seen)
+    }
+
+    fn repl_request() -> PermissionRequest {
+        PermissionRequest {
+            tool_name: "waku_js_repl_js".into(),
+            description: "Run `js` on MCP server `waku_js_repl`".into(),
+            context_description: None,
+            ..request()
+        }
+    }
+
+    /// Turning Computer Use on is the consent. A ten-step desktop task must
+    /// not be ten dialogs.
+    #[test]
+    fn a_consented_tool_runs_without_a_dialog() {
+        let (bridge, seen) = recording_bridge(PermissionMode::Default);
+        bridge.set_consented(vec!["waku_js_repl_js".into()], None);
+        let handler = GuiPermissionHandler::new(bridge);
+
+        assert_eq!(handler.request_permission(&repl_request()), PermissionDecision::Allow);
+        assert!(seen.lock().is_empty(), "consent must not raise a dialog");
+    }
+
+    /// Consent is per tool name, not a blanket pass: anything else still asks.
+    #[test]
+    fn consent_does_not_leak_to_other_tools() {
+        let (bridge, _seen) = recording_bridge(PermissionMode::Default);
+        bridge.set_consented(vec!["waku_js_repl_js".into()], None);
+        let handler = GuiPermissionHandler::new(bridge.clone());
+
+        let answering = answer_one_dialog(bridge, PermissionChoice::RejectOnce);
+        assert_eq!(handler.request_permission(&request()), PermissionDecision::Deny);
+        answering.join().unwrap();
+    }
+
+    /// Only an *undecided* request is promoted. Plan mode settles it as a
+    /// refusal before consent is consulted, and driving the desktop is
+    /// exactly what plan mode promises not to do.
+    #[test]
+    fn consent_does_not_survive_plan_mode() {
+        let (bridge, seen) = recording_bridge(PermissionMode::Plan);
+        bridge.set_consented(vec!["waku_js_repl_js".into()], None);
+        let handler = GuiPermissionHandler::new(bridge);
+
+        assert_eq!(handler.request_permission(&repl_request()), PermissionDecision::Deny);
+        assert!(seen.lock().is_empty());
+    }
+
+    /// A rule the user wrote on the Permissions page outranks the toggle —
+    /// rules are evaluated before the mode, and before consent.
+    #[test]
+    fn a_written_deny_rule_outranks_consent() {
+        use claurst_core::permissions::{PermissionAction, SerializedPermissionRule};
+
+        let mut settings = Settings::default();
+        settings.permission_rules.push(SerializedPermissionRule {
+            tool_name: Some("waku_js_repl_js".to_owned()),
+            path_pattern: None,
+            action: PermissionAction::Deny,
+        });
+        let manager = Arc::new(std::sync::Mutex::new(PermissionManager::new(
+            PermissionMode::Default,
+            &settings,
+        )));
+        let bridge = PermissionBridge::new(
+            EventSink::new(|_: AgentEvent| {}),
+            manager,
+            Arc::new(Mutex::new(settings)),
+            None,
+        );
+        bridge.set_consented(vec!["waku_js_repl_js".into()], None);
+        let handler = GuiPermissionHandler::new(bridge);
+
+        assert_eq!(handler.request_permission(&repl_request()), PermissionDecision::Deny);
+    }
+
+    /// The skill sits in the engine's config directory, outside the
+    /// workspace, so reading it would otherwise prompt for a file this app
+    /// wrote itself. Consent is for that one path only.
+    #[test]
+    fn the_installed_skill_reads_without_a_prompt_but_other_paths_do_not() {
+        let skill = std::path::PathBuf::from("/cfg/commands/waku-computer-use.md");
+        let (bridge, seen) = recording_bridge(PermissionMode::Default);
+        bridge.set_consented(Vec::new(), Some(skill.clone()));
+        let handler = GuiPermissionHandler::new(bridge.clone());
+
+        let reading = |path: &str| PermissionRequest {
+            tool_name: "Skill".into(),
+            description: "Read a skill".into(),
+            path: Some(path.to_owned()),
+            context_description: None,
+            ..request()
+        };
+        assert_eq!(
+            handler.request_permission(&reading(&skill.display().to_string())),
+            PermissionDecision::Allow
+        );
+        assert!(seen.lock().is_empty());
+
+        let answering = answer_one_dialog(bridge, PermissionChoice::RejectOnce);
+        assert_eq!(
+            handler.request_permission(&reading("/cfg/commands/something-else.md")),
+            PermissionDecision::Deny
+        );
+        answering.join().unwrap();
     }
 
     /// "Never ask me about tool calls" was not a decision to skip reading the

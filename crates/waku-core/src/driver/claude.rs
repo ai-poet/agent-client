@@ -89,6 +89,9 @@ pub struct ClaudeDriver {
     pending_user_inputs: Arc<Mutex<HashMap<String, Value>>>,
     mode: RuntimeMode,
     interaction_mode: InteractionMode,
+    /// Held for its `Drop`, which reaps the helper processes and removes the
+    /// directory the plugin was built in.
+    _computer_use: Option<super::support::HeadlessComputerUseRuntime>,
 }
 
 /// The permission posture Claude is launched with.
@@ -187,7 +190,7 @@ impl ClaudeDriver {
             service_tier: _,
             context_window,
             agent_preset: _,
-            computer_use_enabled: _,
+            computer_use_enabled,
             provider_cursor,
         } = options;
         let (resume_session_id, resume_at) = match provider_cursor {
@@ -209,9 +212,25 @@ impl ClaudeDriver {
             .clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
 
+        // Claude Code takes both pieces on the command line for one run:
+        // `--mcp-config` adds the REPL to the user's own servers, and
+        // `--plugin-dir` carries the skill. Nothing reaches `~/.claude`.
+        let computer_use = computer_use_enabled
+            .then(|| {
+                super::support::HeadlessComputerUseRuntime::start(
+                    crate::model::ProviderKind::Claude,
+                    events.clone(),
+                )
+            })
+            .transpose()?;
+
         let mut command = crate::command_env::command_for_provider(&binary, "claude");
         command.current_dir(&cwd);
         configure_stream_command(&mut command, mode, interaction_mode);
+        command.args(super::support::claude_computer_use_arguments(
+            computer_use.as_ref().map(|runtime| &runtime.config),
+            &binary,
+        ));
         let launch_model = wire_model(model.as_deref(), context_window.as_deref());
         if let Some(model) = launch_model.as_deref() {
             command.args(["--model", model]);
@@ -535,6 +554,7 @@ impl ClaudeDriver {
             pending_user_inputs,
             mode,
             interaction_mode,
+            _computer_use: computer_use,
         })
     }
 }
@@ -1959,6 +1979,7 @@ mod tests {
             pending_user_inputs: Arc::new(Mutex::new(HashMap::new())),
             mode: RuntimeMode::FullAccess,
             interaction_mode: InteractionMode::Build,
+            _computer_use: None,
         };
 
         assert!(driver.supports_steer());

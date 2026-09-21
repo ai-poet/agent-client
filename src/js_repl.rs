@@ -20,7 +20,7 @@ const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 
 // Mirrors Codex node_repl's server instructions, substituting the actual QuickJS backend and
 // omitting its unsupported Node module-directory guidance.
-const SERVER_INSTRUCTIONS: &str = "Use `js` to run JavaScript in the persistent QuickJS kernel. When a skill or prompt says to use `waku_js_repl`, call this server's `js` execution tool. Calls default to a 30000 ms (30 seconds) timeout when `timeout_ms` is omitted. The runtime exposes `nodeRepl.cwd`, `nodeRepl.homeDir`, `nodeRepl.tmpDir`, `nodeRepl.requestMeta`, `nodeRepl.setResponseMeta(...)`, and `await nodeRepl.emitImage(...)`. Top-level bindings persist across `js` calls until `js_reset`; do not redeclare existing `const` or `let` names. Reuse existing bindings, use top-level `var` for reusable state that may be assigned again, or choose a fresh descriptive name.";
+const SERVER_INSTRUCTIONS: &str = "Use `generate_image` to draw a picture from a text prompt. Use `js` to run JavaScript in the persistent QuickJS kernel. When a skill or prompt says to use `waku_js_repl`, call this server's `js` execution tool. Calls default to a 30000 ms (30 seconds) timeout when `timeout_ms` is omitted. The runtime exposes `nodeRepl.cwd`, `nodeRepl.homeDir`, `nodeRepl.tmpDir`, `nodeRepl.requestMeta`, `nodeRepl.setResponseMeta(...)`, and `await nodeRepl.emitImage(...)`. Top-level bindings persist across `js` calls until `js_reset`; do not redeclare existing `const` or `let` names. Reuse existing bindings, use top-level `var` for reusable state that may be assigned again, or choose a fresh descriptive name.";
 
 const KERNEL_BOOTSTRAP: &str = include_str!("js_repl_bootstrap.js");
 const JS_TOOL_DESCRIPTION: &str = "Run JavaScript in a persistent QuickJS kernel with top-level await. This is the JavaScript execution tool for the `waku_js_repl` MCP server; use it whenever instructions say to use `waku_js_repl`, the Waku JavaScript REPL MCP, or run Waku JavaScript REPL code. If `timeout_ms` is omitted, execution times out after 30000 ms (30 seconds); pass a larger `timeout_ms` for slow Computer Use automation or other long-running operations. Use `nodeRepl.cwd`, `nodeRepl.homeDir`, and `nodeRepl.tmpDir` to inspect host paths. Use `nodeRepl.requestMeta` to inspect the current MCP request `_meta` object during a tool call. Use `nodeRepl.setResponseMeta(meta)` to attach top-level MCP result `_meta`; repeated calls shallow-merge object keys for the current tool call. Use `nodeRepl.write(value)` to add output without a newline. Strings are unchanged; other values use console-style formatting, including BigInt and circular objects. Prefer it over `console.log(...)` for final output; `console.log(...)` remains useful for debugging or multiple values. Use `await nodeRepl.emitImage(imageLike)` to return images; each call adds one image to the outer tool result, so call it multiple times to emit multiple images. Supported image inputs are a base64 data URL, a file URL, or an object with a `url` property. Saved references to `nodeRepl.write(...)` and `nodeRepl.emitImage(...)` stay reusable across calls. Scheduled callbacks only run while a JavaScript execution call is active; overdue timers resume at the start of the next call. Top-level bindings persist across calls until `js_reset`. If a call throws, prior bindings remain available and bindings that finished initializing before the throw often remain reusable. For reusable names that may be assigned again later, prefer top-level `var name = ...`; `var` can be redeclared across calls. If you hit `SyntaxError: Identifier 'x' has already been declared`, reuse the existing binding if possible, reassign it only if it was declared with `let` or `var`, or pick a new name instead of resetting immediately; a previous `const x` cannot be changed into `var x`. Use a short `{ ... }` block only for temporary scratch names, and do not wrap an entire call in block scope if you want those names reusable later. Module imports are not supported. Prefer `nodeRepl.write(...)` for text or formatted values and `nodeRepl.emitImage(...)` for images.";
@@ -207,7 +207,7 @@ fn initialize_result() -> JsonValue {
 }
 
 fn tool_definitions() -> Vec<JsonValue> {
-    vec![
+    let mut tools = vec![
         json!({
             "name": "js",
             "description": JS_TOOL_DESCRIPTION.trim(),
@@ -248,7 +248,132 @@ fn tool_definitions() -> Vec<JsonValue> {
                 "openWorldHint": false
             }
         }),
-    ]
+    ];
+    // Only when there is a gateway to call. A session routed at the user's
+    // own endpoint has no key table, and offering a tool that can only fail
+    // is worse than not having it.
+    if crate::js_repl_image::resolve_gateway().is_some() {
+        tools.push(image_tool_definition());
+    }
+    tools
+}
+
+fn image_tool_definition() -> JsonValue {
+    json!({
+        "name": "generate_image",
+        "description": "Generate one or more images from a text prompt and save them as files. Returns the pictures themselves along with the paths they were written to.",
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "What to draw. Describe the subject, composition and style; the service may rewrite it and the rewritten version is reported back."
+                },
+                "model": {
+                    "type": "string",
+                    "description": "Image model to use. Defaults to the gateway's own default when omitted."
+                },
+                "size": {
+                    "type": "string",
+                    "enum": ["1024x1024", "1536x1024", "1024x1536", "auto"],
+                    "description": "Output dimensions. Defaults to the service's choice."
+                },
+                "quality": { "type": "string", "description": "Service-defined quality tier." },
+                "background": {
+                    "type": "string",
+                    "enum": ["transparent", "opaque", "auto"],
+                    "description": "Whether the background should be transparent. Only some formats support it."
+                },
+                "output_format": {
+                    "type": "string",
+                    "enum": ["png", "jpeg", "webp"],
+                    "description": "File format to save. Defaults to png."
+                },
+                "n": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4,
+                    "description": "How many images to generate. Defaults to 1."
+                },
+                "output_dir": {
+                    "type": "string",
+                    "description": "Directory to write into. Defaults to `generated-images/` beside the session's working directory."
+                }
+            },
+            "required": ["prompt"]
+        },
+        "annotations": {
+            "readOnlyHint": false,
+            "destructiveHint": false,
+            "openWorldHint": true
+        }
+    })
+}
+
+/// Run one generation and render it as MCP content.
+///
+/// The text item is what the model reads — model, size, where the files
+/// landed, and the rewritten prompt when the service supplied one. The image
+/// items are for the person watching; an agent that wants the pixels can
+/// open the file by path.
+fn call_generate_image(arguments: &JsonValue) -> anyhow::Result<JsonValue> {
+    let Some(gateway) = crate::js_repl_image::resolve_gateway() else {
+        anyhow::bail!(
+            "no gateway is configured for image generation — sign in, or point the              built-in agent back at the managed gateway"
+        );
+    };
+    let prompt = arguments
+        .get("prompt")
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .ok_or_else(|| anyhow!("generate_image requires a non-empty `prompt`"))?;
+    let text = |key: &str| {
+        arguments
+            .get(key)
+            .and_then(JsonValue::as_str)
+            .map(str::to_owned)
+    };
+    let request = crate::js_repl_image::ImageRequest {
+        prompt: prompt.to_owned(),
+        model: text("model"),
+        size: text("size"),
+        quality: text("quality"),
+        background: text("background"),
+        output_format: text("output_format"),
+        count: arguments.get("n").and_then(JsonValue::as_u64).map(|n| n as u8),
+        output_dir: text("output_dir").map(std::path::PathBuf::from),
+    };
+    let images = crate::js_repl_image::generate(&gateway, &request)?;
+
+    let paths: Vec<String> = images
+        .iter()
+        .map(|image| image.path.display().to_string())
+        .collect();
+    let mut summary = format!(
+        "Generated {} image{} and saved {}.",
+        images.len(),
+        if images.len() == 1 { "" } else { "s" },
+        paths.join(", ")
+    );
+    if let Some(revised) = images.iter().find_map(|image| image.revised_prompt.as_deref()) {
+        summary.push_str(&format!(" The service rewrote the prompt as: {revised}"));
+    }
+
+    let mut content = vec![json!({ "type": "text", "text": summary })];
+    for image in &images {
+        content.push(json!({
+            "type": "image",
+            "data": image.base64,
+            "mimeType": image.mime,
+        }));
+    }
+    Ok(json!({
+        "content": content,
+        "structuredContent": { "paths": paths },
+    }))
 }
 
 fn call_tool(repl: &mut JavaScriptRepl, params: &JsonValue) -> anyhow::Result<JsonValue> {
@@ -296,6 +421,7 @@ fn call_tool(repl: &mut JavaScriptRepl, params: &JsonValue) -> anyhow::Result<Js
             let request_meta = params.get("_meta").cloned().unwrap_or_else(|| json!({}));
             Ok(repl.execute(code, timeout, request_meta))
         }
+        "generate_image" => call_generate_image(&JsonValue::Object(arguments.clone())),
         "js_reset" => {
             if !arguments.is_empty() {
                 bail!("js_reset does not accept arguments");
@@ -977,6 +1103,35 @@ mod tests {
         assert!(JS_TOOL_DESCRIPTION.contains("Module imports are not supported"));
     }
 
+    /// `generate_image` is offered only when there is a gateway to call. A
+    /// session routed at the user's own endpoint has no key table, and a
+    /// tool that can only fail is worse than an absent one.
+    #[test]
+    fn the_image_tool_appears_only_with_a_gateway() {
+        let names = |tools: &[JsonValue]| -> Vec<String> {
+            tools
+                .iter()
+                .filter_map(|tool| tool.get("name")?.as_str().map(str::to_owned))
+                .collect()
+        };
+        // The two desktop tools are unconditional and lead the list.
+        let listed = names(&tool_definitions());
+        assert_eq!(&listed[..2], &["js".to_owned(), "js_reset".to_owned()]);
+
+        let present = crate::js_repl_image::resolve_gateway().is_some();
+        assert_eq!(
+            listed.iter().any(|name| name == "generate_image"),
+            present,
+            "the image tool must track whether a gateway resolved"
+        );
+
+        // Its schema demands the one thing it cannot guess.
+        if present {
+            let definition = image_tool_definition();
+            assert_eq!(definition["inputSchema"]["required"][0], "prompt");
+        }
+    }
+
     #[test]
     fn repl_persists_global_bindings_and_reset_clears_them() {
         let mut repl = JavaScriptRepl::new().unwrap();
@@ -1002,7 +1157,11 @@ mod tests {
             "await setupComputerUseRuntime({ globals: globalThis }); var promisedValue = await Promise.resolve(7); nodeRepl.write(`${sky.target}:${promisedValue}`);",
         );
         assert_eq!(result["isError"], false);
-        assert_eq!(result["content"][0]["text"], "mac:7");
+        // `sky.target` names the platform being driven, so the expectation
+        // has to follow it. Hardcoding "mac" failed on Windows, which went
+        // unnoticed while the feature was macOS-only.
+        let target = if cfg!(windows) { "windows" } else { "mac" };
+        assert_eq!(result["content"][0]["text"], format!("{target}:7"));
     }
 
     #[test]

@@ -2,6 +2,8 @@
 mod js_repl;
 #[path = "../js_repl_cua.rs"]
 mod js_repl_cua;
+#[path = "../js_repl_image.rs"]
+mod js_repl_image;
 
 /// Run the dedicated stdio transport without initializing the Waku GUI.
 fn main() {

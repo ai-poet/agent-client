@@ -2012,7 +2012,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::Workflow,
         SettingsPage::Daemon,
     ];
-    if cfg!(all(debug_assertions, target_os = "macos")) {
+    if cfg!(any(target_os = "macos", windows)) {
         all_pages.push(SettingsPage::ComputerUse);
     }
     assert_eq!(pages(""), all_pages);
@@ -2026,7 +2026,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::Skills,
         SettingsPage::Usage,
     ];
-    if cfg!(all(debug_assertions, target_os = "macos")) {
+    if cfg!(any(target_os = "macos", windows)) {
         codex_pages.push(SettingsPage::ComputerUse);
     }
     assert_eq!(pages("codex"), codex_pages);
@@ -2035,13 +2035,15 @@ fn settings_search_filters_pages_for_arrow_cycling() {
 }
 
 #[test]
-fn computer_use_navigation_is_macos_debug_only() {
+fn computer_use_navigation_follows_where_the_pieces_ship() {
     use super::SettingsPage;
 
     assert!(SettingsPage::General.is_visible_in_navigation());
+    // macOS bundles the helper, Windows installs the driver and ships the
+    // REPL; Linux packages carry neither, so the page stays hidden there.
     assert_eq!(
         SettingsPage::ComputerUse.is_visible_in_navigation(),
-        cfg!(all(debug_assertions, target_os = "macos"))
+        cfg!(any(target_os = "macos", windows))
     );
 }
 

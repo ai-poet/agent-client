@@ -454,6 +454,57 @@ fn host_executable_path() -> anyhow::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The two skill documents are one contract described twice, and the
+    /// Windows one is derived from the macOS one. Drift is silent otherwise:
+    /// a `sky` operation added to one file and not the other leaves half
+    /// the platforms with a manual that does not match the driver.
+    #[test]
+    fn the_two_skill_documents_stay_in_step() {
+        const MAC: &str = include_str!("../../../resources/computer-use/SKILL.md");
+        const WINDOWS: &str = include_str!("../../../resources/computer-use/SKILL.windows.md");
+
+        // The name is what `Skill` and every CLI's loader resolve on.
+        for document in [MAC, WINDOWS] {
+            assert!(document.contains("name: waku-computer-use"), "frontmatter name");
+        }
+        assert!(MAC.contains(r#"target: "mac""#));
+        assert!(WINDOWS.contains(r#"target: "windows""#));
+
+        // `select_text` is refused by the Windows driver, so its manual must
+        // not offer it — beyond the one line explaining the absence.
+        assert_eq!(
+            WINDOWS.matches("sky.select_text").count(),
+            0,
+            "the Windows document must not demonstrate select_text"
+        );
+
+        // Every other operation the macOS document names must survive the
+        // derivation.
+        for operation in [
+            "list_apps",
+            "get_app_state",
+            "click",
+            "drag",
+            "perform_secondary_action",
+            "set_value",
+            "scroll",
+            "press_key",
+            "type_text",
+        ] {
+            assert!(
+                MAC.contains(operation),
+                "{operation} missing from the macOS document"
+            );
+            assert!(
+                WINDOWS.contains(operation),
+                "{operation} lost in the Windows document"
+            );
+        }
+
+        // Cmd is not a Windows modifier.
+        assert!(!WINDOWS.contains("super+"), "macOS modifier left behind");
+    }
     use super::*;
 
     #[test]

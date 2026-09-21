@@ -2,6 +2,7 @@
 //! each provider needs handed to it differently, stderr triage, and tool-name
 //! classification.
 
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -43,6 +44,22 @@ pub(super) enum HeadlessComputerUseConfig {
         auth_path: Option<PathBuf>,
         rules: String,
     },
+    /// Claude Code takes both for one session only: the server as JSON on
+    /// the command line, the skill as a throwaway plugin directory. Nothing
+    /// is written to the user's own `~/.claude`.
+    Claude {
+        base: computer_use_runtime::ComputerUseConfig,
+        mcp_config: String,
+        /// `None` on a build too old for `--plugin-dir`. The server still
+        /// loads; only the instructions are missing, and the Skills page can
+        /// install those.
+        plugin_dir: Option<PathBuf>,
+    },
+    /// Cursor and Fx take the server in `session/new` itself, so there is
+    /// nothing to write anywhere. The skill goes through the Skills page.
+    Acp {
+        base: computer_use_runtime::ComputerUseConfig,
+    },
 }
 
 pub(super) struct HeadlessComputerUseRuntime {
@@ -76,6 +93,10 @@ impl HeadlessComputerUseRuntime {
                 }
             }
             ProviderKind::Grok => build_grok_computer_use_config(runtime.config.clone())?,
+            ProviderKind::Claude => build_claude_computer_use_config(runtime.config.clone())?,
+            ProviderKind::Cursor | ProviderKind::Fx => HeadlessComputerUseConfig::Acp {
+                base: runtime.config.clone(),
+            },
             _ => return Err(anyhow!("Computer Use is not supported by this driver")),
         };
         Ok(Self { runtime, config })
@@ -88,9 +109,128 @@ impl HeadlessComputerUseRuntime {
     pub(super) fn grok_home(&self) -> Option<&Path> {
         match &self.config {
             HeadlessComputerUseConfig::Grok { grok_home, .. } => Some(grok_home),
-            HeadlessComputerUseConfig::OpenCode { .. } => None,
+            _ => None,
         }
     }
+}
+
+/// Claude Code's Computer Use wiring: an MCP server as JSON, and the skill
+/// as a one-session plugin.
+///
+/// `--mcp-config` adds to the user's own servers rather than replacing them
+/// (no `--strict-mcp-config`), and `--plugin-dir` loads a directory for this
+/// run only. Between them nothing under `~/.claude` is touched — which is why
+/// this is wired here rather than through the Skills page's installer.
+fn build_claude_computer_use_config(
+    base: computer_use_runtime::ComputerUseConfig,
+) -> anyhow::Result<HeadlessComputerUseConfig> {
+    let mcp_config = serde_json::json!({
+        "mcpServers": {
+            "waku_js_repl": {
+                "type": "stdio",
+                "command": base.repl_path.display().to_string(),
+                "args": [],
+                "env": {
+                    "WAKU_COMPUTER_USE_SERVER": base.server_path.display().to_string(),
+                    "WAKU_COMPUTER_USE_PROCESS_DIRECTORY": base.process_directory.display().to_string(),
+                },
+            }
+        }
+    })
+    .to_string();
+
+    // The plugin layout Claude Code expects: a manifest beside a `skills`
+    // directory. Built inside the process directory so it is removed with
+    // everything else when the session ends.
+    let plugin_dir = base.process_directory.join("claude-plugin");
+    let skills = plugin_dir.join("skills").join("waku-computer-use");
+    let manifest_dir = plugin_dir.join(".claude-plugin");
+    let built = (|| -> anyhow::Result<()> {
+        fs::create_dir_all(&skills)?;
+        fs::create_dir_all(&manifest_dir)?;
+        fs::write(
+            manifest_dir.join("plugin.json"),
+            serde_json::json!({
+                "name": "waku-computer-use",
+                "description": "Drive local applications through Waku Computer Use.",
+                "version": env!("CARGO_PKG_VERSION"),
+            })
+            .to_string(),
+        )?;
+        fs::copy(&base.skill_path, skills.join("SKILL.md"))?;
+        Ok(())
+    })();
+    if let Err(error) = built {
+        // The server is the capability; the skill is its manual. Losing the
+        // manual is worth a warning, not a failed session.
+        eprintln!(
+            "warning: the Computer Use plugin directory could not be built: {error}"
+        );
+        return Ok(HeadlessComputerUseConfig::Claude {
+            base,
+            mcp_config,
+            plugin_dir: None,
+        });
+    }
+    Ok(HeadlessComputerUseConfig::Claude {
+        base,
+        mcp_config,
+        plugin_dir: Some(plugin_dir),
+    })
+}
+
+/// The flags that hand Claude Code the server and the skill.
+///
+/// `--plugin-dir` is only passed to a build that advertises it: an unknown
+/// flag is fatal at spawn, and losing the skill is better than losing the
+/// session.
+pub(super) fn claude_computer_use_arguments(
+    config: Option<&HeadlessComputerUseConfig>,
+    binary: &Path,
+) -> Vec<OsString> {
+    let Some(HeadlessComputerUseConfig::Claude {
+        mcp_config,
+        plugin_dir,
+        ..
+    }) = config
+    else {
+        return Vec::new();
+    };
+    let mut arguments = vec![OsString::from("--mcp-config"), OsString::from(mcp_config)];
+    if let Some(directory) = plugin_dir
+        && sub2api::claude_compat::supports_plugin_dir(binary)
+    {
+        arguments.push(OsString::from("--plugin-dir"));
+        arguments.push(directory.as_os_str().to_owned());
+    }
+    arguments
+}
+
+/// The REPL as an ACP session server, for the agents that take one.
+///
+/// Cursor and Fx accept `mcpServers` in `session/new` itself, so this is the
+/// whole of their wiring — no config file, no launch flag, nothing left on
+/// disk. Grok is excluded deliberately: it already gets the server through
+/// its isolated `GROK_HOME`, and sending it twice would register it twice.
+pub(super) fn acp_computer_use_servers(
+    config: Option<&HeadlessComputerUseConfig>,
+) -> Vec<agent_client_protocol::schema::v1::McpServer> {
+    let Some(HeadlessComputerUseConfig::Acp { base }) = config else {
+        return Vec::new();
+    };
+    use agent_client_protocol::schema::v1::{EnvVariable, McpServer, McpServerStdio};
+    vec![McpServer::Stdio(
+        McpServerStdio::new("waku_js_repl", base.repl_path.clone()).env(vec![
+            EnvVariable::new(
+                "WAKU_COMPUTER_USE_SERVER",
+                base.server_path.display().to_string(),
+            ),
+            EnvVariable::new(
+                "WAKU_COMPUTER_USE_PROCESS_DIRECTORY",
+                base.process_directory.display().to_string(),
+            ),
+        ]),
+    )]
 }
 
 fn build_opencode_computer_use_config(
@@ -367,6 +507,136 @@ pub(super) fn classify_tool(name: &str) -> ActivityKind {
 
 #[cfg(test)]
 mod tests {
+
+    fn sample_base(root: &std::path::Path) -> computer_use_runtime::ComputerUseConfig {
+        computer_use_runtime::ComputerUseConfig {
+            server_path: root.join("helper"),
+            repl_path: root.join("waku_js_repl"),
+            skill_path: root.join("SKILL.md"),
+            process_directory: root.join("process"),
+        }
+    }
+
+    /// Claude Code gets the server as JSON and the skill as a throwaway
+    /// plugin. Nothing may reach the user's own `~/.claude`, which is what
+    /// the absence of `--strict-mcp-config` also protects: their servers
+    /// keep loading beside ours.
+    #[test]
+    fn claude_gets_the_server_and_the_skill_without_touching_the_users_config() {
+        let root = std::env::temp_dir().join(format!("waku-claude-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("temp root");
+        fs::write(root.join("SKILL.md"), "# drive the desktop").expect("skill");
+
+        let config = build_claude_computer_use_config(sample_base(&root)).expect("config");
+        let HeadlessComputerUseConfig::Claude {
+            mcp_config,
+            plugin_dir,
+            ..
+        } = &config
+        else {
+            panic!("expected the Claude variant");
+        };
+
+        let parsed: Value = serde_json::from_str(mcp_config).expect("valid JSON");
+        let server = &parsed["mcpServers"]["waku_js_repl"];
+        assert_eq!(server["type"], "stdio");
+        assert!(server["env"]["WAKU_COMPUTER_USE_SERVER"].is_string());
+        assert!(server["env"]["WAKU_COMPUTER_USE_PROCESS_DIRECTORY"].is_string());
+
+        // The plugin is a real directory with the skill inside it.
+        let directory = plugin_dir.as_ref().expect("a plugin directory");
+        assert!(directory.join(".claude-plugin/plugin.json").is_file());
+        assert_eq!(
+            fs::read_to_string(directory.join("skills/waku-computer-use/SKILL.md")).unwrap(),
+            "# drive the desktop"
+        );
+
+        // And it is inside the process directory, so it is swept up with it.
+        assert!(directory.starts_with(root.join("process")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Losing the manual is not worth losing the session: the server still
+    /// goes, and only `--plugin-dir` is dropped.
+    #[test]
+    fn an_unreadable_skill_still_yields_a_usable_claude_config() {
+        let root = std::env::temp_dir().join(format!("waku-claude-noskill-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("temp root");
+        // No SKILL.md written.
+        let config = build_claude_computer_use_config(sample_base(&root)).expect("config");
+        let HeadlessComputerUseConfig::Claude {
+            mcp_config,
+            plugin_dir,
+            ..
+        } = &config
+        else {
+            panic!("expected the Claude variant");
+        };
+        assert!(plugin_dir.is_none());
+        assert!(mcp_config.contains("waku_js_repl"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Cursor and Fx take the server over the protocol; everything else
+    /// gets an empty list, Grok included — it already has the server through
+    /// its own `GROK_HOME`, and sending it twice would register it twice.
+    #[test]
+    fn only_the_acp_variant_carries_session_servers() {
+        let root = std::env::temp_dir().join("waku-acp-servers");
+        let base = sample_base(&root);
+
+        let servers = acp_computer_use_servers(Some(&HeadlessComputerUseConfig::Acp {
+            base: base.clone(),
+        }));
+        assert_eq!(servers.len(), 1);
+        let agent_client_protocol::schema::v1::McpServer::Stdio(stdio) = &servers[0] else {
+            panic!("the stdio transport is the one every agent must support");
+        };
+        assert_eq!(stdio.name, "waku_js_repl");
+        assert_eq!(stdio.command, base.repl_path);
+        let names: Vec<&str> = stdio.env.iter().map(|v| v.name.as_str()).collect();
+        assert!(names.contains(&"WAKU_COMPUTER_USE_SERVER"));
+        assert!(names.contains(&"WAKU_COMPUTER_USE_PROCESS_DIRECTORY"));
+
+        assert!(acp_computer_use_servers(None).is_empty());
+        // Grok already has the server through its own isolated home, so the
+        // protocol list stays empty for it — sending it twice would
+        // register it twice.
+        assert!(
+            acp_computer_use_servers(Some(&HeadlessComputerUseConfig::Grok {
+                base,
+                grok_home: root.join("grok-home"),
+                auth_path: None,
+                rules: String::new(),
+            }))
+            .is_empty()
+        );
+    }
+
+    /// The flag only goes to a build that advertises it — an unknown flag is
+    /// fatal at spawn, and this probe runs against a path that cannot exist.
+    #[test]
+    fn the_plugin_flag_is_withheld_from_a_build_that_cannot_take_it() {
+        let root = std::env::temp_dir().join("waku-claude-args");
+        let config = HeadlessComputerUseConfig::Claude {
+            base: sample_base(&root),
+            mcp_config: "{}".to_owned(),
+            plugin_dir: Some(root.join("plugin")),
+        };
+        let arguments =
+            claude_computer_use_arguments(Some(&config), std::path::Path::new("/no/such/claude"));
+        assert_eq!(arguments[0], "--mcp-config");
+        assert!(
+            !arguments.iter().any(|argument| argument == "--plugin-dir"),
+            "an unprobeable binary must not be handed the flag"
+        );
+        // Never strict: the user's own servers keep loading beside ours.
+        assert!(!arguments.iter().any(|a| a == "--strict-mcp-config"));
+
+        assert!(claude_computer_use_arguments(None, std::path::Path::new("claude")).is_empty());
+    }
     use std::collections::HashMap;
 
     use super::*;

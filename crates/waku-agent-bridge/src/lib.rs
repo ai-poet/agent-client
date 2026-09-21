@@ -38,6 +38,7 @@
 //! Depending on `waku-core` from here would close that cycle.
 
 pub mod background;
+mod computer_use;
 mod config;
 mod events;
 pub mod history;
@@ -48,7 +49,10 @@ mod runtime;
 mod session;
 
 pub use background::{BackgroundEntry, BackgroundKind, BackgroundStatus};
-pub use config::{AccessMode, AgentStartOptions, MissingApiKey, TurnOptions, WireFormat, split_model};
+pub use config::{
+    AccessMode, AgentStartOptions, COMPUTER_USE_TOOLS, ComputerUseWiring, MissingApiKey,
+    TurnOptions, WireFormat, split_model,
+};
 pub use events::{AgentEvent, EventSink, PermissionChoice};
 // The two refusals whose wording is the fork's rather than the engine's, so
 // the driver can recognise them exactly and say them in the user's language.

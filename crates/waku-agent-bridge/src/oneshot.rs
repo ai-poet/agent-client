@@ -50,6 +50,9 @@ pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result
         // asks for the wording it wants.
         narration_language: None,
         history: Vec::new(),
+        // One prompt with no tools has nothing to control and nothing to
+        // draw with.
+        computer_use: None,
     };
     let config = build_config(&options)?;
     let mut query = build_query_config(&config, &options);

@@ -28,8 +28,8 @@ use std::path::{Path, PathBuf};
 use crate::model::ProviderKind;
 
 pub use waku_protocol::skills::{
-    DISABLED_SKILL_FILE, SKILL_FILE, SkillEntry, SkillInstall, SkillLocation, SkillScope,
-    SkillSource, SkillsCatalog,
+    BundledSkill, BundledSkillTarget, DISABLED_SKILL_FILE, SKILL_FILE, SkillEntry, SkillInstall,
+    SkillLocation, SkillScope, SkillSource, SkillsCatalog,
 };
 
 /// Upper bound on scanned skill directories; past this the library is
@@ -155,6 +155,9 @@ struct RawSkill {
 
 /// Walk every location and build the catalog. Filesystem work throughout —
 /// background executor only.
+/// The one skill the app bundles today.
+const BUNDLED_SKILL_NAME: &str = "waku-computer-use";
+
 pub fn scan_skills(locations: &[SkillLocation]) -> SkillsCatalog {
     let mut raw = Vec::new();
     for location in locations {
@@ -232,7 +235,10 @@ pub fn scan_skills(locations: &[SkillLocation]) -> SkillsCatalog {
             hasher.finish()
         };
     }
-    SkillsCatalog { skills }
+    SkillsCatalog {
+        skills,
+        bundled: bundled_skills(),
+    }
 }
 
 fn scan_location(location: &SkillLocation, raw: &mut Vec<RawSkill>) {
@@ -372,6 +378,108 @@ fn parse_skill_frontmatter(contents: &str) -> SkillFrontmatter<'_> {
 /// copy that already has a live `SKILL.md` is a no-op rather than an error —
 /// which also makes toggling a symlink-shared directory reached through
 /// several installs idempotent.
+/// The skills the app carries in its own bundle.
+///
+/// Empty when the bundle has none — Linux packages ship no Computer Use
+/// resources, so the Skills page simply shows no built-in section there
+/// rather than an entry that cannot be installed.
+pub fn bundled_skills() -> Vec<BundledSkill> {
+    let Ok(root) = crate::computer_use::skill_root_path() else {
+        return Vec::new();
+    };
+    let source = root.join(BUNDLED_SKILL_NAME).join(SKILL_FILE);
+    let Ok(contents) = std::fs::read_to_string(&source) else {
+        return Vec::new();
+    };
+    let description = parse_skill_frontmatter(&contents)
+        .description
+        .unwrap_or_default();
+    let targets = bundled_skill_targets()
+        .into_iter()
+        .map(|location| {
+            let installed_at = location.root.join(BUNDLED_SKILL_NAME).join(SKILL_FILE);
+            let existing = std::fs::read_to_string(&installed_at).ok();
+            BundledSkillTarget {
+                location,
+                installed: existing.is_some(),
+                up_to_date: existing.as_deref() == Some(contents.as_str()),
+            }
+        })
+        .collect();
+    vec![BundledSkill {
+        name: BUNDLED_SKILL_NAME.to_owned(),
+        description,
+        source,
+        targets,
+    }]
+}
+
+/// Where a bundled skill may be installed.
+///
+/// Only the CLIs that cannot be handed a skill at launch. Codex, Pi,
+/// OpenCode and Grok receive it per session, Claude Code through a
+/// throwaway plugin directory, and Oh My Pi ships its own — installing for
+/// any of them would leave a copy behind that nothing reads.
+///
+/// This list is also the authorization boundary for
+/// [`install_bundled_skill`]: the daemon writes to one of these roots or to
+/// nowhere.
+pub fn bundled_skill_targets() -> Vec<SkillLocation> {
+    user_skill_locations()
+        .into_iter()
+        .filter(|location| {
+            matches!(
+                location.source,
+                SkillSource::Shared
+                    | SkillSource::Provider(ProviderKind::Cursor)
+                    | SkillSource::Provider(ProviderKind::Fx)
+                    | SkillSource::Provider(ProviderKind::Amp)
+            )
+        })
+        .collect()
+}
+
+/// Copy a bundled skill into each of `roots`.
+///
+/// Refuses any root that is not one of [`bundled_skill_targets`]. The
+/// command carries paths from the desktop, and a daemon that wrote wherever
+/// it was told would be a way to drop a file anywhere on its host.
+pub fn install_bundled_skill(name: &str, roots: &[PathBuf]) -> Result<(), String> {
+    if name != BUNDLED_SKILL_NAME {
+        return Err(format!("no bundled skill is named {name}"));
+    }
+    let source = crate::computer_use::skill_root_path()
+        .map_err(|error| error.to_string())?
+        .join(BUNDLED_SKILL_NAME)
+        .join(SKILL_FILE);
+    let contents = std::fs::read_to_string(&source).map_err(|error| {
+        format!("the bundled skill at {} could not be read: {error}", source.display())
+    })?;
+
+    let allowed: Vec<PathBuf> = bundled_skill_targets()
+        .into_iter()
+        .map(|location| location.root)
+        .collect();
+    for root in roots {
+        if !allowed.iter().any(|candidate| candidate == root) {
+            return Err(format!("{} is not a skill directory", root.display()));
+        }
+        let directory = root.join(BUNDLED_SKILL_NAME);
+        std::fs::create_dir_all(&directory)
+            .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+        // Written through a sibling so a reader sees one document or the
+        // other, and only the skill file is touched — anything else the user
+        // keeps in that directory stays.
+        let target = directory.join(SKILL_FILE);
+        let temporary = directory.join("SKILL.md.tmp");
+        std::fs::write(&temporary, &contents)
+            .map_err(|error| format!("could not write {}: {error}", temporary.display()))?;
+        std::fs::rename(&temporary, &target)
+            .map_err(|error| format!("could not install {}: {error}", target.display()))?;
+    }
+    Ok(())
+}
+
 pub fn set_skill_enabled(dir: &Path, enabled: bool) -> Result<(), String> {
     let live = dir.join(SKILL_FILE);
     let disabled = dir.join(DISABLED_SKILL_FILE);
@@ -402,6 +510,57 @@ pub fn trash_skills(dirs: &[PathBuf]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The command carries paths from the desktop. A daemon that wrote
+    /// wherever it was told would be a way to drop a file anywhere on its
+    /// host, so anything outside the bundle's own target list is refused
+    /// before a single byte is written.
+    #[test]
+    fn installing_refuses_a_root_that_is_not_a_skill_directory() {
+        let elsewhere = std::env::temp_dir().join("waku-not-a-skill-root");
+        let _ = std::fs::remove_dir_all(&elsewhere);
+
+        let refused = install_bundled_skill("waku-computer-use", &[elsewhere.clone()]);
+        assert!(refused.is_err(), "an arbitrary root must be refused");
+        assert!(
+            !elsewhere.join("waku-computer-use").exists(),
+            "nothing may be written to a refused root"
+        );
+
+        // An unknown skill name is refused too, before any path work.
+        assert!(install_bundled_skill("something-else", &[]).is_err());
+    }
+
+    /// Only the CLIs that cannot be handed the skill at launch. Codex, Pi,
+    /// OpenCode and Grok get it per session and Claude Code through a
+    /// throwaway plugin, so installing for them would leave a copy nothing
+    /// reads.
+    #[test]
+    fn the_targets_are_the_clis_with_no_other_route() {
+        let sources: Vec<SkillSource> = bundled_skill_targets()
+            .into_iter()
+            .map(|location| location.source)
+            .collect();
+        for absent in [
+            SkillSource::Provider(ProviderKind::Codex),
+            SkillSource::Provider(ProviderKind::Claude),
+            SkillSource::Provider(ProviderKind::OpenCode),
+            SkillSource::Provider(ProviderKind::Pi),
+            SkillSource::Provider(ProviderKind::OhMyPi),
+        ] {
+            assert!(
+                !sources.contains(&absent),
+                "{absent:?} already receives the skill another way"
+            );
+        }
+        // And every target is a user-scope root, never a project one: this
+        // installs for the person, not for a checkout.
+        assert!(
+            bundled_skill_targets()
+                .iter()
+                .all(|location| location.scope == SkillScope::User)
+        );
+    }
     use super::*;
 
     fn temp_root(tag: &str) -> PathBuf {

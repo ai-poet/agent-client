@@ -33,6 +33,10 @@ pub enum AgentEvent {
         name: String,
         output: Value,
         failed: bool,
+        /// Images the tool produced, kept apart from `output` because that
+        /// text also goes back to the model and pixels there would flood
+        /// the context. Shaped for `activity::collect_image_urls`.
+        image_source: Option<Value>,
     },
     /// The model entered or left plan mode through the EnterPlanMode /
     /// ExitPlanMode tools. Carried as an event (not folded into the tool
@@ -234,11 +238,20 @@ impl StreamDecoder {
                 // structured rather than shown as an escaped string.
                 let output =
                     serde_json::from_str(&result).unwrap_or_else(|_| Value::String(result));
+                // A metadata document with a `content` array is the image
+                // sideband (`mcp_tool::image_metadata`). The plan-mode
+                // sideband below carries a `type` and no `content`, so the
+                // two never collide.
+                let image_source = metadata
+                    .as_ref()
+                    .filter(|m| m.get("content").is_some_and(Value::is_array))
+                    .cloned();
                 let mut events = vec![AgentEvent::ToolFinished {
                     id: tool_id,
                     name,
                     output,
                     failed: is_error,
+                    image_source,
                 }];
                 // EnterPlanMode / ExitPlanMode report the switch through
                 // their metadata sideband; a failed call changed nothing.
@@ -291,6 +304,35 @@ fn decode_delta(delta: claurst_api::streaming::ContentDelta) -> Vec<AgentEvent> 
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn an_image_sideband_rides_on_tool_finished() {
+        let mut decoder = StreamDecoder::new(None);
+        let meta = serde_json::json!({
+            "content": [{"type": "image", "mime": "image/png", "data": "aGVsbG8="}]
+        });
+        let events = decoder.push(tool_end("waku_js_repl_generate_image", false, Some(meta.clone())));
+        let AgentEvent::ToolFinished { image_source, .. } = &events[0] else {
+            panic!("expected ToolFinished");
+        };
+        assert_eq!(image_source.as_ref(), Some(&meta));
+    }
+
+    /// The plan-mode sideband has a `type` and no `content`, so it must not
+    /// be mistaken for images.
+    #[test]
+    fn the_plan_mode_sideband_is_not_an_image() {
+        let mut decoder = StreamDecoder::new(None);
+        let events = decoder.push(tool_end(
+            "ExitPlanMode",
+            false,
+            Some(serde_json::json!({ "type": "exit_plan_mode" })),
+        ));
+        let AgentEvent::ToolFinished { image_source, .. } = &events[0] else {
+            panic!("expected ToolFinished");
+        };
+        assert!(image_source.is_none());
+    }
     use super::*;
     use claurst_query::QueryEvent;
 

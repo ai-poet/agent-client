@@ -5,11 +5,12 @@
 //! which is *per turn* — model, effort, budgets. That split is what lets a
 //! model change take effect on the next turn without restarting anything.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use anyhow::Context as _;
-use claurst_core::config::{Config, Settings};
+use claurst_core::config::{Config, McpServerConfig, McpServerOrigin, Settings};
 use claurst_core::effort::EffortLevel;
 use claurst_core::{PermissionMode, ProviderConfig};
 use claurst_query::QueryConfig;
@@ -189,7 +190,45 @@ pub struct AgentStartOptions {
     /// A previous conversation to resume, as written by
     /// [`crate::history::serialize`]. Empty for a fresh session.
     pub history: Vec<u8>,
+    /// Desktop control and image generation, when the user has turned
+    /// Computer Use on. `None` leaves the session without either.
+    pub computer_use: Option<ComputerUseWiring>,
 }
+
+/// What the session needs to reach the Computer Use REPL.
+///
+/// `waku-core` resolves these paths (they live in the app bundle) and hands
+/// them over as plain values, because the bridge depends on neither
+/// `waku-core` nor `waku-protocol` and cannot call those helpers itself.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ComputerUseWiring {
+    /// The `waku_js_repl` binary — the MCP server the model talks to.
+    pub repl_server: PathBuf,
+    /// The native helper behind it. `None` when it could not be resolved:
+    /// image generation and plain JavaScript still work, and only `sky`
+    /// fails, with the REPL's own message.
+    pub native_helper: Option<PathBuf>,
+    /// Where the helper registers its PIDs and writes preview frames.
+    /// `None` alongside a missing helper: nothing would write there.
+    pub process_directory: Option<PathBuf>,
+    /// The bundled SKILL.md, installed so the engine's `Skill` tool can
+    /// find it. `None` when the helper is missing — a skill describing
+    /// tools that are absent is worse than no skill.
+    pub skill_markdown: Option<String>,
+}
+
+/// The MCP server name, which prefixes every tool it advertises.
+pub const COMPUTER_USE_SERVER: &str = "waku_js_repl";
+
+/// The tools the Computer Use toggle consents to. Turning the feature on
+/// *is* the approval; asking again per call would make a ten-step desktop
+/// task ten dialogs. Plan mode and any rule the user wrote still refuse
+/// them — see `GuiPermissionHandler::decide`.
+pub const COMPUTER_USE_TOOLS: [&str; 3] = [
+    "waku_js_repl_js",
+    "waku_js_repl_js_reset",
+    "waku_js_repl_generate_image",
+];
 
 impl Default for AgentStartOptions {
     fn default() -> Self {
@@ -203,6 +242,7 @@ impl Default for AgentStartOptions {
             reasoning_effort: None,
             narration_language: None,
             history: Vec::new(),
+            computer_use: None,
         }
     }
 }
@@ -285,7 +325,57 @@ pub(crate) fn build_config_from(settings: Settings, options: &AgentStartOptions)
     }
 
     select_route(&mut config, options);
+    if let Some(wiring) = &options.computer_use {
+        install_repl_server(&mut config, wiring, &options.cwd);
+    }
     config
+}
+
+/// Register the Computer Use REPL as an MCP server for this session only.
+///
+/// Pushed into the loaded `Config` rather than written to `settings.json`:
+/// the toggle is a live preference, and a session that crashed would
+/// otherwise leave a server entry behind pointing at a process directory
+/// that no longer exists. `McpTool::all` wraps whatever it advertises as
+/// ordinary tools named `waku_js_repl_*`.
+///
+/// A same-named entry the user wrote by hand is replaced, not duplicated —
+/// two servers claiming one name would give the model two identical tools.
+fn install_repl_server(config: &mut Config, wiring: &ComputerUseWiring, cwd: &PathBuf) {
+    config
+        .mcp_servers
+        .retain(|server| server.name != COMPUTER_USE_SERVER);
+
+    let mut env = HashMap::new();
+    if let Some(directory) = &wiring.process_directory {
+        env.insert(
+            "WAKU_COMPUTER_USE_PROCESS_DIRECTORY".to_owned(),
+            directory.display().to_string(),
+        );
+    }
+    // Where generated images land when the caller names no directory.
+    //
+    // Only this path needs it. Every CLI driver spawns its CLI with
+    // `current_dir(cwd)` and the REPL is that CLI's own child, so it
+    // inherits the session directory; the engine's MCP manager spawns it
+    // from wherever the daemon happens to be running instead.
+    env.insert("WAKU_SESSION_CWD".to_owned(), cwd.display().to_string());
+    if let Some(helper) = &wiring.native_helper {
+        env.insert(
+            "WAKU_COMPUTER_USE_SERVER".to_owned(),
+            helper.display().to_string(),
+        );
+    }
+
+    config.mcp_servers.push(McpServerConfig {
+        name: COMPUTER_USE_SERVER.to_owned(),
+        command: Some(wiring.repl_server.display().to_string()),
+        args: Vec::new(),
+        env,
+        url: None,
+        server_type: "stdio".to_owned(),
+        origin: McpServerOrigin::User,
+    });
 }
 
 /// Point the session at the engine provider for its wire format, with the
@@ -538,6 +628,30 @@ fn plan_mode_rule(options: &AgentStartOptions) -> Option<String> {
     })
 }
 
+/// That the desktop can be driven, and where the instructions for it are.
+///
+/// Fork: the REPL's tools arrive over MCP with names and one-line
+/// descriptions, which is not enough to use them — the how is an 19 KB
+/// document, and reading it into every request would cost more than it is
+/// worth on the turns that never touch the desktop. Naming the skill lets
+/// the model fetch it on the turn it needs it.
+fn computer_use_rule(options: &AgentStartOptions) -> Option<String> {
+    options.computer_use.as_ref().map(|wiring| {
+        let mut rule = String::from(
+            "This computer can be driven directly. Before operating a desktop              application, call Skill with skill=\"waku-computer-use\" and follow              what it says; the tools it describes are the waku_js_repl ones.",
+        );
+        if wiring.native_helper.is_none() {
+            rule.push_str(
+                " Desktop control is unavailable in this session because its                  helper could not be started, so do not attempt it.",
+            );
+        }
+        rule.push_str(
+            " To make a picture, call waku_js_repl_generate_image rather than              looking for an external service.",
+        );
+        rule
+    })
+}
+
 /// Everything appended to the system prompt for this session, in order:
 /// plan mode, the narration language, then whatever the user wrote on the
 /// Agent settings page. The user's text comes last so it can overrule the
@@ -545,6 +659,7 @@ fn plan_mode_rule(options: &AgentStartOptions) -> Option<String> {
 fn session_rules(options: &AgentStartOptions, house_rules: Option<&str>) -> Option<String> {
     let parts: Vec<String> = [
         plan_mode_rule(options),
+        computer_use_rule(options),
         narration_rule(options),
         house_rules.map(str::trim).filter(|r| !r.is_empty()).map(str::to_owned),
     ]
@@ -610,6 +725,92 @@ mod tests {
         assert!(MIN_PLAUSIBLE_REGISTRY_WINDOW > 4096);
     }
     use super::*;
+
+    fn wired(helper: bool) -> AgentStartOptions {
+        AgentStartOptions {
+            computer_use: Some(ComputerUseWiring {
+                repl_server: PathBuf::from("/opt/waku_js_repl"),
+                native_helper: helper.then(|| PathBuf::from("/opt/helper")),
+                process_directory: helper.then(|| PathBuf::from("/tmp/cu")),
+                skill_markdown: Some("# skill".into()),
+            }),
+            cwd: PathBuf::from("/work"),
+            ..AgentStartOptions::default()
+        }
+    }
+
+    /// The server is registered for this session only, and a hand-written
+    /// entry of the same name is replaced rather than duplicated — two
+    /// servers claiming one name would give the model the tool twice.
+    #[test]
+    fn the_repl_is_registered_once_and_replaces_a_same_named_entry() {
+        let mut config = Config::default();
+        config.mcp_servers.push(McpServerConfig {
+            name: COMPUTER_USE_SERVER.to_owned(),
+            command: Some("/somewhere/else".into()),
+            args: Vec::new(),
+            env: HashMap::new(),
+            url: None,
+            server_type: "stdio".to_owned(),
+            origin: McpServerOrigin::User,
+        });
+        let options = wired(true);
+        install_repl_server(&mut config, options.computer_use.as_ref().unwrap(), &options.cwd);
+
+        let servers: Vec<&McpServerConfig> = config
+            .mcp_servers
+            .iter()
+            .filter(|server| server.name == COMPUTER_USE_SERVER)
+            .collect();
+        assert_eq!(servers.len(), 1);
+        let server = servers[0];
+        assert_eq!(server.command.as_deref(), Some("/opt/waku_js_repl"));
+        assert_eq!(server.server_type, "stdio");
+        assert_eq!(
+            server.env.get("WAKU_COMPUTER_USE_SERVER").map(String::as_str),
+            Some("/opt/helper")
+        );
+        assert_eq!(server.env.get("WAKU_SESSION_CWD").map(String::as_str), Some("/work"));
+        assert!(server.env.contains_key("WAKU_COMPUTER_USE_PROCESS_DIRECTORY"));
+    }
+
+    /// Without the helper the REPL still runs — image generation and plain
+    /// JavaScript work — so the server is registered without the variable
+    /// that would promise desktop control.
+    #[test]
+    fn a_missing_helper_registers_the_server_without_promising_desktop_control() {
+        let mut config = Config::default();
+        let options = wired(false);
+        install_repl_server(&mut config, options.computer_use.as_ref().unwrap(), &options.cwd);
+        let server = &config.mcp_servers[0];
+        assert!(!server.env.contains_key("WAKU_COMPUTER_USE_SERVER"));
+        // Nothing would write there without a helper.
+        assert!(!server.env.contains_key("WAKU_COMPUTER_USE_PROCESS_DIRECTORY"));
+        // The REPL itself still runs, so image generation survives.
+        assert_eq!(server.command.as_deref(), Some("/opt/waku_js_repl"));
+
+        let rule = computer_use_rule(&options).expect("a rule");
+        assert!(rule.contains("unavailable"), "{rule}");
+    }
+
+    /// Nothing registers the server when the toggle is off.
+    #[test]
+    fn no_server_and_no_rule_without_the_toggle() {
+        let options = AgentStartOptions::default();
+        let config = build_config_from(Settings::default(), &options);
+        assert!(config.mcp_servers.is_empty());
+        assert_eq!(computer_use_rule(&options), None);
+    }
+
+    /// The rule names the skill, because the tool descriptions alone do not
+    /// say how to use them.
+    #[test]
+    fn the_rule_points_at_the_skill_and_the_image_tool() {
+        let rule = computer_use_rule(&wired(true)).expect("a rule");
+        assert!(rule.contains("waku-computer-use"), "{rule}");
+        assert!(rule.contains("waku_js_repl_generate_image"), "{rule}");
+        assert!(!rule.contains("unavailable"), "{rule}");
+    }
 
     /// Nothing in the engine's prompt mentions plan mode, so the bridge has
     /// to. The rule is present exactly when the session is planning, and it

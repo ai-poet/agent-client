@@ -87,11 +87,18 @@ impl Tool for McpTool {
         let arguments = (!input.is_null()).then_some(input);
         match self.manager.call_tool(&self.definition.name, arguments).await {
             Ok(result) => {
+                // The text is the engine's own rendering, which reduces an
+                // image to a 32-character preview so the context is never
+                // flooded. The pixels take the metadata sideband instead,
+                // which reaches the transcript and not the model.
                 let text = claurst_mcp::mcp_result_to_string(&result);
                 if result.is_error {
                     ToolResult::error(text)
                 } else {
-                    ToolResult::success(text)
+                    match image_metadata(&result) {
+                        Some(images) => ToolResult::success(text).with_metadata(images),
+                        None => ToolResult::success(text),
+                    }
                 }
             }
             Err(error) => ToolResult::error(format!(
@@ -100,5 +107,62 @@ impl Tool for McpTool {
                 self.server
             )),
         }
+    }
+}
+
+/// The images an MCP result carried, in the shape the transcript reads.
+///
+/// `waku-core`'s `activity::collect_image_urls` accepts `{"type": "image",
+/// "mime": .., "data": ..}` items under a `content` array and turns each
+/// into a data URL — the same path every other provider's images take, so
+/// nothing downstream needs to know these came over MCP. `None` when the
+/// result holds no image, so text-only tools keep an empty sideband.
+pub(crate) fn image_metadata(result: &claurst_mcp::CallToolResult) -> Option<Value> {
+    let images: Vec<Value> = result
+        .content
+        .iter()
+        .filter_map(|item| match item {
+            claurst_mcp::McpContent::Image { data, mime_type } => Some(serde_json::json!({
+                "type": "image",
+                "mime": mime_type,
+                "data": data,
+            })),
+            _ => None,
+        })
+        .collect();
+    (!images.is_empty()).then(|| serde_json::json!({ "content": images }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use claurst_mcp::{CallToolResult, McpContent};
+
+    #[test]
+    fn an_image_in_the_result_becomes_transcript_metadata() {
+        let result = CallToolResult {
+            content: vec![
+                McpContent::Text { text: "done".into() },
+                McpContent::Image { data: "aGVsbG8=".into(), mime_type: "image/png".into() },
+            ],
+            is_error: false,
+        };
+        let meta = image_metadata(&result).expect("one image");
+        let items = meta["content"].as_array().expect("array");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["type"], "image");
+        assert_eq!(items[0]["mime"], "image/png");
+        assert_eq!(items[0]["data"], "aGVsbG8=");
+    }
+
+    /// A text-only tool keeps an empty sideband, so the plan-mode metadata
+    /// and this one never have to share a document.
+    #[test]
+    fn a_text_only_result_carries_no_metadata() {
+        let result = CallToolResult {
+            content: vec![McpContent::Text { text: "just words".into() }],
+            is_error: false,
+        };
+        assert!(image_metadata(&result).is_none());
     }
 }

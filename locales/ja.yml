@@ -1611,3 +1611,27 @@ native.plan_mode_denied: "実行されていません — 計画モードのた�
 native.keep_planning: "計画を続けることを選んだので、エージェントは計画の改善を続けます。"
 
 native.exit_plan_summary_lead: "エージェントの計画です。承認するとビルドに切り替わり、差し戻すと計画を続けます。"
+
+native.computer_use_unavailable: "このセッションではデスクトップ操作を利用できません：%{reason}。画像生成は引き続き使えます。"
+
+computer_use.system_access: "システムアクセス"
+computer_use.driver_access: "隔離された制御ドライバー %{helper} にアクセスを許可します"
+computer_use.windows_driver: "制御ドライバー"
+computer_use.driver_description: "実際にポインタを動かし画面を読むのは %{helper} です。固定バージョンを一度だけダウンロードします。"
+computer_use.driver_installed: "インストール済み、バージョン %{version}"
+computer_use.driver_installed_unknown: "インストール済み"
+computer_use.driver_missing: "未インストール"
+computer_use.driver_outdated: "バージョン %{version} がインストールされていますが、このビルドの想定とは異なります"
+computer_use.install_driver: "インストール"
+computer_use.update_driver: "更新"
+computer_use.driver_installed_toast: "制御ドライバーをインストールしました"
+computer_use.stage_installing_driver: "ドライバーをインストール中"
+computer_use.remote_note: "Computer Use はデーモンが動作しているコンピューターを操作します。このマシンではありません。ドライバーはそちらにインストールしてください。"
+
+skills.section_bundled: "組み込み"
+skills.bundled_caption: "アプリに同梱されています。Codex、Claude Code、OpenCode、Grok、Pi はセッションごとに受け取ります。その他はディスク上にコピーが必要です。"
+skills.install: "インストール"
+skills.update: "更新"
+skills.installed: "インストール済み"
+skills.installed_toast: "%{name} をインストールしました"
+skills.install_failed: "スキルをインストールできませんでした：%{error}"

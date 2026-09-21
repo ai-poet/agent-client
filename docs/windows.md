@@ -114,9 +114,30 @@ Differences worth knowing:
   Keyboard and IME are unaffected — those still reach the page directly once
   it holds focus.
 
+## Computer Use
+
+Turn it on in Settings → Computer Use. Windows needs one download the app does
+not bundle: `cua-driver`, about 27 MB, pinned to a known version and
+checksum-verified. The page's **Install** button fetches it; until it is
+there, desktop control cannot start.
+
+What it drives is the desktop of the machine **the daemon runs on**. Against a
+remote daemon the install button is disabled, because the driver has to land
+on that machine rather than this one.
+
+Two grants are read back from the driver itself and shown on the page. The
+built-in agent, Claude Code, Codex, Cursor, Fx, OpenCode, Grok and Pi all
+reach it through the same `waku_js_repl` MCP server; the instructions the
+model follows are `resources/computer-use/SKILL.windows.md`, which is the
+macOS document with the Windows differences applied (no `select_text`,
+`ctrl` rather than `super`, executable names rather than bundle identifiers).
+
+Image generation rides on the same toggle and the same server, and does not
+need the driver — if `cua-driver` is missing, the session says so and keeps
+generating images.
+
 ## What is not available yet
 
-- **Computer use.** The runtime and its UI stay disabled off macOS.
 - **Terminals over the daemon's browser client.** The desktop terminal works;
   a remote browser client connected to a Windows daemon cannot open one.
 

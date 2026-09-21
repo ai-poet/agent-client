@@ -119,6 +119,26 @@ impl AgentSession {
             settings.clone(),
             options.access_mode.auto_answer(),
         );
+        // Turning Computer Use on is the consent for its tools; the skill
+        // that documents them is written where the engine's `Skill` tool
+        // looks, and consented too so reading it raises nothing.
+        match options.computer_use.as_ref() {
+            Some(wiring) => {
+                let skill = wiring.skill_markdown.as_deref().and_then(|markdown| {
+                    crate::computer_use::install_skill(markdown)
+                        .inspect_err(|error| {
+                            tracing::warn!(%error, "agent: computer-use skill not installed");
+                        })
+                        .ok()
+                });
+                let tools = crate::config::COMPUTER_USE_TOOLS
+                    .iter()
+                    .map(|tool| (*tool).to_owned())
+                    .collect();
+                bridge.set_consented(tools, skill);
+            }
+            None => crate::computer_use::remove_skill(),
+        }
 
         let tools = builtin_tools(&config.disallowed_tools, None);
         let inner = Arc::new(Inner {

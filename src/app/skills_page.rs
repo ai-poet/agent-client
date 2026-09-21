@@ -149,6 +149,44 @@ impl Waku {
 
     /// Flip every copy of the skill keyed by `primary_dir`. A skill installed
     /// into several roots is one skill; the switch converges all of them.
+    /// Copy a bundled skill into one CLI's skill directory.
+    ///
+    /// The roots go to the daemon, which checks them against its own target
+    /// list before writing — this is a request, not an instruction. No
+    /// `is_remote` guard: the CLI runs on the daemon's host, so that is
+    /// where the skill belongs, and the path shown is that host's.
+    fn install_bundled_skill(&mut self, name: String, root: PathBuf, cx: &mut Context<Self>) {
+        let daemon = self.daemon.client();
+        let label = name.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::InstallBundledSkill {
+                            name,
+                            roots: vec![root],
+                        },
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(_) => this.show_toast(tr!("skills.installed_toast", name = label)),
+                    Err(error) => {
+                        this.show_toast(tr!("skills.install_failed", error = error.to_string()))
+                    }
+                }
+                // Re-scan so the row switches to "installed" from disk
+                // rather than from optimism.
+                this.invalidate_skills_catalog(cx);
+            });
+        })
+        .detach();
+    }
+
     fn toggle_skill_enabled(
         &mut self,
         primary_dir: PathBuf,
@@ -349,7 +387,7 @@ impl Waku {
                 .child(skills_status_row(&theme, tr!("skills.scanning")))
                 .into_any_element();
         };
-        if catalog.skills.is_empty() {
+        if catalog.skills.is_empty() && catalog.bundled.is_empty() {
             return skills_empty_state(&theme).into_any_element();
         }
 
@@ -394,8 +432,122 @@ impl Waku {
             .min_h_0()
             .flex()
             .child(self.render_skills_list_column(&catalog, &query, &rows, &theme, cx))
-            .child(div().flex_1().min_w_0().flex().flex_col().child(detail))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .children(self.render_bundled_skills_card(&catalog, &theme, cx))
+                    .child(detail),
+            )
             .into_any_element()
+    }
+
+    /// The skills the app carries, and where each can be installed.
+    ///
+    /// Shown above the detail pane rather than as list rows: these are not
+    /// on disk yet, so they have no directory to select and nothing to
+    /// enable or delete. `None` when the bundle carries none, which is every
+    /// Linux build.
+    fn render_bundled_skills_card(
+        &self,
+        catalog: &SkillsCatalog,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        if catalog.bundled.is_empty() {
+            return None;
+        }
+        let mut card = div()
+            .mx(px(16.0))
+            .mt(px(12.0))
+            .px(px(16.0))
+            .py(px(12.0))
+            .rounded(px(12.0))
+            .bg(theme.raised)
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .text_size(sp(13.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(tr!("skills.section_bundled")),
+            )
+            .child(
+                div()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("skills.bundled_caption")),
+            );
+
+        for skill in &catalog.bundled {
+            card = card.child(
+                div()
+                    .mt(px(8.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text)
+                    .child(SharedString::from(skill.description.clone())),
+            );
+            for target in &skill.targets {
+                let name = skill.name.clone();
+                let root = target.location.root.clone();
+                let action = if target.up_to_date {
+                    None
+                } else if target.installed {
+                    Some(tr!("skills.update"))
+                } else {
+                    Some(tr!("skills.install"))
+                };
+                let mut row = div()
+                    .mt(px(6.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(SharedString::from(target.location.source.label())),
+                    );
+                row = match action {
+                    Some(label) => row.child(
+                        div()
+                            .id(SharedString::from(format!(
+                                "install-bundled-{}-{}",
+                                skill.name,
+                                root.display()
+                            )))
+                            .h(px(25.0))
+                            .px(px(10.0))
+                            .rounded(px(6.0))
+                            .border_1()
+                            .border_color(theme.border_strong)
+                            .flex()
+                            .items_center()
+                            .cursor_default()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_secondary)
+                            .child(label)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.install_bundled_skill(name.clone(), root.clone(), cx);
+                            })),
+                    ),
+                    None => row.child(
+                        div()
+                            .text_size(sp(12.0))
+                            .text_color(theme.success)
+                            .child(tr!("skills.installed")),
+                    ),
+                };
+                card = card.child(row);
+            }
+        }
+        Some(card)
     }
 
     fn render_skills_list_column(

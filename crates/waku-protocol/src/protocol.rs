@@ -154,6 +154,15 @@ pub enum Command {
     LoadSkills {
         projects: Vec<(String, PathBuf)>,
     },
+    /// Copy a bundled skill into the named roots.
+    ///
+    /// The roots are checked against the bundle's own target list on the
+    /// daemon side: this must never become a way to write an arbitrary path.
+    InstallBundledSkill {
+        name: String,
+        #[ts(type = "string[]")]
+        roots: Vec<PathBuf>,
+    },
     SetSkillsEnabled {
         dirs: Vec<PathBuf>,
         enabled: bool,

@@ -28,6 +28,7 @@ pub mod cli_detect;
 pub mod cli_install;
 pub mod cua_install;
 pub mod client;
+pub mod claude_compat;
 pub mod codex_compat;
 pub mod custom_api;
 pub mod env_conflicts;

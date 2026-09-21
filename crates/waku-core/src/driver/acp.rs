@@ -146,7 +146,10 @@ impl AcpDriver {
         };
 
         let launch = launch_for(provider, reasoning_effort.as_deref())?;
-        let computer_use = (provider == ProviderKind::Grok && computer_use_enabled)
+        let computer_use = (matches!(
+            provider,
+            ProviderKind::Grok | ProviderKind::Cursor | ProviderKind::Fx
+        ) && computer_use_enabled)
             .then(|| super::support::HeadlessComputerUseRuntime::start(provider, events.clone()))
             .transpose()?;
         let grok_title_home = computer_use
@@ -161,6 +164,11 @@ impl AcpDriver {
             computer_use.as_ref().map(|runtime| &runtime.config),
             stderr_lines.clone(),
         )?;
+        // Computed before the runtime moves into the driver, so the session
+        // thread can carry it.
+        let acp_servers = super::support::acp_computer_use_servers(
+            computer_use.as_ref().map(|runtime| &runtime.config),
+        );
         let (commands, command_rx) = smol::channel::unbounded();
         let provider_name = provider.display_name();
         let thread_events = events.clone();
@@ -186,6 +194,7 @@ impl AcpDriver {
                     resume_session_id,
                     fork_context,
                     grok_title_home,
+                    acp_servers,
                     command_rx,
                     thread_events.clone(),
                     stderr_lines.clone(),
@@ -374,6 +383,9 @@ async fn run_sdk_connection(
     resume_session_id: Option<String>,
     fork_context: Option<String>,
     grok_title_home: Option<std::path::PathBuf>,
+    // Cursor and Fx take the Computer Use REPL in `session/new` itself;
+    // empty for every other agent.
+    acp_servers: Vec<agent_client_protocol::schema::v1::McpServer>,
     commands: smol::channel::Receiver<CommandMessage>,
     events: DriverEventSender,
     stderr_lines: Arc<Mutex<ProviderStderr>>,
@@ -535,6 +547,7 @@ async fn run_sdk_connection(
                 resume_session_id.as_deref(),
                 &cwd,
                 &suppress_session_updates,
+                acp_servers,
             )
             .await?;
 
@@ -703,6 +716,9 @@ async fn establish_session(
     resume_session_id: Option<&str>,
     cwd: &Path,
     suppress_session_updates: &AtomicBool,
+    // Empty for every agent but Cursor and Fx, which take the Computer Use
+    // REPL here rather than through a config file or a launch flag.
+    mcp_servers: Vec<agent_client_protocol::schema::v1::McpServer>,
 ) -> agent_client_protocol::Result<(
     SessionId,
     Option<SessionModeState>,
@@ -715,7 +731,10 @@ async fn establish_session(
             .resume
             .is_some()
             && let Ok(response) = connection
-                .send_request(ResumeSessionRequest::new(existing.to_owned(), cwd))
+                .send_request(
+                    ResumeSessionRequest::new(existing.to_owned(), cwd)
+                        .mcp_servers(mcp_servers.clone()),
+                )
                 .block_task()
                 .await
         {
@@ -729,7 +748,10 @@ async fn establish_session(
         if initialize.agent_capabilities.load_session {
             suppress_session_updates.store(true, Ordering::Release);
             let response = connection
-                .send_request(LoadSessionRequest::new(existing.to_owned(), cwd))
+                .send_request(
+                    LoadSessionRequest::new(existing.to_owned(), cwd)
+                        .mcp_servers(mcp_servers.clone()),
+                )
                 .block_task()
                 .await;
             suppress_session_updates.store(false, Ordering::Release);
@@ -744,7 +766,7 @@ async fn establish_session(
     }
 
     let response = connection
-        .send_request(NewSessionRequest::new(cwd))
+        .send_request(NewSessionRequest::new(cwd).mcp_servers(mcp_servers))
         .block_task()
         .await?;
     Ok((response.session_id, response.modes, response.config_options))

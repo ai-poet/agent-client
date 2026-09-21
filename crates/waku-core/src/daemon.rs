@@ -287,6 +287,11 @@ impl Backend for WakuBackend {
                 }
                 Ok(ResponsePayload::Ack)
             }
+            Command::InstallBundledSkill { name, roots } => {
+                crate::skills::install_bundled_skill(&name, &roots)
+                    .map_err(|error| anyhow!(error))?;
+                Ok(ResponsePayload::Ack)
+            }
             Command::TrashSkills { dirs } => {
                 crate::skills::trash_skills(&dirs).map_err(|error| anyhow!(error))?;
                 Ok(ResponsePayload::Ack)
@@ -1717,6 +1722,7 @@ fn handle_driver_command(
         | Command::LoadUsageHistory { .. }
         | Command::LoadSkills { .. }
         | Command::SetSkillsEnabled { .. }
+        | Command::InstallBundledSkill { .. }
         | Command::TrashSkills { .. }
         | Command::LoadTaskState
         | Command::SaveTaskState { .. }

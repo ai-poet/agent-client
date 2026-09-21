@@ -88,6 +88,35 @@ impl SkillEntry {
 #[serde(rename_all = "camelCase")]
 pub struct SkillsCatalog {
     pub skills: Vec<SkillEntry>,
+    /// Skills the app carries in its own bundle, with where each one can be
+    /// installed. Separate from `skills` because these are not on disk yet —
+    /// the list is what the Skills page offers to put there.
+    #[serde(default)]
+    pub bundled: Vec<BundledSkill>,
+}
+
+/// A skill shipped inside the app, and where it stands on each CLI that
+/// could use it.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BundledSkill {
+    pub name: String,
+    pub description: String,
+    /// Where the bundle keeps it, on the daemon's host.
+    #[ts(type = "string")]
+    pub source: PathBuf,
+    pub targets: Vec<BundledSkillTarget>,
+}
+
+/// One place a bundled skill can go, and whether it is already there.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BundledSkillTarget {
+    pub location: SkillLocation,
+    pub installed: bool,
+    /// `false` when an older copy is installed, which is what turns the
+    /// button from Install into Update.
+    pub up_to_date: bool,
 }
 
 impl SkillsCatalog {

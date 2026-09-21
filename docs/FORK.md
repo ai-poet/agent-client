@@ -85,6 +85,16 @@ lines below.
 | `crates/waku-agent/query/src/runner/tools.rs` | vendored engine, recorded departure: `whole_floats_to_integers` at the one `.execute()` call site — repairs `120.0` for `usize` fields, which several non-Claude models emit | ~45 |
 | `crates/waku-agent/tools/src/exit_plan_mode.rs` | vendored engine, recorded departure: `self_gates` and asks through `check_permission` with the plan summary as the description — its declared level is `None`, which the central backstop never gates, so the bridge's "finished planning" dialog was unreachable | ~20 |
 | `crates/waku-agent/tools/src/lib.rs` | vendored engine, recorded departure: refusals name their reason, and the two the fork words itself are exported as markers for the driver to localize | ~40 |
+| `crates/waku-agent-bridge/src/computer_use.rs` | fork-owned: writes the bundled skill where the engine's `Skill` tool reads it, and removes it when the toggle is off | ~110 |
+| `crates/waku-agent-bridge/src/{config,permission,session}.rs` | fork-owned: the REPL MCP registration, the consented-tools short-circuit, the plan/computer-use prompt rules | ~200 |
+| `crates/waku-agent-bridge/src/{mcp_tool,events}.rs` | fork-owned: MCP image content onto its own sideband so the model reads text and the transcript gets pixels | ~90 |
+| `src/js_repl_image.rs`, `src/js_repl.rs` | fork-owned: `generate_image` as a third REPL tool, credentials read from the engine settings rather than the environment | ~380 |
+| `src/app.rs`, `src/app/{runtime,settings}.rs` | fork: Computer Use reachable in release builds on macOS and Windows, plus the `cua-driver` install card | ~230 |
+| `resources/computer-use/SKILL.windows.md` | fork: the Windows variant `scripts/bundle-windows.ts` already expected; pinned in step with the macOS one by a guard test | ~237 |
+| `crates/waku-core/src/driver/{claude,acp}.rs` | fork: Computer Use for Claude Code (`--mcp-config` + `--plugin-dir`) and for Cursor/Fx (ACP `mcpServers`) | ~90 |
+| `crates/sub2api/src/claude_compat.rs` | fork: probes `claude --help` once per binary for `--plugin-dir` | ~70 |
+| `crates/waku-core/src/skills.rs`, `waku-protocol/src/skills.rs` | fork: the bundled-skill catalogue and its installer, with the target list as the write boundary | ~180 |
+| `src/app/skills_page.rs` | fork: the "Built in" card and its per-CLI install action | ~110 |
 | `crates/waku-core/src/settings.rs` | the daemon adopts the interface language the desktop pushes, so its own `tr!` strings are not always English | ~12 |
 | `crates/waku-core/src/git_commit.rs` | its provider-argument test names `ProviderKind::Native` (skipped by the `is_builtin` guard above it); without the arm the crate's tests do not compile | 1 |
 | `crates/waku-protocol/src/settings.rs` | `DaemonSettings::LOCALE_KEY` and its accessors — the language the daemon renders in | ~14 |

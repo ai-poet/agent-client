@@ -234,11 +234,17 @@ enum SettingsPage {
 }
 
 impl SettingsPage {
-    /// Computer Use is still experimental, so only development builds expose
-    /// its navigation entry points. Keeping this decision on the page itself
-    /// makes the Settings sidebar and command palette use the same gate.
+    /// Computer Use is shown where the app actually ships the pieces it
+    /// needs: the bundled helper on macOS, the installable driver and the
+    /// REPL on Windows. Linux packages carry neither, so the page would
+    /// promise something that cannot start.
+    ///
+    /// Fork: upstream gated this to macOS development builds while the
+    /// feature was being written. The Windows backend arrived afterwards and
+    /// this gate did not follow it, so the page was unreachable in every
+    /// release build on every platform.
     fn is_visible_in_navigation(self) -> bool {
-        self != Self::ComputerUse || cfg!(all(debug_assertions, target_os = "macos"))
+        self != Self::ComputerUse || cfg!(any(target_os = "macos", windows))
     }
 }
 
@@ -1148,6 +1154,18 @@ pub struct Waku {
     computer_permission_tx: Sender<Result<ComputerPermissions, String>>,
     computer_permission_events: Receiver<Result<ComputerPermissions, String>>,
     computer_permission_request_pending: bool,
+    /// The Computer Use driver on Windows: `None` until probed, `Some(None)`
+    /// once probed and absent. Shared because the probe is scheduled from
+    /// `render`, which holds `&self`, and answered on a background thread —
+    /// the probe runs the driver, so it never happens on the UI thread.
+    cua_driver: std::sync::Arc<std::sync::Mutex<Option<Option<sub2api::cua_install::DriverDetection>>>>,
+    /// Set once the probe has been scheduled, so re-rendering does not queue
+    /// another.
+    cua_probe_started: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The installer's current stage while it runs, shared with the worker.
+    cua_install_stage: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    cua_install_running: bool,
+    cua_install_error: Option<String>,
     /// Account rate-limit meters per provider, fetched off-thread (Claude,
     /// Codex, and OpenCode Go over HTTPS; Grok through a stdio probe) and
     /// refreshed live by Codex's own stream. Frames read only this snapshot.
@@ -2992,6 +3010,11 @@ impl Waku {
                 computer_permission_tx,
                 computer_permission_events,
                 computer_permission_request_pending: false,
+                cua_driver: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                cua_probe_started: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                cua_install_stage: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                cua_install_running: false,
+                cua_install_error: None,
                 plan_usage: HashMap::new(),
                 plan_usage_error: HashMap::new(),
                 plan_usage_tx,

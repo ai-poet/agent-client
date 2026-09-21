@@ -344,10 +344,22 @@ mod tests {
         assert_eq!(text_content(&json!({})), "");
     }
 
+    /// What matters here is the framing — one compact line with one trailing
+    /// newline. Asserting the exact bytes also asserted a key order, which
+    /// `serde_json` only fixes when its `preserve_order` feature is off:
+    /// building this crate alongside one that enables it flipped the order
+    /// and failed a test about newlines.
     #[test]
     fn write_message_emits_one_line() {
         let mut buffer = Vec::new();
         write_message(&mut buffer, &json!({"jsonrpc": "2.0", "id": 1})).unwrap();
-        assert_eq!(buffer, b"{\"id\":1,\"jsonrpc\":\"2.0\"}\n");
+
+        let text = String::from_utf8(buffer).expect("UTF-8");
+        assert!(text.ends_with('\n'), "{text:?}");
+        assert_eq!(text.matches('\n').count(), 1, "one line, not several");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(text.trim_end()).unwrap(),
+            json!({"jsonrpc": "2.0", "id": 1})
+        );
     }
 }

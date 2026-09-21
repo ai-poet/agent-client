@@ -3162,3 +3162,48 @@ native.keep_planning:
 
 native.exit_plan_summary_lead:
   en: "The agent's plan. Approve it to switch to Build, or send it back to keep planning."
+
+native.computer_use_unavailable:
+  en: "Desktop control is unavailable this session: %{reason}. Image generation still works."
+
+computer_use.system_access:
+  en: "System access"
+computer_use.driver_access:
+  en: "Grant access to %{helper}, the isolated control driver"
+computer_use.windows_driver:
+  en: "Control driver"
+computer_use.driver_description:
+  en: "%{helper} is what actually moves the pointer and reads the screen. It is downloaded once, at a pinned version."
+computer_use.driver_installed:
+  en: "Installed, version %{version}"
+computer_use.driver_installed_unknown:
+  en: "Installed"
+computer_use.driver_missing:
+  en: "Not installed"
+computer_use.driver_outdated:
+  en: "Version %{version} installed; this build expects a different one"
+computer_use.install_driver:
+  en: "Install"
+computer_use.update_driver:
+  en: "Update"
+computer_use.driver_installed_toast:
+  en: "Control driver installed"
+computer_use.stage_installing_driver:
+  en: "Installing the driver"
+computer_use.remote_note:
+  en: "Computer Use drives the computer the daemon runs on, not this one. Install the driver there."
+
+skills.section_bundled:
+  en: "Built in"
+skills.bundled_caption:
+  en: "Shipped with the app. Codex, Claude Code, OpenCode, Grok and Pi receive these per session; the rest need a copy on disk."
+skills.install:
+  en: "Install"
+skills.update:
+  en: "Update"
+skills.installed:
+  en: "Installed"
+skills.installed_toast:
+  en: "Installed %{name}"
+skills.install_failed:
+  en: "Could not install the skill: %{error}"
