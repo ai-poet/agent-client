@@ -170,7 +170,7 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
         })
     };
     let custom_target = |provider_id: &str| {
-        custom.endpoint_for(provider_id).map(|endpoint| RouteTarget {
+        custom.routed_endpoint(provider_id).map(|endpoint| RouteTarget {
             base_url: endpoint.base_url.trim().to_owned(),
             api_key: endpoint.api_key.trim().to_owned(),
             models: endpoint.models.clone(),
@@ -179,7 +179,7 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
     let native = {
         let any_custom = NATIVE_SLOTS
             .into_iter()
-            .any(|slot| custom.endpoint_for(slot).is_some());
+            .any(|slot| custom.routed_endpoint(slot).is_some());
         let mut platform_keys = BTreeMap::new();
         // Only while every line is the gateway's. A per-platform table next
         // to somebody else's endpoint would hand that server our key.
@@ -241,7 +241,7 @@ pub fn active_route_kind(
     custom: &CustomApiConfig,
 ) -> RouteKind {
     if NATIVE_SLOTS.contains(&provider_id) {
-        if custom.endpoint_for(provider_id).is_some() {
+        if custom.routed_endpoint(provider_id).is_some() {
             return RouteKind::Custom;
         }
         let cloud_only = desired_routes(cloud, &CustomApiConfig::default());
@@ -265,7 +265,7 @@ pub fn active_route_kind(
     };
     if cloud_covers {
         RouteKind::Cloud
-    } else if custom.endpoint_for(provider_id).is_some() {
+    } else if custom.routed_endpoint(provider_id).is_some() {
         RouteKind::Custom
     } else {
         RouteKind::CliOwn
@@ -516,6 +516,90 @@ pub(crate) fn remove_if_exists(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::{ApiFormat, ProviderEntry};
+
+    /// Routing follows the registry, not the copy a slot still carries: the
+    /// two only agree until the user edits one of them, and the entry is the
+    /// one the settings page edits.
+    #[test]
+    fn a_bound_slot_routes_through_its_registry_entry() {
+        let mut custom = CustomApiConfig::default();
+        custom.set(
+            "grok",
+            Some(crate::custom_api::CustomEndpoint {
+                base_url: "https://stale.example.org".into(),
+                api_key: "sk-stale".into(),
+                models: Vec::new(),
+            }),
+        );
+        let mut entry = ProviderEntry::new("Relay", ApiFormat::OpenAiChat);
+        entry.base_url = "https://relay.example.org".into();
+        entry.api_key = "sk-relay".into();
+        entry.set_model_ids(["m1"]);
+        let id = custom.registry.add(entry);
+        assert!(custom.bind_provider("grok", Some(&id)));
+
+        let routes = desired_routes(None, &custom);
+        let grok = routes.grok.expect("the entry routes");
+        assert_eq!(grok.base_url, "https://relay.example.org");
+        assert_eq!(grok.api_key, "sk-relay");
+        assert_eq!(grok.models, ["m1"]);
+        assert_eq!(active_route_kind("grok", None, &custom), RouteKind::Custom);
+
+        // Switched off, the slot stops routing rather than falling back to
+        // the address it used to hold.
+        custom.registry.get_mut(&id).unwrap().enabled = false;
+        assert!(desired_routes(None, &custom).grok.is_none());
+        assert_eq!(active_route_kind("grok", None, &custom), RouteKind::CliOwn);
+    }
+
+    /// The built-in agent's inversion has to survive the indirection: a
+    /// filled-in line still outranks a signed-in gateway, and a line pointing
+    /// at a switched-off entry falls back to the gateway rather than to
+    /// nothing.
+    #[test]
+    fn a_bound_native_line_still_outranks_the_gateway() {
+        let cloud = GatewayConfig {
+            enabled: true,
+            endpoint: "https://cloud.example.org".into(),
+            api_key: Some("sk-general".into()),
+            claude_api_key: Some("sk-claude".into()),
+            codex_api_key: None,
+            codex_model: None,
+        };
+        let mut custom = CustomApiConfig::default();
+        let mut entry = ProviderEntry::new("Mine", ApiFormat::Anthropic);
+        entry.base_url = "https://mine.example.org".into();
+        entry.api_key = "sk-mine".into();
+        let id = custom.registry.add(entry);
+        assert!(custom.bind_provider("native_messages", Some(&id)));
+
+        let native = desired_routes(Some(&cloud), &custom)
+            .native
+            .expect("the built-in agent is routed");
+        assert_eq!(
+            native.messages.as_ref().map(|route| route.base_url.as_str()),
+            Some("https://mine.example.org")
+        );
+        // Untouched lines still reach the gateway, and the per-platform key
+        // table is withheld while any line is the user's own.
+        assert_eq!(
+            native.chat.as_ref().map(|route| route.base_url.as_str()),
+            Some("https://cloud.example.org")
+        );
+        assert!(native.platform_keys.is_empty());
+
+        custom.registry.get_mut(&id).unwrap().enabled = false;
+        let native = desired_routes(Some(&cloud), &custom)
+            .native
+            .expect("the gateway still covers it");
+        assert_eq!(
+            native.messages.as_ref().map(|route| route.base_url.as_str()),
+            Some("https://cloud.example.org")
+        );
+        // Nothing is the user's own any more, so the table comes back.
+        assert!(!native.platform_keys.is_empty());
+    }
 
     #[test]
     fn active_route_kind_prefers_cloud_over_custom() {

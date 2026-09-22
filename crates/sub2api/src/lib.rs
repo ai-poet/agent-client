@@ -43,6 +43,7 @@ pub mod migrate;
 pub mod node_install;
 pub mod onboarding;
 pub mod pay;
+pub mod providers;
 pub mod speedtest;
 #[cfg(windows)]
 pub mod win_process;

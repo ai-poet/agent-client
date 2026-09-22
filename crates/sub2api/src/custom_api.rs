@@ -10,6 +10,7 @@
 //! involves the daemon at all. Earlier builds carried this configuration in
 //! `DaemonSettings.extra`; [`migrate_from_extra`] adopts that once.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -19,6 +20,7 @@ use serde_json::Value;
 
 use crate::brand;
 use crate::global_config::atomic_write_private;
+use crate::providers::{ProviderEntry, ProviderRegistry, format_for_slot};
 
 /// Key the legacy daemon-settings transport used; read once for migration.
 pub const LEGACY_SETTINGS_KEY: &str = "sub2apiCustomApi";
@@ -100,6 +102,16 @@ pub struct EndpointProfile {
     /// answered successfully.
     #[serde(default)]
     pub auto_select: bool,
+    /// The registry entry this profile routes through ([`crate::providers`]).
+    ///
+    /// When set, *that entry* is what routes; the endpoint fields above are
+    /// the pre-registry copy, kept so a build that predates the registry
+    /// still finds an address here rather than losing the route. A ref that
+    /// no longer resolves — entry deleted, switched off, or in another wire
+    /// format — means the slot routes nothing, because unbinding it was a
+    /// decision, not a reason to fall back to a stale copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_ref: Option<String>,
 }
 
 impl EndpointProfile {
@@ -163,6 +175,23 @@ fn next_profile_id() -> String {
     format!("p-{millis}-{n}")
 }
 
+/// The host of a normalized origin, for naming an entry the user never
+/// named. `https://user@api.relay.org:8443/v1` becomes `api.relay.org`.
+fn host_of(base_url: &str) -> Option<String> {
+    let rest = base_url
+        .split_once("://")
+        .map_or(base_url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let authority = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+    // An IPv6 literal carries colons of its own, so the port is whatever
+    // follows the closing bracket rather than the first colon.
+    let host = match authority.strip_prefix('[') {
+        Some(inside) => inside.split_once(']').map(|(host, _)| host)?,
+        None => authority.split(':').next()?,
+    };
+    (!host.is_empty()).then(|| host.to_owned())
+}
+
 /// Every profile one CLI has, and which of them routes it.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ProviderProfiles {
@@ -187,6 +216,7 @@ impl ProviderProfiles {
             endpoint,
             candidate_urls: Vec::new(),
             auto_select: false,
+            provider_ref: None,
         };
         profile.normalize();
         Self {
@@ -360,14 +390,22 @@ pub struct CustomApiConfig {
     pub opencode: ProviderProfiles,
     #[serde(default, deserialize_with = "deserialize_slot")]
     pub pi: ProviderProfiles,
+    /// Every endpoint the user has described, independent of which slot uses
+    /// it. The slots above point into this by `provider_ref`; see
+    /// [`crate::providers`] for why the description lives here rather than
+    /// being copied per CLI.
+    #[serde(default)]
+    pub registry: ProviderRegistry,
 }
 
 impl CustomApiConfig {
     pub fn is_empty(&self) -> bool {
         // The legacy slot counts: a file holding only that one is not empty,
         // it is un-migrated, and calling it empty would throw the user's
-        // endpoint away.
-        self.get(LEGACY_NATIVE_PROVIDER).is_none()
+        // endpoint away. So does a registry entry no slot points at yet —
+        // describing an endpoint and binding it are separate acts.
+        self.registry.is_empty()
+            && self.get(LEGACY_NATIVE_PROVIDER).is_none()
             && CUSTOM_API_PROVIDERS
                 .into_iter()
                 .all(|provider| self.get(provider).is_none())
@@ -385,6 +423,15 @@ impl CustomApiConfig {
     /// Idempotent, and it cannot resurrect anything: the guard is the legacy
     /// slot being non-empty, and the last thing it does is empty it.
     pub fn normalize(&mut self) -> bool {
+        self.registry.normalize();
+        let split = self.split_legacy_native();
+        // After the split, so the three slots it just filled are described
+        // too rather than being adopted only on the next load.
+        let adopted = self.adopt_into_registry();
+        split || adopted
+    }
+
+    fn split_legacy_native(&mut self) -> bool {
         if self.native.is_empty() {
             return false;
         }
@@ -404,6 +451,118 @@ impl CustomApiConfig {
             }
             *target = copy;
         }
+        true
+    }
+
+    /// Describe every configured slot in the registry, once.
+    ///
+    /// The pre-registry file holds its own copy of an address and a key per
+    /// CLI. This turns each into a registry entry and leaves the slot
+    /// pointing at it; two slots holding the same address, key and wire
+    /// format become one entry, which is the whole point — the relay serving
+    /// Grok, OpenCode and Pi stops being three things to keep in step.
+    /// Slots in different formats never merge, because the format is part of
+    /// what an endpoint is.
+    ///
+    /// The slot's own fields are left exactly as they were. A build that
+    /// predates the registry ignores `provider_ref` and finds them where it
+    /// wrote them, so installing this version and going back loses nothing.
+    ///
+    /// Idempotent: a slot that already carries a ref is left alone, so this
+    /// runs on every load without accumulating anything.
+    fn adopt_into_registry(&mut self) -> bool {
+        let mut adopted = false;
+        for slot in CUSTOM_API_PROVIDERS {
+            let Some(format) = format_for_slot(slot) else {
+                continue;
+            };
+            // Read the slot out before touching the registry: both live in
+            // this struct, and only one of them can be borrowed at a time.
+            let Some(profile) = self.active_profile(slot).cloned() else {
+                continue;
+            };
+            if profile.provider_ref.is_some() || !profile.endpoint.is_usable() {
+                continue;
+            }
+            let base_url = profile.endpoint.base_url.trim();
+            let api_key = profile.endpoint.api_key.trim();
+            let id = match self.registry.find_matching(base_url, api_key, format) {
+                Some(existing) => existing.id.clone(),
+                None => {
+                    let name = match profile.name.trim() {
+                        "" => host_of(base_url).unwrap_or_else(|| slot.to_owned()),
+                        named => named.to_owned(),
+                    };
+                    let mut entry = ProviderEntry::new(&name, format);
+                    entry.base_url = base_url.to_owned();
+                    entry.api_key = api_key.to_owned();
+                    entry.candidate_urls = profile.candidate_urls.clone();
+                    entry.auto_select = profile.auto_select;
+                    entry.set_model_ids(&profile.endpoint.models);
+                    self.registry.add(entry)
+                }
+            };
+            if let Some(active) = self
+                .profiles_mut(slot)
+                .and_then(ProviderProfiles::active_profile_mut)
+            {
+                active.provider_ref = Some(id);
+                adopted = true;
+            }
+        }
+        adopted
+    }
+
+    /// The endpoint bound to `slot`, following its `provider_ref`.
+    ///
+    /// This is the routing answer. [`CustomApiConfig::get`] is the storage
+    /// answer — what this slot's own fields say — and the two differ once a
+    /// slot is bound: the registry entry is what a request actually reaches.
+    pub fn resolved_endpoint(&self, slot: &str) -> Option<Cow<'_, CustomEndpoint>> {
+        let profile = self.active_profile(slot)?;
+        match profile.provider_ref.as_deref() {
+            Some(reference) => self
+                .registry
+                .routable_for_slot(reference, slot)
+                .map(|entry| Cow::Owned(entry.endpoint())),
+            None => Some(Cow::Borrowed(&profile.endpoint)),
+        }
+    }
+
+    /// The endpoint that should route `slot`, if a usable one is bound.
+    pub fn routed_endpoint(&self, slot: &str) -> Option<Cow<'_, CustomEndpoint>> {
+        self.resolved_endpoint(slot)
+            .filter(|endpoint| endpoint.is_usable())
+    }
+
+    /// The registry entry `slot` is bound to, whatever its state.
+    ///
+    /// Unlike [`CustomApiConfig::resolved_endpoint`] this answers even for an
+    /// entry that is switched off or in the wrong format, which is what the
+    /// settings page needs in order to say so.
+    pub fn bound_provider(&self, slot: &str) -> Option<&ProviderEntry> {
+        let reference = self.active_profile(slot)?.provider_ref.as_deref()?;
+        self.registry.get(reference)
+    }
+
+    /// Point `slot` at a registry entry, or at nothing.
+    ///
+    /// Creates a profile to hold the binding when the slot has none, since a
+    /// slot with no profile has nowhere to record one.
+    pub fn bind_provider(&mut self, slot: &str, provider_id: Option<&str>) -> bool {
+        let Some(profiles) = self.profiles_mut(slot) else {
+            return false;
+        };
+        if profiles.active_profile().is_none() {
+            if provider_id.is_none() {
+                return false;
+            }
+            profiles.add("");
+        }
+        let Some(active) = profiles.active_profile_mut() else {
+            return false;
+        };
+        active.provider_ref = provider_id.map(str::to_owned);
         true
     }
 
@@ -458,6 +617,7 @@ impl CustomApiConfig {
         let Some(slot) = self.profiles_mut(provider_id) else {
             return;
         };
+        let mut write_through = None;
         match endpoint {
             Some(endpoint) => {
                 if slot.active_profile().is_none() {
@@ -466,14 +626,30 @@ impl CustomApiConfig {
                 let profile = slot
                     .active_profile_mut()
                     .expect("a profile was just added");
-                profile.endpoint = endpoint;
+                profile.endpoint = endpoint.clone();
                 profile.normalize();
+                write_through = profile
+                    .provider_ref
+                    .clone()
+                    .map(|reference| (reference, endpoint));
             }
             None => {
                 if let Some(id) = slot.active.clone() {
                     slot.remove(&id);
                 }
             }
+        }
+        // While a slot is bound, the registry entry is what routes — an edit
+        // that only touched the slot's own copy would look like it had been
+        // saved and change nothing. Model ids are merged rather than
+        // replaced, because this caller knows names and the entry knows
+        // context windows.
+        if let Some((reference, endpoint)) = write_through
+            && let Some(entry) = self.registry.get_mut(&reference)
+        {
+            entry.select_url(&endpoint.base_url);
+            entry.api_key = endpoint.api_key.trim().to_owned();
+            entry.set_model_ids(&endpoint.models);
         }
     }
 
@@ -851,7 +1027,177 @@ mod tests {
         config.set("native_responses", None);
         config.set("native_chat", None);
         assert!(!config.normalize());
-        assert!(config.is_empty());
+        for slot in NATIVE_SLOTS {
+            assert!(config.get(slot).is_none(), "{slot}");
+            assert!(config.routed_endpoint(slot).is_none(), "{slot}");
+        }
+        assert!(config.get(LEGACY_NATIVE_PROVIDER).is_none());
+        // The description of the endpoint survives being unbound: a user who
+        // clears a slot has stopped using an endpoint, not forgotten it.
+        // Three of them, because the legacy endpoint was used in all three
+        // wire formats and a server implementing `/v1/messages` need not
+        // implement `/v1/responses` — merging them would claim it does.
+        assert_eq!(config.registry.providers.len(), 3);
+        assert!(!config.is_empty());
+    }
+
+    /// The point of the registry: slots sharing an endpoint share one entry,
+    /// so the address and key are typed once and edited once.
+    #[test]
+    fn slots_on_the_same_endpoint_and_format_adopt_one_entry() {
+        let slot = |name: &str| {
+            format!(
+                r#""{name}":{{"profiles":[{{"id":"p-{name}","name":"",
+                  "base_url":"https://relay.example.org","api_key":"sk-one",
+                  "models":["m1"]}}],"active":"p-{name}"}}"#
+            )
+        };
+        let raw = format!(
+            "{{{},{},{}}}",
+            slot("grok"),
+            slot("opencode"),
+            slot("pi")
+        );
+        let mut config: CustomApiConfig = serde_json::from_str(&raw).expect("decodes");
+        assert!(config.normalize());
+
+        assert_eq!(config.registry.providers.len(), 1);
+        let entry = &config.registry.providers[0];
+        // Named after the host, since no profile carried a name.
+        assert_eq!(entry.name, "relay.example.org");
+        assert_eq!(entry.format, crate::providers::ApiFormat::OpenAiChat);
+        assert_eq!(entry.models.len(), 1);
+
+        for name in ["grok", "opencode", "pi"] {
+            assert_eq!(
+                config.active_profile(name).unwrap().provider_ref.as_deref(),
+                Some(entry.id.as_str()),
+                "{name}"
+            );
+            assert_eq!(
+                config.routed_endpoint(name).unwrap().base_url,
+                "https://relay.example.org",
+                "{name}"
+            );
+        }
+    }
+
+    /// Switching the entry off stops every slot bound to it, and does not
+    /// quietly fall back to the copy the slot still carries.
+    #[test]
+    fn unbinding_or_disabling_the_entry_stops_the_route() {
+        let mut config: CustomApiConfig = serde_json::from_str(
+            r#"{"grok":{"profiles":[{"id":"p1","name":"",
+                 "base_url":"https://relay.example.org","api_key":"sk-one"}],"active":"p1"}}"#,
+        )
+        .expect("decodes");
+        assert!(config.normalize());
+        let id = config.registry.providers[0].id.clone();
+        assert!(config.routed_endpoint("grok").is_some());
+        // The slot's own copy is still there, which is what makes a
+        // downgrade safe.
+        assert_eq!(config.get("grok").unwrap().base_url, "https://relay.example.org");
+
+        config.registry.get_mut(&id).unwrap().enabled = false;
+        assert!(config.routed_endpoint("grok").is_none());
+        assert!(config.bound_provider("grok").is_some());
+
+        config.registry.get_mut(&id).unwrap().enabled = true;
+        assert!(config.bind_provider("grok", None));
+        // Unbound, the slot falls back to its own fields rather than to
+        // nothing: that is the pre-registry path, still intact.
+        assert_eq!(
+            config.routed_endpoint("grok").unwrap().base_url,
+            "https://relay.example.org"
+        );
+        assert!(config.bound_provider("grok").is_none());
+    }
+
+    /// Editing through the old per-CLI form must reach the entry that
+    /// actually routes, or the save would appear to do nothing.
+    #[test]
+    fn writing_a_bound_slot_reaches_the_entry_and_keeps_model_metadata() {
+        let mut config: CustomApiConfig = serde_json::from_str(
+            r#"{"pi":{"profiles":[{"id":"p1","name":"",
+                 "base_url":"https://old.example.org","api_key":"sk-old",
+                 "models":["keeper","goner"]}],"active":"p1"}}"#,
+        )
+        .expect("decodes");
+        assert!(config.normalize());
+        let id = config.registry.providers[0].id.clone();
+        config
+            .registry
+            .get_mut(&id)
+            .unwrap()
+            .model_mut("keeper")
+            .unwrap()
+            .context_window = Some(128_000);
+
+        config.set(
+            "pi",
+            Some(CustomEndpoint {
+                base_url: "https://new.example.org".to_owned(),
+                api_key: "sk-new".to_owned(),
+                models: vec!["keeper".to_owned(), "newcomer".to_owned()],
+            }),
+        );
+
+        let routed = config.routed_endpoint("pi").expect("still routed");
+        assert_eq!(routed.base_url, "https://new.example.org");
+        assert_eq!(routed.api_key, "sk-new");
+        assert_eq!(routed.models, ["keeper", "newcomer"]);
+
+        let entry = config.registry.get(&id).expect("the same entry");
+        assert_eq!(entry.model("keeper").unwrap().context_window, Some(128_000));
+        assert!(entry.model("goner").is_none());
+        // The old origin stays listed, so a speed test can still reach it.
+        assert!(entry.candidate_urls.contains(&"https://old.example.org".to_owned()));
+    }
+
+    /// Both halves have to survive the file: the binding, and the copy that
+    /// makes going back to an older build safe.
+    #[test]
+    fn the_registry_and_the_binding_round_trip_through_json() {
+        let mut config: CustomApiConfig = serde_json::from_str(
+            r#"{"grok":{"profiles":[{"id":"p1","name":"Relay",
+                 "base_url":"https://relay.example.org","api_key":"sk-one"}],"active":"p1"}}"#,
+        )
+        .expect("decodes");
+        assert!(config.normalize());
+
+        let encoded = serde_json::to_string(&config).expect("encodes");
+        // An older build reads this file and still finds an address.
+        assert!(encoded.contains(r#""base_url":"https://relay.example.org""#));
+        assert!(encoded.contains(r#""provider_ref""#));
+
+        let mut reloaded: CustomApiConfig = serde_json::from_str(&encoded).expect("decodes again");
+        // Nothing left to migrate, and nothing duplicated by trying.
+        assert!(!reloaded.normalize());
+        assert_eq!(reloaded, config);
+        assert_eq!(reloaded.registry.providers.len(), 1);
+        assert_eq!(
+            reloaded.routed_endpoint("grok").unwrap().base_url,
+            "https://relay.example.org"
+        );
+    }
+
+    /// A ref pointing at nothing is not a reason to use the stale copy the
+    /// slot still carries — the entry was deleted on purpose.
+    #[test]
+    fn a_dangling_reference_routes_nothing() {
+        let mut config: CustomApiConfig = serde_json::from_str(
+            r#"{"grok":{"profiles":[{"id":"p1","name":"",
+                 "base_url":"https://relay.example.org","api_key":"sk-one"}],"active":"p1"}}"#,
+        )
+        .expect("decodes");
+        assert!(config.normalize());
+        let id = config.registry.providers[0].id.clone();
+        assert!(config.registry.remove(&id));
+
+        assert!(config.routed_endpoint("grok").is_none());
+        assert!(config.bound_provider("grok").is_none());
+        // Still stored, and still the thing a downgrade would read.
+        assert_eq!(config.get("grok").unwrap().base_url, "https://relay.example.org");
     }
 
     /// A slot the user already filled in is not overwritten by the old one.
