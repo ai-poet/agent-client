@@ -445,25 +445,27 @@ impl Waku {
                             .flex()
                             .flex_col()
                             .gap(px(6.0))
-                            // Both come from the Providers page, which owns
-                            // the endpoint form every provider shares.
+                            // Which route it is on, and which of the
+                            // described endpoints serves it. What an endpoint
+                            // *is* — address, key, models — belongs to the
+                            // model-providers page, because these three are
+                            // not the only things that can use one.
                             .child(self.render_route_section(
                                 crate::model::ProviderKind::Native,
                                 selected.id(),
                                 theme,
                                 cx,
                             ))
-                            .child(self.render_endpoint_form_titled(
-                                crate::model::ProviderKind::Native,
-                                selected.id(),
-                                selected.label(),
-                                Some(tr!(
-                                    "agent.endpoint_path_hint",
-                                    path = selected.request_path()
-                                )),
-                                theme,
-                                cx,
-                            )),
+                            .child(self.render_route_binding(selected.id(), theme, cx))
+                            .child(
+                                div()
+                                    .text_size(sp(11.5))
+                                    .text_color(theme.text_tertiary)
+                                    .child(tr!(
+                                        "agent.endpoint_path_hint",
+                                        path = selected.request_path()
+                                    )),
+                            ),
                     ),
             )
     }

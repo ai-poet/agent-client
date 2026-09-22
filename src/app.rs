@@ -1480,14 +1480,6 @@ pub struct Waku {
     model_providers: model_providers_page::ModelProvidersPageState,
     /// Fork addition: provider processes warmed while the user types.
     runtime_prewarms: runtime_prewarm::RuntimePrewarms,
-    /// Fork addition: per-CLI custom endpoint fields on the Providers page —
-    /// `(provider_id, base-URL field, API-key field, optional model list)`.
-    custom_api_inputs: Vec<(
-        &'static str,
-        Entity<TextInput>,
-        Entity<TextInput>,
-        Option<Entity<TextInput>>,
-    )>,
     /// Fork addition: which section of the built-in agent's model list is
     /// open in the picker. Every model there has exactly one API, so the
     /// format bar partitions the list rather than switching a setting; this
@@ -2166,54 +2158,6 @@ impl Waku {
                 .clear_on_escape()
                 .placeholder(tr!("plaza.search_placeholder"))
         });
-        // Fork addition: per-CLI custom endpoint fields, prefilled from the
-        // stored routing so reopening settings shows what is in effect.
-        let stored_custom_api = sub2api::custom_api::load();
-        let custom_api_inputs: Vec<_> = sub2api::custom_api::CUSTOM_API_PROVIDERS
-            .into_iter()
-            .map(|provider_id| {
-                let stored = stored_custom_api.get(provider_id);
-                let url_input = cx.new(|cx| {
-                    let mut input = TextInput::new(window, cx)
-                        .select_all_on_focus_click()
-                        .placeholder(tr!("cli_setup.custom_url_placeholder"));
-                    if let Some(endpoint) = stored {
-                        input.set_content(endpoint.base_url.clone(), cx);
-                    }
-                    input
-                });
-                let key_input = cx.new(|cx| {
-                    let mut input = TextInput::new(window, cx)
-                        .select_all_on_focus_click()
-                        // Masked from the start: the reveal control unmasks.
-                        .masked(true)
-                        .placeholder(tr!("cli_setup.custom_key_placeholder"));
-                    if let Some(endpoint) = stored {
-                        input.set_content(endpoint.api_key.clone(), cx);
-                    }
-                    input
-                });
-                // OpenCode and Pi declare models in their config, so their
-                // cards carry an optional model-list field. The built-in
-                // agent takes one for a different reason: nothing discovers
-                // the models behind somebody else's endpoint, so the list is
-                // the user's to declare, and it is what the picker's Chat
-                // Completions section holds.
-                let models_input =
-                    matches!(provider_id, "native_chat" | "opencode" | "pi" | "grok").then(|| {
-                    cx.new(|cx| {
-                        let mut input = TextInput::new(window, cx)
-                            .select_all_on_focus_click()
-                            .placeholder(tr!("cli_setup.custom_models_placeholder"));
-                        if let Some(endpoint) = stored {
-                            input.set_content(endpoint.models.join(", "), cx);
-                        }
-                        input
-                    })
-                });
-                (provider_id, url_input, key_input, models_input)
-            })
-            .collect();
         let skills_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -2749,8 +2693,6 @@ impl Waku {
                 },
             )
             .detach();
-            // Fork addition: Enter saves an endpoint form; edits re-render it.
-            Self::subscribe_custom_api_inputs(&custom_api_inputs, cx);
             cx.subscribe(
                 &settings_search,
                 |_: &mut Self, _, event: &InputEvent, cx| {
@@ -3181,7 +3123,6 @@ impl Waku {
                 model_providers: model_providers_page::ModelProvidersPageState::default(),
                 runtime_prewarms: runtime_prewarm::RuntimePrewarms::default(),
                 model_picker_format: "messages".to_owned(),
-                custom_api_inputs,
                 cloud_usage: cloud_usage::CloudUsageState::default(),
                 model_plaza: model_plaza::ModelPlazaState::default(),
                 workflow: workflow::WorkflowState::default(),

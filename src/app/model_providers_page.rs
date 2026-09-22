@@ -1571,7 +1571,9 @@ impl Waku {
                 }
                 let fastest = sub2api::speedtest::fastest_ok(&results)
                     .and_then(|index| results.get(index))
-                    .map(|result| result.url.clone());
+                    .and_then(|result| {
+                        result.latency_ms().map(|ms| (result.url.clone(), ms))
+                    });
                 this.model_providers.speed = Some(super::providers_page::SpeedTest {
                     running: false,
                     results,
@@ -1579,8 +1581,20 @@ impl Waku {
                 });
                 // Only when asked: silently repointing an endpoint the user
                 // typed would be a routing change they did not make.
-                if let (true, Some(url)) = (auto_select, fastest) {
-                    this.select_provider_url(id, url, cx);
+                if auto_select {
+                    match fastest {
+                        Some((url, ms)) => {
+                            this.show_toast(tr!(
+                                "cli_setup.speed_auto_selected",
+                                url = url.clone(),
+                                ms = ms
+                            ));
+                            this.select_provider_url(id, url, cx);
+                        }
+                        // Nothing answered, so nothing moved — worth saying,
+                        // since "switch to the fastest" did not.
+                        None => this.show_toast(tr!("cli_setup.speed_no_ok")),
+                    }
                 }
                 cx.notify();
             });
@@ -1663,6 +1677,174 @@ impl Waku {
                     },
                     cx,
                 );
+            });
+        })
+        .detach();
+    }
+}
+
+// --- binding a slot to an entry --------------------------------------------
+
+impl Waku {
+    /// Which endpoint routes this slot, and a picker to change it.
+    ///
+    /// Drawn on the Providers page's CLI cards and on the Agent page's three
+    /// endpoint rows. Both used to carry a whole address-and-key form of
+    /// their own, which is how the same relay came to be typed in three
+    /// times; here they choose from what the model-providers page describes.
+    pub(super) fn render_route_binding(
+        &self,
+        slot: &'static str,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let stored = self.custom_api_snapshot();
+        let bound = stored.bound_provider(slot).cloned();
+        let current = bound.as_ref().map(|entry| entry.id.clone());
+        let label = match &bound {
+            Some(entry) => entry_label(entry),
+            None => tr!("model_providers.bound_none"),
+        };
+        // A bound entry that cannot route is worth saying out loud: the slot
+        // silently falls back, and "nothing changed" is a confusing answer
+        // to having configured something.
+        let problem = bound.as_ref().and_then(|entry| {
+            if !entry.enabled {
+                Some(tr!("model_providers.bound_disabled"))
+            } else if !entry.is_usable() {
+                Some(tr!("model_providers.bound_incomplete"))
+            } else {
+                None
+            }
+        });
+
+        let options: Vec<(Option<String>, String)> = std::iter::once((
+            None,
+            tr!("model_providers.bound_none"),
+        ))
+        .chain(
+            stored
+                .registry
+                .candidates_for_slot(slot)
+                .map(|entry| (Some(entry.id.clone()), entry_label(entry))),
+        )
+        .collect();
+
+        let trigger = div()
+            .id(SharedString::from(format!("route-binding-{slot}")))
+            .tab_index(0)
+            .focus_visible(|style| style.border_color(theme.accent))
+            .h(px(28.0))
+            .px(px(10.0))
+            .rounded(px(7.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .cursor_default()
+            .text_size(sp(12.0))
+            .text_color(theme.text)
+            .child(div().min_w_0().truncate().child(label))
+            .child(icon("icons/chevron-down.svg", 12.0, theme.text_secondary));
+
+        let handle = self.menu_handle(format!("route-binding-menu-{slot}"), cx);
+        let weak = cx.entity().downgrade();
+        let picker = dropdown_menu(
+            trigger,
+            SharedString::from(format!("route-binding-menu-{slot}")),
+            &handle,
+            MenuAlign::BelowLeft,
+            move |_| {
+                options
+                    .iter()
+                    .map(|(id, label)| {
+                        let selected = id.as_deref() == current.as_deref();
+                        let weak = weak.clone();
+                        let id = id.clone();
+                        MenuItem::new(SharedString::from(label.clone()), move |_, cx| {
+                            let id = id.clone();
+                            let _ = weak.update(cx, |this, cx| {
+                                this.bind_slot_to_provider(slot, id, cx);
+                            });
+                        })
+                        .selected(selected)
+                    })
+                    .collect()
+            },
+        );
+
+        let mut section = div()
+            .flex()
+            .flex_col()
+            .gap(px(5.0))
+            .child(field_label(theme, tr!("model_providers.bound_title")))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(div().min_w_0().flex_1().max_w(px(320.0)).child(picker))
+                    .child(card_button(
+                        theme,
+                        SharedString::from(format!("route-binding-manage-{slot}")),
+                        tr!("model_providers.manage"),
+                        false,
+                        false,
+                        cx,
+                        |this, _, cx| this.open_settings_page(SettingsPage::ModelProviders, cx),
+                    )),
+            );
+        if let Some(problem) = problem {
+            section = section.child(
+                div()
+                    .text_size(sp(12.0))
+                    .text_color(theme.warning)
+                    .child(problem),
+            );
+        }
+        section
+    }
+
+    /// Point a slot at a registry entry, or at nothing.
+    fn bind_slot_to_provider(
+        &mut self,
+        slot: &'static str,
+        provider_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.model_providers.saving {
+            return;
+        }
+        self.model_providers.saving = true;
+        let cloud = super::providers_page::cloud_config(self);
+        cx.notify();
+
+        cx.spawn(async move |this, cx| {
+            let outcome = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut config = sub2api::custom_api::load();
+                    config.bind_provider(slot, provider_id.as_deref());
+                    sub2api::custom_api::save(&config)?;
+                    let desired = sub2api::global_config::desired_routes(cloud.as_ref(), &config);
+                    let warnings = sub2api::global_config::reconcile(&desired)?;
+                    anyhow::Ok((config, warnings))
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.model_providers.saving = false;
+                match outcome {
+                    Ok((config, warnings)) => {
+                        *this.cli_setup.custom_cache.borrow_mut() = Some(config);
+                        if !warnings.is_empty() {
+                            this.show_toast(warnings.join("\n"));
+                        }
+                        this.sync_native_models();
+                    }
+                    Err(error) => this.show_toast(format!("{error:#}")),
+                }
+                cx.notify();
             });
         })
         .detach();

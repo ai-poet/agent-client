@@ -2380,8 +2380,6 @@ cli_setup.hint_network:
   en: "The registry could not be reached. Check the network or proxy, then retry"
 providers.status_installed:
   en: "Installed"
-providers.built_in:
-  en: "Built in - nothing to install"
 providers.status_not_runnable:
   en: "Installed, but it does not run"
 providers.route_title:
@@ -2400,20 +2398,12 @@ cli_setup.use_this_path:
   en: "Use this path"
 cli_setup.copy_fix:
   en: "Copy fix commands"
-cli_setup.custom_url_label:
-  en: "Endpoint URL"
-cli_setup.custom_key_label:
-  en: "API key"
-cli_setup.custom_models_label:
-  en: "Models"
 cli_setup.custom_reveal:
   en: "Show"
 cli_setup.custom_hide:
   en: "Hide"
 cli_setup.custom_cancel:
   en: "Discard changes"
-cli_setup.custom_unsaved:
-  en: "Unsaved changes"
 cli_setup.custom_invalid_url:
   en: "Invalid endpoint URL: %{reason}"
 cli_setup.custom_url_empty:
@@ -2430,10 +2420,6 @@ cli_setup.custom_test_unauthorized:
   en: "Reachable, but the key was refused (HTTP %{status})"
 cli_setup.custom_test_http:
   en: "Reachable, but it answered HTTP %{status}: %{detail}"
-cli_setup.custom_clear_confirm:
-  en: "Clear the custom endpoint for %{name}?"
-cli_setup.custom_clear_confirm_detail:
-  en: "The CLI's original configuration is restored."
 cli_setup.env_conflicts_title:
   en: "Environment variables may override routing"
 cli_setup.env_conflicts_detail:
@@ -2590,10 +2576,6 @@ pay.status_updated_title:
   en: "Status updated"
 pay.status_updated_message:
   en: "Waiting for the next update"
-cli_setup.custom_title:
-  en: "Custom API endpoints"
-cli_setup.custom_detail:
-  en: "Route a CLI through your own endpoint. Saving writes it into the CLI's own configuration file — the original values are backed up and restored when you clear the entry or sign out."
 cli_setup.custom_url_placeholder:
   en: "https://api.example.com — omit /v1"
 cli_setup.custom_key_placeholder:
@@ -2602,26 +2584,16 @@ cli_setup.custom_save:
   en: "Save"
 cli_setup.custom_saved:
   en: "Custom endpoint saved — applies to new sessions"
-cli_setup.custom_cleared:
-  en: "Custom endpoint cleared"
 cli_setup.custom_need_both:
   en: "Both the base URL and the API key are required"
 cli_setup.custom_overridden:
   en: "Cloud routing is on and overrides this endpoint"
 cloud.group_switched:
   en: "Switched to %{group} — applies to newly started sessions"
-cli_setup.custom_hint_anthropic:
-  en: "Claude-compatible endpoint. Enter the service origin without a trailing slash; a pasted /v1 is stripped automatically."
-cli_setup.custom_hint_openai:
-  en: "OpenAI-compatible endpoint. Enter the service origin; /v1 is appended automatically."
-cli_setup.custom_models_placeholder:
-  en: "Model ids, comma separated (optional)"
 cli_setup.custom_test:
   en: "Test connection"
 cli_setup.custom_open_file:
   en: "Open config file"
-cli_setup.custom_clear:
-  en: "Clear"
 cli_setup.custom_connect_ok:
   en: "Reachable (%{ms} ms)"
 cli_setup.custom_connect_slow:
@@ -2690,36 +2662,6 @@ surface_bar.hide:
   en: "Hide %{surface} (%{shortcut})"
 command_palette.open_surface:
   en: "Open %{surface}"
-cli_setup.profile_label:
-  en: "Profile"
-cli_setup.profile_default_name:
-  en: "Custom"
-cli_setup.profile_none:
-  en: "None yet"
-cli_setup.profile_new:
-  en: "New"
-cli_setup.profile_new_name:
-  en: "Endpoint %{n}"
-cli_setup.profile_duplicate:
-  en: "Duplicate"
-cli_setup.profile_copy_suffix:
-  en: " copy"
-cli_setup.profile_rename:
-  en: "Rename"
-cli_setup.profile_name_placeholder:
-  en: "Profile name"
-cli_setup.profile_delete:
-  en: "Delete profile"
-cli_setup.profile_delete_confirm:
-  en: "Delete the profile \"%{name}\"?"
-cli_setup.profile_switched:
-  en: "Now routing through %{name}; new sessions use it"
-cli_setup.candidates_open:
-  en: "Alternate domains"
-cli_setup.candidates_title:
-  en: "Alternate domains"
-cli_setup.candidates_detail:
-  en: "Other origins serving the same API. Measure them and route through whichever answers fastest."
 cli_setup.candidate_placeholder:
   en: "https://backup.example.com"
 cli_setup.candidate_add:
@@ -2730,8 +2672,6 @@ cli_setup.candidate_remove:
   en: "Remove"
 cli_setup.candidate_active:
   en: "In use"
-cli_setup.candidate_duplicate:
-  en: "That domain is already listed."
 cli_setup.candidate_latency:
   en: "%{ms} ms"
 cli_setup.candidate_unauthorized:
@@ -3278,3 +3218,14 @@ model_providers.deleted:
 
 model_providers.candidates:
   en: "Alternate domains"
+
+model_providers.bound_title:
+  en: "Endpoint"
+model_providers.bound_none:
+  en: "Managed gateway or the CLI's own"
+model_providers.bound_disabled:
+  en: "This endpoint is switched off, so nothing is routed through it."
+model_providers.bound_incomplete:
+  en: "This endpoint has no address or key yet, so nothing is routed through it."
+model_providers.manage:
+  en: "Manage endpoints…"

@@ -52,8 +52,6 @@ pub(super) struct CliSetupState {
     /// What the last removal could not do, kept on screen: a toast would be
     /// gone before the user finished reading it.
     pub env_fix_report: Option<String>,
-    /// Per-CLI endpoint form state for the Providers page.
-    pub page: super::providers_page::ProvidersPageState,
 }
 
 impl CliSetupState {
