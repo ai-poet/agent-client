@@ -66,18 +66,17 @@ pub fn windows_asset() -> DriverAsset {
     }
 }
 
-/// URLs to try for `asset`, in order: the app's own release bucket, which
-/// is reachable where GitHub is not, then GitHub itself. A bucket that does
-/// not carry the file fails fast with a 404 and the next URL is tried.
-pub fn download_urls(asset: &DriverAsset) -> Vec<String> {
-    vec![
-        format!(
-            "{}/cua-driver/{CUA_DRIVER_TAG}/{}",
-            brand::RELEASES_BASE_URL,
-            asset.name
-        ),
-        format!("{GITHUB_RELEASE_BASE}/{CUA_DRIVER_TAG}/{}", asset.name),
-    ]
+/// Where `asset` is fetched from: the upstream release, which is the only
+/// copy there is.
+///
+/// This used to try the app's own release bucket first, so a network that
+/// cannot reach GitHub had a second chance. Nothing was ever published
+/// there, which made that attempt a guaranteed round trip to a 404 and one
+/// more misleading line in every failure report. Mirroring the two archives
+/// under `cua-driver/{CUA_DRIVER_TAG}/` and putting the bucket back ahead of
+/// this is all it would take to restore it.
+pub fn download_url(asset: &DriverAsset) -> String {
+    format!("{GITHUB_RELEASE_BASE}/{CUA_DRIVER_TAG}/{}", asset.name)
 }
 
 /// Where an install currently is. Reported to the UI as it happens.
@@ -219,21 +218,13 @@ pub fn install_driver(mut report: impl FnMut(CuaStage)) -> InstallOutcome {
     let archive = staging.join(asset.name);
 
     let mut failures = Vec::new();
-    let mut source = None;
-    for url in download_urls(&asset) {
-        report(CuaStage::Downloading);
-        match node_install::download(&url, &archive, &mut |_| {}) {
-            Ok(()) => {
-                source = Some(url);
-                break;
-            }
-            Err(error) => failures.push(format!("{url}: {error:#}")),
-        }
-    }
-    let Some(source) = source else {
+    let source = download_url(&asset);
+    report(CuaStage::Downloading);
+    if let Err(error) = node_install::download(&source, &archive, &mut |_| {}) {
+        failures.push(format!("{source}: {error:#}"));
         let _ = std::fs::remove_dir_all(&staging);
         return failed(failures);
-    };
+    }
 
     report(CuaStage::Installing);
     let installed = install_archive(&archive, &staging, &install_dir, &asset);
@@ -361,18 +352,18 @@ mod tests {
     }
 
     #[test]
-    fn download_urls_try_the_app_bucket_before_github() {
-        let urls = download_urls(&WINDOWS_X86_64);
-        assert_eq!(urls.len(), 2);
-        assert!(urls[0].starts_with(brand::RELEASES_BASE_URL));
-        assert!(urls[0].ends_with(WINDOWS_X86_64.name));
-        assert_eq!(
-            urls[1],
-            format!(
-                "{GITHUB_RELEASE_BASE}/{CUA_DRIVER_TAG}/{}",
-                WINDOWS_X86_64.name
-            )
-        );
+    fn the_download_comes_from_the_pinned_upstream_release() {
+        for asset in [WINDOWS_X86_64, WINDOWS_ARM64] {
+            let url = download_url(&asset);
+            assert_eq!(
+                url,
+                format!("{GITHUB_RELEASE_BASE}/{CUA_DRIVER_TAG}/{}", asset.name)
+            );
+            // The tag and the file name both carry the version, and a
+            // mismatch between them would download the wrong archive and
+            // fail the checksum rather than saying so.
+            assert!(url.contains(CUA_DRIVER_VERSION), "{url}");
+        }
     }
 
     #[test]
