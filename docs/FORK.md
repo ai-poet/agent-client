@@ -147,6 +147,7 @@ lines below.
 | `src/app/settings.rs` (daemon banner) | the daemon status pill reads `daemon.phase_connecting` while the socket is down | 3 |
 | `src/app/tests.rs` (daemon banner) | toast de-dup, refresh gate, connection phase and banner stage tests | ~115 |
 | `locales/{app,ja,zh-CN}.yml` (daemon banner) | `daemon.restart`, `daemon.banner_reconnecting_detail`, `daemon.banner_unreachable_detail` | 3 keys |
+| `src/input.rs` | `TextInput::masked` + the `.masked(bool)` builder, `set_masked`/`is_masked`, and the `masked_display` free function the element layout calls instead of using `content` directly — one ASCII `*` per byte so every byte offset (selection, IME marking, hit-testing) still lands in the same place; non-ASCII is left visible on purpose. Used for API keys on the Providers and Agent pages | ~47 + tests |
 | `crates/waku-core/src/command_env.rs` (test) | `windows_environment_probe_captures_the_inherited_path_without_a_profile` waits 60 s instead of 10 s for the PowerShell probe (the ten-second ceiling flaked on the `windows-latest` runner under the parallel suite) | 1 |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
@@ -158,7 +159,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `src/app/providers_page.rs`, `src/app/confirm_dialog.rs`,
 `src/app/onboarding.rs`, `src/app/message_resend.rs`, `src/app/task_rows.rs`,
 `src/app/runtime_prewarm.rs`, `src/app/update_banner.rs`, `src/app/surface_bar.rs`,
-`src/app/daemon_banner.rs`,
+`src/app/daemon_banner.rs`, `src/app/agent_page.rs`, `src/app/native_agent.rs`,
 `crates/waku-core/src/driver/turn_diagnosis.rs`,
 `src/app/cloud_usage.rs`, `src/app/model_plaza.rs`, `src/app/cloud_pay.rs`,
 `src/app/announcements.rs`, `src/app/workflow.rs`, `assets/icons/{bell,circle-x,store,wallet}.svg`,

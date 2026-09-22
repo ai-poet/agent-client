@@ -8,6 +8,7 @@ old-code/
 cc-switch-main/
 codeg-main/
 claurst-main/
+zcode-main/
 
 .DS_Store
 *.log

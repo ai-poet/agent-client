@@ -958,6 +958,32 @@ reach. The form itself is the one every provider shares
 (`providers_page::render_endpoint_form_titled`), so a change to it reaches
 both pages.
 
+Each row in that list names the path its adapter will append —
+`/v1/messages`, `/v1/responses`, `/v1/chat/completions`
+(`agent_page::NativeEndpoint::request_path`, pinned by
+`each_route_names_the_path_its_adapter_requests`). Pointing a route somewhere
+of your own means that server has to implement *that* path, and a server
+answering `/v1/chat/completions` very often does not answer `/v1/responses`;
+the address box alone gave no way to tell which of the three a given endpoint
+was actually for.
+
+The form's key field is masked, entry included (`src/input.rs`, `masked(bool)`
+/ `set_masked`, with a reveal button beside a stored key). It masks at the one
+point where the display string is built: `masked_display` substitutes one
+ASCII `*` per byte, so every offset into the content — selection, IME marking,
+hit-testing — still addresses the same position in what is drawn, which is
+what lets a single call site cover the ten places that convert between the
+two. Non-ASCII content is left visible rather than masked, because a
+multi-byte character has no single-byte stand-in and shifting the offsets
+after it would put the caret in the wrong place; keys are ASCII in practice,
+and failing this way shows the text instead of corrupting the field.
+
+`key_revealed` (what the button says) and the input's own flag (what is drawn)
+have to move together, and the five places that reset the form used to move
+only the first — leaving a key on screen under a control claiming it was
+hidden. `providers_page::remask_endpoint_key` sets both and is called from
+`commit_profiles` and the save path.
+
 **Custom endpoints** — the built-in agent is not a CLI with one endpoint. It
 speaks three APIs and reaches each separately, so it holds three:
 `native_messages`, `native_responses` and `native_chat`
