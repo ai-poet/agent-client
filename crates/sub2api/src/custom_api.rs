@@ -20,7 +20,7 @@ use serde_json::Value;
 
 use crate::brand;
 use crate::global_config::atomic_write_private;
-use crate::providers::{ProviderEntry, ProviderRegistry, format_for_slot};
+use crate::providers::{ApiFormat, ProviderEntry, ProviderRegistry, format_for_slot};
 
 /// Key the legacy daemon-settings transport used; read once for migration.
 pub const LEGACY_SETTINGS_KEY: &str = "sub2apiCustomApi";
@@ -802,9 +802,29 @@ pub fn probe_request_with_timeout(
     api_key: &str,
     timeout_secs: u32,
 ) -> (String, crate::http::Request) {
+    probe_request_for_format(
+        if uses_anthropic_shape(provider_id) {
+            ApiFormat::Anthropic
+        } else {
+            ApiFormat::OpenAiChat
+        },
+        base_url,
+        api_key,
+        timeout_secs,
+    )
+}
+
+/// The same probe, described by the endpoint's own wire format rather than
+/// by which slot happens to use it — which is how the registry knows it.
+pub fn probe_request_for_format(
+    format: ApiFormat,
+    base_url: &str,
+    api_key: &str,
+    timeout_secs: u32,
+) -> (String, crate::http::Request) {
     let key = api_key.trim();
     let mut request = crate::http::Request::new().timeout_seconds(timeout_secs);
-    if uses_anthropic_shape(provider_id) {
+    if format.is_anthropic() {
         let url = format!(
             "{}/v1/models",
             crate::gateway::anthropic_base_url(base_url)
@@ -829,6 +849,12 @@ pub fn probe_endpoint(provider_id: &str, base_url: &str, api_key: &str) -> Probe
     probe_endpoint_with_timeout(provider_id, base_url, api_key, PROBE_TIMEOUT_SECS)
 }
 
+/// [`probe_endpoint`] for an endpoint described by its wire format.
+pub fn probe_endpoint_for_format(format: ApiFormat, base_url: &str, api_key: &str) -> ProbeResult {
+    let (url, request) = probe_request_for_format(format, base_url, api_key, PROBE_TIMEOUT_SECS);
+    send_probe(&url, request)
+}
+
 /// [`probe_endpoint`] with an explicit timeout.
 pub fn probe_endpoint_with_timeout(
     provider_id: &str,
@@ -837,8 +863,12 @@ pub fn probe_endpoint_with_timeout(
     timeout_secs: u32,
 ) -> ProbeResult {
     let (url, request) = probe_request_with_timeout(provider_id, base_url, api_key, timeout_secs);
+    send_probe(&url, request)
+}
+
+fn send_probe(url: &str, request: crate::http::Request) -> ProbeResult {
     let started = std::time::Instant::now();
-    match request.send(&url) {
+    match request.send(url) {
         Ok(response) => {
             let latency_ms = started.elapsed().as_millis();
             let verdict = match response.status {

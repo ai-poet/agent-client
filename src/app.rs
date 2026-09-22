@@ -231,6 +231,11 @@ enum SettingsPage {
     /// Fork addition: the built-in agent's behaviour, tools, MCP servers and
     /// permission rules — the engine's own settings file, editable in the app.
     Agent,
+    /// Fork addition: the endpoints themselves — a list beside one form.
+    /// Separate from Providers, which is about the CLIs: an endpoint is not
+    /// a property of the program that calls it, and one is often called by
+    /// several.
+    ModelProviders,
 }
 
 impl SettingsPage {
@@ -1471,6 +1476,8 @@ pub struct Waku {
     /// Fork addition: first-run checklist state.
     onboarding: onboarding::OnboardingViewState,
     agent_page: agent_page::AgentPageState,
+    /// Fork addition: the model-providers page's selection and detail fields.
+    model_providers: model_providers_page::ModelProvidersPageState,
     /// Fork addition: provider processes warmed while the user types.
     runtime_prewarms: runtime_prewarm::RuntimePrewarms,
     /// Fork addition: per-CLI custom endpoint fields on the Providers page —
@@ -1718,6 +1725,7 @@ mod drafts;
 mod file_search;
 mod image_preview;
 mod model_plaza;
+mod model_providers_page;
 mod workflow;
 mod agent_page;
 mod native_agent;
@@ -3170,6 +3178,7 @@ impl Waku {
                 cli_setup: cli_setup::CliSetupState::default(),
                 onboarding: onboarding::OnboardingViewState::default(),
                 agent_page: agent_page::AgentPageState::default(),
+                model_providers: model_providers_page::ModelProvidersPageState::default(),
                 runtime_prewarms: runtime_prewarm::RuntimePrewarms::default(),
                 model_picker_format: "messages".to_owned(),
                 custom_api_inputs,

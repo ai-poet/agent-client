@@ -489,6 +489,21 @@ mod tests {
         assert_eq!(format_for_slot("not-a-slot"), None);
     }
 
+    /// Two tables answer "is this Anthropic's shape": the slot list the
+    /// probe grew up with, and the registry's format. They must agree, or a
+    /// connectivity test would be sent in one shape and the real request in
+    /// the other.
+    #[test]
+    fn the_probe_shape_agrees_with_the_slot_format() {
+        for slot in crate::custom_api::CUSTOM_API_PROVIDERS {
+            assert_eq!(
+                crate::custom_api::uses_anthropic_shape(slot),
+                format_for_slot(slot).is_some_and(ApiFormat::is_anthropic),
+                "{slot}"
+            );
+        }
+    }
+
     /// The path is what makes a format checkable against somebody else's
     /// server, so each one keeps its own.
     #[test]

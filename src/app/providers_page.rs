@@ -16,6 +16,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use sub2api::custom_api::ProbeVerdict;
+
 use crate::ui::ActivationExt as _;
 
 use super::settings::{abbreviate_home_path, detection_checked_label};
@@ -56,7 +58,7 @@ pub(super) struct EndpointFormState {
 pub(super) struct EndpointTest {
     pub running: bool,
     pub result: Option<sub2api::custom_api::ProbeResult>,
-    generation: u64,
+    pub(super) generation: u64,
 }
 
 /// A candidate speed test's progress and results.
@@ -76,7 +78,7 @@ pub(super) struct ProvidersPageState {
 
 /// Which route a CLI is on, resolved from memory: the cached endpoints and
 /// the cloud account's credentials. No file is read on a frame.
-fn cloud_config(waku: &Waku) -> Option<sub2api::GatewayConfig> {
+pub(super) fn cloud_config(waku: &Waku) -> Option<sub2api::GatewayConfig> {
     let origin = waku.cloud_account.gateway_origin.origin();
     waku.cloud_account.credentials.as_ref().map(|credentials| {
         sub2api::gateway_config_with_origin(
@@ -87,7 +89,7 @@ fn cloud_config(waku: &Waku) -> Option<sub2api::GatewayConfig> {
     })
 }
 
-fn url_error_label(error: &sub2api::custom_api::UrlError) -> String {
+pub(super) fn url_error_label(error: &sub2api::custom_api::UrlError) -> String {
     use sub2api::custom_api::UrlError;
     let reason = match error {
         UrlError::Empty => tr!("cli_setup.custom_url_empty"),
@@ -181,11 +183,70 @@ pub(super) fn card_button(
 }
 
 /// A small label above a form field.
-fn field_label(theme: Theme, text: String) -> Div {
+pub(super) fn field_label(theme: Theme, text: String) -> Div {
     div()
         .text_size(sp(11.5))
         .text_color(theme.text_tertiary)
         .child(text)
+}
+
+/// How a connectivity probe went, in one line.
+///
+/// Shared with the model-providers page so the two surfaces cannot drift
+/// into describing the same failure differently — an unauthorized key and an
+/// unreachable host are different problems, and the wording is the only
+/// thing that says which.
+pub(super) fn probe_status_line(theme: Theme, test: &EndpointTest) -> Div {
+    if test.running {
+        return status_line(
+            theme,
+            "icons/loader-circle.svg",
+            theme.text_ghost,
+            tr!("cli_setup.custom_testing"),
+        );
+    }
+    let Some(result) = &test.result else {
+        return div();
+    };
+    match result.verdict {
+        ProbeVerdict::Ok if result.latency_ms < SLOW_ENDPOINT.as_millis() => status_line(
+            theme,
+            "icons/check.svg",
+            theme.success,
+            tr!("cli_setup.custom_connect_ok", ms = result.latency_ms),
+        ),
+        ProbeVerdict::Ok => status_line(
+            theme,
+            "icons/check.svg",
+            theme.warning,
+            tr!("cli_setup.custom_connect_slow", ms = result.latency_ms),
+        ),
+        ProbeVerdict::Unauthorized => status_line(
+            theme,
+            "icons/alert.svg",
+            theme.warning,
+            tr!(
+                "cli_setup.custom_test_unauthorized",
+                status = result.status.unwrap_or_default()
+            ),
+        ),
+        ProbeVerdict::HttpError => status_line(
+            theme,
+            "icons/alert.svg",
+            theme.warning,
+            tr!(
+                "cli_setup.custom_test_http",
+                status = result.status.unwrap_or_default(),
+                detail = result.detail.clone()
+            ),
+        ),
+        ProbeVerdict::Unreachable => status_line(
+            theme,
+            "icons/x.svg",
+            theme.danger,
+            tr!("cli_setup.custom_connect_failed", error = result.detail.clone()),
+        ),
+    }
 }
 
 /// A status line inside a card: icon, tinted text.
@@ -2512,8 +2573,6 @@ impl Waku {
         theme: Theme,
         cx: &mut Context<Self>,
     ) -> Div {
-        use sub2api::custom_api::ProbeVerdict;
-
         let Some((url_input, key_input, models_input)) = self.endpoint_inputs(provider_id) else {
             return div();
         };
@@ -2653,57 +2712,7 @@ impl Waku {
             section = section.child(status_line(theme, "icons/alert.svg", theme.warning, warning));
         }
         if let Some(test) = form.and_then(|form| form.test.as_ref()) {
-            let line = if test.running {
-                status_line(
-                    theme,
-                    "icons/loader-circle.svg",
-                    theme.text_ghost,
-                    tr!("cli_setup.custom_testing"),
-                )
-            } else if let Some(result) = &test.result {
-                match result.verdict {
-                    ProbeVerdict::Ok if result.latency_ms < SLOW_ENDPOINT.as_millis() => status_line(
-                        theme,
-                        "icons/check.svg",
-                        theme.success,
-                        tr!("cli_setup.custom_connect_ok", ms = result.latency_ms),
-                    ),
-                    ProbeVerdict::Ok => status_line(
-                        theme,
-                        "icons/check.svg",
-                        theme.warning,
-                        tr!("cli_setup.custom_connect_slow", ms = result.latency_ms),
-                    ),
-                    ProbeVerdict::Unauthorized => status_line(
-                        theme,
-                        "icons/alert.svg",
-                        theme.warning,
-                        tr!(
-                            "cli_setup.custom_test_unauthorized",
-                            status = result.status.unwrap_or_default()
-                        ),
-                    ),
-                    ProbeVerdict::HttpError => status_line(
-                        theme,
-                        "icons/alert.svg",
-                        theme.warning,
-                        tr!(
-                            "cli_setup.custom_test_http",
-                            status = result.status.unwrap_or_default(),
-                            detail = result.detail.clone()
-                        ),
-                    ),
-                    ProbeVerdict::Unreachable => status_line(
-                        theme,
-                        "icons/x.svg",
-                        theme.danger,
-                        tr!("cli_setup.custom_connect_failed", error = result.detail.clone()),
-                    ),
-                }
-            } else {
-                div()
-            };
-            section = section.child(line);
+            section = section.child(probe_status_line(theme, test));
         }
 
         let mut actions = div().mt(px(2.0)).flex().flex_wrap().items_center().gap(px(6.0));

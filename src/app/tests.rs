@@ -2003,6 +2003,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::General,
         SettingsPage::Appearance,
         SettingsPage::Providers,
+        SettingsPage::ModelProviders,
         SettingsPage::Agent,
         SettingsPage::Skills,
         SettingsPage::Usage,

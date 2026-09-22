@@ -19,7 +19,7 @@ const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 12] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 13] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -37,6 +37,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 12] = [
         "settings.providers",
         "icons/bot.svg",
         "settings.providers_keywords",
+    ),
+    (
+        SettingsPage::ModelProviders,
+        "settings.model_providers",
+        "icons/server.svg",
+        "settings.model_providers_keywords",
     ),
     (
         SettingsPage::Agent,
@@ -331,7 +337,7 @@ impl Waku {
         // The Skills page is a mail-style split that owns the whole content
         // column — no page title, no titlebar strip, no width cap, no card.
         // Window dragging stays with the sidebar's own titlebar region.
-        if page == SettingsPage::Skills {
+        if matches!(page, SettingsPage::Skills | SettingsPage::ModelProviders) {
             return div()
                 .flex_1()
                 .h_full()
@@ -349,10 +355,13 @@ impl Waku {
                         .child(controls)
                 }))
                 .child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .child(self.render_skills_settings(cx)),
+                    div().flex_1().min_h_0().child(
+                        if page == SettingsPage::ModelProviders {
+                            self.render_model_providers_page(cx)
+                        } else {
+                            self.render_skills_settings(cx)
+                        },
+                    ),
                 );
         }
         // The Monthly and Projects list views own their own scrolling, so
@@ -390,6 +399,7 @@ impl Waku {
                     .child(match page {
                         SettingsPage::General => tr!("settings.general"),
                         SettingsPage::Providers => tr!("settings.providers"),
+                        SettingsPage::ModelProviders => tr!("settings.model_providers"),
                         SettingsPage::Skills => tr!("settings.skills"),
                         SettingsPage::Usage => tr!("settings.usage"),
                         SettingsPage::Daemon => tr!("settings.daemon"),
@@ -405,6 +415,9 @@ impl Waku {
             .child(match page {
                 SettingsPage::General => self.render_general_settings(cx),
                 SettingsPage::Providers => self.render_providers_page(cx),
+                // Drawn by the split branch above; this arm keeps the match
+                // total.
+                SettingsPage::ModelProviders => self.render_model_providers_page(cx),
                 SettingsPage::Skills => self.render_skills_settings(cx),
                 SettingsPage::Usage => self.render_usage_settings(cx),
                 SettingsPage::Daemon => self.render_daemon_settings(cx),

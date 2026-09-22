@@ -3211,3 +3211,67 @@ agent.endpoints_description:
 
 agent.endpoint_path_hint:
   en: "Requests go to %{path} on the address below, so the service has to answer that path."
+
+settings.model_providers:
+  en: "Model providers"
+settings.model_providers_keywords:
+  en: "model providers endpoints api base url key relay format anthropic openai responses chat completions"
+
+model_providers.cloud_route:
+  en: "Managed gateway"
+model_providers.cloud_caption:
+  en: "Built in"
+model_providers.cloud_detail:
+  en: "The account you sign in to. It serves every wire format, and any route you have not pointed elsewhere uses it."
+model_providers.cloud_origin:
+  en: "Address"
+model_providers.cloud_status:
+  en: "Routing"
+model_providers.cloud_signed_out:
+  en: "Signed out"
+model_providers.cloud_on:
+  en: "On"
+model_providers.cloud_off:
+  en: "Off"
+model_providers.cloud_open:
+  en: "Open the account page"
+model_providers.custom_group:
+  en: "YOUR ENDPOINTS"
+model_providers.add:
+  en: "Add an endpoint"
+model_providers.unnamed:
+  en: "Untitled endpoint"
+model_providers.name_placeholder:
+  en: "A name for this endpoint"
+model_providers.format:
+  en: "API"
+model_providers.format_anthropic:
+  en: "Anthropic Messages"
+model_providers.format_responses:
+  en: "OpenAI Responses"
+model_providers.format_chat:
+  en: "OpenAI Chat Completions"
+model_providers.base_url:
+  en: "Address"
+model_providers.path_hint:
+  en: "Requests go to %{path} on this address, so the service has to answer that path."
+model_providers.api_key:
+  en: "API key"
+model_providers.models:
+  en: "Models"
+model_providers.models_empty:
+  en: "Nothing lists what a server of your own serves, so name the models here yourself."
+model_providers.model_placeholder:
+  en: "A model id, or several separated by commas"
+model_providers.model_add:
+  en: "Add"
+model_providers.model_remove:
+  en: "Remove"
+model_providers.delete:
+  en: "Delete"
+model_providers.delete_confirm:
+  en: "Delete %{name}?"
+model_providers.delete_confirm_bound:
+  en: "In use by: %{slots}. They will stop being routed through it."
+model_providers.deleted:
+  en: "Endpoint deleted"
