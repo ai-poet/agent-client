@@ -260,14 +260,29 @@ impl Waku {
             .flex_col()
             .border_r_1()
             .border_color(theme.sidebar_border)
-            .child(list)
+            // Adding is the first thing someone arriving here wants to do,
+            // and a list long enough to scroll would have pushed the control
+            // for it out of sight.
             .child(
                 div()
                     .flex_none()
                     .px(px(12.0))
                     .py(px(10.0))
-                    .border_t_1()
+                    .border_b_1()
                     .border_color(theme.sidebar_border)
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("settings.model_providers")),
+                    )
                     .child(card_button(
                         theme,
                         SharedString::from("model-provider-add"),
@@ -278,6 +293,7 @@ impl Waku {
                         |this, window, cx| this.add_provider(window, cx),
                     )),
             )
+            .child(list)
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -2995,7 +2995,7 @@ agent.mcp_empty:
 agent.mcp_trust_project:
   en: "Trust servers declared inside repositories"
 agent.mcp_trust_project_description:
-  en: "Off, a server defined in a project's own settings is not launched until you approve it. Leave it off for repositories you did not write."
+  en: "When off, servers declared by a repository's own configuration do not start until you approve them. Keep it off for repositories you do not maintain."
 agent.mcp_add:
   en: "Add server"
 agent.mcp_name:
@@ -3015,7 +3015,7 @@ agent.mcp_duplicate:
 agent.rules:
   en: "Standing approvals"
 agent.rules_description:
-  en: "Answering \"Always allow\" or \"Always deny\" in a session adds a rule here. Remove one to be asked again."
+  en: "Choosing “Always allow” or “Always deny” in a session adds a rule here. Deleting a rule restores the prompt."
 agent.rules_empty:
   en: "No rules yet."
 agent.rule_allow:
@@ -3127,7 +3127,7 @@ computer_use.driver_installed_toast:
 computer_use.stage_installing_driver:
   en: "Installing the driver"
 computer_use.remote_note:
-  en: "Computer Use drives the computer the daemon runs on, not this one. Install the driver there."
+  en: "Computer Use controls the machine the daemon runs on, not this one. Install the driver on that machine."
 
 skills.section_bundled:
   en: "Built in"
@@ -3147,10 +3147,10 @@ skills.install_failed:
 agent.endpoints_title:
   en: "Endpoints"
 agent.endpoints_description:
-  en: "The built-in agent speaks three APIs and reaches each one separately. Point the ones you want at a server of your own; the rest keep using the managed gateway."
+  en: "The built-in agent supports three API formats and routes each one independently. Assign a custom endpoint to any of them; the rest continue to use the managed gateway."
 
 agent.endpoint_path_hint:
-  en: "Requests go to %{path} on the address below, so the service has to answer that path."
+  en: "Requests are sent to %{path} on the address below. The endpoint must implement this path."
 
 settings.model_providers:
   en: "Model providers"
@@ -3162,29 +3162,29 @@ model_providers.cloud_route:
 model_providers.cloud_caption:
   en: "Built in"
 model_providers.cloud_detail:
-  en: "The account you sign in to. It serves every wire format, and any route you have not pointed elsewhere uses it."
+  en: "The gateway provided with your account. It supports all three API formats and serves every route that has not been assigned a custom endpoint."
 model_providers.cloud_origin:
   en: "Address"
 model_providers.cloud_status:
   en: "Routing"
 model_providers.cloud_signed_out:
-  en: "Signed out"
+  en: "Not signed in"
 model_providers.cloud_on:
-  en: "On"
+  en: "Enabled"
 model_providers.cloud_off:
-  en: "Off"
+  en: "Disabled"
 model_providers.cloud_open:
-  en: "Open the account page"
+  en: "Open account settings"
 model_providers.custom_group:
-  en: "YOUR ENDPOINTS"
+  en: "CUSTOM ENDPOINTS"
 model_providers.add:
   en: "Add an endpoint"
 model_providers.unnamed:
   en: "Untitled endpoint"
 model_providers.name_placeholder:
-  en: "A name for this endpoint"
+  en: "Endpoint name"
 model_providers.format:
-  en: "API"
+  en: "API format"
 model_providers.format_anthropic:
   en: "Anthropic Messages"
 model_providers.format_responses:
@@ -3194,15 +3194,15 @@ model_providers.format_chat:
 model_providers.base_url:
   en: "Address"
 model_providers.path_hint:
-  en: "Requests go to %{path} on this address, so the service has to answer that path."
+  en: "Requests are sent to %{path} on this address. The endpoint must implement this path."
 model_providers.api_key:
   en: "API key"
 model_providers.models:
   en: "Models"
 model_providers.models_empty:
-  en: "Nothing lists what a server of your own serves, so name the models here yourself."
+  en: "Models on a custom endpoint cannot be detected automatically. Add them here."
 model_providers.model_placeholder:
-  en: "A model id, or several separated by commas"
+  en: "Model ID, or several separated by commas"
 model_providers.model_add:
   en: "Add"
 model_providers.model_remove:
@@ -3212,7 +3212,7 @@ model_providers.delete:
 model_providers.delete_confirm:
   en: "Delete %{name}?"
 model_providers.delete_confirm_bound:
-  en: "In use by: %{slots}. They will stop being routed through it."
+  en: "Currently used by: %{slots}. Routing through this endpoint will stop."
 model_providers.deleted:
   en: "Endpoint deleted"
 
@@ -3222,27 +3222,27 @@ model_providers.candidates:
 model_providers.bound_title:
   en: "Endpoint"
 model_providers.bound_none:
-  en: "Managed gateway or the CLI's own"
+  en: "Managed gateway or the CLI's own configuration"
 model_providers.bound_disabled:
-  en: "This endpoint is switched off, so nothing is routed through it."
+  en: "This endpoint is disabled and is not currently used for routing."
 model_providers.bound_incomplete:
-  en: "This endpoint has no address or key yet, so nothing is routed through it."
+  en: "This endpoint has no address or API key and is not currently used for routing."
 model_providers.manage:
   en: "Manage endpoints…"
 
 model_providers.model_edit:
   en: "Edit"
 model_providers.model_display_name:
-  en: "Shown as"
+  en: "Display name"
 model_providers.model_display_name_placeholder:
-  en: "Leave empty to show the id"
+  en: "Leave empty to show the model ID"
 model_providers.model_context:
   en: "Context window"
 model_providers.model_context_placeholder:
-  en: "200000, 200k or 1M — leave empty if you do not know"
+  en: "For example 200000, 200k or 1M. Leave empty if unknown."
 model_providers.model_context_invalid:
-  en: "That is not a number of tokens. Write it as 200000, 200k or 1M."
+  en: "Not a valid token count. Use a format such as 200000, 200k or 1M."
 model_providers.model_efforts:
-  en: "Reasoning"
+  en: "Reasoning levels"
 model_providers.model_efforts_placeholder:
-  en: "low, medium, high — leave empty if it does not reason"
+  en: "For example low, medium, high. Leave empty if the model does not support reasoning."
