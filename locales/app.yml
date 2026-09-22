@@ -3221,8 +3221,6 @@ model_providers.candidates:
 
 model_providers.bound_title:
   en: "Endpoint"
-model_providers.bound_none:
-  en: "Managed gateway or the CLI's own configuration"
 model_providers.bound_disabled:
   en: "This endpoint is disabled and is not currently used for routing."
 model_providers.bound_incomplete:

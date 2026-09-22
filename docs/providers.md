@@ -967,6 +967,16 @@ serves this API. The description — address, key, wire format, models — lives
 on the model-providers page, because these three are not the only things that
 can use one.
 
+It is one control, not a control under a status line. The status line came
+off because for the built-in agent the binding *is* the route: a filled-in
+line always wins, so a row saying which route was in effect only ever
+restated what the picker already showed. What that row knew and the picker
+did not — whether an unbound line reaches the gateway or falls back to the
+engine's own settings — is now the picker's empty option, which names the
+outcome rather than the absence (`unbound_route_label`). A CLI card keeps
+its status row, because there the gateway outranks a binding and the two
+really can disagree.
+
 **The provider registry** — Settings → Model providers
 (`src/app/model_providers_page.rs` over `crates/sub2api/src/providers.rs`) is
 where an endpoint is described, once. A `ProviderEntry` carries its address,

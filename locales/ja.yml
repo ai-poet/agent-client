@@ -1645,7 +1645,6 @@ model_providers.deleted: "エンドポイントを削除しました"
 model_providers.candidates: "代替ドメイン"
 
 model_providers.bound_title: "エンドポイント"
-model_providers.bound_none: "マネージドゲートウェイまたは CLI 自身の設定"
 model_providers.bound_disabled: "このエンドポイントは無効のため、現在ルーティングに使用されていません。"
 model_providers.bound_incomplete: "アドレスまたは API キーが未入力のため、現在ルーティングに使用されていません。"
 model_providers.manage: "エンドポイントを管理…"

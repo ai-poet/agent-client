@@ -1593,7 +1593,6 @@ model_providers.deleted: "接口已删除"
 model_providers.candidates: "备用域名"
 
 model_providers.bound_title: "接口"
-model_providers.bound_none: "托管网关或 CLI 自身配置"
 model_providers.bound_disabled: "该接口已禁用，当前不参与路由。"
 model_providers.bound_incomplete: "该接口尚未填写地址或密钥，当前不参与路由。"
 model_providers.manage: "管理接口…"

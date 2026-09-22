@@ -1740,9 +1740,10 @@ impl Waku {
         let stored = self.custom_api_snapshot();
         let bound = stored.bound_provider(slot).cloned();
         let current = bound.as_ref().map(|entry| entry.id.clone());
+        let unbound = self.unbound_route_label(slot);
         let label = match &bound {
             Some(entry) => entry_label(entry),
-            None => tr!("model_providers.bound_none"),
+            None => unbound.clone(),
         };
         // A bound entry that cannot route is worth saying out loud: the slot
         // silently falls back, and "nothing changed" is a confusing answer
@@ -1757,10 +1758,7 @@ impl Waku {
             }
         });
 
-        let options: Vec<(Option<String>, String)> = std::iter::once((
-            None,
-            tr!("model_providers.bound_none"),
-        ))
+        let options: Vec<(Option<String>, String)> = std::iter::once((None, unbound))
         .chain(
             stored
                 .registry
@@ -1843,6 +1841,35 @@ impl Waku {
             );
         }
         section
+    }
+
+    /// What "bound to nothing" resolves to for this slot right now.
+    ///
+    /// The picker names the outcome rather than the absence, which is what
+    /// let the separate routing status row go: for the built-in agent the
+    /// binding decides the route outright, so a row above the picker saying
+    /// which route was in effect was the same fact written twice. A CLI card
+    /// keeps its row, because there the gateway can outrank a binding and
+    /// the two really can disagree.
+    fn unbound_route_label(&self, slot: &'static str) -> String {
+        use sub2api::global_config::RouteKind;
+        let cloud = super::providers_page::cloud_config(self);
+        // An empty configuration asks "what would route this with nothing
+        // bound", which is exactly what the empty option means.
+        let route = sub2api::global_config::active_route_kind(
+            slot,
+            cloud.as_ref(),
+            &sub2api::custom_api::CustomApiConfig::default(),
+        );
+        match route {
+            RouteKind::Cloud => tr!("providers.route_cloud"),
+            RouteKind::CliOwn if sub2api::custom_api::NATIVE_SLOTS.contains(&slot) => {
+                tr!("providers.route_engine_default")
+            }
+            // Unreachable with an empty configuration, and harmless if the
+            // precedence rules ever change: it still names a real route.
+            RouteKind::Custom | RouteKind::CliOwn => tr!("providers.route_cli_own"),
+        }
     }
 
     /// Point a slot at a registry entry, or at nothing.

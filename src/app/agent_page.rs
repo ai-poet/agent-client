@@ -445,17 +445,14 @@ impl Waku {
                             .flex()
                             .flex_col()
                             .gap(px(6.0))
-                            // Which route it is on, and which of the
-                            // described endpoints serves it. What an endpoint
-                            // *is* — address, key, models — belongs to the
+                            // Which of the described endpoints serves this
+                            // API — and nothing else. What an endpoint *is*
+                            // (address, key, models) belongs to the
                             // model-providers page, because these three are
-                            // not the only things that can use one.
-                            .child(self.render_route_section(
-                                crate::model::ProviderKind::Native,
-                                selected.id(),
-                                theme,
-                                cx,
-                            ))
+                            // not the only things that can use one; and the
+                            // route in effect is not a second fact here,
+                            // since for the built-in agent the binding is
+                            // what decides it.
                             .child(self.render_route_binding(selected.id(), theme, cx))
                             .child(
                                 div()
