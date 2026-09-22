@@ -66,7 +66,7 @@ pub(super) struct SpeedTest {
     pub running: bool,
     /// One entry per candidate, in the order they were listed.
     pub results: Vec<sub2api::speedtest::CandidateResult>,
-    generation: u64,
+    pub(super) generation: u64,
 }
 
 #[derive(Default)]
@@ -113,7 +113,7 @@ fn profile_label(profile: &sub2api::custom_api::EndpointProfile) -> String {
 
 /// Colour for a measured latency. Always rendered beside the number itself,
 /// never as the only signal.
-fn latency_color(theme: Theme, ms: u128) -> gpui::Hsla {
+pub(super) fn latency_color(theme: Theme, ms: u128) -> gpui::Hsla {
     use sub2api::speedtest::LatencyTier;
     match sub2api::speedtest::latency_tier(ms) {
         LatencyTier::Fast | LatencyTier::Ok => theme.success,

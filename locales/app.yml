@@ -3275,3 +3275,6 @@ model_providers.delete_confirm_bound:
   en: "In use by: %{slots}. They will stop being routed through it."
 model_providers.deleted:
   en: "Endpoint deleted"
+
+model_providers.candidates:
+  en: "Alternate domains"

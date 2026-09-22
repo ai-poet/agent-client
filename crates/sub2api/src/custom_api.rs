@@ -852,7 +852,7 @@ pub fn probe_endpoint(provider_id: &str, base_url: &str, api_key: &str) -> Probe
 /// [`probe_endpoint`] for an endpoint described by its wire format.
 pub fn probe_endpoint_for_format(format: ApiFormat, base_url: &str, api_key: &str) -> ProbeResult {
     let (url, request) = probe_request_for_format(format, base_url, api_key, PROBE_TIMEOUT_SECS);
-    send_probe(&url, request)
+    send_probe_request(&url, request)
 }
 
 /// [`probe_endpoint`] with an explicit timeout.
@@ -863,10 +863,10 @@ pub fn probe_endpoint_with_timeout(
     timeout_secs: u32,
 ) -> ProbeResult {
     let (url, request) = probe_request_with_timeout(provider_id, base_url, api_key, timeout_secs);
-    send_probe(&url, request)
+    send_probe_request(&url, request)
 }
 
-fn send_probe(url: &str, request: crate::http::Request) -> ProbeResult {
+pub fn send_probe_request(url: &str, request: crate::http::Request) -> ProbeResult {
     let started = std::time::Instant::now();
     match request.send(url) {
         Ok(response) => {

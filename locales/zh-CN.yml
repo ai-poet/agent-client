@@ -1619,3 +1619,5 @@ model_providers.delete: "删除"
 model_providers.delete_confirm: "删除 %{name}？"
 model_providers.delete_confirm_bound: "正在使用它的有：%{slots}。它们会停止走这条路由。"
 model_providers.deleted: "接口已删除"
+
+model_providers.candidates: "备用域名"

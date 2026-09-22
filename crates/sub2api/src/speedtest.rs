@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use serde_json::Value;
 
 use crate::custom_api::{
-    ProbeResult, ProbeVerdict, UrlError, normalize_base_url, probe_endpoint_with_timeout,
+    ProbeResult, ProbeVerdict, UrlError, normalize_base_url,
 };
 
 pub const MIN_TIMEOUT_SECS: u32 = 2;
@@ -90,6 +90,26 @@ pub fn test_candidates(
     api_key: &str,
     timeout_secs: u32,
 ) -> Vec<CandidateResult> {
+    test_candidates_for_format(
+        if crate::custom_api::uses_anthropic_shape(provider_id) {
+            crate::providers::ApiFormat::Anthropic
+        } else {
+            crate::providers::ApiFormat::OpenAiChat
+        },
+        urls,
+        api_key,
+        timeout_secs,
+    )
+}
+
+/// The same run, described by the endpoint's own wire format — which is how
+/// the registry knows it, and the only thing the probe's shape depends on.
+pub fn test_candidates_for_format(
+    format: crate::providers::ApiFormat,
+    urls: &[String],
+    api_key: &str,
+    timeout_secs: u32,
+) -> Vec<CandidateResult> {
     let timeout = clamp_timeout(Some(timeout_secs));
     let mut results: Vec<Option<CandidateResult>> = Vec::with_capacity(urls.len());
     let mut pending: Vec<(usize, String)> = Vec::new();
@@ -121,7 +141,7 @@ pub fn test_candidates(
                     let Some((index, url)) = pending.get(job) else {
                         break;
                     };
-                    let result = probe_twice(provider_id, url, api_key, timeout);
+                    let result = probe_twice(format, url, api_key, timeout);
                     let outcome = CandidateResult {
                         url: url.clone(),
                         result: Some(result),
@@ -143,12 +163,28 @@ pub fn test_candidates(
 /// Warm up, then measure. A host that does not answer the warm-up at all is
 /// reported from that attempt — a second wait on the same timeout would only
 /// double the time to the same verdict.
-fn probe_twice(provider_id: &str, url: &str, api_key: &str, timeout: u32) -> ProbeResult {
-    let warm_up = probe_endpoint_with_timeout(provider_id, url, api_key, timeout);
+fn probe_twice(
+    format: crate::providers::ApiFormat,
+    url: &str,
+    api_key: &str,
+    timeout: u32,
+) -> ProbeResult {
+    let warm_up = probe_for_format_with_timeout(format, url, api_key, timeout);
     if warm_up.verdict == ProbeVerdict::Unreachable {
         return warm_up;
     }
-    probe_endpoint_with_timeout(provider_id, url, api_key, timeout)
+    probe_for_format_with_timeout(format, url, api_key, timeout)
+}
+
+fn probe_for_format_with_timeout(
+    format: crate::providers::ApiFormat,
+    url: &str,
+    api_key: &str,
+    timeout: u32,
+) -> ProbeResult {
+    let (url, request) =
+        crate::custom_api::probe_request_for_format(format, url, api_key, timeout);
+    crate::custom_api::send_probe_request(&url, request)
 }
 
 /// Index of the fastest candidate that answered successfully.

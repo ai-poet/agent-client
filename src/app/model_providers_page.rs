@@ -42,6 +42,8 @@ pub(super) struct ProviderDetailInputs {
     pub key: Option<Entity<TextInput>>,
     /// The "add a model" field.
     pub model: Option<Entity<TextInput>>,
+    /// The "add an alternate domain" field.
+    pub candidate: Option<Entity<TextInput>>,
     /// Which entry the fields currently hold, so a re-render never re-seeds
     /// over something half-typed.
     pub loaded: Option<String>,
@@ -58,8 +60,14 @@ pub(super) struct ModelProvidersPageState {
     pub warning: Option<String>,
     pub saving: bool,
     pub test: Option<super::providers_page::EndpointTest>,
+    pub speed: Option<super::providers_page::SpeedTest>,
     test_generation: u64,
+    speed_generation: u64,
 }
+
+/// How long each candidate gets in a speed test. Short on purpose: this
+/// measures reachability from here, not how fast the model answers.
+const SPEEDTEST_TIMEOUT_SECS: u32 = 10;
 
 /// The label for a wire format, which is what the user picks by.
 fn format_label(format: ApiFormat) -> String {
@@ -473,7 +481,10 @@ impl Waku {
             );
         }
 
-        pane = pane.child(form).child(self.render_provider_models(entry, theme, cx));
+        pane = pane
+            .child(form)
+            .child(self.render_provider_candidates(entry, theme, cx))
+            .child(self.render_provider_models(entry, theme, cx));
 
         if let Some(error) = &self.model_providers.error {
             pane = pane.child(
@@ -692,6 +703,15 @@ impl Waku {
                         false,
                         cx,
                         |this, _, cx| this.add_provider_model(cx),
+                    ))
+                    .child(card_button(
+                        theme,
+                        SharedString::from("model-provider-model-fetch"),
+                        tr!("cli_setup.fetch_models"),
+                        false,
+                        self.model_providers.saving,
+                        cx,
+                        |this, _, cx| this.fetch_provider_models(cx),
                     )),
             );
         }
@@ -820,6 +840,9 @@ impl Waku {
         let model = cx.new(|cx| {
             TextInput::new(window, cx).placeholder(tr!("model_providers.model_placeholder"))
         });
+        let candidate = cx.new(|cx| {
+            TextInput::new(window, cx).placeholder(tr!("cli_setup.candidate_placeholder"))
+        });
         for input in [&name, &url, &key] {
             cx.subscribe(
                 input,
@@ -840,10 +863,20 @@ impl Waku {
             },
         )
         .detach();
+        cx.subscribe(
+            &candidate,
+            |this: &mut Self, _, event: &InputEvent, cx| match event {
+                InputEvent::Submit(_) => this.add_provider_candidate(cx),
+                InputEvent::Edited => cx.notify(),
+                _ => {}
+            },
+        )
+        .detach();
         self.model_providers.inputs.name = Some(name);
         self.model_providers.inputs.url = Some(url);
         self.model_providers.inputs.key = Some(key);
         self.model_providers.inputs.model = Some(model);
+        self.model_providers.inputs.candidate = Some(candidate);
     }
 
     /// Open a provider in the detail pane, seeding the fields from it.
@@ -883,11 +916,16 @@ impl Waku {
         if let Some(model) = inputs.3 {
             model.update(cx, |input, cx| input.clear(cx));
         }
+        if let Some(candidate) = self.model_providers.inputs.candidate.clone() {
+            candidate.update(cx, |input, cx| input.clear(cx));
+        }
         self.model_providers.selected = Some(ProviderSelection::Custom(id.clone()));
         self.model_providers.inputs.loaded = Some(id);
         self.model_providers.error = None;
         self.model_providers.warning = None;
         self.model_providers.test = None;
+        // Measurements belong to the endpoint that was measured.
+        self.model_providers.speed = None;
         cx.notify();
     }
 
@@ -1240,6 +1278,394 @@ fn slot_display_name(slot: &str) -> String {
         "opencode" => ProviderKind::OpenCode.display_name().to_owned(),
         "pi" => ProviderKind::Pi.display_name().to_owned(),
         other => other.to_owned(),
+    }
+}
+
+// --- alternate domains -----------------------------------------------------
+
+impl Waku {
+    /// The other origins that serve the same endpoint, and how fast each was.
+    ///
+    /// A relay often publishes several domains for one service; which is
+    /// quickest is a property of where you are sitting, not of the service,
+    /// so it has to be measured here rather than chosen once by whoever
+    /// wrote the address down.
+    fn render_provider_candidates(
+        &self,
+        entry: &ProviderEntry,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let id = entry.id.clone();
+        let running = self
+            .model_providers
+            .speed
+            .as_ref()
+            .is_some_and(|speed| speed.running);
+        let measured = self
+            .model_providers
+            .speed
+            .as_ref()
+            .filter(|speed| !speed.running)
+            .map(|speed| speed.results.clone())
+            .unwrap_or_default();
+
+        let mut section = div()
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(8.0))
+                    .child(field_label(theme, tr!("model_providers.candidates")))
+                    .child(card_button(
+                        theme,
+                        SharedString::from("model-provider-speedtest"),
+                        if running {
+                            tr!("cli_setup.speed_testing")
+                        } else {
+                            tr!("cli_setup.speed_test_all")
+                        },
+                        false,
+                        running || self.model_providers.saving,
+                        cx,
+                        |this, _, cx| this.run_provider_speed_test(cx),
+                    )),
+            );
+
+        for url in &entry.candidate_urls {
+            let in_use = &entry.base_url == url;
+            let latency = measured
+                .iter()
+                .find(|result| &result.url == url)
+                .and_then(|result| result.latency_ms());
+            let select_id = id.clone();
+            let select_url = url.clone();
+            let remove_id = id.clone();
+            let remove_url = url.clone();
+            section = section.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .px(px(10.0))
+                    .py(px(6.0))
+                    .rounded(px(7.0))
+                    .bg(if in_use { theme.surface } else { theme.inset })
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(12.0))
+                            .text_color(if in_use { theme.text } else { theme.text_secondary })
+                            .child(url.clone()),
+                    )
+                    .children(latency.map(|ms| {
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.0))
+                            .text_color(super::providers_page::latency_color(theme, ms))
+                            .child(tr!("cli_setup.candidate_latency", ms = ms))
+                    }))
+                    .when(!in_use, |row| {
+                        row.child(card_button(
+                            theme,
+                            SharedString::from(format!("candidate-use-{remove_id}-{remove_url}")),
+                            tr!("cli_setup.candidate_use"),
+                            false,
+                            false,
+                            cx,
+                            move |this, _, cx| {
+                                let url = select_url.clone();
+                                this.select_provider_url(select_id.clone(), url, cx);
+                            },
+                        ))
+                    })
+                    .when(entry.candidate_urls.len() > 1, |row| {
+                        row.child(card_button(
+                            theme,
+                            SharedString::from(format!("candidate-drop-{remove_id}-{remove_url}")),
+                            tr!("model_providers.model_remove"),
+                            false,
+                            false,
+                            cx,
+                            move |this, _, cx| {
+                                let url = remove_url.clone();
+                                this.remove_provider_url(remove_id.clone(), url, cx);
+                            },
+                        ))
+                    }),
+            );
+        }
+
+        if let Some(input) = self.model_providers.inputs.candidate.clone() {
+            section = section.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        TextField::new(SharedString::from("model-provider-candidate"), input)
+                            .flex_1(),
+                    )
+                    .child(card_button(
+                        theme,
+                        SharedString::from("model-provider-candidate-add"),
+                        tr!("model_providers.model_add"),
+                        false,
+                        false,
+                        cx,
+                        |this, _, cx| this.add_provider_candidate(cx),
+                    )),
+            );
+        }
+
+        let auto = entry.auto_select;
+        let auto_id = id.clone();
+        section.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(toggle_switch(
+                    SharedString::from("model-provider-auto-select"),
+                    auto,
+                    self.model_providers.saving,
+                    theme,
+                    cx,
+                    move |this, _, cx| {
+                        let id = auto_id.clone();
+                        this.commit_registry(
+                            None,
+                            move |registry| {
+                                if let Some(entry) = registry.get_mut(&id) {
+                                    entry.auto_select = !auto;
+                                }
+                            },
+                            cx,
+                        );
+                    },
+                ))
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("cli_setup.speed_auto_select")),
+                ),
+        )
+    }
+
+    fn select_provider_url(&mut self, id: String, url: String, cx: &mut Context<Self>) {
+        self.commit_registry(
+            None,
+            move |registry| {
+                if let Some(entry) = registry.get_mut(&id) {
+                    entry.select_url(&url);
+                }
+            },
+            cx,
+        );
+    }
+
+    fn remove_provider_url(&mut self, id: String, url: String, cx: &mut Context<Self>) {
+        self.commit_registry(
+            None,
+            move |registry| {
+                if let Some(entry) = registry.get_mut(&id) {
+                    entry.remove_candidate(&url);
+                }
+            },
+            cx,
+        );
+    }
+
+    fn add_provider_candidate(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.model_providers.inputs.loaded.clone() else {
+            return;
+        };
+        let Some(input) = self.model_providers.inputs.candidate.clone() else {
+            return;
+        };
+        let typed = input.read(cx).content().trim().to_owned();
+        if typed.is_empty() {
+            return;
+        }
+        let url = match sub2api::custom_api::normalize_base_url(&typed) {
+            Ok(url) => url,
+            Err(error) => {
+                self.model_providers.error = Some(super::providers_page::url_error_label(&error));
+                cx.notify();
+                return;
+            }
+        };
+        input.update(cx, |input, cx| input.clear(cx));
+        self.commit_registry(
+            None,
+            move |registry| {
+                if let Some(entry) = registry.get_mut(&id) {
+                    entry.add_candidate(&url);
+                    // The first one entered is also the one in use: an entry
+                    // with candidates but no address routes nothing.
+                    if entry.base_url.trim().is_empty() {
+                        entry.select_url(&url);
+                    }
+                }
+            },
+            cx,
+        );
+    }
+
+    /// Measure every candidate and, when asked to, move onto the fastest.
+    fn run_provider_speed_test(&mut self, cx: &mut Context<Self>) {
+        let Some(entry) = self.selected_provider() else {
+            return;
+        };
+        let urls = entry.candidate_urls.clone();
+        if urls.is_empty() {
+            return;
+        }
+        let api_key = self
+            .model_providers
+            .inputs
+            .key
+            .as_ref()
+            .map(|input| input.read(cx).content().trim().to_owned())
+            .unwrap_or_default();
+        self.model_providers.speed_generation += 1;
+        let generation = self.model_providers.speed_generation;
+        self.model_providers.error = None;
+        self.model_providers.speed = Some(super::providers_page::SpeedTest {
+            running: true,
+            results: Vec::new(),
+            generation,
+        });
+        cx.notify();
+
+        let format = entry.format;
+        let auto_select = entry.auto_select;
+        let id = entry.id.clone();
+        cx.spawn(async move |this, cx| {
+            let results = cx
+                .background_executor()
+                .spawn(async move {
+                    sub2api::speedtest::test_candidates_for_format(
+                        format,
+                        &urls,
+                        &api_key,
+                        SPEEDTEST_TIMEOUT_SECS,
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this
+                    .model_providers
+                    .speed
+                    .as_ref()
+                    .is_none_or(|speed| speed.generation != generation)
+                {
+                    return;
+                }
+                let fastest = sub2api::speedtest::fastest_ok(&results)
+                    .and_then(|index| results.get(index))
+                    .map(|result| result.url.clone());
+                this.model_providers.speed = Some(super::providers_page::SpeedTest {
+                    running: false,
+                    results,
+                    generation,
+                });
+                // Only when asked: silently repointing an endpoint the user
+                // typed would be a routing change they did not make.
+                if let (true, Some(url)) = (auto_select, fastest) {
+                    this.select_provider_url(id, url, cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Ask the endpoint what it serves, and list what it answers.
+    ///
+    /// Only an offer: what comes back is added to the list, and anything
+    /// already there keeps the context window and tiers it was given.
+    fn fetch_provider_models(&mut self, cx: &mut Context<Self>) {
+        let Some(entry) = self.selected_provider() else {
+            return;
+        };
+        let (Some(url_input), Some(key_input)) = (
+            self.model_providers.inputs.url.clone(),
+            self.model_providers.inputs.key.clone(),
+        ) else {
+            return;
+        };
+        let raw_url = url_input.read(cx).content().trim().to_owned();
+        let api_key = key_input.read(cx).content().trim().to_owned();
+        let base_url = match sub2api::custom_api::normalize_base_url(&raw_url) {
+            Ok(url) => url,
+            Err(error) => {
+                self.model_providers.error = Some(super::providers_page::url_error_label(&error));
+                cx.notify();
+                return;
+            }
+        };
+        self.model_providers.test_generation += 1;
+        let generation = self.model_providers.test_generation;
+        self.model_providers.error = None;
+        self.model_providers.test = Some(super::providers_page::EndpointTest {
+            running: true,
+            result: None,
+            generation,
+        });
+        cx.notify();
+
+        let format = entry.format;
+        let id = entry.id.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    sub2api::custom_api::probe_endpoint_for_format(format, &base_url, &api_key)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this
+                    .model_providers
+                    .test
+                    .as_ref()
+                    .is_none_or(|test| test.generation != generation)
+                {
+                    return;
+                }
+                let models = sub2api::speedtest::model_ids_from_body(&result.body);
+                this.model_providers.test = Some(super::providers_page::EndpointTest {
+                    running: false,
+                    result: Some(result),
+                    generation,
+                });
+                if models.is_empty() {
+                    this.show_toast(tr!("cli_setup.fetch_models_none"));
+                    cx.notify();
+                    return;
+                }
+                let found = models.len();
+                this.commit_registry(
+                    Some(tr!("cli_setup.fetch_models_done", count = found)),
+                    move |registry| {
+                        if let Some(entry) = registry.get_mut(&id) {
+                            for model in models {
+                                entry.add_model(ModelEntry::new(&model));
+                            }
+                        }
+                    },
+                    cx,
+                );
+            });
+        })
+        .detach();
     }
 }
 

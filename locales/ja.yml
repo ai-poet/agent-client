@@ -1671,3 +1671,5 @@ model_providers.delete: "削除"
 model_providers.delete_confirm: "%{name} を削除しますか？"
 model_providers.delete_confirm_bound: "使用中: %{slots}。これらはこの経路を通らなくなります。"
 model_providers.deleted: "エンドポイントを削除しました"
+
+model_providers.candidates: "代替ドメイン"
