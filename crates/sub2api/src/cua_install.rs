@@ -283,8 +283,24 @@ fn install_archive(
     install_dir: &Path,
     asset: &DriverAsset,
 ) -> Result<()> {
+    // The gap between the download landing and this running is where an
+    // antivirus scanner takes it: the archive carries an unsigned executable
+    // that injects input and captures the screen, which is what a remote
+    // access trojan looks like from a heuristic's point of view. Saying so
+    // here is the difference between an actionable message and a PowerShell
+    // stack trace about a path that does not exist.
+    if !archive.is_file() {
+        return Err(anyhow!(
+            "the downloaded archive is no longer at {} — an antivirus scanner most likely removed it; allow the file or install the driver manually",
+            archive.display()
+        ));
+    }
     let script = format!(
-        "$ErrorActionPreference='Stop'; \
+        // Windows PowerShell encodes a redirected stream with the console
+        // code page, so a localized error reaches us as mojibake unless the
+        // stream is told to be UTF-8 first.
+        "[Console]::OutputEncoding=[Text.Encoding]::UTF8; \
+         $ErrorActionPreference='Stop'; \
          $hash = (Get-FileHash -LiteralPath {zip} -Algorithm SHA256).Hash; \
          if ($hash -ne {sha}) {{ throw ('checksum mismatch: expected ' + {sha} + ' but the download hashed to ' + $hash) }}; \
          $extract = Join-Path {staging} 'extract'; \
@@ -394,6 +410,21 @@ mod tests {
             ..detection
         };
         assert!(!unknown.is_pinned_version());
+    }
+
+    /// The archive going missing between the download and the extract is
+    /// what an antivirus scanner does to this file, and it used to surface as
+    /// a PowerShell error about a path that does not exist. It is reported
+    /// before PowerShell is ever started.
+    #[test]
+    fn a_vanished_archive_is_named_rather_than_handed_to_powershell() {
+        let staging = std::env::temp_dir().join(format!("cua-install-test-{}", std::process::id()));
+        let missing = staging.join("cua-driver-rs-0.0.0-windows-x86_64.zip");
+        let error = install_archive(&missing, &staging, &staging.join("out"), &windows_asset())
+            .expect_err("a missing archive cannot be installed");
+        let text = format!("{error:#}");
+        assert!(text.contains("no longer at"), "{text}");
+        assert!(text.contains("antivirus"), "{text}");
     }
 
     #[test]

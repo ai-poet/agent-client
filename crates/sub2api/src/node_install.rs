@@ -312,7 +312,19 @@ pub(crate) fn download(
     if !outcome.success {
         return Err(anyhow!("download failed: {}", outcome.output));
     }
-    Ok(())
+    // A zero exit is not proof the bytes landed: a proxy can answer 200 with
+    // an empty body, and an antivirus scanner can remove an executable
+    // archive as it is written. Checking here is what lets the next mirror be
+    // tried, and what turns "the file is not there" into a sentence naming
+    // the download rather than a missing-path error two steps later.
+    match std::fs::metadata(destination) {
+        Ok(metadata) if metadata.len() > 0 => Ok(()),
+        Ok(_) => Err(anyhow!("{url} answered with an empty file")),
+        Err(error) => Err(anyhow!(
+            "{url} reported success but nothing landed at {}: {error}",
+            destination.display()
+        )),
+    }
 }
 
 #[cfg(target_os = "macos")]
