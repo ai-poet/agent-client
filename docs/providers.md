@@ -947,53 +947,91 @@ everything downstream tells them from a catalog model.
 **Where its settings live** — the built-in agent has no card on the Providers
 page. It has no binary to detect, no version to report and no installer to
 run, so a card there would carry only a name; everything configurable about
-it — endpoints, behaviour, tools, MCP servers, permission rules, and the
-enable switch — is on the Agent page instead. `render_provider_card` now
-asserts it never sees a built-in provider.
+it — behaviour, tools, MCP servers, permission rules, the enable switch and
+which endpoint serves each of its three APIs — is on the Agent page instead.
+`render_provider_card` now asserts it never sees a built-in provider.
 
-The three endpoints are a list beside one form rather than three stacked
-forms (`agent_page::render_agent_endpoints`): they are alternatives, only one
-is edited at a time, and stacking them pushed the rest of the page out of
-reach. The form itself is the one every provider shares
-(`providers_page::render_endpoint_form_titled`), so a change to it reaches
-both pages.
+The three endpoints are a list beside one detail pane
+(`agent_page::render_agent_endpoints`): they are alternatives, only one is
+looked at a time, and stacking them pushed the rest of the page out of reach.
+Each row names the path its adapter will append — `/v1/messages`,
+`/v1/responses`, `/v1/chat/completions` (`NativeEndpoint::request_path`,
+pinned by `each_route_names_the_path_its_adapter_requests`). Pointing a route
+somewhere of your own means that server has to implement *that* path, and a
+server answering `/v1/chat/completions` very often does not answer
+`/v1/responses`; an address alone gives no way to tell which of the three it
+is for.
 
-Each row in that list names the path its adapter will append —
-`/v1/messages`, `/v1/responses`, `/v1/chat/completions`
-(`agent_page::NativeEndpoint::request_path`, pinned by
-`each_route_names_the_path_its_adapter_requests`). Pointing a route somewhere
-of your own means that server has to implement *that* path, and a server
-answering `/v1/chat/completions` very often does not answer `/v1/responses`;
-the address box alone gave no way to tell which of the three a given endpoint
-was actually for.
+What the pane holds is a **choice**, not a form: which described endpoint
+serves this API. The description — address, key, wire format, models — lives
+on the model-providers page, because these three are not the only things that
+can use one.
 
-The form's key field is masked, entry included (`src/input.rs`, `masked(bool)`
-/ `set_masked`, with a reveal button beside a stored key). It masks at the one
-point where the display string is built: `masked_display` substitutes one
-ASCII `*` per byte, so every offset into the content — selection, IME marking,
-hit-testing — still addresses the same position in what is drawn, which is
-what lets a single call site cover the ten places that convert between the
-two. Non-ASCII content is left visible rather than masked, because a
-multi-byte character has no single-byte stand-in and shifting the offsets
+**The provider registry** — Settings → Model providers
+(`src/app/model_providers_page.rs` over `crates/sub2api/src/providers.rs`) is
+where an endpoint is described, once. A `ProviderEntry` carries its address,
+key, wire format, an on/off switch, the models it serves, and the alternate
+origins a speed test can measure; a slot — each CLI, and each of the built-in
+agent's three APIs — carries only a `provider_ref` pointing at one.
+
+That replaced a shape where every slot held its own copy of an address and a
+key, which made one relay serving three CLIs three things to keep in step and
+left the model list as bare strings with nowhere to record what those models
+can do. Stored files migrate on the first read
+(`CustomApiConfig::normalize` → `adopt_into_registry`): each configured slot
+becomes an entry, slots agreeing on address, key *and* format collapse into
+one, and the slot's own fields are left exactly where they were so a build
+that predates the registry still finds an address there. The migration is
+idempotent, so it runs on every load without accumulating anything.
+
+Resolution has one home, `CustomApiConfig::resolved_endpoint`, and
+`desired_routes` goes through it. A ref that no longer resolves — the entry
+deleted, switched off, or in another wire format — routes **nothing** rather
+than falling back to the copy the slot still carries: unbinding was a
+decision, and quietly using a stale address instead would be the opposite of
+what it asked for.
+
+The wire format is a property of the endpoint, not of the model reached
+through it, and it is the one thing a slot cannot choose: each CLI's config
+names a single adapter, so `format_for_slot` maps the eight slots onto the
+three formats and `slot_accepts` refuses a binding across them. The same
+format decides how a connectivity test is shaped
+(`probe_endpoint_for_format`) and how a speed test probes
+(`test_candidates_for_format`) — an Anthropic server wants `x-api-key` and a
+version header, and a bearer token gets a 401 that would read as a bad key.
+`the_probe_shape_agrees_with_the_slot_format` pins that table against the
+older `uses_anthropic_shape` one.
+
+Model metadata is user-declared and optional, because nothing lists what sits
+behind somebody else's address: a display name, a context window, and the
+reasoning tiers the endpoint accepts. The window has a default rather than a
+guess presented as a fact — 200 000 tokens, or a million when the id carries
+the `[1m]` suffix relays use for the long-context variant — and the tiers
+become the traits menu's real ladder for that model
+(`native_agent::native_custom_models`). A declared default naming a tier that
+is no longer offered falls back to the first, since starting a session on
+something the endpoint refuses is worse than starting on something ordinary.
+
+Keys are masked, entry included (`src/input.rs`, `masked(bool)` /
+`set_masked`, with a reveal button beside a stored key). Masking happens at
+the one point where the display string is built: `masked_display` substitutes
+one ASCII `*` per byte, so every offset into the content — selection, IME
+marking, hit-testing — still addresses the same position in what is drawn,
+which is what lets a single call site cover the ten places that convert
+between the two. Non-ASCII content is left visible rather than masked, because
+a multi-byte character has no single-byte stand-in and shifting the offsets
 after it would put the caret in the wrong place; keys are ASCII in practice,
-and failing this way shows the text instead of corrupting the field.
-
-`key_revealed` (what the button says) and the input's own flag (what is drawn)
-have to move together, and the five places that reset the form used to move
-only the first — leaving a key on screen under a control claiming it was
-hidden. `providers_page::remask_endpoint_key` sets both and is called from
-`commit_profiles` and the save path.
+and failing this way shows the text instead of corrupting the field. Opening
+an entry re-masks its key: revealing was a decision about one key, not a mode.
 
 **Custom endpoints** — the built-in agent is not a CLI with one endpoint. It
-speaks three APIs and reaches each separately, so it holds three:
+speaks three APIs and reaches each separately, so it holds three slots:
 `native_messages`, `native_responses` and `native_chat`
-(`crates/sub2api/src/custom_api.rs`), each with its own base URL, key and
-saved profiles, each probed in the wire shape it actually speaks
-(`uses_anthropic_shape`). A route left blank falls back to the managed
-gateway, so signing in and pointing one API somewhere of your own are not
-mutually exclusive. This is also the one place the usual precedence is
-inverted: for a CLI the gateway outranks a stored custom endpoint, but here
-a filled-in box is an instruction about that API and wins.
+(`crates/sub2api/src/custom_api.rs`), each bound independently. A route left
+unbound falls back to the managed gateway, so signing in and pointing one API
+somewhere of your own are not mutually exclusive. This is also the one place
+the usual precedence is inverted: for a CLI the gateway outranks a bound
+endpoint, but here a binding is an instruction about that API and wins.
 
 Two things make three keys actually work, and both are easy to undo by
 accident. The writer no longer pins the top-level `config.api_key`

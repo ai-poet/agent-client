@@ -111,7 +111,7 @@ lines below.
 | `src/app/composer.rs` | balance chip in the status strip | 3 |
 | `resources/AppIcon*.icns`, `resources/windows/AppIcon.ico`, `resources/linux/` | brand artwork and desktop entry name | assets |
 | `scripts/bundle-linux.sh` | installs the brand icon | 5 |
-| `src/app/settings.rs` | nav entries, title arms, dispatch arms, `SETTINGS_PAGES` length (7 upstream → 11); the Providers arm dispatches to the fork's `render_providers_page` (upstream's `render_providers_settings` kept under `#[allow(dead_code)]`); `render_provider_expanded_settings`, `toggle_provider_expanded`, `set_provider_enabled`, `detection_checked_label`, `abbreviate_home_path` widened to `pub(super)`; General page appends `render_update_check_card` after the automatic-updates toggle, outside the `updater_available` guard so the row shows in every build; `open_surface_action` registered beside `toggle_right_panel_action`; Workflow page: nav entry, title and dispatch arms, `fills_viewport` and wide `max_w` arms | ~38 |
+| `src/app/settings.rs` | nav entries, title arms, dispatch arms, `SETTINGS_PAGES` length (7 upstream → 13); the Providers arm dispatches to the fork's `render_providers_page` (upstream's `render_providers_settings` kept under `#[allow(dead_code)]`); `render_provider_expanded_settings`, `toggle_provider_expanded`, `set_provider_enabled`, `detection_checked_label`, `abbreviate_home_path` widened to `pub(super)`; General page appends `render_update_check_card` after the automatic-updates toggle, outside the `updater_available` guard so the row shows in every build; `open_surface_action` registered beside `toggle_right_panel_action`; Workflow page: nav entry, title and dispatch arms, `fills_viewport` and wide `max_w` arms | ~38 |
 | `src/app/right_panel.rs` | the panel header no longer renders `render_right_panel_toggle` beside the window controls (the fn stays, under `#[allow(dead_code)]`, so upstream edits to it merge cleanly) | 3 |
 | `src/app/command_palette.rs` | `PaletteAction::OpenSurface(SurfaceKind)`; one `commands.extend(..)` statement after the right-panel toggle command building the four surface commands; its dispatch arm | 3 |
 | `src/updater.rs` | Windows appcast URL built from the brand env var; `StagedUpdate.version` and `Updater::available_version()` on all three implementations, for the update banner and the settings row | ~25 |
@@ -147,6 +147,7 @@ lines below.
 | `src/app/settings.rs` (daemon banner) | the daemon status pill reads `daemon.phase_connecting` while the socket is down | 3 |
 | `src/app/tests.rs` (daemon banner) | toast de-dup, refresh gate, connection phase and banner stage tests | ~115 |
 | `locales/{app,ja,zh-CN}.yml` (daemon banner) | `daemon.restart`, `daemon.banner_reconnecting_detail`, `daemon.banner_unreachable_detail` | 3 keys |
+| `src/app/settings.rs` (model providers) | `SettingsPage::ModelProviders` nav entry, `SETTINGS_PAGES` length (12 → 13), title and dispatch arms, and the mail-style split branch it shares with Skills | 5 |
 | `src/input.rs` | `TextInput::masked` + the `.masked(bool)` builder, `set_masked`/`is_masked`, and the `masked_display` free function the element layout calls instead of using `content` directly — one ASCII `*` per byte so every byte offset (selection, IME marking, hit-testing) still lands in the same place; non-ASCII is left visible on purpose. Used for API keys on the Providers and Agent pages | ~47 + tests |
 | `crates/waku-core/src/command_env.rs` (test) | `windows_environment_probe_captures_the_inherited_path_without_a_profile` waits 60 s instead of 10 s for the PowerShell probe (the ten-second ceiling flaked on the `windows-latest` runner under the parallel suite) | 1 |
 
@@ -160,6 +161,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `src/app/onboarding.rs`, `src/app/message_resend.rs`, `src/app/task_rows.rs`,
 `src/app/runtime_prewarm.rs`, `src/app/update_banner.rs`, `src/app/surface_bar.rs`,
 `src/app/daemon_banner.rs`, `src/app/agent_page.rs`, `src/app/native_agent.rs`,
+`src/app/model_providers_page.rs`,
 `crates/waku-core/src/driver/turn_diagnosis.rs`,
 `src/app/cloud_usage.rs`, `src/app/model_plaza.rs`, `src/app/cloud_pay.rs`,
 `src/app/announcements.rs`, `src/app/workflow.rs`, `assets/icons/{bell,circle-x,store,wallet}.svg`,
@@ -201,12 +203,19 @@ endpoint. Pi's `auth.json` and `settings.json` are never read or written.
 
 What feeds `desired_routes` on each side:
 
-- **Custom endpoints** (`sub2api::custom_api`, `~/.cheaprouter/custom-api.json`)
-  are a list of named profiles per CLI with one active, each holding the
-  endpoint plus alternate domains for the same service. Only the active
-  profile routes. Files written before profiles existed are a single
-  endpoint object per CLI; `deserialize_slot` reads them as one profile named
-  "Custom" and the next save rewrites the file — keep that variant.
+- **Custom endpoints** (`sub2api::custom_api` +`sub2api::providers`,
+  `~/.cheaprouter/custom-api.json`) are a registry of described endpoints —
+  address, key, wire format, models, alternate domains — that each CLI slot
+  points at by `provider_ref`. `CustomApiConfig::resolved_endpoint` is the one
+  place that resolution happens, and `desired_routes` goes through it; a ref
+  that no longer resolves routes nothing rather than falling back to the copy
+  the slot still carries. Two older on-disk shapes still load and are migrated
+  on the first read: a single endpoint object per CLI (`deserialize_slot`
+  reads it as one profile named "Custom") and per-CLI profiles with no
+  registry (`adopt_into_registry` describes each configured slot once, merging
+  those that agree on address, key and format). Both migrations leave the
+  slot's own fields in place so an older build still finds an address —
+  keep all of that.
 - **The cloud gateway's own domain** (`sub2api::gateway_origin`,
   `~/.cheaprouter/gateway-origin.json`) chooses which of the service's
   origins goes into the CLI configs, via `gateway_config_with_origin`.
