@@ -1649,3 +1649,12 @@ model_providers.bound_none: "マネージドゲートウェイまたは CLI 自�
 model_providers.bound_disabled: "このエンドポイントはオフなので、経由していません。"
 model_providers.bound_incomplete: "アドレスかキーが未入力なので、経由していません。"
 model_providers.manage: "エンドポイントを管理…"
+
+model_providers.model_edit: "編集"
+model_providers.model_display_name: "表示名"
+model_providers.model_display_name_placeholder: "空欄なら id を表示します"
+model_providers.model_context: "コンテキスト長"
+model_providers.model_context_placeholder: "200000、200k、1M など。不明なら空欄"
+model_providers.model_context_invalid: "トークン数として読めません。200000、200k、1M のように書いてください。"
+model_providers.model_efforts: "推論レベル"
+model_providers.model_efforts_placeholder: "low, medium, high など。推論しないなら空欄"

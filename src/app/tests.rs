@@ -2277,11 +2277,14 @@ fn tab_cycle_walks_favorites_then_usable_providers_in_rail_order() {
         probe(ProviderKind::Cursor, false),
     ];
 
-    // Uninstalled providers never join the cycle; favorites leads.
+    // Uninstalled providers never join the cycle; favorites leads. The
+    // built-in agent is always there — it is compiled in, so it has no
+    // probe to wait for and no way to be missing.
     assert_eq!(
         visible_picker_tabs(&probes, &[], None),
         vec![
             ModelPickerTab::Favorites,
+            ModelPickerTab::Provider(ProviderKind::Native),
             ModelPickerTab::Provider(ProviderKind::Claude),
             ModelPickerTab::Provider(ProviderKind::Codex),
         ]
@@ -2292,6 +2295,7 @@ fn tab_cycle_walks_favorites_then_usable_providers_in_rail_order() {
         visible_picker_tabs(&probes, &[ProviderKind::Claude], None),
         vec![
             ModelPickerTab::Favorites,
+            ModelPickerTab::Provider(ProviderKind::Native),
             ModelPickerTab::Provider(ProviderKind::Codex),
         ]
     );
@@ -2330,28 +2334,31 @@ fn the_picker_is_empty_only_once_detection_has_answered() {
         probe(ProviderKind::Codex, false),
     ];
 
+    // The built-in agent is compiled in, so it is always one usable
+    // provider: emptiness now means every CLI is missing *and* the built-in
+    // agent has been switched off. These cases say so explicitly.
+    let off = [ProviderKind::Native, ProviderKind::Claude];
+
     // An unsettled first pass reads as "not known yet", so the composer keeps
     // showing the remembered model instead of flashing an empty state.
-    assert!(!picker_has_no_providers(&undetected, &[], None, false));
+    assert!(!picker_has_no_providers(&undetected, &off, None, false));
     // Once it settles, the same probes really do mean nothing is installed.
-    assert!(picker_has_no_providers(&undetected, &[], None, true));
+    assert!(picker_has_no_providers(&undetected, &off, None, true));
     // One detected CLI is enough to keep the picker populated...
-    assert!(!picker_has_no_providers(&detected, &[], None, true));
+    assert!(!picker_has_no_providers(&detected, &off[..1], None, true));
     // ...until it is switched off, which empties the picker just as surely as
     // never having been installed.
-    assert!(picker_has_no_providers(
-        &detected,
-        &[ProviderKind::Claude],
-        None,
-        true
-    ));
+    assert!(picker_has_no_providers(&detected, &off, None, true));
     // A session already locked to that provider keeps it, switched off or not.
     assert!(!picker_has_no_providers(
         &detected,
-        &[ProviderKind::Claude],
+        &off,
         Some(ProviderKind::Claude),
         true
     ));
+    // And the built-in agent alone keeps it populated, with nothing else
+    // installed at all.
+    assert!(!picker_has_no_providers(&undetected, &[], None, true));
 }
 
 #[test]

@@ -26,6 +26,7 @@
 //! Pure mapping plus the hooks that apply it; the fetch is the Plaza's.
 
 use sub2api::client::ModelCatalogItem;
+use sub2api::providers::ModelEntry;
 
 use super::*;
 // Explicit rather than relying on the glob: `ProviderModelOption` is used by
@@ -281,20 +282,36 @@ fn reasoning_effort_label(effort: &str) -> String {
 /// better route. An endpoint the user points somewhere else is the one case
 /// where this app cannot know what the models are called or what they speak,
 /// so it takes their word for it.
-pub(super) fn native_custom_models(models: &[String]) -> Vec<ProviderModel> {
+pub(super) fn native_custom_models(models: &[ModelEntry]) -> Vec<ProviderModel> {
     let mut seen = std::collections::HashSet::new();
     models
         .iter()
-        .map(|model| model.trim())
-        .filter(|model| !model.is_empty())
-        .filter(|model| seen.insert(model.to_string()))
+        .filter(|model| !model.id.trim().is_empty())
+        .filter(|model| seen.insert(model.id.trim().to_string()))
         .map(|model| {
-            let mut entry = ProviderModel::new(model, model);
+            let id = model.id.trim();
+            let mut entry = ProviderModel::new(id, model.display_name());
             entry.sub_provider = Some("custom".to_owned());
-            entry.service_tiers(
+            let entry = entry.service_tiers(
                 [ProviderModelOption::new("chat", crate::i18n::translate("model_option.wire_chat"))
                     .description(crate::i18n::translate("model_option.wire_chat_description"))],
                 "chat",
+            );
+            // The tiers the user declared, in the order they wrote them. An
+            // endpoint that does not reason declares none, and the traits
+            // menu then offers no ladder rather than one that is refused.
+            if model.reasoning_efforts.is_empty() {
+                return entry;
+            }
+            let default = model
+                .default_reasoning_effort()
+                .unwrap_or(&model.reasoning_efforts[0])
+                .to_owned();
+            entry.reasoning(
+                model.reasoning_efforts.iter().map(|effort| {
+                    ProviderModelOption::new(effort.clone(), reasoning_effort_label(effort))
+                }),
+                default,
             )
         })
         .collect()
@@ -306,7 +323,7 @@ pub(super) fn native_custom_models(models: &[String]) -> Vec<ProviderModel> {
 /// blanks between a sign-out and the next catalog.
 pub(super) fn native_probe_models(
     items: &[ModelCatalogItem],
-    custom: &[String],
+    custom: &[ModelEntry],
 ) -> Vec<ProviderModel> {
     let mut models = native_models_from_catalog(items);
     models.extend(native_custom_models(custom));
@@ -326,10 +343,14 @@ impl Waku {
     /// it, a daemon probe answering with the fallback list, a language
     /// change relabelling the reasoning ladder.
     pub(super) fn sync_native_models(&mut self) {
-        let custom = self
-            .custom_api_snapshot()
-            .get("native_chat")
-            .map(|endpoint| endpoint.models.clone())
+        // Through the binding, so the models the picker offers are the ones
+        // on the endpoint that actually routes — not a copy a slot happens
+        // to still carry.
+        let stored = self.custom_api_snapshot();
+        let custom = stored
+            .bound_provider("native_chat")
+            .filter(|entry| entry.is_routable())
+            .map(|entry| entry.models.clone())
             .unwrap_or_default();
         let models = native_probe_models(&self.model_plaza.items, &custom);
         if let Some(probe) = self
@@ -370,19 +391,24 @@ mod tests {
         }
     }
 
+    /// Every model the agent has an API for is offered, with the platform in
+    /// its id — and a model it has none for is left out rather than listed
+    /// and then failing on the wire. The rule moved here when the wire
+    /// format became a property of the model family; this test was written
+    /// before that and expected Gemini to be listed.
     #[test]
-    fn every_token_model_on_every_platform_is_offered_with_its_platform_in_the_id() {
+    fn a_model_is_offered_only_when_there_is_an_api_to_send_it_over() {
         let models = native_models_from_catalog(&[
             item("claude-sonnet-5", "anthropic"),
             item("gpt-5.6-sol", "openai"),
+            // Neither Messages nor Responses nor the user's own Chat
+            // Completions list: this product configures no Google route.
             item("gemini-3-pro", "gemini"),
         ]);
         let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
-        assert_eq!(
-            ids,
-            ["anthropic::claude-sonnet-5", "openai::gpt-5.6-sol", "gemini::gemini-3-pro"]
-        );
-        assert_eq!(models[2].sub_provider.as_deref(), Some("gemini"));
+        assert_eq!(ids, ["anthropic::claude-sonnet-5", "openai::gpt-5.6-sol"]);
+        assert_eq!(models[0].sub_provider.as_deref(), Some("anthropic"));
+        assert_eq!(models[1].sub_provider.as_deref(), Some("openai"));
     }
 
     /// The easy half: an operator priced it as pictures. This passed the
@@ -456,13 +482,51 @@ mod tests {
             "the catalog never fills Chat Completions"
         );
 
-        let declared = native_custom_models(&["my-model".into(), " ".into(), "my-model".into()]);
+        let declared = native_custom_models(&[
+            ModelEntry::new("my-model"),
+            ModelEntry::new(" "),
+            ModelEntry::new("my-model"),
+        ]);
         let ids: Vec<&str> = declared.iter().map(|model| model.id.as_str()).collect();
         assert_eq!(ids, ["my-model"], "blank and duplicate entries are dropped");
         assert_eq!(declared[0].default_service_tier.as_deref(), Some("chat"));
         // A bare id, with no platform ahead of a `::`: nothing on the
         // gateway claims it.
         assert!(!declared[0].id.contains("::"));
+        // Nothing declared, so no ladder is offered — one whose tiers the
+        // endpoint refuses is worse than none.
+        assert!(declared[0].reasoning_efforts.is_empty());
+        assert_eq!(declared[0].name, "my-model");
+    }
+
+    /// What the user typed about their own models is the only thing anything
+    /// knows about them, so it has to reach the picker intact.
+    #[test]
+    fn a_declared_name_and_reasoning_ladder_reach_the_picker() {
+        let declared = native_custom_models(&[ModelEntry {
+            name: "My relay's Sonnet".to_owned(),
+            reasoning_efforts: vec!["low".to_owned(), "high".to_owned()],
+            default_reasoning: Some("high".to_owned()),
+            ..ModelEntry::new("relay-sonnet")
+        }]);
+        assert_eq!(declared[0].id, "relay-sonnet");
+        assert_eq!(declared[0].name, "My relay's Sonnet");
+        let tiers: Vec<&str> = declared[0]
+            .reasoning_efforts
+            .iter()
+            .map(|option| option.id.as_str())
+            .collect();
+        assert_eq!(tiers, ["low", "high"]);
+        assert_eq!(declared[0].default_reasoning_effort.as_deref(), Some("high"));
+
+        // A default naming a tier that is not offered falls back to the
+        // first, rather than starting the session on something refused.
+        let stray = native_custom_models(&[ModelEntry {
+            reasoning_efforts: vec!["low".to_owned()],
+            default_reasoning: Some("max".to_owned()),
+            ..ModelEntry::new("relay-sonnet")
+        }]);
+        assert_eq!(stray[0].default_reasoning_effort.as_deref(), Some("low"));
     }
 
     #[test]
@@ -536,7 +600,7 @@ mod tests {
         // Signed out of the managed service but pointed at an endpoint of
         // their own: the picker lists what they declared, not the built-in
         // Anthropic list they cannot reach.
-        let models = native_probe_models(&[], &["my-model".into()]);
+        let models = native_probe_models(&[], &[ModelEntry::new("my-model")]);
         let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
         assert_eq!(ids, ["my-model"]);
     }

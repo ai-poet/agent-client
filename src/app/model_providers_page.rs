@@ -44,6 +44,10 @@ pub(super) struct ProviderDetailInputs {
     pub model: Option<Entity<TextInput>>,
     /// The "add an alternate domain" field.
     pub candidate: Option<Entity<TextInput>>,
+    /// The inline model editor's three fields.
+    pub model_name: Option<Entity<TextInput>>,
+    pub model_window: Option<Entity<TextInput>>,
+    pub model_efforts: Option<Entity<TextInput>>,
     /// Which entry the fields currently hold, so a re-render never re-seeds
     /// over something half-typed.
     pub loaded: Option<String>,
@@ -61,6 +65,8 @@ pub(super) struct ModelProvidersPageState {
     pub saving: bool,
     pub test: Option<super::providers_page::EndpointTest>,
     pub speed: Option<super::providers_page::SpeedTest>,
+    /// Which model's metadata is open for editing, if any.
+    pub editing_model: Option<String>,
     test_generation: u64,
     speed_generation: u64,
 }
@@ -643,6 +649,11 @@ impl Waku {
         for model in &entry.models {
             let model_id = model.id.clone();
             let entry_id = id.clone();
+            if self.model_providers.editing_model.as_deref() == Some(model_id.as_str()) {
+                section = section.child(self.render_model_editor(theme, cx));
+                continue;
+            }
+            let edit_id = model_id.clone();
             section = section.child(
                 div()
                     .flex()
@@ -672,6 +683,17 @@ impl Waku {
                             .text_color(theme.text_tertiary)
                             .child(context_badge(model.context_window_or_default())),
                     )
+                    .child(card_button(
+                        theme,
+                        SharedString::from(format!("model-edit-{entry_id}-{model_id}")),
+                        tr!("model_providers.model_edit"),
+                        false,
+                        false,
+                        cx,
+                        move |this, window, cx| {
+                            this.begin_edit_model(edit_id.clone(), window, cx)
+                        },
+                    ))
                     .child(card_button(
                         theme,
                         SharedString::from(format!("model-remove-{entry_id}-{model_id}")),
@@ -926,6 +948,7 @@ impl Waku {
         self.model_providers.test = None;
         // Measurements belong to the endpoint that was measured.
         self.model_providers.speed = None;
+        self.model_providers.editing_model = None;
         cx.notify();
     }
 
@@ -1849,6 +1872,255 @@ impl Waku {
         })
         .detach();
     }
+}
+
+// --- editing one model -----------------------------------------------------
+
+impl Waku {
+    /// The inline editor for one model's declared metadata.
+    ///
+    /// There is nowhere else this can come from — no request tells us the
+    /// context window of a model behind somebody else's relay — so the form
+    /// is the only way the picker learns anything about it beyond its name.
+    fn render_model_editor(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
+        let mut editor = div()
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .px(px(10.0))
+            .py(px(8.0))
+            .rounded(px(7.0))
+            .bg(theme.inset);
+        if let Some(input) = self.model_providers.inputs.model_name.clone() {
+            editor = editor.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(div().w(px(112.0)).flex_none().child(field_label(
+                        theme,
+                        tr!("model_providers.model_display_name"),
+                    )))
+                    .child(
+                        TextField::new(SharedString::from("model-edit-name"), input).flex_1(),
+                    ),
+            );
+        }
+        if let Some(input) = self.model_providers.inputs.model_window.clone() {
+            editor = editor.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(div().w(px(112.0)).flex_none().child(field_label(
+                        theme,
+                        tr!("model_providers.model_context"),
+                    )))
+                    .child(
+                        TextField::new(SharedString::from("model-edit-window"), input).flex_1(),
+                    ),
+            );
+        }
+        if let Some(input) = self.model_providers.inputs.model_efforts.clone() {
+            editor = editor.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(div().w(px(112.0)).flex_none().child(field_label(
+                        theme,
+                        tr!("model_providers.model_efforts"),
+                    )))
+                    .child(
+                        TextField::new(SharedString::from("model-edit-efforts"), input).flex_1(),
+                    ),
+            );
+        }
+        editor.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(card_button(
+                    theme,
+                    SharedString::from("model-edit-save"),
+                    tr!("cli_setup.custom_save"),
+                    true,
+                    self.model_providers.saving,
+                    cx,
+                    |this, _, cx| this.commit_model_edit(cx),
+                ))
+                .child(card_button(
+                    theme,
+                    SharedString::from("model-edit-cancel"),
+                    tr!("cli_setup.custom_cancel"),
+                    false,
+                    false,
+                    cx,
+                    |this, _, cx| {
+                        this.model_providers.editing_model = None;
+                        cx.notify();
+                    },
+                )),
+        )
+    }
+
+    /// Build (once) the model editor's fields and seed them from the model.
+    fn begin_edit_model(
+        &mut self,
+        model_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(entry) = self.selected_provider() else {
+            return;
+        };
+        let Some(model) = entry.model(&model_id).cloned() else {
+            return;
+        };
+        if self.model_providers.inputs.model_name.is_none() {
+            let name = cx.new(|cx| {
+                TextInput::new(window, cx)
+                    .select_all_on_focus_click()
+                    .placeholder(tr!("model_providers.model_display_name_placeholder"))
+            });
+            let context = cx.new(|cx| {
+                TextInput::new(window, cx)
+                    .select_all_on_focus_click()
+                    .placeholder(tr!("model_providers.model_context_placeholder"))
+            });
+            let efforts = cx.new(|cx| {
+                TextInput::new(window, cx)
+                    .select_all_on_focus_click()
+                    .placeholder(tr!("model_providers.model_efforts_placeholder"))
+            });
+            for input in [&name, &context, &efforts] {
+                cx.subscribe(
+                    input,
+                    |this: &mut Self, _, event: &InputEvent, cx| match event {
+                        InputEvent::Submit(_) => this.commit_model_edit(cx),
+                        InputEvent::Edited => cx.notify(),
+                        _ => {}
+                    },
+                )
+                .detach();
+            }
+            self.model_providers.inputs.model_name = Some(name);
+            self.model_providers.inputs.model_window = Some(context);
+            self.model_providers.inputs.model_efforts = Some(efforts);
+        }
+        let inputs = (
+            self.model_providers.inputs.model_name.clone(),
+            self.model_providers.inputs.model_window.clone(),
+            self.model_providers.inputs.model_efforts.clone(),
+        );
+        if let Some(input) = inputs.0 {
+            input.update(cx, |input, cx| input.set_content(model.name.clone(), cx));
+        }
+        if let Some(input) = inputs.1 {
+            // Blank rather than the assumed default, so saving without
+            // typing leaves it undeclared instead of freezing the guess in.
+            let text = model
+                .context_window
+                .map(|window| window.to_string())
+                .unwrap_or_default();
+            input.update(cx, |input, cx| input.set_content(text, cx));
+        }
+        if let Some(input) = inputs.2 {
+            let text = model.reasoning_efforts.join(", ");
+            input.update(cx, |input, cx| input.set_content(text, cx));
+        }
+        self.model_providers.editing_model = Some(model_id);
+        self.model_providers.error = None;
+        cx.notify();
+    }
+
+    fn commit_model_edit(&mut self, cx: &mut Context<Self>) {
+        let (Some(entry_id), Some(model_id)) = (
+            self.model_providers.inputs.loaded.clone(),
+            self.model_providers.editing_model.clone(),
+        ) else {
+            return;
+        };
+        let read = |input: &Option<Entity<TextInput>>| {
+            input
+                .as_ref()
+                .map(|input| input.read(cx).content().trim().to_owned())
+                .unwrap_or_default()
+        };
+        let name = read(&self.model_providers.inputs.model_name);
+        let window_text = read(&self.model_providers.inputs.model_window);
+        let efforts_text = read(&self.model_providers.inputs.model_efforts);
+
+        // An unparseable window is refused rather than silently dropped: the
+        // number is the only thing that tells two models apart in the list.
+        let context_window = if window_text.is_empty() {
+            None
+        } else {
+            match parse_context_window(&window_text) {
+                Some(window) => Some(window),
+                None => {
+                    self.model_providers.error = Some(tr!("model_providers.model_context_invalid"));
+                    cx.notify();
+                    return;
+                }
+            }
+        };
+        let efforts: Vec<String> = efforts_text
+            .split([',', '\u{3001}', ' ', '\n'])
+            .map(str::trim)
+            .filter(|effort| !effort.is_empty())
+            .map(str::to_owned)
+            .collect();
+
+        self.model_providers.editing_model = None;
+        self.commit_registry(
+            None,
+            move |registry| {
+                if let Some(model) = registry
+                    .get_mut(&entry_id)
+                    .and_then(|entry| entry.model_mut(&model_id))
+                {
+                    model.name = name;
+                    model.context_window = context_window;
+                    model.reasoning_efforts = efforts;
+                    // A default that named a tier the user just removed
+                    // would put the picker on something the endpoint never
+                    // accepts.
+                    if model
+                        .default_reasoning
+                        .as_deref()
+                        .is_some_and(|effort| !model.reasoning_efforts.iter().any(|k| k == effort))
+                    {
+                        model.default_reasoning = None;
+                    }
+                }
+            },
+            cx,
+        );
+    }
+}
+
+/// Read a context window written the way people say it: `200000`, `200k`,
+/// `1M`. Returns `None` for anything else, which the caller reports rather
+/// than guessing at.
+fn parse_context_window(text: &str) -> Option<u32> {
+    let text = text.trim().replace([',', '_'], "");
+    let lowered = text.to_ascii_lowercase();
+    let (digits, scale) = match lowered.strip_suffix('m') {
+        Some(rest) => (rest, 1_000_000u64),
+        None => match lowered.strip_suffix('k') {
+            Some(rest) => (rest, 1_000u64),
+            None => (lowered.as_str(), 1u64),
+        },
+    };
+    let digits = digits.trim();
+    let value: f64 = digits.parse().ok()?;
+    if value <= 0.0 {
+        return None;
+    }
+    let tokens = (value * scale as f64).round();
+    (tokens <= u32::MAX as f64).then_some(tokens as u32)
 }
 
 #[cfg(test)]

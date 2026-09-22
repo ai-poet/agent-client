@@ -3229,3 +3229,20 @@ model_providers.bound_incomplete:
   en: "This endpoint has no address or key yet, so nothing is routed through it."
 model_providers.manage:
   en: "Manage endpoints…"
+
+model_providers.model_edit:
+  en: "Edit"
+model_providers.model_display_name:
+  en: "Shown as"
+model_providers.model_display_name_placeholder:
+  en: "Leave empty to show the id"
+model_providers.model_context:
+  en: "Context window"
+model_providers.model_context_placeholder:
+  en: "200000, 200k or 1M — leave empty if you do not know"
+model_providers.model_context_invalid:
+  en: "That is not a number of tokens. Write it as 200000, 200k or 1M."
+model_providers.model_efforts:
+  en: "Reasoning"
+model_providers.model_efforts_placeholder:
+  en: "low, medium, high — leave empty if it does not reason"

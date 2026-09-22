@@ -108,10 +108,6 @@ pub struct ModelEntry {
     /// [`ModelEntry::context_window_or_default`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u32>,
-    /// Tokens the model may produce in one reply. `None` = not declared, and
-    /// the request omits the cap rather than inventing one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_output: Option<u32>,
     /// The reasoning efforts this model accepts, in the order to offer them
     /// (`["off", "low", "high"]`). Empty = the model is not a reasoning
     /// model, and the traits menu shows no tier for it.
@@ -174,9 +170,6 @@ impl ModelEntry {
         self.reasoning_efforts.retain(|effort| !effort.is_empty());
         if self.context_window == Some(0) {
             self.context_window = None;
-        }
-        if self.max_output == Some(0) {
-            self.max_output = None;
         }
     }
 }
