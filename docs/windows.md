@@ -94,10 +94,16 @@ on `PATH`, or at the path in `CLAUDE_CODE_GIT_BASH_PATH` (Claude Code's own
 variable, so one setting serves both). The WSL launcher in `System32` is never
 used: it runs inside a Linux VM that cannot see the session's Windows paths.
 
-Without Git for Windows the tool falls back to `cmd /C`, and both the tool's
-description and the system prompt say so, so the model writes cmd syntax
-instead of bash that would fail. The working directory does not persist in
-that mode. Installing Git for Windows and restarting the app is the fix.
+Without Git for Windows the tool runs **PowerShell** instead — PowerShell 7
+when it is installed, else the Windows PowerShell 5.1 every supported Windows
+ships — never `cmd.exe`, which no model writes well. The tool's description and
+the system prompt both say so, down to whether `&&` chains commands (7 only),
+so the model writes PowerShell rather than bash that would fail. The working
+directory persists here too, through the same wrapper; the script travels as
+`-EncodedCommand` so no quote in it is re-parsed by the Windows command line,
+and plan mode judges a command with a PowerShell read-only check
+(`is_read_only_ps_command`) rather than the bash one. Installing Git for
+Windows and restarting the app switches the tool to bash.
 
 Output is read from both pipes at once and decoded line by line — UTF-8, or the
 console code page for a line that is not (what `cmd`, `where` or `ipconfig`

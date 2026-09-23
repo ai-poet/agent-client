@@ -396,13 +396,19 @@ fn build_env_info_section(working_dir: Option<&str>) -> String {
              Use the PowerShell tool for Windows administration (services, registry, .NET)."
                 .to_string()
         }
-        crate::shell::BashToolShell::Cmd => {
-            "Shell: cmd.exe. No bash is installed, so the Bash tool runs commands with \
-             `cmd /C`: use cmd syntax (dir, type, findstr, 2>NUL, && between commands), not \
-             Unix syntax, and prefer the Read, Glob and Grep tools for files. The working \
-             directory does not persist between commands. For anything more, use the \
-             PowerShell tool."
-                .to_string()
+        crate::shell::BashToolShell::PowerShell => {
+            let (name, chaining) = if crate::shell::is_powershell_7() {
+                ("PowerShell 7", "`;`, or `&&` / `||`")
+            } else {
+                ("Windows PowerShell 5.1", "`;` - not `&&` or `||`, which 5.1 rejects")
+            };
+            format!(
+                "Shell: {name}. Git Bash is not installed, so the Bash tool runs commands in \
+                 PowerShell: write PowerShell, not bash - Get-ChildItem, Get-Content -Tail, \
+                 Select-String, $env:NAME, 2>$null - and chain commands with {chaining}. \
+                 The working directory persists between calls. Native programs (git, npm, \
+                 cargo) run as usual. Prefer the Read, Glob and Grep tools for files."
+            )
         }
     };
 

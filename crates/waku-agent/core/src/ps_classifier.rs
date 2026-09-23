@@ -605,3 +605,139 @@ Write-Host "Done"
         assert!(!ps_is_auto_approvable("Get-Process", &PermissionMode::Default));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Read-only check (fork addition)
+// ---------------------------------------------------------------------------
+
+/// Verbs whose cmdlets only read, query, or reshape what they were given.
+const READ_VERBS: &[&str] = &[
+    "get", "select", "where", "measure", "sort", "group", "test", "resolve", "split",
+    "join", "compare", "format", "find", "search", "convertto", "convertfrom",
+];
+
+/// Cmdlets outside those verbs that write nothing but the console.
+const READ_CMDLETS: &[&str] = &[
+    "out-string", "out-host", "out-null", "write-output", "write-host", "write-verbose",
+    "write-information",
+];
+
+/// Aliases for read-only cmdlets that a command may start with.
+const READ_ALIASES: &[&str] = &[
+    "ls", "dir", "gci", "cat", "type", "gc", "pwd", "gl", "echo", "write", "sls", "select",
+    "where", "?", "sort", "measure", "group", "fl", "ft", "fw", "gi", "gp", "gm", "gcm",
+];
+
+/// Whether a PowerShell command provably only reads.
+///
+/// Fork addition (Waku). On a Windows machine without Git Bash the Bash tool
+/// runs PowerShell, and plan mode lets a shell command through only when it
+/// applies nothing — upstream's check understands bash alone, so every
+/// exploratory `Get-ChildItem` would have been refused. [`classify_ps_command`]
+/// cannot stand in for it: its `Low` is the fall-through for anything it does
+/// not recognise, `Set-Content` included.
+///
+/// Deliberately narrow — a `false` only means "ask". Every `Verb-Noun` token
+/// anywhere in the text (script blocks included) must be a reading one; each
+/// pipeline or statement segment must start with a reading cmdlet, alias,
+/// variable, or a command the bash check proves read-only (`git log`); and
+/// redirection, subexpressions, the call and dot-source operators and .NET
+/// method calls are refused outright, since any of them can run anything.
+pub fn is_read_only_ps_command(command: &str) -> bool {
+    static METHOD_CALL: once_cell::sync::Lazy<regex::Regex> =
+        once_cell::sync::Lazy::new(|| regex::Regex::new(r"\.\s*[A-Za-z_]\w*\s*\(").unwrap());
+    static CMDLET: once_cell::sync::Lazy<regex::Regex> =
+        once_cell::sync::Lazy::new(|| regex::Regex::new(r"^([A-Za-z]+)-[A-Za-z]").unwrap());
+
+    let text = command.trim();
+    if text.is_empty()
+        || text.contains('>')
+        || text.contains("$(")
+        || text.contains("@(")
+        || text.contains("::")
+        || METHOD_CALL.is_match(text)
+    {
+        return false;
+    }
+
+    // Every cmdlet named anywhere, script blocks included.
+    let tokens = text.split(|c: char| {
+        c.is_whitespace() || matches!(c, '{' | '}' | '(' | ')' | ';' | '|' | ',' | '=')
+    });
+    for token in tokens {
+        let Some(captures) = CMDLET.captures(token) else {
+            continue;
+        };
+        let lower = token.to_ascii_lowercase();
+        let verb = captures[1].to_ascii_lowercase();
+        if !READ_VERBS.contains(&verb.as_str()) && !READ_CMDLETS.contains(&lower.as_str()) {
+            return false;
+        }
+    }
+
+    // Each statement and pipeline stage must start with something that reads.
+    let chained = text.replace("&&", ";").replace("||", ";");
+    if chained.contains('&') {
+        return false;
+    }
+    chained
+        .split(|c| matches!(c, '|' | ';' | '\n'))
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty() && *segment != "}")
+        .all(|segment| {
+            let first = segment
+                .split(|c: char| c.is_whitespace() || c == '{')
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            first.starts_with('$')
+                || CMDLET.is_match(&first)
+                || READ_ALIASES.contains(&first.as_str())
+                || crate::bash_classifier::is_read_only_bash_command(segment)
+        })
+}
+
+#[cfg(test)]
+mod read_only_tests {
+    use super::is_read_only_ps_command as read_only;
+
+    #[test]
+    fn exploring_is_read_only() {
+        for command in [
+            "Get-ChildItem -Recurse -Filter *.rs",
+            "Get-Content src\\main.rs -TotalCount 40",
+            "Get-ChildItem | Where-Object { $_.Length -gt 1000 } | Select-Object -First 5",
+            "ls src; cat Cargo.toml",
+            "Select-String -Path *.rs -Pattern 'TODO'",
+            "git log --oneline -5 | Select-Object -First 3",
+            "Test-Path .\\target && Get-Location",
+            "$env:PATH",
+            "Get-Process | Sort-Object CPU | Format-Table -AutoSize",
+        ] {
+            assert!(read_only(command), "{command}");
+        }
+    }
+
+    #[test]
+    fn anything_that_writes_or_runs_code_is_not() {
+        for command in [
+            "Set-Content notes.txt 'x'",
+            "Get-Content a.txt | Set-Content b.txt",
+            "Get-ChildItem *.tmp | Remove-Item",
+            "ls > files.txt",
+            "Get-ChildItem | ForEach-Object { $_ }",
+            "Where-Object { Remove-Item $_ }",
+            "(Get-Item x.txt).Delete()",
+            "[IO.File]::WriteAllText('x', 'y')",
+            "Get-Item $(New-Item x)",
+            "& .\\build.ps1",
+            ". .\\profile.ps1",
+            "npm install",
+            "New-Item -ItemType Directory out",
+            "Invoke-WebRequest https://example.com",
+            "",
+        ] {
+            assert!(!read_only(command), "{command}");
+        }
+    }
+}

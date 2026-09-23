@@ -6,9 +6,11 @@
 //! of them the one executing, so `ls | head`, `2>/dev/null` and
 //! `Get-ChildItem` all failed alike. Models are trained on bash, and Claude
 //! Code and Pi both run their Bash tool through Git Bash on Windows; so does
-//! this engine now, whenever Git for Windows is installed. The prompt and the
-//! tool description read the same answer from here, so they cannot disagree
-//! with the executor again.
+//! this engine now, whenever Git for Windows is installed. Without it the
+//! Bash tool runs PowerShell, which every supported Windows ships, rather
+//! than `cmd.exe`, which no model writes well. The prompt and the tool
+//! description read the same answer from here, so they cannot disagree with
+//! the executor again.
 
 use std::path::{Path, PathBuf};
 
@@ -23,8 +25,8 @@ pub enum BashToolShell {
     Bash,
     /// Git for Windows' bash, without a PTY.
     GitBash,
-    /// `cmd.exe`, because this Windows machine has no bash.
-    Cmd,
+    /// PowerShell, because this Windows machine has no bash.
+    PowerShell,
 }
 
 /// The shell behind the Bash tool here.
@@ -34,8 +36,45 @@ pub fn bash_tool_shell() -> BashToolShell {
     } else if windows_bash().is_some() {
         BashToolShell::GitBash
     } else {
-        BashToolShell::Cmd
+        BashToolShell::PowerShell
     }
+}
+
+/// The PowerShell to run: PowerShell 7 (`pwsh`) when it is on `PATH`, else
+/// Windows PowerShell, which every supported Windows ships. Resolved once.
+pub fn powershell() -> &'static Path {
+    static EXE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    EXE.get_or_init(|| {
+        if let Ok(pwsh) = which::which("pwsh") {
+            return pwsh;
+        }
+        if cfg!(windows) {
+            // The System32 copy, so a stray `powershell.exe` earlier on PATH
+            // is not what runs the agent's commands.
+            let root = std::env::var_os("SystemRoot")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+            let system = root
+                .join("System32")
+                .join("WindowsPowerShell")
+                .join("v1.0")
+                .join("powershell.exe");
+            if system.is_file() {
+                return system;
+            }
+            PathBuf::from("powershell")
+        } else {
+            PathBuf::from("pwsh")
+        }
+    })
+}
+
+/// Whether [`powershell`] is PowerShell 7 or later, which is what decides
+/// whether `&&` and `||` chain commands (Windows PowerShell 5.1 rejects them).
+pub fn is_powershell_7() -> bool {
+    powershell()
+        .file_stem()
+        .is_some_and(|stem| stem.eq_ignore_ascii_case("pwsh"))
 }
 
 /// Git Bash's `bash.exe`, when one is installed. Always `None` off Windows.

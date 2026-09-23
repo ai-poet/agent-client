@@ -7,8 +7,10 @@
 // Platform notes
 // ──────────────
 //  Unix  → portable_pty (native openpty)
-//  Windows → falls back to the existing cmd.exe approach; ConPTY is available
-//             in portable_pty but adds complexity for minimal gain on Windows.
+//  Windows → no PTY. Fork (Waku): Git Bash when Git for Windows is installed,
+//             PowerShell otherwise (see `claurst_core::shell`); upstream ran
+//             `cmd /C`. ConPTY is available in portable_pty but adds
+//             complexity for minimal gain on Windows.
 
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult, session_shell_state};
 use async_trait::async_trait;
@@ -160,30 +162,37 @@ async fn run_in_background(command: String, cwd: PathBuf, timeout_ms: u64) -> To
         let result = tokio::time::timeout(Duration::from_millis(timeout_ms), async {
             // kill_on_drop: when the timeout drops this future the child must die
             // with it, otherwise a timed-out background command leaks (#220).
+            // A PowerShell script too long for the command line runs from a
+            // temporary file, which has to outlive the process.
+            let mut _script_file: Option<tempfile::TempPath> = None;
             let child = if cfg!(windows) {
                 // Fork (Waku): the same executor as a foreground call — Git
-                // Bash when it is installed — so a command that works in the
-                // foreground does not fail when backgrounded.
-                let mut process = match claurst_core::shell::windows_bash() {
+                // Bash when it is installed, PowerShell otherwise — so a
+                // command that works in the foreground does not fail when
+                // backgrounded.
+                let process = match claurst_core::shell::windows_bash() {
                     Some(bash) => {
                         let mut process = Command::new(bash);
                         process.arg("-c").arg(&command_clone);
-                        process
+                        Ok(process)
                     }
-                    None => {
-                        let mut process = Command::new("cmd");
-                        process.arg("/C").arg(&command_clone);
-                        process
-                    }
+                    None => crate::powershell::powershell_process(&command_clone).map(
+                        |(process, file)| {
+                            _script_file = file;
+                            process
+                        },
+                    ),
                 };
-                crate::capture::hide_window(&mut process);
-                process
-                    .current_dir(&cwd)
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .stdin(Stdio::null())
-                    .kill_on_drop(true)
-                    .spawn()
+                process.and_then(|mut process| {
+                    crate::capture::hide_window(&mut process);
+                    process
+                        .current_dir(&cwd)
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .stdin(Stdio::null())
+                        .kill_on_drop(true)
+                        .spawn()
+                })
             } else {
                 Command::new("bash")
                     .arg("-c")
@@ -577,19 +586,35 @@ fn drive_pty_child(
 }
 
 // ---------------------------------------------------------------------------
-// Windows (Git Bash, or cmd.exe when there is none; no PTY)
+// Windows (Git Bash, or PowerShell when there is none; no PTY)
 // ---------------------------------------------------------------------------
 
+/// What runs a Bash tool call on this Windows machine.
+#[cfg_attr(not(windows), allow(dead_code))]
+enum WindowsShell<'a> {
+    GitBash(&'a std::path::Path),
+    PowerShell,
+}
+
+#[cfg(windows)]
+fn windows_shell() -> WindowsShell<'static> {
+    match claurst_core::shell::windows_bash() {
+        Some(bash) => WindowsShell::GitBash(bash),
+        None => WindowsShell::PowerShell,
+    }
+}
+
 /// Fork (Waku): run a command on Windows the way Claude Code and Pi do —
-/// through Git Bash — and fall back to `cmd /C` only when no bash is
-/// installed. See `claurst_core::shell` for why, and `crate::capture` for how
-/// the output is read.
+/// through Git Bash — and through PowerShell, which every supported Windows
+/// ships, when Git Bash is not installed. See `claurst_core::shell` for why,
+/// and `crate::capture` for how the output is read.
 ///
-/// Under Git Bash the working directory persists between calls, as it does
-/// on Unix; the environment does not (see [`windows_bash_script`]). Under
-/// `cmd` neither does, and the tool description and system prompt say so.
+/// Either way the working directory persists between calls, as it does on
+/// Unix, by the same wrapper-and-sentinel scheme; the environment does not
+/// (see [`windows_bash_script`]).
 #[cfg(windows)]
 async fn run_windows(
+    shell: WindowsShell<'_>,
     command: &str,
     shell_state: &std::sync::Arc<parking_lot::Mutex<crate::ShellState>>,
     base_cwd: &std::path::Path,
@@ -601,17 +626,23 @@ async fn run_windows(
         .cwd
         .clone()
         .unwrap_or_else(|| base_cwd.to_path_buf());
-    let bash = claurst_core::shell::windows_bash();
-    let mut process = match bash {
-        Some(bash) => {
+    // Held until the process has finished: a PowerShell script too long for
+    // the command line runs from this file.
+    let mut _script_file = None;
+    let mut process = match shell {
+        WindowsShell::GitBash(bash) => {
             let mut process = Command::new(bash);
             process.arg("-c").arg(windows_bash_script(command, &cwd));
             process
         }
-        None => {
-            let mut process = Command::new("cmd");
-            process.arg("/C").arg(command);
-            process
+        WindowsShell::PowerShell => {
+            match crate::powershell::powershell_process(&windows_powershell_script(command, &cwd)) {
+                Ok((process, file)) => {
+                    _script_file = file;
+                    process
+                }
+                Err(e) => return ToolResult::error(format!("Failed to prepare PowerShell: {}", e)),
+            }
         }
     };
     process.current_dir(&cwd);
@@ -624,13 +655,9 @@ async fn run_windows(
         return ToolResult::error(format!("Command timed out after {}ms", timeout_ms));
     }
 
-    let mut stdout = captured.stdout;
-    if bash.is_some() {
-        let (user_output, new_cwd) = split_windows_state(&stdout);
-        if let Some(new_cwd) = new_cwd {
-            shell_state.lock().cwd = Some(new_cwd);
-        }
-        stdout = user_output;
+    let (stdout, new_cwd) = split_windows_state(&captured.stdout);
+    if let Some(new_cwd) = new_cwd {
+        shell_state.lock().cwd = Some(new_cwd);
     }
 
     let exit_code = captured.exit_code.unwrap_or(-1);
@@ -662,6 +689,24 @@ fn windows_bash_script(command: &str, cwd: &std::path::Path) -> String {
     let cwd = cwd.to_string_lossy().replace('\\', "/").replace('\'', "'\\''");
     format!(
         "cd '{cwd}' || exit 1\n{command}\n__CC_EXIT_CODE=$?\necho '{sentinel}'\npwd -W\nexit $__CC_EXIT_CODE\n",
+        sentinel = SHELL_STATE_SENTINEL,
+    )
+}
+
+/// The same wrapper for PowerShell: start in the tracked directory, run the
+/// command, report success the way a shell would — `$?`, then the native
+/// exit code — and the directory it finished in.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_powershell_script(command: &str, cwd: &std::path::Path) -> String {
+    let cwd = cwd.to_string_lossy().replace('\'', "''");
+    format!(
+        "Set-Location -LiteralPath '{cwd}'\n\
+         {command}\n\
+         $__cc_ok = $?\n\
+         $__cc_code = if ($__cc_ok) {{ 0 }} elseif ($LASTEXITCODE) {{ $LASTEXITCODE }} else {{ 1 }}\n\
+         Write-Output '{sentinel}'\n\
+         Write-Output (Get-Location).ProviderPath\n\
+         exit $__cc_code\n",
         sentinel = SHELL_STATE_SENTINEL,
     )
 }
@@ -767,12 +812,13 @@ impl Tool for PtyBashTool {
                  terminal, so interactive prompts cannot be answered - pass non-interactive flags. \
                  Use for running shell commands, scripts, git operations, and builds."
             }
-            claurst_core::shell::BashToolShell::Cmd => {
-                "Executes a command with cmd.exe (no bash is installed on this Windows machine) \
-                 and returns its output. Use cmd syntax, not Unix syntax. The working directory \
-                 does not persist between commands - chain with && or use absolute paths. Prefer \
-                 the Read, Glob and Grep tools for files, and the PowerShell tool for anything \
-                 cmd cannot do."
+            claurst_core::shell::BashToolShell::PowerShell => {
+                "Executes a command in PowerShell (Git Bash is not installed on this Windows \
+                 machine) and returns its output. Write PowerShell, not bash: Get-ChildItem, \
+                 Get-Content, Select-String, $env:NAME, 2>$null. The working directory persists \
+                 between commands; variables do not. This is not a terminal, so interactive \
+                 prompts cannot be answered - pass non-interactive flags. Use for running \
+                 commands, scripts, git operations, and builds."
             }
         }
     }
@@ -824,7 +870,15 @@ impl Tool for PtyBashTool {
         // Permission check. A command whose every segment the classifier
         // proved read-only applies nothing, which is what lets plan mode
         // let `ls -la | head -30` through while still denying real writes.
-        let is_read_only = is_read_only_bash_command(&params.command);
+        // Fork (Waku): judged in the language that will run it — PowerShell
+        // on a Windows machine without Git Bash.
+        let runs_powershell = claurst_core::shell::bash_tool_shell()
+            == claurst_core::shell::BashToolShell::PowerShell;
+        let is_read_only = if runs_powershell {
+            claurst_core::ps_classifier::is_read_only_ps_command(&params.command)
+        } else {
+            is_read_only_bash_command(&params.command)
+        };
         if let Err(e) = ctx.check_permission_for_path(
             self.name(),
             &reason,
@@ -835,7 +889,13 @@ impl Tool for PtyBashTool {
         }
 
         // Security classifier — block Critical-risk commands unconditionally.
-        if classify_bash_command(&params.command) == BashRiskLevel::Critical {
+        let critical = if runs_powershell {
+            claurst_core::ps_classifier::classify_ps_command(&params.command)
+                == claurst_core::ps_classifier::PsRiskLevel::Critical
+        } else {
+            classify_bash_command(&params.command) == BashRiskLevel::Critical
+        };
+        if critical {
             return ToolResult::error(format!(
                 "Command blocked: classified as Critical risk by the bash security classifier.\n\
                  Refusing to execute: {}",
@@ -858,10 +918,11 @@ impl Tool for PtyBashTool {
 
         debug!(command = %params.command, "Executing bash command via PTY");
 
-        // ── Windows path (no PTY — Git Bash, or cmd.exe without it) ─────────
+        // ── Windows path (no PTY — Git Bash, or PowerShell without it) ──────
         #[cfg(windows)]
         {
             return run_windows(
+                windows_shell(),
                 &params.command,
                 &shell_state_arc,
                 &ctx.working_dir,
@@ -1182,6 +1243,16 @@ mod windows_path_tests {
     }
 
     #[test]
+    fn the_powershell_wrapper_tracks_the_directory_and_the_outcome() {
+        let script = windows_powershell_script("npm test", std::path::Path::new(r"C:\Users\me\it's here"));
+        assert!(script.starts_with("Set-Location -LiteralPath 'C:\\Users\\me\\it''s here'"), "{script}");
+        assert!(script.contains("npm test"));
+        assert!(script.contains("$__cc_ok = $?"));
+        assert!(script.contains(SHELL_STATE_SENTINEL));
+        assert!(script.trim_end().ends_with("exit $__cc_code"));
+    }
+
+    #[test]
     fn the_state_block_is_split_off_the_output() {
         let stdout = format!("built\nok\n{SHELL_STATE_SENTINEL}\nC:/repo/sub\n");
         let (output, cwd) = split_windows_state(&stdout);
@@ -1210,14 +1281,15 @@ mod windows_path_tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn git_bash_runs_unix_syntax_and_remembers_the_directory() {
-        if claurst_core::shell::windows_bash().is_none() {
+        let Some(bash) = claurst_core::shell::windows_bash() else {
             return;
-        }
+        };
         let root = tempfile::tempdir().expect("tempdir");
         let state = fresh_state();
         let timeout = Duration::from_secs(60);
 
         let first = run_windows(
+            WindowsShell::GitBash(bash),
             "mkdir -p sub && cd sub && printf 'a\nb\nc\n' > f.txt && ls | head -1 2>/dev/null",
             &state,
             root.path(),
@@ -1228,9 +1300,73 @@ mod windows_path_tests {
         assert!(!first.is_error, "{}", text(&first));
         assert!(text(&first).contains("f.txt"), "{}", text(&first));
 
-        let second = run_windows("wc -l < f.txt", &state, root.path(), timeout, 60_000).await;
+        let second = run_windows(
+            WindowsShell::GitBash(bash),
+            "wc -l < f.txt",
+            &state,
+            root.path(),
+            timeout,
+            60_000,
+        )
+        .await;
         assert!(!second.is_error, "the next call should start in sub/: {}", text(&second));
         assert!(text(&second).contains('3'), "{}", text(&second));
+    }
+
+    /// Without Git Bash the tool runs PowerShell: its syntax works, a
+    /// `Set-Location` is remembered, and failures report as failures.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn powershell_runs_its_own_syntax_and_remembers_the_directory() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let state = fresh_state();
+        let timeout = Duration::from_secs(90);
+
+        let first = run_windows(
+            WindowsShell::PowerShell,
+            "New-Item -ItemType Directory sub | Out-Null; Set-Location sub; \
+             Set-Content f.txt \"一\" -Encoding UTF8; Get-ChildItem -Name",
+            &state,
+            root.path(),
+            timeout,
+            90_000,
+        )
+        .await;
+        assert!(!first.is_error, "{}", text(&first));
+        assert!(text(&first).contains("f.txt"), "{}", text(&first));
+
+        let second = run_windows(
+            WindowsShell::PowerShell,
+            "(Get-Content f.txt -Encoding UTF8) + ' ' + (Split-Path -Leaf (Get-Location))",
+            &state,
+            root.path(),
+            timeout,
+            90_000,
+        )
+        .await;
+        assert!(text(&second).contains("一 sub"), "the next call should start in sub/: {}", text(&second));
+
+        let failed = run_windows(
+            WindowsShell::PowerShell,
+            "Get-Item does-not-exist.txt",
+            &state,
+            root.path(),
+            timeout,
+            90_000,
+        )
+        .await;
+        assert!(failed.is_error, "{}", text(&failed));
+
+        let native = run_windows(
+            WindowsShell::PowerShell,
+            "cmd /c exit 7",
+            &state,
+            root.path(),
+            timeout,
+            90_000,
+        )
+        .await;
+        assert!(native.is_error, "a native exit code is a failure: {}", text(&native));
     }
 
     /// The output that used to stop the reader: a line in a language other
@@ -1238,12 +1374,13 @@ mod windows_path_tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn non_ascii_output_and_failures_come_back_whole() {
-        if claurst_core::shell::windows_bash().is_none() {
+        let Some(bash) = claurst_core::shell::windows_bash() else {
             return;
-        }
+        };
         let root = tempfile::tempdir().expect("tempdir");
         let state = fresh_state();
         let result = run_windows(
+            WindowsShell::GitBash(bash),
             "echo 编译完成; echo 失败了 >&2; exit 3",
             &state,
             root.path(),

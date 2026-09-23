@@ -208,12 +208,6 @@ impl Tool for PowerShellTool {
         // redirected stream in the console code page; and both pipes read at
         // once through `crate::capture`, which also kills the whole tree on a
         // timeout.
-        let exe = powershell_executable();
-        let script = format!(
-            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
-             $OutputEncoding = [System.Text.Encoding]::UTF8; {}",
-            params.command
-        );
 
         debug!(
             command = %params.command,
@@ -224,17 +218,11 @@ impl Tool for PowerShellTool {
         let timeout_ms = params.timeout.min(600_000);
         let timeout_dur = Duration::from_millis(timeout_ms);
 
-        let mut process = Command::new(exe);
-        process
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-            ])
-            .arg(&script)
-            .current_dir(&ctx.working_dir);
+        let (mut process, _script_file) = match powershell_process(&params.command) {
+            Ok(process) => process,
+            Err(e) => return ToolResult::error(format!("Failed to prepare PowerShell: {}", e)),
+        };
+        process.current_dir(&ctx.working_dir);
         let captured = match crate::capture::run_captured(process, timeout_dur).await {
             Ok(captured) => captured,
             Err(e) => return ToolResult::error(format!("Failed to spawn PowerShell: {}", e)),
@@ -280,17 +268,105 @@ impl Tool for PowerShellTool {
     }
 }
 
-/// Fork (Waku): PowerShell 7 (`pwsh`) when it is on PATH, else Windows
-/// PowerShell. Resolved once.
-fn powershell_executable() -> &'static std::path::Path {
-    static EXE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
-    EXE.get_or_init(|| {
-        which::which("pwsh").unwrap_or_else(|_| {
-            if cfg!(windows) {
-                std::path::PathBuf::from("powershell")
-            } else {
-                std::path::PathBuf::from("pwsh")
-            }
-        })
-    })
+/// Past this many characters of `-EncodedCommand` argument the script goes
+/// through a file instead: a Windows command line tops out at 32 767.
+const MAX_ENCODED_COMMAND: usize = 30_000;
+
+/// Fork (Waku): a PowerShell process ready to run `script`, shared by this
+/// tool and by the Bash tool on a Windows machine without Git Bash.
+///
+/// - PowerShell 7 when installed, else Windows PowerShell
+///   (`claurst_core::shell::powershell`).
+/// - The script travels as `-EncodedCommand` (base64 UTF-16LE). Passed as
+///   `-Command` text it is parsed twice — once by the Windows command line and
+///   again by PowerShell — and a quote in it could come out as something else.
+///   A script too long for the command line is written to a temporary `.ps1`
+///   instead, returned so the caller keeps it alive until the process ends.
+/// - Execution policy bypassed for this invocation: a machine's default
+///   Restricted policy refuses even a one-line script.
+/// - UTF-8 output, since Windows PowerShell otherwise encodes a redirected
+///   stream in the console code page; and no progress bars, which PowerShell
+///   writes to a redirected stderr as CLIXML noise.
+pub(crate) fn powershell_process(
+    script: &str,
+) -> std::io::Result<(Command, Option<tempfile::TempPath>)> {
+    let script = format!(
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n\
+         $OutputEncoding = [System.Text.Encoding]::UTF8\n\
+         $ProgressPreference = 'SilentlyContinue'\n\
+         {script}"
+    );
+    let mut process = Command::new(claurst_core::shell::powershell());
+    process.args([
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+    ]);
+    let encoded = encode_command(&script);
+    if encoded.len() <= MAX_ENCODED_COMMAND {
+        process.arg("-EncodedCommand").arg(encoded);
+        return Ok((process, None));
+    }
+    use std::io::Write as _;
+    let mut file = tempfile::Builder::new()
+        .prefix("waku-ps-")
+        .suffix(".ps1")
+        .tempfile()?;
+    // With a byte-order mark, or Windows PowerShell reads the file as ANSI.
+    file.write_all("\u{feff}".as_bytes())?;
+    file.write_all(script.as_bytes())?;
+    file.flush()?;
+    let path = file.into_temp_path();
+    process.arg("-File").arg(&path);
+    Ok((process, Some(path)))
+}
+
+/// `-EncodedCommand`'s format: the script as UTF-16LE, base64-encoded.
+fn encode_command(script: &str) -> String {
+    use base64::Engine as _;
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+#[cfg(test)]
+mod process_tests {
+    use super::*;
+
+    #[test]
+    fn a_script_is_encoded_the_way_powershell_decodes_it() {
+        use base64::Engine as _;
+        let encoded = encode_command("Write-Output 'a\"b'");
+        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
+        let units: Vec<u16> = bytes
+            .chunks(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        assert_eq!(String::from_utf16(&units).unwrap(), "Write-Output 'a\"b'");
+    }
+
+    #[test]
+    fn a_long_script_goes_through_a_file() {
+        let long = "Write-Output 'x'\n".repeat(2_000);
+        let (process, file) = powershell_process(&long).unwrap();
+        let file = file.expect("too long for the command line");
+        assert!(file.exists());
+        let args: Vec<_> = process.as_std().get_args().collect();
+        assert!(args.iter().any(|arg| *arg == "-File"));
+    }
+
+    /// Quotes, `$` and non-ASCII text reach PowerShell exactly as written.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn quotes_and_non_ascii_text_survive_the_trip() {
+        let (mut process, _file) =
+            powershell_process("Write-Output \"它说 'hi' `\"there`\" $([char]65)\"").unwrap();
+        process.current_dir(std::env::temp_dir());
+        let captured = crate::capture::run_captured(process, Duration::from_secs(60))
+            .await
+            .expect("spawn");
+        assert!(!captured.timed_out);
+        assert_eq!(captured.stdout.trim(), "它说 'hi' \"there\" A", "{}", captured.stderr);
+    }
 }
