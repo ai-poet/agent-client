@@ -16,6 +16,8 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.2.0]
+
 - Custom endpoints are now profiles: keep several per CLI (the gateway, an official key, another relay) and switch between them from Settings → Providers
 - Add alternate domains to an endpoint, measure them all at once, and route through whichever answers fastest — automatically, if you ask it to
 - Pick which of the service's domains the agents reach it on, from Settings → Cloud Account. Signing in stays on the domain you signed in with, and a domain that stops answering falls back on its own
