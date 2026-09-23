@@ -1706,6 +1706,7 @@ mod branches;
 mod cli_setup;
 mod cloud_account;
 mod cloud_pay;
+mod cloud_subscriptions;
 mod cloud_usage;
 mod command_palette;
 mod commit_dialog;

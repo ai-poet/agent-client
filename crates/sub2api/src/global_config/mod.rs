@@ -115,6 +115,10 @@ pub struct NativeRoutes {
     /// This table is consulted by platform and would otherwise hand a
     /// gateway key to a request aimed at somebody else's server.
     pub platform_keys: BTreeMap<String, String>,
+    /// The key for each model whose group is known, consulted before
+    /// `platform_keys`: the group that serves a model is not always the one
+    /// holding its platform's key. Same invariant as `platform_keys`.
+    pub model_keys: BTreeMap<String, String>,
 }
 
 impl NativeRoutes {
@@ -181,9 +185,16 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
             .into_iter()
             .any(|slot| custom.routed_endpoint(slot).is_some());
         let mut platform_keys = BTreeMap::new();
+        let mut model_keys = BTreeMap::new();
         // Only while every line is the gateway's. A per-platform table next
         // to somebody else's endpoint would hand that server our key.
         if let Some(config) = cloud.filter(|_| !any_custom) {
+            model_keys = config
+                .model_keys
+                .iter()
+                .filter(|(_, key)| !key.trim().is_empty())
+                .map(|(model, key)| (model.clone(), key.trim().to_owned()))
+                .collect();
             for (platform, key) in [
                 ("anthropic", config.key_for("claude")),
                 ("openai", config.key_for("codex")),
@@ -202,6 +213,7 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
             chat: custom_target("native_chat")
                 .or_else(|| cloud_target(cloud.and_then(|config| config.api_key.as_deref()))),
             platform_keys,
+            model_keys,
         };
         (!routes.is_empty()).then_some(routes)
     };
@@ -566,6 +578,7 @@ mod tests {
             claude_api_key: Some("sk-claude".into()),
             codex_api_key: None,
             codex_model: None,
+            model_keys: Default::default(),
         };
         let mut custom = CustomApiConfig::default();
         let mut entry = ProviderEntry::new("Mine", ApiFormat::Anthropic);
@@ -610,6 +623,7 @@ mod tests {
             claude_api_key: Some("sk-claude".into()),
             codex_api_key: None,
             codex_model: None,
+            model_keys: Default::default(),
         };
         let mut custom = CustomApiConfig::default();
         custom.set(
@@ -720,6 +734,7 @@ mod tests {
             claude_api_key: Some("sk-claude".into()),
             codex_api_key: None,
             codex_model: None,
+            model_keys: Default::default(),
         };
         let mut custom = CustomApiConfig::default();
         custom.set(
@@ -788,6 +803,7 @@ mod tests {
                     ("anthropic".to_owned(), "sk-c".to_owned()),
                     ("openai".to_owned(), "sk-x".to_owned()),
                 ]),
+                model_keys: BTreeMap::new(),
             }),
             claude: Some(target("https://gw.example.org", "sk-c")),
             codex: Some(target("https://gw.example.org", "sk-x")),

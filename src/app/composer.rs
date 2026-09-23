@@ -4048,8 +4048,8 @@ fn native_platform_and_model(id: Option<&str>) -> (String, String) {
 /// Which API the built-in agent uses for one model.
 ///
 /// The model decides, not the session: Claude is served over Messages, the
-/// GPT and Grok families over Responses, and a model the user declared on
-/// their own endpoint over Chat Completions. The session's stored tier is
+/// GPT and Grok families over Responses, DeepSeek, Kimi, GLM, MiniMax and a
+/// model the user declared on their own endpoint over Chat Completions. The session's stored tier is
 /// only consulted for a model the catalog does not place — which is what a
 /// user-declared model is. `waku_agent_bridge::WireFormat::resolve` applies
 /// the same rule before the request goes out, so what the picker shows is
@@ -4076,8 +4076,8 @@ pub(super) fn native_wire_format(
 ///
 /// Each model has exactly one API, so the bar is a partition of the list
 /// rather than a switch on one model: Messages holds Claude, Responses the
-/// GPT and Grok families, Chat whatever the user declared on their own
-/// endpoint. Clicking a segment shows that section. The open one is marked
+/// GPT and Grok families, Chat DeepSeek, Kimi, GLM and MiniMax plus whatever
+/// the user declared on their own endpoint. Clicking a segment shows that section. The open one is marked
 /// by fill *and* weight, never colour alone; a section with nothing in it
 /// still gets a segment, so its emptiness is visible rather than implied.
 fn native_format_bar(theme: Theme, active: &str, weak: gpui::WeakEntity<Waku>) -> Div {

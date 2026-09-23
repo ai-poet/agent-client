@@ -78,6 +78,14 @@ pub(super) struct CloudAccountState {
     /// Field for adding a domain, built on first use — creating a
     /// `TextInput` needs a `Window`, which render does not have.
     pub origin_input: Option<Entity<TextInput>>,
+    /// The account's active subscriptions, once read. `None` until the first
+    /// model-routing refresh answers, or when the deployment has none to
+    /// report.
+    pub subscriptions: Option<Vec<sub2api::client::SubscriptionProgress>>,
+    /// A model-routing refresh is in flight.
+    pub routes_refreshing: bool,
+    /// Something asked for another refresh while one was in flight.
+    pub routes_stale: bool,
 }
 
 /// A gateway-domain measurement. Which run it belongs to is tracked by
@@ -700,6 +708,7 @@ impl Waku {
         }
         self.cloud_account.credentials = None;
         self.cloud_account.user = None;
+        self.cloud_account.subscriptions = None;
         self.cloud_account.routing_enabled = false;
         self.cloud_account.error = None;
         self.apply_cloud_routing();
@@ -756,6 +765,9 @@ impl Waku {
                 this.cloud_account.groups = groups;
                 this.cloud_account.referral = referral;
                 this.ensure_cloud_group_bindings(cx);
+                // Subscriptions come and go with the groups; so does which
+                // group each of the built-in agent's models goes through.
+                this.refresh_model_routes(cx);
                 cx.notify();
             });
         })
@@ -1141,6 +1153,7 @@ impl Waku {
             // Plaza page; this page keeps identity, routing, and groups.
             page = page
                 .child(self.render_gateway_origins(theme, cx))
+                .child(self.render_cloud_subscriptions(theme))
                 .child(self.render_cloud_groups(theme, cx))
                 .child(self.render_cloud_referral(theme, cx));
         }
@@ -1638,6 +1651,13 @@ impl Waku {
         });
         let weak = cx.entity().downgrade();
         let balance = self.cloud_account.user.as_ref().map(|user| user.balance);
+        let subscription_lines: Vec<String> = self
+            .cloud_account
+            .subscriptions
+            .iter()
+            .flatten()
+            .map(super::cloud_subscriptions::subscription_menu_line)
+            .collect();
         let groups = self.cloud_account.groups.clone();
         let statuses = self.cloud_account.group_status.clone();
         let bindings: Vec<(String, Option<i64>)> = cloud_platforms(&groups)
@@ -1675,6 +1695,14 @@ impl Waku {
                         })
                         .icon("icons/wallet.svg"),
                     );
+                    items.push(MenuItem::Separator);
+                }
+                // What the user has paid for by the period, and how far into
+                // it they are: read-only, the account page has the detail.
+                if !subscription_lines.is_empty() {
+                    for line in &subscription_lines {
+                        items.push(MenuItem::Header(SharedString::from(line.clone())));
+                    }
                     items.push(MenuItem::Separator);
                 }
 
@@ -1881,7 +1909,7 @@ fn platform_display_name(platform: &str) -> String {
 }
 
 /// Heading above a group of rows.
-fn section_title(theme: Theme, title: &str, detail: &str) -> Div {
+pub(super) fn section_title(theme: Theme, title: &str, detail: &str) -> Div {
     div()
         .mt(px(6.0))
         .flex()

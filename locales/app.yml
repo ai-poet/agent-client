@@ -2218,6 +2218,34 @@ cloud.turn_on:
   en: "Turn on"
 cloud.turn_off:
   en: "Turn off"
+cloud.subscriptions_title:
+  en: "Subscriptions"
+cloud.subscriptions_detail:
+  en: "Billed by period: usage counts against the subscription's limits, not your balance. Built-in agent models no CLI group covers — DeepSeek, Kimi, GLM and the like — go through the subscription that serves them."
+cloud.subscription_menu:
+  en: "Subscription %{group}"
+cloud.subscription_expires_in:
+  en: "Expires in %{days} days"
+cloud.subscription_expires_tomorrow:
+  en: "Expires tomorrow"
+cloud.subscription_expires_today:
+  en: "Expires today"
+cloud.subscription_daily:
+  en: "Today"
+cloud.subscription_weekly:
+  en: "This week"
+cloud.subscription_monthly:
+  en: "This month"
+cloud.subscription_unlimited:
+  en: "No spending limit"
+cloud.subscription_models:
+  en: "Built-in agent models through this subscription: %{models}"
+cloud.subscription_models_more:
+  en: "Built-in agent models through this subscription: %{models} and %{count} more"
+cloud.subscription_no_models:
+  en: "No built-in agent model goes through this subscription yet."
+native.via_subscription:
+  en: "Subscription: %{group}"
 cloud.group_title:
   en: "Model group"
 cloud.group_detail:

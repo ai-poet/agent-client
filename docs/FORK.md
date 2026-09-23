@@ -151,6 +151,10 @@ lines below.
 | `src/app/settings.rs` (model providers) | `SettingsPage::ModelProviders` nav entry, `SETTINGS_PAGES` length (12 → 13), title and dispatch arms, and the mail-style split branch it shares with Skills | 5 |
 | `src/input.rs` | `TextInput::masked` + the `.masked(bool)` builder, `set_masked`/`is_masked`, and the `masked_display` free function the element layout calls instead of using `content` directly — one ASCII `*` per byte so every byte offset (selection, IME marking, hit-testing) still lands in the same place; non-ASCII is left visible on purpose. Used for API keys on the Providers and Agent pages | ~47 + tests |
 | `crates/waku-core/src/command_env.rs` (test) | `windows_environment_probe_captures_the_inherited_path_without_a_profile` waits 60 s instead of 10 s for the PowerShell probe (the ten-second ceiling flaked on the `windows-latest` runner under the parallel suite) | 1 |
+| `crates/waku-core/src/driver/{claude,codex,opencode,acp,pi}.rs` (Computer Use optional) | the Computer Use setup goes through `support::optional_computer_use` instead of `?`: a helper that is not installed leaves the session without desktop control instead of failing to start it; Pi folds its extension path into the same setup | 1 each, Pi ~10 |
+| `crates/waku-core/src/driver/support.rs` | `optional_computer_use` (+ test) | ~30 |
+| `src/app.rs` (subscriptions) | `mod cloud_subscriptions` | 1 |
+| `src/app/usage_meter.rs` | `meter_bar` is `pub(super)`, reused by the subscription cards | 1 |
 | `src/js_repl.rs` (test) | `repl_supports_top_level_await_and_lazy_native_sky` expects `linux` off macOS and Windows | 6 |
 | `.github/workflows/{test,release,sync-release}.yml` | no Linux: the test matrix drops Ubuntu and the generated-protocol checks move to the macOS runner; the two Linux release jobs, the `*.tar.gz` upload and `latest-linux.txt` are gone. The version, draft-release and R2-sync jobs still run on `ubuntu-latest` — they build nothing for Linux | ~140 removed |
 
@@ -164,7 +168,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `src/app/onboarding.rs`, `src/app/message_resend.rs`, `src/app/task_rows.rs`,
 `src/app/runtime_prewarm.rs`, `src/app/update_banner.rs`, `src/app/surface_bar.rs`,
 `src/app/daemon_banner.rs`, `src/app/agent_page.rs`, `src/app/native_agent.rs`,
-`src/app/model_providers_page.rs`,
+`src/app/model_providers_page.rs`, `src/app/cloud_subscriptions.rs`,
 `crates/waku-core/src/driver/turn_diagnosis.rs`,
 `src/app/cloud_usage.rs`, `src/app/model_plaza.rs`, `src/app/cloud_pay.rs`,
 `src/app/announcements.rs`, `src/app/workflow.rs`, `assets/icons/{bell,circle-x,store,wallet}.svg`,

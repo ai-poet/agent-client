@@ -21,7 +21,8 @@ use crate::events::PermissionChoice;
 ///
 /// Not a free choice: each model family is served over one of them, and
 /// [`WireFormat::for_model`] is where that is written down. Chat Completions
-/// carries only what a user declared on their own endpoint.
+/// carries the gateway's DeepSeek, Kimi, GLM and MiniMax families, and
+/// whatever a user declared on their own endpoint.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WireFormat {
     /// Anthropic Messages — the engine's primary path.
@@ -79,9 +80,18 @@ impl WireFormat {
         {
             return Some(Self::Responses);
         }
+        // DeepSeek, Kimi, GLM and MiniMax: the gateway serves them from
+        // accounts that speak Chat Completions, and forwards that API to them
+        // as it is — anything else it would first have to translate.
+        if is_chat_family(&model) {
+            return Some(Self::Chat);
+        }
         match normalized_platform(platform).as_deref() {
             Some("anthropic") => Some(Self::Messages),
             Some("openai") | Some("grok") => Some(Self::Responses),
+            Some("deepseek" | "kimi" | "zhipu" | "minimax" | "opencode_go" | "composite") => {
+                Some(Self::Chat)
+            }
             _ => None,
         }
     }
@@ -98,6 +108,23 @@ impl WireFormat {
             .or(requested)
             .unwrap_or(Self::Chat)
     }
+}
+
+/// The families the gateway serves over Chat Completions, by the same name
+/// prefixes its composite routing reads (`DetectModelPlatform`). Takes the
+/// lowercased name.
+fn is_chat_family(model: &str) -> bool {
+    let model = model.rsplit('/').next().unwrap_or(model);
+    model.starts_with("deepseek-")
+        || model.starts_with("kimi-")
+        || model.starts_with("moonshot-")
+        || model == "k3"
+        || model == "k3-256k"
+        || model.starts_with("glm-")
+        || model.starts_with("minimax-")
+        || model.starts_with("abab5")
+        || model.starts_with("abab6")
+        || model.starts_with("abab7")
 }
 
 fn normalized_platform(platform: Option<&str>) -> Option<String> {
@@ -400,14 +427,27 @@ fn select_route(config: &mut Config, options: &AgentStartOptions) {
         .platform
         .as_deref()
         .map(|platform| platform.trim().to_ascii_lowercase());
-    let key = gateway_keys.as_ref().and_then(|keys| {
-        platform
-            .as_deref()
-            .and_then(|platform| keys.get(platform))
-            .or_else(|| keys.get("default"))
-            .or_else(|| keys.get("anthropic"))
-            .and_then(|value| value.as_str())
+    // The model's own group first: the writer files a key per model whose
+    // group it knows, because the group that serves a model is not always
+    // the one holding its platform's key — a DeepSeek model sent with the
+    // Codex group's key comes back "no available channel".
+    let model_key = gateway_keys.as_ref().and_then(|keys| {
+        let model = options.model.as_deref()?.trim();
+        keys.get(MODEL_KEYS_MEMBER)?
+            .get(model)?
+            .as_str()
             .map(str::to_owned)
+    });
+    let key = model_key.or_else(|| {
+        gateway_keys.as_ref().and_then(|keys| {
+            platform
+                .as_deref()
+                .and_then(|platform| keys.get(platform))
+                .or_else(|| keys.get("default"))
+                .or_else(|| keys.get("anthropic"))
+                .and_then(|value| value.as_str())
+                .map(str::to_owned)
+        })
     });
 
     config.provider = Some(provider.to_owned());
@@ -448,6 +488,10 @@ const TOOL_RESULT_BUDGET: usize = 600_000;
 /// `sub2api::global_config::native::GATEWAY_KEYS_OPTION`, which this crate
 /// cannot import.
 pub const GATEWAY_KEYS_OPTION: &str = "gateway_keys";
+
+/// The member of that table holding one key per model. Kept in step with
+/// `sub2api::global_config::native::MODEL_KEYS_MEMBER`.
+pub const MODEL_KEYS_MEMBER: &str = "models";
 
 /// A route with nothing to authenticate it.
 ///
@@ -1224,6 +1268,68 @@ mod tests {
         // And a model the catalog does not place is the user's own.
         assert_eq!(WireFormat::for_model(Some("gemini"), "gemini-3-pro"), None);
         assert_eq!(WireFormat::for_model(None, "my-local-model"), None);
+    }
+
+    /// The families the gateway serves from Chat Completions accounts go
+    /// out over that API, whatever group they come through — including a
+    /// session that stored the old `openai::` prefix for one.
+    #[test]
+    fn chat_families_go_over_chat_completions() {
+        for model in ["deepseek-v4.1-flash", "kimi-k3", "k3", "glm-5", "minimax-m3", "DeepSeek-V4"] {
+            assert_eq!(WireFormat::for_model(Some("deepseek"), model), Some(WireFormat::Chat), "{model}");
+            assert_eq!(WireFormat::for_model(Some("openai"), model), Some(WireFormat::Chat), "{model}");
+        }
+        assert_eq!(
+            WireFormat::resolve(Some(WireFormat::Responses), Some("openai"), "deepseek-v4.1-flash"),
+            WireFormat::Chat
+        );
+        // A name that says nothing, in a group of those platforms.
+        for platform in ["deepseek", "kimi", "zhipu", "minimax", "composite"] {
+            assert_eq!(
+                WireFormat::for_model(Some(platform), "house-model"),
+                Some(WireFormat::Chat),
+                "{platform}"
+            );
+        }
+    }
+
+    /// The group that serves a model is not always the one holding its
+    /// platform's key; the writer files a key per model for that, and it
+    /// outranks the platform table.
+    #[test]
+    fn a_models_own_key_outranks_its_platforms() {
+        let mut config = Config::default();
+        let mut anthropic = ProviderConfig::default();
+        anthropic.api_base = Some("https://gw.example".into());
+        anthropic.options.insert(
+            GATEWAY_KEYS_OPTION.into(),
+            serde_json::json!({
+                "anthropic": "sk-claude",
+                "openai": "sk-codex",
+                "default": "sk-general",
+                "models": {"deepseek-v4.1-flash": "sk-subscription"}
+            }),
+        );
+        config.provider_configs.insert("anthropic".into(), anthropic);
+
+        // A session from before the fix, still carrying `openai::`.
+        let options = AgentStartOptions {
+            platform: Some("openai".into()),
+            model: Some("deepseek-v4.1-flash".into()),
+            ..AgentStartOptions::default()
+        };
+        select_route(&mut config, &options);
+        assert_eq!(config.provider.as_deref(), Some("openai"));
+        assert_eq!(config.api_key.as_deref(), Some("sk-subscription"));
+
+        // A model without an entry keeps its platform's key.
+        let options = AgentStartOptions {
+            platform: Some("openai".into()),
+            model: Some("gpt-5.6-sol".into()),
+            ..AgentStartOptions::default()
+        };
+        select_route(&mut config, &options);
+        assert_eq!(config.api_key.as_deref(), Some("sk-codex"));
     }
 
     #[test]

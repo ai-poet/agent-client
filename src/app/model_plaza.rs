@@ -251,8 +251,10 @@ impl Waku {
                         this.model_plaza.summary = catalog.summary;
                         this.model_plaza.statuses = statuses;
                         this.model_plaza.error = None;
-                        // The built-in agent's picker reads this same listing.
+                        // The built-in agent's picker reads this same listing,
+                        // and routes each of its models by it.
                         this.sync_native_models();
+                        this.refresh_model_routes(cx);
                     }
                     Err(error) => this.model_plaza.error = Some(format!("{error:#}")),
                 }

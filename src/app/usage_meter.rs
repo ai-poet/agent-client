@@ -583,7 +583,7 @@ fn plan_skeleton(theme: &Theme) -> AnyElement {
 
 /// A quota bar: full-width track, fill proportional to `percent`. A lane in
 /// use keeps a visible sliver even under one percent.
-fn meter_bar(theme: &Theme, percent: f64) -> Div {
+pub(super) fn meter_bar(theme: &Theme, percent: f64) -> Div {
     let fraction = (percent / 100.0).clamp(0.0, 1.0) as f32;
     let fraction = if fraction > 0.0 {
         fraction.max(0.015)

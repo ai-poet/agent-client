@@ -31,6 +31,11 @@ pub struct GatewayConfig {
     /// Codex model to pin, when the account specifies one.
     #[serde(default)]
     pub codex_model: Option<String>,
+    /// The key for each of the built-in agent's models whose group is known
+    /// (`Credentials::model_routes`). Only the built-in agent reads it: a CLI
+    /// takes one key for its whole run.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub model_keys: std::collections::BTreeMap<String, String>,
 }
 
 impl GatewayConfig {
@@ -89,6 +94,7 @@ mod tests {
             claude_api_key: Some("sk-claude".to_owned()),
             codex_api_key: None,
             codex_model: None,
+            model_keys: Default::default(),
         }
     }
 

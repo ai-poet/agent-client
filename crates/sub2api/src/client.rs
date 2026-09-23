@@ -82,8 +82,110 @@ pub struct Group {
     pub rate_multiplier: f64,
     #[serde(default)]
     pub status: String,
+    /// `standard` or `subscription`. A subscription group is reachable only
+    /// while the user holds an active subscription to it, and bills against
+    /// that subscription's limits instead of the balance.
     #[serde(default)]
     pub subscription_type: String,
+    /// A subscription group's spending limits per window, when it has them.
+    #[serde(default)]
+    pub daily_limit_usd: Option<f64>,
+    #[serde(default)]
+    pub weekly_limit_usd: Option<f64>,
+    #[serde(default)]
+    pub monthly_limit_usd: Option<f64>,
+}
+
+impl Group {
+    pub fn is_subscription(&self) -> bool {
+        self.subscription_type.eq_ignore_ascii_case("subscription")
+    }
+}
+
+/// One of the user's subscriptions (`GET /subscriptions/progress`).
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct UserSubscription {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub group_id: i64,
+    #[serde(default)]
+    pub starts_at: String,
+    #[serde(default)]
+    pub expires_at: String,
+    /// `active`, `expired`, `suspended` or `revoked`.
+    #[serde(default)]
+    pub status: String,
+    #[serde(default, deserialize_with = "null_to_default")]
+    pub group: Option<Group>,
+}
+
+/// Spend against one of a subscription's limits in its current window.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct SubscriptionWindow {
+    #[serde(default)]
+    pub limit_usd: f64,
+    #[serde(default)]
+    pub used_usd: f64,
+    #[serde(default)]
+    pub remaining_usd: f64,
+    /// 0–100, capped by the service.
+    #[serde(default)]
+    pub percentage: f64,
+    #[serde(default)]
+    pub resets_in_seconds: i64,
+}
+
+/// Where a subscription stands. A window is absent when the group sets no
+/// limit for it, or when it has not been used since it last reset.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct SubscriptionUsage {
+    #[serde(default)]
+    pub group_name: String,
+    #[serde(default)]
+    pub expires_at: String,
+    #[serde(default)]
+    pub expires_in_days: i64,
+    #[serde(default, deserialize_with = "null_to_default")]
+    pub daily: Option<SubscriptionWindow>,
+    #[serde(default, deserialize_with = "null_to_default")]
+    pub weekly: Option<SubscriptionWindow>,
+    #[serde(default, deserialize_with = "null_to_default")]
+    pub monthly: Option<SubscriptionWindow>,
+}
+
+/// An active subscription with its usage.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct SubscriptionProgress {
+    #[serde(default)]
+    pub subscription: UserSubscription,
+    #[serde(default, deserialize_with = "null_to_default")]
+    pub progress: Option<SubscriptionUsage>,
+}
+
+impl SubscriptionProgress {
+    pub fn group_id(&self) -> i64 {
+        self.subscription.group_id
+    }
+
+    /// The group's name, from whichever half of the answer carries it.
+    pub fn group_name(&self) -> String {
+        self.subscription
+            .group
+            .as_ref()
+            .map(|group| group.name.clone())
+            .filter(|name| !name.trim().is_empty())
+            .or_else(|| self.progress.as_ref().map(|progress| progress.group_name.clone()))
+            .unwrap_or_default()
+    }
+
+    pub fn platform(&self) -> String {
+        self.subscription
+            .group
+            .as_ref()
+            .map(|group| group.platform.trim().to_ascii_lowercase())
+            .unwrap_or_default()
+    }
 }
 
 /// A gateway API key. `key` is the secret the agent CLIs authenticate with.
@@ -497,6 +599,12 @@ impl Client {
     /// Groups this account may route to.
     pub fn available_groups(&self, access_token: &str) -> Result<Vec<Group>> {
         self.get("/groups/available", access_token)
+    }
+
+    /// The user's active subscriptions, each with its usage against the
+    /// group's limits.
+    pub fn subscription_progress(&self, access_token: &str) -> Result<Vec<SubscriptionProgress>> {
+        self.get("/subscriptions/progress", access_token)
     }
 
     /// Existing gateway keys, used to reuse a key rather than minting one per

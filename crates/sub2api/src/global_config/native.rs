@@ -53,6 +53,27 @@ pub const MANAGED_PROVIDERS: [&str; 3] = ["anthropic", "openai", "codex"];
 /// options. The bridge reads the same path.
 pub const GATEWAY_KEYS_OPTION: &str = "gateway_keys";
 
+/// The member of that table holding the per-model keys. Nested rather than
+/// an option of its own so it is written, cleared and restored with the
+/// platform keys as one unit — the invariant that neither table survives
+/// next to somebody else's endpoint then holds for both without a second
+/// code path. No platform is called `models`.
+pub const MODEL_KEYS_MEMBER: &str = "models";
+
+/// The table as written: platform keys, plus the per-model ones when there
+/// are any.
+fn gateway_keys_value(routes: &NativeRoutes) -> Value {
+    let mut table: Map<String, Value> = routes
+        .platform_keys
+        .iter()
+        .map(|(platform, key)| (platform.clone(), json!(key)))
+        .collect();
+    if !routes.model_keys.is_empty() {
+        table.insert(MODEL_KEYS_MEMBER.to_owned(), json!(routes.model_keys));
+    }
+    Value::Object(table)
+}
+
 /// Where the engine looks for its global settings.
 ///
 /// Mirrors the engine's own resolver exactly — an explicit `CLAURST_HOME`, then
@@ -181,7 +202,7 @@ pub fn take_over(
             let options = options.as_object_mut().ok_or_else(|| {
                 anyhow!("the anthropic provider options in {} are not an object", path.display())
             })?;
-            options.insert(GATEWAY_KEYS_OPTION.to_owned(), json!(routes.platform_keys));
+            options.insert(GATEWAY_KEYS_OPTION.to_owned(), gateway_keys_value(routes));
         }
         if entry.is_empty() {
             providers.remove("anthropic");
@@ -351,6 +372,7 @@ mod tests {
             responses: at("https://gateway.example.org", "sk-claude"),
             chat: at("https://gateway.example.org", "sk-claude"),
             platform_keys: keys(),
+            model_keys: BTreeMap::new(),
         }
     }
 
@@ -473,6 +495,7 @@ mod tests {
             responses: at("https://responses.example.org", "sk-responses"),
             chat: at("https://chat.example.org", "sk-chat"),
             platform_keys: BTreeMap::new(),
+            model_keys: BTreeMap::new(),
         };
         take_over(&dir, &routes, &mut backups).unwrap();
 
@@ -497,6 +520,36 @@ mod tests {
         );
     }
 
+    /// The per-model keys ride inside the platform table, so the bridge finds
+    /// both in one place and one release clears both.
+    #[test]
+    fn model_keys_are_written_beside_the_platform_keys_and_leave_with_them() {
+        let dir = tempdir();
+        let mut backups = CliBackups::default();
+        let routes = NativeRoutes {
+            model_keys: BTreeMap::from([("deepseek-v4.1-flash".to_owned(), "sk-sub".to_owned())]),
+            ..routes()
+        };
+        take_over(&dir, &routes, &mut backups).unwrap();
+        let table = read(&settings_path(&dir))
+            .pointer("/config/provider_configs/anthropic/options/gateway_keys")
+            .cloned()
+            .expect("key table");
+        assert_eq!(table.pointer("/models/deepseek-v4.1-flash").unwrap(), "sk-sub");
+        assert_eq!(table.get("openai").unwrap(), "sk-codex");
+
+        let custom = NativeRoutes {
+            messages: at("https://mine.example.org", "sk-mine"),
+            ..NativeRoutes::default()
+        };
+        take_over(&dir, &custom, &mut backups).unwrap();
+        assert!(
+            read(&settings_path(&dir))
+                .pointer("/config/provider_configs/anthropic/options/gateway_keys")
+                .is_none()
+        );
+    }
+
     /// Switching from the managed gateway to an endpoint of your own has to
     /// drop the key table the gateway left behind, or every session keeps
     /// authenticating with the gateway's key against your server.
@@ -516,6 +569,7 @@ mod tests {
             responses: None,
             chat: None,
             platform_keys: BTreeMap::new(),
+            model_keys: BTreeMap::new(),
         };
         take_over(&dir, &custom, &mut backups).unwrap();
         let root = read(&settings_path(&dir));

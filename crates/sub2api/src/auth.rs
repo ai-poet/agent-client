@@ -24,6 +24,7 @@
 //! published into daemon settings, so a compromised daemon settings file cannot
 //! be used to mint new credentials or read the account.
 
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -70,6 +71,17 @@ pub struct Credentials {
     /// Group `codex_api_key` is bound to, when the user picked one per CLI.
     #[serde(default)]
     pub codex_group_id: Option<i64>,
+    /// Keys for groups no CLI slot is bound to — subscription groups above
+    /// all — by group id. The built-in agent sends each model through the
+    /// group that serves it, which is often not one of the three slots.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub group_keys: BTreeMap<i64, String>,
+    /// The group each of the built-in agent's models goes through, as
+    /// [`crate::model_routing::resolve`] last worked it out from the catalog
+    /// and the user's subscriptions. A model missing here keeps the key of
+    /// its platform's slot.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub model_routes: BTreeMap<String, i64>,
     /// The user turned gateway routing off without signing out. Stored
     /// inverted so the serde default (false) means the common case: signing
     /// in routes.
@@ -304,6 +316,8 @@ pub fn credentials_from_fragment(fragment: &str, expected_endpoint: &str) -> Res
         group_id: None,
         claude_group_id: None,
         codex_group_id: None,
+        group_keys: BTreeMap::new(),
+        model_routes: BTreeMap::new(),
         // Signing in is an explicit request to route through the service.
         routing_disabled: false,
     })

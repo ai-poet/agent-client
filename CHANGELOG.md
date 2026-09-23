@@ -23,6 +23,9 @@ the original feature bullet instead of adding separate entries for them.
 - Remove the environment variables that override routing, from the warning that reports them. Values are backed up first and can be restored; machine-wide Windows variables still hand you the command to run as administrator
 - Optional automatic failover per platform: when the group you are on reports an outage, switch to a healthy one and switch back once yours recovers
 - Model catalogs: GPT-6-Sol replaces GPT-5.6-Luna in the Codex list, Claude Opus 5.5 added for Claude Code, and Grok 4.7 (up to extra-high effort) added for Grok
+- Your subscriptions on the account page and in the account menu: days left, and spend against each daily, weekly and monthly limit
+- The built-in agent sends each model through the group that serves it: DeepSeek, Kimi, GLM and the like use your subscription instead of the Codex group, which answered them with "no available channel". The model picker says which subscription a model goes through
+- Turning on Computer Use without its driver installed no longer stops a conversation: the agent carries on without desktop control, and the built-in agent still generates images
 - Linux builds are no longer published
 ## [0.1.21]
 

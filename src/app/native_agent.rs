@@ -7,17 +7,21 @@
 //! listing the Model Plaza page shows, every platform of it, and lands in the
 //! provider probe the picker already reads.
 //!
-//! The id carries the platform ahead of a `::`, which is how the daemon
-//! knows which of the account's keys to use; the picker never shows an id,
-//! only the name and the brand-and-platform subtitle.
+//! The id carries the model's family ahead of a `::` (`deepseek::…`), one
+//! row per model however many groups serve it. The key it goes out with is
+//! not the id's business: the routing writer files one per model, from the
+//! group [`sub2api::model_routing`] picked for it, and the family only
+//! decides the fallback. The picker never shows an id, only the name and the
+//! brand-and-platform subtitle — which also names the subscription a model
+//! goes through, when it goes through one.
 //!
 //! The wire format — Anthropic Messages, OpenAI Responses, OpenAI Chat
 //! Completions — is a property of the model, and each model has exactly one.
 //! Claude is served over Messages; the GPT and Grok families over Responses;
-//! Chat Completions is for models the user declared on their own endpoint,
-//! and is empty until they do. A model belonging to none of those is not
-//! offered at all — there is no API to send it over, so listing it would
-//! only promise something that fails.
+//! DeepSeek, Kimi, GLM and MiniMax over Chat Completions, which is also where
+//! the models a user declared on their own endpoint go. A model belonging to
+//! none of those is not offered at all — there is no API to send it over, so
+//! listing it would only promise something that fails.
 //!
 //! That one format lands in the model's "service tier" slot, which is what
 //! the picker's format bar partitions the list by and what the composer's
@@ -33,6 +37,31 @@ use super::*;
 // no other view, so nothing guarantees `app.rs` re-exports it.
 use crate::model::{ProviderModel, ProviderModelOption};
 
+/// Where the built-in agent's models are sent, for labelling them: the
+/// group model routing picked for each (`Credentials::model_routes`) and the
+/// account's subscription groups, by id, with their names.
+#[derive(Clone, Debug, Default)]
+pub(super) struct NativeRouting {
+    pub routes: std::collections::BTreeMap<String, i64>,
+    pub subscriptions: std::collections::BTreeMap<i64, String>,
+}
+
+impl NativeRouting {
+    /// The subscription `model` goes through, by name, when it goes through
+    /// one.
+    fn subscription_for(&self, model: &str) -> Option<&str> {
+        let group = self.routes.get(model)?;
+        self.subscriptions.get(group).map(String::as_str)
+    }
+}
+
+/// [`native_models_routed`] with nothing routed, as the tests describe the
+/// catalog.
+#[cfg(test)]
+pub(super) fn native_models_from_catalog(items: &[ModelCatalogItem]) -> Vec<ProviderModel> {
+    native_models_routed(items, &NativeRouting::default())
+}
+
 /// The models the built-in agent may offer, from the gateway catalog.
 ///
 /// Token-billed models on every platform qualify; image and per-request
@@ -40,24 +69,53 @@ use crate::model::{ProviderModel, ProviderModelOption};
 /// families get the reasoning ladder the engine understands, with
 /// `ultracode` on the ones that accept `xhigh`. The first Sonnet 5 is the
 /// default, since it is the engine's own default family.
-pub(super) fn native_models_from_catalog(items: &[ModelCatalogItem]) -> Vec<ProviderModel> {
-    let mut seen = std::collections::HashSet::new();
-    let mut models: Vec<ProviderModel> = items
+///
+/// The catalog lists a model once per group that serves it; the picker
+/// lists it once. The row comes from the entry of the group routing sends it
+/// through, when routing has picked one, so its name and platform are that
+/// group's.
+pub(super) fn native_models_routed(
+    items: &[ModelCatalogItem],
+    routing: &NativeRouting,
+) -> Vec<ProviderModel> {
+    let mut order: Vec<String> = Vec::new();
+    let mut chosen: std::collections::HashMap<String, &ModelCatalogItem> =
+        std::collections::HashMap::new();
+    for item in items
         .iter()
         .filter(|item| is_chat_model(item) && !item.model.trim().is_empty())
-        .filter(|item| seen.insert((platform_of(item), item.model.clone())))
-        .filter_map(|item| {
-            let platform = platform_of(item);
+    {
+        let key = item.model.trim().to_ascii_lowercase();
+        let routed = routing.routes.get(item.model.trim()) == Some(&item.best_group.id);
+        if !chosen.contains_key(&key) {
+            order.push(key.clone());
+            chosen.insert(key, item);
+        } else if routed {
+            chosen.insert(key, item);
+        }
+    }
+    let mut models: Vec<ProviderModel> = order
+        .iter()
+        .filter_map(|key| {
+            let item = chosen[key];
+            let model_id = item.model.trim();
+            let platform = native_platform(item);
             // No API to send it over means it is not a choice, however well
             // it reads in a catalog.
-            let format = native_format_for_model(&platform, &item.model)?;
+            let format = native_format_for_model(&platform, model_id)?;
             let name = if item.display_name.trim().is_empty() {
-                item.model.clone()
+                model_id.to_owned()
             } else {
                 item.display_name.clone()
             };
-            let mut model = ProviderModel::new(format!("{platform}::{}", item.model), name);
-            model.sub_provider = Some(platform.clone());
+            let mut model = ProviderModel::new(format!("{platform}::{model_id}"), name);
+            model.sub_provider = Some(match routing.subscription_for(model_id) {
+                Some(group) => format!(
+                    "{platform} \u{00b7} {}",
+                    tr!("native.via_subscription", group = group.to_owned())
+                ),
+                None => platform.clone(),
+            });
             if let Some(entry) = native_format_option(format) {
                 model = model.service_tiers(
                     [
@@ -67,9 +125,9 @@ pub(super) fn native_models_from_catalog(items: &[ModelCatalogItem]) -> Vec<Prov
                     entry.id,
                 );
             }
-            if has_reasoning_ladder(&platform, &item.model) {
+            if has_reasoning_ladder(&platform, model_id) {
                 let mut ladder = vec!["low", "medium", "high", "xhigh", "max"];
-                if supports_ultracode(&item.model) {
+                if supports_ultracode(model_id) {
                     ladder.push("ultracode");
                 }
                 model = model.reasoning(
@@ -91,6 +149,15 @@ pub(super) fn native_models_from_catalog(items: &[ModelCatalogItem]) -> Vec<Prov
         models[default].is_default = true;
     }
     models
+}
+
+/// The platform a catalog model is filed under in the picker: its family,
+/// read from the name the way the gateway reads it, or — for a name that
+/// gives nothing away — the platform of the group that listed it.
+fn native_platform(item: &ModelCatalogItem) -> String {
+    sub2api::model_routing::model_family(&item.model)
+        .map(str::to_owned)
+        .unwrap_or_else(|| platform_of(item))
 }
 
 fn platform_of(item: &ModelCatalogItem) -> String {
@@ -231,9 +298,10 @@ pub(super) static NATIVE_WIRE_FORMATS: [WireFormatOption; 3] = [
 /// group reports `composite` for everything in it, so the platform is only
 /// consulted as a tie-breaker for a name that gives nothing away.
 ///
-/// Chat Completions is deliberately absent here. It carries the models a
-/// user declared on their own endpoint ([`native_custom_models`]), nothing
-/// from the managed catalog.
+/// Chat Completions carries DeepSeek, Kimi, GLM and MiniMax: the gateway
+/// serves them from accounts that speak it and forwards it as it is. The
+/// models a user declared on their own endpoint ([`native_custom_models`])
+/// land there too, by another road.
 pub(super) fn native_format_for_model(platform: &str, model: &str) -> Option<&'static str> {
     let model = model.trim().to_ascii_lowercase();
     if model.starts_with("claude") {
@@ -249,11 +317,18 @@ pub(super) fn native_format_for_model(platform: &str, model: &str) -> Option<&'s
     {
         return Some("responses");
     }
+    if matches!(
+        sub2api::model_routing::model_family(&model),
+        Some("deepseek" | "kimi" | "zhipu" | "minimax")
+    ) {
+        return Some("chat");
+    }
     // A name that says nothing: fall back to the group's platform, for the
     // rare model whose id carries no family at all.
     match platform.trim().to_ascii_lowercase().as_str() {
         "anthropic" => Some("messages"),
         "openai" | "grok" => Some("responses"),
+        "deepseek" | "kimi" | "zhipu" | "minimax" | "opencode_go" | "composite" => Some("chat"),
         _ => None,
     }
 }
@@ -323,9 +398,10 @@ pub(super) fn native_custom_models(models: &[ModelEntry]) -> Vec<ProviderModel> 
 /// blanks between a sign-out and the next catalog.
 pub(super) fn native_probe_models(
     items: &[ModelCatalogItem],
+    routing: &NativeRouting,
     custom: &[ModelEntry],
 ) -> Vec<ProviderModel> {
-    let mut models = native_models_from_catalog(items);
+    let mut models = native_models_routed(items, routing);
     models.extend(native_custom_models(custom));
     if models.is_empty() {
         crate::model_catalog::fallback_models(ProviderKind::Native)
@@ -352,7 +428,7 @@ impl Waku {
             .filter(|entry| entry.is_routable())
             .map(|entry| entry.models.clone())
             .unwrap_or_default();
-        let models = native_probe_models(&self.model_plaza.items, &custom);
+        let models = native_probe_models(&self.model_plaza.items, &self.native_routing(), &custom);
         if let Some(probe) = self
             .probes
             .iter_mut()
@@ -468,19 +544,21 @@ mod tests {
     }
 
     #[test]
-    fn the_chat_section_holds_the_users_own_models_and_nothing_else() {
-        // Nothing from the managed catalog lands in Chat Completions.
+    fn the_chat_section_holds_the_chat_families_and_the_users_own_models() {
+        // Of the managed catalog, only the families the gateway serves over
+        // Chat Completions land there.
         let catalog = native_models_from_catalog(&[
             item("claude-sonnet-5", "anthropic"),
             item("gpt-5.6-sol", "openai"),
             item("grok-4.6", "grok"),
+            item("deepseek-v4.1-flash", "deepseek"),
         ]);
-        assert!(
-            catalog
-                .iter()
-                .all(|model| model.default_service_tier.as_deref() != Some("chat")),
-            "the catalog never fills Chat Completions"
-        );
+        let chat: Vec<&str> = catalog
+            .iter()
+            .filter(|model| model.default_service_tier.as_deref() == Some("chat"))
+            .map(|model| model.id.as_str())
+            .collect();
+        assert_eq!(chat, ["deepseek::deepseek-v4.1-flash"]);
 
         let declared = native_custom_models(&[
             ModelEntry::new("my-model"),
@@ -581,16 +659,20 @@ mod tests {
         };
         let fallback = ids(crate::model_catalog::fallback_models(ProviderKind::Native));
         assert!(!fallback.is_empty());
-        assert_eq!(ids(native_probe_models(&[], &[])), fallback);
+        assert_eq!(ids(native_probe_models(&[], &NativeRouting::default(), &[])), fallback);
         // A catalog with nothing a coding agent can drive counts as empty.
         let mut image = item("gpt-image-2", "openai");
         image.billing_mode = "image".into();
-        assert_eq!(ids(native_probe_models(&[image], &[])), fallback);
+        assert_eq!(ids(native_probe_models(&[image], &NativeRouting::default(), &[])), fallback);
     }
 
     #[test]
     fn a_catalog_replaces_the_fallback_list_outright() {
-        let models = native_probe_models(&[item("claude-sonnet-5", "anthropic")], &[]);
+        let models = native_probe_models(
+            &[item("claude-sonnet-5", "anthropic")],
+            &NativeRouting::default(),
+            &[],
+        );
         let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
         assert_eq!(ids, ["anthropic::claude-sonnet-5"]);
     }
@@ -600,7 +682,7 @@ mod tests {
         // Signed out of the managed service but pointed at an endpoint of
         // their own: the picker lists what they declared, not the built-in
         // Anthropic list they cannot reach.
-        let models = native_probe_models(&[], &[ModelEntry::new("my-model")]);
+        let models = native_probe_models(&[], &NativeRouting::default(), &[ModelEntry::new("my-model")]);
         let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
         assert_eq!(ids, ["my-model"]);
     }
@@ -613,6 +695,37 @@ mod tests {
         ]);
         assert!(!models[0].is_default);
         assert!(models[1].is_default);
+    }
+
+    /// The report that started per-model routing: the Codex group also
+    /// listed a DeepSeek model, so it was offered as `openai::…` and sent
+    /// with the Codex key. Filed by family, it is one `deepseek::` row built
+    /// from the group routing picked — a subscription, which the subtitle
+    /// names.
+    #[test]
+    fn a_model_is_filed_by_its_family_and_names_its_subscription() {
+        let mut codex = item("deepseek-v4.1-flash", "openai");
+        codex.best_group.id = 7;
+        let mut subscription = item("deepseek-v4.1-flash", "composite");
+        subscription.best_group.id = 20;
+        subscription.display_name = "DeepSeek V4.1 Flash".into();
+        let routing = NativeRouting {
+            routes: std::collections::BTreeMap::from([("deepseek-v4.1-flash".to_owned(), 20)]),
+            subscriptions: std::collections::BTreeMap::from([(20, "DeepSeek 包月".to_owned())]),
+        };
+        let models = native_models_routed(&[codex, subscription], &routing);
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "deepseek::deepseek-v4.1-flash");
+        assert_eq!(models[0].name, "DeepSeek V4.1 Flash");
+        assert_eq!(models[0].default_service_tier.as_deref(), Some("chat"));
+        let subtitle = models[0].sub_provider.as_deref().unwrap_or_default();
+        assert!(subtitle.starts_with("deepseek"), "{subtitle}");
+        assert!(subtitle.contains("DeepSeek 包月"), "{subtitle}");
+
+        // Without a subscription behind it, the subtitle is the family alone.
+        let models = native_models_from_catalog(&[item("glm-5", "composite")]);
+        assert_eq!(models[0].id, "zhipu::glm-5");
+        assert_eq!(models[0].sub_provider.as_deref(), Some("zhipu"));
     }
 
     #[test]

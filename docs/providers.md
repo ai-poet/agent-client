@@ -932,11 +932,14 @@ is excluded from `supports_model_discovery`, the catalog is fetched at
 start-up, sign-in and after a group switch (`refresh_native_catalog`, the
 Plaza's own fetch behind its freshness window), and `sync_native_models`
 re-applies it after every daemon probe answer and language change so the
-daemon's fallback never replaces it. Each entry's id carries its platform
-(`openai::gpt-5.6-sol`), which is how the daemon picks the account key that
-authorizes it — the routing writer files every gateway key by platform under
-the engine's anthropic provider entry, and `select_route` in the bridge picks
-the one for the session's platform. Picture, video, speech and embedding
+daemon's fallback never replaces it. Each entry's id carries the model's
+family (`openai::gpt-5.6-sol`, `deepseek::deepseek-v4.1-flash`), one row per
+model however many groups list it. The key it goes out with is chosen per
+model — see **Which group a model goes through** below — and the family only
+decides the fallback: the routing writer files every gateway key under the
+engine's anthropic provider entry, per model first and per platform after,
+and `select_route` in the bridge takes the model's own before its
+platform's. Picture, video, speech and embedding
 products are filtered out: the catalog has no modality field, so
 `is_chat_model` reads the billing mode, then the pricing shape, then the
 model's name — the same name test the gateway itself uses, because a
@@ -950,10 +953,12 @@ Completions — is a property of the model, and each model has exactly one:
 |---|---|
 | Anthropic Messages | the Claude family |
 | OpenAI Responses | the GPT family (`gpt-*`, `o1`/`o3`/`o4`, `codex-*`) and Grok |
-| OpenAI Chat Completions | only what the user declared on their own endpoint — empty otherwise |
+| OpenAI Chat Completions | DeepSeek, Kimi, GLM and MiniMax, and whatever the user declared on their own endpoint |
 
 The model's *name* decides, with the group's platform as a tie-breaker for
-a name that carries no family. That order matters: a composite group
+a name that carries no family. DeepSeek, Kimi, GLM and MiniMax go over Chat
+Completions because the gateway serves them from accounts that speak it and
+forwards it as it is; anything else it would first translate. That order matters: a composite group
 reports `composite` as the platform of every model in it, so a
 platform-first rule would mis-route all of them. A catalog model matching
 neither is not offered at all — there is no API to send it over, and
@@ -969,6 +974,49 @@ the one holding the session's current model. And `WireFormat::resolve` in
 the bridge applies the same rule before a request is built, so a session
 persisted before it existed heals instead of failing on the wire. Choosing
 a model brings its own API with it (`choose_model` in `sessions.rs`).
+
+**Which group a model goes through** — a gateway key belongs to exactly one
+group, and a group serves only the models its accounts map. Routing by
+platform alone sent every model to whichever group held that platform's key:
+a Codex group whose upstream also listed `deepseek-v4.1-flash` got the
+DeepSeek requests, and answered 503 "no available channel". The catalog lists
+every (model, group) pair the account can reach, so the choice is made per
+model instead (`crates/sub2api/src/model_routing.rs`):
+
+1. A family a CLI slot speaks for — Claude (Claude Code's group), GPT
+   (Codex's), and the general binding when its group is on the model's own
+   platform, which is how Grok is covered — goes through that group when it
+   lists the model. A bound group that lists nothing at all is trusted and
+   the model keeps the slot's key: accounts without a model mapping add no
+   catalog entries, so silence says nothing about what the group serves.
+2. Otherwise an active subscription group that lists it.
+3. Otherwise any group that lists it.
+
+Within 2 and 3 the model's own platform beats a composite group, which beats
+anything else, then the lower rate. A subscription group the catalog is
+silent about is asked with one of its keys (`GET /v1/models`), believed only
+where it cannot be a platform default in disguise — the model's family is
+the group's platform, or the group is composite.
+
+`refresh_model_routes` (in `src/app/cloud_subscriptions.rs`, the work in
+`sub2api::refresh_model_routes`) runs whenever the catalog or the group list
+lands: it reads the active subscriptions (`GET /api/v1/subscriptions/progress`),
+keeps one key per subscription group and per routed group in
+`Credentials::group_keys` — reusing an active key the account already has in
+that group before minting one, and dropping a kept key the listing shows
+gone — and stores the answer in `Credentials::model_routes`. The refresh runs
+on a copy; only those two tables are merged back into the live session, so a
+group switch made meanwhile is not undone. The routing writer then files one
+key per model (`gateway_keys.models` beside the per-platform keys, one table
+so it is released with them), and the picker names the subscription a model
+goes through in its subtitle.
+
+Settings → Cloud Account lists the subscriptions — group, days left, spend
+against each daily, weekly and monthly limit, and which of the built-in
+agent's models go through each — and the account menu carries one line per
+subscription. The CLIs are unchanged: each takes one key for its whole run,
+and the group switcher already lets a CLI's slot point at a subscription
+group.
 
 The user's own endpoint is the one case this app cannot discover: nothing
 lists the models behind somebody else's base URL, so the built-in agent's

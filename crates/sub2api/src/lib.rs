@@ -40,6 +40,7 @@ pub mod global_config;
 pub mod http;
 pub mod mcp_stdio;
 pub mod migrate;
+pub mod model_routing;
 pub mod node_install;
 pub mod onboarding;
 pub mod pay;
@@ -215,6 +216,258 @@ pub fn ensure_key_for_group(
     }
 }
 
+/// The key that authorizes `group_id`: a CLI slot's when that slot is bound
+/// to it, otherwise one kept for it in `group_keys`.
+pub fn key_for_group(credentials: &Credentials, group_id: i64) -> Option<&str> {
+    [
+        (credentials.claude_group_id, credentials.claude_api_key.as_deref()),
+        (credentials.codex_group_id, credentials.codex_api_key.as_deref()),
+        (credentials.group_id, credentials.api_key.as_deref()),
+    ]
+    .into_iter()
+    .find_map(|(bound, key)| (bound == Some(group_id)).then_some(key).flatten())
+    .or_else(|| credentials.group_keys.get(&group_id).map(String::as_str))
+    .filter(|key| !key.trim().is_empty())
+}
+
+/// Give every group in `groups` a key, keeping them in `group_keys`.
+///
+/// One listing serves the lot: an active key already bound to the group is
+/// reused, and only a group with none gets one minted, named like the keys
+/// the CLI slots use. A kept key that the listing shows gone or disabled is
+/// dropped first — the user may have deleted it on the web — but only when
+/// the listing is complete, since a key past its first page is merely
+/// unseen. Groups a CLI slot already holds a key for are left alone.
+pub fn ensure_group_keys(
+    credentials: &mut Credentials,
+    groups: &std::collections::BTreeSet<i64>,
+) -> anyhow::Result<()> {
+    let wanted: Vec<i64> = groups
+        .iter()
+        .copied()
+        .filter(|group| {
+            let slot = [
+                credentials.claude_group_id,
+                credentials.codex_group_id,
+                credentials.group_id,
+            ]
+            .contains(&Some(*group));
+            !slot || key_for_group(credentials, *group).is_none()
+        })
+        .collect();
+    if wanted.is_empty() {
+        return Ok(());
+    }
+    let client = authenticated(credentials)?;
+    let listing = client.list_keys(&credentials.access_token)?;
+    let usable = |key: &client::ApiKey| {
+        !key.key.is_empty() && !key.status.eq_ignore_ascii_case("disabled")
+    };
+    if listing.total <= listing.items.len() as i64 {
+        credentials.group_keys.retain(|_, kept| {
+            listing
+                .items
+                .iter()
+                .any(|key| usable(key) && key.key == *kept)
+        });
+    }
+    for group in wanted {
+        if credentials.group_keys.contains_key(&group) {
+            continue;
+        }
+        let key = match listing
+            .items
+            .iter()
+            .find(|key| key.group_id == Some(group) && usable(key))
+        {
+            Some(key) => key.key.clone(),
+            None => {
+                client
+                    .create_key(
+                        &credentials.access_token,
+                        &format!("{} desktop", brand::DISPLAY_NAME),
+                        Some(group),
+                    )?
+                    .key
+            }
+        };
+        credentials.group_keys.insert(group, key);
+    }
+    Ok(())
+}
+
+/// The models a group serves by the gateway's own account (`GET /v1/models`
+/// with one of its keys). See [`model_routing::Offer::from_group_listing`]
+/// for how far that answer is believed.
+pub fn gateway_model_ids(origin: &str, api_key: &str) -> anyhow::Result<Vec<String>> {
+    let url = format!("{}/models", gateway::openai_base_url(origin));
+    let response = http::Request::new()
+        .timeout_seconds(15)
+        .bearer(api_key.trim())
+        .send(&url)?;
+    if !response.is_success() {
+        anyhow::bail!("{url} answered {}", response.status);
+    }
+    Ok(speedtest::model_ids_from_body(&response.body))
+}
+
+/// What a model-routing refresh learned.
+#[derive(Clone, Debug, Default)]
+pub struct ModelRoutesRefresh {
+    /// The active subscriptions, or `None` when they could not be read — a
+    /// deployment without subscriptions, or a transient failure. Routing then
+    /// goes by the catalog alone.
+    pub subscriptions: Option<Vec<client::SubscriptionProgress>>,
+    /// The new `Credentials::group_keys`.
+    pub group_keys: std::collections::BTreeMap<i64, String>,
+    /// The new `Credentials::model_routes`.
+    pub model_routes: std::collections::BTreeMap<String, i64>,
+}
+
+impl ModelRoutesRefresh {
+    /// Put the result into the session the app holds now. Only the two
+    /// tables are taken: the refresh ran on a copy, and the user may have
+    /// switched a group meanwhile — copying the whole struct back would
+    /// undo that.
+    pub fn apply_to(&self, credentials: &mut Credentials) {
+        credentials.group_keys = self.group_keys.clone();
+        credentials.model_routes = self.model_routes.clone();
+    }
+}
+
+/// Work out which group each of the built-in agent's models goes through and
+/// make sure there is a key for every group that needs one. Blocking; run it
+/// off the UI thread. `credentials` comes back with renewed tokens only;
+/// the answer is in the result, for [`ModelRoutesRefresh::apply_to`] and
+/// then a save on the side that owns the session.
+///
+/// `catalog` is the model catalog the app already holds and `groups` the
+/// account's available groups; `origin` is the gateway domain the agents are
+/// routed to, for asking a subscription group the catalog is silent about
+/// what it serves.
+pub fn refresh_model_routes(
+    credentials: &mut Credentials,
+    catalog: &[client::ModelCatalogItem],
+    groups: &[client::Group],
+    origin: &str,
+) -> anyhow::Result<ModelRoutesRefresh> {
+    use std::collections::BTreeSet;
+
+    let client = authenticated(credentials)?;
+    let subscriptions = client.subscription_progress(&credentials.access_token).ok();
+    let subscribed: BTreeSet<i64> = subscriptions
+        .iter()
+        .flatten()
+        .map(client::SubscriptionProgress::group_id)
+        .filter(|id| *id > 0)
+        .collect();
+
+    // Every subscription gets a key up front: it is what the user bought,
+    // and a group the catalog is silent about can only be asked with one.
+    ensure_group_keys(credentials, &subscribed)?;
+
+    let mut offers = model_routing::Offer::from_catalog(catalog);
+    for subscription in subscriptions.iter().flatten() {
+        let group = subscription.group_id();
+        if offers.iter().any(|offer| offer.group_id == group) {
+            continue;
+        }
+        let Some(key) = key_for_group(credentials, group) else {
+            continue;
+        };
+        let rate = subscription
+            .subscription
+            .group
+            .as_ref()
+            .map_or(0.0, |group| group.rate_multiplier);
+        // Unanswered, the group simply offers nothing this time.
+        if let Ok(models) = gateway_model_ids(origin, key) {
+            offers.extend(model_routing::Offer::from_group_listing(
+                &models,
+                group,
+                &subscription.platform(),
+                rate,
+            ));
+        }
+    }
+
+    // From the group list, or — before that has loaded — from the catalog,
+    // whose entries carry their group's platform.
+    let general_platform = credentials.group_id.and_then(|id| {
+        groups
+            .iter()
+            .find(|group| group.id == id)
+            .map(|group| group.platform.clone())
+            .or_else(|| {
+                catalog
+                    .iter()
+                    .find(|item| item.best_group.id == id)
+                    .map(|item| item.platform.clone())
+            })
+    });
+    let bindings = model_routing::Bindings::from_credentials(credentials, general_platform);
+    let routes = model_routing::resolve(&offers, &bindings, &subscribed);
+
+    let needed: BTreeSet<i64> = routes.values().copied().chain(subscribed.iter().copied()).collect();
+    ensure_group_keys(credentials, &needed)?;
+    credentials.group_keys.retain(|group, _| needed.contains(group));
+    // A group that could not be given a key leaves its models on their
+    // platform's key rather than on nothing.
+    let model_routes = routes
+        .into_iter()
+        .filter(|(_, group)| key_for_group(credentials, *group).is_some())
+        .collect();
+    Ok(ModelRoutesRefresh {
+        subscriptions,
+        group_keys: credentials.group_keys.clone(),
+        model_routes,
+    })
+}
+
+#[cfg(test)]
+mod group_key_tests {
+    use super::*;
+
+    #[test]
+    fn a_slot_bound_to_the_group_supplies_its_key() {
+        let credentials = Credentials {
+            codex_group_id: Some(7),
+            codex_api_key: Some("sk-codex".into()),
+            group_keys: std::collections::BTreeMap::from([(20, "sk-sub".to_owned())]),
+            ..Credentials::default()
+        };
+        assert_eq!(key_for_group(&credentials, 7), Some("sk-codex"));
+        assert_eq!(key_for_group(&credentials, 20), Some("sk-sub"));
+        assert_eq!(key_for_group(&credentials, 21), None);
+    }
+
+    /// Only the models whose group has a key reach the agent's table; the
+    /// rest keep their platform's key.
+    #[test]
+    fn model_keys_follow_the_routes() {
+        let credentials = Credentials {
+            endpoint: "https://gw.example.org".into(),
+            codex_group_id: Some(7),
+            codex_api_key: Some("sk-codex".into()),
+            group_keys: std::collections::BTreeMap::from([(20, "sk-sub".to_owned())]),
+            model_routes: std::collections::BTreeMap::from([
+                ("gpt-5.6-sol".to_owned(), 7),
+                ("deepseek-v4.1-flash".to_owned(), 20),
+                ("glm-5".to_owned(), 30),
+            ]),
+            ..Credentials::default()
+        };
+        let config = gateway_config_from(&credentials, true);
+        assert_eq!(
+            config.model_keys,
+            std::collections::BTreeMap::from([
+                ("deepseek-v4.1-flash".to_owned(), "sk-sub".to_owned()),
+                ("gpt-5.6-sol".to_owned(), "sk-codex".to_owned()),
+            ])
+        );
+    }
+}
+
 #[cfg(test)]
 mod platform_binding_tests {
     use super::*;
@@ -306,6 +559,13 @@ pub fn gateway_config_with_origin(
         claude_api_key: credentials.claude_api_key.clone(),
         codex_api_key: credentials.codex_api_key.clone(),
         codex_model: None,
+        model_keys: credentials
+            .model_routes
+            .iter()
+            .filter_map(|(model, group)| {
+                key_for_group(credentials, *group).map(|key| (model.clone(), key.to_owned()))
+            })
+            .collect(),
     }
 }
 
