@@ -17,7 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-24.04, windows-latest]
+        # No Linux runner: this fork ships no Linux build.
+        os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
 
@@ -32,21 +33,6 @@ jobs:
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
-
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes \
-            clang \
-            cmake \
-            libfontconfig-dev \
-            libvulkan1 \
-            libwayland-dev \
-            libx11-xcb-dev \
-            libxkbcommon-x11-dev \
-            pkg-config \
-            xdg-desktop-portal
 
       - name: Cache Cargo
         uses: actions/cache@v6
@@ -65,11 +51,11 @@ jobs:
       # The generated protocol and browser client are platform-independent, so
       # one runner is enough to catch a drifted checked-in artifact.
       - name: Install JavaScript dependencies
-        if: runner.os == 'Linux'
+        if: runner.os == 'macOS'
         run: bun install --frozen-lockfile
 
       - name: Check generated protocol and browser client
-        if: runner.os == 'Linux'
+        if: runner.os == 'macOS'
         run: |
           bun run protocol:check
           bun run --filter @waku/client check

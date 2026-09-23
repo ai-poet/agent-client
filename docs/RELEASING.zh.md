@@ -198,8 +198,9 @@ Windows 安装包由 GitHub Actions 打（本地打需要 Inno Setup，一般没
 2. 触发：推 tag `v<版本>`（须与 Cargo.toml 一致），或 Actions → Release →
    Run workflow（不用 tag，按 Cargo.toml 版本出 draft）。
 3. 工作流产出 Windows x64/arm64 的 `CheapRouter-<v>-<arch>-Setup.exe`、便携
-   zip、签名过的 `appcast-windows-<arch>.xml`，连同 mac/Linux 产物挂在一个
-   **draft GitHub release** 上。
+   zip、签名过的 `appcast-windows-<arch>.xml`，连同 mac 产物挂在一个
+   **draft GitHub release** 上。本 fork 不发 Linux 包，工作流里也没有 Linux
+   构建和 Linux 测试。
 4. 检查 draft 没问题后点 **Publish** → `sync-release.yml` 自动把所有文件同步进
    R2 —— 这一步完成，两个平台的自动更新才对老用户生效。
 

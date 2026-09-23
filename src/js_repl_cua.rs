@@ -236,10 +236,16 @@ impl AppRow {
         if path.starts_with("shell:") {
             return None;
         }
-        let path = path.trim_matches('"');
-        let name = Path::new(path).file_name()?.to_string_lossy().to_lowercase();
+        let name = windows_file_name(path.trim_matches('"')).to_lowercase();
         name.ends_with(".exe").then_some(name)
     }
+}
+
+/// The last component of a path as the driver reports it. Those are Windows
+/// paths, so they are split on `\` as well as `/` whatever the host: `Path`
+/// on macOS or Linux reads the whole of `C:\x\y.exe` as one file name.
+fn windows_file_name(path: &str) -> &str {
+    path.rsplit(['\\', '/']).next().unwrap_or(path)
 }
 
 impl CuaAdapter {
@@ -1233,10 +1239,7 @@ fn is_blocked(app_name: &str, title: &str) -> bool {
 fn match_windows_by_executable<'a>(query: &str, windows: &'a [WindowRow]) -> Vec<&'a WindowRow> {
     let query = query.trim_matches('"');
     let by_path = query.contains(['\\', '/']);
-    let wanted_name = Path::new(query)
-        .file_name()
-        .map(|name| name.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
+    let wanted_name = windows_file_name(query).to_lowercase();
     windows
         .iter()
         .filter(|window| !is_ignored(window))
@@ -1788,6 +1791,16 @@ mod tests {
             Some("data:image/png;base64,AAAA")
         );
         assert_eq!(screenshot_data_url(&json!({}), &JsonValue::Null), None);
+    }
+
+    /// The driver's paths are Windows paths on every host; these tests run
+    /// on macOS too, where `Path` would not split them.
+    #[test]
+    fn driver_paths_split_on_either_separator_on_any_host() {
+        assert_eq!(windows_file_name("%windir%\\system32\\notepad.exe"), "notepad.exe");
+        assert_eq!(windows_file_name("C:/Tools/app.exe"), "app.exe");
+        assert_eq!(windows_file_name("chrome"), "chrome");
+        assert_eq!(windows_file_name("C:\\Tools\\"), "");
     }
 
     #[test]

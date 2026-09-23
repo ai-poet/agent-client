@@ -68,115 +68,6 @@ jobs:
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 
-  linux-x86_64:
-    name: Linux x86_64
-    needs: version
-    if: needs.version.outputs.published != 'true'
-    runs-on: ubuntu-22.04
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust
-        run: |
-          rustup toolchain install 1.96.0 --profile minimal
-          rustup default 1.96.0
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes \
-            clang \
-            cmake \
-            libfontconfig-dev \
-            libvulkan1 \
-            libwayland-dev \
-            libx11-xcb-dev \
-            libxkbcommon-x11-dev \
-            pkg-config \
-            xdg-desktop-portal
-
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ubuntu-22.04-rust-1.96.0-release-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ubuntu-22.04-rust-1.96.0-release-
-
-      # `target/` is restored from the release cache, so the previous
-      # release's bundles are still sitting in `target/release` when this one
-      # starts. Cargo does not own them, so nothing else clears them.
-      - name: Clear stale bundles
-        run: rm -f target/release/waku-*.tar.gz
-
-      - name: Bundle
-        run: ./scripts/bundle-linux.sh
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: linux-x86_64
-          # Named exactly, not globbed: `if-no-files-found: error` is then a
-          # real check that this version built, rather than something an older
-          # bundle can satisfy.
-          path: target/release/waku-${{ needs.version.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz
-          if-no-files-found: error
-
-  linux-arm64:
-    name: Linux arm64
-    needs: version
-    if: needs.version.outputs.published != 'true'
-    runs-on: ubuntu-22.04-arm
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust
-        run: |
-          rustup toolchain install 1.96.0 --profile minimal
-          rustup default 1.96.0
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes \
-            clang \
-            cmake \
-            libfontconfig-dev \
-            libvulkan1 \
-            libwayland-dev \
-            libx11-xcb-dev \
-            libxkbcommon-x11-dev \
-            pkg-config \
-            xdg-desktop-portal
-
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ubuntu-22.04-arm-rust-1.96.0-release-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ubuntu-22.04-arm-rust-1.96.0-release-
-
-      # `target/` is restored from the release cache, so the previous
-      # release's bundles are still sitting in `target/release` when this one
-      # starts. Cargo does not own them, so nothing else clears them.
-      - name: Clear stale bundles
-        run: rm -f target/release/waku-*.tar.gz
-
-      - name: Bundle
-        run: ./scripts/bundle-linux.sh
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: linux-arm64
-          path: target/release/waku-${{ needs.version.outputs.version }}-aarch64-unknown-linux-gnu.tar.gz
-          if-no-files-found: error
-
   windows-x86_64:
     name: Windows x86_64
     needs: version
@@ -377,8 +268,6 @@ jobs:
     needs:
       [
         version,
-        linux-x86_64,
-        linux-arm64,
         windows-x86_64,
         windows-arm64,
         macos,
@@ -402,9 +291,9 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          # What `install.sh` and the website's Windows download resolve
-          # "latest" to. In-app updates read the appcasts instead.
-          echo "$VERSION" > artifacts/latest-linux.txt
+          # What the website's Windows download resolves "latest" to.
+          # In-app updates read the appcasts instead. No Linux build is
+          # published, so there is no Linux pointer.
           echo "$VERSION" > artifacts/latest-windows.txt
 
       # Signed here rather than on the Windows runners: this is the only job
@@ -451,12 +340,10 @@ jobs:
           body_path: release-notes.md
           fail_on_unmatched_files: true
           files: |
-            artifacts/*.tar.gz
             artifacts/*.dmg
             artifacts/*.md
             artifacts/*.zip
             artifacts/*.exe
             artifacts/appcast.xml
             artifacts/appcast-windows-*.xml
-            artifacts/latest-linux.txt
             artifacts/latest-windows.txt

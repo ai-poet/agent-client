@@ -1161,7 +1161,13 @@ mod tests {
         // `sky.target` names the platform being driven, so the expectation
         // has to follow it. Hardcoding "mac" failed on Windows, which went
         // unnoticed while the feature was macOS-only.
-        let target = if cfg!(windows) { "windows" } else { "mac" };
+        let target = if cfg!(windows) {
+            "windows"
+        } else if cfg!(target_os = "macos") {
+            "mac"
+        } else {
+            "linux"
+        };
         assert_eq!(result["content"][0]["text"], format!("{target}:7"));
     }
 
