@@ -155,6 +155,7 @@ lines below.
 | `crates/waku-core/src/driver/support.rs` | `optional_computer_use` (+ test) | ~30 |
 | `src/app.rs` (subscriptions) | `mod cloud_subscriptions` | 1 |
 | `src/app/usage_meter.rs` | `meter_bar` is `pub(super)`, reused by the subscription cards | 1 |
+| `crates/waku-core/src/git_commit.rs`, `crates/waku-core/src/driver/codex.rs` (Codex pins) | Codex commit messages and titles pinned to `gpt-5.6-terra` instead of `gpt-5.6-luna`, commit effort `low` instead of `none` (+ the title test's name and assertion) | 5 |
 | `src/js_repl.rs` (test) | `repl_supports_top_level_await_and_lazy_native_sky` expects `linux` off macOS and Windows | 6 |
 | `.github/workflows/{test,release,sync-release}.yml` | no Linux: the test matrix drops Ubuntu and the generated-protocol checks move to the macOS runner; the two Linux release jobs, the `*.tar.gz` upload and `latest-linux.txt` are gone. The version, draft-release and R2-sync jobs still run on `ubuntu-latest` — they build nothing for Linux | ~140 removed |
 

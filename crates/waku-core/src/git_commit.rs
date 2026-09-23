@@ -32,11 +32,13 @@ const MAX_ERROR_CHARS: usize = 4_000;
 // to the lowest effort that tier's API accepts, whatever the session selected.
 const CLAUDE_COMMIT_MODEL: &str = "claude-haiku-4-5";
 const CLAUDE_COMMIT_EFFORT: &str = "low";
-const CODEX_COMMIT_MODEL: &str = "gpt-5.6-luna";
+// Fork: Terra, not Luna — the gateway's groups no longer carry Luna.
+const CODEX_COMMIT_MODEL: &str = "gpt-5.6-terra";
 // `codex exec` has no effort flag, so the config override is the only route.
-// `none` is the floor: `minimal` is rejected by the API for this model with
-// `unsupported_value`, listing `none` as the lowest it accepts.
-const CODEX_COMMIT_EFFORT: &str = r#"model_reasoning_effort="none""#;
+// `low` is the lowest level Codex's own model list gives Terra. Luna ran at
+// `none`, which the API accepted there without listing it; for Terra that is
+// unverified, and a rejected level would fail every commit message.
+const CODEX_COMMIT_EFFORT: &str = r#"model_reasoning_effort="low""#;
 
 struct CapturedOutput {
     status: ExitStatus,

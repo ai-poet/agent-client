@@ -75,7 +75,7 @@ title near when the provider writes it, and long enough to survive a slow start.
 | Provider | Author | Transport | Trigger | Emit site |
 | --- | --- | --- | --- | --- |
 | Claude Code | Claude (Haiku 4.5) | transcript JSONL on disk | poll from each prompt, plus turn end | [title_refresh.rs:53](../crates/waku-core/src/driver/title_refresh.rs#L53), [claude.rs:1300](../crates/waku-core/src/driver/claude.rs#L1300) |
-| Codex CLI | **Waku** (`gpt-5.6-luna`, effort `low`) | second `codex app-server` process | first `turn/started`, new threads only | [codex.rs:636](../crates/waku-core/src/driver/codex.rs#L636) |
+| Codex CLI | **Waku** (`gpt-5.6-terra`, effort `low`) | second `codex app-server` process | first `turn/started`, new threads only | [codex.rs:636](../crates/waku-core/src/driver/codex.rs#L636) |
 | Codex CLI | Codex | JSON-RPC stream | thread start/resume, `thread/name/updated` | [codex.rs:1612](../crates/waku-core/src/driver/codex.rs#L1612), [codex.rs:1735](../crates/waku-core/src/driver/codex.rs#L1735) |
 | Amp | Amp | `amp threads list --json` subprocess | poll at turn end | [title_refresh.rs:53](../crates/waku-core/src/driver/title_refresh.rs#L53) |
 | Grok Build | Grok | `summary.json` on disk | poll at turn end | [title_refresh.rs:53](../crates/waku-core/src/driver/title_refresh.rs#L53) |
@@ -158,9 +158,10 @@ that behavior in
 second, short-lived `codex app-server --stdio` process runs one ephemeral,
 read-only turn.
 
-- Model `gpt-5.6-luna` ([codex.rs:958](../crates/waku-core/src/driver/codex.rs#L958)),
-  `effort: "low"`, `summary: "none"` — the cheapest tier, since a title is a
-  fixed classification.
+- Model `gpt-5.6-terra` ([codex.rs:958](../crates/waku-core/src/driver/codex.rs#L958)),
+  `effort: "low"`, `summary: "none"` — a cheap tier, since a title is a fixed
+  classification. It was `gpt-5.6-luna` until the gateway's groups stopped
+  carrying Luna.
 - `CODEX_TITLE_INSTRUCTIONS` is passed as both `baseInstructions` and
   `developerInstructions`; the turn's only input is the raw user prompt.
 - An `outputSchema` pins `{title: string}`, max 80 chars.

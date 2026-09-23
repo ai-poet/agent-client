@@ -1134,7 +1134,8 @@ fn write_json_line(writer: &mut impl Write, value: &Value) -> std::io::Result<()
 }
 
 const CODEX_TITLE_INSTRUCTIONS: &str = "Generate a concise title for the user's coding task. Return only a plain title of at most six words. Do not use tools, quotes, markdown, labels, or ending punctuation.";
-const CODEX_TITLE_MODEL: &str = "gpt-5.6-luna";
+// Fork: Terra, not Luna — the gateway's groups no longer carry Luna.
+const CODEX_TITLE_MODEL: &str = "gpt-5.6-terra";
 const CODEX_TITLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn is_codex_turn_started(value: &Value, thread_id: Option<&str>) -> bool {
@@ -2775,11 +2776,11 @@ mod tests {
     }
 
     #[test]
-    fn title_generation_uses_luna_low_and_only_the_user_message() {
+    fn title_generation_uses_terra_low_and_only_the_user_message() {
         let thread = codex_title_thread_params(Path::new("/tmp/project"));
         let turn = codex_title_turn_params("title-thread", "Fix task titles");
 
-        assert_eq!(thread["model"], "gpt-5.6-luna");
+        assert_eq!(thread["model"], "gpt-5.6-terra");
         assert_eq!(turn["effort"], "low");
         assert_eq!(
             turn["input"],

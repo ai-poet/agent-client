@@ -27,6 +27,7 @@ the original feature bullet instead of adding separate entries for them.
 - The built-in agent sends each model through the group that serves it: DeepSeek, Kimi, GLM and the like use your subscription instead of the Codex group, which answered them with "no available channel". The model picker says which subscription a model goes through
 - Turning on Computer Use without its driver installed no longer stops a conversation: the agent carries on without desktop control, and the built-in agent still generates images
 - Linux builds are no longer published
+- Codex session titles and commit messages are generated with GPT-5.6-Terra
 - Codex is set up the way the service documents it: GPT-5.6-Sol with GPT-5.6-Terra for reviews, image generation on, and the key kept in `config.toml` only — your ChatGPT sign-in in `auth.json` is no longer replaced, and one replaced by an earlier version is given back
 ## [0.1.21]
 

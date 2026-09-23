@@ -15,16 +15,19 @@ A commit subject is a fixed classification over a diff that is already in the
 prompt, so it does not need the model the task runs on. Where a provider names a
 cheap tier, generation is **pinned** to it at the lowest effort that tier's API
 accepts, whatever the session selected — the same reasoning that puts Codex
-titles on `gpt-5.6-luna` ([titles.md](titles.md)):
+titles on `gpt-5.6-terra` ([titles.md](titles.md)):
 
 | Provider | Model | Effort | How |
 | --- | --- | --- | --- |
 | Claude Code | `claude-haiku-4-5` | `low` | `--model` / `--effort`; `low` is the floor `--effort` accepts |
-| Codex CLI | `gpt-5.6-luna` | `none` | `--model`, plus `-c model_reasoning_effort="none"` — `codex exec` has no effort flag |
+| Codex CLI | `gpt-5.6-terra` | `low` | `--model`, plus `-c model_reasoning_effort="low"` — `codex exec` has no effort flag |
 
-`none` is genuinely the floor for Codex: `minimal` comes back as a 400
-`unsupported_value` naming `none, low, medium, high, xhigh, max` as the
-supported set for this model.
+`low` is the lowest level Codex's own bundled model list gives Terra. The pin
+used to be `gpt-5.6-luna` at `none`, which the API accepted for Luna (a
+`minimal` request came back as a 400 `unsupported_value` naming `none, low,
+medium, high, xhigh, max`) although Codex's list does not name it; whether
+Terra takes `none` too is unverified, and a rejected level would fail every
+commit message, so the pin stays on a level the list vouches for.
 
 Every other provider still runs on the session's own selection, captured when
 the dialog opens into an
@@ -71,7 +74,7 @@ argument**; `NO_COLOR=1` and `CI=1` are set for all of them.
 | --- | --- | --- | --- | --- |
 | Amp | `amp` | `--execute --no-color --no-ide --no-notifications --settings-file <temp>` | `--mode` | `--effort` |
 | Claude Code | `claude` | `--print --output-format text --permission-mode plan --tools "" --disable-slash-commands --no-session-persistence --no-chrome` | pinned `claude-haiku-4-5` | pinned `low` |
-| Codex CLI | `codex exec` | `--sandbox read-only --ephemeral --color never --skip-git-repo-check` | pinned `gpt-5.6-luna` | pinned `none`, via `-c` |
+| Codex CLI | `codex exec` | `--sandbox read-only --ephemeral --color never --skip-git-repo-check` | pinned `gpt-5.6-terra` | pinned `low`, via `-c` |
 | Cursor CLI | `cursor-agent` | `--print --output-format text --mode ask --sandbox enabled --trust` | `--model` | — |
 | DeepSeek Harness | `dsh` | `--profile headless` | — | — |
 | Fx | `fx ask` | `--no-save --no-color --` | — | — |
