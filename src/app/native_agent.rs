@@ -125,11 +125,7 @@ pub(super) fn native_models_routed(
                     entry.id,
                 );
             }
-            if has_reasoning_ladder(&platform, model_id) {
-                let mut ladder = vec!["low", "medium", "high", "xhigh", "max"];
-                if supports_ultracode(model_id) {
-                    ladder.push("ultracode");
-                }
+            if let Some(ladder) = reasoning_ladder(&platform, model_id) {
                 model = model.reasoning(
                     ladder.into_iter().map(|effort| {
                         ProviderModelOption::new(effort, reasoning_effort_label(effort))
@@ -224,9 +220,10 @@ fn is_non_conversational_name(model: &str) -> bool {
 /// A reasoning ladder wherever the engine maps effort onto a request field
 /// the upstream understands.
 ///
-/// That is every family the picker offers: Claude over Messages turns it
-/// into a thinking budget, and the GPT and Grok families over Responses
-/// turn it into `reasoning.effort`. Grok was the exception until the engine
+/// That is every family the picker offers over Messages and Responses
+/// (DeepSeek's, over Chat Completions, is [`reasoning_ladder`]'s): Claude
+/// over Messages turns it into a thinking budget, and the GPT and Grok
+/// families over Responses turn it into `reasoning.effort`. Grok was the exception until the engine
 /// stopped leaving it out of that second list; the gateway normalizes the
 /// value per model and drops it for the ones that cannot use it, so the
 /// ladder is honest for all of them.
@@ -247,6 +244,30 @@ fn has_reasoning_ladder(platform: &str, model: &str) -> bool {
         return true;
     }
     platform == "anthropic" || platform == "openai" || platform == "grok"
+}
+
+/// The efforts one model is offered, or `None` for a model without a
+/// reasoning choice.
+///
+/// DeepSeek gets its own three: `low` turns its thinking mode off, `high`
+/// and `max` are the two effort values its API takes. The engine turns them
+/// into `thinking` and `reasoning_effort` on the Chat Completions request,
+/// the gateway forwards both as they are, and its own Codex manifest names
+/// the same three for DeepSeek. Kimi, GLM and MiniMax have no levels to
+/// offer — their thinking is on or off, and the gateway does not expose even
+/// that as a choice.
+fn reasoning_ladder(platform: &str, model: &str) -> Option<Vec<&'static str>> {
+    if sub2api::model_routing::model_family(model) == Some("deepseek") {
+        return Some(vec!["low", "high", "max"]);
+    }
+    if !has_reasoning_ladder(platform, model) {
+        return None;
+    }
+    let mut ladder = vec!["low", "medium", "high", "xhigh", "max"];
+    if supports_ultracode(model) {
+        ladder.push("ultracode");
+    }
+    Some(ladder)
 }
 
 /// The engine resolves `ultracode` to its top reasoning budget, which only
@@ -748,6 +769,28 @@ mod tests {
         // platform says nothing.
         assert!(ladder(&native_models_from_catalog(&[item("gpt-5.6-sol", "composite")])));
         assert!(ladder(&native_models_from_catalog(&[item("grok-4.6", "composite")])));
+    }
+
+    /// DeepSeek's three efforts, as its API and the gateway know them;
+    /// Kimi, GLM and MiniMax have none to offer.
+    #[test]
+    fn deepseek_offers_its_own_three_efforts_and_the_others_none() {
+        let efforts = |model: &ProviderModel| {
+            model
+                .reasoning_efforts
+                .iter()
+                .map(|option| option.id.clone())
+                .collect::<Vec<_>>()
+        };
+        let models = native_models_from_catalog(&[
+            item("deepseek-v4.1-flash", "deepseek"),
+            item("glm-5", "zhipu"),
+            item("kimi-k3", "kimi"),
+        ]);
+        assert_eq!(efforts(&models[0]), ["low", "high", "max"]);
+        assert_eq!(models[0].default_reasoning_effort.as_deref(), Some("high"));
+        assert!(efforts(&models[1]).is_empty());
+        assert!(efforts(&models[2]).is_empty());
     }
 
     #[test]

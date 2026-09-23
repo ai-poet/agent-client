@@ -2435,6 +2435,40 @@ mod tests {
         );
     }
 
+    /// Fork (Waku): DeepSeek's thinking mode reaches the request on the
+    /// `openai` Chat Completions route a gateway serves it over — low turns
+    /// thinking off, high and max set its effort — and never touches a model
+    /// of another family.
+    #[test]
+    fn deepseek_effort_maps_to_its_thinking_mode_on_any_openai_route() {
+        use claurst_core::effort::EffortLevel;
+        let options = |level| build_provider_options("openai", "deepseek-v4.1-flash", Some(level), None);
+
+        let low = options(EffortLevel::Low);
+        assert_eq!(low["thinking"], serde_json::json!({"type": "disabled"}));
+        assert!(low.get("reasoningEffort").is_none());
+
+        let high = options(EffortLevel::High);
+        assert_eq!(high["thinking"], serde_json::json!({"type": "enabled"}));
+        assert_eq!(high["reasoningEffort"], serde_json::json!("high"));
+
+        let max = options(EffortLevel::Max);
+        assert_eq!(max["thinking"], serde_json::json!({"type": "enabled"}));
+        assert_eq!(max["reasoningEffort"], serde_json::json!("max"));
+
+        let namespaced = build_provider_options(
+            "openrouter",
+            "deepseek/deepseek-v4.1-flash",
+            Some(EffortLevel::Max),
+            None,
+        );
+        assert_eq!(namespaced["reasoningEffort"], serde_json::json!("max"));
+
+        let other = build_provider_options("openai", "glm-5", Some(EffortLevel::Max), None);
+        assert!(other.get("thinking").is_none());
+        assert!(other.get("reasoningEffort").is_none());
+    }
+
     #[test]
     fn test_alibaba_is_openaiish_provider() {
         // "alibaba" is an alias for "qwen" (Alibaba's DashScope backend);

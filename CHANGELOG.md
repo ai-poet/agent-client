@@ -28,6 +28,8 @@ the original feature bullet instead of adding separate entries for them.
 - Turning on Computer Use without its driver installed no longer stops a conversation: the agent carries on without desktop control, and the built-in agent still generates images
 - Linux builds are no longer published
 - Codex session titles and commit messages are generated with GPT-5.6-Terra
+- The built-in agent no longer stops a task after ten steps
+- DeepSeek models in the built-in agent have a reasoning effort choice: low (thinking off), high and max
 - Codex is set up the way the service documents it: GPT-5.6-Sol with GPT-5.6-Terra for reviews, image generation on, and the key kept in `config.toml` only — your ChatGPT sign-in in `auth.json` is no longer replaced, and one replaced by an earlier version is given back
 ## [0.1.21]
 

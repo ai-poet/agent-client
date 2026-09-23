@@ -958,7 +958,12 @@ Completions — is a property of the model, and each model has exactly one:
 The model's *name* decides, with the group's platform as a tie-breaker for
 a name that carries no family. DeepSeek, Kimi, GLM and MiniMax go over Chat
 Completions because the gateway serves them from accounts that speak it and
-forwards it as it is; anything else it would first translate. That order matters: a composite group
+forwards it as it is; anything else it would first translate. DeepSeek is the
+one of them with an effort choice: `low` turns its thinking mode off, `high`
+and `max` are the two `reasoning_effort` values its API takes — the same three
+the gateway's own Codex manifest names — and the engine sends them as
+`thinking` plus `reasoning_effort`. Kimi, GLM and MiniMax get no ladder: their
+thinking is on or off, and the gateway exposes no levels for them. That order matters: a composite group
 reports `composite` as the platform of every model in it, so a
 platform-first rule would mis-route all of them. A catalog model matching
 neither is not offered at all — there is no API to send it over, and
