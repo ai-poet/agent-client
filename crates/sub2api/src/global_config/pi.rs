@@ -100,6 +100,7 @@ mod tests {
             base_url: "https://gw.example.org".to_owned(),
             api_key: "sk-pi".to_owned(),
             models: models.iter().map(|id| (*id).to_owned()).collect(),
+            managed_gateway: false,
         }
     }
 

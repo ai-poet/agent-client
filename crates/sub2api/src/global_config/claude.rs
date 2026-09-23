@@ -147,6 +147,7 @@ mod tests {
             base_url: "https://gw.example.org/v1/".to_owned(),
             api_key: "sk-live".to_owned(),
             models: Vec::new(),
+            managed_gateway: false,
         }
     }
 

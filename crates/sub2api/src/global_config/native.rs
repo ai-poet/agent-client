@@ -361,6 +361,7 @@ mod tests {
             base_url: base.into(),
             api_key: key.into(),
             models: Vec::new(),
+            managed_gateway: false,
         })
     }
 

@@ -95,6 +95,10 @@ pub struct RouteTarget {
     /// Model ids to advertise, for the CLIs whose config carries a model
     /// list (OpenCode, Pi). Empty means "none declared".
     pub models: Vec<String>,
+    /// The managed gateway, not somebody else's endpoint. The gateway also
+    /// answers the OpenAI paths at its root (`/responses`, `/models`), which
+    /// a writer may rely on only here.
+    pub managed_gateway: bool,
 }
 
 /// The built-in agent's routing: one line per API it can speak, because
@@ -171,6 +175,7 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
             base_url: config.endpoint.clone(),
             api_key: key.to_owned(),
             models: Vec::new(),
+            managed_gateway: true,
         })
     };
     let custom_target = |provider_id: &str| {
@@ -178,6 +183,7 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
             base_url: endpoint.base_url.trim().to_owned(),
             api_key: endpoint.api_key.trim().to_owned(),
             models: endpoint.models.clone(),
+            managed_gateway: false,
         })
     };
     let native = {
@@ -696,6 +702,7 @@ mod tests {
             base_url: url.to_owned(),
             api_key: key.to_owned(),
             models: Vec::new(),
+            managed_gateway: false,
         }
     }
 
@@ -824,7 +831,7 @@ mod tests {
         assert!(claude_raw.contains(r#""FOO": "bar""#));
         let codex_raw = std::fs::read_to_string(paths.codex_dir.join("config.toml")).unwrap();
         assert!(codex_raw.contains("# my note"));
-        assert!(codex_raw.contains(&format!("[model_providers.{PROVIDER_ID}]")));
+        assert!(codex_raw.contains("[model_providers.OpenAI]"));
         assert!(codex_raw.contains("[mcp_servers.files]"));
         assert!(
             std::fs::read_to_string(paths.grok_dir.join("config.toml"))
@@ -855,7 +862,7 @@ mod tests {
             std::fs::read_to_string(paths.codex_dir.join("config.toml")).unwrap();
         assert!(codex_restored.contains("# my note"));
         assert!(codex_restored.contains("model = \"my-model\""));
-        assert!(!codex_restored.contains(PROVIDER_ID));
+        assert!(!codex_restored.contains("[model_providers.OpenAI]"));
         assert_eq!(
             std::fs::read_to_string(paths.codex_dir.join("auth.json")).unwrap(),
             r#"{"tokens":{"access_token":"chatgpt-oauth"}}"#

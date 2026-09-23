@@ -201,12 +201,16 @@ entry points.
 ## Routing contract (cc-switch model)
 
 `sub2api::global_config` edits the live CLI configs — `~/.claude/settings.json`
-(env block, deep-merged), `~/.codex/auth.json` + `config.toml` (toml_edit,
-comments preserved), `~/.grok/config.toml`, `opencode.json` and Pi's
-`models.json` (one additive `cheaprouter` provider entry each). Before the
-first write per CLI the originals are backed up into
-`~/.cheaprouter/takeover.json` and restored on sign-out / clearing the
-endpoint. Pi's `auth.json` and `settings.json` are never read or written.
+(env block, deep-merged), `~/.codex/config.toml` (toml_edit, comments
+preserved; the documented shape: `[model_providers.OpenAI]` with the key as
+`experimental_bearer_token`, `requires_openai_auth = false`, the image
+extension header and two `[features]` switches, the gateway's bare origin as
+`base_url`), `~/.grok/config.toml`, `opencode.json` and Pi's `models.json`
+(one additive `cheaprouter` provider entry each). Before the first write per
+CLI the originals are backed up into `~/.cheaprouter/takeover.json` and
+restored on sign-out / clearing the endpoint. Codex's `auth.json` and Pi's
+`auth.json` and `settings.json` are never written — Codex's is only handed
+back once to users an earlier build had replaced it for.
 
 What feeds `desired_routes` on each side:
 

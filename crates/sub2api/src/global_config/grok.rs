@@ -249,6 +249,7 @@ mod tests {
             base_url: "https://gw.example.org/".to_owned(),
             api_key: "sk-grok".to_owned(),
             models: Vec::new(),
+            managed_gateway: false,
         }
     }
 

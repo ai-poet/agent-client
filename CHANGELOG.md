@@ -27,6 +27,7 @@ the original feature bullet instead of adding separate entries for them.
 - The built-in agent sends each model through the group that serves it: DeepSeek, Kimi, GLM and the like use your subscription instead of the Codex group, which answered them with "no available channel". The model picker says which subscription a model goes through
 - Turning on Computer Use without its driver installed no longer stops a conversation: the agent carries on without desktop control, and the built-in agent still generates images
 - Linux builds are no longer published
+- Codex is set up the way the service documents it: GPT-5.6-Sol with GPT-5.6-Terra for reviews, image generation on, and the key kept in `config.toml` only — your ChatGPT sign-in in `auth.json` is no longer replaced, and one replaced by an earlier version is given back
 ## [0.1.21]
 
 - Fix the app losing its daemon for good when only the connection to it dropped (a "Waku daemon disconnected" notice that came back every few seconds until a relaunch): the app now reconnects to the still-running daemon and running tasks carry on. While it reconnects, a strip across the top says so and offers a restart if it takes too long, nothing else repeats the notice, and state and drafts that could not be saved meanwhile are written once the connection is back
