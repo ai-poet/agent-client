@@ -2971,7 +2971,7 @@ workflow.inspector_changes:
 settings.agent:
   en: "Agent"
 settings.agent_keywords:
-  en: "agent built-in mcp tools permissions rules system prompt compact turns"
+  en: "agent built-in mcp tools permissions rules system prompt compact"
 providers.route_engine_default:
   en: "Engine settings"
 agent.title_hint:
@@ -2994,12 +2994,6 @@ agent.system_prompt_placeholder:
   en: "e.g. Reply in Chinese. Never run destructive git commands without asking."
 agent.system_prompt_empty:
   en: "None set."
-agent.max_turns:
-  en: "Steps per turn"
-agent.max_turns_description:
-  en: "How many model steps one message may take before the agent is asked to wrap up."
-agent.default:
-  en: "Default"
 agent.auto_compact:
   en: "Compact long conversations"
 agent.auto_compact_description:

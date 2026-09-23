@@ -191,7 +191,7 @@ impl Tool for AgentTool {
                 },
                 "max_turns": {
                     "type": "number",
-                    "description": "Maximum number of turns for the sub-agent (default 10)"
+                    "description": "Maximum number of turns for the sub-agent (default: no limit)"
                 },
                 "model": {
                     "type": "string",
@@ -298,10 +298,13 @@ impl Tool for AgentTool {
         });
 
         // Resolve max_turns: explicit > managed config executor_max_turns > default.
+        // Fork (Waku): the default is no cap. Ten tool rounds cut a sub-agent
+        // off mid-exploration and handed back a "summarize and stop" reply; the
+        // model can still pass `max_turns` when it wants a bound.
         let resolved_max_turns = params.max_turns.unwrap_or_else(|| {
             ctx.managed_agent_config.as_ref()
                 .map(|c| c.executor_max_turns)
-                .unwrap_or(10)
+                .unwrap_or(u32::MAX)
         });
 
         // Resolve isolation: explicit param > managed config executor_isolation.
@@ -634,7 +637,8 @@ pub fn init_team_swarm_runner() {
                 let query_config = crate::QueryConfig {
                     model,
                     max_tokens: claurst_core::constants::DEFAULT_MAX_TOKENS,
-                    max_turns: max_turns.unwrap_or(10),
+                    // Fork (Waku): no cap unless one was asked for, as above.
+                    max_turns: max_turns.unwrap_or(u32::MAX),
                     system_prompt: Some(system_prompt),
                     working_directory: Some(ctx.working_dir.display().to_string()),
                     output_style: ctx.config.effective_output_style(),

@@ -112,9 +112,6 @@ pub struct AgentSettings {
     /// rules that should apply to every session.
     #[serde(default)]
     pub append_system_prompt: Option<String>,
-    /// Model steps per turn before the engine asks the model to wrap up.
-    #[serde(default)]
-    pub max_turns: Option<u32>,
     #[serde(default)]
     pub auto_compact: Option<bool>,
     /// Fraction of the context window (0–1) at which compaction runs.
@@ -199,9 +196,6 @@ fn from_document(root: &Value) -> AgentSettings {
         append_system_prompt: field("append_system_prompt")
             .and_then(Value::as_str)
             .map(str::to_owned),
-        max_turns: field("max_turns")
-            .and_then(Value::as_u64)
-            .map(|value| value as u32),
         auto_compact: field("auto_compact").and_then(Value::as_bool),
         compact_threshold: field("compact_threshold")
             .and_then(Value::as_f64)
@@ -249,7 +243,10 @@ fn apply(root: &mut Value, settings: &AgentSettings) -> Result<()> {
     set_optional(config, "append_system_prompt", settings.append_system_prompt.as_deref()
         .filter(|prompt| !prompt.trim().is_empty())
         .map(|prompt| json!(prompt)));
-    set_optional(config, "max_turns", settings.max_turns.map(|value| json!(value)));
+    // Earlier builds offered a per-turn step cap here and wrote it under this
+    // key. The engine never read it, and a message is no longer capped at
+    // all, so the key goes on the next save.
+    config.remove("max_turns");
     set_optional(config, "auto_compact", settings.auto_compact.map(|value| json!(value)));
     set_optional(
         config,
@@ -308,10 +305,8 @@ mod tests {
             "permissionRules": [{"tool_name": "Bash", "action": "Allow"}]
         });
         let mut settings = from_document(&root);
-        assert_eq!(settings.max_turns, Some(3));
         assert_eq!(settings.permission_rules.len(), 1);
 
-        settings.max_turns = None;
         settings.append_system_prompt = Some("Answer in Chinese.".into());
         settings.disallowed_tools = vec!["WebSearch".into()];
         settings.mcp_servers.push(McpServer {
@@ -329,7 +324,7 @@ mod tests {
         assert_eq!(root.pointer("/config/model").unwrap(), "claude-opus-5");
         assert!(root.pointer("/config/hooks/PreToolUse").is_some());
         assert_eq!(root.pointer("/enabledPlugins/0").unwrap(), "thing");
-        // Unset means removed, not null.
+        // The step cap earlier builds wrote is dropped.
         assert!(root.pointer("/config/max_turns").is_none());
         // Written in the engine's shape.
         assert_eq!(

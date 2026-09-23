@@ -28,10 +28,6 @@ use super::*;
 
 use crate::ui::text_field::TextField;
 
-/// Presets for the per-turn step cap. The engine's own default applies when
-/// none is chosen.
-const MAX_TURN_PRESETS: [u32; 4] = [25, 50, 100, 200];
-
 /// Presets for the compaction threshold, as fractions of the window.
 const COMPACT_PRESETS: [(f32, &str); 3] = [(0.6, "60%"), (0.8, "80%"), (0.9, "90%")];
 
@@ -627,30 +623,6 @@ impl Waku {
                 );
         }
 
-        let max_turns = settings.max_turns;
-        let mut turn_presets = div().flex().flex_wrap().gap(px(6.0)).child(preset_button(
-            theme,
-            "agent-turns-default",
-            tr!("agent.default"),
-            max_turns.is_none(),
-            cx,
-            |this, _, cx| this.update_agent_settings(cx, |settings| settings.max_turns = None),
-        ));
-        for preset in MAX_TURN_PRESETS {
-            turn_presets = turn_presets.child(preset_button(
-                theme,
-                SharedString::from(format!("agent-turns-{preset}")),
-                preset.to_string(),
-                max_turns == Some(preset),
-                cx,
-                move |this, _, cx| {
-                    this.update_agent_settings(cx, move |settings| {
-                        settings.max_turns = Some(preset)
-                    })
-                },
-            ));
-        }
-
         let auto_compact = settings.auto_compact.unwrap_or(true);
         let threshold = settings.compact_threshold;
         let mut threshold_presets = div().flex().flex_wrap().gap(px(6.0));
@@ -678,12 +650,6 @@ impl Waku {
                 tr!("agent.system_prompt"),
                 tr!("agent.system_prompt_description"),
                 prompt_block.into_any_element(),
-            ))
-            .child(setting_row(
-                theme,
-                tr!("agent.max_turns"),
-                tr!("agent.max_turns_description"),
-                turn_presets.into_any_element(),
             ))
             .child(setting_row(
                 theme,

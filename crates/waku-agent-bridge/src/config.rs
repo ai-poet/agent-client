@@ -619,6 +619,12 @@ pub fn build_query_config(config: &Config, options: &AgentStartOptions) -> Query
     query.system_prompt = config.custom_system_prompt.clone();
     refresh_session_rules(&mut query, config, options);
     query.tool_result_budget = TOOL_RESULT_BUDGET;
+    // No cap on the steps one message may take. The engine's default is ten
+    // tool rounds, after which it disables tools and asks the model to wrap
+    // up — which cut real work off mid-task, and `from_config` never reads a
+    // configured cap, so no setting could raise it. Claude Code has no such
+    // cap either; stopping a run is the user's, through cancel.
+    query.max_turns = u32::MAX;
     if let Some(model) = &options.model {
         query.model = model.clone();
     }
@@ -1425,6 +1431,14 @@ mod tests {
         select_route(&mut config, &options);
         assert_eq!(config.provider.as_deref(), Some("openai"));
         assert_eq!(config.api_key.as_deref(), Some("sk-general"));
+    }
+
+    /// A message is never cut off by a step count: the engine's default of
+    /// ten tool rounds stopped real work mid-task.
+    #[test]
+    fn a_message_has_no_step_cap() {
+        let query = build_query_config(&Config::default(), &AgentStartOptions::default());
+        assert_eq!(query.max_turns, u32::MAX);
     }
 
     #[test]

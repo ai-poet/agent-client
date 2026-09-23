@@ -40,7 +40,7 @@ use uuid::Uuid;
 ///   prompt      — full task prompt
 ///   tools       — optional allowlist of tool names; None means all tools
 ///   system      — optional system prompt override
-///   max_turns   — max agent turns (default 10 when None)
+///   max_turns   — max agent turns (Fork (Waku): no cap when None)
 ///   ctx         — parent tool context (cloned in for the sub-agent)
 ///
 /// Returns the agent's final text output.
