@@ -32,9 +32,9 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         .collect(),
         ProviderKind::Codex => [
             ProviderModel::new("gpt-6-astra", "GPT-6-Astra"),
+            ProviderModel::new("gpt-6-sol", "GPT-6-Sol"),
             ProviderModel::new("gpt-5.6-sol", "GPT-5.6-Sol").default(),
             ProviderModel::new("gpt-5.6-terra", "GPT-5.6-Terra"),
-            ProviderModel::new("gpt-5.6-luna", "GPT-5.6-Luna"),
             ProviderModel::new("gpt-5.5", "GPT-5.5"),
             ProviderModel::new("gpt-5.4", "GPT-5.4"),
         ]
@@ -55,6 +55,7 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         ProviderKind::Claude => vec![
             claude_long_context(claude_ultracode_model("claude-fable-5-1", "Claude Fable 5.1")),
             claude_long_context(claude_ultracode_model("claude-fable-5", "Claude Fable 5")),
+            claude_long_context(claude_ultracode_model("claude-opus-5-5", "Claude Opus 5.5")),
             claude_long_context(claude_ultracode_model("claude-opus-5", "Claude Opus 5")),
             claude_long_context(claude_ultracode_model("claude-opus-4-8", "Claude Opus 4.8")),
             claude_long_context(claude_ultracode_model("claude-opus-4-7", "Claude Opus 4.7")),
@@ -1364,6 +1365,37 @@ mod tests {
     }
 
     #[test]
+    fn codex_catalog_lists_the_current_models_with_sol_as_default() {
+        let models = fallback_models(ProviderKind::Codex);
+        let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
+
+        assert_eq!(
+            ids,
+            [
+                "gpt-6-astra",
+                "gpt-6-sol",
+                "gpt-5.6-sol",
+                "gpt-5.6-terra",
+                "gpt-5.5",
+                "gpt-5.4"
+            ]
+        );
+        let defaults: Vec<&str> = models
+            .iter()
+            .filter(|model| model.is_default)
+            .map(|model| model.id.as_str())
+            .collect();
+        assert_eq!(defaults, ["gpt-5.6-sol"]);
+        // Both catalogs, the daemon's and the client's pre-discovery one,
+        // offer the same list.
+        let client: Vec<String> = waku_protocol::model_catalog::fallback_models(ProviderKind::Codex)
+            .into_iter()
+            .map(|model| model.id)
+            .collect();
+        assert_eq!(client, ids);
+    }
+
+    #[test]
     fn amp_catalog_uses_agent_modes_and_medium_by_default() {
         let models = fallback_models(ProviderKind::Amp);
 
@@ -1398,6 +1430,16 @@ mod tests {
         assert_eq!(
             efforts("claude-opus-5"),
             ["low", "medium", "high", "xhigh", "max", "ultracode"]
+        );
+        assert_eq!(
+            efforts("claude-opus-5-5"),
+            ["low", "medium", "high", "xhigh", "max", "ultracode"]
+        );
+        assert!(
+            models
+                .iter()
+                .find(|model| model.id == "claude-opus-5-5")
+                .is_some_and(|model| model.context_windows.iter().any(|option| option.id == "1m"))
         );
         assert_eq!(
             efforts("claude-fable-5-1"),

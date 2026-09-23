@@ -21,9 +21,9 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         .collect(),
         ProviderKind::Codex => [
             ProviderModel::new("gpt-6-astra", "GPT-6-Astra"),
+            ProviderModel::new("gpt-6-sol", "GPT-6-Sol"),
             ProviderModel::new("gpt-5.6-sol", "GPT-5.6-Sol").default(),
             ProviderModel::new("gpt-5.6-terra", "GPT-5.6-Terra"),
-            ProviderModel::new("gpt-5.6-luna", "GPT-5.6-Luna"),
             ProviderModel::new("gpt-5.5", "GPT-5.5"),
             ProviderModel::new("gpt-5.4", "GPT-5.4"),
         ]
@@ -44,6 +44,7 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         ProviderKind::Claude => vec![
             claude_long_context(claude_ultracode_model("claude-fable-5-1", "Claude Fable 5.1")),
             claude_long_context(claude_ultracode_model("claude-fable-5", "Claude Fable 5")),
+            claude_long_context(claude_ultracode_model("claude-opus-5-5", "Claude Opus 5.5")),
             claude_long_context(claude_ultracode_model("claude-opus-5", "Claude Opus 5")),
             claude_long_context(claude_ultracode_model("claude-opus-4-8", "Claude Opus 4.8")),
             claude_long_context(claude_ultracode_model("claude-opus-4-7", "Claude Opus 4.7")),
@@ -123,7 +124,7 @@ fn reasoning_options<const N: usize>(efforts: [&str; N]) -> Vec<ProviderModelOpt
 pub fn grok_model_reasoning_efforts(id: &str) -> Option<&'static [&'static str]> {
     match id.to_ascii_lowercase().as_str() {
         "grok-4.5" => Some(&["low", "medium", "high"]),
-        "grok-4.6" => Some(&["low", "medium", "high", "xhigh"]),
+        "grok-4.6" | "grok-4.7" => Some(&["low", "medium", "high", "xhigh"]),
         _ => None,
     }
 }
@@ -169,6 +170,10 @@ mod tests {
         );
         assert_eq!(
             grok_model_reasoning_efforts("grok-4.6"),
+            Some(&["low", "medium", "high", "xhigh"][..])
+        );
+        assert_eq!(
+            grok_model_reasoning_efforts("grok-4.7"),
             Some(&["low", "medium", "high", "xhigh"][..])
         );
         // Custom models and unknown spellings get no menu.

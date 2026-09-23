@@ -20,18 +20,40 @@ use crate::gateway::openai_base_url;
 
 const CONFIG_FILE: &str = "config.toml";
 
-/// Model profiles written when no explicit list is given — the CLI's own
-/// fallback pair, same as the Electron client used.
-const FALLBACK_MODELS: [&str; 2] = ["grok-4.6", "grok-4.5"];
+/// Model profiles written when no explicit list is given, newest first: the
+/// CLI's own built-in pair, same as the Electron client used, plus
+/// `grok-4.7`, which the CLI does not ship a definition for and so only
+/// reaches through this profile.
+const FALLBACK_MODELS: [&str; 3] = ["grok-4.7", "grok-4.6", "grok-4.5"];
+
+/// The default among the fallback profiles: the CLI's own, not the newest.
+const FALLBACK_DEFAULT: &str = "grok-4.6";
 
 /// Keys we own inside `[models]`.
 const MANAGED_MODELS_KEYS: [&str; 2] = ["default", "default_reasoning_effort"];
 
-fn managed_models(target: &RouteTarget) -> Vec<String> {
+/// The profiles to write and which of them is the default: the fallback set,
+/// or an explicit list whose first entry is the default.
+fn managed_models(target: &RouteTarget) -> (Vec<String>, String) {
     if target.models.is_empty() {
-        FALLBACK_MODELS.iter().map(|id| (*id).to_owned()).collect()
+        (
+            FALLBACK_MODELS.iter().map(|id| (*id).to_owned()).collect(),
+            FALLBACK_DEFAULT.to_owned(),
+        )
     } else {
-        target.models.clone()
+        (target.models.clone(), target.models[0].clone())
+    }
+}
+
+/// The effort levels a profile declares. `grok-4.6` and `grok-4.7` go up to
+/// xhigh — the CLI's own definition of 4.6 says so, and the model picker
+/// offers it on both (`waku_protocol::model_catalog::grok_model_reasoning_efforts`),
+/// so the profile has to agree. Any other id keeps the ladder every Grok
+/// model accepts.
+fn profile_reasoning_efforts(id: &str) -> &'static [&'static str] {
+    match id {
+        "grok-4.6" | "grok-4.7" => &["low", "medium", "high", "xhigh"],
+        _ => &["low", "medium", "high"],
     }
 }
 
@@ -40,7 +62,7 @@ pub fn take_over(grok_dir: &Path, target: &RouteTarget, backups: &mut CliBackups
     let mut document = read_document(&path)?;
     capture_backup(backups, CONFIG_FILE, &path)?;
 
-    let models = managed_models(target);
+    let (models, default_model) = managed_models(target);
     let base_url = openai_base_url(&target.base_url);
     let root = document.as_table_mut();
 
@@ -67,8 +89,8 @@ pub fn take_over(grok_dir: &Path, target: &RouteTarget, backups: &mut CliBackups
         table.insert("api_backend", value("responses"));
         table.insert("supports_reasoning_effort", value(true));
         let mut efforts = Array::new();
-        for effort in ["low", "medium", "high"] {
-            efforts.push(effort);
+        for effort in profile_reasoning_efforts(id) {
+            efforts.push(*effort);
         }
         table.insert("reasoning_efforts", value(efforts));
         profiles.insert(id, Item::Table(table));
@@ -95,7 +117,7 @@ pub fn take_over(grok_dir: &Path, target: &RouteTarget, backups: &mut CliBackups
     let defaults = defaults
         .as_table_mut()
         .ok_or_else(|| anyhow!("`models` in {} is not a table", path.display()))?;
-    set_toml_value(defaults, "default", value(models[0].as_str()));
+    set_toml_value(defaults, "default", value(default_model.as_str()));
     set_toml_value(defaults, "default_reasoning_effort", value("high"));
 
     write_document(&path, &document)
@@ -243,11 +265,25 @@ mod tests {
 
         let live = std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap();
         assert!(live.contains("# user note"));
+        assert!(live.contains(r#"[model."grok-4.7"]"#));
         assert!(live.contains(r#"[model."grok-4.6"]"#));
         assert!(live.contains(r#"[model."grok-4.5"]"#));
         assert!(live.contains(r#"[model."my-model"]"#), "user profile kept: {live}");
+        // The newest profile is listed, the CLI's own default stays the default.
         assert!(live.contains(r#"default = "grok-4.6""#));
         assert!(live.contains(r#"base_url = "https://gw.example.org/v1""#));
+        let document: DocumentMut = live.parse().unwrap();
+        let efforts = |id: &str| -> Vec<String> {
+            document["model"][id]["reasoning_efforts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|effort| effort.as_str().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(efforts("grok-4.7"), ["low", "medium", "high", "xhigh"]);
+        assert_eq!(efforts("grok-4.6"), ["low", "medium", "high", "xhigh"]);
+        assert_eq!(efforts("grok-4.5"), ["low", "medium", "high"]);
 
         restore(&dir, &backups).expect("restore");
         let restored = std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap();
@@ -255,6 +291,7 @@ mod tests {
         assert!(restored.contains(r#"default = "my-model""#));
         assert!(restored.contains("user-key"));
         assert!(!restored.contains("grok-4.6"));
+        assert!(!restored.contains("grok-4.7"));
         assert!(!restored.contains("sk-grok"));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -282,11 +319,13 @@ mod tests {
         let live = std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap();
         // Dash-only ids are valid TOML bare keys, so no quotes.
         assert!(live.contains("[model.grok-code-fast]"));
+        assert!(live.contains(r#"default = "grok-code-fast""#));
         assert!(!live.contains("grok-4.6"));
         // Switching back to the fallback pair prunes the stale profile.
         take_over(&dir, &target(), &mut backups).expect("switch");
         let live = std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap();
         assert!(live.contains("grok-4.6"));
+        assert!(live.contains("grok-4.7"));
         assert!(!live.contains("grok-code-fast"));
         let _ = std::fs::remove_dir_all(&dir);
     }

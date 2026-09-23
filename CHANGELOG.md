@@ -22,6 +22,7 @@ the original feature bullet instead of adding separate entries for them.
 - Fill an endpoint's model list from the endpoint itself
 - Remove the environment variables that override routing, from the warning that reports them. Values are backed up first and can be restored; machine-wide Windows variables still hand you the command to run as administrator
 - Optional automatic failover per platform: when the group you are on reports an outage, switch to a healthy one and switch back once yours recovers
+- Model catalogs: GPT-6-Sol replaces GPT-5.6-Luna in the Codex list, Claude Opus 5.5 added for Claude Code, and Grok 4.7 (up to extra-high effort) added for Grok
 ## [0.1.21]
 
 - Fix the app losing its daemon for good when only the connection to it dropped (a "Waku daemon disconnected" notice that came back every few seconds until a relaunch): the app now reconnects to the still-running daemon and running tasks carry on. While it reconnects, a strip across the top says so and offers a restart if it takes too long, nothing else repeats the notice, and state and drafts that could not be saved meanwhile are written once the connection is back
