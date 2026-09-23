@@ -500,11 +500,11 @@ fn localize_refusal(output: &Value) -> Option<Value> {
 /// rather than by guessing at the content.
 fn localize_exit_plan_detail(detail: String) -> String {
     if detail == waku_agent_bridge::EXIT_PLAN_MODE_DETAIL {
-        tr!("native.exit_plan_detail")
+        tr!("plan.ready_detail")
     } else {
         format!("{}
 
-{detail}", tr!("native.exit_plan_summary_lead"))
+{detail}", tr!("plan.summary_lead"))
     }
 }
 
@@ -602,8 +602,9 @@ impl EventTranslator {
                 // here. Everything else keeps the engine's description, which
                 // names the actual command and is the specific thing to
                 // decide on.
-                let (title, detail) = if tool_name == "ExitPlanMode" {
-                    (tr!("native.exit_plan_title"), localize_exit_plan_detail(detail))
+                let plan = tool_name == "ExitPlanMode";
+                let (title, detail) = if plan {
+                    (tr!("plan.ready_title"), localize_exit_plan_detail(detail))
                 } else {
                     (title, detail)
                 };
@@ -611,7 +612,14 @@ impl EventTranslator {
                     .into_iter()
                     .map(|choice| PermissionOption {
                         id: choice.id().to_string(),
-                        label: permission_label(choice),
+                        // The same two answers the Claude Code dialog offers,
+                        // in the same words: "allow once" says nothing about
+                        // what approving a plan starts.
+                        label: if plan {
+                            plan_answer_label(choice)
+                        } else {
+                            permission_label(choice)
+                        },
                         allow: choice.is_allow(),
                     })
                     .collect();
@@ -754,6 +762,16 @@ fn tool_title(name: &str, input: &Value) -> String {
 /// whichever agent raised it. The durable options say "always" because they
 /// write a rule the Permissions settings page lists — this is the one place a
 /// user can create one without going looking for it.
+/// The plan dialog's two answers. The bridge offers only once-scoped choices
+/// for it, so these are the only two that can arrive.
+fn plan_answer_label(choice: waku_agent_bridge::PermissionChoice) -> String {
+    if choice.is_allow() {
+        tr!("plan.approve")
+    } else {
+        tr!("plan.keep_planning")
+    }
+}
+
 fn permission_label(choice: waku_agent_bridge::PermissionChoice) -> String {
     use waku_agent_bridge::PermissionChoice as Choice;
     match choice {

@@ -1567,8 +1567,6 @@ cli_setup.native_route_messages: "Anthropic Messages"
 cli_setup.native_route_responses: "OpenAI Responses"
 cli_setup.native_route_chat: "OpenAI Chat Completions"
 
-native.exit_plan_title: "計画が完了しました"
-native.exit_plan_detail: "エージェントは計画が整ったので実行に移りたいと言っています。ビルドに切り替えるか、計画を続けさせてください。"
 
 commands.plan_description: "変更する前に計画する"
 commands.plan_argument_hint: "[off | 計画したいこと]"
@@ -1578,7 +1576,6 @@ commands.plan_exited: "ビルドモード — 変更が適用されます"
 native.plan_mode_denied: "実行されていません — 計画モードのため何も適用されません。下でビルドに切り替えてからもう一度依頼してください。"
 native.keep_planning: "計画を続けることを選んだので、エージェントは計画の改善を続けます。"
 
-native.exit_plan_summary_lead: "エージェントの計画です。承認するとビルドに切り替わり、差し戻すと計画を続けます。"
 
 native.computer_use_unavailable: "このセッションではデスクトップ操作を利用できません：%{reason}。画像生成は引き続き使えます。"
 
@@ -1657,3 +1654,9 @@ model_providers.model_context_placeholder: "例: 200000、200k、1M。不明な�
 model_providers.model_context_invalid: "トークン数として認識できません。200000、200k、1M のような形式で入力してください。"
 model_providers.model_efforts: "推論レベル"
 model_providers.model_efforts_placeholder: "例: low、medium、high。推論に対応していない場合は空欄"
+
+plan.ready_title: "計画が完成しました"
+plan.ready_detail: "エージェントが計画を完成させ、実行の開始を求めています。承認して実行するか、計画を続けるかを選んでください。"
+plan.summary_lead: "エージェントの計画は以下のとおりです。承認すると実装を開始します。修正が必要な場合は計画を続けさせてください。"
+plan.approve: "承認して実行"
+plan.keep_planning: "計画を続ける"

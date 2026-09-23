@@ -1515,8 +1515,6 @@ cli_setup.native_route_messages: "Anthropic Messages"
 cli_setup.native_route_responses: "OpenAI Responses"
 cli_setup.native_route_chat: "OpenAI Chat Completions"
 
-native.exit_plan_title: "规划完成"
-native.exit_plan_detail: "Agent 认为计划已经就绪，想开始执行。可以切到构建模式，也可以让它继续规划。"
 
 commands.plan_description: "先规划，不做任何改动"
 commands.plan_argument_hint: "[off | 要规划什么]"
@@ -1526,7 +1524,6 @@ commands.plan_exited: "已切到构建模式，改动会真的执行"
 native.plan_mode_denied: "没有执行——当前是计划模式，不会改动任何东西。在下方切到构建模式后再让它做一次。"
 native.keep_planning: "你选择了继续规划，Agent 会接着完善计划。"
 
-native.exit_plan_summary_lead: "Agent 给出的计划。同意就切到构建模式，不满意就让它继续规划。"
 
 native.computer_use_unavailable: "本次会话无法控制桌面：%{reason}。图像生成仍然可用。"
 
@@ -1605,3 +1602,9 @@ model_providers.model_context_placeholder: "例如 200000、200k 或 1M，未知
 model_providers.model_context_invalid: "无法识别为 token 数量，请填写如 200000、200k 或 1M 的格式。"
 model_providers.model_efforts: "推理档位"
 model_providers.model_efforts_placeholder: "例如 low、medium、high，不支持推理可留空"
+
+plan.ready_title: "规划完成"
+plan.ready_detail: "Agent 已完成计划，请求开始执行。可以批准执行，或让它继续规划。"
+plan.summary_lead: "Agent 给出的计划如下。批准后开始执行，也可以退回继续规划。"
+plan.approve: "批准并执行"
+plan.keep_planning: "继续规划"

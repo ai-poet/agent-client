@@ -321,7 +321,8 @@ fn image_tool_definition() -> JsonValue {
 fn call_generate_image(arguments: &JsonValue) -> anyhow::Result<JsonValue> {
     let Some(gateway) = crate::js_repl_image::resolve_gateway() else {
         anyhow::bail!(
-            "no gateway is configured for image generation — sign in, or point the              built-in agent back at the managed gateway"
+            "no gateway is configured for image generation — sign in, or point the \
+             built-in agent back at the managed gateway"
         );
     };
     let prompt = arguments

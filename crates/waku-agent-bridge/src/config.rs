@@ -573,7 +573,7 @@ pub fn build_query_config(config: &Config, options: &AgentStartOptions) -> Query
     // has always known what to do with them once they arrive
     // (`claurst_query::runner::prompt`).
     query.system_prompt = config.custom_system_prompt.clone();
-    query.append_system_prompt = session_rules(options, config.append_system_prompt.as_deref());
+    refresh_session_rules(&mut query, config, options);
     query.tool_result_budget = TOOL_RESULT_BUDGET;
     if let Some(model) = &options.model {
         query.model = model.clone();
@@ -623,7 +623,10 @@ fn plan_mode_rule(options: &AgentStartOptions) -> Option<String> {
          is ready, call ExitPlanMode with a short `summary` of it - that hands \
          the plan to the user, who will approve it or send you back to keep \
          planning. Do not call ExitPlanMode before the plan is written, and do \
-         not try to edit files or run commands while planning."
+         not try to edit files or run commands while planning. If ExitPlanMode \
+         succeeds, the user has approved the plan and plan mode is over: carry \
+         the plan out from there. If it is refused, stay in plan mode and ask \
+         what to change."
             .to_owned()
     })
 }
@@ -638,18 +641,38 @@ fn plan_mode_rule(options: &AgentStartOptions) -> Option<String> {
 fn computer_use_rule(options: &AgentStartOptions) -> Option<String> {
     options.computer_use.as_ref().map(|wiring| {
         let mut rule = String::from(
-            "This computer can be driven directly. Before operating a desktop              application, call Skill with skill=\"waku-computer-use\" and follow              what it says; the tools it describes are the waku_js_repl ones.",
+            "This computer can be driven directly. Before operating a desktop \
+             application, call Skill with skill=\"waku-computer-use\" and follow \
+             what it says; the tools it describes are the waku_js_repl ones.",
         );
         if wiring.native_helper.is_none() {
             rule.push_str(
-                " Desktop control is unavailable in this session because its                  helper could not be started, so do not attempt it.",
+                " Desktop control is unavailable in this session because its \
+                 helper could not be started, so do not attempt it.",
             );
         }
         rule.push_str(
-            " To make a picture, call waku_js_repl_generate_image rather than              looking for an external service.",
+            " To make a picture, call waku_js_repl_generate_image rather than \
+             looking for an external service.",
         );
         rule
     })
+}
+
+/// Re-derive the rules appended to the system prompt from `options`.
+///
+/// Called wherever a rule's premise can change. Plan mode is the one that
+/// moves on its own: the model leaves it by calling `ExitPlanMode`, and a
+/// session that kept the rule it started with would open every later turn by
+/// telling the model it is still planning — while the permission manager,
+/// already switched, lets it edit. The model then refuses to act on the plan
+/// the user just approved, or proposes it again.
+pub(crate) fn refresh_session_rules(
+    query: &mut QueryConfig,
+    config: &Config,
+    options: &AgentStartOptions,
+) {
+    query.append_system_prompt = session_rules(options, config.append_system_prompt.as_deref());
 }
 
 /// Everything appended to the system prompt for this session, in order:
@@ -828,6 +851,73 @@ mod tests {
 
     /// Order matters: plan mode first, then the language, then the user's
     /// own text last so it can overrule both.
+    /// Leaving plan mode mid-turn has to reach the prompt of the turns that
+    /// follow. Before this the rule was fixed when the session started, so
+    /// the turn after an approved plan was still told to plan while its
+    /// permission manager let it edit.
+    #[test]
+    fn refreshing_the_rules_drops_the_plan_rule_once_planning_is_over() {
+        let config = Config::default();
+        let mut options = AgentStartOptions {
+            plan_mode: true,
+            ..AgentStartOptions::default()
+        };
+        let mut query = QueryConfig::default();
+        refresh_session_rules(&mut query, &config, &options);
+        assert!(
+            query
+                .append_system_prompt
+                .as_deref()
+                .is_some_and(|rules| rules.contains("plan mode")),
+            "{:?}",
+            query.append_system_prompt
+        );
+
+        options.plan_mode = false;
+        refresh_session_rules(&mut query, &config, &options);
+        assert_eq!(query.append_system_prompt, None);
+
+        // And back again, for a model that enters plan mode on its own.
+        options.plan_mode = true;
+        refresh_session_rules(&mut query, &config, &options);
+        assert!(query.append_system_prompt.is_some());
+    }
+
+    /// The engine's own result for an approved plan only says "Exited plan
+    /// mode", which a model can read as a state change rather than a go-ahead.
+    /// The rule says what success means, so the approved plan gets carried
+    /// out instead of proposed a second time.
+    #[test]
+    fn the_plan_rule_says_what_an_approved_plan_means() {
+        let options = AgentStartOptions {
+            plan_mode: true,
+            ..AgentStartOptions::default()
+        };
+        let rule = plan_mode_rule(&options).expect("a rule while planning");
+        assert!(rule.contains("approved the plan"), "{rule}");
+        assert!(rule.contains("carry"), "{rule}");
+        assert!(rule.contains("refused"), "{rule}");
+        // No stray runs of spaces where a line continuation was lost.
+        assert!(!rule.contains("  "), "{rule}");
+    }
+
+    /// Line continuations lost to a copy-paste leave long runs of spaces in
+    /// the middle of the text the model reads.
+    #[test]
+    fn the_computer_use_rule_reads_as_prose() {
+        let options = AgentStartOptions {
+            computer_use: Some(ComputerUseWiring {
+                repl_server: "/tmp/waku_js_repl".into(),
+                native_helper: None,
+                process_directory: None,
+                skill_markdown: None,
+            }),
+            ..AgentStartOptions::default()
+        };
+        let rule = computer_use_rule(&options).expect("a rule when wired");
+        assert!(!rule.contains("  "), "{rule}");
+    }
+
     #[test]
     fn session_rules_keep_the_users_text_last() {
         let options = AgentStartOptions {

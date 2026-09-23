@@ -395,6 +395,38 @@ only reports denials after the fact on `result`.
 **Lifetime** — long-lived. One process serves the conversation, with turns fed
 as newline-delimited user messages on stdin.
 
+**Plan mode** — the launch mode is always the *access* mode; plan mode is
+entered on top of it with a `set_permission_mode` control request written
+before the first prompt. That order is the point. The CLI leaves plan mode
+for `prePlanMode`, the mode planning started from, and a session launched
+straight into `plan` has none — so it used to drop to `default` after every
+approved plan whatever the user had chosen, and under Auto every later
+escalation then reached this driver's blanket auto-approval instead of
+Claude's own classifier. Entered this way, an approved plan returns to the
+user's access mode exactly as the CLI's own Shift+Tab does (verified against
+2.1.251's `ExitPlanModeV2Tool`). `--dangerously-skip-permissions` is passed
+for Full Access even while planning, since the CLI can only return to bypass
+if it was launched allowing it.
+
+Every mode change arrives on stdout as `{"type":"system","subtype":"status",
+"permissionMode":…}` — the user's, the model's own `EnterPlanMode`, and the
+CLI's return after an approved plan. The driver keeps the live mode in a
+shared flag and reports crossings as `DriverEvent::InteractionModeUpdated`,
+so the composer chip follows the CLI; `apply_options` toggles plan mode in
+place through the same setter and compares against that live flag, so a
+switch the CLI already made never costs a restart.
+
+`ExitPlanMode` is never answered for the user. The CLI marks the tool as
+needing a person even when bypassing everything else, and an automatic
+"allow" here used to start the implementation before the plan was read. Its
+input carries the plan — the CLI reads its plan file into `input.plan`
+before asking — and that is the dialog's body, under the same title and the
+same two answers (`plan.approve` / `plan.keep_planning`) the built-in agent
+uses; keeping planning denies with a message that tells the model to revise.
+While planning, nothing else the CLI escalates is auto-approved either — the
+CLI's own plan mode asks there too — except writes to the plan file
+(`<config dir>/plans/<slug>.md`), which are the planning.
+
 **Per turn** — write `{"type":"user","message":{"role":"user","content":[…]},
 "parent_tool_use_id":null}`; the turn ends with a `result` message carrying
 `is_error`, `stop_reason`, usage, and `permission_denials`.
@@ -1229,6 +1261,15 @@ the second by rebuilding the `PermissionManager` on `PlanModeChanged` and
 reporting `DriverEvent::InteractionModeUpdated`, so the chip never lies about
 what the next tool call will be allowed to do.
 
+The same event also re-derives the rules appended to the system prompt
+(`refresh_session_rules`). The plan rule rides in every later turn's prompt,
+and it used to be fixed when the session started: the turn after an approved
+plan was told it was still planning while its permission manager already
+let it edit, so the model refused to carry out the plan it had just had
+approved, or proposed it again. The rule itself also says what a successful
+`ExitPlanMode` means — the engine's own result only says "Exited plan mode",
+which a model can read as a state change rather than a go-ahead.
+
 What plan mode allows is wider than "reads": the tools planning itself needs
 (`PLAN_SAFE_TOOLS` — notes, questions, web research), plus any shell command
 the classifier proves read-only. Without the first the agent could not leave
@@ -1246,7 +1287,9 @@ permission handler; `ExitPlanModeTool` now `self_gates` and calls
 reaches `GuiPermissionHandler`, which asks even under "never ask", shows the
 summary when there is one (the plan is what the user is here to read), and
 offers only once-scoped answers so nobody can accidentally retire plan mode
-for good. Declining returns a refusal with no metadata, so the bridge's mode
+for good — labelled as the plan decision they are (`plan.approve` /
+`plan.keep_planning`, shared with the Claude Code driver's dialog) rather
+than as a generic allow and deny. Declining returns a refusal with no metadata, so the bridge's mode
 does not move, and the text tells the model to keep planning rather than to
 retry. And because the engine's prompt never mentions plan mode at all, the
 bridge appends a rule (`plan_mode_rule` in `config.rs`) telling the model what

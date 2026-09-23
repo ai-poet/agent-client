@@ -3077,10 +3077,6 @@ cli_setup.native_route_responses:
 cli_setup.native_route_chat:
   en: "OpenAI Chat Completions"
 
-native.exit_plan_title:
-  en: "Finished planning"
-native.exit_plan_detail:
-  en: "The agent says the plan is ready and wants to start applying it. Switch to Build, or keep planning."
 
 commands.plan_description:
   en: "Plan before changing anything"
@@ -3096,8 +3092,6 @@ native.plan_mode_denied:
 native.keep_planning:
   en: "You chose to keep planning, so the agent will carry on refining the plan."
 
-native.exit_plan_summary_lead:
-  en: "The agent's plan. Approve it to switch to Build, or send it back to keep planning."
 
 native.computer_use_unavailable:
   en: "Desktop control is unavailable this session: %{reason}. Image generation still works."
@@ -3244,3 +3238,14 @@ model_providers.model_efforts:
   en: "Reasoning levels"
 model_providers.model_efforts_placeholder:
   en: "For example low, medium, high. Leave empty if the model does not support reasoning."
+
+plan.ready_title:
+  en: "Finished planning"
+plan.ready_detail:
+  en: "The agent has finished the plan and asks to start implementing it. Approve it to begin, or keep planning."
+plan.summary_lead:
+  en: "The agent's plan is below. Approve it to start implementing, or send it back to keep planning."
+plan.approve:
+  en: "Approve plan"
+plan.keep_planning:
+  en: "Keep planning"

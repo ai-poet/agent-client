@@ -57,6 +57,8 @@ enum CommandMessage {
         answers: Vec<UserInputAnswer>,
     },
     Options(SessionOptions),
+    /// Move the CLI into or out of plan mode without restarting it.
+    SetPlanMode(bool),
     StopBackgroundWork {
         key: BackgroundWorkKey,
         control_id: String,
@@ -88,24 +90,58 @@ pub struct ClaudeDriver {
     commands: Sender<CommandMessage>,
     pending_user_inputs: Arc<Mutex<HashMap<String, Value>>>,
     mode: RuntimeMode,
-    interaction_mode: InteractionMode,
+    /// Whether the CLI is in plan mode right now — as it last reported, or
+    /// as this driver last asked for. Not the launch value: the CLI leaves
+    /// plan mode on its own when a plan is approved, and comparing a later
+    /// options change against the launch value would restart the session
+    /// for a switch that already happened.
+    plan_mode: Arc<AtomicBool>,
     /// Held for its `Drop`, which reaps the helper processes and removes the
     /// directory the plugin was built in.
     _computer_use: Option<super::support::HeadlessComputerUseRuntime>,
 }
 
-/// The permission posture Claude is launched with.
-fn permission_mode(mode: RuntimeMode, interaction_mode: InteractionMode) -> &'static str {
-    if interaction_mode == InteractionMode::Plan || mode == RuntimeMode::Plan {
-        return "plan";
-    }
+/// The permission posture Claude is launched with: always the access mode,
+/// never `plan`.
+///
+/// Fork: plan mode used to be the launch mode itself. The CLI leaves plan
+/// mode for the mode it entered it from (`prePlanMode`), and a session
+/// launched straight into it has none — so an approved plan dropped the
+/// session to `default` whatever access the user had chosen, and in Auto
+/// mode that meant every escalation reaching this driver's auto-approval
+/// instead of Claude's own classifier. Launching in the access mode and
+/// entering plan mode through `set_permission_mode` (see
+/// [`starts_in_plan_mode`]) gives the CLI the mode to come back to, which is
+/// exactly what its own Shift+Tab does.
+fn permission_mode(mode: RuntimeMode) -> &'static str {
     match mode {
         RuntimeMode::Ask => "default",
         RuntimeMode::AutoAcceptEdits => "acceptEdits",
         RuntimeMode::Auto => "auto",
         RuntimeMode::FullAccess => "bypassPermissions",
-        RuntimeMode::Plan => unreachable!("handled above"),
+        // The legacy access mode that meant "plan": plan mode on top of
+        // asking for everything.
+        RuntimeMode::Plan => "default",
     }
+}
+
+/// Whether the session should be planning, from either of the two places
+/// that can say so.
+fn starts_in_plan_mode(mode: RuntimeMode, interaction_mode: InteractionMode) -> bool {
+    interaction_mode == InteractionMode::Plan || mode == RuntimeMode::Plan
+}
+
+/// The control request that moves the CLI into plan mode, or back to the
+/// access mode it was launched with.
+fn set_permission_mode_request(request_id: u64, plan: bool, access_mode: RuntimeMode) -> Value {
+    json!({
+        "type": "control_request",
+        "request_id": format!("waku-{request_id}"),
+        "request": {
+            "subtype": "set_permission_mode",
+            "mode": if plan { "plan" } else { permission_mode(access_mode) }
+        }
+    })
 }
 
 /// The model id to hand the CLI for a session's context-window choice.
@@ -145,11 +181,7 @@ fn start_claude_title_refresh(
     );
 }
 
-fn configure_stream_command(
-    command: &mut Command,
-    mode: RuntimeMode,
-    interaction_mode: InteractionMode,
-) {
+fn configure_stream_command(command: &mut Command, mode: RuntimeMode) {
     command.args([
         "-p",
         "--input-format",
@@ -171,9 +203,12 @@ fn configure_stream_command(
         "--permission-prompt-tool",
         "stdio",
         "--permission-mode",
-        permission_mode(mode, interaction_mode),
+        permission_mode(mode),
     ]);
-    if mode == RuntimeMode::FullAccess && interaction_mode != InteractionMode::Plan {
+    // Also while planning: plan mode is entered on top of the access mode,
+    // and the CLI can only return to bypass after an approved plan if it was
+    // launched allowing it.
+    if mode == RuntimeMode::FullAccess {
         command.arg("--dangerously-skip-permissions");
     }
 }
@@ -226,7 +261,7 @@ impl ClaudeDriver {
 
         let mut command = crate::command_env::command_for_provider(&binary, "claude");
         command.current_dir(&cwd);
-        configure_stream_command(&mut command, mode, interaction_mode);
+        configure_stream_command(&mut command, mode);
         command.args(super::support::claude_computer_use_arguments(
             computer_use.as_ref().map(|runtime| &runtime.config),
             &binary,
@@ -273,6 +308,13 @@ impl ClaudeDriver {
         });
 
         let (commands, command_rx) = unbounded();
+        let plan_mode = Arc::new(AtomicBool::new(starts_in_plan_mode(mode, interaction_mode)));
+        if plan_mode.load(Ordering::SeqCst) {
+            // Queued before any prompt can be: the writer drains this channel
+            // in order and the CLI settles a control request as it reads it,
+            // so the first turn already runs in plan mode.
+            let _ = commands.send(CommandMessage::SetPlanMode(true));
+        }
         let auto_approve = mode != RuntimeMode::Ask;
         let turn_active = Arc::new(Mutex::new(false));
         let pending_task_stops = Arc::new(Mutex::new(HashMap::<String, BackgroundWorkKey>::new()));
@@ -284,12 +326,14 @@ impl ClaudeDriver {
         let reader_session = session_id.clone();
         let reader_pending_task_stops = pending_task_stops.clone();
         let reader_pending_user_inputs = pending_user_inputs.clone();
+        let reader_plan_mode = plan_mode.clone();
         let reader_thread = thread::Builder::new()
             .name("waku-claude-reader".into())
             .spawn(move || {
                 let mut state = ClaudeStreamState {
                     pending_task_stops: reader_pending_task_stops,
                     pending_user_inputs: reader_pending_user_inputs,
+                    plan_mode: reader_plan_mode,
                     ..ClaudeStreamState::default()
                 };
                 for line in BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -390,13 +434,16 @@ impl ClaudeDriver {
                             request_id,
                             option_id,
                         } => {
-                            let decision = if option_id == "deny" {
-                                json!({
+                            let decision = match option_id.as_str() {
+                                "deny" => json!({
                                     "behavior": "deny",
                                     "message": "The user denied this tool call."
-                                })
-                            } else {
-                                json!({"behavior": "allow"})
+                                }),
+                                KEEP_PLANNING => json!({
+                                    "behavior": "deny",
+                                    "message": KEEP_PLANNING_MESSAGE
+                                }),
+                                _ => json!({"behavior": "allow"}),
                             };
                             write_line(
                                 &mut stdin,
@@ -481,6 +528,13 @@ impl ClaudeDriver {
                                 }),
                             )
                         }
+                        CommandMessage::SetPlanMode(plan) => {
+                            next_request_id += 1;
+                            write_line(
+                                &mut stdin,
+                                &set_permission_mode_request(next_request_id, plan, mode),
+                            )
+                        }
                         CommandMessage::StopBackgroundWork { key, control_id } => {
                             next_request_id += 1;
                             let request_id = format!("waku-{next_request_id}");
@@ -553,7 +607,7 @@ impl ClaudeDriver {
             commands,
             pending_user_inputs,
             mode,
-            interaction_mode,
+            plan_mode,
             _computer_use: computer_use,
         })
     }
@@ -601,10 +655,22 @@ impl DriverControl for ClaudeDriver {
     }
 
     fn apply_options(&self, options: SessionOptions) -> bool {
-        // The model has a setter; the permission posture is a launch flag, and
+        // The model has a setter; the access posture is a launch flag, and
         // changing what a running agent may touch deserves a fresh session.
-        if options.mode != self.mode || options.interaction_mode != self.interaction_mode {
+        if options.mode != self.mode {
             return false;
+        }
+        // Plan mode has a setter too, and it is the same one the CLI's own
+        // Shift+Tab uses — so switching it keeps the conversation running,
+        // and leaving it returns to the access mode above. Compared against
+        // the mode the CLI is in now, which an approved plan may already
+        // have changed.
+        let plan = starts_in_plan_mode(options.mode, options.interaction_mode);
+        if plan != self.plan_mode.load(Ordering::SeqCst) {
+            if self.commands.send(CommandMessage::SetPlanMode(plan)).is_err() {
+                return false;
+            }
+            self.plan_mode.store(plan, Ordering::SeqCst);
         }
         self.commands.send(CommandMessage::Options(options)).is_ok()
     }
@@ -652,6 +718,10 @@ struct ClaudeStreamState {
     task_output_tails: ClaudeTaskOutputTails,
     pending_task_stops: Arc<Mutex<HashMap<String, BackgroundWorkKey>>>,
     pending_user_inputs: Arc<Mutex<HashMap<String, Value>>>,
+    /// Whether the CLI is in plan mode, shared with the driver. The reader
+    /// moves it when the CLI reports a mode change; see
+    /// [`ClaudeDriver::plan_mode`].
+    plan_mode: Arc<AtomicBool>,
     /// Model of the latest main-thread assistant message, so the settled
     /// turn's `modelUsage` map can be read for that model's context window
     /// rather than a subagent's.
@@ -1269,12 +1339,35 @@ fn handle_message(
                     let _ = events.send(DriverEvent::AvailableCommands(commands));
                 }
             }
+            // Every permission-mode change arrives as a status line carrying
+            // the new mode: the user's (through `set_permission_mode`), the
+            // model's (EnterPlanMode), and the CLI's own when an approved
+            // plan returns it to the mode planning started from. The last two
+            // are the ones nothing else would tell the composer about.
+            if value.get("subtype").and_then(Value::as_str) == Some("status")
+                && let Some(mode) = value.get("permissionMode").and_then(Value::as_str)
+            {
+                let plan = mode == "plan";
+                if state.plan_mode.swap(plan, Ordering::SeqCst) != plan {
+                    let _ = events.send(DriverEvent::InteractionModeUpdated(if plan {
+                        InteractionMode::Plan
+                    } else {
+                        InteractionMode::Build
+                    }));
+                }
+            }
             handle_claude_system(value, session_id, events, state);
         }
         Some("control_request") => {
             if value.pointer("/request/subtype").and_then(Value::as_str) == Some("can_use_tool") {
                 if !request_user_input(value, events, state) {
-                    request_permission(value, events, commands, auto_approve);
+                    request_permission(
+                        value,
+                        events,
+                        commands,
+                        auto_approve,
+                        state.plan_mode.load(Ordering::SeqCst),
+                    );
                 }
             }
         }
@@ -1643,11 +1736,21 @@ fn request_permission(
     events: &impl DriverEventSink,
     commands: &Sender<CommandMessage>,
     auto_approve: bool,
+    in_plan: bool,
 ) {
     let Some(request_id) = value.get("request_id").and_then(Value::as_str) else {
         return;
     };
-    if auto_approve {
+    let request = value.get("request").unwrap_or(&Value::Null);
+    if request.get("tool_name").and_then(Value::as_str) == Some("ExitPlanMode") {
+        request_plan_approval(request_id, request, events);
+        return;
+    }
+    // Plan mode is where nothing is applied without the user seeing it, so
+    // the access mode's standing "yes" does not reach into it — the CLI's own
+    // plan mode asks here too. Writing the plan itself is what planning is,
+    // and stays answered by the access mode.
+    if auto_approve && (!in_plan || writes_the_plan_file(request)) {
         let _ = commands.send(CommandMessage::Respond {
             request_id: request_id.to_owned(),
             option_id: "allow".into(),
@@ -1655,7 +1758,6 @@ fn request_permission(
         return;
     }
 
-    let request = value.get("request").unwrap_or(&Value::Null);
     let tool = request
         .get("display_name")
         .or_else(|| request.get("tool_name"))
@@ -1694,6 +1796,64 @@ fn request_permission(
     });
 }
 
+/// The answer id for sending a plan back rather than approving it.
+const KEEP_PLANNING: &str = "keep_planning";
+
+/// What the model is told when the user sends the plan back.
+const KEEP_PLANNING_MESSAGE: &str = "The user wants to keep planning. Stay in plan mode, \
+     ask what they would like changed, and revise the plan before calling ExitPlanMode again.";
+
+/// Leaving plan mode: the user reading the plan and deciding.
+///
+/// Never answered on the user's behalf, whatever the access mode. The CLI
+/// itself marks this tool as needing a person even when it bypasses every
+/// other check — approving a plan unseen is not planning — and an automatic
+/// "allow" here used to start the implementation before anyone had read the
+/// plan. The CLI reads the plan out of its plan file into the request's
+/// input before asking, and that text is the dialog's body.
+fn request_plan_approval(request_id: &str, request: &Value, events: &impl DriverEventSink) {
+    let plan = request
+        .pointer("/input/plan")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|plan| !plan.is_empty());
+    let detail = match plan {
+        Some(plan) => format!("{}\n\n{plan}", tr!("plan.summary_lead")),
+        None => tr!("plan.ready_detail"),
+    };
+    let _ = events.send(DriverEvent::Permission {
+        request_id: request_id.to_owned(),
+        title: tr!("plan.ready_title"),
+        detail,
+        options: vec![
+            PermissionOption {
+                id: "allow".into(),
+                label: tr!("plan.approve"),
+                allow: true,
+            },
+            PermissionOption {
+                id: KEEP_PLANNING.into(),
+                label: tr!("plan.keep_planning"),
+                allow: false,
+            },
+        ],
+    });
+}
+
+/// A write to the plan file, which is where the CLI has the model put its
+/// plan while planning: `<config dir>/plans/<slug>.md`.
+fn writes_the_plan_file(request: &Value) -> bool {
+    let Some(path) = request.pointer("/input/file_path").and_then(Value::as_str) else {
+        return false;
+    };
+    // Both separators, whatever this build runs on: the path is the CLI's,
+    // and `std::path` would read a Windows path on Unix as one long name.
+    let mut components = path.rsplit(['/', '\\']);
+    let file = components.next().unwrap_or_default();
+    let directory = components.next().unwrap_or_default();
+    directory == "plans" && file.len() > ".md".len() && file.to_ascii_lowercase().ends_with(".md")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1701,11 +1861,7 @@ mod tests {
     #[test]
     fn streaming_command_requests_readable_reasoning_summary() {
         let mut command = Command::new("/usr/bin/true");
-        configure_stream_command(
-            &mut command,
-            RuntimeMode::AutoAcceptEdits,
-            InteractionMode::Build,
-        );
+        configure_stream_command(&mut command, RuntimeMode::AutoAcceptEdits);
         let arguments = command
             .get_args()
             .map(|argument| argument.to_string_lossy().into_owned())
@@ -1978,7 +2134,7 @@ mod tests {
             commands,
             pending_user_inputs: Arc::new(Mutex::new(HashMap::new())),
             mode: RuntimeMode::FullAccess,
-            interaction_mode: InteractionMode::Build,
+            plan_mode: Arc::new(AtomicBool::new(false)),
             _computer_use: None,
         };
 
@@ -2411,22 +2567,224 @@ mod tests {
 
     #[test]
     fn access_modes_map_to_claude_permission_modes() {
-        assert_eq!(
-            permission_mode(RuntimeMode::Ask, InteractionMode::Build),
-            "default"
+        assert_eq!(permission_mode(RuntimeMode::Ask), "default");
+        assert_eq!(permission_mode(RuntimeMode::AutoAcceptEdits), "acceptEdits");
+        assert_eq!(permission_mode(RuntimeMode::Auto), "auto");
+        assert_eq!(permission_mode(RuntimeMode::FullAccess), "bypassPermissions");
+        // The legacy "plan" access mode plans on top of asking.
+        assert_eq!(permission_mode(RuntimeMode::Plan), "default");
+        assert!(starts_in_plan_mode(RuntimeMode::Plan, InteractionMode::Build));
+        assert!(starts_in_plan_mode(RuntimeMode::Auto, InteractionMode::Plan));
+        assert!(!starts_in_plan_mode(RuntimeMode::Auto, InteractionMode::Build));
+    }
+
+    fn launch_arguments(mode: RuntimeMode) -> Vec<String> {
+        let mut command = Command::new("claude");
+        configure_stream_command(&mut command, mode);
+        command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    /// Plan mode is entered on top of the access mode, never launched into.
+    /// A session launched straight into `plan` has nothing to return to, and
+    /// an approved plan used to drop it to `default` whatever the user chose.
+    #[test]
+    fn a_planning_session_launches_in_its_access_mode() {
+        let auto = launch_arguments(RuntimeMode::Auto);
+        assert!(auto.windows(2).any(|pair| pair == ["--permission-mode", "auto"]), "{auto:?}");
+        assert!(!auto.iter().any(|argument| argument == "plan"), "{auto:?}");
+
+        // Bypass has to be allowed at launch, or the CLI cannot return to it
+        // once the plan is approved.
+        let full = launch_arguments(RuntimeMode::FullAccess);
+        assert!(full.iter().any(|argument| argument == "--dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn plan_mode_is_set_through_the_control_channel() {
+        let into = set_permission_mode_request(3, true, RuntimeMode::AutoAcceptEdits);
+        assert_eq!(into["type"], "control_request");
+        assert_eq!(into["request"]["subtype"], "set_permission_mode");
+        assert_eq!(into["request"]["mode"], "plan");
+        // Leaving returns to the access mode, not to `default`.
+        let out = set_permission_mode_request(4, false, RuntimeMode::AutoAcceptEdits);
+        assert_eq!(out["request"]["mode"], "acceptEdits");
+        assert_ne!(into["request_id"], out["request_id"]);
+    }
+
+    fn plan_driver(
+        mode: RuntimeMode,
+        planning: bool,
+    ) -> (ClaudeDriver, crossbeam_channel::Receiver<CommandMessage>) {
+        let (commands, command_rx) = unbounded();
+        (
+            ClaudeDriver {
+                commands,
+                pending_user_inputs: Arc::new(Mutex::new(HashMap::new())),
+                mode,
+                plan_mode: Arc::new(AtomicBool::new(planning)),
+                _computer_use: None,
+            },
+            command_rx,
+        )
+    }
+
+    fn options(mode: RuntimeMode, interaction_mode: InteractionMode) -> SessionOptions {
+        SessionOptions {
+            mode,
+            interaction_mode,
+            model: None,
+            reasoning_effort: None,
+            service_tier: None,
+            context_window: None,
+        }
+    }
+
+    /// Switching between planning and building keeps the conversation: the
+    /// CLI has a setter for it. Only the access mode needs a new session.
+    #[test]
+    fn toggling_plan_mode_is_applied_in_place() {
+        let (driver, commands) = plan_driver(RuntimeMode::Ask, false);
+        assert!(driver.apply_options(options(RuntimeMode::Ask, InteractionMode::Plan)));
+        assert!(matches!(commands.try_recv(), Ok(CommandMessage::SetPlanMode(true))));
+        assert!(matches!(commands.try_recv(), Ok(CommandMessage::Options(_))));
+
+        assert!(driver.apply_options(options(RuntimeMode::Ask, InteractionMode::Build)));
+        assert!(matches!(commands.try_recv(), Ok(CommandMessage::SetPlanMode(false))));
+
+        assert!(!driver.apply_options(options(RuntimeMode::FullAccess, InteractionMode::Build)));
+    }
+
+    /// After an approved plan the CLI is already building. The composer
+    /// follows it, and a later unrelated change must not read the stale
+    /// launch mode as a request to switch — which used to cost a restart.
+    #[test]
+    fn a_mode_change_the_cli_reports_is_followed_and_not_resent() {
+        let (events, event_rx, commands, _command_rx, turn, mut state) = harness();
+        state.plan_mode.store(true, Ordering::SeqCst);
+        let status = json!({"type": "system", "subtype": "status", "status": null, "permissionMode": "acceptEdits"});
+        handle_message(&status, "s", &events, &commands, &turn, true, &mut state);
+        let followed = event_rx
+            .try_iter()
+            .any(|event| matches!(event, DriverEvent::InteractionModeUpdated(InteractionMode::Build)));
+        assert!(followed, "the composer should leave Plan");
+        assert!(!state.plan_mode.load(Ordering::SeqCst));
+
+        // The same report again changes nothing and says nothing.
+        handle_message(&status, "s", &events, &commands, &turn, true, &mut state);
+        assert!(!event_rx.try_iter().any(|event| matches!(event, DriverEvent::InteractionModeUpdated(_))));
+
+        // The model entering plan mode on its own is followed the same way.
+        let planning = json!({"type": "system", "subtype": "status", "status": null, "permissionMode": "plan"});
+        handle_message(&planning, "s", &events, &commands, &turn, true, &mut state);
+        assert!(event_rx
+            .try_iter()
+            .any(|event| matches!(event, DriverEvent::InteractionModeUpdated(InteractionMode::Plan))));
+
+        // And the driver compares later options against that live mode.
+        let (driver, sent) = plan_driver(RuntimeMode::Ask, true);
+        driver.plan_mode.store(false, Ordering::SeqCst);
+        assert!(driver.apply_options(options(RuntimeMode::Ask, InteractionMode::Build)));
+        assert!(!sent.try_iter().any(|message| matches!(message, CommandMessage::SetPlanMode(_))));
+    }
+
+    fn exit_plan_request(plan: Option<&str>) -> Value {
+        let mut input = json!({});
+        if let Some(plan) = plan {
+            input["plan"] = json!(plan);
+            input["planFilePath"] = json!("/home/me/.claude/plans/tidy-otter.md");
+        }
+        json!({
+            "type": "control_request",
+            "request_id": "req-plan",
+            "request": {"subtype": "can_use_tool", "tool_name": "ExitPlanMode", "display_name": "", "input": input}
+        })
+    }
+
+    /// An approved plan starts the implementation, so it is never answered
+    /// for the user — not even under Full Access, which is also how the CLI
+    /// itself treats this tool.
+    #[test]
+    fn a_plan_is_never_approved_on_the_users_behalf() {
+        let (events, event_rx, commands, command_rx, turn, mut state) = harness();
+        state.plan_mode.store(true, Ordering::SeqCst);
+        handle_message(
+            &exit_plan_request(Some("1. Split the parser.\n2. Add the tests.")),
+            "s",
+            &events,
+            &commands,
+            &turn,
+            true,
+            &mut state,
         );
-        assert_eq!(
-            permission_mode(RuntimeMode::AutoAcceptEdits, InteractionMode::Build),
-            "acceptEdits"
-        );
-        assert_eq!(
-            permission_mode(RuntimeMode::FullAccess, InteractionMode::Build),
-            "bypassPermissions"
-        );
-        assert_eq!(
-            permission_mode(RuntimeMode::FullAccess, InteractionMode::Plan),
-            "plan"
-        );
+        assert!(command_rx.try_recv().is_err(), "nothing may be answered automatically");
+        let Some(DriverEvent::Permission { title, detail, options, .. }) = event_rx
+            .try_iter()
+            .find(|event| matches!(event, DriverEvent::Permission { .. }))
+        else {
+            panic!("the plan should be put to the user");
+        };
+        assert_eq!(title, tr!("plan.ready_title"));
+        assert!(detail.ends_with("1. Split the parser.\n2. Add the tests."), "{detail}");
+        let ids: Vec<&str> = options.iter().map(|option| option.id.as_str()).collect();
+        assert_eq!(ids, ["allow", KEEP_PLANNING]);
+        assert!(!options[1].allow);
+    }
+
+    #[test]
+    fn a_plan_without_its_text_still_asks() {
+        let (events, event_rx, commands, command_rx, turn, mut state) = harness();
+        handle_message(&exit_plan_request(None), "s", &events, &commands, &turn, false, &mut state);
+        assert!(command_rx.try_recv().is_err());
+        assert!(event_rx.try_iter().any(|event| matches!(
+            event,
+            DriverEvent::Permission { ref detail, .. } if *detail == tr!("plan.ready_detail")
+        )));
+    }
+
+    fn can_use(tool: &str, input: Value) -> Value {
+        json!({
+            "type": "control_request",
+            "request_id": "req-1",
+            "request": {"subtype": "can_use_tool", "tool_name": tool, "input": input}
+        })
+    }
+
+    /// While planning, the access mode's standing "yes" does not apply:
+    /// anything the CLI escalates goes to the user — except writing the plan,
+    /// which is what planning is.
+    #[test]
+    fn planning_asks_for_everything_but_the_plan_file() {
+        let (events, event_rx, commands, command_rx, turn, mut state) = harness();
+        state.plan_mode.store(true, Ordering::SeqCst);
+        let edit = can_use("Edit", json!({"file_path": "/repo/src/main.rs"}));
+        handle_message(&edit, "s", &events, &commands, &turn, true, &mut state);
+        assert!(command_rx.try_recv().is_err());
+        assert!(event_rx.try_iter().any(|event| matches!(event, DriverEvent::Permission { .. })));
+
+        let plan = can_use("Write", json!({"file_path": "/home/me/.claude/plans/tidy-otter.md"}));
+        handle_message(&plan, "s", &events, &commands, &turn, true, &mut state);
+        assert!(matches!(
+            command_rx.try_recv(),
+            Ok(CommandMessage::Respond { option_id, .. }) if option_id == "allow"
+        ));
+
+        // Out of plan mode the access mode answers as before.
+        state.plan_mode.store(false, Ordering::SeqCst);
+        handle_message(&edit, "s", &events, &commands, &turn, true, &mut state);
+        assert!(matches!(command_rx.try_recv(), Ok(CommandMessage::Respond { .. })));
+    }
+
+    #[test]
+    fn only_a_markdown_file_in_a_plans_directory_is_the_plan() {
+        let write = |path: &str| json!({"input": {"file_path": path}});
+        assert!(writes_the_plan_file(&write("/home/me/.claude/plans/tidy-otter.md")));
+        assert!(writes_the_plan_file(&write(r"C:\Users\me\.claude\plans\tidy-otter.md")));
+        assert!(!writes_the_plan_file(&write("/repo/plans/../src/main.rs")));
+        assert!(!writes_the_plan_file(&write("/repo/docs/plan.md")));
+        assert!(!writes_the_plan_file(&json!({"input": {"command": "rm -rf /"}})));
     }
 
     #[test]

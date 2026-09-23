@@ -698,12 +698,25 @@ async fn forward_events(
                 // engine's permission policy now — waiting for the next
                 // turn would let a just-approved plan sit unexecutable
                 // behind a manager that still says Plan.
-                let permission_mode = {
+                let (permission_mode, options) = {
                     let mut options = inner.options.lock();
                     options.plan_mode = *plan;
-                    options.access_mode.permission_mode(*plan)
+                    (options.access_mode.permission_mode(*plan), options.clone())
                 };
-                inner.config.lock().permission_mode = permission_mode.clone();
+                let config = {
+                    let mut config = inner.config.lock();
+                    config.permission_mode = permission_mode.clone();
+                    config.clone()
+                };
+                // The plan rule rides in the system prompt of every later
+                // turn; left as it was, the turn after an approved plan
+                // would be told it is still planning while its tools say
+                // otherwise. Locked last and alone, matching `run_turn`.
+                crate::config::refresh_session_rules(
+                    &mut inner.query.lock(),
+                    &config,
+                    &options,
+                );
                 if let Ok(mut manager) = inner.manager.lock() {
                     // Same reasoning as apply_options: the manager caches the
                     // mode it evaluates against, so rebuild it rather than
