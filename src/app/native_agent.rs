@@ -249,15 +249,15 @@ fn has_reasoning_ladder(platform: &str, model: &str) -> bool {
 /// The efforts one model is offered, or `None` for a model without a
 /// reasoning choice.
 ///
-/// DeepSeek gets its own three: `low` turns its thinking mode off, `high`
-/// and `max` are the two effort values its API takes. The engine turns them
-/// into `thinking` and `reasoning_effort` on the Chat Completions request,
-/// the gateway forwards both as they are, and its own Codex manifest names
-/// the same three for DeepSeek. Kimi, GLM and MiniMax have no levels to
-/// offer — their thinking is on or off, and the gateway does not expose even
-/// that as a choice.
+/// DeepSeek, GLM from 4.5 on and Kimi's K3 family share one ladder of three
+/// (`sub2api::model_routing::has_three_step_effort`): `low`, `high`, `max`.
+/// The engine sends each in its API's own shape on the Chat Completions
+/// request — DeepSeek and GLM as a `thinking` switch plus `reasoning_effort`,
+/// `low` being thinking off; K3 as `reasoning_effort` alone, since it always
+/// thinks — and the gateway forwards them. Kimi's K2 line and MiniMax have
+/// no depth to choose, so they get no ladder.
 fn reasoning_ladder(platform: &str, model: &str) -> Option<Vec<&'static str>> {
-    if sub2api::model_routing::model_family(model) == Some("deepseek") {
+    if sub2api::model_routing::has_three_step_effort(model) {
         return Some(vec!["low", "high", "max"]);
     }
     if !has_reasoning_ladder(platform, model) {
@@ -771,10 +771,10 @@ mod tests {
         assert!(ladder(&native_models_from_catalog(&[item("grok-4.6", "composite")])));
     }
 
-    /// DeepSeek's three efforts, as its API and the gateway know them;
-    /// Kimi, GLM and MiniMax have none to offer.
+    /// DeepSeek, GLM and Kimi K3 share three efforts, as their APIs and the
+    /// gateway know them; Kimi K2 and MiniMax have none to offer.
     #[test]
-    fn deepseek_offers_its_own_three_efforts_and_the_others_none() {
+    fn chat_families_offer_three_efforts_where_their_api_has_them() {
         let efforts = |model: &ProviderModel| {
             model
                 .reasoning_efforts
@@ -786,11 +786,15 @@ mod tests {
             item("deepseek-v4.1-flash", "deepseek"),
             item("glm-5", "zhipu"),
             item("kimi-k3", "kimi"),
+            item("kimi-k2.6", "kimi"),
+            item("minimax-m3", "minimax"),
         ]);
-        assert_eq!(efforts(&models[0]), ["low", "high", "max"]);
-        assert_eq!(models[0].default_reasoning_effort.as_deref(), Some("high"));
-        assert!(efforts(&models[1]).is_empty());
-        assert!(efforts(&models[2]).is_empty());
+        for model in &models[..3] {
+            assert_eq!(efforts(model), ["low", "high", "max"], "{}", model.id);
+            assert_eq!(model.default_reasoning_effort.as_deref(), Some("high"));
+        }
+        assert!(efforts(&models[3]).is_empty());
+        assert!(efforts(&models[4]).is_empty());
     }
 
     #[test]

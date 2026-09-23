@@ -958,12 +958,16 @@ Completions — is a property of the model, and each model has exactly one:
 The model's *name* decides, with the group's platform as a tie-breaker for
 a name that carries no family. DeepSeek, Kimi, GLM and MiniMax go over Chat
 Completions because the gateway serves them from accounts that speak it and
-forwards it as it is; anything else it would first translate. DeepSeek is the
-one of them with an effort choice: `low` turns its thinking mode off, `high`
-and `max` are the two `reasoning_effort` values its API takes — the same three
-the gateway's own Codex manifest names — and the engine sends them as
-`thinking` plus `reasoning_effort`. Kimi, GLM and MiniMax get no ladder: their
-thinking is on or off, and the gateway exposes no levels for them. That order matters: a composite group
+forwards it as it is; anything else it would first translate. Three of them
+take an effort choice, all offered as `low` / `high` / `max`
+(`model_routing::has_three_step_effort`), each sent in its own API's shape by
+the engine: DeepSeek and GLM from 4.5 on as a `thinking` switch plus
+`reasoning_effort` — `low` is thinking off, and the gateway folds GLM's value
+onto z.ai's high/max scale — and Kimi's K3 family as `reasoning_effort` alone,
+since K3 always thinks and has no switch. The rest of the Kimi line, K2.7 Code
+included, takes neither field (its thinking is always on, and Moonshot's API
+lists no `reasoning_effort` for it), and MiniMax has no depth to choose, so they
+get no ladder. That order matters: a composite group
 reports `composite` as the platform of every model in it, so a
 platform-first rule would mis-route all of them. A catalog model matching
 neither is not offered at all — there is no API to send it over, and

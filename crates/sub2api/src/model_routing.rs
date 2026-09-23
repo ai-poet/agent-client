@@ -177,6 +177,31 @@ pub fn model_family(model: &str) -> Option<&'static str> {
     }
 }
 
+/// Whether a model takes the three-step effort — `low`, `high`, `max` —
+/// that its API and the gateway both know: DeepSeek (`low` is its thinking
+/// switched off), GLM from 4.5 on (the same switch, and z.ai's high/max
+/// scale), and Kimi's K3 family (`reasoning_effort` itself; K3 always
+/// thinks). Kimi's K2 line and MiniMax have no depth to choose. The engine's
+/// `provider_options` sends each in its own API's shape; this is the
+/// picker's half of the same rule.
+pub fn has_three_step_effort(model: &str) -> bool {
+    let name = model.trim().to_ascii_lowercase();
+    let name = name.rsplit('/').next().unwrap_or(&name);
+    if name.starts_with("deepseek-") {
+        return true;
+    }
+    if name == "k3" || name == "k3-256k" || name.starts_with("kimi-k3") {
+        return true;
+    }
+    name.strip_prefix("glm-").is_some_and(|version| {
+        let number: String = version
+            .chars()
+            .take_while(|character| character.is_ascii_digit() || *character == '.')
+            .collect();
+        number.trim_end_matches('.').parse::<f64>().is_ok_and(|version| version >= 4.5)
+    })
+}
+
 /// Where rule 1 stands for one family.
 enum Slot {
     /// A group the user bound for this family.
@@ -376,6 +401,16 @@ mod tests {
         assert_eq!(model_family("openrouter/deepseek-v4.1-flash"), Some("deepseek"));
         assert_eq!(model_family("qwen3-coder"), None);
         assert_eq!(model_family("o3x"), None);
+    }
+
+    #[test]
+    fn the_three_step_effort_covers_deepseek_glm_and_kimi_k3() {
+        for model in ["deepseek-v4.1-flash", "glm-4.5-air", "glm-5", "glm-5.3", "kimi-k3", "k3", "k3-256k", "moonshot/kimi-k3"] {
+            assert!(has_three_step_effort(model), "{model}");
+        }
+        for model in ["glm-4-plus", "glm-z1", "kimi-k2.6", "kimi-k2-thinking", "minimax-m3", "gpt-5.6-sol"] {
+            assert!(!has_three_step_effort(model), "{model}");
+        }
     }
 
     /// A group's own `/v1/models` is believed only where it cannot be a

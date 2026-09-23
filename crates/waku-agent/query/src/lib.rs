@@ -2435,12 +2435,11 @@ mod tests {
         );
     }
 
-    /// Fork (Waku): DeepSeek's thinking mode reaches the request on the
-    /// `openai` Chat Completions route a gateway serves it over — low turns
-    /// thinking off, high and max set its effort — and never touches a model
-    /// of another family.
+    /// Fork (Waku): the effort of DeepSeek, GLM and Kimi K3 reaches the
+    /// request on the `openai` Chat Completions route a gateway serves them
+    /// over, each in its own API's shape, and never touches another family.
     #[test]
-    fn deepseek_effort_maps_to_its_thinking_mode_on_any_openai_route() {
+    fn chat_family_efforts_map_to_each_apis_own_fields() {
         use claurst_core::effort::EffortLevel;
         let options = |level| build_provider_options("openai", "deepseek-v4.1-flash", Some(level), None);
 
@@ -2464,9 +2463,29 @@ mod tests {
         );
         assert_eq!(namespaced["reasoningEffort"], serde_json::json!("max"));
 
-        let other = build_provider_options("openai", "glm-5", Some(EffortLevel::Max), None);
-        assert!(other.get("thinking").is_none());
-        assert!(other.get("reasoningEffort").is_none());
+        // GLM from 4.5 on: the same switch and scale.
+        let glm = |level| build_provider_options("openai", "glm-5.3", Some(level), None);
+        assert_eq!(glm(EffortLevel::Low)["thinking"], serde_json::json!({"type": "disabled"}));
+        assert_eq!(glm(EffortLevel::Max)["thinking"], serde_json::json!({"type": "enabled"}));
+        assert_eq!(glm(EffortLevel::Max)["reasoningEffort"], serde_json::json!("max"));
+        let glm45 = build_provider_options("openai", "glm-4.5-air", Some(EffortLevel::High), None);
+        assert_eq!(glm45["reasoningEffort"], serde_json::json!("high"));
+
+        // Kimi K3: the effort alone, never a `thinking` switch it does not have.
+        let k3 = |model, level| build_provider_options("openai", model, Some(level), None);
+        for model in ["kimi-k3", "k3", "k3-256k"] {
+            let low = k3(model, EffortLevel::Low);
+            assert_eq!(low["reasoningEffort"], serde_json::json!("low"), "{model}");
+            assert!(low.get("thinking").is_none(), "{model}");
+            assert_eq!(k3(model, EffortLevel::Max)["reasoningEffort"], serde_json::json!("max"));
+        }
+
+        // Families without an effort to set are left alone.
+        for model in ["glm-4-plus", "kimi-k2.6", "minimax-m3", "qwen3-coder"] {
+            let other = build_provider_options("openai", model, Some(EffortLevel::Max), None);
+            assert!(other.get("thinking").is_none(), "{model}");
+            assert!(other.get("reasoningEffort").is_none(), "{model}");
+        }
     }
 
     #[test]

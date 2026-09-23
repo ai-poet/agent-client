@@ -58,12 +58,37 @@ pub(crate) fn is_openai_reasoning_model(model_id: &str) -> bool {
         || model_id.starts_with("grok")
 }
 
-/// Fork (Waku): a DeepSeek model by name, with or without a router's
-/// `deepseek/` namespace.
-pub(crate) fn is_deepseek_model(model_id: &str) -> bool {
+/// Fork (Waku): the model's own name, lowercased, without a router's
+/// `vendor/` namespace.
+fn bare_model_name(model_id: &str) -> String {
     let model_id = model_id.to_ascii_lowercase();
-    let name = model_id.rsplit('/').next().unwrap_or(&model_id);
-    name.starts_with("deepseek-")
+    model_id.rsplit('/').next().unwrap_or(&model_id).to_owned()
+}
+
+/// Fork (Waku): a DeepSeek model by name.
+pub(crate) fn is_deepseek_model(model_id: &str) -> bool {
+    bare_model_name(model_id).starts_with("deepseek-")
+}
+
+/// Fork (Waku): a GLM model with a thinking mode — 4.5 and later. Earlier
+/// ones (`glm-4-plus`, `glm-4-flash`) have none to switch.
+pub(crate) fn is_glm_thinking_model(model_id: &str) -> bool {
+    let name = bare_model_name(model_id);
+    let Some(version) = name.strip_prefix("glm-") else {
+        return false;
+    };
+    let number: String = version
+        .chars()
+        .take_while(|character| character.is_ascii_digit() || *character == '.')
+        .collect();
+    number.trim_end_matches('.').parse::<f64>().is_ok_and(|version| version >= 4.5)
+}
+
+/// Fork (Waku): Kimi's K3 family — `kimi-k3…`, or the bare `k3` / `k3-256k`
+/// Kimi Code serves. The K2 line has no effort to set.
+pub(crate) fn is_kimi_k3_model(model_id: &str) -> bool {
+    let name = bare_model_name(model_id);
+    name == "k3" || name == "k3-256k" || name.starts_with("kimi-k3")
 }
 
 pub(crate) fn is_openaiish_provider(provider_id: &str) -> bool {
@@ -263,7 +288,13 @@ pub(crate) fn build_provider_options(
     // so never ran for anything. Keyed on the model family instead, on any
     // OpenAI-compatible route — a gateway serves DeepSeek over the `openai`
     // Chat Completions entry and forwards these two fields as they are.
-    if is_openaiish_provider(provider_id) && is_deepseek_model(&model_id) {
+    //
+    // GLM from 4.5 on takes the same shape: z.ai's `thinking` switch and its
+    // native `reasoning_effort` scale of high/max (a gateway folds low and
+    // medium into high on the way), so `low` there is thinking off too.
+    if is_openaiish_provider(provider_id)
+        && (is_deepseek_model(&model_id) || is_glm_thinking_model(&model_id))
+    {
         match effort_level {
             None
             | Some(claurst_core::effort::EffortLevel::Minimal)
@@ -292,6 +323,21 @@ pub(crate) fn build_provider_options(
                     serde_json::json!({"type": "disabled"}),
                 );
             }
+        }
+    }
+
+    // Fork (Waku): Kimi K3 always thinks and takes its depth from the
+    // top-level `reasoning_effort` — low, high or max, max by default — with
+    // no `thinking` switch at all, so none is sent.
+    if is_openaiish_provider(provider_id) && is_kimi_k3_model(&model_id) {
+        if let Some(level) = effort_level {
+            use claurst_core::effort::EffortLevel;
+            let effort = match level {
+                EffortLevel::None | EffortLevel::Minimal | EffortLevel::Low => "low",
+                EffortLevel::Medium | EffortLevel::High => "high",
+                EffortLevel::XHigh | EffortLevel::Max | EffortLevel::Ultracode => "max",
+            };
+            options.insert("reasoningEffort".to_string(), serde_json::json!(effort));
         }
     }
 
