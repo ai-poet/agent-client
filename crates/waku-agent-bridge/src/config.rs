@@ -638,19 +638,28 @@ fn plan_mode_rule(options: &AgentStartOptions) -> Option<String> {
 /// document, and reading it into every request would cost more than it is
 /// worth on the turns that never touch the desktop. Naming the skill lets
 /// the model fetch it on the turn it needs it.
+///
+/// Without the helper the REPL is there for image generation alone, and the
+/// rule says so plainly — a model told the desktop can be driven would try,
+/// fail, and try again. It is also what lets the model answer a request to
+/// operate the desktop with where to turn it on, rather than with an error.
 fn computer_use_rule(options: &AgentStartOptions) -> Option<String> {
     options.computer_use.as_ref().map(|wiring| {
-        let mut rule = String::from(
-            "This computer can be driven directly. Before operating a desktop \
-             application, call Skill with skill=\"waku-computer-use\" and follow \
-             what it says; the tools it describes are the waku_js_repl ones.",
-        );
-        if wiring.native_helper.is_none() {
-            rule.push_str(
-                " Desktop control is unavailable in this session because its \
-                 helper could not be started, so do not attempt it.",
-            );
-        }
+        let mut rule = if wiring.native_helper.is_some() {
+            String::from(
+                "This computer can be driven directly. Before operating a desktop \
+                 application, call Skill with skill=\"waku-computer-use\" and follow \
+                 what it says; the tools it describes are the waku_js_repl ones.",
+            )
+        } else {
+            String::from(
+                "Desktop control is not available in this session: its helper is \
+                 not installed on this computer or could not be started. Do not try \
+                 to operate desktop applications; if the user asks you to, say so \
+                 and point them to the Computer Use page in Settings, where it is \
+                 set up.",
+            )
+        };
         rule.push_str(
             " To make a picture, call waku_js_repl_generate_image rather than \
              looking for an external service.",
@@ -859,8 +868,16 @@ mod tests {
         // The REPL itself still runs, so image generation survives.
         assert_eq!(server.command.as_deref(), Some("/opt/waku_js_repl"));
 
+        // The model is told desktop control is off — and never, in the same
+        // breath, that the desktop can be driven or which skill drives it —
+        // so it neither tries nor retries, and can say where to turn it on.
         let rule = computer_use_rule(&options).expect("a rule");
-        assert!(rule.contains("unavailable"), "{rule}");
+        assert!(rule.contains("not available"), "{rule}");
+        assert!(rule.contains("Settings"), "{rule}");
+        assert!(!rule.contains("driven directly"), "{rule}");
+        assert!(!rule.contains("waku-computer-use"), "{rule}");
+        assert!(rule.contains("waku_js_repl_generate_image"), "{rule}");
+        assert!(!rule.contains("  "), "{rule}");
     }
 
     /// Nothing registers the server when the toggle is off.
@@ -879,7 +896,7 @@ mod tests {
         let rule = computer_use_rule(&wired(true)).expect("a rule");
         assert!(rule.contains("waku-computer-use"), "{rule}");
         assert!(rule.contains("waku_js_repl_generate_image"), "{rule}");
-        assert!(!rule.contains("unavailable"), "{rule}");
+        assert!(!rule.contains("not available"), "{rule}");
     }
 
     /// Nothing in the engine's prompt mentions plan mode, so the bridge has

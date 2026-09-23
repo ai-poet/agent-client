@@ -1577,8 +1577,6 @@ native.plan_mode_denied: "実行されていません — 計画モードのた�
 native.keep_planning: "計画を続けることを選んだので、エージェントは計画の改善を続けます。"
 
 
-native.computer_use_unavailable: "このセッションではデスクトップ操作を利用できません：%{reason}。画像生成は引き続き使えます。"
-
 computer_use.system_access: "システムアクセス"
 computer_use.driver_access: "隔離された制御ドライバー %{helper} にアクセスを許可します"
 computer_use.windows_driver: "制御ドライバー"

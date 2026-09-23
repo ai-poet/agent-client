@@ -151,7 +151,7 @@ impl AcpDriver {
             ProviderKind::Grok | ProviderKind::Cursor | ProviderKind::Fx
         ) && computer_use_enabled)
             .then(|| super::support::HeadlessComputerUseRuntime::start(provider, events.clone()))
-            .transpose()?;
+            .and_then(super::support::optional_computer_use);
         let grok_title_home = computer_use
             .as_ref()
             .and_then(super::support::HeadlessComputerUseRuntime::grok_home)

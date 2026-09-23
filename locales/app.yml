@@ -3093,9 +3093,6 @@ native.keep_planning:
   en: "You chose to keep planning, so the agent will carry on refining the plan."
 
 
-native.computer_use_unavailable:
-  en: "Desktop control is unavailable this session: %{reason}. Image generation still works."
-
 computer_use.system_access:
   en: "System access"
 computer_use.driver_access:

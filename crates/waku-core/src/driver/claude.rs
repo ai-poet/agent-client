@@ -257,7 +257,7 @@ impl ClaudeDriver {
                     events.clone(),
                 )
             })
-            .transpose()?;
+            .and_then(super::support::optional_computer_use);
 
         let mut command = crate::command_env::command_for_provider(&binary, "claude");
         command.current_dir(&cwd);

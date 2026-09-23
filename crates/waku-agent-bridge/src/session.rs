@@ -474,10 +474,14 @@ fn connect_mcp_in_background(inner: &Arc<Inner>) {
     rt.spawn(async move {
         let manager = Arc::new(claurst_mcp::McpManager::connect_all(&servers).await);
         manager.clone().spawn_notification_poll_loop();
+        // A server that did not connect costs its own tools and nothing
+        // more, so it is logged rather than raised: `AgentEvent::Error`
+        // reaches the desktop as the failure of the turn in progress, and
+        // this runs while the first one is starting. That includes the
+        // Computer Use REPL, which must never keep a message from being
+        // answered.
         for (server, error) in manager.failed_servers() {
-            inner.events.emit(AgentEvent::Error(format!(
-                "MCP server `{server}` did not connect: {error}"
-            )));
+            tracing::warn!(%server, %error, "agent: MCP server did not connect");
         }
         let disallowed = inner.config.lock().disallowed_tools.clone();
         *inner.tools.lock() = builtin_tools(&disallowed, Some(&manager));

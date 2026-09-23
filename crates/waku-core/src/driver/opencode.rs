@@ -145,7 +145,7 @@ impl OpenCodeDriver {
                     events.clone(),
                 )
             })
-            .transpose()?;
+            .and_then(super::support::optional_computer_use);
         // The one-shot path handed Computer Use to OpenCode through the
         // environment; the resident server takes it exactly the same way.
         let environment = computer_use

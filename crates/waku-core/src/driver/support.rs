@@ -32,6 +32,24 @@ pub(super) fn claude_context_tokens(usage: &Value) -> Option<u64> {
     (total > 0).then_some(total)
 }
 
+/// Fork: Computer Use is an extra, never a reason for a session not to start
+/// or for a message not to be answered.
+///
+/// It is only set up when its helper is installed: every setup resolves the
+/// helper first (`crate::computer_use::mcp_server_command`, which on Windows
+/// only looks for the `cua-driver` file) and stops there when there is none,
+/// before anything is created or launched. When the setup fails, for that or
+/// any other reason, the session runs without desktop control and the reason
+/// goes to the daemon's stderr. It is deliberately not `DriverEvent::Error`:
+/// the app reads that as the failure of the turn the user just sent.
+pub(super) fn optional_computer_use<T>(setup: anyhow::Result<T>) -> Option<T> {
+    setup
+        .inspect_err(|error| {
+            eprintln!("warning: desktop control is off for this session: {error:#}");
+        })
+        .ok()
+}
+
 #[derive(Clone)]
 pub(super) enum HeadlessComputerUseConfig {
     OpenCode {
@@ -507,6 +525,20 @@ pub(super) fn classify_tool(name: &str) -> ActivityKind {
 
 #[cfg(test)]
 mod tests {
+
+    /// Every driver runs its Computer Use setup through this, so a setup
+    /// that fails — no helper installed, most often — leaves the session
+    /// without desktop control instead of failing to start it.
+    #[test]
+    fn computer_use_that_cannot_be_set_up_is_simply_off() {
+        assert_eq!(
+            super::optional_computer_use::<u8>(Err(anyhow::anyhow!(
+                "Computer Use driver (cua-driver) is not installed"
+            ))),
+            None
+        );
+        assert_eq!(super::optional_computer_use(Ok(7_u8)), Some(7));
+    }
 
     fn sample_base(root: &std::path::Path) -> computer_use_runtime::ComputerUseConfig {
         computer_use_runtime::ComputerUseConfig {

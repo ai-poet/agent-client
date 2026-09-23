@@ -235,13 +235,18 @@ impl PiDriver {
             parse_model_slug(model)?;
         }
 
-        let computer_use = (computer_use_enabled && flavor.supports_waku_computer_use())
-            .then(|| computer_use_runtime::ComputerUseRuntime::start(events.clone()))
-            .transpose()?;
-        let pi_extension = computer_use
-            .as_ref()
-            .map(|_| crate::computer_use::pi_extension_path())
-            .transpose()?;
+        // The extension is part of the setup: without it Pi has no way to
+        // reach the REPL, so a missing one turns Computer Use off rather than
+        // failing the session.
+        let (computer_use, pi_extension) = (computer_use_enabled
+            && flavor.supports_waku_computer_use())
+        .then(|| {
+            let runtime = computer_use_runtime::ComputerUseRuntime::start(events.clone())?;
+            let extension = crate::computer_use::pi_extension_path()?;
+            anyhow::Ok((runtime, extension))
+        })
+        .and_then(super::support::optional_computer_use)
+        .unzip();
         let mut command = crate::command_env::command(&binary);
         command.args(["--mode", "rpc", flavor.full_access_arg()]);
         if flavor.skips_version_check_by_env() {

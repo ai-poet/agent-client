@@ -80,6 +80,42 @@ fn computer_use_wiring(config: &super::computer_use::ComputerUseConfig) -> Compu
     }
 }
 
+/// What a session gets of Computer Use.
+///
+/// Desktop control is set up only when its helper is installed, and a setup
+/// that fails never fails the session or the message that started it
+/// (`support::optional_computer_use`) — there is no event sender here to fail
+/// it with. The REPL still goes in without the helper: it also carries image
+/// generation, which needs no desktop access, and the session rules tell the
+/// model that desktop control is off so it does not try.
+fn session_computer_use(
+    enabled: bool,
+    start: impl FnOnce() -> anyhow::Result<super::computer_use::ComputerUseRuntime>,
+    repl_server: impl FnOnce() -> anyhow::Result<std::path::PathBuf>,
+) -> (
+    Option<super::computer_use::ComputerUseRuntime>,
+    Option<ComputerUseWiring>,
+) {
+    if !enabled {
+        return (None, None);
+    }
+    match super::support::optional_computer_use(start()) {
+        Some(runtime) => {
+            let wiring = computer_use_wiring(&runtime.config);
+            (Some(runtime), Some(wiring))
+        }
+        None => {
+            let wiring = repl_server().ok().map(|repl_server| ComputerUseWiring {
+                repl_server,
+                native_helper: None,
+                process_directory: None,
+                skill_markdown: None,
+            });
+            (None, wiring)
+        }
+    }
+}
+
 impl NativeDriver {
     pub fn start(
         options: DriverStartOptions,
@@ -101,33 +137,11 @@ impl NativeDriver {
             Vec::new()
         };
 
-        // Unlike the CLI drivers, a helper that will not start does not fail
-        // the session here: the REPL also carries image generation, which
-        // needs no desktop access at all. Say what was lost and go on.
-        let (computer_use, wiring) = if options.computer_use_enabled {
-            match super::computer_use::ComputerUseRuntime::start(events.clone()) {
-                Ok(runtime) => {
-                    let wiring = computer_use_wiring(&runtime.config);
-                    (Some(runtime), Some(wiring))
-                }
-                Err(error) => {
-                    let _ = events.send(DriverEvent::Error(tr!(
-                        "native.computer_use_unavailable",
-                        reason = error.to_string()
-                    )));
-                    let repl = crate::computer_use::js_repl_server_path().ok();
-                    let wiring = repl.map(|repl_server| ComputerUseWiring {
-                        repl_server,
-                        native_helper: None,
-                        process_directory: None,
-                        skill_markdown: None,
-                    });
-                    (None, wiring)
-                }
-            }
-        } else {
-            (None, None)
-        };
+        let (computer_use, wiring) = session_computer_use(
+            options.computer_use_enabled,
+            || super::computer_use::ComputerUseRuntime::start(events.clone()),
+            crate::computer_use::js_repl_server_path,
+        );
 
         let (platform, model) = route_of(options.model.as_deref());
         let start = AgentStartOptions {
@@ -784,6 +798,44 @@ fn permission_label(choice: waku_agent_bridge::PermissionChoice) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// A missing `cua-driver` used to reach the desktop as an error, which
+    /// failed the message that started the session. Now the session simply
+    /// starts without desktop control: no runtime, and the REPL wired for
+    /// image generation alone — no helper, no skill, no process directory.
+    #[test]
+    fn a_missing_helper_turns_desktop_control_off_and_keeps_the_repl() {
+        let (runtime, wiring) = super::session_computer_use(
+            true,
+            || Err(anyhow::anyhow!("Computer Use driver (cua-driver) is not installed")),
+            || Ok("/opt/waku_js_repl".into()),
+        );
+        assert!(runtime.is_none());
+        let wiring = wiring.expect("the REPL still carries image generation");
+        assert_eq!(wiring.repl_server, std::path::PathBuf::from("/opt/waku_js_repl"));
+        assert_eq!(wiring.native_helper, None);
+        assert_eq!(wiring.process_directory, None);
+        assert_eq!(wiring.skill_markdown, None);
+
+        // A build without the REPL has nothing to wire at all.
+        let (runtime, wiring) = super::session_computer_use(
+            true,
+            || Err(anyhow::anyhow!("Computer Use driver (cua-driver) is not installed")),
+            || Err(anyhow::anyhow!("Waku JavaScript REPL is missing from this Waku build")),
+        );
+        assert!(runtime.is_none() && wiring.is_none());
+    }
+
+    /// With the switch off, nothing is looked up, let alone launched.
+    #[test]
+    fn computer_use_off_is_not_attempted() {
+        let (runtime, wiring) = super::session_computer_use(
+            false,
+            || panic!("the helper must not be resolved when Computer Use is off"),
+            || panic!("the REPL must not be resolved when Computer Use is off"),
+        );
+        assert!(runtime.is_none() && wiring.is_none());
+    }
 
     /// The bridge cannot resolve bundle paths itself, so the driver hands
     /// them over as values — and the skill as text, because the engine's

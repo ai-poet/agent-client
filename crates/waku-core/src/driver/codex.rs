@@ -230,7 +230,7 @@ impl CodexDriver {
         };
         let computer_use = computer_use_enabled
             .then(CodexComputerUseConfig::load)
-            .transpose()?;
+            .and_then(super::support::optional_computer_use);
         let computer_use_skill_root = computer_use
             .as_ref()
             .map(|config| config.skill_root.clone());
