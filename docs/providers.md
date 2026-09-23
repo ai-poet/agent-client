@@ -976,6 +976,38 @@ Chat Completions route takes a model list, and those are the Chat section.
 They carry a bare id with no platform ahead of a `::`, which is how
 everything downstream tells them from a catalog model.
 
+**What the model is told** — the engine's own system prompt (Claurst's) is a
+short generic list, so the bridge appends the rest, in this order
+(`refresh_session_rules` in `waku-agent-bridge/src/config.rs`, re-derived at
+the start of every turn):
+
+1. **How to work** (`WORKING_STYLE`) — do the task in the code rather than
+   describe it, keep to its scope, follow the codebase's conventions, use the
+   file tools rather than `cat`/`sed`/`find`, verify and keep what was checked
+   apart from what was assumed, be concise with `path:line` references, git
+   discipline, ask before anything destructive, write secure code. It covers
+   the behaviours Claude Code's prompt establishes and Pi's rules state,
+   written for this product; the leaked Claude Code prompt is Anthropic's
+   text and is not copied.
+2. The session's conditional rules: plan mode, Computer Use, the narration
+   language.
+3. **Project instructions** (`project_context.rs`) — the repository's own
+   `AGENTS.md` / `CLAUDE.md`. The engine can find these, but upstream calls
+   its `ContextBuilder` from the CLI crate, which is not vendored, so the
+   built-in agent never saw the files Claude Code, Codex and Pi all read in
+   the same repository. The rule is Pi's: the engine's global file, then for
+   every directory from the root down to the working directory the first of
+   `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md`; one per directory, identical
+   copies (a worktree nested in its repository) once, each file capped at
+   64 KB.
+4. The user's own rules from the Agent page, last, so they can overrule
+   everything above.
+
+The environment block now carries today's date (upstream computed a rough
+year and threw it away) and a shell line that names what actually executes a
+Bash call; see [windows.md](windows.md) for the Windows side. The PowerShell
+tool is offered on Windows only.
+
 **Where its settings live** — the built-in agent has no card on the Providers
 page. It has no binary to detect, no version to report and no installer to
 run, so a card there would carry only a name; everything configurable about

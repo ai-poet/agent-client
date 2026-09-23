@@ -83,6 +83,28 @@ console window attached.
 If a CLI is installed but not detected, set its path explicitly in
 **Settings → Providers**.
 
+## The built-in agent's shell
+
+The built-in agent's Bash tool runs commands through **Git Bash** when Git for
+Windows is installed — the same arrangement Claude Code and Pi use, and the
+one models are trained for: Unix syntax, pipes, `/dev/null`, and a working
+directory that persists between calls. It is found in `%ProgramFiles%\Git`,
+`%ProgramFiles(x86)%\Git` or `%LOCALAPPDATA%\Programs\Git`, beside a `git.exe`
+on `PATH`, or at the path in `CLAUDE_CODE_GIT_BASH_PATH` (Claude Code's own
+variable, so one setting serves both). The WSL launcher in `System32` is never
+used: it runs inside a Linux VM that cannot see the session's Windows paths.
+
+Without Git for Windows the tool falls back to `cmd /C`, and both the tool's
+description and the system prompt say so, so the model writes cmd syntax
+instead of bash that would fail. The working directory does not persist in
+that mode. Installing Git for Windows and restarting the app is the fix.
+
+Output is read from both pipes at once and decoded line by line — UTF-8, or the
+console code page for a line that is not (what `cmd`, `where` or `ipconfig`
+print on a Chinese-language system) — and a command that times out takes its
+whole process tree with it. The PowerShell tool prefers PowerShell 7, bypasses
+the execution policy for its own invocation, and asks for UTF-8 output.
+
 ## Terminal
 
 The built-in terminal opens PowerShell 7 (`pwsh.exe`) when it is installed,

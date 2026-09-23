@@ -4471,6 +4471,9 @@ pub mod effort;
 pub mod keywords;
 pub mod prompt_history;
 pub mod bash_classifier;
+/// Fork addition (Waku): which shell executes the Bash tool, for the tool and
+/// the prompt alike.
+pub mod shell;
 pub mod ps_classifier;
 pub mod mcp_trust;
 pub mod paths;

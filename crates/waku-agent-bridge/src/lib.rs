@@ -45,6 +45,7 @@ pub mod history;
 mod mcp_tool;
 mod oneshot;
 mod permission;
+mod project_context;
 mod runtime;
 mod session;
 

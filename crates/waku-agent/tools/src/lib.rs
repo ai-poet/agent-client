@@ -40,6 +40,8 @@ pub mod lsp_tool;
 pub mod mcp_resources;
 pub mod todo_write;
 pub mod notebook_edit;
+/// Fork addition (Waku): concurrent, code-page-aware output capture.
+pub(crate) mod capture;
 pub mod powershell;
 pub mod send_message;
 pub mod bundled_skills;

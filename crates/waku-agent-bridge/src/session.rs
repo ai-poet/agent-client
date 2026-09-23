@@ -450,6 +450,12 @@ fn builtin_tools(
     let mut tools: Vec<Box<dyn Tool>> = claurst_tools::all_tools();
     tools.push(Box::new(claurst_query::AgentTool));
     tools.retain(|tool| !disallowed.iter().any(|name| name == tool.name()));
+    // The PowerShell tool runs `pwsh`, which a Mac or Linux machine almost
+    // never has; a tool the model can call but not run only teaches it to
+    // fail. Claude Code and Pi offer it on Windows alone.
+    if !cfg!(windows) {
+        tools.retain(|tool| tool.name() != "PowerShell");
+    }
     if let Some(manager) = mcp {
         tools.extend(McpTool::all(manager));
     }
@@ -550,6 +556,12 @@ async fn run_turn(
 
     let config = inner.config.lock().clone();
     let mut query = inner.query.lock().clone();
+    // Re-derived every turn: an instruction file edited between turns applies
+    // to the next one. Locked on its own, after the two above, as elsewhere.
+    {
+        let options = inner.options.lock().clone();
+        crate::config::refresh_session_rules(&mut query, &config, &options);
+    }
     query.command_queue = Some(queue.clone());
     // Read while `config` is still here: it moves into the tool context
     // below, and a turn that ends up saying nothing has to name the route it

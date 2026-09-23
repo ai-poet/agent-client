@@ -21,7 +21,6 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tracing::debug;
 
@@ -33,8 +32,8 @@ use regex::Regex;
 #[cfg(unix)]
 use std::collections::HashMap;
 
-/// Sentinel appended to the shell wrapper script (Unix only).
-#[cfg(unix)]
+/// Sentinel appended to the shell wrapper script (Unix, and Git Bash on
+/// Windows).
 const SHELL_STATE_SENTINEL: &str = "__CC_SHELL_STATE__";
 
 pub struct PtyBashTool;
@@ -162,9 +161,23 @@ async fn run_in_background(command: String, cwd: PathBuf, timeout_ms: u64) -> To
             // kill_on_drop: when the timeout drops this future the child must die
             // with it, otherwise a timed-out background command leaks (#220).
             let child = if cfg!(windows) {
-                Command::new("cmd")
-                    .arg("/C")
-                    .arg(&command_clone)
+                // Fork (Waku): the same executor as a foreground call — Git
+                // Bash when it is installed — so a command that works in the
+                // foreground does not fail when backgrounded.
+                let mut process = match claurst_core::shell::windows_bash() {
+                    Some(bash) => {
+                        let mut process = Command::new(bash);
+                        process.arg("-c").arg(&command_clone);
+                        process
+                    }
+                    None => {
+                        let mut process = Command::new("cmd");
+                        process.arg("/C").arg(&command_clone);
+                        process
+                    }
+                };
+                crate::capture::hide_window(&mut process);
+                process
                     .current_dir(&cwd)
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
@@ -190,19 +203,28 @@ async fn run_in_background(command: String, cwd: PathBuf, timeout_ms: u64) -> To
                     }
                     let stdout = c.stdout.take();
                     let stderr = c.stderr.take();
-                    if let Some(out) = stdout {
-                        let mut lines = BufReader::new(out).lines();
-                        while let Ok(Some(line)) = lines.next_line().await {
-                            global_registry().append_output(&task_id_clone, &line);
-                        }
-                    }
-                    if let Some(err) = stderr {
-                        let mut lines = BufReader::new(err).lines();
-                        while let Ok(Some(line)) = lines.next_line().await {
-                            global_registry()
-                                .append_output(&task_id_clone, &format!("STDERR: {}", line));
-                        }
-                    }
+                    // Fork (Waku): both pipes at once, decoded per line — see
+                    // `crate::capture`. Reading stdout to its end first let a
+                    // chatty stderr fill its pipe and stall the task.
+                    tokio::join!(
+                        async {
+                            if let Some(out) = stdout {
+                                crate::capture::for_each_line(out, |line| {
+                                    global_registry().append_output(&task_id_clone, &line);
+                                })
+                                .await;
+                            }
+                        },
+                        async {
+                            if let Some(err) = stderr {
+                                crate::capture::for_each_line(err, |line| {
+                                    global_registry()
+                                        .append_output(&task_id_clone, &format!("STDERR: {}", line));
+                                })
+                                .await;
+                            }
+                        },
+                    );
                     match c.wait().await {
                         Ok(status) if status.success() => {
                             global_registry().complete(&task_id_clone);
@@ -555,79 +577,109 @@ fn drive_pty_child(
 }
 
 // ---------------------------------------------------------------------------
-// Windows fallback (cmd.exe, no PTY)
+// Windows (Git Bash, or cmd.exe when there is none; no PTY)
 // ---------------------------------------------------------------------------
 
+/// Fork (Waku): run a command on Windows the way Claude Code and Pi do —
+/// through Git Bash — and fall back to `cmd /C` only when no bash is
+/// installed. See `claurst_core::shell` for why, and `crate::capture` for how
+/// the output is read.
+///
+/// Under Git Bash the working directory persists between calls, as it does
+/// on Unix; the environment does not (see [`windows_bash_script`]). Under
+/// `cmd` neither does, and the tool description and system prompt say so.
 #[cfg(windows)]
-async fn run_windows_fallback(
+async fn run_windows(
     command: &str,
-    effective_cwd: &PathBuf,
+    shell_state: &std::sync::Arc<parking_lot::Mutex<crate::ShellState>>,
+    base_cwd: &std::path::Path,
     timeout_dur: Duration,
     timeout_ms: u64,
 ) -> ToolResult {
-    let mut child = match Command::new("cmd")
-        .arg("/C")
-        .arg(command)
-        .current_dir(effective_cwd)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .stdin(Stdio::null())
-        .spawn()
-    {
-        Ok(c) => c,
+    let cwd = shell_state
+        .lock()
+        .cwd
+        .clone()
+        .unwrap_or_else(|| base_cwd.to_path_buf());
+    let bash = claurst_core::shell::windows_bash();
+    let mut process = match bash {
+        Some(bash) => {
+            let mut process = Command::new(bash);
+            process.arg("-c").arg(windows_bash_script(command, &cwd));
+            process
+        }
+        None => {
+            let mut process = Command::new("cmd");
+            process.arg("/C").arg(command);
+            process
+        }
+    };
+    process.current_dir(&cwd);
+
+    let captured = match crate::capture::run_captured(process, timeout_dur).await {
+        Ok(captured) => captured,
         Err(e) => return ToolResult::error(format!("Failed to spawn command: {}", e)),
     };
-
-    let stdout_handle = child.stdout.take();
-    let stderr_handle = child.stderr.take();
-
-    let result = tokio::time::timeout(timeout_dur, async {
-        let mut stdout_lines = Vec::new();
-        let mut stderr_lines = Vec::new();
-
-        if let Some(stdout) = stdout_handle {
-            let reader = BufReader::new(stdout);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                stdout_lines.push(line);
-            }
-        }
-        if let Some(stderr) = stderr_handle {
-            let reader = BufReader::new(stderr);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                stderr_lines.push(line);
-            }
-        }
-        let status = child.wait().await;
-        (stdout_lines, stderr_lines, status)
-    })
-    .await;
-
-    match result {
-        Ok((stdout_lines, stderr_lines, status)) => {
-            let exit_code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
-            let mut output = String::new();
-            if !stdout_lines.is_empty() {
-                output.push_str(&stdout_lines.join("\n"));
-            }
-            if !stderr_lines.is_empty() {
-                if !output.is_empty() {
-                    output.push('\n');
-                }
-                output.push_str("STDERR:\n");
-                output.push_str(&stderr_lines.join("\n"));
-            }
-            if output.is_empty() {
-                output = "(no output)".to_string();
-            }
-            truncate_output(output, exit_code)
-        }
-        Err(_) => {
-            let _ = child.kill().await;
-            ToolResult::error(format!("Command timed out after {}ms", timeout_ms))
-        }
+    if captured.timed_out {
+        return ToolResult::error(format!("Command timed out after {}ms", timeout_ms));
     }
+
+    let mut stdout = captured.stdout;
+    if bash.is_some() {
+        let (user_output, new_cwd) = split_windows_state(&stdout);
+        if let Some(new_cwd) = new_cwd {
+            shell_state.lock().cwd = Some(new_cwd);
+        }
+        stdout = user_output;
+    }
+
+    let exit_code = captured.exit_code.unwrap_or(-1);
+    let mut output = stdout.trim_end_matches(['\n', '\r']).to_string();
+    let stderr = captured.stderr.trim_end();
+    if !stderr.is_empty() {
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push_str("STDERR:\n");
+        output.push_str(stderr);
+    }
+    if output.is_empty() {
+        output = "(no output)".to_string();
+    }
+    truncate_output(output, exit_code)
+}
+
+/// The Unix wrapper's shape, for Git Bash: start in the tracked directory,
+/// run the command, and report where it ended up — as a Windows path
+/// (`pwd -W`, `C:/Users/...`), since that is what the next call's
+/// `current_dir` needs and what `cd` accepts back.
+///
+/// The environment is not carried over, unlike on Unix: the dump would be
+/// MSYS's view of it, `PATH` in POSIX form included, and handing that back to
+/// a native process breaks every Windows program the next command runs.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_bash_script(command: &str, cwd: &std::path::Path) -> String {
+    let cwd = cwd.to_string_lossy().replace('\\', "/").replace('\'', "'\\''");
+    format!(
+        "cd '{cwd}' || exit 1\n{command}\n__CC_EXIT_CODE=$?\necho '{sentinel}'\npwd -W\nexit $__CC_EXIT_CODE\n",
+        sentinel = SHELL_STATE_SENTINEL,
+    )
+}
+
+/// Split the wrapper's output into what the command printed and the
+/// directory it finished in.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn split_windows_state(stdout: &str) -> (String, Option<PathBuf>) {
+    let lines: Vec<&str> = stdout.lines().collect();
+    let Some(position) = lines.iter().rposition(|line| line.trim() == SHELL_STATE_SENTINEL) else {
+        return (stdout.to_string(), None);
+    };
+    let cwd = lines
+        .get(position + 1)
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from);
+    (lines[..position].join("\n"), cwd)
 }
 
 // ---------------------------------------------------------------------------
@@ -698,11 +750,31 @@ impl Tool for PtyBashTool {
     }
 
     fn description(&self) -> &str {
-        "Executes a given bash command in a real terminal (PTY) and returns its output. \
-         The working directory persists between commands. Supports interactive programs, \
-         colored output (stripped for readability), and terminal-aware tools like npm, \
-         cargo, git, and pytest. Use for running shell commands, scripts, git operations, \
-         and system tasks."
+        // Fork (Waku): say what actually runs the command. On Windows it
+        // was described as a bash PTY while `cmd /C` executed it.
+        match claurst_core::shell::bash_tool_shell() {
+            claurst_core::shell::BashToolShell::Bash => {
+                "Executes a given bash command in a real terminal (PTY) and returns its output. \
+                 The working directory persists between commands. Supports interactive programs, \
+                 colored output (stripped for readability), and terminal-aware tools like npm, \
+                 cargo, git, and pytest. Use for running shell commands, scripts, git operations, \
+                 and system tasks."
+            }
+            claurst_core::shell::BashToolShell::GitBash => {
+                "Executes a given bash command with Git for Windows' bash and returns its output. \
+                 Use Unix shell syntax; write Windows paths as C:/Users/... . The working \
+                 directory persists between commands; exported variables do not. This is not a \
+                 terminal, so interactive prompts cannot be answered - pass non-interactive flags. \
+                 Use for running shell commands, scripts, git operations, and builds."
+            }
+            claurst_core::shell::BashToolShell::Cmd => {
+                "Executes a command with cmd.exe (no bash is installed on this Windows machine) \
+                 and returns its output. Use cmd syntax, not Unix syntax. The working directory \
+                 does not persist between commands - chain with && or use absolute paths. Prefer \
+                 the Read, Glob and Grep tools for files, and the PowerShell tool for anything \
+                 cmd cannot do."
+            }
+        }
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -786,15 +858,17 @@ impl Tool for PtyBashTool {
 
         debug!(command = %params.command, "Executing bash command via PTY");
 
-        // ── Windows path (no PTY — use cmd.exe fallback) ─────────────────────
+        // ── Windows path (no PTY — Git Bash, or cmd.exe without it) ─────────
         #[cfg(windows)]
         {
-            let effective_cwd = {
-                let state = shell_state_arc.lock();
-                state.cwd.clone().unwrap_or_else(|| ctx.working_dir.clone())
-            };
-            return run_windows_fallback(&params.command, &effective_cwd, timeout_dur, timeout_ms)
-                .await;
+            return run_windows(
+                &params.command,
+                &shell_state_arc,
+                &ctx.working_dir,
+                timeout_dur,
+                timeout_ms,
+            )
+            .await;
         }
 
         // ── Unix PTY path ────────────────────────────────────────────────────
@@ -1086,5 +1160,100 @@ mod tests {
             "execute should return promptly after the direct child exits, took {:?}",
             elapsed
         );
+    }
+}
+
+/// Fork (Waku): the Windows execution path. The wrapper and its parsing are
+/// plain text and tested everywhere; running it needs Git Bash, so those
+/// tests run on Windows machines that have it.
+#[cfg(test)]
+mod windows_path_tests {
+    use super::*;
+
+    #[test]
+    fn the_git_bash_wrapper_starts_in_the_tracked_directory_and_reports_where_it_ended() {
+        let script = windows_bash_script("npm test", std::path::Path::new("C:/Users/me/it's here"));
+        assert!(script.starts_with("cd 'C:/Users/me/it'"), "{script}");
+        assert!(script.contains("npm test"));
+        assert!(script.contains(SHELL_STATE_SENTINEL));
+        assert!(script.contains("pwd -W"), "a Windows path is what current_dir needs");
+        // The exit code of the user's command is the one reported.
+        assert!(script.trim_end().ends_with("exit $__CC_EXIT_CODE"));
+    }
+
+    #[test]
+    fn the_state_block_is_split_off_the_output() {
+        let stdout = format!("built\nok\n{SHELL_STATE_SENTINEL}\nC:/repo/sub\n");
+        let (output, cwd) = split_windows_state(&stdout);
+        assert_eq!(output, "built\nok");
+        assert_eq!(cwd, Some(PathBuf::from("C:/repo/sub")));
+
+        // A command that exited before the wrapper could report leaves the
+        // directory where it was.
+        let (output, cwd) = split_windows_state("partial\n");
+        assert_eq!(output, "partial\n");
+        assert_eq!(cwd, None);
+    }
+
+    #[cfg(windows)]
+    fn fresh_state() -> std::sync::Arc<parking_lot::Mutex<crate::ShellState>> {
+        std::sync::Arc::new(parking_lot::Mutex::new(crate::ShellState::new()))
+    }
+
+    #[cfg(windows)]
+    fn text(result: &ToolResult) -> String {
+        format!("{:?}", result)
+    }
+
+    /// What the model is trained on has to work: Unix syntax, pipes, and a
+    /// `cd` that the next call remembers.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn git_bash_runs_unix_syntax_and_remembers_the_directory() {
+        if claurst_core::shell::windows_bash().is_none() {
+            return;
+        }
+        let root = tempfile::tempdir().expect("tempdir");
+        let state = fresh_state();
+        let timeout = Duration::from_secs(60);
+
+        let first = run_windows(
+            "mkdir -p sub && cd sub && printf 'a\nb\nc\n' > f.txt && ls | head -1 2>/dev/null",
+            &state,
+            root.path(),
+            timeout,
+            60_000,
+        )
+        .await;
+        assert!(!first.is_error, "{}", text(&first));
+        assert!(text(&first).contains("f.txt"), "{}", text(&first));
+
+        let second = run_windows("wc -l < f.txt", &state, root.path(), timeout, 60_000).await;
+        assert!(!second.is_error, "the next call should start in sub/: {}", text(&second));
+        assert!(text(&second).contains('3'), "{}", text(&second));
+    }
+
+    /// The output that used to stop the reader: a line in a language other
+    /// than English, and a failing command's exit code.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn non_ascii_output_and_failures_come_back_whole() {
+        if claurst_core::shell::windows_bash().is_none() {
+            return;
+        }
+        let root = tempfile::tempdir().expect("tempdir");
+        let state = fresh_state();
+        let result = run_windows(
+            "echo 编译完成; echo 失败了 >&2; exit 3",
+            &state,
+            root.path(),
+            Duration::from_secs(60),
+            60_000,
+        )
+        .await;
+        let shown = text(&result);
+        assert!(result.is_error, "exit 3 is a failure: {shown}");
+        assert!(shown.contains("编译完成"), "{shown}");
+        assert!(shown.contains("失败了"), "{shown}");
     }
 }

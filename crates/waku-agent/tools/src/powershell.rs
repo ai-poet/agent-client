@@ -18,9 +18,7 @@ use async_trait::async_trait;
 use claurst_core::ps_classifier::{PsRiskLevel, classify_ps_command};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::process::Stdio;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tracing::debug;
 
@@ -203,11 +201,19 @@ impl Tool for PowerShellTool {
         }
 
         // ── Step 3: execute ──────────────────────────────────────────────────
-        let (exe, args) = if cfg!(windows) {
-            ("powershell", vec!["-NoProfile", "-NonInteractive", "-Command"])
-        } else {
-            ("pwsh", vec!["-NoProfile", "-NonInteractive", "-Command"])
-        };
+        // Fork (Waku): PowerShell 7 when installed, then Windows PowerShell;
+        // execution policy bypassed for this one invocation (a machine's
+        // default Restricted policy refuses even a one-line script); output
+        // told to be UTF-8, since Windows PowerShell otherwise encodes a
+        // redirected stream in the console code page; and both pipes read at
+        // once through `crate::capture`, which also kills the whole tree on a
+        // timeout.
+        let exe = powershell_executable();
+        let script = format!(
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+             $OutputEncoding = [System.Text.Encoding]::UTF8; {}",
+            params.command
+        );
 
         debug!(
             command = %params.command,
@@ -218,83 +224,73 @@ impl Tool for PowerShellTool {
         let timeout_ms = params.timeout.min(600_000);
         let timeout_dur = Duration::from_millis(timeout_ms);
 
-        let mut child = match Command::new(exe)
-            .args(&args)
-            .arg(&params.command)
-            .current_dir(&ctx.working_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::null())
-            .spawn()
-        {
-            Ok(c) => c,
+        let mut process = Command::new(exe);
+        process
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+            ])
+            .arg(&script)
+            .current_dir(&ctx.working_dir);
+        let captured = match crate::capture::run_captured(process, timeout_dur).await {
+            Ok(captured) => captured,
             Err(e) => return ToolResult::error(format!("Failed to spawn PowerShell: {}", e)),
         };
+        if captured.timed_out {
+            return ToolResult::error(format!("PowerShell command timed out after {}ms", timeout_ms));
+        }
 
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
+        let exit_code = captured.exit_code.unwrap_or(-1);
+        let mut output = captured.stdout.trim_end().to_string();
+        let stderr = captured.stderr.trim_end();
+        if !stderr.is_empty() {
+            if !output.is_empty() { output.push('\n'); }
+            output.push_str("STDERR:\n");
+            output.push_str(stderr);
+        }
+        if output.is_empty() { output = "(no output)".to_string(); }
 
-        let result = tokio::time::timeout(timeout_dur, async {
-            let mut stdout_lines = Vec::new();
-            let mut stderr_lines = Vec::new();
+        // Truncate very long output (same limit as BashTool)
+        const MAX_OUTPUT_LEN: usize = 100_000;
+        if output.len() > MAX_OUTPUT_LEN {
+            // Fork departure (Waku): character boundaries, not byte
+            // offsets. See `pty_bash::truncate_output`.
+            let half = MAX_OUTPUT_LEN / 2;
+            let start = &output[..crate::pty_bash::floor_char_boundary(&output, half)];
+            let end = &output[crate::pty_bash::ceil_char_boundary(
+                &output,
+                output.len() - half,
+            )..];
+            output = format!(
+                "{}\n\n... ({} characters truncated) ...\n\n{}",
+                start,
+                output.len() - MAX_OUTPUT_LEN,
+                end
+            );
+        }
 
-            if let Some(out) = stdout {
-                let mut lines = BufReader::new(out).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    stdout_lines.push(line);
-                }
-            }
-            if let Some(err) = stderr {
-                let mut lines = BufReader::new(err).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    stderr_lines.push(line);
-                }
-            }
-
-            let status = child.wait().await;
-            (stdout_lines, stderr_lines, status)
-        }).await;
-
-        match result {
-            Ok((stdout_lines, stderr_lines, status)) => {
-                let exit_code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
-                let mut output = stdout_lines.join("\n");
-                if !stderr_lines.is_empty() {
-                    if !output.is_empty() { output.push('\n'); }
-                    output.push_str("STDERR:\n");
-                    output.push_str(&stderr_lines.join("\n"));
-                }
-                if output.is_empty() { output = "(no output)".to_string(); }
-
-                // Truncate very long output (same limit as BashTool)
-                const MAX_OUTPUT_LEN: usize = 100_000;
-                if output.len() > MAX_OUTPUT_LEN {
-                    // Fork departure (Waku): character boundaries, not byte
-                    // offsets. See `pty_bash::truncate_output`.
-                    let half = MAX_OUTPUT_LEN / 2;
-                    let start = &output[..crate::pty_bash::floor_char_boundary(&output, half)];
-                    let end = &output[crate::pty_bash::ceil_char_boundary(
-                        &output,
-                        output.len() - half,
-                    )..];
-                    output = format!(
-                        "{}\n\n... ({} characters truncated) ...\n\n{}",
-                        start,
-                        output.len() - MAX_OUTPUT_LEN,
-                        end
-                    );
-                }
-
-                if exit_code != 0 {
-                    ToolResult::error(format!("PowerShell exited with code {}\n{}", exit_code, output))
-                } else {
-                    ToolResult::success(output)
-                }
-            }
-            Err(_) => {
-                let _ = child.kill().await;
-                ToolResult::error(format!("PowerShell command timed out after {}ms", timeout_ms))
-            }
+        if exit_code != 0 {
+            ToolResult::error(format!("PowerShell exited with code {}\n{}", exit_code, output))
+        } else {
+            ToolResult::success(output)
         }
     }
+}
+
+/// Fork (Waku): PowerShell 7 (`pwsh`) when it is on PATH, else Windows
+/// PowerShell. Resolved once.
+fn powershell_executable() -> &'static std::path::Path {
+    static EXE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    EXE.get_or_init(|| {
+        which::which("pwsh").unwrap_or_else(|_| {
+            if cfg!(windows) {
+                std::path::PathBuf::from("powershell")
+            } else {
+                std::path::PathBuf::from("pwsh")
+            }
+        })
+    })
 }

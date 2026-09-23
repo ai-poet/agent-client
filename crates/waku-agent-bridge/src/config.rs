@@ -672,18 +672,65 @@ pub(crate) fn refresh_session_rules(
     config: &Config,
     options: &AgentStartOptions,
 ) {
-    query.append_system_prompt = session_rules(options, config.append_system_prompt.as_deref());
+    let files = crate::project_context::load(
+        &options.cwd,
+        &claurst_core::config::Settings::config_dir(),
+    );
+    let project = crate::project_context::render(&files);
+    let rules = session_rules(options, project.as_deref(), config.append_system_prompt.as_deref());
+    query.append_system_prompt = Some(match rules {
+        Some(rules) => format!("{WORKING_STYLE}\n\n{rules}"),
+        None => WORKING_STYLE.to_owned(),
+    });
 }
+
+/// How to work — the habits a coding agent is expected to have.
+///
+/// Fork: the engine's own prompt is a short generic list, and most of what
+/// makes an agent pleasant to work with was missing from it: doing the task
+/// in the code rather than describing it, following the codebase's
+/// conventions, saying what was verified and what was assumed, git
+/// discipline, terseness. This covers the behaviours Claude Code's prompt
+/// establishes and Pi's rules state, written for this product in its own
+/// words. It comes first among the appended rules so the project's
+/// instruction files and the user's own rules, which follow, can overrule it.
+const WORKING_STYLE: &str = "How to work:\n\
+- Do what was asked. A question gets an answer; a task gets done in the code - find the \
+code involved and change it rather than describing the change. Keep to what the task needs: \
+do not refactor, rename or reformat code you were not asked to touch.\n\
+- Read before you edit, and follow the conventions already there: the codebase's style, \
+naming, structure and comment density. Check that a library is already used in the project \
+before relying on it.\n\
+- Use the dedicated tools for files - Read, Edit, Write, Glob, Grep - rather than cat, sed, \
+find or grep in the shell.\n\
+- Verify where you can: run the relevant tests, build or linter after a change. When you \
+report back, keep what you checked apart from what you assume, and never say a check passed \
+that you did not run.\n\
+- Be concise. Lead with the answer or the result; skip preambles and recaps. Refer to code as \
+path:line so it can be opened.\n\
+- Git: do not commit, push, rewrite history or change git configuration unless asked. When \
+asked to commit, stage only what you changed, write a message that says why, and never skip \
+hooks or force-push.\n\
+- Ask before anything destructive or hard to undo - deleting files or data, force \
+operations, changes outside the working directory or to shared systems.\n\
+- Write secure code: guard against command injection, SQL injection and XSS, and keep secrets \
+out of code, logs and commits. Help with defensive and authorized security work; do not build \
+malware or attacks on systems the user does not control.";
 
 /// Everything appended to the system prompt for this session, in order:
 /// plan mode, the narration language, then whatever the user wrote on the
 /// Agent settings page. The user's text comes last so it can overrule the
 /// rules above it.
-fn session_rules(options: &AgentStartOptions, house_rules: Option<&str>) -> Option<String> {
+fn session_rules(
+    options: &AgentStartOptions,
+    project: Option<&str>,
+    house_rules: Option<&str>,
+) -> Option<String> {
     let parts: Vec<String> = [
         plan_mode_rule(options),
         computer_use_rule(options),
         narration_rule(options),
+        project.map(str::trim).filter(|r| !r.is_empty()).map(str::to_owned),
         house_rules.map(str::trim).filter(|r| !r.is_empty()).map(str::to_owned),
     ]
     .into_iter()
@@ -841,12 +888,12 @@ mod tests {
     #[test]
     fn plan_mode_is_explained_only_while_planning() {
         let planning = AgentStartOptions { plan_mode: true, ..AgentStartOptions::default() };
-        let rule = session_rules(&planning, None).expect("a rule while planning");
+        let rule = session_rules(&planning, None, None).expect("a rule while planning");
         assert!(rule.contains("ExitPlanMode"), "{rule}");
         assert!(rule.contains("summary"), "{rule}");
 
         let building = AgentStartOptions { plan_mode: false, ..AgentStartOptions::default() };
-        assert_eq!(session_rules(&building, None), None);
+        assert_eq!(session_rules(&building, None, None), None);
     }
 
     /// Order matters: plan mode first, then the language, then the user's
@@ -858,8 +905,10 @@ mod tests {
     #[test]
     fn refreshing_the_rules_drops_the_plan_rule_once_planning_is_over() {
         let config = Config::default();
+        let workspace = tempfile::tempdir().expect("tempdir");
         let mut options = AgentStartOptions {
             plan_mode: true,
+            cwd: workspace.path().to_path_buf(),
             ..AgentStartOptions::default()
         };
         let mut query = QueryConfig::default();
@@ -875,12 +924,14 @@ mod tests {
 
         options.plan_mode = false;
         refresh_session_rules(&mut query, &config, &options);
-        assert_eq!(query.append_system_prompt, None);
+        let rules = query.append_system_prompt.clone().expect("the working style is always there");
+        assert!(!rules.contains("plan mode"), "{rules}");
+        assert!(rules.starts_with("How to work:"), "{rules}");
 
         // And back again, for a model that enters plan mode on its own.
         options.plan_mode = true;
         refresh_session_rules(&mut query, &config, &options);
-        assert!(query.append_system_prompt.is_some());
+        assert!(query.append_system_prompt.unwrap().contains("plan mode"));
     }
 
     /// The engine's own result for an approved plan only says "Exited plan
@@ -918,6 +969,40 @@ mod tests {
         assert!(!rule.contains("  "), "{rule}");
     }
 
+    /// The repository's instruction files reach the model, after the
+    /// general guidance and before the user's own rules, so the user still
+    /// has the last word.
+    #[test]
+    fn project_instructions_reach_the_prompt_before_the_users_rules() {
+        let workspace = tempfile::tempdir().expect("tempdir");
+        std::fs::write(workspace.path().join("AGENTS.md"), "Run `make check` before finishing.")
+            .expect("write");
+        let options = AgentStartOptions {
+            cwd: workspace.path().to_path_buf(),
+            ..AgentStartOptions::default()
+        };
+        let config = Config {
+            append_system_prompt: Some("Prefer tabs.".into()),
+            ..Config::default()
+        };
+        let mut query = QueryConfig::default();
+        refresh_session_rules(&mut query, &config, &options);
+        let rules = query.append_system_prompt.expect("rules");
+        let style = rules.find("How to work:").expect("working style");
+        let project = rules.find("make check").expect("the repository's file");
+        let house = rules.find("Prefer tabs.").expect("the user's rules");
+        assert!(style < project && project < house, "{rules}");
+        assert!(rules.ends_with("Prefer tabs."));
+    }
+
+    /// Lost line continuations would put runs of spaces in the text the
+    /// model reads on every request.
+    #[test]
+    fn the_working_style_reads_as_prose() {
+        assert!(!WORKING_STYLE.contains("  "), "{WORKING_STYLE}");
+        assert!(WORKING_STYLE.lines().count() > 5);
+    }
+
     #[test]
     fn session_rules_keep_the_users_text_last() {
         let options = AgentStartOptions {
@@ -925,7 +1010,7 @@ mod tests {
             narration_language: Some("Simplified Chinese".into()),
             ..AgentStartOptions::default()
         };
-        let combined = session_rules(&options, Some("Prefer tabs.")).expect("all three");
+        let combined = session_rules(&options, None, Some("Prefer tabs.")).expect("all three");
         let plan = combined.find("plan mode").expect("plan rule");
         let language = combined.find("Simplified Chinese").expect("language rule");
         let house = combined.find("Prefer tabs.").expect("house rule");
@@ -939,17 +1024,17 @@ mod tests {
             narration_language: Some("Simplified Chinese".into()),
             ..AgentStartOptions::default()
         };
-        let combined = session_rules(&options, Some("  Prefer tabs.  ")).expect("both");
+        let combined = session_rules(&options, None, Some("  Prefer tabs.  ")).expect("both");
         assert!(combined.starts_with("Write everything the user reads in Simplified Chinese"));
         assert!(combined.trim_end().ends_with("Prefer tabs."));
 
         // Either one alone is the whole thing.
-        assert_eq!(session_rules(&options, None), Some(combined[..combined.find("\n\n").unwrap()].to_owned()));
+        assert_eq!(session_rules(&options, None, None), Some(combined[..combined.find("\n\n").unwrap()].to_owned()));
         let english = AgentStartOptions::default();
-        assert_eq!(session_rules(&english, Some("Prefer tabs.")), Some("Prefer tabs.".to_owned()));
-        assert_eq!(session_rules(&english, None), None);
+        assert_eq!(session_rules(&english, None, Some("Prefer tabs.")), Some("Prefer tabs.".to_owned()));
+        assert_eq!(session_rules(&english, None, None), None);
         // Blank house rules are not house rules.
-        assert_eq!(session_rules(&english, Some("   ")), None);
+        assert_eq!(session_rules(&english, None, Some("   ")), None);
     }
 
     #[test]

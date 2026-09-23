@@ -372,59 +372,38 @@ fn build_env_info_section(working_dir: Option<&str>) -> String {
         "linux"
     };
 
-    // OS version string (mirrors getUnameSR())
-    let os_version = {
-        #[cfg(target_os = "windows")]
-        {
-            // Read ProductName from the registry via `ver` or env vars.
-            // Also include architecture for clarity.
-            let ver = std::process::Command::new("cmd")
-                .args(["/c", "ver"])
-                .output()
-                .ok()
-                .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
-            let arch = std::env::var("PROCESSOR_ARCHITECTURE").unwrap_or_default();
-            match ver {
-                Some(v) => format!("{} ({})", v, arch),
-                None => format!("Windows ({})", arch),
+    let os_version = os_version();
+
+    // Fork (Waku): the shell line says what actually executes a Bash tool
+    // call — see `crate::shell`. Upstream described the shell as PowerShell,
+    // asked for Unix syntax, then asked for `dir` and `type`, while the tool
+    // ran `cmd /C`.
+    let shell_line = match crate::shell::bash_tool_shell() {
+        crate::shell::BashToolShell::Bash => {
+            let login = std::env::var("SHELL").unwrap_or_default();
+            if login.is_empty() || login.ends_with("/bash") {
+                "Shell: bash".to_string()
+            } else {
+                // The PTY runs `bash`, whatever the login shell: saying zsh
+                // invited zsh-only syntax that bash then rejected.
+                format!("Shell: bash (the Bash tool runs bash; the user's login shell is {login})")
             }
         }
-        #[cfg(not(target_os = "windows"))]
-        {
-            // Use uname -sr via std::process for POSIX systems.
-            std::process::Command::new("uname")
-                .args(["-s", "-r"])
-                .output()
-                .ok()
-                .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map(|s| s.trim().to_string())
-                .unwrap_or_else(|| platform.to_string())
+        crate::shell::BashToolShell::GitBash => {
+            "Shell: bash (Git Bash). The Bash tool runs commands in Git for Windows' bash: \
+             use Unix shell syntax — forward slashes, /dev/null, pipes to head/grep — and \
+             write Windows paths as C:/Users/... . Native Windows programs still run from it. \
+             Use the PowerShell tool for Windows administration (services, registry, .NET)."
+                .to_string()
         }
-    };
-
-    // Shell detection (mirrors getShellInfoLine())
-    let shell_env = std::env::var("SHELL").unwrap_or_default();
-    let shell_name = if shell_env.contains("zsh") {
-        "zsh"
-    } else if shell_env.contains("bash") {
-        "bash"
-    } else if shell_env.contains("fish") {
-        "fish"
-    } else if cfg!(target_os = "windows") {
-        "powershell"
-    } else if shell_env.is_empty() {
-        "unknown"
-    } else {
-        &shell_env
-    };
-
-    // Shell line: on Windows add Unix syntax note
-    let shell_line = if cfg!(target_os = "windows") {
-        format!("Shell: {} (use Unix shell syntax, not Windows — e.g., /dev/null not NUL, forward slashes in paths)", shell_name)
-    } else {
-        format!("Shell: {}", shell_name)
+        crate::shell::BashToolShell::Cmd => {
+            "Shell: cmd.exe. No bash is installed, so the Bash tool runs commands with \
+             `cmd /C`: use cmd syntax (dir, type, findstr, 2>NUL, && between commands), not \
+             Unix syntax, and prefer the Read, Glob and Grep tools for files. The working \
+             directory does not persist between commands. For anything more, use the \
+             PowerShell tool."
+                .to_string()
+        }
     };
 
     // Is git repo?
@@ -432,36 +411,17 @@ fn build_env_info_section(working_dir: Option<&str>) -> String {
         .map(|d| std::path::Path::new(d).join(".git").exists())
         .unwrap_or(false);
 
-    // Today's date
-    let today = {
-        // Use chrono if available; otherwise fall back to env or skip
-        // We avoid adding a new dep just for formatting, so use a rough ISO format.
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        // Simple YYYY-MM-DD from seconds since epoch
-        let days = now / 86400;
-        let year_approx = 1970 + days / 365;
-        // Not perfectly accurate but good enough for the system prompt context.
-        // For exact dates a chrono dep would be needed; use SystemTime string as fallback.
-        format!("{}", year_approx)
-    };
-    let _ = today; // suppress unused warning — date is included below via SystemTime
+    // Fork (Waku): upstream computed an approximate year here and discarded
+    // it, so the model was never told the date and fell back on its training
+    // cutoff — for "latest", release notes, and every date it wrote.
+    let today = chrono::Local::now().format("%Y-%m-%d");
 
-    // Build the section
     let cwd_line = working_dir
         .map(|d| format!("\nWorking directory: {}", d))
         .unwrap_or_default();
 
-    // Platform-specific guidance so the model uses the right commands.
     let os_note = if cfg!(target_os = "windows") {
-        format!(
-            "\nIMPORTANT: The user is on Windows ({}). Use Windows-compatible commands \
-             (e.g., `dir` not `ls`, `type` not `cat`, backslashes in native paths). \
-             When the shell is bash/git-bash, Unix syntax is acceptable.",
-            os_version
-        )
+        format!("\nThe user is on Windows ({}).", os_version)
     } else if cfg!(target_os = "macos") {
         format!(
             "\nThe user is on macOS ({}). Use macOS-compatible commands. \
@@ -476,14 +436,54 @@ fn build_env_info_section(working_dir: Option<&str>) -> String {
     };
 
     format!(
-        "\n<env>{}\nIs directory a git repo: {}\nPlatform: {}\nOS Version: {}\n{}{}\n</env>",
+        "\n<env>{}\nIs directory a git repo: {}\nPlatform: {}\nOS Version: {}\nToday's date: {}\n{}{}\n</env>",
         cwd_line,
         if is_git { "Yes" } else { "No" },
         platform,
         os_version,
+        today,
         shell_line,
         os_note,
     )
+}
+
+/// The OS version string (mirrors `getUnameSR()`).
+///
+/// Fork (Waku): asked once per process. The environment section is rebuilt
+/// for every model call, and each rebuild used to spawn `cmd /c ver` or
+/// `uname` again.
+fn os_version() -> &'static str {
+    static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    VERSION.get_or_init(|| {
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let ver = std::process::Command::new("cmd")
+                .args(["/c", "ver"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let arch = std::env::var("PROCESSOR_ARCHITECTURE").unwrap_or_default();
+            match ver {
+                Some(v) => format!("{} ({})", v, arch),
+                None => format!("Windows ({})", arch),
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            std::process::Command::new("uname")
+                .args(["-s", "-r"])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|| std::env::consts::OS.to_string())
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
