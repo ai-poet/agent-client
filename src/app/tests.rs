@@ -75,7 +75,7 @@ fn structured_user_input_preserves_question_order_and_custom_answer_precedence()
 }
 use gpui::{ListAlignment, ListState, Pixels, px};
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     time::{Duration, Instant},
 };
 use uuid::Uuid;
@@ -1331,12 +1331,9 @@ fn changed_files_remain_visible_when_an_interrupted_turn_has_no_answer() {
         }],
     );
 
+    // A stopped turn keeps its work in view until the person folds it.
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new()),
-        vec![Message(0), TurnFold(turn_id, 0), ChangedFiles(turn_id)]
-    );
-    assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::from([turn_id])),
         vec![
             Message(0),
             TurnFold(turn_id, 0),
@@ -1344,6 +1341,10 @@ fn changed_files_remain_visible_when_an_interrupted_turn_has_no_answer() {
             Message(1),
             ChangedFiles(turn_id),
         ]
+    );
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &closed(turn_id)),
+        vec![Message(0), TurnFold(turn_id, 0), ChangedFiles(turn_id)]
     );
     assert_eq!(response_footer_message_index(&session, turn_id), None);
 }
@@ -1641,8 +1642,8 @@ fn consecutive_trailing_text_parts_all_stay_out_of_the_fold() {
     );
 }
 
-/// An interrupted turn that never produced text has nothing to stay visible,
-/// so the whole turn folds behind its summary rather than spilling raw work.
+/// A turn that never produced text has nothing to stay visible, so folding
+/// it hides the whole turn behind its summary rather than spilling raw work.
 #[test]
 fn a_turn_without_an_answer_folds_completely() {
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
@@ -1663,13 +1664,18 @@ fn a_turn_without_an_answer_folds_completely() {
     session.finish_active_turn(TurnStatus::Interrupted);
 
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::new()),
+        folded_transcript_row_kinds(&session, &closed(turn_id)),
         vec![Message(0), TurnFold(turn_id, 0)]
     );
     assert_eq!(
-        folded_transcript_row_kinds(&session, &HashSet::from([turn_id])),
+        folded_transcript_row_kinds(&session, &HashSet::new()),
         vec![Message(0), TurnFold(turn_id, 0), TurnBlock(0), Message(1)]
     );
+}
+
+/// The person folded a turn's first segment by hand.
+fn closed(turn_id: Uuid) -> super::transcript::TurnFoldOverrides {
+    HashMap::from([((turn_id, 0), false)])
 }
 
 #[test]

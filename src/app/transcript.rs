@@ -822,14 +822,6 @@ pub(super) fn transcript_row_kinds(
     rows
 }
 
-/// Fingerprint of every field [`folded_transcript_row_kinds`] reads, so a frame
-/// can tell a settled transcript from a changed one without refolding it.
-///
-/// Keep this in step with that function and with [`row_turn_id`]. A field they
-/// consult but this one misses leaves the cached rows stale, and stale rows
-/// fall back to `Message(n)` — silently dropping every reasoning block and tool
-/// activity from the transcript. Cheap mixing, not a real hash: this runs on
-/// the frame path, and the values it folds in are already well distributed.
 /// Which fold segments the person opened or closed by hand, over the default
 /// [`segment_default_open`] gives each.
 pub(super) trait FoldOverrides {
@@ -873,6 +865,14 @@ impl FoldOverrides for HashSet<Uuid> {
     }
 }
 
+/// Fingerprint of every field [`folded_transcript_row_kinds`] reads, so a frame
+/// can tell a settled transcript from a changed one without refolding it.
+///
+/// Keep this in step with that function and with [`row_turn_id`]. A field they
+/// consult but this one misses leaves the cached rows stale, and stale rows
+/// fall back to `Message(n)` — silently dropping every reasoning block and tool
+/// activity from the transcript. Cheap mixing, not a real hash: this runs on
+/// the frame path, and the values it folds in are already well distributed.
 pub(super) fn transcript_rows_fingerprint(
     session: &AgentSession,
     overrides: &impl FoldOverrides,
