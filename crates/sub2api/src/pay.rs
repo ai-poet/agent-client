@@ -7,17 +7,22 @@
 //!
 //! * `GET  /pay/api/orders/my`      — who is paying, balance, pending count
 //! * `GET  /pay/api/user`           — payment methods, limits, exchange rates
-//! * `POST /pay/api/orders`         — create an order
+//! * `GET  /pay/api/subscription-plans` — the plans on sale (fork addition)
+//! * `POST /pay/api/orders`         — create an order (top-up or plan)
 //! * `GET  /pay/api/orders/{id}`    — poll its status
 //! * `POST /pay/api/orders/{id}/cancel`
 //!
-//! Amounts are US dollars credited; when the config carries a CNY rate the
-//! actual charge is CNY and the UI shows both.
+//! Top-up amounts are US dollars credited; when the config carries a CNY rate
+//! the actual charge is CNY and the UI shows both. Plan prices are CNY.
+//!
+//! Reads send the session token as `Authorization: Bearer`, falling back once
+//! to the `?token=` parameter servers from before bearer support expect; writes
+//! carry it in the JSON body. Either way it travels on curl's stdin, not argv.
 
 use anyhow::{Result, anyhow};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
-use crate::http::Request;
+use crate::http::{Request, Response};
 
 /// Per-method limits, as `/pay/api/user` reports them.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -66,6 +71,8 @@ pub struct PayConfig {
     /// CNY charged per USD credited; `None` means the charge is in USD.
     pub balance_credit_cny_per_usd: Option<f64>,
     pub stripe_enabled: bool,
+    /// The administrator turned balance top-ups off; only plans can be bought.
+    pub balance_disabled: bool,
 }
 
 impl PayConfig {
@@ -100,6 +107,236 @@ impl PayConfig {
             .filter(|rate| *rate > 0.0)
             .unwrap_or(0.0)
     }
+}
+
+/// How long a plan's validity counts in.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ValidityUnit {
+    Week,
+    Month,
+    /// Also what an unknown unit reads as, which is what the service does.
+    /// (`other` must sit on the last variant.)
+    #[default]
+    #[serde(other)]
+    Day,
+}
+
+/// The usage caps of a plan's subscription group, in US dollars. `None` or
+/// zero means no cap on that window. The service sends these keys in
+/// snake_case, unlike the rest of the plan.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct PlanLimits {
+    #[serde(default)]
+    pub daily_limit_usd: Option<f64>,
+    #[serde(default)]
+    pub weekly_limit_usd: Option<f64>,
+    #[serde(default)]
+    pub monthly_limit_usd: Option<f64>,
+}
+
+/// A subscription plan on sale, as `/pay/api/subscription-plans` lists it.
+/// Buying one grants (or extends) a subscription to `group_id`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscriptionPlan {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub group_id: i64,
+    #[serde(default)]
+    pub group_name: Option<String>,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// CNY.
+    #[serde(default)]
+    pub price: f64,
+    /// CNY; shown struck through when above `price`.
+    #[serde(default)]
+    pub original_price: Option<f64>,
+    #[serde(default)]
+    pub validity_days: i64,
+    #[serde(default)]
+    pub validity_unit: ValidityUnit,
+    #[serde(default, deserialize_with = "lenient_strings")]
+    pub features: Vec<String>,
+    #[serde(default)]
+    pub product_name: Option<String>,
+    /// The group's platform: `anthropic`, `openai`, `gemini`, ...
+    #[serde(default)]
+    pub platform: Option<String>,
+    #[serde(default)]
+    pub rate_multiplier: Option<f64>,
+    #[serde(default)]
+    pub limits: Option<PlanLimits>,
+    #[serde(default)]
+    pub default_mapped_model: Option<String>,
+    /// The group's model scopes. A group the user has not bought is absent
+    /// from their catalog, so this is the only hint of what the plan serves.
+    #[serde(default, deserialize_with = "lenient_strings")]
+    pub supported_model_scopes: Vec<String>,
+}
+
+impl SubscriptionPlan {
+    /// The original price, when it is a real discount off it.
+    pub fn discounted_from(&self) -> Option<f64> {
+        self.original_price
+            .filter(|original| *original > self.price + 0.004)
+    }
+}
+
+/// Strings from a JSON array that may be null, hold nulls, or hold
+/// `{ "text": ... }` objects (the pay center's rich feature form).
+fn lenient_strings<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    let Some(serde_json::Value::Array(items)) = value else {
+        return Ok(Vec::new());
+    };
+    Ok(items
+        .iter()
+        .filter_map(|item| match item {
+            serde_json::Value::String(text) => Some(text.as_str()),
+            serde_json::Value::Object(object) => {
+                object.get("text").and_then(serde_json::Value::as_str)
+            }
+            _ => None,
+        })
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+/// What an order buys.
+#[derive(Clone, Debug, PartialEq)]
+pub enum OrderKind {
+    /// A balance top-up of `amount` US dollars credited.
+    Balance { amount: f64 },
+    /// A subscription plan. The service charges the plan's own price; `price`
+    /// only satisfies the request schema, which wants a positive amount.
+    Plan { plan_id: String, price: f64 },
+}
+
+impl OrderKind {
+    fn body(&self, access_token: &str, payment_type: &str) -> serde_json::Value {
+        match self {
+            Self::Balance { amount } => serde_json::json!({
+                "token": access_token,
+                "amount": amount,
+                "payment_type": payment_type,
+                "is_mobile": false,
+            }),
+            Self::Plan { plan_id, price } => serde_json::json!({
+                "token": access_token,
+                "amount": if *price > 0.0 { *price } else { 0.01 },
+                "payment_type": payment_type,
+                "is_mobile": false,
+                "order_type": "subscription",
+                "plan_id": plan_id,
+            }),
+        }
+    }
+}
+
+/// `code` for a 2xx answer that was not JSON: an HTML page where the pay
+/// service should be, i.e. no pay service behind this gateway.
+const NOT_JSON: &str = "NOT_JSON";
+
+/// A request the pay service refused.
+///
+/// Unlike the gateway's numeric envelope code, the pay service reports a
+/// string code (`TOO_MANY_PENDING`, `PLAN_NOT_AVAILABLE`, ...) next to a
+/// message already localized by the `lang` parameter.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PayError {
+    pub status: u16,
+    /// Empty when the service sent none.
+    pub code: String,
+    pub message: String,
+}
+
+impl PayError {
+    fn from_response(response: &Response) -> Self {
+        let parsed: Option<serde_json::Value> = serde_json::from_str(&response.body).ok();
+        let field = |name: &str| {
+            parsed
+                .as_ref()
+                .and_then(|value| value.get(name))
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(str::to_owned)
+        };
+        Self {
+            status: response.status,
+            code: field("code").unwrap_or_default(),
+            message: field("error").or_else(|| field("message")).unwrap_or_default(),
+        }
+    }
+}
+
+impl std::fmt::Display for PayError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.message.is_empty() {
+            write!(f, "the payment service answered with status {}", self.status)
+        } else {
+            f.write_str(&self.message)
+        }
+    }
+}
+
+impl std::error::Error for PayError {}
+
+/// Deserialize a pay-service answer, surfacing a refusal as [`PayError`].
+fn pay_json<T: serde::de::DeserializeOwned>(response: &Response) -> Result<T> {
+    if !response.is_success() {
+        return Err(PayError::from_response(response).into());
+    }
+    serde_json::from_str(&response.body).map_err(|error| {
+        if response.body.trim_start().starts_with('<') {
+            PayError {
+                status: response.status,
+                code: NOT_JSON.to_owned(),
+                message: String::new(),
+            }
+            .into()
+        } else {
+            anyhow!("could not parse the payment service's answer: {error}")
+        }
+    })
+}
+
+/// The pay service's refusal `code`, when `error` carries one.
+pub fn error_code(error: &anyhow::Error) -> Option<&str> {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<PayError>())
+        .map(|pay| pay.code.as_str())
+        .filter(|code| !code.is_empty())
+}
+
+/// No pay service stands behind this gateway (or it is down): the gateway's
+/// proxy answered 502, nothing is routed there, or an HTML page came back.
+/// Plan entry points hide rather than show an error. A network failure is not
+/// this; it is worth a retry.
+pub fn plans_unavailable(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .filter_map(|cause| cause.downcast_ref::<PayError>())
+        .any(|pay| matches!(pay.status, 404 | 405 | 501 | 502 | 503) || pay.code == NOT_JSON)
+}
+
+/// The session's access token, renewed first when it is close to expiring.
+///
+/// The pay service checks the token against the gateway on every call, so a
+/// token that expired between the app's refresh ticks fails there as "invalid
+/// token". Run off the UI thread; hand the credentials back to the app so it
+/// adopts any renewed pair.
+pub fn session_token(credentials: &mut crate::Credentials) -> Result<String> {
+    crate::refresh_if_needed(credentials)?;
+    Ok(credentials.access_token.clone())
 }
 
 /// A created order.
@@ -190,8 +427,8 @@ pub enum PayFlow {
     Stripe,
 }
 
-/// Payment types whose `pay_url` must open in a browser rather than render
-/// as a QR code.
+/// Payment types whose `pay_url`, when there is one, must open in a browser
+/// rather than render as a QR code.
 const REDIRECT_PAYMENT_PREFIXES: [&str; 2] = ["wxpay", "bank"];
 
 pub fn resolve_flow(order: &PayOrder) -> PayFlow {
@@ -199,9 +436,12 @@ pub fn resolve_flow(order: &PayOrder) -> PayFlow {
         return PayFlow::Stripe;
     }
     let payment_type = order.payment_type.trim().to_lowercase();
-    if REDIRECT_PAYMENT_PREFIXES
-        .iter()
-        .any(|prefix| payment_type.starts_with(prefix))
+    // WeChat direct on a PC returns only a `weixin://` QR payload; sending
+    // that to the browser reported "no payment link".
+    if order.pay_url.is_some()
+        && REDIRECT_PAYMENT_PREFIXES
+            .iter()
+            .any(|prefix| payment_type.starts_with(prefix))
     {
         return PayFlow::Redirect;
     }
@@ -262,15 +502,33 @@ impl PayClient {
         )
     }
 
-    /// Both config calls, folded into one form-ready value.
-    pub fn load_config(&self, access_token: &str) -> Result<PayConfig> {
-        let orders: serde_json::Value = Request::new()
+    /// A read authenticated with the session token.
+    ///
+    /// Sends it as a bearer header. A service from before bearer support
+    /// ignores the header and answers 400/401 for the missing `token`
+    /// parameter, so that one answer is retried the old way.
+    // TODO(pay-bearer): drop the fallback once every deployment reads the header.
+    fn authed_get(&self, path_and_query: &str, access_token: &str) -> Result<Response> {
+        let response = Request::new()
+            .header("Accept-Language", &self.lang)
+            .bearer(access_token)
+            .send(&self.url(path_and_query))?;
+        if !matches!(response.status, 400 | 401) {
+            return Ok(response);
+        }
+        let separator = if path_and_query.contains('?') { '&' } else { '?' };
+        Request::new()
             .header("Accept-Language", &self.lang)
             .send(&self.url(&format!(
-                "/api/orders/my?token={}&page=1&page_size=20",
+                "{path_and_query}{separator}token={}",
                 percent(access_token)
-            )))?
-            .json()?;
+            )))
+    }
+
+    /// Both config calls, folded into one form-ready value.
+    pub fn load_config(&self, access_token: &str) -> Result<PayConfig> {
+        let orders: serde_json::Value =
+            pay_json(&self.authed_get("/api/orders/my?page=1&page_size=20", access_token)?)?;
         let user = orders.get("user");
         let field = |key: &str| user.and_then(|user| user.get(key));
         let user_id = field("id")
@@ -291,12 +549,8 @@ impl PayClient {
             .and_then(serde_json::Value::as_i64)
             .unwrap_or(0);
 
-        let payload: serde_json::Value = Request::new()
-            .send(&self.url(&format!(
-                "/api/user?user_id={user_id}&token={}",
-                percent(access_token)
-            )))?
-            .json()?;
+        let payload: serde_json::Value =
+            pay_json(&self.authed_get(&format!("/api/user?user_id={user_id}"), access_token)?)?;
         let config = payload.get("config").cloned().unwrap_or_default();
         let enabled_payment_types = config
             .get("enabledPaymentTypes")
@@ -343,58 +597,117 @@ impl PayClient {
                 .get("stripePublishableKey")
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|key| !key.trim().is_empty()),
+            balance_disabled: config
+                .get("balanceDisabled")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
         })
     }
 
-    /// Create an order for `amount` USD credited via `payment_type`.
+    /// The plans on sale, in the service's display order. A plan that does
+    /// not parse is skipped rather than failing the whole list.
+    pub fn list_plans(&self, access_token: &str) -> Result<Vec<SubscriptionPlan>> {
+        let payload: serde_json::Value =
+            pay_json(&self.authed_get("/api/subscription-plans", access_token)?)?;
+        let plans = payload
+            .get("plans")
+            .and_then(serde_json::Value::as_array)
+            .map(|plans| {
+                plans
+                    .iter()
+                    .filter_map(|plan| {
+                        serde_json::from_value::<SubscriptionPlan>(plan.clone()).ok()
+                    })
+                    .filter(|plan| !plan.id.is_empty() && plan.group_id > 0)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(plans)
+    }
+
+    /// Create an order buying `kind` via `payment_type`.
     pub fn create_order(
         &self,
         access_token: &str,
-        amount: f64,
+        kind: &OrderKind,
         payment_type: &str,
     ) -> Result<PayOrder> {
-        let body = serde_json::json!({
-            "token": access_token,
-            "amount": amount,
-            "payment_type": payment_type,
-            "is_mobile": false,
-        });
-        let order: PayOrder = Request::new()
-            .header("Accept-Language", &self.lang)
-            .json_body(body.to_string())
-            .send(&self.url("/api/orders"))?
-            .json()?;
+        let mut order: PayOrder = pay_json(
+            &Request::new()
+                .header("Accept-Language", &self.lang)
+                .json_body(kind.body(access_token, payment_type).to_string())
+                .send(&self.url("/api/orders"))?,
+        )?;
         if order.order_id.is_empty() {
             return Err(anyhow!("the payment service returned no order id"));
         }
         if order.status_access_token.is_empty() {
             return Err(anyhow!("the payment service returned no status token"));
         }
+        self.normalize_order_urls(&mut order);
         Ok(order)
     }
 
     /// Poll an order. Authenticates with the order's own status token, not
     /// the account token.
     pub fn order_status(&self, order_id: &str, status_access_token: &str) -> Result<OrderStatus> {
-        Request::new()
-            .header("Accept-Language", &self.lang)
-            .send(&self.url(&format!(
-                "/api/orders/{}?access_token={}",
-                percent(order_id),
-                percent(status_access_token)
-            )))?
-            .json()
+        pay_json(
+            &Request::new()
+                .header("Accept-Language", &self.lang)
+                .send(&self.url(&format!(
+                    "/api/orders/{}?access_token={}",
+                    percent(order_id),
+                    percent(status_access_token)
+                )))?,
+        )
     }
 
     /// Cancel a pending order.
     pub fn cancel_order(&self, access_token: &str, order_id: &str) -> Result<()> {
         let body = serde_json::json!({ "token": access_token });
-        let _: serde_json::Value = Request::new()
-            .header("Accept-Language", &self.lang)
-            .json_body(body.to_string())
-            .send(&self.url(&format!("/api/orders/{}/cancel", percent(order_id))))?
-            .json()?;
+        let _: serde_json::Value = pay_json(
+            &Request::new()
+                .header("Accept-Language", &self.lang)
+                .json_body(body.to_string())
+                .send(&self.url(&format!("/api/orders/{}/cancel", percent(order_id))))?,
+        )?;
         Ok(())
+    }
+
+    /// Resolve a root-relative link (the Alipay short link `/pay/{id}`)
+    /// against the service's origin; anything else passes through. Servers
+    /// from before the fix return the short link relative, and a relative
+    /// path neither opens in a browser nor scans from a phone.
+    pub fn absolute_url(&self, url: &str) -> String {
+        let url = url.trim();
+        if let Some(rest) = url.strip_prefix("//") {
+            return format!("https://{rest}");
+        }
+        if !url.starts_with('/') {
+            return url.to_owned();
+        }
+        let origin = match self.endpoint.find("://") {
+            Some(scheme_end) => {
+                let host_start = scheme_end + 3;
+                match self.endpoint[host_start..].find('/') {
+                    Some(path_start) => &self.endpoint[..host_start + path_start],
+                    None => self.endpoint.as_str(),
+                }
+            }
+            None => self.endpoint.as_str(),
+        };
+        format!("{origin}{url}")
+    }
+
+    fn normalize_order_urls(&self, order: &mut PayOrder) {
+        for link in [&mut order.pay_url, &mut order.qr_code] {
+            if let Some(value) = link.as_mut() {
+                *value = self.absolute_url(value);
+            }
+            if link.as_deref().is_some_and(str::is_empty) {
+                *link = None;
+            }
+        }
     }
 
     /// The hosted pay center, for the flows the native modal cannot carry
@@ -495,13 +808,168 @@ mod tests {
 
     #[test]
     fn flow_resolution_matches_the_electron_client() {
-        // clientSecret always wins; wxpay/bank redirect even with a QR
-        // payload; anything else with a QR renders it; the rest redirect.
+        // clientSecret always wins; wxpay/bank with a pay URL redirect even
+        // with a QR payload; anything else with a QR renders it; the rest
+        // redirect.
         assert_eq!(resolve_flow(&order("alipay", None, Some("cs"))), PayFlow::Stripe);
-        assert_eq!(resolve_flow(&order("wxpay_native", Some("qr"), None)), PayFlow::Redirect);
+        let mut easypay_wx = order("wxpay", Some("qr"), None);
+        easypay_wx.pay_url = Some("https://pay.example.com/submit".into());
+        assert_eq!(resolve_flow(&easypay_wx), PayFlow::Redirect);
         assert_eq!(resolve_flow(&order("bank_transfer", None, None)), PayFlow::Redirect);
         assert_eq!(resolve_flow(&order("alipay", Some("qr-data"), None)), PayFlow::Qr);
         assert_eq!(resolve_flow(&order("alipay", None, None)), PayFlow::Redirect);
+    }
+
+    #[test]
+    fn wechat_direct_with_only_a_qr_payload_renders_it() {
+        // wxpay_direct on a PC answers with a weixin:// code and no pay URL.
+        assert_eq!(
+            resolve_flow(&order("wxpay_direct", Some("weixin://wxpay/bizpayurl?pr=x"), None)),
+            PayFlow::Qr
+        );
+    }
+
+    #[test]
+    fn plans_parse_the_route_shape() {
+        let plan: SubscriptionPlan = serde_json::from_str(
+            r#"{"id":"cm1","groupId":7,"groupName":"Claude Max","name":"Pro 月卡",
+                "description":null,"price":29.9,"originalPrice":39.9,
+                "validityDays":1,"validityUnit":"month",
+                "features":["不限速",{"text":"优先调度"},null,"  "],
+                "productName":null,"platform":"anthropic","rateMultiplier":1,
+                "limits":{"daily_limit_usd":10,"weekly_limit_usd":null,"monthly_limit_usd":200},
+                "allowMessagesDispatch":false,"defaultMappedModel":null,
+                "supportedModelScopes":["claude"]}"#,
+        )
+        .expect("parse");
+        assert_eq!(plan.id, "cm1");
+        assert_eq!(plan.group_id, 7);
+        assert_eq!(plan.validity_unit, ValidityUnit::Month);
+        assert_eq!(plan.features, vec!["不限速", "优先调度"]);
+        assert_eq!(plan.discounted_from(), Some(39.9));
+        let limits = plan.limits.expect("limits");
+        assert_eq!(limits.daily_limit_usd, Some(10.0));
+        assert_eq!(limits.weekly_limit_usd, None);
+        assert_eq!(plan.supported_model_scopes, vec!["claude"]);
+
+        // Older servers: no scopes, null features, an unknown unit.
+        let plan: SubscriptionPlan = serde_json::from_str(
+            r#"{"id":"cm2","groupId":8,"name":"x","price":10,"originalPrice":10,
+                "validityDays":30,"validityUnit":"fortnight","features":null,"limits":null}"#,
+        )
+        .expect("parse");
+        assert_eq!(plan.validity_unit, ValidityUnit::Day);
+        assert!(plan.features.is_empty());
+        assert!(plan.supported_model_scopes.is_empty());
+        assert_eq!(plan.discounted_from(), None);
+    }
+
+    #[test]
+    fn order_bodies_carry_the_order_kind() {
+        let balance = OrderKind::Balance { amount: 20.0 }.body("tok", "alipay");
+        assert_eq!(balance["amount"], 20.0);
+        assert!(balance.get("order_type").is_none());
+        assert_eq!(balance["token"], "tok");
+
+        let plan = OrderKind::Plan {
+            plan_id: "cm1".into(),
+            price: 29.9,
+        }
+        .body("tok", "wxpay_direct");
+        assert_eq!(plan["order_type"], "subscription");
+        assert_eq!(plan["plan_id"], "cm1");
+        assert_eq!(plan["amount"], 29.9);
+        assert_eq!(plan["payment_type"], "wxpay_direct");
+        assert_eq!(plan["is_mobile"], false);
+
+        // A free-looking plan still sends a positive amount the schema accepts.
+        let free = OrderKind::Plan {
+            plan_id: "cm0".into(),
+            price: 0.0,
+        }
+        .body("tok", "alipay");
+        assert_eq!(free["amount"], 0.01);
+    }
+
+    #[test]
+    fn relative_pay_links_resolve_against_the_origin() {
+        let client = PayClient::new("https://cloud.example.org/", "zh");
+        assert_eq!(
+            client.absolute_url("/pay/ord_1"),
+            "https://cloud.example.org/pay/ord_1"
+        );
+        assert_eq!(
+            client.absolute_url("https://openapi.alipay.com/gateway.do?x=1"),
+            "https://openapi.alipay.com/gateway.do?x=1"
+        );
+        assert_eq!(client.absolute_url("weixin://wxpay/x"), "weixin://wxpay/x");
+        assert_eq!(client.absolute_url("//cdn.example.org/a"), "https://cdn.example.org/a");
+        // An endpoint with a path still resolves against its origin.
+        let client = PayClient::new("https://cloud.example.org/base", "zh");
+        assert_eq!(client.absolute_url("/pay/x"), "https://cloud.example.org/pay/x");
+
+        let mut order = PayOrder {
+            order_id: "ord_1".into(),
+            payment_type: "alipay_direct".into(),
+            pay_url: Some("/pay/ord_1".into()),
+            qr_code: Some("/pay/ord_1".into()),
+            ..Default::default()
+        };
+        PayClient::new("https://cloud.example.org", "zh").normalize_order_urls(&mut order);
+        assert_eq!(order.qr_code.as_deref(), Some("https://cloud.example.org/pay/ord_1"));
+        assert_eq!(order.pay_url.as_deref(), Some("https://cloud.example.org/pay/ord_1"));
+        assert_eq!(resolve_flow(&order), PayFlow::Qr);
+    }
+
+    fn response(status: u16, body: &str) -> Response {
+        Response {
+            status,
+            body: body.to_owned(),
+        }
+    }
+
+    #[test]
+    fn pay_errors_keep_the_string_code() {
+        let error = pay_json::<serde_json::Value>(&response(
+            429,
+            r#"{"error":"待支付订单过多（最多 3 笔）","code":"TOO_MANY_PENDING"}"#,
+        ))
+        .expect_err("refused");
+        assert_eq!(error_code(&error), Some("TOO_MANY_PENDING"));
+        assert_eq!(error.to_string(), "待支付订单过多（最多 3 笔）");
+        assert!(!plans_unavailable(&error));
+
+        let error = pay_json::<serde_json::Value>(&response(500, "")).expect_err("refused");
+        assert_eq!(error_code(&error), None);
+        assert!(error.to_string().contains("500"));
+    }
+
+    #[test]
+    fn missing_pay_service_reads_as_unavailable() {
+        let bad_gateway = pay_json::<serde_json::Value>(&response(
+            502,
+            r#"{"error":"pay service unavailable"}"#,
+        ))
+        .expect_err("refused");
+        assert!(plans_unavailable(&bad_gateway));
+
+        let not_found = pay_json::<serde_json::Value>(&response(404, "Not Found")).expect_err("404");
+        assert!(plans_unavailable(&not_found));
+
+        // A single-page app answering every path with its index page.
+        let html = pay_json::<serde_json::Value>(&response(200, "<!doctype html><html></html>"))
+            .expect_err("html");
+        assert!(plans_unavailable(&html));
+
+        let unauthorized = pay_json::<serde_json::Value>(&response(
+            401,
+            r#"{"error":"无效的 token"}"#,
+        ))
+        .expect_err("401");
+        assert!(!plans_unavailable(&unauthorized));
+
+        let other = anyhow!("curl: (6) Could not resolve host");
+        assert!(!plans_unavailable(&other));
     }
 
     #[test]

@@ -5,6 +5,8 @@
 //! now stays on the turn (`AgentTurn::error`) and this banner shows it until
 //! the person retries, dismisses it, or starts another turn.
 
+use sub2api::paywall::{Paywall, PaywallState};
+
 use super::*;
 
 /// Past this the message is clipped to two lines until its details open.
@@ -28,6 +30,7 @@ impl Waku {
         let long = message.lines().count() > 2 || message.chars().count() > COLLAPSED_CHARS;
         let details_open = self.error_details_open == Some(turn_id);
         let copy_text = message.clone();
+        let paywall = self.turn_paywall(session.provider, &message);
 
         let button = |id: &str, label: String, primary: bool| {
             div()
@@ -58,17 +61,31 @@ impl Waku {
                 .child(label)
         };
 
-        let mut actions = div()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .mt(px(10.0))
+        let mut actions = div().flex().items_center().gap(px(8.0)).mt(px(10.0));
+        // A turn the account could not pay for: the purchase that fixes it
+        // leads, and retrying — pointless until then — steps back.
+        if let Some(paywall) = paywall {
+            let label = match paywall {
+                Paywall::Balance => tr!("error_banner.top_up"),
+                Paywall::PlanLimit => tr!("error_banner.upgrade_plan"),
+                Paywall::PlanInactive => tr!("error_banner.renew_plan"),
+            };
+            actions = actions.child(button("paywall", label, true).on_click(cx.listener(
+                move |this, _, _, cx| match paywall {
+                    Paywall::Balance => this.open_cloud_pay_modal(cx),
+                    Paywall::PlanLimit | Paywall::PlanInactive => {
+                        this.open_settings_page(SettingsPage::Plans, cx);
+                    }
+                },
+            )));
+        }
+        actions = actions
             .child(
-                button("retry", tr!("error_banner.retry"), true).on_click(cx.listener(
-                    move |this, _, _, cx| {
+                button("retry", tr!("error_banner.retry"), paywall.is_none()).on_click(
+                    cx.listener(move |this, _, _, cx| {
                         this.retry_failed_turn(session_id, cx);
-                    },
-                )),
+                    }),
+                ),
             )
             .child(
                 button("copy", tr!("common.copy"), false).on_click(cx.listener(
@@ -159,6 +176,45 @@ impl Waku {
                     .child(actions),
             ),
         )
+    }
+
+    /// Which purchase would have let a failed turn through — only for a turn
+    /// that went through the managed gateway; see [`sub2api::paywall`].
+    fn turn_paywall(&self, provider: ProviderKind, message: &str) -> Option<Paywall> {
+        if self.cloud_account.credentials.is_none() || !self.cloud_account.routing_enabled {
+            return None;
+        }
+        let subscriptions = self.cloud_account.subscriptions.as_deref().unwrap_or(&[]);
+        let state = PaywallState {
+            balance: self.cloud_account.user.as_ref().map(|user| user.balance),
+            has_active_subscription: !subscriptions.is_empty(),
+            exhausted_subscription: subscriptions.iter().any(|subscription| {
+                super::cloud_subscriptions::subscription_windows(subscription)
+                    .iter()
+                    .any(|(_, window)| window.limit_usd > 0.0 && window.used_usd >= window.limit_usd)
+            }),
+        };
+        let paywall = sub2api::paywall::classify(message, &state)?;
+        (!self.provider_on_custom_endpoint(provider)).then_some(paywall)
+    }
+
+    /// Whether `provider`'s requests leave through the user's own endpoint
+    /// rather than the gateway — or whether the gateway routes it at all.
+    /// Another sub2api deployment answers with the same codes, and buying
+    /// here would not fix it. The built-in agent counts as custom when any of
+    /// its three APIs is: which one the failed turn used is not recorded.
+    fn provider_on_custom_endpoint(&self, provider: ProviderKind) -> bool {
+        let slots: &[&str] = match provider {
+            ProviderKind::Claude => &["claude"],
+            ProviderKind::Codex => &["codex"],
+            ProviderKind::Grok => &["grok"],
+            ProviderKind::OpenCode => &["opencode"],
+            ProviderKind::Pi => &["pi"],
+            ProviderKind::Native => &sub2api::custom_api::NATIVE_SLOTS,
+            _ => return true,
+        };
+        let config = self.custom_api_snapshot();
+        slots.iter().any(|slot| config.routed_endpoint(slot).is_some())
     }
 
     /// Put the banner away for this turn. The choice is kept on the turn, so

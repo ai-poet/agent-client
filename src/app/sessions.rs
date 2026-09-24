@@ -1031,35 +1031,56 @@ impl Waku {
 
     /// Discovery is not requested here: launch already requested it for every
     /// installed provider, so tabs only ever switch between loaded lists.
-    /// Open one section of the built-in agent's model list.
+    /// Open one vendor of the built-in agent's model list.
     ///
-    /// A section is an API, and every model has exactly one, so this filters
-    /// the list rather than changing anything about the session. Picking a
-    /// model out of a section is what sets the session's format.
-    pub(super) fn show_model_picker_format(&mut self, format: &str, cx: &mut Context<Self>) {
-        if self.model_picker_format == format {
+    /// This only filters the list; nothing about the session changes until a
+    /// model is picked, and that model brings its own API with it.
+    pub(super) fn show_model_picker_vendor(&mut self, vendor: &str, cx: &mut Context<Self>) {
+        if self.model_picker_vendor == vendor {
             return;
         }
-        self.model_picker_format = format.to_owned();
-        // A different section is a different set of rows under the keyboard
-        // cursor, and would otherwise inherit the old section's offset.
+        self.model_picker_vendor = vendor.to_owned();
+        // A different vendor is a different set of rows under the keyboard
+        // cursor, and would otherwise inherit the old vendor's offset.
         self.model_picker_highlight = None;
         self.reveal_selected_picker_model();
         cx.notify();
     }
 
-    /// The section that should be open for a session: the one holding its
-    /// current model.
-    pub(super) fn sync_model_picker_format(&mut self) {
+    /// The vendor that should be open for a session: the one holding its
+    /// current model, or the first the column draws when that model is not
+    /// in the list.
+    pub(super) fn sync_model_picker_vendor(&mut self) {
         let model = self
             .selected_session()
             .and_then(|session| self.model_for_session(session))
             .map(str::to_owned);
-        let tier = self
-            .selected_session()
-            .and_then(|session| session.service_tier.clone());
-        self.model_picker_format =
-            super::composer::native_wire_format(tier.as_deref(), model.as_deref());
+        let Some(models) = self
+            .probes
+            .iter()
+            .find(|probe| probe.provider == ProviderKind::Native)
+            .map(|probe| &probe.models)
+        else {
+            return;
+        };
+        // A model the list no longer carries under that id (a session saved
+        // before the catalog filed it by platform, say) is read by its name.
+        let current = model.as_deref().map(|id| {
+            models
+                .iter()
+                .find(|entry| entry.id == id)
+                .map(super::native_agent::native_vendor_of)
+                .unwrap_or_else(|| {
+                    super::native_agent::native_vendor_of(&ProviderModel::new(id, id))
+                })
+        });
+        let present = super::native_agent::native_vendors_present(models);
+        let vendor = current
+            .filter(|id| present.iter().any(|(vendor, _)| vendor.id == *id))
+            .or_else(|| present.first().map(|(vendor, _)| vendor.id));
+        if let Some(vendor) = vendor {
+            self.model_picker_vendor = vendor.to_owned();
+        }
     }
 
     pub(super) fn select_model_picker_tab(&mut self, tab: ModelPickerTab, cx: &mut Context<Self>) {
@@ -1074,7 +1095,7 @@ impl Waku {
                 // account's catalog, refreshed within the Plaza's window.
                 if provider.is_builtin() {
                     self.refresh_native_catalog(false, cx);
-                    self.sync_model_picker_format();
+                    self.sync_model_picker_vendor();
                 }
             }
             // A different tab renumbers the rows under the keyboard cursor,

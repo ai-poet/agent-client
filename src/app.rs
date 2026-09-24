@@ -222,6 +222,8 @@ enum SettingsPage {
     Appearance,
     /// Fork addition: managed cloud account and gateway routing.
     CloudAccount,
+    /// Fork addition: the subscription plans on sale, bought in-app.
+    Plans,
     /// Fork addition: the gateway model catalog with pricing and health.
     ModelPlaza,
     /// Fork addition: the managed account's request history.
@@ -1506,11 +1508,10 @@ pub struct Waku {
     model_providers: model_providers_page::ModelProvidersPageState,
     /// Fork addition: provider processes warmed while the user types.
     runtime_prewarms: runtime_prewarm::RuntimePrewarms,
-    /// Fork addition: which section of the built-in agent's model list is
-    /// open in the picker. Every model there has exactly one API, so the
-    /// format bar partitions the list rather than switching a setting; this
-    /// is picker state, not session state, and is not persisted.
-    model_picker_format: String,
+    /// Fork addition: which vendor of the built-in agent's model list the
+    /// picker's vendor column has open (`native_agent::NATIVE_VENDORS` ids).
+    /// Picker state, not session state, and not persisted.
+    model_picker_vendor: String,
     /// Fork addition: cloud usage view state.
     cloud_usage: cloud_usage::CloudUsageState,
     /// Fork addition: model plaza view state.
@@ -1523,8 +1524,11 @@ pub struct Waku {
     plaza_search_input: Entity<TextInput>,
     /// Fork addition: the native top-up modal, present while open.
     cloud_pay: Option<cloud_pay::CloudPayState>,
-    /// A click staged the top-up modal; the next frame materializes it.
-    cloud_pay_request: bool,
+    /// A click staged the pay modal (a top-up or a plan); the next frame
+    /// materializes it.
+    cloud_pay_request: Option<cloud_pay::PayIntent>,
+    /// Fork addition: Settings → Plans, the subscription plans on sale.
+    plans: plans_page::PlansState,
     /// Bumped whenever the modal opens, closes, or starts a new order, so a
     /// stale poll loop can tell it has been superseded.
     cloud_pay_epoch: usize,
@@ -1750,6 +1754,7 @@ mod image_studio;
 mod image_studio_view;
 mod model_plaza;
 mod model_providers_page;
+mod plans_page;
 mod workflow;
 mod agent_page;
 mod native_agent;
@@ -3191,14 +3196,15 @@ impl Waku {
                 agent_page: agent_page::AgentPageState::default(),
                 model_providers: model_providers_page::ModelProvidersPageState::default(),
                 runtime_prewarms: runtime_prewarm::RuntimePrewarms::default(),
-                model_picker_format: "messages".to_owned(),
+                model_picker_vendor: "anthropic".to_owned(),
                 cloud_usage: cloud_usage::CloudUsageState::default(),
                 model_plaza: model_plaza::ModelPlazaState::default(),
                 image_studio: image_studio::ImageStudioState::default(),
                 workflow: workflow::WorkflowState::default(),
                 plaza_search_input,
                 cloud_pay: None,
-                cloud_pay_request: false,
+                cloud_pay_request: None,
+                plans: plans_page::PlansState::default(),
                 cloud_pay_epoch: 0,
                 cloud_balance_stale: false,
                 cloud_announcements: announcements::AnnouncementsState::default(),

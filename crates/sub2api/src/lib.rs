@@ -45,6 +45,7 @@ pub mod model_routing;
 pub mod node_install;
 pub mod onboarding;
 pub mod pay;
+pub mod paywall;
 pub mod providers;
 pub mod speedtest;
 #[cfg(windows)]

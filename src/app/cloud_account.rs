@@ -26,6 +26,11 @@ const GROUP_STATUS_TTL: Duration = Duration::from_secs(180);
 /// is exactly what the feature exists to avoid.
 const FAILOVER_STATUS_TTL: Duration = Duration::from_secs(60);
 
+/// How long subscription usage read with the balance stays fresh. The balance
+/// refresh runs after every settled turn; this keeps it from reading usage on
+/// every one.
+const SUBSCRIPTIONS_TTL: Duration = Duration::from_secs(60);
+
 /// Balance polling after the top-up page is opened.
 const TOP_UP_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const TOP_UP_POLL_ATTEMPTS: usize = 8;
@@ -82,6 +87,9 @@ pub(super) struct CloudAccountState {
     /// model-routing refresh answers, or when the deployment has none to
     /// report.
     pub subscriptions: Option<Vec<sub2api::client::SubscriptionProgress>>,
+    /// Last subscription read on the balance cadence, for its TTL guard: a
+    /// failed turn is judged by how far into its windows the account is.
+    pub subscriptions_at: Option<Instant>,
     /// A model-routing refresh is in flight.
     pub routes_refreshing: bool,
     /// Something asked for another refresh while one was in flight.
@@ -193,6 +201,15 @@ impl Waku {
             return;
         }
         self.cloud_account.pending = true;
+        // Usage rides along behind its own TTL: what a failed turn's paywall
+        // prompt reads when the driver lost the gateway's code.
+        let read_subscriptions = self
+            .cloud_account
+            .subscriptions_at
+            .is_none_or(|at| at.elapsed() >= SUBSCRIPTIONS_TTL);
+        if read_subscriptions {
+            self.cloud_account.subscriptions_at = Some(Instant::now());
+        }
         cx.notify();
 
         cx.spawn(async move |this, cx| {
@@ -201,18 +218,24 @@ impl Waku {
                 .spawn(async move {
                     let mut credentials = credentials;
                     sub2api::refresh_if_needed(&mut credentials)?;
-                    let user = sub2api::Client::new(credentials.endpoint.clone())
-                        .me(&credentials.access_token)?;
-                    anyhow::Ok((credentials, user))
+                    let client = sub2api::Client::new(credentials.endpoint.clone());
+                    let user = client.me(&credentials.access_token)?;
+                    let subscriptions = read_subscriptions
+                        .then(|| client.subscription_progress(&credentials.access_token).ok())
+                        .flatten();
+                    anyhow::Ok((credentials, user, subscriptions))
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.cloud_account.pending = false;
                 match fetched {
-                    Ok((credentials, user)) => {
+                    Ok((credentials, user, subscriptions)) => {
                         this.adopt_cloud_tokens(credentials);
                         this.cloud_account.user = Some(user);
                         this.cloud_account.error = None;
+                        if let Some(subscriptions) = subscriptions {
+                            this.cloud_account.subscriptions = Some(subscriptions);
+                        }
                     }
                     // The service refused the refresh token itself: no retry
                     // will bring the session back, so stop pretending.
@@ -709,8 +732,10 @@ impl Waku {
         self.cloud_account.credentials = None;
         self.cloud_account.user = None;
         self.cloud_account.subscriptions = None;
+        self.cloud_account.subscriptions_at = None;
         self.cloud_account.routing_enabled = false;
         self.cloud_account.error = None;
+        self.reset_plans();
         self.apply_cloud_routing();
         // The catalog was this account's; the built-in agent drops back to
         // its fallback list until someone signs in again.
@@ -1153,7 +1178,7 @@ impl Waku {
             // Plaza page; this page keeps identity, routing, and groups.
             page = page
                 .child(self.render_gateway_origins(theme, cx))
-                .child(self.render_cloud_subscriptions(theme))
+                .child(self.render_cloud_subscriptions(theme, cx))
                 .child(self.render_cloud_groups(theme, cx))
                 .child(self.render_cloud_referral(theme, cx));
         }
@@ -1646,11 +1671,13 @@ impl Waku {
                 let _ = refresh_weak.update(cx, |this, cx| {
                     this.load_cloud_details(cx);
                     this.refresh_cloud_account(cx);
+                    this.load_plans_if_needed(false, cx);
                 });
             }
         });
         let weak = cx.entity().downgrade();
         let balance = self.cloud_account.user.as_ref().map(|user| user.balance);
+        let plans_visible = self.plans_entry_visible();
         let subscription_lines: Vec<String> = self
             .cloud_account
             .subscriptions
@@ -1695,6 +1722,17 @@ impl Waku {
                         })
                         .icon("icons/wallet.svg"),
                     );
+                    if plans_visible {
+                        let plans_weak = weak.clone();
+                        items.push(
+                            MenuItem::new(tr!("plans.menu_item"), move |_, cx| {
+                                let _ = plans_weak.update(cx, |this, cx| {
+                                    this.open_settings_page(SettingsPage::Plans, cx);
+                                });
+                            })
+                            .icon("icons/zap.svg"),
+                        );
+                    }
                     items.push(MenuItem::Separator);
                 }
                 // What the user has paid for by the period, and how far into
@@ -1892,7 +1930,7 @@ fn group_status_suffix(
     parts.join(" \u{00b7} ")
 }
 
-fn platform_display_name(platform: &str) -> String {
+pub(super) fn platform_display_name(platform: &str) -> String {
     match platform {
         "anthropic" => "Claude Code".to_owned(),
         "openai" => "Codex".to_owned(),

@@ -133,11 +133,16 @@ impl Waku {
 
     /// Settings → Cloud Account: one card per active subscription — its
     /// group, how long it has left, spend against each limit, and which of
-    /// the built-in agent's models go through it. Absent when there are
-    /// none; a heading over nothing would only suggest something is missing.
-    pub(super) fn render_cloud_subscriptions(&self, theme: Theme) -> Div {
+    /// the built-in agent's models go through it, with a way to renew when a
+    /// plan sells the group. With none, a pointer to the plans when there are
+    /// any to buy; otherwise nothing, since a heading over nothing would only
+    /// suggest something is missing.
+    pub(super) fn render_cloud_subscriptions(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
+        // Renew buttons and the empty state need to know what is on sale.
+        self.schedule_plans_load(cx);
         let subscriptions = match self.cloud_account.subscriptions.as_ref() {
             Some(subscriptions) if !subscriptions.is_empty() => subscriptions,
+            _ if self.plans_offered() => return self.render_no_subscription(theme, cx),
             _ => return div(),
         };
         let routes = self
@@ -153,9 +158,76 @@ impl Waku {
             &tr!("cloud.subscriptions_detail"),
         ));
         for subscription in subscriptions {
-            section = section.child(subscription_card(theme, subscription, &routes));
+            let mut card = subscription_card(theme, subscription, &routes);
+            let group_id = subscription.group_id();
+            if !self.plans_for_group(group_id).is_empty() {
+                // About to lapse: the one card worth acting on, so its button
+                // is the primary one.
+                let lapsing = subscription
+                    .progress
+                    .as_ref()
+                    .is_some_and(|progress| progress.expires_in_days <= 3);
+                card = card.child(
+                    div().flex().child(super::providers_page::card_button(
+                        theme,
+                        SharedString::from(format!("cloud-subscription-renew-{group_id}")),
+                        tr!("cloud.subscription_renew"),
+                        lapsing,
+                        false,
+                        cx,
+                        move |this, _, cx| this.renew_group(group_id, cx),
+                    )),
+                );
+            }
+            section = section.child(card);
         }
         section
+    }
+
+    fn render_no_subscription(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
+        div().flex().flex_col().gap(px(8.0)).child(
+            div()
+                .w_full()
+                .px(px(16.0))
+                .py(px(12.0))
+                .rounded(px(11.0))
+                .bg(theme.raised)
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(16.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(3.0))
+                        .child(
+                            div()
+                                .text_size(sp(13.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(tr!("cloud.subscriptions_empty_title")),
+                        )
+                        .child(
+                            div()
+                                .text_size(sp(12.0))
+                                .line_height(sp(17.0))
+                                .text_color(theme.text_secondary)
+                                .child(tr!("cloud.subscriptions_empty_detail")),
+                        ),
+                )
+                .child(super::providers_page::card_button(
+                    theme,
+                    "cloud-subscriptions-browse".into(),
+                    tr!("plans.browse_link"),
+                    false,
+                    false,
+                    cx,
+                    |this, _, cx| this.open_settings_page(SettingsPage::Plans, cx),
+                )),
+        )
     }
 }
 
@@ -178,7 +250,7 @@ pub(super) fn subscription_menu_line(subscription: &sub2api::client::Subscriptio
     parts.join(" \u{00b7} ")
 }
 
-fn expiry_label(days: i64) -> String {
+pub(super) fn expiry_label(days: i64) -> String {
     match days {
         ..=0 => tr!("cloud.subscription_expires_today"),
         1 => tr!("cloud.subscription_expires_tomorrow"),
@@ -190,7 +262,7 @@ fn expiry_label(days: i64) -> String {
 /// limits but that has not been used since it reset comes back from the
 /// service without figures; it is shown at zero rather than dropped, so the
 /// limit itself stays visible.
-fn subscription_windows(
+pub(super) fn subscription_windows(
     subscription: &sub2api::client::SubscriptionProgress,
 ) -> Vec<(String, sub2api::client::SubscriptionWindow)> {
     let group = subscription.subscription.group.as_ref();

@@ -794,11 +794,11 @@ impl Waku {
                         this.refresh_provider_model_discovery(provider);
                         // The built-in agent has no CLI to ask; its list is
                         // the account's catalog, refreshed within the
-                        // Plaza's freshness window. The section that opens is
+                        // Plaza's freshness window. The vendor that opens is
                         // the one holding the session's current model.
                         if provider.is_builtin() {
                             this.refresh_native_catalog(false, cx);
-                            this.sync_model_picker_format();
+                            this.sync_model_picker_vendor();
                         }
                         this.model_picker_highlight = None;
                         reset_search.update(cx, |search, cx| search.clear(cx));
@@ -842,12 +842,10 @@ impl Waku {
         // rendered rows index one ordering and cannot disagree about what
         // `enter` selects.
         //
-        // `picker_format` is which section of the built-in agent's list is
-        // open. Every model there has exactly one API, so the format bar
-        // partitions the list rather than switching a setting on one model,
-        // and the filter belongs here so the keyboard cursor and the drawn
-        // rows agree about what is in the section.
-        let picker_format = self.model_picker_format.clone();
+        // `picker_vendor` is which vendor of the built-in agent's list the
+        // vendor column has open. The filter belongs here so the keyboard
+        // cursor and the drawn rows agree about what is in the section.
+        let picker_vendor = self.model_picker_vendor.clone();
         let available_models = Rc::new(if handle.is_open() {
             visible_picker_models(
                 &probes,
@@ -855,12 +853,25 @@ impl Waku {
                 &disabled_providers,
                 locked_provider,
                 selected_tab,
-                &picker_format,
+                &picker_vendor,
                 &normalized_query,
             )
         } else {
             Vec::new()
         });
+        // The vendor column's entries, only while it can be drawn.
+        let native_vendors = if handle.is_open()
+            && selected_tab == ModelPickerTab::Provider(ProviderKind::Native)
+            && !searching
+        {
+            probes
+                .iter()
+                .find(|probe| probe.provider == ProviderKind::Native)
+                .map(|probe| super::native_agent::native_vendors_present(&probe.models))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let highlight = self
             .model_picker_highlight
             .filter(|index| *index < available_models.len());
@@ -1025,11 +1036,11 @@ impl Waku {
                             .child(div().flex_1().min_w_0().child(search.clone())),
                     );
 
-                // Which section of the built-in agent's list is open. Read
+                // Which vendor of the built-in agent's list is open. Read
                 // before the rows so the empty state can name it.
-                let native_format = (selected_tab == ModelPickerTab::Provider(ProviderKind::Native)
+                let native_vendor = (selected_tab == ModelPickerTab::Provider(ProviderKind::Native)
                     && !searching)
-                    .then(|| picker_format.clone());
+                    .then(|| picker_vendor.clone());
 
                 let mut rows = div()
                     .id("model-picker-list")
@@ -1048,11 +1059,11 @@ impl Waku {
                             if pending_discoveries.contains(&provider)
                     ) {
                         tr!("models.loading")
-                    } else if native_format.as_deref() == Some("chat") {
-                        // Empty by design: nothing on the managed service is
-                        // served over Chat Completions, and nothing can
-                        // discover what sits behind an endpoint of the
-                        // user's own. Say where to declare them.
+                    } else if native_vendor.as_deref()
+                        == Some(super::native_agent::CUSTOM_VENDOR)
+                    {
+                        // Nothing can discover what sits behind an endpoint
+                        // of the user's own. Say where to declare them.
                         tr!("models.declare_your_own")
                     } else {
                         tr!("models.none_reported")
@@ -1083,6 +1094,16 @@ impl Waku {
                     let favorite_model_id = model.id.clone();
                     let favorite_weak = weak.clone();
                     let subtitle = model_picker_subtitle(kind, model.sub_provider.as_deref());
+                    // The built-in agent's rows wear their vendor's mark, so
+                    // search results and favorites still say whose model it is.
+                    let (row_icon, row_icon_color) = if kind.is_builtin() {
+                        let vendor = super::native_agent::native_vendor(
+                            super::native_agent::native_vendor_of(model),
+                        );
+                        (vendor.icon, native_vendor_color(&theme, vendor))
+                    } else {
+                        (provider_icon(kind), provider_color(&theme, kind))
+                    };
                     rows = rows.child(
                         div()
                             .id(SharedString::from(format!(
@@ -1129,9 +1150,9 @@ impl Waku {
                                             .items_center()
                                             .gap(px(6.0))
                                             .child(icon(
-                                                provider_icon(kind),
+                                                row_icon,
                                                 10.5,
-                                                provider_color(&theme, kind).opacity(0.85),
+                                                row_icon_color.opacity(0.85),
                                             ))
                                             .child(
                                                 div()
@@ -1201,8 +1222,10 @@ impl Waku {
                 let previous_tab_weak = weak.clone();
                 let confirm_weak = weak.clone();
                 let confirm_popover = popover.clone();
+                // Wide enough for the built-in agent's vendor column beside a
+                // list; the same on every tab so switching never resizes it.
                 div()
-                    .w(px(460.0))
+                    .w(px(560.0))
                     .h(px(390.0))
                     .rounded(px(13.0))
                     .overflow_hidden()
@@ -1254,18 +1277,28 @@ impl Waku {
                             .rounded_br(px(12.0))
                             .bg(theme.surface)
                             .child(search_input)
-                            .children(
-                                native_format
-                                    .as_deref()
-                                    .map(|active| native_format_bar(theme, active, weak.clone())),
-                            )
                             .child(
                                 div()
                                     .flex_1()
                                     .min_h_0()
-                                    .relative()
-                                    .child(rows)
-                                    .child(scrollbar::vertical(&scroll, &scrollbar_state)),
+                                    .flex()
+                                    .children(native_vendor.as_deref().map(|active| {
+                                        native_vendor_column(
+                                            theme,
+                                            &native_vendors,
+                                            active,
+                                            weak.clone(),
+                                        )
+                                    }))
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .flex_1()
+                                            .h_full()
+                                            .relative()
+                                            .child(rows)
+                                            .child(scrollbar::vertical(&scroll, &scrollbar_state)),
+                                    ),
                             ),
                     )
                     .into_any_element()
@@ -1292,8 +1325,9 @@ impl Waku {
         cx.notify();
     }
 
-    /// Step the sidebar rail to the adjacent usable tab, wrapping at both
-    /// ends. `tab`/`shift-tab` land here from under the focused filter field,
+    /// Step the sidebar rail to the adjacent usable tab — or, on the
+    /// built-in agent's tab, to the adjacent vendor — wrapping at both ends.
+    /// `tab`/`shift-tab` land here from under the focused filter field,
     /// the same route the arrows take. A live query hides which tab is
     /// selected and searches across all of them, so cycling waits until the
     /// field is cleared.
@@ -1310,11 +1344,30 @@ impl Waku {
             &self.state.disabled_providers,
             locked_provider,
         );
-        let current = tabs.iter().position(|tab| *tab == self.model_picker_tab);
-        let Some(next) = next_picker_highlight(current, tabs.len(), key) else {
+        let native_vendors: Vec<&'static str> = self
+            .probes
+            .iter()
+            .find(|probe| probe.provider == ProviderKind::Native)
+            .map(|probe| {
+                super::native_agent::native_vendors_present(&probe.models)
+                    .into_iter()
+                    .map(|(vendor, _)| vendor.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let stops = picker_stops(&tabs, &native_vendors);
+        let current = stops.iter().position(|(tab, vendor)| {
+            *tab == self.model_picker_tab
+                && vendor.is_none_or(|vendor| vendor == self.model_picker_vendor)
+        });
+        let Some(next) = next_picker_highlight(current, stops.len(), key) else {
             return;
         };
-        self.select_model_picker_tab(tabs[next], cx);
+        let (tab, vendor) = stops[next];
+        self.select_model_picker_tab(tab, cx);
+        if let Some(vendor) = vendor {
+            self.show_model_picker_vendor(vendor, cx);
+        }
     }
 
     /// Bring the current model's row into view whenever the picker shows the
@@ -1338,7 +1391,7 @@ impl Waku {
             &self.state.disabled_providers,
             locked_provider,
             self.model_picker_tab,
-            &self.model_picker_format,
+            &self.model_picker_vendor,
             "",
         )
         .iter()
@@ -1366,10 +1419,9 @@ impl Waku {
         let session = self.selected_session()?;
         let model = self.model_metadata_for_session(session)?;
         // The built-in agent's tier slot carries the wire format, which is
-        // what this menu is for it: the same list the picker's format bar
-        // draws, reachable from the keyboard. There is no "standard" one —
-        // every format is a named API, and the model's own route is already
-        // marked as the default.
+        // what this menu is for it: the one API the chosen model goes over.
+        // There is no "standard" one — every format is a named API, and the
+        // model's own route is already marked as the default.
         let tiers_are_wire_formats = session.provider.is_builtin();
         if model.reasoning_efforts.is_empty()
             && model.service_tiers.is_empty()
@@ -3829,6 +3881,28 @@ pub(super) fn visible_picker_tabs(
     tabs
 }
 
+/// Where `tab`/`shift-tab` can land in the picker, in order: the rail's tabs,
+/// with the built-in agent's tab opened out into its vendor column so the
+/// keyboard reaches every vendor the mouse can.
+pub(super) fn picker_stops(
+    tabs: &[ModelPickerTab],
+    native_vendors: &[&'static str],
+) -> Vec<(ModelPickerTab, Option<&'static str>)> {
+    tabs.iter()
+        .flat_map(|tab| match tab {
+            ModelPickerTab::Provider(provider)
+                if provider.is_builtin() && !native_vendors.is_empty() =>
+            {
+                native_vendors
+                    .iter()
+                    .map(|vendor| (*tab, Some(*vendor)))
+                    .collect::<Vec<_>>()
+            }
+            _ => vec![(*tab, None)],
+        })
+        .collect()
+}
+
 /// The picker's whole body when nothing can back a session: no agent CLI
 /// found on this machine, and none left switched on.
 ///
@@ -3978,19 +4052,6 @@ pub(super) fn model_picker_subtitle(provider: ProviderKind, sub_provider: Option
     }
 }
 
-/// The wire formats the built-in agent can speak, in the order the picker
-/// lists them: tier id, label key, short label key. Ids match
-/// `waku_agent_bridge::WireFormat`, which the desktop does not link; the
-/// daemon reads them back from the session's tier.
-/// The short label for one wire format, for the bar's segments.
-fn native_format_short_label(format: &str) -> String {
-    crate::i18n::translate(match format {
-        "responses" => "model_option.wire_responses_short",
-        "chat" => "model_option.wire_chat_short",
-        _ => "model_option.wire_messages_short",
-    })
-}
-
 /// Split a picker model id into the platform ahead of the `::` and the model
 /// after it. A bare id carries no platform — that is what a model the user
 /// declared on their own endpoint looks like.
@@ -4024,82 +4085,100 @@ pub(super) fn native_wire_format(
         .to_owned()
 }
 
-/// The bar above the built-in agent's model list: the brand the models come
-/// through, then one segment per wire format with the session's current one
-/// filled. It sits outside the scrolling list on purpose — a header inside
-/// the list was scrolled out of view by the reveal of the selected model,
-/// and a chip drawn in `overlay` on a `raised` panel had no contrast.
-///
-/// Each model has exactly one API, so the bar is a partition of the list
-/// rather than a switch on one model: Messages holds Claude, Responses the
-/// GPT and Grok families, Chat DeepSeek, Kimi, GLM and MiniMax plus whatever
-/// the user declared on their own endpoint. Clicking a segment shows that section. The open one is marked
-/// by fill *and* weight, never colour alone; a section with nothing in it
-/// still gets a segment, so its emptiness is visible rather than implied.
-fn native_format_bar(theme: Theme, active: &str, weak: gpui::WeakEntity<Waku>) -> Div {
-    let mut bar = div()
-        .h(px(32.0))
-        .px(px(12.0))
+/// The column beside the built-in agent's model list: one row per vendor
+/// that has models, plus "custom" for the user's own endpoint, each with its
+/// mark and how many models it holds. It sits outside the scrolling list, so
+/// it reads at any scroll position, and scrolls itself only when the vendors
+/// outgrow the panel. The open vendor is marked by fill *and* weight, never
+/// colour alone.
+fn native_vendor_column(
+    theme: Theme,
+    vendors: &[(&'static super::native_agent::NativeVendor, usize)],
+    active: &str,
+    weak: gpui::WeakEntity<Waku>,
+) -> impl IntoElement {
+    let mut column = div()
+        .id("model-vendor-column")
+        .w(px(132.0))
+        .h_full()
         .flex_none()
         .flex()
-        .items_center()
-        .gap(px(4.0))
-        .child(
-            div()
-                .flex_none()
-                .mr(px(4.0))
-                .px(px(6.0))
-                .py(px(1.0))
-                .rounded(px(5.0))
-                .bg(theme.overlay_strong)
-                .border_1()
-                .border_color(theme.border_strong)
-                .text_size(sp(10.5))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(theme.text_secondary)
-                .child(sub2api::brand::DISPLAY_NAME),
-        );
-    for option in super::native_agent::NATIVE_WIRE_FORMATS.iter() {
-        let format = option.id;
-        let name = crate::i18n::translate(option.label);
-        let selected = format == active;
+        .flex_col()
+        .gap(px(2.0))
+        .p(px(6.0))
+        .overflow_y_scroll()
+        .border_r_1()
+        .border_color(theme.border);
+    for &(vendor, count) in vendors {
+        let id = vendor.id;
+        let selected = id == active;
         let weak = weak.clone();
-        let tooltip = format!("{name} · {}", crate::i18n::translate(option.description));
-        bar = bar.child(
+        column = column.child(
             div()
-                .id(SharedString::from(format!("model-format-{format}")))
-                .h(px(24.0))
+                .id(SharedString::from(format!("model-vendor-{id}")))
+                .h(px(32.0))
+                .flex_none()
                 .px(px(8.0))
-                .rounded(px(6.0))
+                .rounded(px(7.0))
                 .flex()
                 .items_center()
+                .gap(px(8.0))
                 .cursor_default()
-                .text_size(sp(11.5))
-                .font_weight(if selected {
-                    FontWeight::SEMIBOLD
-                } else {
-                    FontWeight::NORMAL
-                })
-                .text_color(if selected {
-                    theme.text
-                } else {
-                    theme.text_secondary
-                })
                 .when(selected, |element| element.bg(theme.overlay_strong))
                 .when(!selected, |element| {
                     element
                         .hover(|element| element.bg(theme.overlay))
                         .on_click(move |_, _, cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.show_model_picker_format(format, cx);
+                                this.show_model_picker_vendor(id, cx);
                             });
                         })
                 })
-                .tooltip(Tooltip::text(tooltip))
-                .child(SharedString::from(native_format_short_label(format))),
+                .child(icon(
+                    vendor.icon,
+                    15.0,
+                    native_vendor_color(&theme, vendor).opacity(if selected { 1.0 } else { 0.82 }),
+                ))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .font_weight(if selected {
+                            FontWeight::SEMIBOLD
+                        } else {
+                            FontWeight::NORMAL
+                        })
+                        .text_color(if selected {
+                            theme.text
+                        } else {
+                            theme.text_secondary
+                        })
+                        .child(SharedString::from(crate::i18n::translate(vendor.label))),
+                )
+                .when(count > 0, |element| {
+                    element.child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_ghost)
+                            .child(SharedString::from(count.to_string())),
+                    )
+                }),
         );
     }
-    bar
+    column
+}
+
+/// A vendor's mark colour: its brand hue, or the theme's ink for a mark
+/// that has none — the same ink `provider_color` gives monochrome marks.
+fn native_vendor_color(theme: &Theme, vendor: &super::native_agent::NativeVendor) -> Hsla {
+    match vendor.color {
+        Some(hex) => rgb(hex).into(),
+        None if theme.is_dark => rgb(0xF3F3F3).into(),
+        None => rgb(0x34363B).into(),
+    }
 }
 
 /// Whether the picker has nothing left to offer, so the composer's trigger
@@ -4125,17 +4204,16 @@ pub(super) fn picker_has_no_providers(
 ///
 /// Shared by the panel body and by `enter`'s handler so a keyboard cursor index
 /// always means the same row in both.
-/// `native_format` is which section of the built-in agent's list is open.
-/// Every model there has exactly one API, so the format bar partitions the
-/// list rather than switching a setting; the filter lives here so that the
-/// rows drawn and the rows the keyboard cursor counts are the same rows.
+/// `native_vendor` is which vendor of the built-in agent's list the vendor
+/// column has open; the filter lives here so that the rows drawn and the
+/// rows the keyboard cursor counts are the same rows.
 pub(super) fn visible_picker_models(
     probes: &[ProviderProbe],
     favorites: &[FavoriteModel],
     disabled_providers: &[ProviderKind],
     locked_provider: Option<ProviderKind>,
     selected_tab: ModelPickerTab,
-    native_format: &str,
+    native_vendor: &str,
     normalized_query: &str,
 ) -> Vec<(ProviderKind, ProviderModel)> {
     let searching = !normalized_query.is_empty();
@@ -4155,12 +4233,23 @@ pub(super) fn visible_picker_models(
         .filter(|(kind, _)| !disabled_providers.contains(kind) || locked_provider == Some(*kind))
         .filter(|(kind, model)| {
             if searching {
+                // The built-in agent's vendor goes in by its shown name too,
+                // so a query in the UI's own language finds it.
+                let vendor = if kind.is_builtin() {
+                    let vendor = super::native_agent::native_vendor(
+                        super::native_agent::native_vendor_of(model),
+                    );
+                    crate::i18n::translate(vendor.label)
+                } else {
+                    String::new()
+                };
                 let searchable = format!(
-                    "{} {} {} {}",
+                    "{} {} {} {} {}",
                     model.name,
                     model.id,
                     kind.short_name(),
-                    model.sub_provider.as_deref().unwrap_or("")
+                    model.sub_provider.as_deref().unwrap_or(""),
+                    vendor
                 )
                 .to_ascii_lowercase();
                 return normalized_query
@@ -4171,16 +4260,9 @@ pub(super) fn visible_picker_models(
                 ModelPickerTab::Favorites => favorites
                     .iter()
                     .any(|favorite| favorite.provider == *kind && favorite.model == model.id),
-                // Read the section off the model rather than off its tier
-                // field: the fallback list the picker shows while signed out
-                // carries no tier at all, and reading the field alone emptied
-                // every section.
                 ModelPickerTab::Provider(provider) if provider.is_builtin() => {
                     provider == *kind
-                        && native_wire_format(
-                            model.default_service_tier.as_deref(),
-                            Some(model.id.as_str()),
-                        ) == native_format
+                        && super::native_agent::native_vendor_of(model) == native_vendor
                 }
                 ModelPickerTab::Provider(provider) => provider == *kind,
             }

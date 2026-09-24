@@ -3386,12 +3386,28 @@ model_option.wire_chat_description:
 
 native.no_api_key:
   en: "The built-in agent has no API key for its %{provider} route. Sign in to %{name}, or set provider_configs.%{provider}.api_key in %{path}."
-model_option.wire_messages_short:
-  en: "Messages"
-model_option.wire_responses_short:
-  en: "Responses"
-model_option.wire_chat_short:
-  en: "Chat"
+native.vendor.anthropic:
+  en: "Anthropic"
+native.vendor.openai:
+  en: "OpenAI"
+native.vendor.gemini:
+  en: "Google"
+native.vendor.grok:
+  en: "xAI"
+native.vendor.deepseek:
+  en: "DeepSeek"
+native.vendor.zhipu:
+  en: "Zhipu GLM"
+native.vendor.kimi:
+  en: "Kimi"
+native.vendor.minimax:
+  en: "MiniMax"
+native.vendor.qwen:
+  en: "Qwen"
+native.vendor.other:
+  en: "Other"
+native.vendor.custom:
+  en: "Custom"
 
 native.empty_turn:
   en: "%{model} ended the turn without saying anything. The request went to %{endpoint} over the %{provider} API. Try this model over a different API, or a different model."
@@ -3586,3 +3602,99 @@ plan.expand_full:
   en: "Show the whole plan"
 plan.collapse:
   en: "Show less"
+settings.plans:
+  en: "Plans"
+settings.plans_keywords:
+  en: "plans plan subscription buy purchase renew upgrade package pricing cheaprouter"
+pay.plan_title:
+  en: "Buy a plan"
+pay.plan_pay_cta:
+  en: "Pay %{amount}"
+pay.plan_order_meta:
+  en: "Pay %{pay} · %{plan}"
+pay.plan_status_complete_message:
+  en: "The plan is active. Its models are being set up."
+pay.plan_status_received_message:
+  en: "Payment received. Activating the plan…"
+pay.topup_disabled_hint:
+  en: "Balance top-ups are turned off on this service. Buy a plan instead."
+pay.plans_hint:
+  en: "Using it every day? A plan billed by the period is often cheaper."
+plans.browse_link:
+  en: "See plans"
+plans.menu_item:
+  en: "Buy a plan"
+plans.intro:
+  en: "A plan grants a subscription group for a period: requests through it bill against the plan's limits instead of your balance."
+plans.sign_in_hint:
+  en: "Sign in to %{name} to see and buy plans"
+plans.loading:
+  en: "Loading plans…"
+plans.empty:
+  en: "No plans are on sale right now."
+plans.unavailable:
+  en: "This service does not sell plans. You can still top up your balance."
+plans.retry:
+  en: "Retry"
+plans.buy:
+  en: "Buy"
+plans.renew:
+  en: "Renew"
+plans.current:
+  en: "Current plan"
+plans.for_cli:
+  en: "for %{cli}"
+plans.rate:
+  en: "rate %{rate}"
+plans.original_price:
+  en: "was %{price}"
+plans.original_price_label:
+  en: "was"
+plans.validity_day:
+  en: "%{count}-day plan"
+plans.validity_week:
+  en: "%{count}-week plan"
+plans.validity_month:
+  en: "%{count}-month plan"
+plans.limit_daily:
+  en: "%{amount} per day"
+plans.limit_weekly:
+  en: "%{amount} per week"
+plans.limit_monthly:
+  en: "%{amount} per month"
+plans.unlimited:
+  en: "No usage cap"
+plans.scopes:
+  en: "Models: %{scopes}"
+plans.default_model:
+  en: "Default model: %{model}"
+plans.use_for_cli:
+  en: "Use in %{cli}"
+plans.use_for_cli_hint:
+  en: "%{cli} is routed through another group. Point it at this plan so its models bill against the plan."
+plans.in_use:
+  en: "In use by %{cli}"
+plans.bound_toast:
+  en: "%{cli} now uses this plan"
+plans.activated_title:
+  en: "“%{plan}” is active"
+plans.activated_toast:
+  en: "“%{plan}” is active"
+plans.activated_toast_generic:
+  en: "Your new plan is active"
+plans.syncing:
+  en: "Syncing your subscription…"
+plans.done:
+  en: "Done"
+error_banner.top_up:
+  en: "Top up"
+error_banner.upgrade_plan:
+  en: "Upgrade plan"
+error_banner.renew_plan:
+  en: "Renew plan"
+cloud.subscriptions_empty_title:
+  en: "No plan yet"
+cloud.subscriptions_empty_detail:
+  en: "A plan bills requests against its own limits instead of your balance."
+cloud.subscription_renew:
+  en: "Renew"

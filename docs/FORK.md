@@ -105,7 +105,7 @@ lines below.
 | `crates/waku-protocol/src/model.rs` | `ProviderKind::Native` and its `is_builtin()`; Native excluded from `supports_model_discovery` (its catalog comes from the gateway, not a CLI) | ~8 |
 | `src/app/runtime.rs` | `sync_native_models()` after `drain_provider_detection_events` / `drain_provider_probe_events`, so daemon probes never replace the built-in agent's catalog list | 2 |
 | `src/app/settings.rs` | `sync_native_models()` after the language-change fallback reset | 1 |
-| `src/app/sessions.rs`, `src/app/composer.rs` | `refresh_native_catalog` when the built-in agent's rail is opened or selected; `picker_rail_shows_provider` treats built-in providers as installed; the built-in agent's format bar and brand chip in the picker | ~10 + fork fns |
+| `src/app/sessions.rs`, `src/app/composer.rs` | `refresh_native_catalog` when the built-in agent's rail is opened or selected; `picker_rail_shows_provider` treats built-in providers as installed; the built-in agent's vendor column in the picker (`native_vendor_column`, vendor marks on its rows, `picker_stops` for `tab`) | ~10 + fork fns |
 | `src/app.rs` | provider probes seeded `installed: provider.is_builtin()` | 1 |
 | `src/assets.rs` | `bell`/`circle-x`/`store`/`wallet` icon entries; embedded `images/logo.png` brand mark | ~12 |
 | `src/app/runtime.rs` | `cloud_balance_stale` set at the turn-settlement seam, drained in the event pump; `workflow.pending_settles` pushed at the same seam and `drain_workflow_settles` called beside that drain; `submit_submission_for_session` widened to `pub(super)` for stage starts | 11 |

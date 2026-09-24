@@ -973,16 +973,23 @@ platform-first rule would mis-route all of them. A catalog model matching
 neither is not offered at all — there is no API to send it over, and
 listing it would only promise something that fails.
 
-Three places hold that rule and they must agree.
+Two places hold that rule and they must agree.
 `native_format_for_model` in `native_agent.rs` fills each model's "service
-tier" slot, which is what the composer's traits menu names.
-`native_format_bar` in `composer.rs` draws the three as a partition of the
-picker's list — outside the scrolling container, so it reads at any scroll
-position — and clicking one opens that section; the section that opens is
-the one holding the session's current model. And `WireFormat::resolve` in
-the bridge applies the same rule before a request is built, so a session
-persisted before it existed heals instead of failing on the wire. Choosing
-a model brings its own API with it (`choose_model` in `sessions.rs`).
+tier" slot, which is what the composer's traits menu names. And
+`WireFormat::resolve` in the bridge applies the same rule before a request
+is built, so a session persisted before it existed heals instead of failing
+on the wire. Choosing a model brings its own API with it (`choose_model` in
+`sessions.rs`).
+
+The picker does not file the list by API — people look for DeepSeek, not
+for Chat Completions. `native_vendor_column` in `composer.rs` draws a
+vertical column of vendors (mark, name, model count) beside the list,
+outside the scrolling container so it reads at any scroll position;
+`native_vendor_of` in `native_agent.rs` files each model by its name first
+and the group's platform only for a name that gives nothing away, and the
+models on the user's own endpoint go under "custom", which is always drawn.
+The vendor that opens is the one holding the session's current model, and
+`tab`/`shift-tab` step through the vendors as well as the rail.
 
 **Which group a model goes through** — a gateway key belongs to exactly one
 group, and a group serves only the models its accounts map. Routing by

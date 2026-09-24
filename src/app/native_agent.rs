@@ -24,8 +24,10 @@
 //! listing it would only promise something that fails.
 //!
 //! That one format lands in the model's "service tier" slot, which is what
-//! the picker's format bar partitions the list by and what the composer's
-//! traits menu names.
+//! the composer's traits menu names. The picker does not file the list by
+//! it: people look for DeepSeek, not for Chat Completions, so its column
+//! groups the models by vendor ([`native_vendor_of`]) and the format simply
+//! rides along with whichever model is picked.
 //!
 //! Pure mapping plus the hooks that apply it; the fetch is the Plaza's.
 
@@ -278,7 +280,7 @@ fn supports_ultracode(model: &str) -> bool {
     model.contains("opus-5") || model.contains("sonnet-5") || model.contains("fable")
 }
 
-/// One wire format, as the picker and the traits menu name it.
+/// One wire format, as the traits menu names it.
 ///
 /// Kept in step with `waku_agent_bridge::WireFormat`, which the desktop does
 /// not link — the bridge is the daemon's dependency, not the app's. The
@@ -357,6 +359,159 @@ pub(super) fn native_format_for_model(platform: &str, model: &str) -> Option<&'s
 /// The format entry for one id, for labelling.
 pub(super) fn native_format_option(format: &str) -> Option<&'static WireFormatOption> {
     NATIVE_WIRE_FORMATS.iter().find(|entry| entry.id == format)
+}
+
+/// One entry of the vendor column the picker draws beside the built-in
+/// agent's list.
+pub(super) struct NativeVendor {
+    pub id: &'static str,
+    /// Locale key of the name the column shows.
+    pub label: &'static str,
+    pub icon: &'static str,
+    /// The vendor's brand hue, or `None` for a mark drawn in the theme's ink.
+    pub color: Option<u32>,
+}
+
+const OTHER_VENDOR: &str = "other";
+/// Where the models a user declared on their own endpoint are filed.
+pub(super) const CUSTOM_VENDOR: &str = "custom";
+
+/// The vendors in the order the column lists them. Ids are the families
+/// `sub2api::model_routing::model_family` reads off a name, plus Qwen, which
+/// only ever arrives through a composite group, and the two catch-alls.
+/// `custom` stays last: it is always drawn, as the place to find out where
+/// models on the user's own endpoint go.
+pub(super) static NATIVE_VENDORS: [NativeVendor; 11] = [
+    NativeVendor {
+        id: "anthropic",
+        label: "native.vendor.anthropic",
+        icon: "icons/provider-claude.svg",
+        color: Some(0xD97757),
+    },
+    NativeVendor {
+        id: "openai",
+        label: "native.vendor.openai",
+        icon: "icons/provider-openai.svg",
+        color: None,
+    },
+    NativeVendor {
+        id: "gemini",
+        label: "native.vendor.gemini",
+        icon: "icons/provider-gemini.svg",
+        color: Some(0x4285F4),
+    },
+    NativeVendor {
+        id: "grok",
+        label: "native.vendor.grok",
+        icon: "icons/provider-grok.svg",
+        color: None,
+    },
+    NativeVendor {
+        id: "deepseek",
+        label: "native.vendor.deepseek",
+        icon: "icons/provider-deepseek.svg",
+        color: Some(0x4D6BFE),
+    },
+    NativeVendor {
+        id: "zhipu",
+        label: "native.vendor.zhipu",
+        icon: "icons/provider-zhipu.svg",
+        color: Some(0x3859FF),
+    },
+    NativeVendor {
+        id: "kimi",
+        label: "native.vendor.kimi",
+        icon: "icons/provider-kimi.svg",
+        color: None,
+    },
+    NativeVendor {
+        id: "minimax",
+        label: "native.vendor.minimax",
+        icon: "icons/provider-minimax.svg",
+        color: Some(0xF23F5D),
+    },
+    NativeVendor {
+        id: "qwen",
+        label: "native.vendor.qwen",
+        icon: "icons/provider-qwen.svg",
+        color: Some(0x615EFF),
+    },
+    NativeVendor {
+        id: OTHER_VENDOR,
+        label: "native.vendor.other",
+        icon: "icons/sparkle.svg",
+        color: None,
+    },
+    NativeVendor {
+        id: CUSTOM_VENDOR,
+        label: "native.vendor.custom",
+        icon: "icons/server.svg",
+        color: None,
+    },
+];
+
+/// The column entry for one vendor id; an id the table does not know is
+/// filed under "other".
+pub(super) fn native_vendor(id: &str) -> &'static NativeVendor {
+    NATIVE_VENDORS
+        .iter()
+        .find(|vendor| vendor.id == id)
+        .or_else(|| NATIVE_VENDORS.iter().find(|vendor| vendor.id == OTHER_VENDOR))
+        .expect("the vendor table lists `other`")
+}
+
+/// Which vendor the picker files one of the built-in agent's models under.
+///
+/// A model on the user's own endpoint is theirs whatever it is called — its
+/// route and key are the user's, not the vendor's — so it goes under
+/// `custom`. Otherwise the name decides, the way it decides the API, and the
+/// platform ahead of the `::` only for a name that gives nothing away: a
+/// composite group reports `composite` for everything in it.
+pub(super) fn native_vendor_of(model: &ProviderModel) -> &'static str {
+    let Some((platform, name)) = model.id.split_once("::") else {
+        if model.sub_provider.as_deref() == Some("custom") {
+            return CUSTOM_VENDOR;
+        }
+        return vendor_by_name(&model.id).unwrap_or(OTHER_VENDOR);
+    };
+    if let Some(vendor) = vendor_by_name(name) {
+        return vendor;
+    }
+    let platform = platform.trim().to_ascii_lowercase();
+    NATIVE_VENDORS
+        .iter()
+        .map(|vendor| vendor.id)
+        .find(|id| *id == platform && *id != CUSTOM_VENDOR)
+        .unwrap_or(OTHER_VENDOR)
+}
+
+fn vendor_by_name(model: &str) -> Option<&'static str> {
+    if let Some(family) = sub2api::model_routing::model_family(model) {
+        return Some(family);
+    }
+    let name = model.trim().to_ascii_lowercase();
+    let name = name.rsplit('/').next().unwrap_or(&name);
+    (name.starts_with("qwen") || name.starts_with("qwq")).then_some("qwen")
+}
+
+/// The vendors the column draws for a list, in table order, each with how
+/// many models it holds. A vendor with none is left out, except `custom`,
+/// which is always there to say where the user's own models go.
+pub(super) fn native_vendors_present(
+    models: &[ProviderModel],
+) -> Vec<(&'static NativeVendor, usize)> {
+    let mut counts = vec![0usize; NATIVE_VENDORS.len()];
+    for model in models {
+        let id = native_vendor_of(model);
+        if let Some(index) = NATIVE_VENDORS.iter().position(|vendor| vendor.id == id) {
+            counts[index] += 1;
+        }
+    }
+    NATIVE_VENDORS
+        .iter()
+        .zip(counts)
+        .filter(|(vendor, count)| *count > 0 || vendor.id == CUSTOM_VENDOR)
+        .collect()
 }
 
 fn reasoning_effort_label(effort: &str) -> String {
@@ -795,6 +950,55 @@ mod tests {
         }
         assert!(efforts(&models[3]).is_empty());
         assert!(efforts(&models[4]).is_empty());
+    }
+
+    #[test]
+    fn a_model_is_filed_under_its_vendor() {
+        let vendor = |id: &str| native_vendor_of(&ProviderModel::new(id, id));
+        assert_eq!(vendor("zhipu::glm-5"), "zhipu");
+        // The name beats the group's platform, as it does for the API.
+        assert_eq!(vendor("composite::glm-4.6"), "zhipu");
+        assert_eq!(vendor("composite::qwen3-coder"), "qwen");
+        assert_eq!(vendor("deepseek::deepseek-v4"), "deepseek");
+        assert_eq!(vendor("grok::grok-4.6"), "grok");
+        assert_eq!(vendor("openai::gemini-3-pro"), "gemini");
+        // A name that says nothing falls back to a platform the table knows,
+        // and past that to "other".
+        assert_eq!(vendor("openai::some-new-model"), "openai");
+        assert_eq!(vendor("opencode_go::mystery"), "other");
+        // The signed-out fallback list: bare ids, read by name.
+        assert_eq!(vendor("claude-sonnet-5"), "anthropic");
+
+        // The user's own endpoint keeps its models whatever they are called.
+        let declared = native_custom_models(&[ModelEntry::new("deepseek-chat")]);
+        assert_eq!(native_vendor_of(&declared[0]), CUSTOM_VENDOR);
+    }
+
+    #[test]
+    fn the_vendor_column_lists_vendors_with_models_in_table_order() {
+        let mut models = native_models_from_catalog(&[
+            item("deepseek-v4.1-flash", "deepseek"),
+            item("glm-5", "composite"),
+            item("claude-sonnet-5", "anthropic"),
+            item("claude-opus-5", "anthropic"),
+        ]);
+        let column = |models: &[ProviderModel]| -> Vec<(&str, usize)> {
+            native_vendors_present(models)
+                .into_iter()
+                .map(|(vendor, count)| (vendor.id, count))
+                .collect()
+        };
+        assert_eq!(
+            column(&models),
+            [("anthropic", 2), ("deepseek", 1), ("zhipu", 1), ("custom", 0)]
+        );
+
+        // Custom stays last, and counts what the user declared.
+        models.extend(native_custom_models(&[ModelEntry::new("my-model")]));
+        assert_eq!(column(&models).last(), Some(&("custom", 1)));
+
+        // An id the table does not know reads as "other".
+        assert_eq!(native_vendor("nope").id, "other");
     }
 
     #[test]

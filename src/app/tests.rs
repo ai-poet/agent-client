@@ -2081,6 +2081,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::Skills,
         SettingsPage::Usage,
         SettingsPage::CloudAccount,
+        SettingsPage::Plans,
         SettingsPage::ModelPlaza,
         SettingsPage::CloudUsage,
         SettingsPage::Workflow,
@@ -2151,7 +2152,7 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
         &disabled,
         None,
         ModelPickerTab::Provider(ProviderKind::Claude),
-        "messages",
+        "",
         "",
     );
     assert!(models.is_empty());
@@ -2161,7 +2162,7 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
         &disabled,
         None,
         ModelPickerTab::Favorites,
-        "messages",
+        "",
         "",
     );
     assert!(models.is_empty());
@@ -2171,7 +2172,7 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
         &disabled,
         None,
         ModelPickerTab::Provider(ProviderKind::Codex),
-        "messages",
+        "",
         "",
     );
     assert_eq!(models.len(), 1);
@@ -2183,7 +2184,7 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
         &disabled,
         None,
         ModelPickerTab::Provider(ProviderKind::Codex),
-        "messages",
+        "",
         "claude",
     );
     assert!(models.is_empty());
@@ -2195,7 +2196,7 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
         &disabled,
         Some(ProviderKind::Claude),
         ModelPickerTab::Provider(ProviderKind::Claude),
-        "messages",
+        "",
         "",
     );
     assert_eq!(models.len(), 1);
@@ -2274,40 +2275,118 @@ fn the_built_in_agents_api_is_decided_by_the_model() {
     assert_eq!(native_wire_format(None, None), "chat");
 }
 
-/// The section bar partitions the built-in agent's list, and the fallback
-/// list it shows while signed out carries no tier field at all. Reading the
-/// field alone emptied every section — the picker had nothing in it until a
-/// catalog landed.
+/// The fallback list the picker shows while signed out is bare Claude ids
+/// with no platform ahead of a `::` and no tier. The vendor column still
+/// files them — by name — so the picker is never empty before a catalog
+/// lands, and "custom" is drawn, empty, as the place the user's own models go.
 #[test]
-fn every_section_still_has_rows_while_signed_out() {
+fn the_signed_out_fallback_is_filed_under_anthropic() {
     use super::ModelPickerTab;
     use super::composer::visible_picker_models;
+    use super::native_agent::native_vendors_present;
     use crate::model::ProviderProbe;
 
+    let fallback = crate::model_catalog::fallback_models(ProviderKind::Native);
     let probes = [ProviderProbe {
         provider: ProviderKind::Native,
         installed: true,
         path: None,
-        models: crate::model_catalog::fallback_models(ProviderKind::Native),
+        models: fallback.clone(),
         agent_presets: Vec::new(),
     }];
-    let section = |format: &str| {
+    let vendor = |vendor: &str| {
         visible_picker_models(
             &probes,
             &[],
             &[],
             None,
             ModelPickerTab::Provider(ProviderKind::Native),
-            format,
+            vendor,
             "",
         )
     };
 
-    // The fallback list is Claude, so Messages holds all of it and the other
-    // two are empty by construction rather than by accident.
-    assert!(!section("messages").is_empty());
-    assert!(section("responses").is_empty());
-    assert!(section("chat").is_empty());
+    assert_eq!(vendor("anthropic").len(), fallback.len());
+    assert!(vendor("custom").is_empty());
+    let column: Vec<(&str, usize)> = native_vendors_present(&fallback)
+        .into_iter()
+        .map(|(vendor, count)| (vendor.id, count))
+        .collect();
+    assert_eq!(column, [("anthropic", fallback.len()), ("custom", 0)]);
+}
+
+/// A vendor is picked by the model's name, so a query naming the vendor finds
+/// its models from any tab, and the open vendor only filters the list.
+#[test]
+fn the_built_in_agents_list_is_filed_by_vendor() {
+    use super::ModelPickerTab;
+    use super::composer::visible_picker_models;
+    use crate::model::{ProviderModel, ProviderProbe};
+
+    let mut custom = ProviderModel::new("deepseek-local", "DeepSeek on my box");
+    custom.sub_provider = Some("custom".into());
+    let probes = [ProviderProbe {
+        provider: ProviderKind::Native,
+        installed: true,
+        path: None,
+        models: vec![
+            ProviderModel::new("anthropic::claude-sonnet-5", "Claude Sonnet 5"),
+            ProviderModel::new("zhipu::glm-5", "GLM-5"),
+            ProviderModel::new("composite::glm-4.6", "GLM-4.6"),
+            ProviderModel::new("deepseek::deepseek-v4", "DeepSeek V4"),
+            custom,
+        ],
+        agent_presets: Vec::new(),
+    }];
+    let list = |vendor: &str, query: &str| -> Vec<String> {
+        visible_picker_models(
+            &probes,
+            &[],
+            &[],
+            None,
+            ModelPickerTab::Provider(ProviderKind::Native),
+            vendor,
+            query,
+        )
+        .into_iter()
+        .map(|(_, model)| model.id)
+        .collect()
+    };
+
+    assert_eq!(list("zhipu", ""), ["zhipu::glm-5", "composite::glm-4.6"]);
+    assert_eq!(list("deepseek", ""), ["deepseek::deepseek-v4"]);
+    // The user's own endpoint keeps its models, whatever they are called.
+    assert_eq!(list("custom", ""), ["deepseek-local"]);
+    // A search crosses vendors.
+    assert_eq!(list("zhipu", "deepseek"), ["deepseek::deepseek-v4", "deepseek-local"]);
+}
+
+#[test]
+fn tab_steps_through_the_built_in_agents_vendors() {
+    use super::ModelPickerTab;
+    use super::composer::{next_picker_highlight, picker_stops};
+
+    let tabs = [
+        ModelPickerTab::Favorites,
+        ModelPickerTab::Provider(ProviderKind::Claude),
+        ModelPickerTab::Provider(ProviderKind::Native),
+    ];
+    let stops = picker_stops(&tabs, &["anthropic", "deepseek", "custom"]);
+    assert_eq!(
+        stops,
+        [
+            (ModelPickerTab::Favorites, None),
+            (ModelPickerTab::Provider(ProviderKind::Claude), None),
+            (ModelPickerTab::Provider(ProviderKind::Native), Some("anthropic")),
+            (ModelPickerTab::Provider(ProviderKind::Native), Some("deepseek")),
+            (ModelPickerTab::Provider(ProviderKind::Native), Some("custom")),
+        ]
+    );
+    // Wraps at both ends.
+    assert_eq!(next_picker_highlight(Some(4), stops.len(), "down"), Some(0));
+    assert_eq!(next_picker_highlight(Some(0), stops.len(), "up"), Some(4));
+    // Without a vendor list the built-in tab is one stop like any other.
+    assert_eq!(picker_stops(&tabs, &[]).len(), 3);
 }
 
 #[test]
