@@ -157,6 +157,13 @@ lines below.
 | `src/app/usage_meter.rs` | `meter_bar` is `pub(super)`, reused by the subscription cards | 1 |
 | `crates/waku-core/src/git_commit.rs`, `crates/waku-core/src/driver/codex.rs` (Codex pins) | Codex commit messages and titles pinned to `gpt-5.6-terra` instead of `gpt-5.6-luna`, commit effort `low` instead of `none` (+ the title test's name and assertion) | 5 |
 | `src/js_repl.rs` (test) | `repl_supports_top_level_await_and_lazy_native_sky` expects `linux` off macOS and Windows | 6 |
+| `src/app/transcript.rs`, `src/app/transcript_view.rs` (agent flow) | `TurnFold(Uuid, usize)` per steer segment with `turn_fold_overrides`; `PendingSteer` rows; the working row hidden while waiting, a divider while compacting; `render_activities_row` rewritten over `activity_phase::group_activities` (flat rows, phase groups, reasoning collapsed with a ticker; `activity_groups_expanded` replaces `activities_expanded`); the changed-files card collapsed with clickable files and undo; `markdown_ctx` is `pub(super)` | large — resolve toward ours |
+| `src/app/components.rs` (agent flow) | `activity_summary` / `activity_header_title` / `activity_group_is_live` / `activity_action_label` replaced by `activity_verb`, `activity_row_target`, `activity_group_title`, `activity_failure_tail`; one-line system messages drawn as dividers | ~200 |
+| `src/app/streaming.rs`, `src/app/sessions.rs`, `src/app/runtime.rs` (agent flow) | turn pauses around permissions, questions and compactions; `complete_turn_blocks(stopped)`; failures recorded on the turn instead of as assistant messages, a connecting turn finished on error; `pending_permissions` queue; `RewindOrigin` and `restore_workspace` in the rewind path, `retry_failed_turn`; waiting notifications | ~250 |
+| `src/app/render.rs`, `src/app/composer.rs`, `src/app/sidebar.rs`, `src/app/right_panel.rs`, `src/app/workflow.rs`, `src/app/background_work.rs` (agent flow) | error banner and status capsule mounted; the permission branch of `render_permission` delegates to `permission_card`; waiting count in the task row; `open_turn_diff` takes a path; `live_background_work` | ~60 |
+| `src/ui/motion.rs`, `src/ui/mod.rs` | `shimmer` text; `activity_noun` removed with the block header | ~110 |
+| `crates/waku-protocol/src/{model,workspace,lib}.rs` (agent flow) | additive: `AgentTurn::{pauses, error, undone_at}`, `ActivityItem::stopped` (all `serde(default)`), `PlanTurnUndo` / `ApplyTurnUndo` and their results, `TurnUndoPlan` / `UndoFile` / `UndoReason`, `TURN_UNDO_STALE`; TS bindings regenerated | ~150 |
+| `crates/waku-core/src/{checkpoint,workspace}.rs` (agent flow) | `plan_turn_undo` / `apply_turn_undo` and the undo backup ref, cleared with the turn's other refs | ~300 + tests |
 | `.github/workflows/{test,release,sync-release}.yml` | no Linux: the test matrix drops Ubuntu and the generated-protocol checks move to the macOS runner; the two Linux release jobs, the `*.tar.gz` upload and `latest-linux.txt` are gone. The version, draft-release and R2-sync jobs still run on `ubuntu-latest` — they build nothing for Linux | ~140 removed |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
@@ -173,6 +180,9 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `crates/waku-core/src/driver/turn_diagnosis.rs`,
 `src/app/cloud_usage.rs`, `src/app/model_plaza.rs`, `src/app/cloud_pay.rs`,
 `src/app/announcements.rs`, `src/app/workflow.rs`, `assets/icons/{bell,circle-x,store,wallet}.svg`,
+`src/app/error_banner.rs`, `src/app/turn_undo.rs`, `src/app/status_capsule.rs`,
+`src/app/permission_card.rs`, `src/app/shortcuts.rs`,
+`crates/waku-client/src/{activity_phase,turn_segments,status_capsule}.rs`,
 `NOTICE.md`, `docs/FORK.md`.
 
 ### Conflict triage
@@ -191,7 +201,10 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
   desktop writes each CLI's own global configuration; the daemon carries no
   routing state), so the protocol stays byte-identical to upstream and the
   browser client keeps working unchanged. (`identity.rs` constants are branded,
-  but no message shape changes.)
+  but no message shape changes.) The exceptions are additive and listed in the
+  register above: new `serde(default)` fields on stored records and new
+  workspace operations, none of which an upstream client or daemon has to
+  understand.
 - Provider drivers' protocol handling.
 
 User data now lives under `~/.cheaprouter` (platform folders `CheapRouter`

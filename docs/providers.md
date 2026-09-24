@@ -1395,6 +1395,46 @@ cursor's file, alongside the checkpoint-ref cleanup every provider gets.
 
 ---
 
+## What the transcript makes of a turn
+
+Provider-neutral: every driver's events land in the same turn record
+(`AgentTurn` in `waku-protocol/src/model.rs`), and the transcript derives its
+layout from that record alone.
+
+- **Steers split a turn into segments.** A user message inside a turn that is
+  not the one that opened it is a steer (`message_is_steer`, inferred from
+  position — `Message` has fixed SQL columns, so nothing new is stored). Each
+  segment folds under its own heading with its own working time, and keeps its
+  own answer outside the fold (`waku-client/src/turn_segments.rs`,
+  `folded_transcript_row_kinds`). A steer sent but not yet taken shows as a
+  dimmed bubble (`TranscriptRowKind::PendingSteer`, read from the runtime's
+  `pending_steers`) until `SteerAccepted` turns it into a message.
+- **Waiting is not working.** Permission requests, questions and compactions
+  pause the turn (`AgentTurn::pauses`); the working row and every "worked for"
+  heading count `active_seconds`, which leaves the pauses out.
+- **Work is grouped by phase.** Consecutive reading calls — file tools and
+  shell commands `classify_shell` proves read-only — gather under one line, as
+  do consecutive terminal commands (`waku-client/src/activity_phase.rs`).
+  Calls a stopped turn cut off are marked `stopped` rather than passed off as
+  finished.
+- **A failure is not an answer.** Errors, a provider exiting and a failed
+  finish with nothing to say record `AgentTurn::error` instead of pushing an
+  assistant message; the banner above the composer shows it until it is
+  dismissed (kept on the turn) or retried. A turn that fails while still
+  connecting is finished as failed rather than left running. Retry rewinds the
+  conversation to before the turn and sends its prompt again without touching
+  the files (`RewindOrigin::Retry`, `restore_workspace: false`), or resends it
+  as a new turn where the provider cannot roll back.
+- **Undo is per turn and per file.** `PlanTurnUndo` / `ApplyTurnUndo`
+  (`waku-core/src/checkpoint.rs`) compare the turn's base and end checkpoints
+  with the worktree now: a file changed again since is not put back, one a
+  command wrote (when the agent reported the files it edited) or a submodule
+  is left alone, and the rest go back all or none after a backup under
+  `refs/waku/session-…-turn-undo-N`. The index is never touched and nothing is
+  cleaned; `AgentTurn::undone_at` records it.
+
+---
+
 ## Access modes across providers
 
 Waku's `InteractionMode` (Build / Plan) and `RuntimeMode` (Supervised /

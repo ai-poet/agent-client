@@ -16,6 +16,17 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- The agent's work reads as it happens: reading around the code gathers into one line ("Explored · 2 searches, 3 files"), commands into another, each step says what it is doing or did, and a failed command is marked in red with the end of its output on hover
+- Thinking stays one line — the newest sentence while the model thinks, how long it thought once it is done — instead of a box that opened and closed on its own
+- Messages sent to steer a running task show at once, and the work before and after each one folds on its own, with its own time
+- "Worked for" no longer counts time spent waiting for your approval or answer
+- A failed turn says so in a banner above the composer — no more made-up replies — with the full error, copy and one-click retry (which never deletes files)
+- Undo one turn's file changes from its card: files changed again since are left alone and listed, and nothing else in the folder is touched. Click a file on the card to open its diff
+- A status capsule at the top right of the transcript: the goal, the current step, progress through the plan, background work and the latest changes
+- Several approval requests queue with a counter, a digit key picks an answer, Escape no longer stops the whole task, and "Deny and explain" tells the agent what to do instead. Plans to approve read as formatted text
+- Shortcuts: ⇧⌘M cycles the access mode, ⇧⌘P toggles plan mode, ⌘T cycles reasoning effort (Ctrl on Windows)
+- A notification when a task needs your approval or answer while the app is in the background, and the sidebar counts how many requests wait
+
 ## [0.2.0]
 
 - Custom endpoints are now profiles: keep several per CLI (the gateway, an official key, another relay) and switch between them from Settings → Providers
