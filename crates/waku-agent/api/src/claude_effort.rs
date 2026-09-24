@@ -192,7 +192,11 @@ mod tests {
     #[test]
     fn older_models_keep_their_thinking_budget() {
         assert_eq!(
-            claude_reasoning("claude-haiku-4-5-20251001", Some(EffortLevel::High), Some(10_000)),
+            claude_reasoning(
+                "claude-haiku-4-5-20251001",
+                Some(EffortLevel::High),
+                Some(10_000)
+            ),
             ClaudeReasoning::Budget(10_000)
         );
         assert_eq!(
@@ -218,7 +222,10 @@ mod tests {
             assert!(effort_levels(id).is_some(), "{id} should take an effort");
         }
         // Opus 5.5 is its own family, not Opus 5 with a suffix.
-        assert_eq!(effort_levels("claude-opus-5-5"), Some(LOW_TO_MAX_WITH_XHIGH));
+        assert_eq!(
+            effort_levels("claude-opus-5-5"),
+            Some(LOW_TO_MAX_WITH_XHIGH)
+        );
         assert!(effort_levels("claude-opus-50").is_none());
     }
 

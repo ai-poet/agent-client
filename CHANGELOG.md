@@ -17,6 +17,7 @@ the original feature bullet instead of adding separate entries for them.
 ## [unreleased]
 
 - The built-in agent is prompt-cached on Claude routes: it marks its requests the way Claude Code does, so on a group that goes straight to Anthropic (such as Claude Max) each step reads the conversation so far from the cache instead of paying for all of it again
+- The reasoning effort chosen for a current Claude model (Opus 4.6 and later, Sonnet 4.6 and 5, Fable 5) now reaches it the way Claude Code sends it, and shows in the gateway's usage log; Opus 5.5 no longer fails when an effort is chosen
 
 - The agent's work reads as it happens: reading around the code gathers into one line ("Explored · 2 searches, 3 files"), commands into another, each step says what it is doing or did, and a failed command is marked in red with the end of its output on hover
 - Thinking stays one line — the newest sentence while the model thinks, how long it thought once it is done — instead of a box that opened and closed on its own

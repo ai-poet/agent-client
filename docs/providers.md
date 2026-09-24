@@ -1202,6 +1202,10 @@ its own requests, was cached on the same group. `api/src/prompt_cache.rs` now
 marks every Messages request as Claude Code does: the last tool, the end of
 the system prompt, the last message and the user message before it, so each
 call reads everything up to the previous turn and writes only the newest one.
+The Anthropic route does not go through the provider adapter — the query loop
+sends the request it builds itself — so the marks are applied there as well
+as in `providers/anthropic.rs`; the first fix only reached the adapter and
+changed nothing on the wire.
 The gateway's Claude Code mimicry for OAuth accounts keeps these: it moves the
 system prompt into the first message with its breakpoint, and trims the tool
 breakpoint first when its own blocks take the count past four. A group served
@@ -1221,7 +1225,12 @@ user's language (`native.empty_turn`) rather than shipping an English
 sentence.
 
 **Reasoning effort** — every family the picker offers has a working ladder:
-Claude over Messages turns it into a thinking budget, and the GPT and Grok
+Claude over Messages turns it into adaptive thinking plus
+`output_config.effort` for the current families (Opus 4.6 and later, Sonnet
+4.6 and 5, Fable 5, Mythos; `api/src/claude_effort.rs`, in step with the
+gateway's effort table), clamping a level the model lacks to the nearest
+below, and into a thinking budget for older models — Opus 5.5 rejects a
+budget, and the gateway logs effort only from that field. The GPT and Grok
 families over Responses turn it into `reasoning.effort`. Grok was the
 exception until the engine's reasoning-model list stopped leaving it out — a
 recorded departure — and the gateway normalizes the value per model and
