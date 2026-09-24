@@ -132,6 +132,43 @@ pub fn plan_mode_submission(prompt: &str, commands: &[SlashCommand]) -> Option<P
     })
 }
 
+/// A report the composer answers from what the session already knows,
+/// without a turn.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UsageReport {
+    /// `/context`: how full the context window is and how the latest request
+    /// split.
+    Context,
+    /// `/cost`: the tokens spent since the runtime started.
+    Cost,
+}
+
+/// Parse the built-in agent's `/context` and `/cost`. A project or user
+/// command that owns either name keeps it.
+pub fn usage_report_submission(
+    provider: ProviderKind,
+    prompt: &str,
+    commands: &[SlashCommand],
+) -> Option<UsageReport> {
+    if provider != ProviderKind::Native {
+        return None;
+    }
+    let name = prompt.trim().strip_prefix('/')?;
+    let report = match name {
+        "context" => UsageReport::Context,
+        "cost" => UsageReport::Cost,
+        _ => return None,
+    };
+    commands
+        .iter()
+        .any(|command| {
+            command.name == name
+                && command.scope == CommandScope::Builtin
+                && command.template.is_none()
+        })
+        .then_some(report)
+}
+
 /// Whether the submitted text resolves to Codex's native fast-mode command,
 /// which Waku bridges to the provider's service-tier control. Checking the
 /// resolved entry preserves project/user command precedence when one of them
@@ -645,6 +682,29 @@ mod tests {
         );
         assert_eq!(parse("/goals"), None);
         assert_eq!(parse("ship /goal"), None);
+    }
+
+    #[test]
+    fn usage_reports_are_the_builtin_agents_own() {
+        let context = command("context", CommandScope::Builtin);
+        let commands = std::slice::from_ref(&context);
+        assert_eq!(
+            usage_report_submission(ProviderKind::Native, "/context", commands),
+            Some(UsageReport::Context)
+        );
+        assert_eq!(
+            usage_report_submission(ProviderKind::Claude, "/context", commands),
+            None
+        );
+        // Not offered, not answered.
+        assert_eq!(
+            usage_report_submission(ProviderKind::Native, "/cost", commands),
+            None
+        );
+        assert_eq!(
+            usage_report_submission(ProviderKind::Native, "/contexts", commands),
+            None
+        );
     }
 
     #[test]

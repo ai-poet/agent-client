@@ -580,6 +580,17 @@ commands.fast_description: 高速モードを切り替え
 commands.fast_enabled: 高速モードを有効にしました
 commands.fast_disabled: 高速モードを無効にしました
 commands.goal_description: このタスクが継続して追求するゴールを設定
+commands.compact_description: "ここまでの会話を要約してコンテキストを空ける"
+commands.extra_instructions_hint: "[追加の指示]"
+commands.context_description: "コンテキストウインドウの使用量を表示"
+commands.cost_description: "この実行で使ったトークンを表示"
+commands.init_description: "このリポジトリの AGENTS.md を作成・更新"
+commands.review_description: "未コミットの変更をレビュー"
+commands.context_report: "コンテキスト：%{used} / %{window}（%{percent}%）"
+commands.context_report_unsized: "コンテキスト：%{used} トークン"
+commands.context_report_empty: "コンテキストの使用量はまだありません"
+commands.cost_report: "%{totals}。実際の請求はアカウントの使用量ページを参照してください。"
+commands.cost_report_empty: "トークン使用量はまだありません"
 commands.resume_description: ターミナルのエージェントセッションを再開
 goal.title: ゴール
 goal.objective_placeholder: このタスクは何を目指し続けるべきですか？

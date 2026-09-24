@@ -351,9 +351,10 @@ impl StreamDecoder {
                     context_tokens,
                     context_window: self.context_window,
                 }];
-                if let Some(usage) = usage.as_ref().filter(|usage| {
-                    usage.total_input() > 0 || usage.output_tokens > 0
-                }) {
+                if let Some(usage) = usage
+                    .as_ref()
+                    .filter(|usage| usage.total_input() > 0 || usage.output_tokens > 0)
+                {
                     events.push(AgentEvent::TokenUsage {
                         last: TokenCounts::from_usage(usage),
                         session: TokenCounts::default(),
@@ -497,11 +498,17 @@ mod tests {
         });
         assert!(matches!(
             events[0],
-            AgentEvent::Compaction { phase: CompactionPhase::Finished, .. }
+            AgentEvent::Compaction {
+                phase: CompactionPhase::Finished,
+                ..
+            }
         ));
         assert!(matches!(
             events[1],
-            AgentEvent::Usage { context_tokens: Some(20_000), .. }
+            AgentEvent::Usage {
+                context_tokens: Some(20_000),
+                ..
+            }
         ));
         let stale = decoder.push(QueryEvent::TurnComplete {
             turn: 3,

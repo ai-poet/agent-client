@@ -144,7 +144,11 @@ pub fn current_todo(items: &[TodoItem]) -> Option<usize> {
     items
         .iter()
         .position(|item| item.status == TodoStatus::InProgress)
-        .or_else(|| items.iter().position(|item| item.status == TodoStatus::Pending))
+        .or_else(|| {
+            items
+                .iter()
+                .position(|item| item.status == TodoStatus::Pending)
+        })
 }
 
 /// The slice of a long list worth showing: `size` items around the current
@@ -185,7 +189,11 @@ mod tests {
         for shape in [&claude, &codex, &acp, &bare] {
             let items = parse_todo_list(shape).expect("a todo list");
             let statuses: Vec<_> = items.iter().map(|item| item.status).collect();
-            assert_eq!(statuses, [TodoStatus::Completed, TodoStatus::InProgress], "{shape}");
+            assert_eq!(
+                statuses,
+                [TodoStatus::Completed, TodoStatus::InProgress],
+                "{shape}"
+            );
             assert_eq!(items[1].content, "Run the tests");
         }
         let claude = parse_todo_list(&claude).unwrap();
@@ -238,7 +246,10 @@ mod tests {
         let all_done: Vec<TodoItem> = items
             .iter()
             .cloned()
-            .map(|item| TodoItem { status: TodoStatus::Completed, ..item })
+            .map(|item| TodoItem {
+                status: TodoStatus::Completed,
+                ..item
+            })
             .collect();
         assert_eq!(todo_window(&all_done, 3), 7..10);
     }

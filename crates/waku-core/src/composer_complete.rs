@@ -153,15 +153,53 @@ pub fn discover_slash_commands(
 
 /// Commands the built-in agent answers itself instead of passing to the
 /// model — the counterpart of what a CLI reports from its own catalog.
+/// `/goal` and the two reports are handled in the composer, `/compact` by
+/// the driver, and `/init` and `/review` expand to prompts of our own.
 fn native_builtin_commands() -> Vec<SlashCommand> {
-    vec![SlashCommand {
-        name: "goal".to_owned(),
-        description: crate::i18n::translate("commands.goal_description"),
+    let builtin = |name: &str, description: &str, argument_hint: Option<&str>| SlashCommand {
+        name: name.to_owned(),
+        description: crate::i18n::translate(description),
         scope: CommandScope::Builtin,
-        argument_hint: None,
+        argument_hint: argument_hint.map(crate::i18n::translate),
         template: None,
-    }]
+    };
+    let prompt = |name: &str, description: &str, template: &str| SlashCommand {
+        template: Some(template.to_owned()),
+        ..builtin(name, description, Some("commands.extra_instructions_hint"))
+    };
+    vec![
+        builtin("goal", "commands.goal_description", None),
+        builtin(
+            "compact",
+            "commands.compact_description",
+            Some("commands.extra_instructions_hint"),
+        ),
+        builtin("context", "commands.context_description", None),
+        builtin("cost", "commands.cost_description", None),
+        prompt("init", "commands.init_description", NATIVE_INIT_PROMPT),
+        prompt(
+            "review",
+            "commands.review_description",
+            NATIVE_REVIEW_PROMPT,
+        ),
+    ]
 }
+
+/// `/init` for the built-in agent.
+const NATIVE_INIT_PROMPT: &str = "Create or update the AGENTS.md file at the root of this \
+repository: guidance for coding agents that work here. First read any existing AGENTS.md or \
+CLAUDE.md, the README, the build and test configuration, and enough of the source tree to \
+see how it is laid out. Then write short, specific sections: what the project is, how to \
+build, run and test it, where code of each kind belongs, the conventions the code actually \
+follows, and the pitfalls. Keep whatever in an existing file is still accurate and correct \
+what is not. Only name commands you found in the repository. $ARGUMENTS";
+
+/// `/review` for the built-in agent.
+const NATIVE_REVIEW_PROMPT: &str = "Review the uncommitted changes in this repository: \
+`git diff`, `git diff --staged`, and any new untracked files. Look for bugs, regressions, \
+missed edge cases, security problems, and code that does not follow the conventions of the \
+code around it. Report what you find ordered by severity, each with its file and line and a \
+concrete fix. Do not change any files. $ARGUMENTS";
 
 fn assemble_slash_commands(
     provider: ProviderKind,

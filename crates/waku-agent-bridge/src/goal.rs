@@ -94,7 +94,9 @@ pub(crate) fn apply(store: &GoalStore, session_id: &str, op: GoalOp) -> Result<G
     match op {
         GoalOp::Refresh => Ok(GoalEffect::Settled),
         GoalOp::Clear => {
-            store.clear_goal(session_id).map_err(|error| error.to_string())?;
+            store
+                .clear_goal(session_id)
+                .map_err(|error| error.to_string())?;
             Ok(GoalEffect::Settled)
         }
         GoalOp::Set {
@@ -122,7 +124,9 @@ pub(crate) fn apply(store: &GoalStore, session_id: &str, op: GoalOp) -> Result<G
                         .map_err(|error| error.to_string())?;
                     return Ok(GoalEffect::Settled);
                 }
-                return Ok(GoalEffect::Kickoff(claurst_core::goal_kickoff_message(&goal)));
+                return Ok(GoalEffect::Kickoff(claurst_core::goal_kickoff_message(
+                    &goal,
+                )));
             }
             let Some(goal) = current else {
                 return Err("there is no goal to change".to_owned());
@@ -210,7 +214,10 @@ mod tests {
             status: Some(GoalState::Active),
             replace: false,
         };
-        assert!(matches!(apply(&store, "s", resume.clone()).unwrap(), GoalEffect::Resume(_)));
+        assert!(matches!(
+            apply(&store, "s", resume.clone()).unwrap(),
+            GoalEffect::Resume(_)
+        ));
         // Resuming a goal that is already being pursued starts nothing.
         assert_eq!(apply(&store, "s", resume).unwrap(), GoalEffect::Settled);
     }
@@ -232,7 +239,10 @@ mod tests {
             .unwrap(),
             GoalEffect::Settled
         );
-        assert!(matches!(apply(&store, "s", set("second")).unwrap(), GoalEffect::Kickoff(_)));
+        assert!(matches!(
+            apply(&store, "s", set("second")).unwrap(),
+            GoalEffect::Kickoff(_)
+        ));
         assert_eq!(snapshot(&store, "s").unwrap().objective, "second");
     }
 

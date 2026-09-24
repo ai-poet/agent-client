@@ -2237,6 +2237,38 @@ impl Waku {
             || self.execute_plan_mode_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
             || self.execute_goal_composer_command(prompt, cx)
+            || self.execute_usage_report_command(prompt, cx)
+    }
+
+    /// `/context` and `/cost` for the built-in agent: answered from the usage
+    /// the session already holds, as a line in the transcript, with no turn —
+    /// asking how full the context is should not fill it.
+    fn execute_usage_report_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+        use crate::composer_complete::UsageReport;
+        let Some((session_id, report)) = self.selected_session().and_then(|session| {
+            let report = crate::composer_complete::usage_report_submission(
+                session.provider,
+                prompt,
+                &self.slash_command_index,
+            )?;
+            Some((session.id, report))
+        }) else {
+            return false;
+        };
+        let Some(session) = self.state.session_mut(session_id) else {
+            return false;
+        };
+        let usage = session.context_usage.unwrap_or_default();
+        let line = match report {
+            UsageReport::Context => super::usage_meter::context_report(&usage),
+            UsageReport::Cost => super::usage_meter::cost_report(&usage),
+        };
+        session.push_message(MessageRole::System, line);
+        session.updated_at = crate::model::unix_time();
+        self.state.mark_session_dirty(session_id);
+        self.composer.update(cx, |input, cx| input.clear(cx));
+        cx.notify();
+        true
     }
 
     /// `/plan`, `/plan off`, `/plan <description>` — the composer's

@@ -39,8 +39,7 @@ use crate::model::{
     ActivityKind, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey,
     BackgroundWorkKind, BackgroundWorkStatus, CompactionPhase, DriverEvent, InteractionMode,
     Message, MessageRole, PermissionOption, ProviderResumeCursor, ProviderSessionHistory,
-    RuntimeMode, TurnStatus,
-    UserInputAnswer, UserInputOption, UserInputQuestion, unix_time_millis,
+    RuntimeMode, TurnStatus, UserInputAnswer, UserInputOption, UserInputQuestion, unix_time_millis,
 };
 
 pub struct NativeDriver {
@@ -198,6 +197,10 @@ impl NativeDriver {
 
 impl DriverControl for NativeDriver {
     fn prompt(&self, prompt: String) {
+        if let Some(instructions) = compact_command(&prompt) {
+            self.session.compact(instructions);
+            return;
+        }
         self.session.prompt(prompt);
     }
 
@@ -266,7 +269,10 @@ impl DriverControl for NativeDriver {
     }
 
     fn rollback(&self, turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
-        let removed = self.session.rollback(turns).map_err(localize_rewind_error)?;
+        let removed = self
+            .session
+            .rollback(turns)
+            .map_err(localize_rewind_error)?;
         if removed == 0 {
             return Ok(None);
         }
@@ -277,7 +283,10 @@ impl DriverControl for NativeDriver {
     }
 
     fn fork(&self, turns_to_remove: usize) -> anyhow::Result<ProviderResumeCursor> {
-        let branched = self.session.fork(turns_to_remove).map_err(localize_rewind_error)?;
+        let branched = self
+            .session
+            .fork(turns_to_remove)
+            .map_err(localize_rewind_error)?;
         // The branch is a new session with its own transcript file. Waku
         // creates the session and starts a driver against this cursor; the
         // history has to be on disk before that happens.
@@ -287,6 +296,17 @@ impl DriverControl for NativeDriver {
             session_id: branch_id.to_string(),
         })
     }
+}
+
+/// `/compact` and `/compact <instructions>`: the built-in agent's own
+/// command, answered by compacting rather than by a model turn.
+fn compact_command(prompt: &str) -> Option<Option<String>> {
+    let rest = prompt.trim().strip_prefix("/compact")?;
+    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let rest = rest.trim();
+    Some((!rest.is_empty()).then(|| rest.to_owned()))
 }
 
 /// The desktop's goal operation in the bridge's terms. The statuses only

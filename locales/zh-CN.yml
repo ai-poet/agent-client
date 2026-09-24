@@ -551,6 +551,17 @@ commands.fast_description: 切换快速模式
 commands.fast_enabled: 已启用快速模式
 commands.fast_disabled: 已关闭快速模式
 commands.goal_description: 为此任务设定一个持续追求的目标
+commands.compact_description: "把目前的对话压缩成摘要，腾出上下文"
+commands.extra_instructions_hint: "[补充说明]"
+commands.context_description: "查看上下文窗口的占用"
+commands.cost_description: "查看本次运行用掉的 token"
+commands.init_description: "为这个仓库生成或更新 AGENTS.md"
+commands.review_description: "审查未提交的改动"
+commands.context_report: "上下文：%{used} / %{window}（%{percent}%）"
+commands.context_report_unsized: "上下文：%{used} token"
+commands.context_report_empty: "还没有上下文用量数据"
+commands.cost_report: "%{totals}。实际扣费以账户「用量」页为准。"
+commands.cost_report_empty: "还没有 token 用量数据"
 commands.resume_description: 恢复终端智能体会话
 goal.title: 目标
 goal.objective_placeholder: 这个任务应该持续朝什么方向努力？

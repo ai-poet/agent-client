@@ -1130,6 +1130,28 @@ commands.fast_disabled:
   en: Fast mode disabled
 commands.goal_description:
   en: Set a goal this task keeps pursuing
+commands.compact_description:
+  en: "Fold the conversation so far into a summary to free context"
+commands.extra_instructions_hint:
+  en: "[extra instructions]"
+commands.context_description:
+  en: "Show how full the context window is"
+commands.cost_description:
+  en: "Show the tokens used since the agent started"
+commands.init_description:
+  en: "Write or update AGENTS.md for this repository"
+commands.review_description:
+  en: "Review the uncommitted changes"
+commands.context_report:
+  en: "Context: %{used} / %{window} (%{percent}%)"
+commands.context_report_unsized:
+  en: "Context: %{used} tokens"
+commands.context_report_empty:
+  en: "No context usage reported yet"
+commands.cost_report:
+  en: "%{totals}. Charges are on the account usage page."
+commands.cost_report_empty:
+  en: "No token usage reported yet"
 commands.resume_description:
   en: Resume a terminal agent session
 

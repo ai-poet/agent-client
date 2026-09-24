@@ -187,7 +187,11 @@ pub fn rollback(messages: &mut Vec<Message>, turns: usize) -> Result<usize, Rewi
         }
         match weight(message) {
             0 => {}
-            1 if message.uuid.as_deref().is_some_and(|uuid| uuid.starts_with(TURN_MARK)) => {
+            1 if message
+                .uuid
+                .as_deref()
+                .is_some_and(|uuid| uuid.starts_with(TURN_MARK)) =>
+            {
                 removed += 1;
                 cut = Some(index);
             }
@@ -429,7 +433,11 @@ mod tests {
         assert_eq!(rewound.len(), 1);
         let mut too_far = after.clone();
         assert_eq!(rollback(&mut too_far, 2), Err(RewindPastCompaction));
-        assert_eq!(too_far.len(), after.len(), "a refused rewind changes nothing");
+        assert_eq!(
+            too_far.len(),
+            after.len(),
+            "a refused rewind changes nothing"
+        );
         assert!(fork(&after, 3).is_err());
     }
 

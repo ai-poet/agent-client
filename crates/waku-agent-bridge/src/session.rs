@@ -315,6 +315,44 @@ impl AgentSession {
         }
     }
 
+    /// Fold the conversation so far into a summary now — `/compact`, with the
+    /// person's own instructions for what the summary should keep.
+    ///
+    /// Holds the turn slot while it runs, so a prompt waits behind it and a
+    /// stop cancels it. It never reports a `TurnStarted`: nothing is added to
+    /// the conversation Waku could count as a turn, and the summary it leaves
+    /// stands for the turns it replaced.
+    pub fn compact(&self, instructions: Option<String>) {
+        let inner = self.inner.clone();
+        let Ok(rt) = runtime::shared() else {
+            inner
+                .events
+                .emit(AgentEvent::Error("the agent runtime is unavailable".to_string()));
+            return;
+        };
+        let cancel = {
+            let mut guard = inner.turn.lock();
+            if guard.is_some() {
+                drop(guard);
+                inner.events.emit(AgentEvent::Error(
+                    "the conversation cannot be compacted while a turn is running".to_string(),
+                ));
+                return;
+            }
+            let cancel = CancellationToken::new();
+            *guard = Some(Turn {
+                cancel: cancel.clone(),
+                queue: CommandQueue::new(),
+                steers: Arc::new(Mutex::new(Vec::new())),
+                watching: false,
+            });
+            cancel
+        };
+        rt.spawn(async move {
+            compact_now(inner, instructions, cancel).await;
+        });
+    }
+
     /// Answer a [`AgentEvent::Permission`].
     pub fn respond(&self, request_id: &str, option_id: &str) {
         let Some(choice) = PermissionChoice::from_id(option_id) else {
@@ -817,6 +855,126 @@ async fn run_turn(
     if let Some(prompt) = goal_follow_up {
         AgentSession { inner }.prompt(prompt);
     }
+}
+
+/// The body of [`AgentSession::compact`].
+async fn compact_now(inner: Arc<Inner>, instructions: Option<String>, cancel: CancellationToken) {
+    use crate::events::CompactionPhase;
+
+    let messages = inner.history.lock().clone();
+    let weight_before = history::turn_count(&messages);
+    let config = inner.config.lock().clone();
+    let query = inner.query.lock().clone();
+    let provider_id = config.selected_provider_id().to_owned();
+    let tokens_before = claurst_query::estimate_context_tokens(&messages, None);
+    let report = |phase, tokens_after| {
+        inner.events.emit(AgentEvent::Compaction {
+            phase,
+            automatic: false,
+            tokens_before,
+            tokens_after,
+        });
+    };
+    report(CompactionPhase::Started, None);
+
+    let summarise = async {
+        if provider_id == "anthropic" {
+            let client = inner.client.lock().clone();
+            claurst_query::compact_conversation_with(
+                client.as_ref(),
+                &messages,
+                &query.model,
+                instructions.as_deref(),
+            )
+            .await
+        } else {
+            match summary_provider(&config, &query, &provider_id) {
+                Some(provider) => {
+                    claurst_query::compact_conversation_via_provider(
+                        provider.as_ref(),
+                        &query.model,
+                        &messages,
+                        query.max_tokens,
+                        instructions.as_deref(),
+                    )
+                    .await
+                }
+                None => Err(claurst_core::error::ClaudeError::Other(format!(
+                    "no provider is configured for {provider_id}"
+                ))),
+            }
+        }
+    };
+    let result = tokio::select! {
+        _ = cancel.cancelled() => None,
+        result = summarise => Some(result),
+    };
+
+    let (success, summary) = match result {
+        None => {
+            report(CompactionPhase::Failed, None);
+            (false, Some("Stopped.".to_string()))
+        }
+        Some(Ok(mut compacted)) if compacted.len() < messages.len() => {
+            history::settle_compaction(weight_before, &mut compacted);
+            let tokens_after = claurst_query::estimate_context_tokens(&compacted, None);
+            *inner.history.lock() = compacted;
+            report(CompactionPhase::Finished, Some(tokens_after));
+            inner.events.emit(AgentEvent::Usage {
+                context_tokens: Some(tokens_after),
+                context_window: crate::config::registry_context_window(&query.model, &provider_id),
+            });
+            (true, None)
+        }
+        // Everything fits the recent tail the summary would keep verbatim:
+        // there is nothing old enough to fold away.
+        Some(Ok(_)) => {
+            report(CompactionPhase::Failed, None);
+            (true, None)
+        }
+        Some(Err(error)) => {
+            report(CompactionPhase::Failed, None);
+            (false, Some(error.to_string()))
+        }
+    };
+
+    let leftover = inner
+        .turn
+        .lock()
+        .take()
+        .map(|turn| turn.steers.lock().drain(..).collect::<Vec<_>>())
+        .unwrap_or_default();
+    inner.events.emit(AgentEvent::TurnFinished { success, summary });
+    inner.events.emit(AgentEvent::HistoryCommitted(history::serialize(
+        &inner.history.lock(),
+    )));
+    for message in leftover {
+        inner.events.emit(AgentEvent::SteerRejected {
+            message,
+            reason: "the conversation was being compacted".to_string(),
+        });
+    }
+}
+
+/// The provider adapter a summary goes through on a route that is not the
+/// Messages API — found the way the engine's loop finds it for a turn.
+fn summary_provider(
+    config: &Config,
+    query: &QueryConfig,
+    provider_id: &str,
+) -> Option<Arc<dyn claurst_api::LlmProvider>> {
+    if claurst_api::registry::resolve_provider_api_base(config, provider_id).is_some()
+        && let Some(provider) = claurst_api::registry::provider_from_config(config, provider_id)
+    {
+        return Some(provider);
+    }
+    claurst_api::registry::runtime_provider_for(provider_id).or_else(|| {
+        query
+            .provider_registry
+            .as_ref()?
+            .get(&claurst_core::provider_id::ProviderId::new(provider_id))
+            .cloned()
+    })
 }
 
 /// After a turn: charge its tokens to the goal, report where the goal

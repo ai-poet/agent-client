@@ -293,13 +293,44 @@ fn context_percent(usage: ContextUsage) -> Option<f64> {
         .map(|window| usage.tokens as f64 * 100.0 / window as f64)
 }
 
+/// `/context`: how full the window is, then how the latest request split.
+pub(super) fn context_report(usage: &ContextUsage) -> String {
+    let occupancy = match (usage.window, context_percent(*usage)) {
+        (Some(window), Some(percent)) => tr!(
+            "commands.context_report",
+            used = format_tokens(usage.tokens),
+            window = format_tokens(window),
+            percent = format!("{percent:.0}")
+        ),
+        _ if usage.tokens > 0 => tr!(
+            "commands.context_report_unsized",
+            used = format_tokens(usage.tokens)
+        ),
+        _ => return tr!("commands.context_report_empty"),
+    };
+    match token_breakdown_lines(usage).and_then(|lines| lines.into_iter().next()) {
+        Some(last) => format!("{occupancy} · {last}"),
+        None => occupancy,
+    }
+}
+
+/// `/cost`: the tokens spent since the runtime started. The account's usage
+/// page has the money; the engine's own price table would only guess it.
+pub(super) fn cost_report(usage: &ContextUsage) -> String {
+    match token_breakdown_lines(usage).and_then(|lines| lines.into_iter().nth(1)) {
+        Some(totals) => tr!("commands.cost_report", totals = totals),
+        None => tr!("commands.cost_report_empty"),
+    }
+}
+
 /// How the tokens split, for providers that report it: the latest request's
 /// input (and how much of it the cache served) and output, then the running
 /// totals with the cache hit rate. `None` when nothing was reported.
 fn token_breakdown_lines(usage: &ContextUsage) -> Option<Vec<String>> {
     let last = usage.last?;
-    let input =
-        |totals: &crate::usage_history::TokenTotals| totals.uncached_input + totals.cached_input + totals.cache_creation;
+    let input = |totals: &crate::usage_history::TokenTotals| {
+        totals.uncached_input + totals.cached_input + totals.cache_creation
+    };
     let mut lines = vec![tr!(
         "usage.last_request",
         input = format_tokens(input(&last)),
