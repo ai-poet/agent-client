@@ -1799,13 +1799,19 @@ fn handle_session_update(
         }
         Some("tool_call" | "tool_call_update") => tool_activity(&update, events, state),
         Some("plan") => {
-            let _ = events.send(DriverEvent::Activity {
-                id: Some("acp-plan".into()),
-                kind: ActivityKind::Plan,
-                title: tr!("activity.plan_updated"),
-                detail: None,
-                complete: false,
-            });
+            // The whole plan every time; the entries used to be dropped and
+            // only the title kept.
+            let item = activity::tool_activity(
+                Some("acp-plan".into()),
+                ActivityKind::Plan,
+                tr!("activity.plan_updated"),
+                None,
+                Some(&update),
+                None,
+                false,
+                true,
+            );
+            let _ = events.send(DriverEvent::RichActivity(item));
         }
         Some("available_commands_update") => {
             let commands = update

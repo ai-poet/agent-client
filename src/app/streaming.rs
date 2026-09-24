@@ -333,6 +333,15 @@ impl Waku {
                         should_refresh_branch_after_activity(item.kind, item.complete)
                             && self.state.selected_session == Some(session_id);
                     self.observe_foreground_command_activity(session_id, &item);
+                    // The newest list the agent settled on is the session's:
+                    // a reopened task shows where the work stood.
+                    if let Some(todos) = item.settled_todos()
+                        && let Some(session) = self.state.session_mut(session_id)
+                        && session.todos != todos
+                    {
+                        session.todos = todos.to_vec();
+                        self.state.mark_session_dirty(session_id);
+                    }
                     self.update_activity(session_id, runtime, item);
                     if refresh_branch {
                         self.refresh_selected_branch_snapshot(cx);

@@ -159,7 +159,12 @@ export function reduceRuntimeEvent(
     }
     case 'richActivity':
       if (acceptsTurnOutput(session) && asRecord(payload)) {
-        upsertActivity(session, payload as ActivityItem, clock)
+        const item = payload as ActivityItem
+        // The newest list the agent settled on is the session's.
+        if (item.todos && item.complete && !item.failed) {
+          session.todos = item.todos
+        }
+        upsertActivity(session, item, clock)
       }
       break
     case 'permission': {

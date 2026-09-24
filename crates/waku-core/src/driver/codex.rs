@@ -1927,10 +1927,26 @@ fn handle_codex_message(
                     .with_activity_source(Some(item))
                     .with_output(output)
                     .with_image_urls(image_urls)
-                    .with_failed(codex_item_failed(item));
+                    .with_failed(codex_item_failed(item))
+                    .with_todos(super::activity::plan_todos(kind, Some(item), None));
                     let _ = events.send(DriverEvent::RichActivity(activity));
                 }
             }
+        }
+        "turn/plan/updated" => {
+            // Codex's plan tool reports the whole list on every change, as a
+            // notification rather than an item. One row per turn, updated in
+            // place.
+            let turn = turn_id.lock().clone().unwrap_or_default();
+            let activity = ActivityItem::new(
+                Some(format!("codex-plan-{turn}")),
+                ActivityKind::Plan,
+                tr!("activity.plan_updated"),
+                None,
+                true,
+            )
+            .with_todos(waku_protocol::todo::parse_todo_list(&params));
+            let _ = events.send(DriverEvent::RichActivity(activity));
         }
         "turn/completed" => {
             stream_state.citation_buffer.clear();
@@ -2673,6 +2689,34 @@ mod tests {
             harness.received.try_recv(),
             Ok(DriverEvent::GoalUpdated(None))
         ));
+    }
+
+    /// Codex's plan tool reports through a notification, not an item; the
+    /// list it carries lands on a plan row like every other agent's.
+    #[test]
+    fn a_plan_update_becomes_a_plan_row_with_its_todo_list() {
+        let harness = GoalHarness::new();
+        harness.handle(json!({
+            "method": "turn/plan/updated",
+            "params": {
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "explanation": null,
+                "plan": [
+                    {"step": "Reproduce the crash", "status": "completed"},
+                    {"step": "Fix the parser", "status": "inProgress"},
+                    {"step": "Add a test", "status": "pending"}
+                ]
+            }
+        }));
+        let Ok(DriverEvent::RichActivity(item)) = harness.received.try_recv() else {
+            panic!("a plan update must produce a plan row");
+        };
+        assert_eq!(item.kind, ActivityKind::Plan);
+        let todos = item.settled_todos().expect("the row carries the list");
+        assert_eq!(todos.len(), 3);
+        assert_eq!(todos[1].content, "Fix the parser");
+        assert_eq!(todos[1].status, waku_protocol::todo::TodoStatus::InProgress);
     }
 
     #[test]

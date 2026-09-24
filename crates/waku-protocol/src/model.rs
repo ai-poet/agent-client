@@ -991,6 +991,11 @@ pub struct AgentSession {
     /// Currently populated by Codex.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_goal: Option<ThreadGoal>,
+    /// The agent's todo list as it last wrote it, kept so a reopened task
+    /// shows where the work stood. Empty when the agent never kept one or
+    /// cleared it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub todos: Vec<crate::todo::TodoItem>,
     /// Context-window occupancy from the live stream, kept so a resumed
     /// session's meter starts where the conversation left off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1053,6 +1058,7 @@ impl AgentSession {
             provider_cursor: None,
             available_commands: Vec::new(),
             thread_goal: None,
+            todos: Vec::new(),
             context_usage: None,
             runtime_event_cursor: None,
             provider_session_id: None,
@@ -1090,6 +1096,7 @@ impl AgentSession {
             provider_cursor: None,
             available_commands: Vec::new(),
             thread_goal: None,
+            todos: Vec::new(),
             context_usage: None,
             runtime_event_cursor: None,
             provider_session_id: None,
@@ -2158,6 +2165,11 @@ pub struct ActivityItem {
     /// activity fields and leave this empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ReasoningBlock>,
+    /// The agent's todo list as this call left it, when the call wrote one —
+    /// a `TodoWrite`, a plan update. Parsed once, when the event arrives, in
+    /// every agent's own shape (`crate::todo::parse_todo_list`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub todos: Option<Vec<crate::todo::TodoItem>>,
 }
 
 impl ActivityItem {
@@ -2185,6 +2197,7 @@ impl ActivityItem {
             display_target,
             display_description: None,
             reasoning: None,
+            todos: None,
         }
     }
 
@@ -2222,6 +2235,19 @@ impl ActivityItem {
     pub fn with_failed(mut self, failed: bool) -> Self {
         self.failed = failed;
         self
+    }
+
+    pub fn with_todos(mut self, todos: Option<Vec<crate::todo::TodoItem>>) -> Self {
+        self.todos = todos;
+        self
+    }
+
+    /// The todo list this activity settled on: set once the call finished
+    /// without failing. A call still running or refused changed nothing.
+    pub fn settled_todos(&self) -> Option<&[crate::todo::TodoItem]> {
+        (self.complete && !self.failed)
+            .then_some(self.todos.as_deref())
+            .flatten()
     }
 
     /// Extracts the common tool-input shapes emitted by every provider. This

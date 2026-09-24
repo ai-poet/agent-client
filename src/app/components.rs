@@ -1270,6 +1270,16 @@ fn activity_path_name(path: &str) -> String {
         .to_owned()
 }
 
+/// Whether this activity's expanded view shows the agent's todo list instead
+/// of the JSON that wrote it.
+pub(super) fn activity_shows_todos(activity: &ActivityItem) -> bool {
+    activity.kind == ActivityKind::Plan
+        && activity
+            .todos
+            .as_ref()
+            .is_some_and(|todos| !todos.is_empty())
+}
+
 /// Whether this activity's expanded view shows a diff instead of the tool
 /// arguments that produced it.
 pub(super) fn activity_shows_diff(activity: &ActivityItem) -> bool {
@@ -1370,9 +1380,10 @@ pub(super) fn activity_disclosure_sections(
         }
         return sections;
     }
-    // An edit renders as a diff, which says everything the raw arguments would
-    // and reads. What the tool replied is only worth the room when it failed.
-    let shows_diff = activity_shows_diff(activity);
+    // An edit renders as a diff, and a todo list as its checklist, which say
+    // everything the raw arguments would and read. What the tool replied is
+    // only worth the room when it failed.
+    let shows_diff = activity_shows_diff(activity) || activity_shows_todos(activity);
     if let Some(arguments) = activity
         .arguments
         .as_deref()

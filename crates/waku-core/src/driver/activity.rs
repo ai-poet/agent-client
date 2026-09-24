@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use serde_json::Value;
 
 use crate::model::{ActivityItem, ActivityKind};
+use waku_protocol::todo::parse_todo_list;
 
 const MAX_ACTIVITY_CHARS: usize = 16_000;
 
@@ -49,6 +50,22 @@ pub(super) fn tool_activity(
         .with_output(formatted_output)
         .with_image_urls(image_urls)
         .with_failed(failed)
+        .with_todos(plan_todos(kind, raw_arguments, output))
+}
+
+/// The todo list a plan activity carries, from its arguments (a `TodoWrite`)
+/// or, when the agent reports the list as a result, its output.
+pub(super) fn plan_todos(
+    kind: ActivityKind,
+    arguments: Option<&Value>,
+    output: Option<&Value>,
+) -> Option<Vec<waku_protocol::todo::TodoItem>> {
+    if kind != ActivityKind::Plan {
+        return None;
+    }
+    arguments
+        .and_then(parse_todo_list)
+        .or_else(|| output.and_then(parse_todo_list))
 }
 
 pub(super) fn input_title(value: Option<&Value>) -> Option<String> {
@@ -67,6 +84,41 @@ pub(super) fn input_title(value: Option<&Value>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every agent's todo tool lands as the same list on its row.
+    #[test]
+    fn a_plan_row_carries_the_todo_list_it_wrote() {
+        let arguments = serde_json::json!({"todos": [
+            {"content": "Read the code", "status": "completed"},
+            {"content": "Fix the bug", "status": "in_progress"}
+        ]});
+        let item = tool_activity(
+            Some("t1".into()),
+            ActivityKind::Plan,
+            "TodoWrite".into(),
+            Some(&arguments),
+            None,
+            None,
+            false,
+            true,
+        );
+        let todos = item.settled_todos().expect("a settled list");
+        assert_eq!(todos.len(), 2);
+        assert_eq!(todos[1].content, "Fix the bug");
+
+        // A command's arguments are never read as a list.
+        let command = tool_activity(
+            None,
+            ActivityKind::Command,
+            "Bash".into(),
+            Some(&serde_json::json!({"todos": []})),
+            None,
+            None,
+            false,
+            true,
+        );
+        assert!(command.todos.is_none());
+    }
 
     #[test]
     fn title_supports_direct_and_provider_wrapped_arguments() {

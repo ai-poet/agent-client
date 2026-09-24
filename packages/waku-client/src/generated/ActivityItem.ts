@@ -2,6 +2,7 @@
 import type { ActivityFileChange } from "./ActivityFileChange";
 import type { ActivityKind } from "./ActivityKind";
 import type { ReasoningBlock } from "./ReasoningBlock";
+import type { TodoItem } from "./TodoItem";
 
 export type ActivityItem = { id: string, source_id: string | null, kind: ActivityKind, title: string, detail: string | null, arguments?: string | null, output?: string | null,
 /**
@@ -31,4 +32,10 @@ display_description?: string | null,
  * tool work. Generic provider `think` tools can still use the ordinary
  * activity fields and leave this empty.
  */
-reasoning?: ReasoningBlock | null, };
+reasoning?: ReasoningBlock | null,
+/**
+ * The agent's todo list as this call left it, when the call wrote one —
+ * a `TodoWrite`, a plan update. Parsed once, when the event arrives, in
+ * every agent's own shape (`crate::todo::parse_todo_list`).
+ */
+todos?: Array<TodoItem> | null, };

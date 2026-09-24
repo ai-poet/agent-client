@@ -2043,10 +2043,12 @@ impl Waku {
                 _ => None,
             };
             let shows_diff = reasoning.is_none() && activity_shows_diff(activity);
+            let shows_todos = reasoning.is_none() && activity_shows_todos(activity);
             let has_detail = reasoning
                 .is_some_and(|reasoning| !reasoning.content.trim().is_empty())
                 || !sections.is_empty()
-                || shows_diff;
+                || shows_diff
+                || shows_todos;
             let item_expanded = has_detail
                 && self
                     .expanded_activity_items
@@ -2254,6 +2256,22 @@ impl Waku {
                             &reasoning_viewport.scrollbar,
                         ))
                         .child(activity_scroll_guard(reasoning_viewport, reasoning_live)),
+                );
+            }
+            if item_expanded
+                && shows_todos
+                && let Some(todos) = activity.todos.as_deref()
+            {
+                let (mono_size, _) = self.activity_mono_text();
+                item = item.child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .border_t_1()
+                        .border_color(theme.border_strong)
+                        .px(px(12.0))
+                        .py(px(8.0))
+                        .child(super::todo_list::render_todo_list(todos, mono_size + 0.5, theme)),
                 );
             }
             if item_expanded && shows_diff {

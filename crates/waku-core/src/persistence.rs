@@ -1218,6 +1218,11 @@ impl StateStore {
         session.service_tier = stored.service_tier;
         session.context_window = stored.context_window;
         session.context_usage = stored.context_usage;
+        // Conversation meta a reopened task shows before its runtime
+        // reconnects and reports them again.
+        session.available_commands = stored.available_commands;
+        session.thread_goal = stored.thread_goal;
+        session.todos = stored.todos;
         session.runtime_event_cursor = stored.runtime_event_cursor;
 
         let mut statement = connection
@@ -1509,6 +1514,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         provider_cursor: None,
         available_commands: Vec::new(),
         thread_goal: None,
+        todos: Vec::new(),
         context_usage: None,
         runtime_event_cursor: None,
         provider_session_id: None,

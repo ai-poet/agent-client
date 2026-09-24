@@ -43,6 +43,7 @@ pub mod provider_session;
 pub mod settings;
 pub mod skills;
 pub mod theme;
+pub mod todo;
 pub mod usage;
 pub mod usage_history;
 pub mod workspace;
