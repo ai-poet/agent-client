@@ -293,6 +293,33 @@ fn context_percent(usage: ContextUsage) -> Option<f64> {
         .map(|window| usage.tokens as f64 * 100.0 / window as f64)
 }
 
+/// How the tokens split, for providers that report it: the latest request's
+/// input (and how much of it the cache served) and output, then the running
+/// totals with the cache hit rate. `None` when nothing was reported.
+fn token_breakdown_lines(usage: &ContextUsage) -> Option<Vec<String>> {
+    let last = usage.last?;
+    let input =
+        |totals: &crate::usage_history::TokenTotals| totals.uncached_input + totals.cached_input + totals.cache_creation;
+    let mut lines = vec![tr!(
+        "usage.last_request",
+        input = format_tokens(input(&last)),
+        cached = format_tokens(last.cached_input),
+        output = format_tokens(last.output)
+    )];
+    if let Some(session) = usage.session {
+        let rate = ContextUsage::cache_hit_rate(&session)
+            .map(|rate| format!("{:.0}%", rate * 100.0))
+            .unwrap_or_else(|| "—".to_owned());
+        lines.push(tr!(
+            "usage.session_totals",
+            input = format_tokens(input(&session)),
+            output = format_tokens(session.output),
+            rate = rate
+        ));
+    }
+    Some(lines)
+}
+
 /// The trigger glyph: a ring whose arc fills clockwise from 12 o'clock as the
 /// context window does, over a faint full ring. An unknown fraction draws the
 /// track alone. This is Zed's `CircularProgress` drawing sized for the footer
@@ -431,6 +458,19 @@ fn usage_panel(
             )
             .child(meter_bar(&theme, percent.unwrap_or(0.0))),
     );
+    if let Some(breakdown) = token_breakdown_lines(&usage) {
+        let mut lines = div().flex().flex_col().gap(px(3.0));
+        for line in breakdown {
+            lines = lines.child(
+                div()
+                    .text_size(sp(12.0))
+                    .line_height(sp(16.0))
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(line)),
+            );
+        }
+        panel = panel.child(lines);
+    }
     if plan.is_some() || error.is_some() || plan_loading {
         panel = panel.child(div().h(px(1.0)).flex_none().bg(theme.border));
     }

@@ -1861,6 +1861,24 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
                 "contextWindow": context_window,
             }),
         ),
+        DriverEvent::TokenUsageUpdated { last, session } => (
+            "tokenUsageUpdated",
+            json!({ "last": last, "session": session }),
+        ),
+        DriverEvent::ContextCompaction {
+            phase,
+            automatic,
+            tokens_before,
+            tokens_after,
+        } => (
+            "contextCompaction",
+            json!({
+                "phase": phase,
+                "automatic": automatic,
+                "tokensBefore": tokens_before,
+                "tokensAfter": tokens_after,
+            }),
+        ),
         DriverEvent::PlanUsageUpdated(usage) => ("planUsageUpdated", serde_json::to_value(usage)?),
         DriverEvent::GoalUpdated(goal) => ("goalUpdated", serde_json::to_value(goal)?),
         DriverEvent::TurnFinished { success, summary } => (

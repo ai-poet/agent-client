@@ -1889,6 +1889,16 @@ transcript.you_stopped_after:
   en: You stopped after %{duration}
 transcript.working_for:
   en: Working for %{duration}
+session.context_compacting:
+  en: "Compacting the conversation…"
+session.context_compacted_auto:
+  en: "Context compacted automatically · %{before} → %{after}"
+session.context_compacted_manual:
+  en: "Context compacted · %{before} → %{after}"
+session.context_compacted:
+  en: "Context compacted"
+session.context_compaction_failed:
+  en: "Could not compact the context; the conversation is unchanged"
 transcript.thinking:
   en: Thinking
 transcript.thought_for:
@@ -2094,6 +2104,10 @@ usage.shortcut:
   en: Usage (%{shortcut})
 usage.context_window:
   en: Context window
+usage.last_request:
+  en: "Last request: %{input} in (%{cached} cached) · %{output} out"
+usage.session_totals:
+  en: "This run: %{input} in · %{output} out · %{rate} cache hits"
 usage.plan_limits:
   en: Plan usage limits
 usage.plan_limits_named:

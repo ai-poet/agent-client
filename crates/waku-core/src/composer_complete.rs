@@ -139,7 +139,7 @@ pub fn discover_slash_commands(
     // with its empty command name would resolve every PATH directory as a
     // candidate. Its commands are the file-backed ones alone.
     if provider.is_builtin() {
-        return assemble_slash_commands(provider, project_root, Vec::new());
+        return assemble_slash_commands(provider, project_root, native_builtin_commands());
     }
     let cli_commands = match binary_override {
         Some(binary) => crate::command_env::resolve_binary_override(binary),
@@ -149,6 +149,18 @@ pub fn discover_slash_commands(
     .and_then(|binary| crate::slash_command_catalog::discover(provider, binary, project_root))
     .unwrap_or_default();
     assemble_slash_commands(provider, project_root, cli_commands)
+}
+
+/// Commands the built-in agent answers itself instead of passing to the
+/// model — the counterpart of what a CLI reports from its own catalog.
+fn native_builtin_commands() -> Vec<SlashCommand> {
+    vec![SlashCommand {
+        name: "goal".to_owned(),
+        description: crate::i18n::translate("commands.goal_description"),
+        scope: CommandScope::Builtin,
+        argument_hint: None,
+        template: None,
+    }]
 }
 
 fn assemble_slash_commands(

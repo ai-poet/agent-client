@@ -833,6 +833,31 @@ pub struct ContextUsage {
     pub tokens: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window: Option<u64>,
+    /// How the latest model request's tokens split, for providers that say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<crate::usage_history::TokenTotals>,
+    /// The same, summed over every request since the session's runtime
+    /// started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<crate::usage_history::TokenTotals>,
+}
+
+impl ContextUsage {
+    /// Share of the input the provider served from its prompt cache, over
+    /// the requests `totals` covers. `None` before any input was counted.
+    pub fn cache_hit_rate(totals: &crate::usage_history::TokenTotals) -> Option<f64> {
+        let input = totals.uncached_input + totals.cached_input + totals.cache_creation;
+        (input > 0).then(|| totals.cached_input as f64 / input as f64)
+    }
+}
+
+/// Where a compaction of the conversation is.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum CompactionPhase {
+    Started,
+    Finished,
+    Failed,
 }
 
 /// Where Codex stands on a thread goal. Mirrors the app-server's
@@ -1858,6 +1883,23 @@ pub enum DriverEvent {
     UsageUpdated {
         context_tokens: Option<u64>,
         context_window: Option<u64>,
+    },
+    /// How the tokens behind [`Self::UsageUpdated`] split — uncached and
+    /// cached input, cache writes, output — for the latest request and summed
+    /// since the runtime started. Only providers whose stream reports the
+    /// split send it.
+    TokenUsageUpdated {
+        last: crate::usage_history::TokenTotals,
+        session: crate::usage_history::TokenTotals,
+    },
+    /// The provider is folding older conversation into a summary to free
+    /// context, or has. `automatic` is `false` when the person asked for it.
+    ContextCompaction {
+        phase: CompactionPhase,
+        automatic: bool,
+        tokens_before: u64,
+        /// Estimated, once `phase` is `Finished`.
+        tokens_after: Option<u64>,
     },
     /// Account-level rate-limit meters carried by the provider's own stream
     /// (Codex's `account/rateLimits/updated`). Same shape the OAuth fetcher

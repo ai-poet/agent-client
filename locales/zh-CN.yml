@@ -918,6 +918,11 @@ transcript.worked: 已完成
 transcript.worked_for: 用时 %{duration}
 transcript.you_stopped_after: 你在工作 %{duration} 后停止了
 transcript.working_for: 工作中 · %{duration}
+session.context_compacting: "正在压缩上下文…"
+session.context_compacted_auto: "上下文已自动压缩 · %{before} → %{after}"
+session.context_compacted_manual: "上下文已压缩 · %{before} → %{after}"
+session.context_compacted: "上下文已压缩"
+session.context_compaction_failed: "上下文压缩失败，对话保持原样"
 transcript.thinking: 正在思考
 transcript.thought_for: 思考用时 %{duration}
 transcript.changed_file: 更改了 %{count} 个文件
@@ -1019,6 +1024,8 @@ usage.refresh_failed: "用量刷新失败：%{error}"
 usage.context_used: 上下文窗口已使用 %{percent}%（%{shortcut}）
 usage.shortcut: 用量（%{shortcut}）
 usage.context_window: 上下文窗口
+usage.last_request: "上次请求：输入 %{input}（缓存 %{cached}）· 输出 %{output}"
+usage.session_totals: "本次运行累计：输入 %{input} · 输出 %{output} · 缓存命中 %{rate}"
 usage.plan_limits: 套餐用量限额
 usage.plan_limits_named: 套餐用量限额 · %{plan}
 usage.open_account_settings: 打开账户用量设置

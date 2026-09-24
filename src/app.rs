@@ -1286,6 +1286,9 @@ pub struct Waku {
     /// the wall clock since then while an active goal's turn runs, so elapsed
     /// pursuit time ticks live the way the Codex CLI shows it.
     goal_observed_at: HashMap<Uuid, Instant>,
+    /// Sessions whose agent is folding older conversation into a summary
+    /// right now, so the working row can say why nothing is streaming.
+    compacting_sessions: HashSet<Uuid>,
     /// Commit-message generation and Git mutation outlive the modal that
     /// started them. Keeping the operation on the app also lets every
     /// Environment surface reflect and gate the same in-flight action.
@@ -3016,6 +3019,7 @@ impl Waku {
                 pending_goal_operations: HashMap::new(),
                 goal_runtime_starts: HashSet::new(),
                 goal_observed_at: HashMap::new(),
+                compacting_sessions: HashSet::new(),
                 commit_operation: None,
                 // Providers × workspaces; both scans are small, the cache
                 // only exists to keep them off the frame path.

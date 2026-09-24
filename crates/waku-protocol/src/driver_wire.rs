@@ -106,6 +106,24 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
                 "contextWindow": context_window,
             }),
         ),
+        DriverEvent::TokenUsageUpdated { last, session } => (
+            "tokenUsageUpdated",
+            json!({ "last": last, "session": session }),
+        ),
+        DriverEvent::ContextCompaction {
+            phase,
+            automatic,
+            tokens_before,
+            tokens_after,
+        } => (
+            "contextCompaction",
+            json!({
+                "phase": phase,
+                "automatic": automatic,
+                "tokensBefore": tokens_before,
+                "tokensAfter": tokens_after,
+            }),
+        ),
         DriverEvent::PlanUsageUpdated(usage) => ("planUsageUpdated", serde_json::to_value(usage)?),
         DriverEvent::GoalUpdated(goal) => ("goalUpdated", serde_json::to_value(goal)?),
         DriverEvent::TurnFinished { success, summary } => (
@@ -190,6 +208,22 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 context_window: usage.context_window,
             }
         }
+        "tokenUsageUpdated" => {
+            let usage: TokenUsageWire = serde_json::from_value(payload)?;
+            DriverEvent::TokenUsageUpdated {
+                last: usage.last,
+                session: usage.session,
+            }
+        }
+        "contextCompaction" => {
+            let compaction: CompactionWire = serde_json::from_value(payload)?;
+            DriverEvent::ContextCompaction {
+                phase: compaction.phase,
+                automatic: compaction.automatic,
+                tokens_before: compaction.tokens_before,
+                tokens_after: compaction.tokens_after,
+            }
+        }
         "planUsageUpdated" => DriverEvent::PlanUsageUpdated(serde_json::from_value(payload)?),
         "goalUpdated" => DriverEvent::GoalUpdated(serde_json::from_value(payload)?),
         "turnFinished" => {
@@ -203,6 +237,22 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
         "processExited" => DriverEvent::ProcessExited,
         kind => bail!("daemon sent an unsupported driver event {kind:?}"),
     })
+}
+
+#[derive(Deserialize)]
+struct TokenUsageWire {
+    last: crate::usage_history::TokenTotals,
+    session: crate::usage_history::TokenTotals,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompactionWire {
+    phase: crate::model::CompactionPhase,
+    automatic: bool,
+    tokens_before: u64,
+    #[serde(default)]
+    tokens_after: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -270,6 +320,49 @@ mod tests {
     use crate::model::{
         InteractionMode, ThreadGoal, ThreadGoalStatus, UserInputOption, UserInputQuestion,
     };
+
+    #[test]
+    fn compaction_and_the_token_split_round_trip_through_the_daemon_wire() {
+        let wire = event_to_wire(DriverEvent::ContextCompaction {
+            phase: crate::model::CompactionPhase::Finished,
+            automatic: true,
+            tokens_before: 170_000,
+            tokens_after: Some(21_000),
+        })
+        .unwrap();
+        assert_eq!(wire.kind, "contextCompaction");
+        let DriverEvent::ContextCompaction {
+            phase,
+            automatic,
+            tokens_before,
+            tokens_after,
+        } = event_from_wire(wire).unwrap()
+        else {
+            panic!("expected a compaction");
+        };
+        assert_eq!(phase, crate::model::CompactionPhase::Finished);
+        assert!(automatic);
+        assert_eq!((tokens_before, tokens_after), (170_000, Some(21_000)));
+
+        let totals = crate::usage_history::TokenTotals {
+            uncached_input: 1_000,
+            cached_input: 9_000,
+            cache_creation: 0,
+            output: 300,
+            reasoning: 0,
+        };
+        let wire = event_to_wire(DriverEvent::TokenUsageUpdated {
+            last: totals,
+            session: totals,
+        })
+        .unwrap();
+        assert_eq!(wire.kind, "tokenUsageUpdated");
+        let DriverEvent::TokenUsageUpdated { last, session } = event_from_wire(wire).unwrap() else {
+            panic!("expected a token split");
+        };
+        assert_eq!(last, totals);
+        assert_eq!(session.cached_input, 9_000);
+    }
 
     #[test]
     fn interaction_mode_update_round_trips_through_the_daemon_wire() {

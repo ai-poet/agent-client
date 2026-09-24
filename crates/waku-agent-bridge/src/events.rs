@@ -48,6 +48,13 @@ pub enum AgentEvent {
         context_tokens: Option<u64>,
         context_window: Option<u64>,
     },
+    /// How the latest request's tokens split, and the same summed over the
+    /// session. The decoder fills `last`; the session fills `session` from
+    /// the engine's cost tracker.
+    TokenUsage {
+        last: TokenCounts,
+        session: TokenCounts,
+    },
     /// The engine is compacting the conversation, or has.
     Compaction {
         phase: CompactionPhase,
@@ -82,6 +89,9 @@ pub enum AgentEvent {
     /// [`crate::AgentSession::stop_background_work`] answers synchronously,
     /// because only the caller holds the key the panel filed the entry under.
     BackgroundWork(Vec<BackgroundEntry>),
+    /// The session's goal changed — set, paused, resumed, completed by the
+    /// model, or (`None`) cleared. Carries the whole goal.
+    GoalUpdated(Option<crate::goal::GoalSnapshot>),
     /// A steering message reached the conversation.
     SteerAccepted { message: String },
     /// A steering message could not be delivered — the turn ended first.
@@ -110,6 +120,37 @@ pub enum AgentEvent {
         success: bool,
         summary: Option<String>,
     },
+}
+
+/// Tokens split the way the Messages API reports them; the Responses
+/// adapter is normalized to the same meaning.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TokenCounts {
+    pub uncached_input: u64,
+    pub cached_input: u64,
+    pub cache_creation: u64,
+    pub output: u64,
+}
+
+impl TokenCounts {
+    fn from_usage(usage: &claurst_core::types::UsageInfo) -> Self {
+        Self {
+            uncached_input: usage.input_tokens,
+            cached_input: usage.cache_read_input_tokens,
+            cache_creation: usage.cache_creation_input_tokens,
+            output: usage.output_tokens,
+        }
+    }
+
+    /// Everything the engine's cost tracker has counted this session.
+    pub(crate) fn from_tracker(tracker: &claurst_core::CostTracker) -> Self {
+        Self {
+            uncached_input: tracker.input_tokens(),
+            cached_input: tracker.cache_read_tokens(),
+            cache_creation: tracker.cache_creation_tokens(),
+            output: tracker.output_tokens(),
+        }
+    }
 }
 
 /// Where a compaction is.
@@ -306,10 +347,19 @@ impl StreamDecoder {
                 let context_tokens = usage.as_ref().map(|usage| {
                     (usage.total_input() as u64).saturating_add(usage.output_tokens as u64)
                 });
-                vec![AgentEvent::Usage {
+                let mut events = vec![AgentEvent::Usage {
                     context_tokens,
                     context_window: self.context_window,
-                }]
+                }];
+                if let Some(usage) = usage.as_ref().filter(|usage| {
+                    usage.total_input() > 0 || usage.output_tokens > 0
+                }) {
+                    events.push(AgentEvent::TokenUsage {
+                        last: TokenCounts::from_usage(usage),
+                        session: TokenCounts::default(),
+                    });
+                }
+                events
             }
             Q::TokenWarning { .. } => Vec::new(),
             Q::Compaction {
@@ -462,6 +512,28 @@ mod tests {
             }),
         });
         assert!(stale.is_empty());
+    }
+
+    #[test]
+    fn a_settled_step_reports_how_its_tokens_split() {
+        let mut decoder = StreamDecoder::new(None);
+        let events = decoder.push(QueryEvent::TurnComplete {
+            turn: 1,
+            stop_reason: "end_turn".into(),
+            usage: Some(claurst_core::types::UsageInfo {
+                input_tokens: 1_000,
+                output_tokens: 200,
+                cache_creation_input_tokens: 50,
+                cache_read_input_tokens: 9_000,
+            }),
+        });
+        let Some(AgentEvent::TokenUsage { last, .. }) = events.get(1) else {
+            panic!("expected the token split after the meter");
+        };
+        assert_eq!(last.uncached_input, 1_000);
+        assert_eq!(last.cached_input, 9_000);
+        assert_eq!(last.cache_creation, 50);
+        assert_eq!(last.output, 200);
     }
 
     #[test]

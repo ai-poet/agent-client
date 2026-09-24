@@ -180,8 +180,9 @@ pub enum GoalCommand {
     Set(String),
 }
 
-/// Parse the submitted text as Codex's native `/goal` command, which Waku
-/// bridges to `thread/goal/*`. `None` when it is not one — wrong provider,
+/// Parse the submitted text as the `/goal` command — Codex's native one,
+/// which Waku bridges to `thread/goal/*`, or the built-in agent's, which its
+/// bridge keeps in the engine's goal store. `None` when it is not one — wrong provider,
 /// other text, or a project/user command that deliberately owns `/goal`
 /// (resolution precedence stands).
 pub fn parse_goal_submission(
@@ -189,7 +190,7 @@ pub fn parse_goal_submission(
     prompt: &str,
     commands: &[SlashCommand],
 ) -> Option<GoalCommand> {
-    if provider != ProviderKind::Codex {
+    if !matches!(provider, ProviderKind::Codex | ProviderKind::Native) {
         return None;
     }
     let invocation = prompt.trim().strip_prefix('/')?;
@@ -647,7 +648,7 @@ mod tests {
     }
 
     #[test]
-    fn goal_command_is_codex_only_and_respects_overrides() {
+    fn goal_command_is_codex_and_builtin_agent_only_and_respects_overrides() {
         let builtin = command("goal", CommandScope::Builtin);
         assert_eq!(
             parse_goal_submission(
@@ -656,6 +657,14 @@ mod tests {
                 std::slice::from_ref(&builtin)
             ),
             None
+        );
+        assert_eq!(
+            parse_goal_submission(
+                ProviderKind::Native,
+                "/goal ship it",
+                std::slice::from_ref(&builtin)
+            ),
+            Some(GoalCommand::Set("ship it".into()))
         );
         // A project command deliberately owning /goal wins the collision.
         let mut project = command("goal", CommandScope::Project);

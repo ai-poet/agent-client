@@ -6,6 +6,7 @@ import type {
   ReportedCommand,
   SequencedEvent,
   ThreadGoal,
+  TokenTotals,
   TranscriptBlock,
   TurnStatus,
 } from '@waku/client'
@@ -159,12 +160,12 @@ export function reduceRuntimeEvent(
     }
     case 'richActivity':
       if (acceptsTurnOutput(session) && asRecord(payload)) {
-        const item = payload as ActivityItem
-        // The newest list the agent settled on is the session's.
-        if (item.todos && item.complete && !item.failed) {
-          session.todos = item.todos
+        const merged = upsertActivity(session, payload as ActivityItem, clock)
+        // The newest list the agent settled on is the session's. Read from
+        // the merged row: a completion need not repeat what its start said.
+        if (merged.todos && merged.complete && !merged.failed) {
+          session.todos = merged.todos
         }
-        upsertActivity(session, item, clock)
       }
       break
     case 'permission': {
@@ -197,12 +198,23 @@ export function reduceRuntimeEvent(
       if (!value) break
       const previous = session.context_usage ?? { tokens: 0, window: null }
       session.context_usage = {
+        ...previous,
         tokens:
           typeof value.contextTokens === 'number' ? value.contextTokens : previous.tokens,
         window:
           typeof value.contextWindow === 'number'
             ? value.contextWindow
             : previous.window,
+      }
+      break
+    }
+    case 'tokenUsageUpdated': {
+      const value = asRecord(payload)
+      if (!value) break
+      session.context_usage = {
+        ...(session.context_usage ?? { tokens: 0, window: null }),
+        last: value.last as TokenTotals,
+        session: value.session as TokenTotals,
       }
       break
     }
@@ -362,7 +374,7 @@ function upsertActivity(
   session: AgentSession,
   incoming: ActivityItem,
   _clock: ReducerClock,
-) {
+): ActivityItem {
   finishStreamingMessages(session)
   completeReasoning(session)
   for (const block of [...session.transcript_blocks].reverse()) {
@@ -386,10 +398,12 @@ function upsertActivity(
       display_target: incoming.display_target ?? matching.display_target,
       display_description: incoming.display_description ?? matching.display_description,
       reasoning: incoming.reasoning ?? matching.reasoning,
+      todos: incoming.todos ?? matching.todos,
     })
-    return
+    return matching
   }
   pushActivity(session, incoming)
+  return incoming
 }
 
 function pushActivity(session: AgentSession, activity: ActivityItem) {

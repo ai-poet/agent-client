@@ -27,7 +27,8 @@ use serde_json::Value;
 use uuid::Uuid;
 use waku_agent_bridge::{
     AccessMode, AgentEvent, AgentSession, AgentStartOptions, BackgroundEntry, BackgroundKind,
-    BackgroundStatus, ComputerUseWiring, MissingApiKey, TurnOptions, WireFormat, split_model,
+    BackgroundStatus, ComputerUseWiring, GoalOp, GoalSnapshot, GoalState, MissingApiKey,
+    TurnOptions, WireFormat, split_model,
 };
 
 use super::activity;
@@ -36,8 +37,9 @@ use crate::driver::{
 };
 use crate::model::{
     ActivityKind, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey,
-    BackgroundWorkKind, BackgroundWorkStatus, DriverEvent, InteractionMode, Message, MessageRole,
-    PermissionOption, ProviderResumeCursor, ProviderSessionHistory, RuntimeMode, TurnStatus,
+    BackgroundWorkKind, BackgroundWorkStatus, CompactionPhase, DriverEvent, InteractionMode,
+    Message, MessageRole, PermissionOption, ProviderResumeCursor, ProviderSessionHistory,
+    RuntimeMode, TurnStatus,
     UserInputAnswer, UserInputOption, UserInputQuestion, unix_time_millis,
 };
 
@@ -181,6 +183,8 @@ impl NativeDriver {
                 session_id: session_id.to_string(),
             }),
         });
+        // A resumed session shows its goal before anything else happens.
+        session.goal(GoalOp::Refresh);
 
         Ok(Self {
             session,
@@ -195,6 +199,12 @@ impl NativeDriver {
 impl DriverControl for NativeDriver {
     fn prompt(&self, prompt: String) {
         self.session.prompt(prompt);
+    }
+
+    /// The engine keeps one goal per session and pursues it across turns;
+    /// the desktop's goal chip and dialog drive it the way they drive Codex.
+    fn goal(&self, operation: crate::model::GoalOperation) {
+        self.session.goal(goal_op(operation));
     }
 
     /// The engine drains its command queue at every turn boundary, so a
@@ -276,6 +286,60 @@ impl DriverControl for NativeDriver {
         Ok(ProviderResumeCursor::Native {
             session_id: branch_id.to_string(),
         })
+    }
+}
+
+/// The desktop's goal operation in the bridge's terms. The statuses only
+/// Codex has — blocked, usage-limited — mean "not being pursued" here.
+fn goal_op(operation: crate::model::GoalOperation) -> GoalOp {
+    use crate::model::{GoalOperation, ThreadGoalStatus};
+    match operation {
+        GoalOperation::Refresh => GoalOp::Refresh,
+        GoalOperation::Clear => GoalOp::Clear,
+        GoalOperation::Set {
+            objective,
+            status,
+            replace,
+        } => GoalOp::Set {
+            objective,
+            status: status.map(|status| match status {
+                ThreadGoalStatus::Active => GoalState::Active,
+                ThreadGoalStatus::Complete => GoalState::Complete,
+                ThreadGoalStatus::BudgetLimited => GoalState::BudgetLimited,
+                ThreadGoalStatus::Paused
+                | ThreadGoalStatus::Blocked
+                | ThreadGoalStatus::UsageLimited => GoalState::Paused,
+            }),
+            replace,
+        },
+    }
+}
+
+fn thread_goal(goal: GoalSnapshot) -> crate::model::ThreadGoal {
+    use crate::model::ThreadGoalStatus;
+    crate::model::ThreadGoal {
+        objective: goal.objective,
+        status: match goal.status {
+            GoalState::Active => ThreadGoalStatus::Active,
+            GoalState::Paused => ThreadGoalStatus::Paused,
+            GoalState::BudgetLimited => ThreadGoalStatus::BudgetLimited,
+            GoalState::Complete => ThreadGoalStatus::Complete,
+        },
+        token_budget: goal
+            .token_budget
+            .map(|budget| i64::try_from(budget).unwrap_or(i64::MAX)),
+        tokens_used: i64::try_from(goal.tokens_used).unwrap_or(i64::MAX),
+        time_used_seconds: i64::try_from(goal.time_used_secs).unwrap_or(i64::MAX),
+    }
+}
+
+fn token_totals(counts: waku_agent_bridge::TokenCounts) -> crate::usage_history::TokenTotals {
+    crate::usage_history::TokenTotals {
+        uncached_input: counts.uncached_input,
+        cached_input: counts.cached_input,
+        cache_creation: counts.cache_creation,
+        output: counts.output,
+        reasoning: 0,
     }
 }
 
@@ -617,9 +681,28 @@ impl EventTranslator {
                 context_tokens,
                 context_window,
             }),
-            // The meter follows through the `Usage` the bridge sends after a
-            // finished compaction; the event itself has no transcript row.
-            AgentEvent::Compaction { .. } => {}
+            AgentEvent::GoalUpdated(goal) => {
+                self.send(DriverEvent::GoalUpdated(goal.map(thread_goal)));
+            }
+            AgentEvent::TokenUsage { last, session } => self.send(DriverEvent::TokenUsageUpdated {
+                last: token_totals(last),
+                session: token_totals(session),
+            }),
+            AgentEvent::Compaction {
+                phase,
+                automatic,
+                tokens_before,
+                tokens_after,
+            } => self.send(DriverEvent::ContextCompaction {
+                phase: match phase {
+                    waku_agent_bridge::CompactionPhase::Started => CompactionPhase::Started,
+                    waku_agent_bridge::CompactionPhase::Finished => CompactionPhase::Finished,
+                    waku_agent_bridge::CompactionPhase::Failed => CompactionPhase::Failed,
+                },
+                automatic,
+                tokens_before,
+                tokens_after,
+            }),
             AgentEvent::Permission {
                 request_id,
                 tool_name,

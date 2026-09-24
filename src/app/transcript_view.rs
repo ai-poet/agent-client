@@ -1804,6 +1804,19 @@ impl Waku {
             .filter(|turn| turn.status == TurnStatus::Running)
             .map(|turn| unix_time().saturating_sub(turn.started_at))
             .unwrap_or(0);
+        // A compaction is a long, silent model call; say what it is.
+        let label = if self
+            .state
+            .selected_session
+            .is_some_and(|id| self.compacting_sessions.contains(&id))
+        {
+            tr!("session.context_compacting")
+        } else {
+            tr!(
+                "transcript.working_for",
+                duration = format_working_elapsed(elapsed)
+            )
+        };
         div()
             .h(px(22.0))
             .flex()
@@ -1816,10 +1829,7 @@ impl Waku {
                     .line_height(sp(18.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text_tertiary)
-                    .child(SharedString::from(tr!(
-                        "transcript.working_for",
-                        duration = format_working_elapsed(elapsed)
-                    ))),
+                    .child(SharedString::from(label)),
             )
             .into_any_element()
     }

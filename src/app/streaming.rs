@@ -154,6 +154,11 @@ impl Waku {
                     if item.reasoning.is_some() {
                         activity.reasoning = item.reasoning;
                     }
+                    // A plan row updated in place (ACP's plan, Codex's plan
+                    // tool) carries the newer list.
+                    if item.todos.is_some() {
+                        activity.todos = item.todos;
+                    }
                     session.updated_at = unix_time();
                     runtime.stream_phase = Some(StreamPhase::Activity);
                     if replaces_changes {
@@ -169,6 +174,32 @@ impl Waku {
             session.updated_at = unix_time();
         }
         runtime.stream_phase = Some(StreamPhase::Activity);
+    }
+
+    /// The newest todo list the agent settled on is the session's, so a
+    /// reopened task shows where the work stood. Read from the merged row: a
+    /// provider's completion event need not repeat the list its start carried.
+    fn adopt_settled_todos(&mut self, session_id: Uuid, source_id: Option<&str>) {
+        let Some(source_id) = source_id else {
+            return;
+        };
+        let Some(session) = self.state.session_mut(session_id) else {
+            return;
+        };
+        let todos = session
+            .transcript_blocks
+            .iter()
+            .rev()
+            .flat_map(|block| block.activities.iter().rev())
+            .find(|activity| activity.source_id.as_deref() == Some(source_id))
+            .and_then(ActivityItem::settled_todos)
+            .map(<[_]>::to_vec);
+        if let Some(todos) = todos
+            && session.todos != todos
+        {
+            session.todos = todos;
+            self.state.mark_session_dirty(session_id);
+        }
     }
 
     pub(super) fn complete_turn_blocks(&mut self, session_id: Uuid) {
@@ -286,12 +317,13 @@ impl Waku {
                         // a `/goal` began: the provider's start confirms it.
                         session.mark_active_turn_provider_started();
                         session.status = SessionStatus::Working;
-                    } else if session.provider == ProviderKind::Codex {
-                        // Codex starts turns on its own: goal continuation
-                        // pursues an active goal whenever the thread is
-                        // idle. Give the turn a transcript home — there is
-                        // no user message for it — so its work streams in
-                        // instead of being dropped.
+                    } else if matches!(session.provider, ProviderKind::Codex | ProviderKind::Native)
+                    {
+                        // Codex and the built-in agent start turns on their
+                        // own: goal continuation pursues an active goal
+                        // whenever the thread is idle. Give the turn a
+                        // transcript home — there is no user message for it
+                        // — so its work streams in instead of being dropped.
                         session.begin_provider_turn();
                         session.mark_active_turn_provider_started();
                         session.status = SessionStatus::Working;
@@ -333,16 +365,9 @@ impl Waku {
                         should_refresh_branch_after_activity(item.kind, item.complete)
                             && self.state.selected_session == Some(session_id);
                     self.observe_foreground_command_activity(session_id, &item);
-                    // The newest list the agent settled on is the session's:
-                    // a reopened task shows where the work stood.
-                    if let Some(todos) = item.settled_todos()
-                        && let Some(session) = self.state.session_mut(session_id)
-                        && session.todos != todos
-                    {
-                        session.todos = todos.to_vec();
-                        self.state.mark_session_dirty(session_id);
-                    }
+                    let source_id = item.source_id.clone();
                     self.update_activity(session_id, runtime, item);
+                    self.adopt_settled_todos(session_id, source_id.as_deref());
                     if refresh_branch {
                         self.refresh_selected_branch_snapshot(cx);
                     }
@@ -517,7 +542,34 @@ impl Waku {
                     self.state.mark_session_dirty(session_id);
                 }
             }
+            DriverEvent::TokenUsageUpdated { last, session } => {
+                if let Some(state) = self.state.session_mut(session_id) {
+                    let usage = state.context_usage.get_or_insert(ContextUsage::default());
+                    usage.last = Some(last);
+                    usage.session = Some(session);
+                    self.state.mark_session_dirty(session_id);
+                }
+            }
+            DriverEvent::ContextCompaction {
+                phase,
+                automatic,
+                tokens_before,
+                tokens_after,
+            } => {
+                if phase == crate::model::CompactionPhase::Started {
+                    self.compacting_sessions.insert(session_id);
+                } else {
+                    self.compacting_sessions.remove(&session_id);
+                    let notice = compaction_notice(phase, automatic, tokens_before, tokens_after);
+                    if let Some(session) = self.state.session_mut(session_id) {
+                        session.push_message(MessageRole::System, notice);
+                        session.updated_at = crate::model::unix_time();
+                        self.state.mark_session_dirty(session_id);
+                    }
+                }
+            }
             DriverEvent::TurnFinished { success, summary } => {
+                self.compacting_sessions.remove(&session_id);
                 self.settle_foreground_work(
                     session_id,
                     if success {
@@ -880,6 +932,30 @@ pub(super) fn pop_stream_batch(
     match kind {
         StreamDeltaKind::Text => Some(DriverEvent::TextDelta(chunk)),
         StreamDeltaKind::Reasoning => Some(DriverEvent::ReasoningDelta(chunk)),
+    }
+}
+
+/// The line a finished or failed compaction leaves in the transcript.
+fn compaction_notice(
+    phase: crate::model::CompactionPhase,
+    automatic: bool,
+    tokens_before: u64,
+    tokens_after: Option<u64>,
+) -> String {
+    let before = crate::usage::format_tokens(tokens_before);
+    match (phase, tokens_after) {
+        (crate::model::CompactionPhase::Failed, _) => tr!("session.context_compaction_failed"),
+        (_, Some(after)) if automatic => tr!(
+            "session.context_compacted_auto",
+            before = before,
+            after = crate::usage::format_tokens(after)
+        ),
+        (_, Some(after)) => tr!(
+            "session.context_compacted_manual",
+            before = before,
+            after = crate::usage::format_tokens(after)
+        ),
+        (_, None) => tr!("session.context_compacted"),
     }
 }
 

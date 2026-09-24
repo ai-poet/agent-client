@@ -284,6 +284,37 @@ impl AgentSession {
         self.inner.questions.lock().clear();
     }
 
+    /// Change the session's goal and report it back as
+    /// [`AgentEvent::GoalUpdated`]. A goal set or resumed while nothing runs
+    /// starts pursuing it at once; one set during a turn is picked up when
+    /// that turn ends.
+    pub fn goal(&self, op: crate::goal::GoalOp) {
+        let Some(store) = crate::goal::open_store() else {
+            self.inner.events.emit(AgentEvent::Error(
+                "goals are unavailable: the goal store could not be opened".to_owned(),
+            ));
+            return;
+        };
+        match crate::goal::apply(&store, &self.inner.id, op) {
+            Err(error) => self.inner.events.emit(AgentEvent::Error(error)),
+            Ok(effect) => {
+                self.inner.events.emit(AgentEvent::GoalUpdated(crate::goal::snapshot(
+                    &store,
+                    &self.inner.id,
+                )));
+                match effect {
+                    crate::goal::GoalEffect::Kickoff(prompt)
+                    | crate::goal::GoalEffect::Resume(prompt)
+                        if !self.is_busy() =>
+                    {
+                        self.prompt(prompt);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
     /// Answer a [`AgentEvent::Permission`].
     pub fn respond(&self, request_id: &str, option_id: &str) {
         let Some(choice) = PermissionChoice::from_id(option_id) else {
@@ -622,6 +653,20 @@ async fn run_turn(
         crate::config::refresh_session_rules(&mut query, &config, &options);
     }
     query.command_queue = Some(queue.clone());
+    // A session with an active goal keeps going after each answer until the
+    // model closes it with `GoalComplete` — the one tool set that has it.
+    let goal_store = crate::goal::open_store();
+    let goal_mode = goal_store
+        .as_ref()
+        .is_some_and(|store| crate::goal::is_active(store, &inner.id));
+    let had_goal = goal_store
+        .as_ref()
+        .is_some_and(|store| crate::goal::snapshot(store, &inner.id).is_some());
+    drop(goal_store);
+    if goal_mode {
+        query.continuation = claurst_query::ContinuationMode::Goal;
+    }
+    let tokens_before = inner.cost_tracker.total_tokens();
     // Read while `config` is still here: it moves into the tool context
     // below, and a turn that ends up saying nothing has to name the route it
     // tried.
@@ -630,11 +675,18 @@ async fn run_turn(
         model: query.model.clone(),
         api_base: config.resolve_anthropic_api_base(),
     };
-    let tools = inner.tools.lock().plain.clone();
+    let tools = {
+        let sets = inner.tools.lock();
+        if goal_mode {
+            sets.goal.clone()
+        } else {
+            sets.plain.clone()
+        }
+    };
     // `None` means "nobody here knows", and the meter then shows a token
     // count with no percentage rather than a percentage of the wrong number.
-    // The engine's heuristic would have answered 100k for every model this
-    // app offers, which is the bug being fixed.
+    // The engine's heuristic answers a fixed guess for every model it does
+    // not know, which is no basis for a percentage.
     let context_window = crate::config::registry_context_window(&query.model, &route.provider);
 
     let client = inner.client.lock().clone();
@@ -717,6 +769,7 @@ async fn run_turn(
     // produces nothing either, and saying "the model ended without saying
     // anything" to someone who just pressed stop would be a lie.
     let ended_empty = !produced_output && matches!(outcome, QueryOutcome::EndTurn { .. });
+    let cancelled = matches!(outcome, QueryOutcome::Cancelled);
     let (success, summary) = describe(outcome, produced_output, &route);
     if !success && let Some(reason) = summary.clone() {
         // The empty turn gets its own event so the desktop can say it in the
@@ -741,6 +794,7 @@ async fn run_turn(
     inner
         .events
         .emit(AgentEvent::BackgroundWork(background::snapshot()));
+    let goal_follow_up = settle_goal(&inner, goal_mode, had_goal, tokens_before, cancelled);
 
     // Steering messages the watcher had not yet accounted for. The queue
     // itself is the authority, not the watcher's 120ms poll: `drain` empties
@@ -758,6 +812,49 @@ async fn run_turn(
             }
         });
     }
+
+    // Last, so the next turn starts after this one has fully reported.
+    if let Some(prompt) = goal_follow_up {
+        AgentSession { inner }.prompt(prompt);
+    }
+}
+
+/// After a turn: charge its tokens to the goal, report where the goal
+/// stands, and say whether to keep going.
+///
+/// Stopping a turn pauses an active goal — otherwise the next message would
+/// quietly pick the pursuit back up. A goal set while an ordinary turn ran
+/// was not pursued by it, so it starts now; one the turn already pursued was
+/// kept going by the engine itself until it stopped.
+fn settle_goal(
+    inner: &Arc<Inner>,
+    goal_mode: bool,
+    had_goal: bool,
+    tokens_before: u64,
+    cancelled: bool,
+) -> Option<String> {
+    let store = crate::goal::open_store()?;
+    let goal = store.get_goal(&inner.id);
+    if let Some(goal) = &goal {
+        let spent = inner.cost_tracker.total_tokens().saturating_sub(tokens_before);
+        if spent > 0 {
+            let _ = store.add_tokens(&inner.id, spent);
+        }
+        if cancelled && goal.status == claurst_core::GoalStatus::Active {
+            let _ = store.set_status(&inner.id, claurst_core::GoalStatus::Paused);
+        }
+    }
+    if goal.is_some() || had_goal {
+        inner
+            .events
+            .emit(AgentEvent::GoalUpdated(crate::goal::snapshot(&store, &inner.id)));
+    }
+    if goal_mode || cancelled {
+        return None;
+    }
+    store
+        .get_active_goal(&inner.id)
+        .map(|goal| claurst_core::goal_continuation_message(&goal))
 }
 
 async fn forward_events(
@@ -769,7 +866,10 @@ async fn forward_events(
 ) {
     let mut decoder = StreamDecoder::new(context_window);
     while let Some(event) = rx.recv().await {
-        for translated in decoder.push(event) {
+        for mut translated in decoder.push(event) {
+            if let AgentEvent::TokenUsage { session, .. } = &mut translated {
+                *session = crate::events::TokenCounts::from_tracker(&inner.cost_tracker);
+            }
             if let AgentEvent::PlanModeChanged(plan) = &translated {
                 // The model entered or left plan mode mid-turn. Move the
                 // engine's permission policy now — waiting for the next
@@ -805,7 +905,19 @@ async fn forward_events(
                     *manager = PermissionManager::new(permission_mode, &settings);
                 }
             }
+            let closed_goal = matches!(
+                &translated,
+                AgentEvent::ToolFinished { name, failed: false, .. }
+                    if name == GOAL_COMPLETE_TOOL
+            );
             inner.events.emit(translated);
+            // The model just marked the goal complete; the chip should say
+            // so now, not when the run winds down.
+            if closed_goal && let Some(store) = crate::goal::open_store() {
+                inner
+                    .events
+                    .emit(AgentEvent::GoalUpdated(crate::goal::snapshot(&store, &inner.id)));
+            }
         }
     }
 }

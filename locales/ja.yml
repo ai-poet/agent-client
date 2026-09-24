@@ -967,6 +967,11 @@ transcript.worked: 完了
 transcript.worked_for: 作業時間 %{duration}
 transcript.you_stopped_after: "%{duration} 後にタスクを停止しました"
 transcript.working_for: 作業中 · %{duration}
+session.context_compacting: "会話を圧縮しています…"
+session.context_compacted_auto: "コンテキストを自動で圧縮しました · %{before} → %{after}"
+session.context_compacted_manual: "コンテキストを圧縮しました · %{before} → %{after}"
+session.context_compacted: "コンテキストを圧縮しました"
+session.context_compaction_failed: "コンテキストを圧縮できませんでした。会話はそのままです"
 transcript.thinking: 思考中
 transcript.thought_for: 思考時間 %{duration}
 transcript.changed_file: "%{count} 個のファイルを変更"
@@ -1070,6 +1075,8 @@ usage.refresh_failed: "使用状況の更新に失敗しました：%{error}"
 usage.context_used: コンテキストウインドウを %{percent}% 使用（%{shortcut}）
 usage.shortcut: 使用状況（%{shortcut}）
 usage.context_window: コンテキストウインドウ
+usage.last_request: "直近のリクエスト：入力 %{input}（キャッシュ %{cached}）· 出力 %{output}"
+usage.session_totals: "この実行の累計：入力 %{input} · 出力 %{output} · キャッシュヒット %{rate}"
 usage.plan_limits: プランの使用量上限
 usage.plan_limits_named: プランの使用量上限 · %{plan}
 usage.open_account_settings: アカウントの使用状況設定を開く
