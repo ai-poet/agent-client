@@ -64,6 +64,9 @@ pub mod transformers;
 // Fork departure (Waku): prompt-cache breakpoints on Messages requests.
 pub mod prompt_cache;
 
+// Fork departure (Waku): Claude's reasoning effort as `output_config.effort`.
+pub mod claude_effort;
+
 // ---------------------------------------------------------------------------
 // Public re-exports
 // ---------------------------------------------------------------------------
@@ -206,6 +209,16 @@ pub mod types {
         pub stream: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         pub thinking: Option<ThinkingConfig>,
+        /// Fork (Waku): the reasoning effort current Claude models take in
+        /// place of a thinking budget — see [`crate::claude_effort`].
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub output_config: Option<OutputConfig>,
+    }
+
+    /// `output_config` on a Messages request.
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    pub struct OutputConfig {
+        pub effort: String,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1294,6 +1307,7 @@ impl CreateMessageRequest {
             top_k: None,
             stop_sequences: None,
             thinking: None,
+            output_config: None,
         }
     }
 }
@@ -1309,6 +1323,7 @@ pub struct CreateMessageRequestBuilder {
     top_k: Option<u32>,
     stop_sequences: Option<Vec<String>>,
     thinking: Option<ThinkingConfig>,
+    output_config: Option<OutputConfig>,
 }
 
 impl CreateMessageRequestBuilder {
@@ -1362,6 +1377,11 @@ impl CreateMessageRequestBuilder {
         self
     }
 
+    pub fn output_config(mut self, config: OutputConfig) -> Self {
+        self.output_config = Some(config);
+        self
+    }
+
     pub fn build(self) -> CreateMessageRequest {
         CreateMessageRequest {
             model: self.model,
@@ -1375,6 +1395,7 @@ impl CreateMessageRequestBuilder {
             stop_sequences: self.stop_sequences,
             stream: true,
             thinking: self.thinking,
+            output_config: self.output_config,
         }
     }
 }

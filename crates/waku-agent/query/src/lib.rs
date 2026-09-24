@@ -60,7 +60,7 @@ pub use session_memory::{
 
 use claurst_api::{
     ApiMessage, ApiToolDefinition, AnthropicStreamEvent, CreateMessageRequest, StreamAccumulator,
-    StreamHandler, SystemPrompt, ThinkingConfig,
+    StreamHandler, SystemPrompt,
 };
 use claurst_core::config::Config;
 use claurst_core::cost::CostTracker;
@@ -795,8 +795,20 @@ pub async fn run_query_loop(
             effective_effort_level.and_then(|el| el.thinking_budget_tokens())
         });
 
-        if let Some(budget) = effective_thinking_budget {
-            req_builder = req_builder.thinking(ThinkingConfig::enabled(budget));
+        // Fork (Waku): current Claude families take the effort itself —
+        // adaptive thinking plus `output_config.effort`, as Claude Code sends
+        // it — and Opus 5.5 rejects a budget. Older models keep the budget.
+        let claude_reasoning = claurst_api::claude_effort::claude_reasoning(
+            &effective_model,
+            effective_effort_level,
+            effective_thinking_budget,
+        );
+        let (thinking_config, output_config) = claude_reasoning.fields();
+        if let Some(thinking_config) = thinking_config {
+            req_builder = req_builder.thinking(thinking_config);
+        }
+        if let Some(output_config) = output_config {
+            req_builder = req_builder.output_config(output_config);
         }
 
         // Apply temperature: explicit config value takes precedence, then agent override,
@@ -808,13 +820,21 @@ pub async fn run_query_loop(
                     .map(|t| t as f32)
             })
             .or_else(|| {
-                effective_effort_level.and_then(|el| el.temperature())
+                // A thinking request takes only the default temperature, and
+                // Low's 0.0 now rides along with adaptive thinking.
+                effective_effort_level
+                    .filter(|_| !claude_reasoning.thinks())
+                    .and_then(|el| el.temperature())
             });
         if let Some(t) = effective_temperature {
             req_builder = req_builder.temperature(t);
         }
 
-        let request = req_builder.build();
+        // Fork (Waku): this is the request the Anthropic route sends — the
+        // provider adapter is bypassed for it — so the cache breakpoints go
+        // here as well as in `providers/anthropic.rs`.
+        let mut request = req_builder.build();
+        claurst_api::prompt_cache::apply_breakpoints(&mut request);
 
         // Create a stream handler that forwards to the event channel
         let handler: Arc<dyn StreamHandler> = if let Some(ref tx) = event_tx {
