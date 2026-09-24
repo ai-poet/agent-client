@@ -608,10 +608,10 @@ const MIN_PLAUSIBLE_REGISTRY_WINDOW: u64 = 8192;
 /// The model's real context window, or `None` when nothing here knows it.
 ///
 /// Deliberately not `claurst_query::resolve_context_window`: that one returns
-/// a plain `u64` because it always falls back to a Claude-only heuristic that
-/// answers 100k for everything it does not recognise — which is every model
-/// this app actually offers, and precisely the number the usage meter was
-/// wrong about. A meter that says nothing beats a meter that says 100k.
+/// a plain `u64` because it always falls back to a heuristic that answers a
+/// fixed guess for everything it does not recognise — which is every model
+/// this app actually offers. A meter that says nothing beats a meter that
+/// shows a percentage of a guess.
 ///
 /// The engine's auto-compact keeps using the heuristic, and should: it needs
 /// *a* threshold to act on, where the meter needs the truth or silence.
@@ -646,7 +646,7 @@ pub fn build_query_config(config: &Config, options: &AgentStartOptions) -> Query
     // `from_config_with_registry` consults the registry to resolve the model
     // name but does not keep it, so hand it over as well: that is what sizes
     // the engine's own auto-compact against the model's real window instead
-    // of the Claude-only heuristic's 100k.
+    // of the heuristic's guess.
     query.model_registry = Some(model_registry().clone());
     query.working_directory = Some(options.cwd.display().to_string());
     // `QueryConfig::from_config` copies neither of these, so the Agent
@@ -849,8 +849,8 @@ mod tests {
     }
 
     /// The whole point of returning an `Option`: the models this app actually
-    /// offers are newer than the snapshot, and a wrong 100k is worse than no
-    /// percentage at all. The gateway is what fills these in.
+    /// offers are newer than the snapshot, and a guessed window is worse than
+    /// no percentage at all. The gateway is what fills these in.
     #[test]
     fn a_model_no_source_knows_reports_nothing_rather_than_a_guess() {
         for (model, provider) in [
@@ -863,9 +863,9 @@ mod tests {
                 None,
                 "{model} should report an unknown window, not a guess"
             );
-            // The heuristic this replaced would have answered 100k for every
-            // one of them.
-            assert_eq!(claurst_query::context_window_for_model(model), 100_000);
+            // The engine's heuristic still answers one — a guess the
+            // compaction threshold can act on, but not a number to show.
+            assert!(claurst_query::context_window_for_model(model) >= 200_000);
         }
     }
 

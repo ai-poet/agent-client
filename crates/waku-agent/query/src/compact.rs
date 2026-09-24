@@ -802,21 +802,29 @@ pub fn format_compact_summary(raw: &str) -> String {
 /// These are approximate; the API enforces the real limits server-side.
 ///
 /// This is a Claude-centric heuristic and only recognises Anthropic models —
-/// every other provider collapses to the ~100k default. Prefer
+/// every other provider collapses to [`UNKNOWN_MODEL_CONTEXT_WINDOW`]. Prefer
 /// [`resolve_context_window`], which consults the models.dev-backed registry
 /// first and only falls back to this heuristic.
 pub fn context_window_for_model(model: &str) -> u64 {
-    if model.contains("opus-4")
-        || model.contains("sonnet-4")
-        || model.contains("haiku-4")
-        || model.contains("claude-3-5")
-        || model.contains("claude-3.5")
+    if model.contains("claude-2") || model.contains("claude-instant") {
+        100_000
+    } else if ["claude", "opus", "sonnet", "haiku", "fable"]
+        .iter()
+        .any(|family| model.contains(family))
     {
+        // Waku: every Claude generation since 3.5 has at least 200k — the
+        // newer names the registry does not know yet included, which would
+        // otherwise fall through to the larger default below.
         200_000
     } else {
-        100_000
+        UNKNOWN_MODEL_CONTEXT_WINDOW
     }
 }
+
+/// Waku: the window assumed for a model nothing here knows. Upstream assumed
+/// 100k, which compacted every newer GPT, Grok and gateway model long before
+/// it needed to; the models this app offers start around 256k.
+pub const UNKNOWN_MODEL_CONTEXT_WINDOW: u64 = 256_000;
 
 /// Smallest registry context-window value we treat as real.
 ///
@@ -874,7 +882,7 @@ pub fn resolve_context_window(
         // Waku: the route's provider id is not always the one models.dev
         // files the model under — the Responses route is `codex`, which it
         // does not have, and Grok lives under `xai`. Ask the registry's own
-        // family table before settling for the 100k guess.
+        // family table before settling for a guess.
         if let Some(owner) = registry.find_provider_for_model(stripped) {
             if let Some(window) = registry_context_window(registry, &owner.to_string(), stripped) {
                 return window;
@@ -2115,6 +2123,9 @@ mod tests {
     #[test]
     fn test_context_window_legacy() {
         assert_eq!(context_window_for_model("claude-2"), 100_000);
+        // Waku: newer Claude names the registry has not caught up with.
+        assert_eq!(context_window_for_model("claude-opus-5-5"), 200_000);
+        assert_eq!(context_window_for_model("gpt-6-sol"), UNKNOWN_MODEL_CONTEXT_WINDOW);
     }
 
     // ---- resolve_context_window (#216) -------------------------------------
@@ -2171,7 +2182,7 @@ mod tests {
             context_window_for_model("claude-opus-4-8")
         );
         assert_eq!(resolve_context_window(None, "anthropic", "claude-opus-4-8"), 200_000);
-        assert_eq!(resolve_context_window(None, "some-provider", "some-model"), 100_000);
+        assert_eq!(resolve_context_window(None, "some-provider", "some-model"), 256_000);
     }
 
     #[test]
@@ -2182,7 +2193,7 @@ mod tests {
             resolve_context_window(Some(&reg), "nope", "ghost-model"),
             context_window_for_model("ghost-model")
         );
-        assert_eq!(resolve_context_window(Some(&reg), "nope", "ghost-model"), 100_000);
+        assert_eq!(resolve_context_window(Some(&reg), "nope", "ghost-model"), 256_000);
     }
 
     #[test]
@@ -2199,7 +2210,7 @@ mod tests {
             resolve_context_window(Some(&reg), "testprov", "tiny-model"),
             context_window_for_model("tiny-model")
         );
-        assert_eq!(resolve_context_window(Some(&reg), "testprov", "tiny-model"), 100_000);
+        assert_eq!(resolve_context_window(Some(&reg), "testprov", "tiny-model"), 256_000);
     }
 
     // ---- estimate_tokens_for_messages --------------------------------------
