@@ -1515,6 +1515,8 @@ pub struct Waku {
     cloud_usage: cloud_usage::CloudUsageState,
     /// Fork addition: model plaza view state.
     model_plaza: model_plaza::ModelPlazaState,
+    /// Fork addition: the image studio, opened from the sidebar.
+    image_studio: image_studio::ImageStudioState,
     /// Fork addition: workflow page view state.
     workflow: workflow::WorkflowState,
     /// Fork addition: search field on the Model Plaza page.
@@ -1744,6 +1746,8 @@ mod drafts;
 mod error_banner;
 mod file_search;
 mod image_preview;
+mod image_studio;
+mod image_studio_view;
 mod model_plaza;
 mod model_providers_page;
 mod workflow;
@@ -3190,6 +3194,7 @@ impl Waku {
                 model_picker_format: "messages".to_owned(),
                 cloud_usage: cloud_usage::CloudUsageState::default(),
                 model_plaza: model_plaza::ModelPlazaState::default(),
+                image_studio: image_studio::ImageStudioState::default(),
                 workflow: workflow::WorkflowState::default(),
                 plaza_search_input,
                 cloud_pay: None,

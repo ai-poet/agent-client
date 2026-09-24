@@ -54,6 +54,7 @@ command_palette.resume: 恢复…
 command_palette.change_provider: 更改服务商
 command_palette.current_provider: 当前服务商
 command_palette.open_project: 打开项目…
+command_palette.open_image_studio: "画图"
 command_palette.choose_model: 选择模型…
 command_palette.copy_task_id: 复制任务 ID
 command_palette.copy_agent_cli_thread_id: 复制智能体 CLI 线程 ID
@@ -240,6 +241,65 @@ common.rename: 重命名
 session.new_task: 新任务
 sidebar.today: 今天
 sidebar.search: 搜索
+sidebar.image_studio: "画图"
+image_studio.title: "画图"
+image_studio.placeholder: "描述你想要的画面，或拖入、粘贴图片来改图…"
+image_studio.subtitle: "文生图，或图生图"
+image_studio.picture_count: "共 %{count} 张"
+image_studio.open_folder: "打开文件夹"
+image_studio.signed_out_title: "登录后就能画图"
+image_studio.signed_out_body: "图片通过你账号的网关生成，从余额扣费。"
+image_studio.sign_in: "去登录"
+image_studio.empty_title: "还没有画过图"
+image_studio.empty_body: "在下方写下想要的画面；拖入、粘贴或选择图片，就会在这些图片的基础上改图。"
+image_studio.file_missing: "文件已被移动或删除"
+image_studio.use_as_reference: "用作参考图"
+image_studio.edit_again: "改提示词再画"
+image_studio.rerun: "重新生成"
+image_studio.send_to_task: "发到对话"
+image_studio.copy_prompt: "复制提示词"
+image_studio.remove: "从图库移除"
+image_studio.queued: "等待空位"
+image_studio.running_task: "在网关上排队生成，关窗口也不丢"
+image_studio.running_direct: "直接生成中"
+image_studio.waiting: "排队中"
+image_studio.drawing: "生成中 · %{time}"
+image_studio.cancel: "不等了"
+image_studio.count_label: "%{count} 张"
+image_studio.retry: "重试"
+image_studio.top_up: "去充值"
+image_studio.group_auto: "分组：自动"
+image_studio.group_number: "分组 #%{id}"
+image_studio.group_denied: "未开放生图"
+image_studio.size_auto: "自动"
+image_studio.quality_auto: "质量：自动"
+image_studio.quality_low: "质量：低"
+image_studio.quality_medium: "质量：中"
+image_studio.quality_high: "质量：高"
+image_studio.add_images: "添加图片"
+image_studio.generate: "生成"
+image_studio.mode_edit: "图生图"
+image_studio.mode_generate: "文生图"
+image_studio.estimate: "预计 %{price}"
+image_studio.error_no_permission: "你的分组都没开放这个模型的生图"
+image_studio.error_wrong_platform: "这个分组不能画图（需要 OpenAI 或 Grok 分组）"
+image_studio.error_model_unavailable: "没有分组提供这个模型"
+image_studio.error_content_policy: "提示词或图片没通过内容审核"
+image_studio.error_balance: "余额不足"
+image_studio.error_upstream_balance: "上游生图账号余额不足，稍后再试"
+image_studio.error_busy: "生图的人太多了，稍后再试"
+image_studio.error_timeout: "生成超时"
+image_studio.error_task_lost: "任务已过期，结果取不回来了"
+image_studio.error_interrupted: "应用关闭时中断了"
+image_studio.error_unauthorized: "登录已失效，请重新登录"
+image_studio.error_network: "连不上网关"
+image_studio.error_other: "生成失败"
+image_studio.too_many_references: "这个模型最多 %{count} 张参考图"
+image_studio.reference_format: "只支持 PNG、JPEG 和 WebP 图片"
+image_studio.reference_too_large: "图片不能超过 20 MB"
+image_studio.reference_unreadable: "图片读不出来"
+image_studio.sign_in_first: "先登录才能画图"
+image_studio.prompt_copied: "提示词已复制"
 sidebar.options: 侧边栏选项
 sidebar.grouping: 分组
 sidebar.grouping_project: 项目

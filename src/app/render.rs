@@ -389,30 +389,38 @@ impl Render for Waku {
                     .children(self.render_update_banner(cx))
                     .children(self.render_daemon_connection_banner(cx))
                     .child(self.render_header(window, cx))
-                    .child(if empty {
-                        self.render_empty_state(cx).into_any_element()
-                    } else {
-                        div()
-                            .flex_1()
-                            .min_h(px(0.0))
-                            .w_full()
-                            .flex()
-                            .flex_col()
-                            .relative()
-                            .child(self.transcript_pane.clone().cached(
-                                StyleRefinement::default().flex_1().min_h(px(0.0)).w_full(),
-                            ))
-                            .children(self.render_status_capsule(cx))
-                            .into_any_element()
+                    // Fork addition: the image studio takes the column in
+                    // place of the task.
+                    .when(self.image_studio.open, |element| {
+                        element.child(self.render_image_studio(cx))
                     })
-                    .children(permission)
-                    .children(self.render_error_banner(cx))
-                    .when(self.selected_project().is_some(), |element| {
+                    .when(!self.image_studio.open, |element| {
                         element
-                            .children(self.render_queued_messages(cx))
-                            .children(self.render_onboarding_strip(cx))
-                            .child(self.render_composer(window, cx))
-                            .child(self.render_workspace_footer(cx))
+                            .child(if empty {
+                                self.render_empty_state(cx).into_any_element()
+                            } else {
+                                div()
+                                    .flex_1()
+                                    .min_h(px(0.0))
+                                    .w_full()
+                                    .flex()
+                                    .flex_col()
+                                    .relative()
+                                    .child(self.transcript_pane.clone().cached(
+                                        StyleRefinement::default().flex_1().min_h(px(0.0)).w_full(),
+                                    ))
+                                    .children(self.render_status_capsule(cx))
+                                    .into_any_element()
+                            })
+                            .children(permission)
+                            .children(self.render_error_banner(cx))
+                            .when(self.selected_project().is_some(), |element| {
+                                element
+                                    .children(self.render_queued_messages(cx))
+                                    .children(self.render_onboarding_strip(cx))
+                                    .child(self.render_composer(window, cx))
+                                    .child(self.render_workspace_footer(cx))
+                            })
                     })
                     .relative()
                     .children(toast)

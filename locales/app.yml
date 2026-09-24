@@ -110,6 +110,8 @@ command_palette.current_provider:
   en: Current provider
 command_palette.open_project:
   en: Open project…
+command_palette.open_image_studio:
+  en: "Draw an image"
 command_palette.choose_model:
   en: Choose model…
 command_palette.copy_task_id:
@@ -492,6 +494,124 @@ sidebar.today:
   en: Today
 sidebar.search:
   en: Search
+sidebar.image_studio:
+  en: "Images"
+image_studio.title:
+  en: "Images"
+image_studio.placeholder:
+  en: "Describe a picture, or drop and paste images to edit them…"
+image_studio.subtitle:
+  en: "Text to image, or image to image"
+image_studio.picture_count:
+  en: "%{count} pictures"
+image_studio.open_folder:
+  en: "Open folder"
+image_studio.signed_out_title:
+  en: "Sign in to draw"
+image_studio.signed_out_body:
+  en: "Pictures are drawn through your account's gateway and billed to its balance."
+image_studio.sign_in:
+  en: "Sign in"
+image_studio.empty_title:
+  en: "Nothing drawn yet"
+image_studio.empty_body:
+  en: "Write what you want to see below. Add pictures — drop, paste or pick them — and the request edits them instead."
+image_studio.file_missing:
+  en: "The file was moved or deleted"
+image_studio.use_as_reference:
+  en: "Use as reference"
+image_studio.edit_again:
+  en: "Edit prompt again"
+image_studio.rerun:
+  en: "Draw again"
+image_studio.send_to_task:
+  en: "Send to task"
+image_studio.copy_prompt:
+  en: "Copy prompt"
+image_studio.remove:
+  en: "Remove"
+image_studio.queued:
+  en: "Waiting for a free slot"
+image_studio.running_task:
+  en: "Runs on the gateway — closing the window loses nothing"
+image_studio.running_direct:
+  en: "Drawing directly"
+image_studio.waiting:
+  en: "Queued"
+image_studio.drawing:
+  en: "Drawing · %{time}"
+image_studio.cancel:
+  en: "Stop waiting"
+image_studio.count_label:
+  en: "×%{count}"
+image_studio.retry:
+  en: "Retry"
+image_studio.top_up:
+  en: "Top up"
+image_studio.group_auto:
+  en: "Group: automatic"
+image_studio.group_number:
+  en: "Group #%{id}"
+image_studio.group_denied:
+  en: "no image access"
+image_studio.size_auto:
+  en: "Auto"
+image_studio.quality_auto:
+  en: "Quality: auto"
+image_studio.quality_low:
+  en: "Quality: low"
+image_studio.quality_medium:
+  en: "Quality: medium"
+image_studio.quality_high:
+  en: "Quality: high"
+image_studio.add_images:
+  en: "Add images"
+image_studio.generate:
+  en: "Draw"
+image_studio.mode_edit:
+  en: "Image to image"
+image_studio.mode_generate:
+  en: "Text to image"
+image_studio.estimate:
+  en: "About %{price}"
+image_studio.error_no_permission:
+  en: "None of your groups may draw with this model"
+image_studio.error_wrong_platform:
+  en: "This group cannot draw (it needs an OpenAI or Grok group)"
+image_studio.error_model_unavailable:
+  en: "No group serves this model"
+image_studio.error_content_policy:
+  en: "The prompt or a picture was turned down by moderation"
+image_studio.error_balance:
+  en: "Not enough balance"
+image_studio.error_upstream_balance:
+  en: "The image service is out of credit — try again later"
+image_studio.error_busy:
+  en: "Too many pictures at once — try again shortly"
+image_studio.error_timeout:
+  en: "Drawing took too long"
+image_studio.error_task_lost:
+  en: "The task expired before its result was fetched"
+image_studio.error_interrupted:
+  en: "Interrupted when the app closed"
+image_studio.error_unauthorized:
+  en: "The sign-in is no longer valid — sign in again"
+image_studio.error_network:
+  en: "Could not reach the gateway"
+image_studio.error_other:
+  en: "Drawing failed"
+image_studio.too_many_references:
+  en: "At most %{count} reference pictures for this model"
+image_studio.reference_format:
+  en: "Only PNG, JPEG and WebP pictures can be used"
+image_studio.reference_too_large:
+  en: "Pictures must be under 20 MB"
+image_studio.reference_unreadable:
+  en: "The picture could not be read"
+image_studio.sign_in_first:
+  en: "Sign in to draw"
+image_studio.prompt_copied:
+  en: "Prompt copied"
 sidebar.options:
   en: Sidebar options
 sidebar.grouping:

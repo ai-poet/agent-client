@@ -56,6 +56,7 @@ command_palette.resume: 再開…
 command_palette.change_provider: プロバイダーを変更
 command_palette.current_provider: 現在のプロバイダー
 command_palette.open_project: プロジェクトを開く…
+command_palette.open_image_studio: "画像を生成"
 command_palette.choose_model: モデルを選択…
 command_palette.copy_task_id: タスク ID をコピー
 command_palette.copy_agent_cli_thread_id: エージェント CLI スレッド ID をコピー
@@ -252,6 +253,65 @@ session.new_task: 新規タスク
 
 sidebar.today: 今日
 sidebar.search: 検索
+sidebar.image_studio: "画像生成"
+image_studio.title: "画像生成"
+image_studio.placeholder: "描きたい画像を説明するか、画像をドロップ・貼り付けして編集…"
+image_studio.subtitle: "テキストから画像、または画像から画像"
+image_studio.picture_count: "%{count} 枚"
+image_studio.open_folder: "フォルダを開く"
+image_studio.signed_out_title: "サインインすると画像を生成できます"
+image_studio.signed_out_body: "画像はアカウントのゲートウェイで生成され、残高から課金されます。"
+image_studio.sign_in: "サインイン"
+image_studio.empty_title: "まだ画像はありません"
+image_studio.empty_body: "下に描きたいものを書いてください。画像をドロップ・貼り付け・選択すると、その画像を編集します。"
+image_studio.file_missing: "ファイルが移動または削除されました"
+image_studio.use_as_reference: "参照画像にする"
+image_studio.edit_again: "プロンプトを編集して再生成"
+image_studio.rerun: "もう一度生成"
+image_studio.send_to_task: "タスクに送る"
+image_studio.copy_prompt: "プロンプトをコピー"
+image_studio.remove: "削除"
+image_studio.queued: "空きを待っています"
+image_studio.running_task: "ゲートウェイで生成中 — ウィンドウを閉じても失われません"
+image_studio.running_direct: "直接生成中"
+image_studio.waiting: "待機中"
+image_studio.drawing: "生成中 · %{time}"
+image_studio.cancel: "待つのをやめる"
+image_studio.count_label: "%{count} 枚"
+image_studio.retry: "再試行"
+image_studio.top_up: "チャージ"
+image_studio.group_auto: "グループ：自動"
+image_studio.group_number: "グループ #%{id}"
+image_studio.group_denied: "画像生成不可"
+image_studio.size_auto: "自動"
+image_studio.quality_auto: "品質：自動"
+image_studio.quality_low: "品質：低"
+image_studio.quality_medium: "品質：中"
+image_studio.quality_high: "品質：高"
+image_studio.add_images: "画像を追加"
+image_studio.generate: "生成"
+image_studio.mode_edit: "画像から画像"
+image_studio.mode_generate: "テキストから画像"
+image_studio.estimate: "約 %{price}"
+image_studio.error_no_permission: "このモデルで画像生成できるグループがありません"
+image_studio.error_wrong_platform: "このグループでは画像生成できません（OpenAI または Grok のグループが必要です）"
+image_studio.error_model_unavailable: "このモデルを提供するグループがありません"
+image_studio.error_content_policy: "プロンプトまたは画像がモデレーションで拒否されました"
+image_studio.error_balance: "残高不足です"
+image_studio.error_upstream_balance: "画像サービスのクレジットが不足しています — 後で再試行してください"
+image_studio.error_busy: "混み合っています — 少し待って再試行してください"
+image_studio.error_timeout: "生成がタイムアウトしました"
+image_studio.error_task_lost: "結果を取得する前にタスクの期限が切れました"
+image_studio.error_interrupted: "アプリの終了で中断されました"
+image_studio.error_unauthorized: "サインインが無効です — もう一度サインインしてください"
+image_studio.error_network: "ゲートウェイに接続できません"
+image_studio.error_other: "生成に失敗しました"
+image_studio.too_many_references: "このモデルの参照画像は最大 %{count} 枚です"
+image_studio.reference_format: "PNG・JPEG・WebP の画像のみ使えます"
+image_studio.reference_too_large: "画像は 20 MB 未満にしてください"
+image_studio.reference_unreadable: "画像を読み込めませんでした"
+image_studio.sign_in_first: "サインインしてから生成してください"
+image_studio.prompt_copied: "プロンプトをコピーしました"
 sidebar.options: サイドバーオプション
 sidebar.grouping: グループ化
 sidebar.grouping_project: プロジェクト

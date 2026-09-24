@@ -152,6 +152,8 @@ enum PaletteAction {
     SelectResumeProvider(ProviderKind),
     ResumeProviderSession(ProviderSessionSummary),
     OpenProject,
+    /// Fork addition.
+    OpenImageStudio,
     FocusComposer,
     CopyIdentifier(PaletteIdentifier),
     ChooseModel,
@@ -719,6 +721,15 @@ impl Waku {
                 Some(crate::platform::primary_shortcut("⌘O", "Ctrl+O")),
                 PaletteAction::OpenProject,
                 "open add folder project workspace repository repo",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.open_image_studio"),
+                "icons/image.svg",
+                None,
+                PaletteAction::OpenImageStudio,
+                "image images picture draw generate edit gpt-image grok imagine 画图 生图",
                 next(),
             ),
         ];
@@ -1592,6 +1603,7 @@ impl Waku {
         match action {
             PaletteAction::NewTask => self.new_session_action(&NewSession, window, cx),
             PaletteAction::OpenProject => self.new_project_action(&NewProject, window, cx),
+            PaletteAction::OpenImageStudio => self.open_image_studio(window, cx),
             PaletteAction::FocusComposer => self.focus_composer_action(&FocusComposer, window, cx),
             PaletteAction::CopyIdentifier(identifier) => {
                 if let Some(value) = identifier.value(self.selected_session()) {

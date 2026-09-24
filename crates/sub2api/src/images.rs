@@ -378,6 +378,9 @@ pub enum ImageErrorKind {
     AsyncUnavailable,
     /// The task is gone: expired, or never this key's.
     TaskLost,
+    /// The request was cut off before it answered — the app closed while it
+    /// was drawing without a task to come back to.
+    Interrupted,
     BadRequest,
     Unauthorized,
     Network,

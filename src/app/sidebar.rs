@@ -351,7 +351,8 @@ fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<us
 
 fn sidebar_row_height(row: SidebarRow) -> Pixels {
     px(match row {
-        SidebarRow::Search => SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP,
+        // Search, then the image studio beneath it.
+        SidebarRow::Search => 2.0 * SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP,
         SidebarRow::Header(_) => {
             SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
         }
@@ -781,9 +782,34 @@ impl Waku {
             }));
         div()
             .w_full()
-            .h(px(SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP))
+            .h(px(
+                2.0 * SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP
+            ))
             .flex_none()
             .child(search)
+            .child(self.render_sidebar_image_studio(cx))
+    }
+
+    /// Fork addition: the image studio's entry, marked while it is open.
+    fn render_sidebar_image_studio(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        let open = self.image_studio.open;
+        self.render_sidebar_action_row(
+            "sidebar-image-studio",
+            "icons/image.svg",
+            tr!("sidebar.image_studio"),
+            cx,
+        )
+        .when(open, |element| element.bg(theme.sidebar_item_background))
+        .on_click(cx.listener(|this, _, window, cx| {
+            this.open_image_studio(window, cx);
+        }))
+        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                this.open_image_studio(window, cx);
+                cx.stop_propagation();
+            }
+        }))
     }
 
     pub(super) fn start_available_update(&mut self, cx: &mut Context<Self>) {
@@ -1803,12 +1829,14 @@ impl Waku {
         else {
             return div().into_any_element();
         };
-        let selected = sidebar_session_selected(
-            self.state.selected_session,
-            self.pending_session_activation
-                .map(|pending| pending.session_id),
-            session_id,
-        );
+        // While the image studio has the main column, no task is showing.
+        let selected = !self.image_studio.open
+            && sidebar_session_selected(
+                self.state.selected_session,
+                self.pending_session_activation
+                    .map(|pending| pending.session_id),
+                session_id,
+            );
         let working = matches!(
             session.status,
             SessionStatus::Connecting | SessionStatus::Working
@@ -2075,10 +2103,15 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = Theme::current(cx);
-        let session = self.selected_session();
-        let title = session
-            .map(localized_session_title)
-            .unwrap_or_else(|| tr!("session.new_task"));
+        // Fork addition: the image studio titles the header while it is open.
+        let session = self.selected_session().filter(|_| !self.image_studio.open);
+        let title = if self.image_studio.open {
+            self.image_studio_title()
+        } else {
+            session
+                .map(localized_session_title)
+                .unwrap_or_else(|| tr!("session.new_task"))
+        };
         let agent_preset_label = session
             .filter(|session| session.provider == ProviderKind::DeepSeek && session.has_started())
             .and_then(|session| self.agent_preset_label_for_session(session));

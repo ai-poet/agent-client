@@ -89,7 +89,7 @@ lines below.
 | `crates/waku-agent-bridge/src/computer_use.rs` | fork-owned: writes the bundled skill where the engine's `Skill` tool reads it, and removes it when the toggle is off | ~110 |
 | `crates/waku-agent-bridge/src/{config,permission,session}.rs` | fork-owned: the REPL MCP registration, the consented-tools short-circuit, the plan/computer-use prompt rules | ~200 |
 | `crates/waku-agent-bridge/src/{mcp_tool,events}.rs` | fork-owned: MCP image content onto its own sideband so the model reads text and the transcript gets pixels | ~90 |
-| `src/js_repl_image.rs`, `src/js_repl.rs` | fork-owned: `generate_image` as a third REPL tool, credentials read from the engine settings rather than the environment | ~380 |
+| `src/js_repl_image.rs`, `src/js_repl.rs` | fork-owned: `generate_image` as a third REPL tool, credentials read from the engine settings rather than the environment; the request is `sub2api::images` (a gateway task where there are tasks, else streamed) and an image model goes out with its own routed key (`gateway_keys.models`) before the OpenAI one | ~380 |
 | `src/app.rs`, `src/app/{runtime,settings}.rs` | fork: Computer Use reachable in release builds on macOS and Windows, plus the `cua-driver` install card | ~230 |
 | `resources/computer-use/SKILL.windows.md` | fork: the Windows variant `scripts/bundle-windows.ts` already expected; pinned in step with the macOS one by a guard test | ~237 |
 | `crates/waku-core/src/driver/{claude,acp}.rs` | fork: Computer Use for Claude Code (`--mcp-config` + `--plugin-dir`) and for Cursor/Fx (ACP `mcpServers`) | ~90 |
@@ -161,6 +161,7 @@ lines below.
 | `src/app/transcript.rs`, `src/app/transcript_view.rs` (agent flow) | `TurnFold(Uuid, usize)` per steer segment with `turn_fold_overrides`; `PendingSteer` rows; the working row hidden while waiting, a divider while compacting; `render_activities_row` rewritten over `activity_phase::group_activities` (flat rows, phase groups, reasoning collapsed with a ticker; `activity_groups_expanded` replaces `activities_expanded`); the changed-files card collapsed with clickable files and undo; `markdown_ctx` is `pub(super)` | large — resolve toward ours |
 | `src/app/components.rs` (agent flow) | `activity_summary` / `activity_header_title` / `activity_group_is_live` / `activity_action_label` replaced by `activity_verb`, `activity_row_target`, `activity_group_title`, `activity_failure_tail`; one-line system messages drawn as dividers | ~200 |
 | `src/app/streaming.rs`, `src/app/sessions.rs`, `src/app/runtime.rs` (agent flow) | turn pauses around permissions, questions and compactions; `complete_turn_blocks(stopped)`; failures recorded on the turn instead of as assistant messages, a connecting turn finished on error; `pending_permissions` queue; `RewindOrigin` and `restore_workspace` in the rewind path, `retry_failed_turn`; waiting notifications | ~250 |
+| `src/app.rs`, `src/app/{sidebar,render,sessions,command_palette,composer}.rs`, `src/assets.rs` (image studio) | `mod image_studio` / `image_studio_view` and the `image_studio` field; an "Images" row under Search in the sidebar (the Search row's height is two action rows), session rows not marked selected and the header titled "Images" while it is open; the main column renders the studio in place of transcript + composer; `request_session_activation` and `new_session_action` close it, the model-picker shortcut ignores it; `PaletteAction::OpenImageStudio`; `stage_attachment_paths` is `pub(super)` for "Send to task"; the `image` icon | ~60 |
 | `src/app/render.rs`, `src/app/composer.rs`, `src/app/sidebar.rs`, `src/app/right_panel.rs`, `src/app/workflow.rs`, `src/app/background_work.rs` (agent flow) | error banner and status capsule mounted; the permission branch of `render_permission` delegates to `permission_card`; waiting count in the task row; `open_turn_diff` takes a path; `live_background_work` | ~60 |
 | `src/ui/motion.rs`, `src/ui/mod.rs` | `shimmer` text; `activity_noun` removed with the block header | ~110 |
 | `crates/waku-protocol/src/{model,workspace,lib}.rs` (agent flow) | additive: `AgentTurn::{pauses, error, undone_at}`, `ActivityItem::stopped` (all `serde(default)`), `PlanTurnUndo` / `ApplyTurnUndo` and their results, `TurnUndoPlan` / `UndoFile` / `UndoReason`, `TURN_UNDO_STALE`; TS bindings regenerated | ~150 |
@@ -183,6 +184,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `src/app/announcements.rs`, `src/app/workflow.rs`, `assets/icons/{bell,circle-x,store,wallet}.svg`,
 `src/app/error_banner.rs`, `src/app/turn_undo.rs`, `src/app/status_capsule.rs`,
 `src/app/permission_card.rs`, `src/app/shortcuts.rs`,
+`src/app/image_studio.rs`, `src/app/image_studio_view.rs`, `assets/icons/image.svg`,
 `crates/waku-client/src/{activity_phase,turn_segments,status_capsule}.rs`,
 `NOTICE.md`, `docs/FORK.md`.
 
