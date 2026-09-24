@@ -1194,6 +1194,20 @@ configures — so every session on the Messages route was re-routed by model
 name to a provider with no key. Waku picks the route itself, so an explicit
 provider is now the answer rather than a hint.
 
+**Prompt caching** — Anthropic caches a request's prefix only up to a
+`cache_control` breakpoint, and the engine never placed one, so on a route
+that reaches Anthropic directly (a Claude Max group on the gateway) every call
+re-read the whole conversation at full price — while Claude Code, which marks
+its own requests, was cached on the same group. `api/src/prompt_cache.rs` now
+marks every Messages request as Claude Code does: the last tool, the end of
+the system prompt, the last message and the user message before it, so each
+call reads everything up to the previous turn and writes only the newest one.
+The gateway's Claude Code mimicry for OAuth accounts keeps these: it moves the
+system prompt into the first message with its breakpoint, and trims the tool
+breakpoint first when its own blocks take the count past four. A group served
+by Kiro reports its own usage (`kiro_billable_input_tokens` mapped onto
+`cache_read_input_tokens`), which looks like caching whatever is sent.
+
 **When a turn says nothing** — a 200 response whose SSE carries an `error`
 event used to leave no trace: the accumulator ignored it, the loop logged it,
 and the turn ended as a clean `end_turn` with empty content, which the

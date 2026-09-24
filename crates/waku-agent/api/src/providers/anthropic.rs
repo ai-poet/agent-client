@@ -97,7 +97,12 @@ impl AnthropicProvider {
             builder = builder.thinking(tc);
         }
 
-        builder.build()
+        // Fork departure (Waku): mark the prefix for prompt caching, the way
+        // Claude Code does — without a breakpoint a direct Anthropic route
+        // re-reads the whole conversation at full price on every call.
+        let mut request = builder.build();
+        crate::prompt_cache::apply_breakpoints(&mut request);
+        request
     }
 
     /// Map a string stop_reason from Anthropic wire format to [`StopReason`].

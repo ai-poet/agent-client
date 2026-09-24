@@ -61,6 +61,9 @@ pub mod error_handling;
 // Message transform layer — concrete transformers (Phase 4).
 pub mod transformers;
 
+// Fork departure (Waku): prompt-cache breakpoints on Messages requests.
+pub mod prompt_cache;
+
 // ---------------------------------------------------------------------------
 // Public re-exports
 // ---------------------------------------------------------------------------
