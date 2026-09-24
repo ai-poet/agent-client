@@ -3,7 +3,6 @@ use super::*;
 use crate::activity_phase::{self, ActivityPhase, ActivityRun, GroupKind};
 use base64::Engine as _;
 
-const CHANGED_FILES_PREVIEW_LIMIT: usize = 3;
 /// Keep one virtualized transcript row bounded even when a generator touches
 /// hundreds of files. The full immutable list remains one click away in the
 /// right panel.
@@ -1497,78 +1496,178 @@ impl Waku {
         cx.notify();
     }
 
-    /// The immutable file delta captured when a response settles. Small
-    /// summaries stay useful at a glance; larger ones disclose in place and
-    /// always offer the complete per-turn list in the right panel.
+    /// The files a settled turn changed, as a card: one line with the count
+    /// and totals, review and undo, opening onto the files themselves — each
+    /// of which opens its own diff.
     fn render_changed_files_row(
         &self,
         turn_id: Uuid,
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let Some(checkpoint) = self
-            .selected_session()
-            .and_then(|session| session.turns.iter().find(|turn| turn.id == turn_id))
-            .and_then(|turn| turn.checkpoint.as_ref())
+        let session = self.selected_session()?;
+        let turn = session.turns.iter().find(|turn| turn.id == turn_id)?;
+        let checkpoint = turn
+            .checkpoint
+            .as_ref()
             .filter(|checkpoint| checkpoint.status == CheckpointStatus::Ready)
-            .filter(|checkpoint| !checkpoint.files.is_empty())
-        else {
-            return None;
-        };
+            .filter(|checkpoint| !checkpoint.files.is_empty())?;
 
         let files = checkpoint.files.as_slice();
         let additions = checkpoint.additions;
         let deletions = checkpoint.deletions;
+        let undone = turn.undone_at.is_some();
+        let busy = session.is_busy() || self.turn_undo_pending.contains(&turn_id);
         let expanded = self.expanded_changed_files.contains(&turn_id);
-        let visible_limit = if expanded {
-            CHANGED_FILES_EXPANDED_LIMIT
-        } else {
-            CHANGED_FILES_PREVIEW_LIMIT
-        };
-        let visible_count = files.len().min(visible_limit);
-        let can_expand = files.len() > CHANGED_FILES_PREVIEW_LIMIT;
-        let clipped = expanded && files.len() > CHANGED_FILES_EXPANDED_LIMIT;
+        let visible_count = files.len().min(CHANGED_FILES_EXPANDED_LIMIT);
+        let clipped = files.len() > CHANGED_FILES_EXPANDED_LIMIT;
 
+        let action_button = |id: String, icon_path: &'static str, label: String| {
+            div()
+                .id(SharedString::from(id))
+                .h(px(26.0))
+                .px(px(9.0))
+                .rounded(px(7.0))
+                .border_1()
+                .border_color(theme.border_strong)
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .cursor_default()
+                .text_size(sp(12.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text_secondary)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
+                .active(|style| style.bg(theme.overlay))
+                .child(icon(icon_path, 12.0, theme.text_tertiary))
+                .child(label)
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        };
         let review_focus =
             self.transcript_control_focus(format!("changed-files-review-{turn_id}"), cx);
-        let review = div()
-            .id(SharedString::from(format!(
-                "changed-files-review-{turn_id}"
-            )))
-            .track_focus(&review_focus)
+        let review = action_button(
+            format!("changed-files-review-{turn_id}"),
+            "icons/file-diff.svg",
+            tr!("transcript.review_changes"),
+        )
+        .track_focus(&review_focus)
+        .tab_index(0)
+        .on_click(cx.listener(move |this, _, _, cx| {
+            cx.stop_propagation();
+            this.open_turn_diff(turn_id, None, cx);
+        }))
+        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                this.open_turn_diff(turn_id, None, cx);
+                cx.stop_propagation();
+            }
+        }));
+        let undo = if undone {
+            div()
+                .flex_none()
+                .text_size(sp(12.5))
+                .text_color(theme.text_tertiary)
+                .child(tr!("changes.undone"))
+                .into_any_element()
+        } else {
+            let undo_focus =
+                self.transcript_control_focus(format!("changed-files-undo-{turn_id}"), cx);
+            action_button(
+                format!("changed-files-undo-{turn_id}"),
+                "icons/rewind.svg",
+                tr!("changes.undo"),
+            )
+            .track_focus(&undo_focus)
             .tab_index(0)
-            .h(px(28.0))
-            .px(px(10.0))
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .gap(px(5.0))
-            .cursor_default()
-            .text_size(sp(12.5))
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(theme.text_secondary)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
-            .active(|style| style.bg(theme.overlay))
-            .child(icon("icons/file-diff.svg", 12.0, theme.text_tertiary))
-            .child(tr_cow!("transcript.review_changes"))
+            .when(busy, |button| button.opacity(0.5))
+            .tooltip(Tooltip::text(if busy {
+                tr!("changes.undo_busy")
+            } else {
+                tr!("changes.undo_title")
+            }))
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.open_turn_diff(turn_id, cx);
+                cx.stop_propagation();
+                this.start_turn_undo(turn_id, cx);
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.open_turn_diff(turn_id, cx);
+                    this.start_turn_undo(turn_id, cx);
                     cx.stop_propagation();
                 }
-            }));
+            }))
+            .into_any_element()
+        };
 
         let title = if files.len() == 1 {
             tr!("transcript.changed_file", count = files.len())
         } else {
             tr!("transcript.changed_files", count = files.len())
         };
+        let hover_group = SharedString::from(format!("changed-files-toggle-{turn_id}"));
+        let header_focus =
+            self.transcript_control_focus(format!("changed-files-toggle-{turn_id}"), cx);
+        let header = div()
+            .id(hover_group.clone())
+            .group(hover_group.clone())
+            .track_focus(&header_focus)
+            .tab_index(0)
+            .min_h(px(44.0))
+            .px(px(12.0))
+            .py(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .cursor_default()
+            .focus_visible(|style| style.bg(theme.overlay_strong))
+            .child(icon("icons/file-diff.svg", 14.0, theme.text_tertiary))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .text_size(sp(12.5))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(if undone {
+                                theme.text_tertiary
+                            } else {
+                                theme.text
+                            })
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(theme.success)
+                            .child(format!("+{additions}")),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(theme.danger)
+                            .child(format!("-{deletions}")),
+                    )
+                    .child(disclosure_chevron(expanded, hover_group, theme)),
+            )
+            .child(review)
+            .child(undo)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.toggle_changed_files(turn_id, expanded, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.toggle_changed_files(turn_id, expanded, cx);
+                    cx.stop_propagation();
+                }
+            }));
+
         let mut card = div()
             .id(SharedString::from(format!("changed-files-card-{turn_id}")))
             .w_full()
@@ -1581,178 +1680,85 @@ impl Waku {
             .tab_group()
             .tab_stop(false)
             .overflow_hidden()
-            .child(
-                div()
-                    .min_h(px(58.0))
-                    .px(px(12.0))
-                    .py(px(9.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .child(
-                        div()
-                            .size(px(36.0))
-                            .flex_none()
-                            .rounded(px(9.0))
-                            .bg(theme.overlay_strong)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(icon("icons/file-diff.svg", 16.0, theme.text_tertiary)),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_size(sp(12.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(title),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(14.0))
-                                    .child(
-                                        div()
-                                            .text_color(theme.success)
-                                            .child(format!("+{additions}")),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_color(theme.danger)
-                                            .child(format!("-{deletions}")),
-                                    ),
-                            ),
-                    )
-                    .child(review),
-            );
+            .child(header);
+        if !expanded {
+            return Some(card.into_any_element());
+        }
 
-        let mut file_rows = div()
+        let mut rows = div()
             .w_full()
             .min_w_0()
             .flex()
             .flex_col()
+            .py(px(4.0))
             .border_t_1()
             .border_color(theme.border);
         for file in files.iter().take(visible_count) {
-            file_rows = file_rows.child(
+            let key = format!("changed-file-{turn_id}-{}", file.path);
+            let focus = self.transcript_control_focus(key.clone(), cx);
+            let path = file.path.clone();
+            let key_path = file.path.clone();
+            rows = rows.child(
                 div()
-                    .h(px(31.0))
+                    .id(SharedString::from(key))
+                    .track_focus(&focus)
+                    .tab_index(0)
+                    .h(px(28.0))
                     .px(px(12.0))
                     .flex()
                     .items_center()
                     .gap(px(8.0))
+                    .cursor_default()
+                    .text_size(sp(12.5))
+                    .hover(|style| style.bg(theme.overlay_strong))
+                    .focus_visible(|style| style.bg(theme.overlay_strong))
                     .child(
                         div()
-                            .id(SharedString::from(format!(
-                                "changed-file-path-{turn_id}-{}",
-                                file.path
-                            )))
                             .min_w_0()
                             .flex_1()
                             .truncate()
-                            .text_size(sp(12.5))
                             .text_color(theme.text_secondary)
-                            .tooltip(Tooltip::text(file.path.clone()))
                             .child(file.path.clone()),
                     )
                     .child(
                         div()
                             .flex_none()
-                            .text_size(sp(12.5))
                             .text_color(theme.success)
                             .child(format!("+{}", file.additions)),
                     )
                     .child(
                         div()
                             .flex_none()
-                            .text_size(sp(12.5))
                             .text_color(theme.danger)
                             .child(format!("-{}", file.deletions)),
-                    ),
-            );
-        }
-        card = card.child(file_rows);
-
-        if can_expand {
-            let toggle_focus =
-                self.transcript_control_focus(format!("changed-files-toggle-{turn_id}"), cx);
-            let label = if expanded {
-                tr!("transcript.show_fewer_files")
-            } else {
-                tr!(
-                    "transcript.show_more_files",
-                    count = files.len() - CHANGED_FILES_PREVIEW_LIMIT
-                )
-            };
-            card = card.child(
-                div()
-                    .id(SharedString::from(format!(
-                        "changed-files-toggle-{turn_id}"
-                    )))
-                    .track_focus(&toggle_focus)
-                    .tab_index(0)
-                    .h(px(34.0))
-                    .px(px(12.0))
-                    .border_t_1()
-                    .border_color(theme.border)
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .cursor_default()
-                    .text_size(sp(12.5))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text_secondary)
-                    .focus_visible(|style| style.bg(theme.overlay_strong))
-                    .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
-                    .active(|style| style.bg(theme.overlay))
-                    .child(SharedString::from(label))
-                    .when(clipped, |row| {
-                        row.child(
-                            div()
-                                .min_w_0()
-                                .truncate()
-                                .font_weight(FontWeight::NORMAL)
-                                .text_color(theme.text_ghost)
-                                .child(tr!(
-                                    "transcript.showing_first_files",
-                                    count = CHANGED_FILES_EXPANDED_LIMIT,
-                                    total = files.len()
-                                )),
-                        )
-                    })
-                    .child(div().flex_1())
-                    .child(icon(
-                        if expanded {
-                            "icons/chevron-down.svg"
-                        } else {
-                            "icons/chevron-right.svg"
-                        },
-                        11.0,
-                        theme.text_tertiary,
-                    ))
+                    )
+                    .tooltip(Tooltip::text(tr!("changes.open_diff")))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_changed_files(turn_id, expanded, cx);
+                        this.open_turn_diff(turn_id, Some(path.clone()), cx);
                     }))
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.toggle_changed_files(turn_id, expanded, cx);
+                            this.open_turn_diff(turn_id, Some(key_path.clone()), cx);
                             cx.stop_propagation();
                         }
                     })),
             );
         }
-
+        if clipped {
+            rows = rows.child(
+                div()
+                    .px(px(12.0))
+                    .py(px(4.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_ghost)
+                    .child(tr!(
+                        "transcript.showing_first_files",
+                        count = CHANGED_FILES_EXPANDED_LIMIT,
+                        total = files.len()
+                    )),
+            );
+        }
+        card = card.child(rows);
         Some(card.into_any_element())
     }
 

@@ -1989,7 +1989,13 @@ impl Waku {
         cx.notify();
     }
 
-    pub(super) fn open_turn_diff(&mut self, turn_id: Uuid, cx: &mut Context<Self>) {
+    /// Show the turn's diff in the right panel, at `path` when given.
+    pub(super) fn open_turn_diff(
+        &mut self,
+        turn_id: Uuid,
+        path: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let Some((session_id, turn_count)) = self.selected_session().and_then(|session| {
             session
                 .turns
@@ -2007,6 +2013,7 @@ impl Waku {
         self.right_panel_diff_selection.clear();
         self.right_panel_diff_snapshot = None;
         self.right_panel_diff_selected_file = None;
+        self.right_panel_diff_pending_path = path;
         self.open_right_panel_surface(RightPanelSurface::Diff, cx);
     }
 
@@ -4521,10 +4528,17 @@ impl Waku {
                         } else {
                             waku.right_panel_diff_expanded_paths = directories;
                         }
-                        waku.right_panel_diff_selected_file = selected_path
-                            .as_deref()
-                            .and_then(|path| {
-                                snapshot.files.iter().position(|file| file.path == path)
+                        // A file asked for by name wins over the one selected
+                        // before, which wins over the first.
+                        let wanted = waku.right_panel_diff_pending_path.take();
+                        let jump_to = wanted.as_deref().and_then(|path| {
+                            snapshot.files.iter().position(|file| file.path == path)
+                        });
+                        waku.right_panel_diff_selected_file = jump_to
+                            .or_else(|| {
+                                selected_path.as_deref().and_then(|path| {
+                                    snapshot.files.iter().position(|file| file.path == path)
+                                })
                             })
                             .or_else(|| (!snapshot.files.is_empty()).then_some(0));
                         let line_count = snapshot.lines.len();
@@ -4532,6 +4546,9 @@ impl Waku {
                         waku.right_panel_diff_error = None;
                         waku.right_panel_diff_list_state.reset(line_count);
                         waku.sync_right_panel_diff_tree_rows(cx);
+                        if let Some(file_index) = jump_to {
+                            waku.select_right_panel_diff_file(file_index, cx);
+                        }
                     }
                     Err(error) => {
                         let message = error.to_string();

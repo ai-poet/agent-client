@@ -25,12 +25,22 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
+/// A titled list under the detail line — the files an undo would touch, the
+/// ones it would not.
+pub(super) struct ConfirmSection {
+    pub title: String,
+    pub items: Vec<String>,
+    /// Secondary: what the confirm leaves alone rather than what it does.
+    pub muted: bool,
+}
+
 /// What runs when the user confirms.
 pub(super) type ConfirmAction = Box<dyn FnOnce(&mut Waku, &mut Window, &mut Context<Waku>)>;
 
 pub(super) struct ConfirmDialogState {
     title: String,
     detail: Option<String>,
+    sections: Vec<ConfirmSection>,
     confirm_label: String,
     /// Paints the confirm button in the danger color.
     destructive: bool,
@@ -56,9 +66,33 @@ impl Waku {
         cx: &mut Context<Self>,
         on_confirm: impl FnOnce(&mut Waku, &mut Window, &mut Context<Waku>) + 'static,
     ) {
+        self.request_confirm_with_sections(
+            title,
+            detail,
+            Vec::new(),
+            confirm_label,
+            destructive,
+            cx,
+            on_confirm,
+        );
+    }
+
+    /// [`Self::request_confirm`] with lists under the detail line.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn request_confirm_with_sections(
+        &mut self,
+        title: String,
+        detail: Option<String>,
+        sections: Vec<ConfirmSection>,
+        confirm_label: String,
+        destructive: bool,
+        cx: &mut Context<Self>,
+        on_confirm: impl FnOnce(&mut Waku, &mut Window, &mut Context<Waku>) + 'static,
+    ) {
         self.confirm_dialog = Some(ConfirmDialogState {
             title,
             detail,
+            sections,
             confirm_label,
             destructive,
             on_confirm: Some(Box::new(on_confirm)),
@@ -118,6 +152,57 @@ impl Waku {
         }
         let title = dialog.title.clone();
         let detail = dialog.detail.clone();
+        let sections = dialog
+            .sections
+            .iter()
+            .enumerate()
+            .map(|(index, section)| {
+                div()
+                    .mt(px(4.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(if section.muted {
+                                theme.text_tertiary
+                            } else {
+                                theme.text_secondary
+                            })
+                            .child(section.title.clone()),
+                    )
+                    .child(
+                        div()
+                            .id(("confirm-dialog-section", index))
+                            .max_h(px(132.0))
+                            .overflow_y_scroll()
+                            .rounded(px(8.0))
+                            .bg(theme.inset)
+                            .px(px(10.0))
+                            .py(px(6.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.0))
+                            .font_family(crate::md::render::MONO_FAMILY)
+                            .text_size(sp(12.0))
+                            .line_height(sp(17.0))
+                            .text_color(if section.muted {
+                                theme.text_tertiary
+                            } else {
+                                theme.text_secondary
+                            })
+                            .children(
+                                section
+                                    .items
+                                    .iter()
+                                    .map(|item| div().min_w_0().truncate().child(item.clone())),
+                            ),
+                    )
+            })
+            .collect::<Vec<_>>();
+        let wide = !sections.is_empty();
         let confirm_label = dialog.confirm_label.clone();
         let destructive = dialog.destructive;
         let confirm_focus = dialog.confirm_focus.clone();
@@ -183,7 +268,7 @@ impl Waku {
             .tab_group()
             .tab_stop(false)
             .w_full()
-            .max_w(px(380.0))
+            .max_w(px(if wide { 460.0 } else { 380.0 }))
             .rounded(px(16.0))
             .bg(theme.composer)
             .shadow_xl()
@@ -208,6 +293,7 @@ impl Waku {
                         .child(detail),
                 )
             })
+            .children(sections)
             .child(
                 div()
                     .mt(px(8.0))

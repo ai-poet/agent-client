@@ -1368,6 +1368,8 @@ pub struct Waku {
     turn_fold_overrides: transcript::TurnFoldOverrides,
     /// The failed turn whose full error the banner above the composer shows.
     error_details_open: Option<Uuid>,
+    /// Turns whose undo is being planned or applied right now.
+    turn_undo_pending: HashSet<Uuid>,
     /// Per-response file cards the user expanded beyond their three-file
     /// preview. Runtime-only, like the other transcript disclosures.
     expanded_changed_files: HashSet<Uuid>,
@@ -1450,6 +1452,9 @@ pub struct Waku {
     right_panel_diff_error: Option<String>,
     right_panel_diff_generation: u64,
     right_panel_diff_selected_file: Option<usize>,
+    /// A file the next diff load should open at — a changed-files row asked
+    /// for it by name before the diff existed.
+    right_panel_diff_pending_path: Option<String>,
     right_panel_diff_expanded_paths: HashSet<String>,
     right_panel_diff_tree_rows: RefCell<Vec<right_panel::ReviewDiffTreeRow>>,
     right_panel_diff_tree_cursor: Option<usize>,
@@ -1751,6 +1756,7 @@ mod todo_list;
 mod transcript;
 mod transcript_search;
 mod transcript_view;
+mod turn_undo;
 mod usage_meter;
 mod usage_page;
 mod window_chrome;
@@ -3060,6 +3066,7 @@ impl Waku {
                 expanded_activity_items: HashMap::new(),
                 turn_fold_overrides: HashMap::new(),
                 error_details_open: None,
+                turn_undo_pending: HashSet::new(),
                 expanded_changed_files: HashSet::new(),
                 transcript_control_focuses: RefCell::new(HashMap::new()),
                 session_navigation,
@@ -3116,6 +3123,7 @@ impl Waku {
                 right_panel_diff_error: None,
                 right_panel_diff_generation: 0,
                 right_panel_diff_selected_file: None,
+                right_panel_diff_pending_path: None,
                 right_panel_diff_expanded_paths: HashSet::new(),
                 right_panel_diff_tree_rows: RefCell::new(Vec::new()),
                 right_panel_diff_tree_cursor: None,

@@ -983,6 +983,24 @@ transcript.thought_for: 思考 · 持续了 %{duration}
 transcript.changed_file: 更改了 %{count} 个文件
 transcript.changed_files: 更改了 %{count} 个文件
 transcript.review_changes: 审阅
+changes.undo: "撤销"
+changes.undone: "已撤销"
+changes.undo_title: "撤销这一轮的文件改动"
+changes.undo_detail: "文件会回到这一轮开始前的样子；文件夹里的其他内容不受影响，对话也保持不变。"
+changes.undo_safe: "可以撤销（%{count}）"
+changes.undo_unsafe: "无法安全撤销（%{count}）"
+changes.undo_ignored: "已忽略（%{count}）"
+changes.reason_changed: "此后又被修改过"
+changes.reason_shell: "由命令写入"
+changes.reason_submodule: "子模块"
+changes.undo_confirm_one: "撤销 %{count} 个文件"
+changes.undo_confirm_other: "撤销 %{count} 个文件"
+changes.undo_stale: "检查后文件又有变化，请重新确认"
+changes.undo_busy: "任务运行中无法撤销"
+changes.undo_nothing: "没有可以安全撤销的文件"
+changes.undone_count: "已撤销 %{count} 个文件的改动"
+changes.undo_failed: "撤销失败：%{error}"
+changes.open_diff: "查看这个文件的改动"
 transcript.show_more_files: 再显示 %{count} 个文件
 transcript.show_fewer_files: 收起文件列表
 transcript.showing_first_files: 仅显示前 %{count}/%{total} 个

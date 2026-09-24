@@ -2019,6 +2019,42 @@ transcript.changed_files:
   en: Changed %{count} files
 transcript.review_changes:
   en: Review
+changes.undo:
+  en: "Undo"
+changes.undone:
+  en: "Undone"
+changes.undo_title:
+  en: "Undo this turn's file changes"
+changes.undo_detail:
+  en: "The files go back to how they were before the turn. Nothing else in the folder is touched, and the conversation stays as it is."
+changes.undo_safe:
+  en: "Can be undone (%{count})"
+changes.undo_unsafe:
+  en: "Can't be undone safely (%{count})"
+changes.undo_ignored:
+  en: "Left alone (%{count})"
+changes.reason_changed:
+  en: "changed again since"
+changes.reason_shell:
+  en: "written by a command"
+changes.reason_submodule:
+  en: "submodule"
+changes.undo_confirm_one:
+  en: "Undo %{count} file"
+changes.undo_confirm_other:
+  en: "Undo %{count} files"
+changes.undo_stale:
+  en: "The files changed after you looked. Open undo again to see what it would do now."
+changes.undo_busy:
+  en: "Can't undo while the task is running"
+changes.undo_nothing:
+  en: "Nothing here can be undone safely"
+changes.undone_count:
+  en: "Undid changes to %{count} files"
+changes.undo_failed:
+  en: "Couldn't undo: %{error}"
+changes.open_diff:
+  en: "Open this file's diff"
 transcript.show_more_files:
   en: Show %{count} more files
 transcript.show_fewer_files:
