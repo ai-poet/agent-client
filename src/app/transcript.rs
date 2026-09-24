@@ -22,6 +22,7 @@ impl Waku {
                 transcript_rows_fingerprint(session, &self.turn_fold_overrides)
             });
         let fingerprint = mix(fingerprint, self.selected_pending_steer_count() as u64);
+        let fingerprint = mix(fingerprint, self.selected_session_compacting() as u64);
         if self.transcript_row_kinds_fingerprint.get() != Some(fingerprint) {
             let next_kinds = self.selected_transcript_row_kinds();
             *self.transcript_row_kinds.borrow_mut() = next_kinds;
@@ -34,8 +35,21 @@ impl Waku {
         let mut rows = self.selected_session().map_or_else(Vec::new, |session| {
             folded_transcript_row_kinds(session, &self.turn_fold_overrides)
         });
+        // A compaction can run outside a turn (`/compact`); the working row
+        // says it is happening either way.
+        if self.selected_session_compacting()
+            && !rows.contains(&TranscriptRowKind::WorkingIndicator)
+        {
+            rows.push(TranscriptRowKind::WorkingIndicator);
+        }
         rows.extend((0..self.selected_pending_steer_count()).map(TranscriptRowKind::PendingSteer));
         rows
+    }
+
+    fn selected_session_compacting(&self) -> bool {
+        self.state
+            .selected_session
+            .is_some_and(|id| self.compacting_sessions.contains(&id))
     }
 
     fn selected_pending_steer_count(&self) -> usize {

@@ -751,6 +751,36 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             }
             column
         }
+        // A one-line notice — a compaction, a mode change — is a marker in the
+        // flow rather than a message: a rule with the notice set into it. A
+        // report of several lines (`/context`, `/cost`) keeps its capsule.
+        MessageRole::System if !content.trim().contains('\n') => div()
+            .w_full()
+            .min_h(px(22.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .child(div().h(px(1.0)).flex_1().min_w(px(16.0)).bg(theme.border))
+            .child(
+                div()
+                    .flex_shrink(1.0)
+                    .min_w_0()
+                    .max_w(px(560.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(icon("icons/info.svg", 12.0, theme.text_ghost))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .line_height(sp(16.0))
+                            .text_color(theme.text_tertiary)
+                            .child(content.trim().to_owned()),
+                    ),
+            )
+            .child(div().h(px(1.0)).flex_1().min_w(px(16.0)).bg(theme.border)),
         MessageRole::System => div().w_full().flex().justify_center().child(
             div()
                 .px(px(10.0))

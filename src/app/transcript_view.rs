@@ -1825,19 +1825,38 @@ impl Waku {
             .filter(|turn| turn.status == TurnStatus::Running)
             .map(|turn| turn.active_seconds(turn.started_at, unix_time()))
             .unwrap_or(0);
-        // A compaction is a long, silent model call; say what it is.
-        let label = if self
+        // A compaction is a long, silent model call, and a break in the
+        // conversation rather than a step of the work: a rule that says so.
+        if self
             .state
             .selected_session
             .is_some_and(|id| self.compacting_sessions.contains(&id))
         {
-            tr!("session.context_compacting")
-        } else {
-            tr!(
-                "transcript.working_for",
-                duration = format_working_elapsed(elapsed)
-            )
-        };
+            return div()
+                .w_full()
+                .h(px(22.0))
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .child(div().h(px(1.0)).flex_1().bg(theme.border))
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(12.5))
+                        .line_height(sp(16.0))
+                        .child(motion::shimmer(
+                            tr!("session.context_compacting"),
+                            theme.text_tertiary,
+                            theme.text,
+                        )),
+                )
+                .child(div().h(px(1.0)).flex_1().bg(theme.border))
+                .into_any_element();
+        }
+        let label = tr!(
+            "transcript.working_for",
+            duration = format_working_elapsed(elapsed)
+        );
         div()
             .h(px(22.0))
             .flex()
