@@ -58,4 +58,6 @@ pub use protocol::{
     WireDriverEvent, WireDriverStartOptions, WireSessionOptions,
 };
 pub use settings::DaemonSettings;
-pub use workspace::{WorkspaceOperation, WorkspaceResult};
+pub use workspace::{
+    TURN_UNDO_STALE, TurnUndoPlan, UndoFile, UndoReason, WorkspaceOperation, WorkspaceResult,
+};

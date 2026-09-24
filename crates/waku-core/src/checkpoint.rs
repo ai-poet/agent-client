@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{Checkpoint, CheckpointFile, CheckpointStatus, unix_time};
+use waku_protocol::{TURN_UNDO_STALE, TurnUndoPlan, UndoFile, UndoReason};
 
 const TURN_START_METADATA_PREFIX: &str = "Waku-Turn-Start: ";
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -33,6 +34,12 @@ pub fn turn_start_ref(session_id: Uuid, turn_count: usize) -> String {
 
 pub fn turn_diff_base_ref(session_id: Uuid, turn_count: usize) -> String {
     format!("refs/waku/session-{session_id}-turn-diff-{turn_count}")
+}
+
+/// The worktree as it stood just before a turn's changes were undone, kept
+/// with the session's other refs so a rewind past the turn clears it too.
+pub fn turn_undo_backup_ref(session_id: Uuid, turn_count: usize) -> String {
+    format!("refs/waku/session-{session_id}-turn-undo-{turn_count}")
 }
 
 /// Capture the exact workspace state accepted for a turn before its provider
@@ -472,10 +479,11 @@ pub fn delete_turn_refs_after(
     let mut commands = String::new();
     for turn_count in retained_turn_count + 1..=previous_turn_count {
         commands.push_str(&format!(
-            "delete {}\ndelete {}\ndelete {}\n",
+            "delete {}\ndelete {}\ndelete {}\ndelete {}\n",
             checkpoint_ref(session_id, turn_count),
             turn_start_ref(session_id, turn_count),
-            turn_diff_base_ref(session_id, turn_count)
+            turn_diff_base_ref(session_id, turn_count),
+            turn_undo_backup_ref(session_id, turn_count)
         ));
     }
     update_refs(cwd, commands)
@@ -494,9 +502,10 @@ pub fn delete_session_refs(
         ));
         if turn_count > 0 {
             commands.push_str(&format!(
-                "delete {}\ndelete {}\n",
+                "delete {}\ndelete {}\ndelete {}\n",
                 turn_start_ref(session_id, turn_count),
-                turn_diff_base_ref(session_id, turn_count)
+                turn_diff_base_ref(session_id, turn_count),
+                turn_undo_backup_ref(session_id, turn_count)
             ));
         }
     }
@@ -525,6 +534,12 @@ pub fn delete_all_session_refs(cwd: &Path, session_id: Uuid) -> anyhow::Result<(
         commands.push_str(&format!(
             "delete {}\n",
             turn_diff_base_ref(session_id, *turn_count)
+        ));
+    }
+    for turn_count in refs.undo_backups.keys() {
+        commands.push_str(&format!(
+            "delete {}\n",
+            turn_undo_backup_ref(session_id, *turn_count)
         ));
     }
     update_refs(cwd, commands)
@@ -573,6 +588,7 @@ struct SessionCheckpointRefs {
     turns: HashMap<usize, String>,
     starts: HashMap<usize, String>,
     diff_bases: HashMap<usize, String>,
+    undo_backups: HashMap<usize, String>,
 }
 
 /// Every checkpoint ref for `session_id`, resolved in one `git for-each-ref`.
@@ -605,6 +621,11 @@ fn session_checkpoint_ref_commits(cwd: &Path, session_id: Uuid) -> SessionCheckp
                     .parse()
                     .ok()
                     .map(|turn_count| (&mut refs.diff_bases, turn_count))
+            } else if let Some(turn_count) = suffix.strip_prefix("turn-undo-") {
+                turn_count
+                    .parse()
+                    .ok()
+                    .map(|turn_count| (&mut refs.undo_backups, turn_count))
             } else if let Some(turn_count) = suffix.strip_prefix("turn-") {
                 turn_count
                     .parse()
@@ -652,6 +673,330 @@ fn update_refs(cwd: &Path, commands: String) -> anyhow::Result<()> {
     let output = child.wait_with_output().context("failed to execute git")?;
     if output.status.success() {
         Ok(())
+    } else {
+        bail!("{}", command_error(&output))
+    }
+}
+
+/// Which of a turn's changed files can go back to how they were before it.
+///
+/// The turn's changes run from its base — the state it started from — to its
+/// end checkpoint. A file that differs between that checkpoint and the
+/// worktree now was changed again afterwards, by the person or a later turn;
+/// putting it back would lose that, so it is blocked. With `edited_paths`
+/// given (absolute, or relative to `cwd`), a changed file the agent did not
+/// edit through a tool was written by a command — a build, a formatter — and
+/// is left alone.
+pub fn plan_turn_undo(
+    cwd: &Path,
+    session_id: Uuid,
+    turn_count: usize,
+    edited_paths: &[String],
+) -> anyhow::Result<TurnUndoPlan> {
+    let (base, end) = turn_undo_range(cwd, session_id, turn_count)?;
+    let current = capture_worktree_commit(cwd)?;
+    let location = repository_location(cwd)?;
+    plan_undo_between(cwd, &location, &base, &end, &current, edited_paths)
+}
+
+/// Put back the files [`plan_turn_undo`] finds safe, all or none. The plan is
+/// worked out again first: if its safe files are not `expected_safe`, the
+/// worktree moved since the person looked, and nothing is written.
+///
+/// Only the worktree changes: the index stays as it is and nothing is
+/// cleaned. The worktree as it stood is kept under [`turn_undo_backup_ref`]
+/// before anything is written.
+pub fn apply_turn_undo(
+    cwd: &Path,
+    session_id: Uuid,
+    turn_count: usize,
+    edited_paths: &[String],
+    expected_safe: &[String],
+) -> anyhow::Result<Vec<String>> {
+    let (base, end) = turn_undo_range(cwd, session_id, turn_count)?;
+    let current = capture_worktree_commit(cwd)?;
+    let location = repository_location(cwd)?;
+    let plan = plan_undo_between(cwd, &location, &base, &end, &current, edited_paths)?;
+    let mut planned = plan.safe.clone();
+    planned.sort();
+    let mut expected = expected_safe.to_vec();
+    expected.sort();
+    expected.dedup();
+    if planned != expected {
+        bail!("{TURN_UNDO_STALE}");
+    }
+    if plan.safe.is_empty() {
+        return Ok(Vec::new());
+    }
+    git_output(
+        cwd,
+        [
+            "update-ref",
+            &turn_undo_backup_ref(session_id, turn_count),
+            &current,
+        ],
+    )?;
+    let toplevel = PathBuf::from(&location.toplevel);
+    let mut written: Vec<&str> = Vec::with_capacity(plan.safe.len());
+    for path in &plan.safe {
+        if let Err(error) = write_path_from(cwd, &toplevel, &base, path) {
+            // All or none: every file touched so far, this one included, goes
+            // back to how it was a moment ago.
+            for done in written.iter().copied().chain([path.as_str()]) {
+                let _ = write_path_from(cwd, &toplevel, &current, done);
+            }
+            return Err(error.context(format!("could not put `{path}` back")));
+        }
+        written.push(path);
+    }
+    Ok(plan.safe)
+}
+
+/// The commits a turn's changes run between: where it started, and its end
+/// checkpoint.
+fn turn_undo_range(
+    cwd: &Path,
+    session_id: Uuid,
+    turn_count: usize,
+) -> anyhow::Result<(String, String)> {
+    if turn_count == 0 || !is_git_repository(cwd) {
+        bail!("undo needs the turn's checkpoints in a Git repository");
+    }
+    let end = resolve_ref(cwd, &checkpoint_ref(session_id, turn_count))
+        .ok_or_else(|| anyhow!("the turn's checkpoint is unavailable"))?;
+    let base = [
+        turn_diff_base_ref(session_id, turn_count),
+        turn_start_ref(session_id, turn_count),
+        checkpoint_ref(session_id, turn_count - 1),
+    ]
+    .iter()
+    .find_map(|git_ref| resolve_ref(cwd, git_ref))
+    .ok_or_else(|| anyhow!("the turn's starting checkpoint is unavailable"))?;
+    Ok((base, end))
+}
+
+/// Where the repository is: its top level, and `cwd` below it (`--show-prefix`,
+/// empty or ending in `/`). Git names every path from the top level.
+struct RepositoryLocation {
+    toplevel: String,
+    prefix: String,
+}
+
+fn repository_location(cwd: &Path) -> anyhow::Result<RepositoryLocation> {
+    Ok(RepositoryLocation {
+        toplevel: git_output(cwd, ["rev-parse", "--show-toplevel"])?
+            .trim()
+            .to_owned(),
+        prefix: git_output(cwd, ["rev-parse", "--show-prefix"])?
+            .trim()
+            .to_owned(),
+    })
+}
+
+fn plan_undo_between(
+    cwd: &Path,
+    location: &RepositoryLocation,
+    base: &str,
+    end: &str,
+    current: &str,
+    edited_paths: &[String],
+) -> anyhow::Result<TurnUndoPlan> {
+    let changes = changed_paths(cwd, base, end)?;
+    let changed_since = changed_paths(cwd, end, current)?
+        .into_iter()
+        .map(|change| change.path)
+        .collect::<HashSet<_>>();
+    // The same file can be named two ways — a short name, a link, another
+    // case — so absolute paths are compared resolved.
+    let toplevel =
+        canonical_text(Path::new(&location.toplevel)).unwrap_or_else(|| location.toplevel.clone());
+    let edited = edited_paths
+        .iter()
+        .filter_map(|path| {
+            let path = if Path::new(path).is_absolute() {
+                canonical_text(Path::new(path)).unwrap_or_else(|| path.clone())
+            } else {
+                path.clone()
+            };
+            repo_relative_path(&path, &toplevel, &location.prefix)
+        })
+        .collect::<HashSet<_>>();
+    // Reported paths that match nothing the turn changed were named some
+    // other way than git names them. Judged by them, every change would pass
+    // for a command's, so they are not used at all.
+    let edited = if changes.iter().any(|change| edited.contains(&change.path)) {
+        edited
+    } else {
+        HashSet::new()
+    };
+    let mut plan = TurnUndoPlan::default();
+    for change in changes {
+        let ignored = if change.submodule {
+            Some(UndoReason::Submodule)
+        } else if !edited.is_empty() && !edited.contains(&change.path) {
+            Some(UndoReason::ShellWritten)
+        } else {
+            None
+        };
+        match ignored {
+            Some(reason) => plan.ignored.push(UndoFile {
+                path: change.path,
+                reason,
+            }),
+            None if changed_since.contains(&change.path) => plan.blocked.push(UndoFile {
+                path: change.path,
+                reason: UndoReason::ChangedSinceTurn,
+            }),
+            None => plan.safe.push(change.path),
+        }
+    }
+    Ok(plan)
+}
+
+struct PathChange {
+    path: String,
+    submodule: bool,
+}
+
+/// Every path that differs between two commits, a rename split into its two
+/// sides, submodules marked.
+fn changed_paths(cwd: &Path, from: &str, to: &str) -> anyhow::Result<Vec<PathChange>> {
+    let output = git_output(
+        cwd,
+        ["diff", "--raw", "--no-renames", "-z", from, to, "--", "."],
+    )?;
+    let mut fields = output.split('\0');
+    let mut changes = Vec::new();
+    while let Some(meta) = fields.next() {
+        let meta = meta.trim();
+        if meta.is_empty() {
+            continue;
+        }
+        let Some(path) = fields.next() else {
+            break;
+        };
+        // `:<old mode> <new mode> <old object> <new object> <status>`
+        let mut columns = meta.trim_start_matches(':').split(' ');
+        let old_mode = columns.next().unwrap_or_default();
+        let new_mode = columns.next().unwrap_or_default();
+        changes.push(PathChange {
+            path: path.to_owned(),
+            submodule: old_mode == "160000" || new_mode == "160000",
+        });
+    }
+    Ok(changes)
+}
+
+/// `path` with links, short names and `..` resolved, as `/`-separated text.
+/// A file that no longer exists is resolved through its directory.
+fn canonical_text(path: &Path) -> Option<String> {
+    let resolved = fs::canonicalize(path).ok().or_else(|| {
+        let parent = fs::canonicalize(path.parent()?).ok()?;
+        Some(parent.join(path.file_name()?))
+    })?;
+    let text = resolved.to_string_lossy().replace('\\', "/");
+    Some(text.strip_prefix("//?/").map(str::to_owned).unwrap_or(text))
+}
+
+/// `path` as git names it: relative to the repository's top level and
+/// `/`-separated. An absolute path must lie inside `toplevel`; a relative one
+/// is taken from the directory `prefix` names.
+fn repo_relative_path(path: &str, toplevel: &str, prefix: &str) -> Option<String> {
+    let path = path.trim().replace('\\', "/");
+    let absolute = path.starts_with('/') || path.as_bytes().get(1) == Some(&b':');
+    let relative = if absolute {
+        let toplevel = toplevel.trim_end_matches('/').replace('\\', "/");
+        let head = path.get(..toplevel.len())?;
+        let same = if cfg!(windows) {
+            head.eq_ignore_ascii_case(&toplevel)
+        } else {
+            head == toplevel
+        };
+        let rest = path.get(toplevel.len()..)?;
+        if !same || !(rest.is_empty() || rest.starts_with('/')) {
+            return None;
+        }
+        rest.trim_start_matches('/').to_owned()
+    } else {
+        format!("{prefix}{}", path.trim_start_matches("./"))
+    };
+    (!relative.is_empty()).then_some(relative)
+}
+
+/// Make `path` in the worktree what it is in `commit`: its content — with the
+/// line endings and filters a checkout would apply — and its mode, or gone
+/// when the commit does not have it.
+fn write_path_from(cwd: &Path, toplevel: &Path, commit: &str, path: &str) -> anyhow::Result<()> {
+    let target = toplevel.join(path);
+    let entry = git_output(cwd, ["ls-tree", "--full-tree", "-z", commit, "--", path])?;
+    let entry = entry.trim_end_matches('\0');
+    if entry.is_empty() {
+        match fs::remove_file(&target) {
+            Ok(()) => remove_empty_parents(&target, toplevel),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        return Ok(());
+    }
+    // `<mode> <type> <object>\t<path>`
+    let mode = entry.split(' ').next().unwrap_or_default();
+    let content = git_bytes(cwd, ["cat-file", "--filters", &format!("{commit}:{path}")])?;
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    // Writing through a symlink would change what it points at.
+    if fs::symlink_metadata(&target).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        fs::remove_file(&target)?;
+    }
+    #[cfg(unix)]
+    if mode == "120000" {
+        use std::os::unix::ffi::OsStrExt as _;
+        std::os::unix::fs::symlink(OsStr::from_bytes(&content), &target)?;
+        return Ok(());
+    }
+    fs::write(&target, &content)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mut permissions = fs::metadata(&target)?.permissions();
+        let bits = permissions.mode();
+        permissions.set_mode(if mode == "100755" {
+            bits | 0o111
+        } else {
+            bits & !0o111
+        });
+        fs::set_permissions(&target, permissions)?;
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+    Ok(())
+}
+
+/// After a file the turn created is removed, the directories it created for
+/// it go too, up to the first one with anything else in it.
+fn remove_empty_parents(file: &Path, toplevel: &Path) {
+    let mut directory = file.parent();
+    while let Some(current) = directory {
+        if current == toplevel || !current.starts_with(toplevel) || fs::remove_dir(current).is_err()
+        {
+            break;
+        }
+        directory = current.parent();
+    }
+}
+
+fn git_bytes<I, S>(cwd: &Path, args: I) -> anyhow::Result<Vec<u8>>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = crate::command_env::plain_command("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .context("failed to execute git")?;
+    if output.status.success() {
+        Ok(output.stdout)
     } else {
         bail!("{}", command_error(&output))
     }
@@ -1221,5 +1566,146 @@ mod tests {
         assert_eq!(second.files.len(), 1);
         assert_eq!(second.files[0].path, "second-turn.txt");
         fs::remove_dir_all(directory).ok();
+    }
+
+    /// A repository with one committed file, and turn 1 of a session that
+    /// changed it and added another.
+    fn repository_with_a_turn() -> (PathBuf, Uuid) {
+        let directory = std::env::temp_dir().join(format!("waku-undo-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        git_ok(&directory, &["init", "--quiet"]);
+        // Contents without line endings, so no end-of-line conversion the
+        // machine is configured for can change them.
+        fs::write(directory.join("tracked.txt"), "before").unwrap();
+        git_ok(&directory, &["add", "tracked.txt"]);
+        git_ok(
+            &directory,
+            &[
+                "-c",
+                "user.name=Waku Test",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "baseline",
+            ],
+        );
+        let session = Uuid::new_v4();
+        capture_turn_start(&directory, session, 1).unwrap();
+        fs::write(directory.join("tracked.txt"), "after").unwrap();
+        fs::create_dir_all(directory.join("added")).unwrap();
+        fs::write(directory.join("added/new.txt"), "new").unwrap();
+        capture_turn(&directory, session, 1).unwrap();
+        (directory, session)
+    }
+
+    fn sorted(mut paths: Vec<String>) -> Vec<String> {
+        paths.sort();
+        paths
+    }
+
+    #[test]
+    fn undo_puts_a_turns_files_back_and_leaves_the_index_alone() {
+        let (directory, session) = repository_with_a_turn();
+
+        let plan = plan_turn_undo(&directory, session, 1, &[]).unwrap();
+        assert_eq!(sorted(plan.safe.clone()), ["added/new.txt", "tracked.txt"]);
+        assert!(plan.blocked.is_empty() && plan.ignored.is_empty());
+
+        let restored = apply_turn_undo(&directory, session, 1, &[], &plan.safe).unwrap();
+        assert_eq!(sorted(restored), ["added/new.txt", "tracked.txt"]);
+        assert_eq!(
+            fs::read_to_string(directory.join("tracked.txt")).unwrap(),
+            "before"
+        );
+        assert!(!directory.join("added").exists());
+        assert!(git_text(&directory, &["diff", "--cached", "--name-only"]).is_empty());
+        assert!(has_ref(&directory, &turn_undo_backup_ref(session, 1)));
+    }
+
+    #[test]
+    fn a_file_changed_after_the_turn_is_not_put_back() {
+        let (directory, session) = repository_with_a_turn();
+        fs::write(directory.join("tracked.txt"), "later").unwrap();
+
+        let plan = plan_turn_undo(&directory, session, 1, &[]).unwrap();
+        assert_eq!(plan.safe, ["added/new.txt"]);
+        assert_eq!(
+            plan.blocked,
+            [UndoFile {
+                path: "tracked.txt".into(),
+                reason: UndoReason::ChangedSinceTurn,
+            }]
+        );
+
+        apply_turn_undo(&directory, session, 1, &[], &plan.safe).unwrap();
+        assert_eq!(
+            fs::read_to_string(directory.join("tracked.txt")).unwrap(),
+            "later"
+        );
+        assert!(!directory.join("added/new.txt").exists());
+    }
+
+    #[test]
+    fn files_a_command_wrote_are_left_alone() {
+        let (directory, session) = repository_with_a_turn();
+        let edited = [directory.join("tracked.txt").to_string_lossy().into_owned()];
+
+        let plan = plan_turn_undo(&directory, session, 1, &edited).unwrap();
+        assert_eq!(plan.safe, ["tracked.txt"]);
+        assert_eq!(
+            plan.ignored,
+            [UndoFile {
+                path: "added/new.txt".into(),
+                reason: UndoReason::ShellWritten,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_plan_the_files_moved_away_from_writes_nothing() {
+        let (directory, session) = repository_with_a_turn();
+        let plan = plan_turn_undo(&directory, session, 1, &[]).unwrap();
+        fs::write(directory.join("tracked.txt"), "later").unwrap();
+
+        let error = apply_turn_undo(&directory, session, 1, &[], &plan.safe).unwrap_err();
+        assert!(error.to_string().contains(TURN_UNDO_STALE));
+        assert!(directory.join("added/new.txt").exists());
+        assert!(!has_ref(&directory, &turn_undo_backup_ref(session, 1)));
+    }
+
+    #[test]
+    fn a_rewind_clears_the_undo_backup_with_the_turns_other_refs() {
+        let (directory, session) = repository_with_a_turn();
+        let plan = plan_turn_undo(&directory, session, 1, &[]).unwrap();
+        apply_turn_undo(&directory, session, 1, &[], &plan.safe).unwrap();
+
+        delete_turn_refs_after(&directory, session, 0, 1).unwrap();
+        assert!(!has_ref(&directory, &turn_undo_backup_ref(session, 1)));
+    }
+
+    #[test]
+    fn reported_paths_are_named_the_way_git_names_them() {
+        assert_eq!(
+            repo_relative_path("/repo/src/a.rs", "/repo", "").as_deref(),
+            Some("src/a.rs")
+        );
+        assert_eq!(
+            repo_relative_path("./src/a.rs", "/repo", "app/").as_deref(),
+            Some("app/src/a.rs")
+        );
+        assert_eq!(repo_relative_path("/other/a.rs", "/repo", ""), None);
+        assert_eq!(repo_relative_path("/repository/a.rs", "/repo", ""), None);
+        assert_eq!(
+            repo_relative_path("C:\\Repo\\src\\a.rs", "C:/Repo", "").as_deref(),
+            Some("src/a.rs")
+        );
+        if cfg!(windows) {
+            assert_eq!(
+                repo_relative_path("c:\\repo\\a.rs", "C:/Repo", "").as_deref(),
+                Some("a.rs")
+            );
+        }
     }
 }

@@ -218,6 +218,29 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::CollectReviewDiff { cwd, source } => WorkspaceResult::ReviewDiff {
             data: collect_review_diff(&cwd, source)?,
         },
+        WorkspaceOperation::PlanTurnUndo {
+            cwd,
+            session_id,
+            turn_count,
+            edited_paths,
+        } => WorkspaceResult::TurnUndoPlan {
+            plan: crate::checkpoint::plan_turn_undo(&cwd, session_id, turn_count, &edited_paths)?,
+        },
+        WorkspaceOperation::ApplyTurnUndo {
+            cwd,
+            session_id,
+            turn_count,
+            edited_paths,
+            expected_safe,
+        } => WorkspaceResult::TurnUndone {
+            restored: crate::checkpoint::apply_turn_undo(
+                &cwd,
+                session_id,
+                turn_count,
+                &edited_paths,
+                &expected_safe,
+            )?,
+        },
     })
 }
 

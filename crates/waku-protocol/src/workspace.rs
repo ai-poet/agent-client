@@ -32,6 +32,42 @@ pub struct ReviewDiffData {
     pub complete_context: bool,
 }
 
+/// The error text an undo fails with when the files moved after the person
+/// looked at the plan. The app matches it to ask them to look again.
+pub const TURN_UNDO_STALE: &str = "waku:turn-undo-stale";
+
+/// Why a file a turn changed is not put back by undoing it.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum UndoReason {
+    /// Changed again after the turn ended; putting it back would lose that.
+    ChangedSinceTurn,
+    /// Written by a command rather than edited through a tool.
+    ShellWritten,
+    /// A submodule: its content belongs to another repository.
+    Submodule,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UndoFile {
+    pub path: String,
+    pub reason: UndoReason,
+}
+
+/// What undoing one turn's file changes would do, file by file. Paths are
+/// relative to the repository root, `/`-separated.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnUndoPlan {
+    /// Files that go back to how they were before the turn.
+    pub safe: Vec<String>,
+    /// Files the turn changed that cannot go back without losing later work.
+    pub blocked: Vec<UndoFile>,
+    /// Files the turn changed that undo leaves alone by design.
+    pub ignored: Vec<UndoFile>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkingTreeEntry {
@@ -195,6 +231,27 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         source: ReviewDiffSource,
     },
+    /// Work out which of a turn's changed files can go back. `edited_paths`
+    /// are the files the agent edited through tools (repository-relative);
+    /// empty when the provider does not report them.
+    PlanTurnUndo {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        session_id: Uuid,
+        turn_count: usize,
+        edited_paths: Vec<String>,
+    },
+    /// Put the files of a plan back, all or none. `expected_safe` is the
+    /// plan the person confirmed; if it no longer holds nothing is written
+    /// and the request fails with [`TURN_UNDO_STALE`].
+    ApplyTurnUndo {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        session_id: Uuid,
+        turn_count: usize,
+        edited_paths: Vec<String>,
+        expected_safe: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -254,5 +311,11 @@ pub enum WorkspaceResult {
     },
     ReviewDiff {
         data: ReviewDiffData,
+    },
+    TurnUndoPlan {
+        plan: TurnUndoPlan,
+    },
+    TurnUndone {
+        restored: Vec<String>,
     },
 }
