@@ -1,4 +1,5 @@
 use super::*;
+use crate::turn_segments::{segment_default_open, segment_of, steer_indexes, turn_segments};
 
 impl Waku {
     /// One list row per message plus each ordered non-message turn block.
@@ -18,7 +19,7 @@ impl Waku {
         let fingerprint = self
             .selected_session()
             .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
-                transcript_rows_fingerprint(session, &self.expanded_turns)
+                transcript_rows_fingerprint(session, &self.turn_fold_overrides)
             });
         if self.transcript_row_kinds_fingerprint.get() != Some(fingerprint) {
             let next_kinds = self.selected_transcript_row_kinds();
@@ -30,7 +31,7 @@ impl Waku {
 
     pub(super) fn selected_transcript_row_kinds(&self) -> Vec<TranscriptRowKind> {
         self.selected_session().map_or_else(Vec::new, |session| {
-            folded_transcript_row_kinds(session, &self.expanded_turns)
+            folded_transcript_row_kinds(session, &self.turn_fold_overrides)
         })
     }
 
@@ -412,7 +413,9 @@ impl Waku {
 pub(super) enum TranscriptRowKind {
     Message(usize),
     TurnBlock(usize),
-    TurnFold(Uuid),
+    /// The heading a stretch of a turn's work folds under — one per segment
+    /// the steering messages split the turn into.
+    TurnFold(Uuid, usize),
     /// Actions and completion time for one settled response. This is a turn
     /// row rather than part of an assistant message so tool activity that
     /// follows the last text segment can never strand the footer mid-response.
@@ -441,11 +444,15 @@ pub(super) fn transcript_navigation_turns(
     session: &AgentSession,
     row_kinds: &[TranscriptRowKind],
 ) -> Vec<TranscriptNavigationTurn> {
+    // One tick per prompt that started a turn; a steer is part of its turn.
     let user_message_indexes = session
         .messages
         .iter()
         .enumerate()
-        .filter_map(|(index, message)| (message.role == MessageRole::User).then_some(index))
+        .filter_map(|(index, message)| {
+            (message.role == MessageRole::User && !message_is_steer(&session.messages, index))
+                .then_some(index)
+        })
         .collect::<Vec<_>>();
 
     // Message rows keep ascending message order through folding, so one cursor
@@ -630,7 +637,7 @@ pub(super) fn assistant_response_footer(
             .filter_map(|row| match *row {
                 TranscriptRowKind::Message(index) => session.messages.get(index),
                 TranscriptRowKind::TurnBlock(_)
-                | TranscriptRowKind::TurnFold(_)
+                | TranscriptRowKind::TurnFold(..)
                 | TranscriptRowKind::ResponseFooter(_, _)
                 | TranscriptRowKind::ChangedFiles(_)
                 | TranscriptRowKind::WorkingIndicator => None,
@@ -823,9 +830,52 @@ pub(super) fn transcript_row_kinds(
 /// fall back to `Message(n)` — silently dropping every reasoning block and tool
 /// activity from the transcript. Cheap mixing, not a real hash: this runs on
 /// the frame path, and the values it folds in are already well distributed.
+/// Which fold segments the person opened or closed by hand, over the default
+/// [`segment_default_open`] gives each.
+pub(super) trait FoldOverrides {
+    fn open_override(&self, turn_id: Uuid, segment: usize) -> Option<bool>;
+    /// Order-independent: the collections behind this have no stable order.
+    fn fold_fingerprint(&self) -> u64;
+}
+
+/// The app's own record: `(turn, segment)` → open.
+pub(super) type TurnFoldOverrides = HashMap<(Uuid, usize), bool>;
+
+impl FoldOverrides for TurnFoldOverrides {
+    fn open_override(&self, turn_id: Uuid, segment: usize) -> Option<bool> {
+        self.get(&(turn_id, segment)).copied()
+    }
+
+    fn fold_fingerprint(&self) -> u64 {
+        let combined = self.iter().fold(0u64, |combined, ((turn_id, segment), open)| {
+            let entry = mix(
+                mix(mix_uuid(EMPTY_TRANSCRIPT_FINGERPRINT, *turn_id), *segment as u64),
+                *open as u64,
+            );
+            combined.wrapping_add(entry)
+        });
+        mix(self.len() as u64, combined)
+    }
+}
+
+/// A set of turns with every segment open — the shape the fold had before
+/// turns were split, kept for the tests that describe it.
+impl FoldOverrides for HashSet<Uuid> {
+    fn open_override(&self, turn_id: Uuid, _segment: usize) -> Option<bool> {
+        self.contains(&turn_id).then_some(true)
+    }
+
+    fn fold_fingerprint(&self) -> u64 {
+        let combined = self.iter().fold(0u64, |combined, turn_id| {
+            combined.wrapping_add(mix_uuid(EMPTY_TRANSCRIPT_FINGERPRINT, *turn_id))
+        });
+        mix(self.len() as u64, combined)
+    }
+}
+
 pub(super) fn transcript_rows_fingerprint(
     session: &AgentSession,
-    expanded_turns: &HashSet<Uuid>,
+    overrides: &impl FoldOverrides,
 ) -> u64 {
     let mut hash = mix_uuid(EMPTY_TRANSCRIPT_FINGERPRINT, session.id);
 
@@ -865,12 +915,7 @@ pub(super) fn transcript_rows_fingerprint(
         );
     }
 
-    // A set has no stable iteration order, so combine its members with an
-    // order-independent sum instead of folding them in sequence.
-    let expanded = expanded_turns.iter().fold(0u64, |combined, turn_id| {
-        combined.wrapping_add(mix_uuid(EMPTY_TRANSCRIPT_FINGERPRINT, *turn_id))
-    });
-    mix(mix(hash, expanded_turns.len() as u64), expanded)
+    mix(hash, overrides.fold_fingerprint())
 }
 
 /// The fingerprint of "no session selected", and the seed everything else
@@ -909,7 +954,7 @@ fn mix_turn_id(hash: u64, turn_id: Option<Uuid>) -> u64 {
 /// so frames can skip the fold; consult a new one and that must learn it too.
 pub(super) fn folded_transcript_row_kinds(
     session: &AgentSession,
-    expanded_turns: &HashSet<Uuid>,
+    overrides: &impl FoldOverrides,
 ) -> Vec<TranscriptRowKind> {
     let anchors = session
         .transcript_blocks
@@ -922,29 +967,41 @@ pub(super) fn folded_transcript_row_kinds(
     let mut response_footers = HashMap::new();
 
     for turn in &session.turns {
-        if turn.status == TurnStatus::Running {
-            continue;
-        }
         let turn_rows = turn_rows(session, turn.id);
-        if let Some(message_index) = response_footer_message_index_from_rows(session, &turn_rows) {
+        if turn.status != TurnStatus::Running
+            && let Some(message_index) = response_footer_message_index_from_rows(session, &turn_rows)
+        {
             response_footers.insert(turn.id, message_index);
         }
-        let hidden = &turn_rows[..turn_answer_start(session, &turn_rows)];
-        let Some(anchor) = hidden.first().copied() else {
-            continue;
-        };
-        fold_anchors.insert(anchor, turn.id);
-        hidden_rows.extend(hidden.iter().copied());
+        // Each steer the turn took begins a segment of its own, folded under
+        // its own heading; each keeps its own answer outside the fold.
+        for (segment, rows) in turn_segment_rows(session, turn.id, turn_rows)
+            .iter()
+            .enumerate()
+        {
+            let (open, togglable) = turn_fold_state(session, turn, segment, overrides);
+            // The segment being worked on right now has no heading: the
+            // working row below it says how long it has run.
+            if !togglable {
+                continue;
+            }
+            let hidden = &rows[..turn_answer_start(session, rows)];
+            let Some(anchor) = hidden.first().copied() else {
+                continue;
+            };
+            fold_anchors.insert(anchor, (turn.id, segment));
+            if !open {
+                hidden_rows.extend(hidden.iter().copied());
+            }
+        }
     }
 
     let mut rows = Vec::with_capacity(raw_rows.len() + fold_anchors.len() + 1);
     for row in raw_rows {
-        if let Some(turn_id) = fold_anchors.get(&row).copied() {
-            rows.push(TranscriptRowKind::TurnFold(turn_id));
+        if let Some((turn_id, segment)) = fold_anchors.get(&row).copied() {
+            rows.push(TranscriptRowKind::TurnFold(turn_id, segment));
         }
-        let expanded =
-            row_turn_id(session, row).is_some_and(|turn_id| expanded_turns.contains(&turn_id));
-        if expanded || !hidden_rows.contains(&row) {
+        if !hidden_rows.contains(&row) {
             rows.push(row);
         }
     }
@@ -1071,6 +1128,49 @@ fn turn_rows(session: &AgentSession, turn_id: Uuid) -> Vec<TranscriptRowKind> {
     rows
 }
 
+/// A turn's rows split by the segment each belongs to.
+fn turn_segment_rows(
+    session: &AgentSession,
+    turn_id: Uuid,
+    rows: Vec<TranscriptRowKind>,
+) -> Vec<Vec<TranscriptRowKind>> {
+    let steers = steer_indexes(session, turn_id);
+    let mut segments = vec![Vec::new(); steers.len() + 1];
+    let message_count = session.messages.len();
+    for row in rows {
+        let position = match row {
+            TranscriptRowKind::Message(index) => index,
+            TranscriptRowKind::TurnBlock(index) => session
+                .transcript_blocks
+                .get(index)
+                .map_or(message_count, |block| block.after_message.min(message_count)),
+            _ => continue,
+        };
+        segments[segment_of(&steers, position)].push(row);
+    }
+    segments
+}
+
+/// Whether a turn's fold segment is open, and whether it may be folded at
+/// all: the person's choice where they made one, else the default for the
+/// turn's state.
+pub(super) fn turn_fold_state(
+    session: &AgentSession,
+    turn: &crate::model::AgentTurn,
+    segment: usize,
+    overrides: &impl FoldOverrides,
+) -> (bool, bool) {
+    let is_last = segment == steer_indexes(session, turn.id).len();
+    let (default_open, togglable) = segment_default_open(turn.status, is_last);
+    if !togglable {
+        return (default_open, false);
+    }
+    (
+        overrides.open_override(turn.id, segment).unwrap_or(default_open),
+        true,
+    )
+}
+
 fn response_footer_message_index_from_rows(
     session: &AgentSession,
     turn_rows: &[TranscriptRowKind],
@@ -1078,7 +1178,7 @@ fn response_footer_message_index_from_rows(
     let message_index = turn_rows.iter().rev().find_map(|row| match *row {
         TranscriptRowKind::Message(message_index) => Some(message_index),
         TranscriptRowKind::TurnBlock(_)
-        | TranscriptRowKind::TurnFold(_)
+        | TranscriptRowKind::TurnFold(..)
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
         | TranscriptRowKind::WorkingIndicator => None,
@@ -1092,7 +1192,7 @@ fn response_footer_message_index_from_rows(
         .filter_map(|row| match *row {
             TranscriptRowKind::Message(message_index) => session.messages.get(message_index),
             TranscriptRowKind::TurnBlock(_)
-            | TranscriptRowKind::TurnFold(_)
+            | TranscriptRowKind::TurnFold(..)
             | TranscriptRowKind::ResponseFooter(_, _)
             | TranscriptRowKind::ChangedFiles(_)
             | TranscriptRowKind::WorkingIndicator => None,
@@ -1115,7 +1215,7 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
             .get(message_index)
             .is_some_and(|message| !message.content.trim().is_empty()),
         TranscriptRowKind::TurnBlock(_)
-        | TranscriptRowKind::TurnFold(_)
+        | TranscriptRowKind::TurnFold(..)
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
         | TranscriptRowKind::WorkingIndicator => false,
@@ -1133,7 +1233,7 @@ fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Option<Uuid> {
     match row {
         TranscriptRowKind::Message(index) => session.messages.get(index)?.turn_id,
         TranscriptRowKind::TurnBlock(index) => session.transcript_blocks.get(index)?.turn_id,
-        TranscriptRowKind::TurnFold(turn_id) => Some(turn_id),
+        TranscriptRowKind::TurnFold(turn_id, _) => Some(turn_id),
         TranscriptRowKind::ResponseFooter(turn_id, _) => Some(turn_id),
         TranscriptRowKind::ChangedFiles(turn_id) => Some(turn_id),
         TranscriptRowKind::WorkingIndicator => None,
@@ -1154,25 +1254,34 @@ pub(super) fn response_row_turn_id(session: &AgentSession, row: TranscriptRowKin
         }
         TranscriptRowKind::WorkingIndicator => None,
         TranscriptRowKind::TurnBlock(_)
-        | TranscriptRowKind::TurnFold(_)
+        | TranscriptRowKind::TurnFold(..)
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_) => row_turn_id(session, row),
     }
 }
 
-pub(super) fn turn_fold_label(session: &AgentSession, turn_id: Uuid) -> String {
+pub(super) fn turn_fold_label(session: &AgentSession, turn_id: Uuid, segment: usize) -> String {
     let Some(turn) = session.turns.iter().find(|turn| turn.id == turn_id) else {
         return tr!("transcript.worked");
     };
+    let segments = turn_segments(session, turn);
+    let Some(span) = segments.get(segment) else {
+        return tr!("transcript.worked");
+    };
     // Working time: waits on approvals, answers and compactions left out.
-    let seconds = turn
-        .active_seconds(turn.started_at, turn.completed_at.unwrap_or_else(unix_time))
-        .max(1);
+    let end = span
+        .ended_at
+        .or(turn.completed_at)
+        .unwrap_or_else(unix_time);
+    let seconds = turn.active_seconds(span.started_at, end).max(1);
     let duration = format_worked_duration(seconds);
-    if turn.status == TurnStatus::Interrupted {
-        tr!("transcript.you_stopped_after", duration = duration)
-    } else {
-        tr!("transcript.worked_for", duration = duration)
+    // A segment a steer ended simply worked; only the turn's last one can
+    // have been stopped or have failed.
+    let is_last = segment + 1 == segments.len();
+    match turn.status {
+        TurnStatus::Interrupted if is_last => tr!("transcript.segment_stopped", duration = duration),
+        TurnStatus::Failed if is_last => tr!("transcript.segment_failed", duration = duration),
+        _ => tr!("transcript.worked_for", duration = duration),
     }
 }
 
@@ -1273,7 +1382,17 @@ pub(super) fn message_starts_followup_turn(messages: &[Message], message_index: 
     messages
         .get(message_index)
         .is_some_and(|message| message.role == MessageRole::User)
+        && !message_is_steer(messages, message_index)
         && messages[..message_index]
             .iter()
             .any(|message| message.role == MessageRole::User)
+}
+
+/// A user message sent into a turn already running — steering it — rather
+/// than one that started a turn.
+pub(super) fn message_is_steer(messages: &[Message], message_index: usize) -> bool {
+    messages
+        .get(message_index)
+        .is_some_and(|message| message.role == MessageRole::User && message.turn_id.is_some())
+        && !message_opens_turn(messages, message_index)
 }

@@ -977,6 +977,8 @@ common.copy_named: "%{name} をコピー"
 transcript.worked: 完了
 transcript.worked_for: 作業時間 %{duration}
 transcript.you_stopped_after: "%{duration} 後にタスクを停止しました"
+transcript.segment_stopped: "%{duration}で停止"
+transcript.segment_failed: "%{duration}で失敗"
 transcript.working_for: 作業中 · %{duration}
 session.context_compacting: "会話を圧縮しています…"
 session.context_compacted_auto: "コンテキストを自動で圧縮しました · %{before} → %{after}"

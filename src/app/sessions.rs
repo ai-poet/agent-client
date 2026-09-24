@@ -829,7 +829,7 @@ impl Waku {
     pub(super) fn reset_visible_state(&mut self) {
         self.activities_expanded.clear();
         self.expanded_activity_items.clear();
-        self.expanded_turns.clear();
+        self.turn_fold_overrides.clear();
         self.expanded_changed_files.clear();
         self.transcript_control_focuses.borrow_mut().clear();
         self.hovered_response_row = None;

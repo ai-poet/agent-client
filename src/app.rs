@@ -1363,7 +1363,9 @@ pub struct Waku {
     /// details start closed, so the stored bool must preserve either choice.
     expanded_activity_items: HashMap<Uuid, bool>,
     /// Settled turns whose folded work the user has reopened.
-    expanded_turns: HashSet<Uuid>,
+    /// Fold segments the person opened or closed by hand, by turn and
+    /// segment. Everything else follows its turn's state.
+    turn_fold_overrides: transcript::TurnFoldOverrides,
     /// Per-response file cards the user expanded beyond their three-file
     /// preview. Runtime-only, like the other transcript disclosures.
     expanded_changed_files: HashSet<Uuid>,
@@ -3053,7 +3055,7 @@ impl Waku {
                 last_stream_save: Instant::now(),
                 activities_expanded: HashMap::new(),
                 expanded_activity_items: HashMap::new(),
-                expanded_turns: HashSet::new(),
+                turn_fold_overrides: HashMap::new(),
                 expanded_changed_files: HashSet::new(),
                 transcript_control_focuses: RefCell::new(HashMap::new()),
                 session_navigation,

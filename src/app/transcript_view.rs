@@ -954,6 +954,7 @@ impl Waku {
     pub(super) fn toggle_turn_fold(
         &mut self,
         turn_id: Uuid,
+        segment: usize,
         expanded: bool,
         cx: &mut Context<Self>,
     ) {
@@ -961,11 +962,8 @@ impl Waku {
         let scroll_top = self.active_transcript_rows().logical_scroll_top();
         let previous_kinds = self.transcript_row_kinds.borrow().clone();
         let anchor_kind = previous_kinds.get(scroll_top.item_ix).copied();
-        if expanded {
-            self.expanded_turns.remove(&turn_id);
-        } else {
-            self.expanded_turns.insert(turn_id);
-        }
+        self.turn_fold_overrides
+            .insert((turn_id, segment), !expanded);
         self.transcript_anchor_following.set(false);
         self.splice_transcript_rows_after_visibility_change(&previous_kinds);
 
@@ -975,7 +973,7 @@ impl Waku {
         let target = anchored_target.or_else(|| {
             next_kinds
                 .iter()
-                .position(|kind| *kind == TranscriptRowKind::TurnFold(turn_id))
+                .position(|kind| *kind == TranscriptRowKind::TurnFold(turn_id, segment))
         });
         drop(next_kinds);
         if let Some(item_ix) = target {
@@ -1238,7 +1236,7 @@ impl Waku {
                 })
             }
             TranscriptRowKind::TurnBlock(_)
-            | TranscriptRowKind::TurnFold(_)
+            | TranscriptRowKind::TurnFold(..)
             | TranscriptRowKind::ResponseFooter(_, _)
             | TranscriptRowKind::ChangedFiles(_)
             | TranscriptRowKind::WorkingIndicator => false,
@@ -1365,7 +1363,9 @@ impl Waku {
                     self.render_activities_row(&block.activities, block_index, &theme, window, cx)
                 })
                 .unwrap_or_else(|| div().into_any_element()),
-            TranscriptRowKind::TurnFold(turn_id) => self.render_turn_fold_row(turn_id, &theme, cx),
+            TranscriptRowKind::TurnFold(turn_id, segment) => {
+                self.render_turn_fold_row(turn_id, segment, &theme, cx)
+            }
             TranscriptRowKind::ResponseFooter(turn_id, message_index) => {
                 self.render_response_footer_row(turn_id, message_index, &theme, cx)
             }
@@ -1746,13 +1746,19 @@ impl Waku {
     pub(super) fn render_turn_fold_row(
         &self,
         turn_id: Uuid,
+        segment: usize,
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let expanded = self.expanded_turns.contains(&turn_id);
-        let label = self
-            .selected_session()
-            .map(|session| turn_fold_label(session, turn_id))
+        let session = self.selected_session();
+        let expanded = session
+            .and_then(|session| {
+                let turn = session.turns.iter().find(|turn| turn.id == turn_id)?;
+                Some(turn_fold_state(session, turn, segment, &self.turn_fold_overrides).0)
+            })
+            .unwrap_or(false);
+        let label = session
+            .map(|session| turn_fold_label(session, turn_id, segment))
             .unwrap_or_else(|| tr!("transcript.worked"));
         div()
             .w_full()
@@ -1763,7 +1769,7 @@ impl Waku {
             .child(div().h(px(1.0)).flex_1().bg(theme.border))
             .child(
                 div()
-                    .id(SharedString::from(format!("turn-fold-{turn_id}")))
+                    .id(SharedString::from(format!("turn-fold-{turn_id}-{segment}")))
                     .h(px(24.0))
                     .px(px(2.0))
                     .flex_none()
@@ -1786,7 +1792,7 @@ impl Waku {
                         theme.text_tertiary,
                     ))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_turn_fold(turn_id, expanded, cx);
+                        this.toggle_turn_fold(turn_id, segment, expanded, cx);
                     })),
             )
             .child(div().h(px(1.0)).flex_1().bg(theme.border))

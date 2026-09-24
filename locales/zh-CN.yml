@@ -926,8 +926,10 @@ attachments.open_preview: 打开%{name}
 attachments.preview_unavailable: 无法显示图片
 common.copy_named: 复制%{name}
 transcript.worked: 已完成
-transcript.worked_for: 用时 %{duration}
+transcript.worked_for: 已工作 %{duration}
 transcript.you_stopped_after: 你在工作 %{duration} 后停止了
+transcript.segment_stopped: "已停止 · %{duration}"
+transcript.segment_failed: "失败 · %{duration}"
 transcript.working_for: 工作中 · %{duration}
 session.context_compacting: "正在压缩上下文…"
 session.context_compacted_auto: "上下文已自动压缩 · %{before} → %{after}"

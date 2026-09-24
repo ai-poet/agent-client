@@ -1169,10 +1169,76 @@ fn row_kinds_and_row_count_describe_the_same_rows() {
         folded_transcript_row_kinds(&session, &HashSet::new()),
         vec![
             Message(0),
-            TurnFold(turn_id),
+            TurnFold(turn_id, 0),
             Message(1),
             ResponseFooter(turn_id, 1),
         ]
+    );
+}
+
+/// A steer starts a segment of the turn's work with a heading of its own;
+/// the work before it folds under the first heading, not above the steer.
+#[test]
+fn a_steer_splits_the_turns_work_into_two_folds() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Native);
+    let turn_id = session.begin_turn("Build it");
+    let work = |label: &str| ActivityItem::new(None, ActivityKind::Command, label, None, true);
+    session.transcript_blocks.push(TranscriptBlock {
+        after_message: 1,
+        turn_id: Some(turn_id),
+        activities: vec![work("first")],
+    });
+    session.push_user_message_with_presentation("also add tests", None, Vec::new());
+    session.transcript_blocks.push(TranscriptBlock {
+        after_message: 2,
+        turn_id: Some(turn_id),
+        activities: vec![work("second")],
+    });
+
+    // While it runs, the steered-away segment folds; the live one stays open
+    // with no heading of its own.
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::new()),
+        vec![
+            Message(0),
+            TurnFold(turn_id, 0),
+            Message(1),
+            TurnBlock(1),
+        ]
+    );
+
+    session.push_message(MessageRole::Assistant, "Done.");
+    session.finish_active_turn(TurnStatus::Completed);
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::new()),
+        vec![
+            Message(0),
+            TurnFold(turn_id, 0),
+            Message(1),
+            TurnFold(turn_id, 1),
+            Message(2),
+            ResponseFooter(turn_id, 2),
+        ]
+    );
+    // A steer is not a new turn: no follow-up gap, no rail tick.
+    assert!(!message_starts_followup_turn(&session.messages, 1));
+}
+
+/// A turn that failed or was stopped keeps its work in view — that work is
+/// the explanation — under a heading that says how it ended.
+#[test]
+fn a_failed_turn_keeps_its_work_open() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Native);
+    let turn_id = session.begin_turn("Build it");
+    session.transcript_blocks.push(TranscriptBlock {
+        after_message: 1,
+        turn_id: Some(turn_id),
+        activities: vec![ActivityItem::new(None, ActivityKind::Command, "cargo build", None, true)],
+    });
+    session.finish_active_turn(TurnStatus::Failed);
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::new()),
+        vec![Message(0), TurnFold(turn_id, 0), TurnBlock(0)]
     );
 }
 
@@ -1229,7 +1295,7 @@ fn response_hover_owns_every_response_row_but_not_the_prompt() {
     assert_eq!(response_row_turn_id(&session, Message(0)), None);
     for row in [
         TurnBlock(0),
-        TurnFold(turn_id),
+        TurnFold(turn_id, 0),
         Message(1),
         ResponseFooter(turn_id, 1),
         ChangedFiles(turn_id),
@@ -1267,13 +1333,13 @@ fn changed_files_remain_visible_when_an_interrupted_turn_has_no_answer() {
 
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new()),
-        vec![Message(0), TurnFold(turn_id), ChangedFiles(turn_id)]
+        vec![Message(0), TurnFold(turn_id, 0), ChangedFiles(turn_id)]
     );
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::from([turn_id])),
         vec![
             Message(0),
-            TurnFold(turn_id),
+            TurnFold(turn_id, 0),
             TurnBlock(0),
             Message(1),
             ChangedFiles(turn_id),
@@ -1521,7 +1587,7 @@ fn a_settled_turn_folds_all_of_its_work_above_the_answer() {
         folded_transcript_row_kinds(&session, &HashSet::new()),
         vec![
             Message(0),
-            TurnFold(turn_id),
+            TurnFold(turn_id, 0),
             Message(2),
             ResponseFooter(turn_id, 2),
         ]
@@ -1531,7 +1597,7 @@ fn a_settled_turn_folds_all_of_its_work_above_the_answer() {
         folded_transcript_row_kinds(&session, &HashSet::from([turn_id])),
         vec![
             Message(0),
-            TurnFold(turn_id),
+            TurnFold(turn_id, 0),
             TurnBlock(0),
             Message(1),
             TurnBlock(1),
@@ -1567,7 +1633,7 @@ fn consecutive_trailing_text_parts_all_stay_out_of_the_fold() {
         folded_transcript_row_kinds(&session, &HashSet::new()),
         vec![
             Message(0),
-            TurnFold(turn_id),
+            TurnFold(turn_id, 0),
             Message(1),
             Message(2),
             ResponseFooter(turn_id, 2),
@@ -1598,11 +1664,11 @@ fn a_turn_without_an_answer_folds_completely() {
 
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new()),
-        vec![Message(0), TurnFold(turn_id)]
+        vec![Message(0), TurnFold(turn_id, 0)]
     );
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::from([turn_id])),
-        vec![Message(0), TurnFold(turn_id), TurnBlock(0), Message(1)]
+        vec![Message(0), TurnFold(turn_id, 0), TurnBlock(0), Message(1)]
     );
 }
 
@@ -1703,7 +1769,7 @@ fn assistant_response_footer_treats_a_blank_part_as_work() {
         folded_transcript_row_kinds(&session, &HashSet::new()),
         vec![
             Message(0),
-            TurnFold(turn_id),
+            TurnFold(turn_id, 0),
             Message(3),
             ResponseFooter(turn_id, 3),
         ]
@@ -1747,13 +1813,13 @@ fn turn_fold_visibility_splice_preserves_surrounding_message_rows() {
     let turn_id = Uuid::new_v4();
     let collapsed = vec![
         Message(0),
-        TurnFold(turn_id),
+        TurnFold(turn_id, 0),
         Message(2),
         ResponseFooter(turn_id, 2),
     ];
     let expanded = vec![
         Message(0),
-        TurnFold(turn_id),
+        TurnFold(turn_id, 0),
         TurnBlock(0),
         Message(1),
         TurnBlock(1),

@@ -1909,6 +1909,10 @@ transcript.worked_for:
   en: Worked for %{duration}
 transcript.you_stopped_after:
   en: You stopped after %{duration}
+transcript.segment_stopped:
+  en: "Stopped after %{duration}"
+transcript.segment_failed:
+  en: "Failed after %{duration}"
 transcript.working_for:
   en: Working for %{duration}
 session.context_compacting:
