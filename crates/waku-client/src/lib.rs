@@ -12,6 +12,7 @@ pub mod computer_use;
 pub mod driver;
 pub mod persistence;
 mod process;
+pub mod status_capsule;
 pub mod turn_segments;
 mod workspace_client;
 

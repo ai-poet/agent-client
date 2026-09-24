@@ -608,6 +608,20 @@ impl Waku {
             .unwrap_or_default()
     }
 
+    /// The session's background work still running, newest first.
+    pub(super) fn live_background_work(&self, session_id: Uuid) -> Vec<&BackgroundWorkItem> {
+        self.background_work
+            .get(&session_id)
+            .map(|registry| {
+                registry
+                    .ordered_items()
+                    .into_iter()
+                    .filter(|item| item.status.is_live())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub(super) fn background_work_for_activity(
         &self,
         session_id: Uuid,

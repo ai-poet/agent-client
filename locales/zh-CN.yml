@@ -983,6 +983,13 @@ transcript.thought_for: 思考 · 持续了 %{duration}
 transcript.changed_file: 更改了 %{count} 个文件
 transcript.changed_files: 更改了 %{count} 个文件
 transcript.review_changes: 审阅
+status.goal: "目标"
+status.progress: "进度"
+status.background: "后台"
+status.changes: "改动"
+status.progress_fact: "已完成 %{done}/%{total} 步"
+status.background_fact: "后台运行 %{count} 个"
+status.goal_done: "目标已完成"
 changes.undo: "撤销"
 changes.undone: "已撤销"
 changes.undo_title: "撤销这一轮的文件改动"

@@ -1032,6 +1032,13 @@ transcript.thought_for: 思考 · %{duration}
 transcript.changed_file: "%{count} 個のファイルを変更"
 transcript.changed_files: "%{count} 個のファイルを変更"
 transcript.review_changes: レビュー
+status.goal: "目標"
+status.progress: "進捗"
+status.background: "バックグラウンド"
+status.changes: "変更"
+status.progress_fact: "%{done}/%{total} ステップ完了"
+status.background_fact: "バックグラウンドで %{count} 件実行中"
+status.goal_done: "目標を達成しました"
 changes.undo: "元に戻す"
 changes.undone: "元に戻しました"
 changes.undo_title: "このターンのファイル変更を元に戻す"

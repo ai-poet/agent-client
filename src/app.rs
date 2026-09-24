@@ -1370,6 +1370,8 @@ pub struct Waku {
     error_details_open: Option<Uuid>,
     /// Turns whose undo is being planned or applied right now.
     turn_undo_pending: HashSet<Uuid>,
+    /// Whether the status capsule over the transcript is open onto its panel.
+    status_capsule_open: bool,
     /// Per-response file cards the user expanded beyond their three-file
     /// preview. Runtime-only, like the other transcript disclosures.
     expanded_changed_files: HashSet<Uuid>,
@@ -1750,6 +1752,7 @@ mod sessions;
 mod settings;
 mod sidebar;
 mod skills_page;
+mod status_capsule;
 mod streaming;
 mod task_switcher;
 mod todo_list;
@@ -3067,6 +3070,7 @@ impl Waku {
                 turn_fold_overrides: HashMap::new(),
                 error_details_open: None,
                 turn_undo_pending: HashSet::new(),
+                status_capsule_open: false,
                 expanded_changed_files: HashSet::new(),
                 transcript_control_focuses: RefCell::new(HashMap::new()),
                 session_navigation,

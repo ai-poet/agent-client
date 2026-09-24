@@ -389,9 +389,17 @@ impl Render for Waku {
                     .child(if empty {
                         self.render_empty_state(cx).into_any_element()
                     } else {
-                        self.transcript_pane
-                            .clone()
-                            .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
+                        div()
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .relative()
+                            .child(self.transcript_pane.clone().cached(
+                                StyleRefinement::default().flex_1().min_h(px(0.0)).w_full(),
+                            ))
+                            .children(self.render_status_capsule(cx))
                             .into_any_element()
                     })
                     .children(permission)

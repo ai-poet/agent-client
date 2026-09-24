@@ -2019,6 +2019,20 @@ transcript.changed_files:
   en: Changed %{count} files
 transcript.review_changes:
   en: Review
+status.goal:
+  en: "Goal"
+status.progress:
+  en: "Progress"
+status.background:
+  en: "Background"
+status.changes:
+  en: "Changes"
+status.progress_fact:
+  en: "%{done}/%{total} steps done"
+status.background_fact:
+  en: "%{count} running in the background"
+status.goal_done:
+  en: "Goal achieved"
 changes.undo:
   en: "Undo"
 changes.undone:
