@@ -16,7 +16,7 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
-## [2.0.1]
+## [0.2.1]
 
 - The built-in agent is prompt-cached on Claude routes: it marks its requests the way Claude Code does, so on a group that goes straight to Anthropic (such as Claude Max) each step reads the conversation so far from the cache instead of paying for all of it again
 - The reasoning effort chosen for a current Claude model (Opus 4.6 and later, Sonnet 4.6 and 5, Fable 5) now reaches it the way Claude Code sends it, and shows in the gateway's usage log; Opus 5.5 no longer fails when an effort is chosen
