@@ -4,6 +4,7 @@
 //! clients cannot accidentally reach daemon-owned filesystem, Git, database,
 //! or provider implementations.
 
+pub mod activity_phase;
 mod client;
 pub mod command_env;
 pub mod composer_complete;
@@ -11,6 +12,7 @@ pub mod computer_use;
 pub mod driver;
 pub mod persistence;
 mod process;
+pub mod turn_segments;
 mod workspace_client;
 
 pub use client::{
