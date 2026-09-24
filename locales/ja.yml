@@ -509,6 +509,12 @@ computer_use.preparing_preview: プレビューを準備中…
 common.deny: 拒否
 
 permission.allow_once: 1 回だけ許可
+shortcuts.access_now: "アクセス：%{mode}"
+shortcuts.mode_now: "モード：%{mode}"
+shortcuts.effort_now: "推論の強さ：%{effort}"
+permission.counter: "%{index}/%{total}"
+permission.deny_with_feedback: "理由を添えて拒否"
+permission.feedback_placeholder: "代わりにどうすべきかをエージェントに伝える…"
 permission.allow_for_session: このセッションで許可
 permission.always_allow: 常に許可
 permission.always_deny: 常に拒否
@@ -700,6 +706,8 @@ session.stopped: 停止しました
 session.turn_completed: ターンが完了しました
 session.agent_returned_nothing: "エージェントは応答を返さずにターンを終了し、エラーも報告しませんでした。CLI 自身のログに手がかりがあるかもしれません。"
 session.stopped_before_response: エージェントは回答を返す前に停止しました
+notification.waiting_permission: "承認が必要です"
+notification.waiting_question: "質問があります"
 session.provider_exited_before_response: "%{provider} は回答を返す前に終了しました"
 session.retry_as_new_turn: "このエージェントはターンの前に戻れないため、プロンプトを新しいターンとして再送信しました"
 error_banner.title: "このタスクは失敗しました"
@@ -1757,3 +1765,6 @@ plan.ready_detail: "エージェントが計画を完成させ、実行の開始
 plan.summary_lead: "エージェントの計画は以下のとおりです。承認すると実装を開始します。修正が必要な場合は計画を続けさせてください。"
 plan.approve: "承認して実行"
 plan.keep_planning: "計画を続ける"
+plan.keep_planning_with_notes: "このメモで計画を続ける"
+plan.expand_full: "計画全体を表示"
+plan.collapse: "折りたたむ"

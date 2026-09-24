@@ -26,100 +26,20 @@ pub(super) fn composer_submit_action(
 impl Waku {
     // ── Permission ─────────────────────────────────────────────────────────
 
-    pub(super) fn render_permission(&self, cx: &mut Context<Self>) -> Option<Div> {
+    pub(super) fn render_permission(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
         if let Some(input) = self.selected_runtime()?.pending_user_input.clone() {
             return Some(self.render_user_input(input, cx));
         }
         if let Some(permission) = self.selected_runtime()?.pending_computer_approval.as_ref() {
             return Some(self.render_computer_permission(permission, cx));
         }
-        let permission = self.selected_runtime()?.pending_permission.as_ref()?;
-        let theme = Theme::current(cx);
-        let request_id = permission.request_id.clone();
-        let mut buttons = div().flex().items_center().gap(px(8.0)).mt(px(10.0));
-        for option in &permission.options {
-            let request_id = request_id.clone();
-            let option_id = option.id.clone();
-            let allow = option.allow;
-            buttons = buttons.child(
-                div()
-                    .id(SharedString::from(format!(
-                        "permission-{}-{}",
-                        permission.request_id, option.id
-                    )))
-                    .h(px(28.0))
-                    .px(px(13.0))
-                    .rounded(px(7.0))
-                    .flex()
-                    .items_center()
-                    .cursor_default()
-                    .text_size(sp(12.5))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .when(allow, |element| {
-                        element
-                            .bg(theme.inverse)
-                            .text_color(theme.on_inverse)
-                            .hover(|element| element.opacity(0.9))
-                    })
-                    .when(!allow, |element| {
-                        element
-                            .border_1()
-                            .border_color(theme.border_strong)
-                            .text_color(theme.text_secondary)
-                            .hover(|element| element.bg(theme.overlay).text_color(theme.text))
-                    })
-                    .active(|element| element.opacity(0.8))
-                    .child(SharedString::from(option.label.clone()))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.respond_permission(request_id.clone(), option_id.clone(), cx);
-                    })),
-            );
-        }
-        Some(
-            div().px(px(20.0)).pb(px(8.0)).child(
-                div()
-                    .w_full()
-                    .max_w(px(CONTENT_MAX_WIDTH))
-                    .mx_auto()
-                    .p(px(12.0))
-                    .rounded(px(12.0))
-                    .border_1()
-                    .border_color(theme.border_strong)
-                    .bg(theme.raised)
-                    .shadow_md()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(icon("icons/alert.svg", 13.0, theme.warning))
-                            .child(
-                                div()
-                                    .text_size(sp(12.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(SharedString::from(permission.title.clone())),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id("permission-detail")
-                            .mt(px(8.0))
-                            .max_h(px(92.0))
-                            .overflow_y_scroll()
-                            .p(px(8.0))
-                            .rounded(px(7.0))
-                            .bg(theme.inset)
-                            .font_family(crate::md::render::MONO_FAMILY)
-                            .text_size(sp(12.5))
-                            .line_height(sp(16.0))
-                            .text_color(theme.text_secondary)
-                            .whitespace_normal()
-                            .child(SharedString::from(permission.detail.clone())),
-                    )
-                    .child(buttons),
-            ),
-        )
+        let runtime = self.selected_runtime()?;
+        let permission = runtime.pending_permissions.front()?;
+        Some(self.render_permission_card(permission, runtime.pending_permissions.len(), window, cx))
     }
 
     fn render_user_input(&self, pending: PendingUserInput, cx: &mut Context<Self>) -> Div {

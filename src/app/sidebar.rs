@@ -1929,11 +1929,30 @@ impl Waku {
                         )))
                     })
                     .when(session.status == SessionStatus::Waiting, |element| {
-                        element.child(icon(
-                            "icons/alert.svg",
-                            12.0,
-                            status_color(&theme, session.status),
-                        ))
+                        // Several requests can wait at once; say how many.
+                        let waiting = self.runtimes.get(&session.id).map_or(0, |runtime| {
+                            runtime.pending_permissions.len()
+                                + usize::from(runtime.pending_user_input.is_some())
+                                + usize::from(runtime.pending_computer_approval.is_some())
+                        });
+                        let color = status_color(&theme, session.status);
+                        element.child(
+                            div()
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap(px(2.0))
+                                .child(icon("icons/alert.svg", 12.0, color))
+                                .when(waiting > 1, |badge| {
+                                    badge.child(
+                                        div()
+                                            .text_size(sp(11.0))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(color)
+                                            .child(waiting.to_string()),
+                                    )
+                                }),
+                        )
                     })
                     // Fork addition: failure badge with the cause, and a remove control.
                     .children(self.render_task_failure_badge(session, cx))

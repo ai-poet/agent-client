@@ -205,6 +205,33 @@ impl Waku {
     /// Settle every activity still open. `stopped` says the turn ended
     /// without finishing: a call cut off then is marked stopped rather than
     /// passed off as done.
+    /// Tell the person a task waits on them when the window is not in front;
+    /// in front, the card above the composer already says so.
+    fn notify_waiting(&self, session_id: Uuid, body: String, cx: &App) {
+        if cx.active_window().is_some() {
+            return;
+        }
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        let title = if session.display_title() == AgentSession::DEFAULT_TITLE {
+            tr!("session.new_task")
+        } else {
+            session.display_title().to_owned()
+        };
+        crate::platform::show_task_notification(
+            &task_notification_tag(session_id),
+            &title,
+            &body,
+            cx,
+        );
+    }
+
     pub(super) fn complete_turn_blocks(&mut self, session_id: Uuid, stopped: bool) {
         if let Some(session) = self.state.session_mut(session_id) {
             for block in &mut session.transcript_blocks {
@@ -392,12 +419,13 @@ impl Waku {
                 options,
             } => {
                 if self.accepts_turn_output(session_id) {
-                    runtime.pending_permission = Some(PendingPermission {
+                    runtime.pending_permissions.push_back(PendingPermission {
                         request_id,
                         title,
                         detail,
                         options,
                     });
+                    self.notify_waiting(session_id, tr!("notification.waiting_permission"), cx);
                     if let Some(session) = self.state.session_mut(session_id) {
                         session.status = SessionStatus::Waiting;
                         // Time spent waiting on the person is not work.
@@ -412,6 +440,7 @@ impl Waku {
             } => {
                 if self.accepts_turn_output(session_id) && !questions.is_empty() {
                     runtime.pending_user_input = Some(PendingUserInput::new(request_id, questions));
+                    self.notify_waiting(session_id, tr!("notification.waiting_question"), cx);
                     if self.state.selected_session == Some(session_id) {
                         self.user_input_answer
                             .update(cx, |input, cx| input.clear(cx));
@@ -682,7 +711,7 @@ impl Waku {
                         crate::analytics::TurnOutcome::Failed
                     },
                 );
-                runtime.pending_permission = None;
+                runtime.pending_permissions.clear();
                 runtime.pending_user_input = None;
                 runtime.pending_computer_approval = None;
                 runtime.driver.cancel_computer_use();
@@ -781,7 +810,7 @@ impl Waku {
                 self.finish_streaming_assistant(session_id);
                 self.complete_turn_blocks(session_id, true);
                 runtime.stream_phase = None;
-                runtime.pending_permission = None;
+                runtime.pending_permissions.clear();
                 runtime.pending_user_input = None;
                 runtime.pending_computer_approval = None;
                 runtime.driver.cancel_computer_use();

@@ -295,7 +295,7 @@ impl Render for Waku {
 
         let theme = Theme::current(cx);
         let empty = should_render_empty_state(self.selected_session());
-        let permission = self.render_permission(cx);
+        let permission = self.render_permission(window, cx);
         let computer_use = self.render_computer_use_overlay(cx);
         let command_palette = self.render_command_palette(window, cx);
         let commit_dialog = self.render_commit_dialog(cx);
@@ -328,6 +328,9 @@ impl Render for Waku {
             .on_action(cx.listener(Self::cancel_task_switch_action))
             .on_action(cx.listener(Self::focus_composer_action))
             .on_action(cx.listener(Self::toggle_model_picker_action))
+            .on_action(cx.listener(Self::cycle_access_mode_action))
+            .on_action(cx.listener(Self::toggle_plan_mode_action))
+            .on_action(cx.listener(Self::cycle_reasoning_effort_action))
             .on_action(cx.listener(Self::toggle_usage_panel_action))
             .on_action(cx.listener(Self::save_right_panel_file_action))
             .on_action(cx.listener(Self::cancel_turn_action))

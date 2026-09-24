@@ -902,7 +902,9 @@ struct SessionRuntime {
     pending_steers: VecDeque<ComposerSubmission>,
     stream_phase: Option<StreamPhase>,
     stream_remeasure_pending: bool,
-    pending_permission: Option<PendingPermission>,
+    /// Requests waiting on the person, oldest first. The card shows the
+    /// front one and counts the rest.
+    pending_permissions: VecDeque<PendingPermission>,
     pending_user_input: Option<PendingUserInput>,
     pending_computer_approval: Option<PendingComputerApproval>,
     /// Back-to-front stack of window previews captured during the active turn.
@@ -1093,6 +1095,16 @@ pub struct Waku {
     home_directory: Option<PathBuf>,
     composer: Entity<ComposerInput>,
     user_input_answer: Entity<TextInput>,
+    /// The note sent with a refusal, on the permission card.
+    permission_feedback: Entity<TextInput>,
+    /// The permission card, which takes the keyboard for a new request.
+    permission_focus: FocusHandle,
+    /// The request the card last took the keyboard for.
+    permission_focused_request: RefCell<Option<String>>,
+    /// The plan request shown in full rather than capped.
+    plan_card_expanded: RefCell<Option<String>>,
+    /// The plan awaiting approval, parsed for the card.
+    plan_markdown: RefCell<MarkdownView>,
     /// Drafts are independent of transcript persistence: started tasks key by
     /// session id, while blank New Task pages key by project id.
     composer_drafts: ComposerDrafts,
@@ -1738,6 +1750,7 @@ mod workflow;
 mod agent_page;
 mod native_agent;
 mod onboarding;
+mod permission_card;
 mod message_resend;
 mod task_rows;
 mod update_banner;
@@ -1750,6 +1763,7 @@ mod runtime;
 mod runtime_prewarm;
 mod sessions;
 mod settings;
+mod shortcuts;
 mod sidebar;
 mod skills_page;
 mod status_capsule;
@@ -1772,6 +1786,8 @@ pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
 pub use goal_dialog::init as init_goal_dialog_keys;
 pub use confirm_dialog::init as init_confirm_dialog_keys;
+pub use permission_card::init as init_permission_card_keys;
+pub use shortcuts::init as init_shortcut_keys;
 use components::*;
 pub use image_preview::init as init_image_preview_keys;
 pub use settings::init as init_settings_keys;
@@ -2123,6 +2139,9 @@ impl Waku {
         let user_input_answer = cx.new(|cx| {
             TextInput::new(window, cx)
                 .placeholder(tr!("user_input.other_placeholder"))
+        });
+        let permission_feedback = cx.new(|cx| {
+            TextInput::new(window, cx).placeholder(tr!("permission.feedback_placeholder"))
         });
         let command_palette_search = cx.new(|cx| {
             TextInput::new(window, cx)
@@ -2603,6 +2622,23 @@ impl Waku {
             .detach();
 
             cx.subscribe(
+                &permission_feedback,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if let InputEvent::Submit(_) = event
+                        && let Some(request_id) = this.selected_runtime().and_then(|runtime| {
+                            runtime
+                                .pending_permissions
+                                .front()
+                                .map(|permission| permission.request_id.clone())
+                        })
+                    {
+                        this.deny_permission_with_feedback(request_id, cx);
+                    }
+                },
+            )
+            .detach();
+
+            cx.subscribe(
                 &user_input_answer,
                 |this: &mut Self, input, event: &InputEvent, cx| match event {
                     InputEvent::Submit(answer) => {
@@ -2929,6 +2965,11 @@ impl Waku {
                 home_directory,
                 composer,
                 user_input_answer,
+                permission_feedback,
+                permission_focus: cx.focus_handle(),
+                permission_focused_request: RefCell::new(None),
+                plan_card_expanded: RefCell::new(None),
+                plan_markdown: RefCell::new(MarkdownView::default()),
                 composer_drafts,
                 composer_draft_store,
                 composer_draft_save_generation: 0,

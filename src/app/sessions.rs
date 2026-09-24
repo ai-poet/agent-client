@@ -1277,7 +1277,7 @@ impl Waku {
         self.settle_foreground_work(session_id, BackgroundWorkStatus::Stopped);
         if let Some(runtime) = runtime.as_mut() {
             runtime.stream_phase = None;
-            runtime.pending_permission = None;
+            runtime.pending_permissions.clear();
             runtime.pending_user_input = None;
             runtime.pending_computer_approval = None;
             runtime.computer_use_previews.clear();
@@ -1335,9 +1335,14 @@ impl Waku {
             .iter()
             .find(|session| session.id == session_id)
             .map(|session| session.provider.id());
+        let mut still_waiting = false;
         let decision = if let Some(runtime) = self.runtimes.get_mut(&session_id) {
-            let decision = runtime
-                .pending_permission
+            let answered = runtime
+                .pending_permissions
+                .iter()
+                .position(|permission| permission.request_id == request_id)
+                .and_then(|index| runtime.pending_permissions.remove(index));
+            let decision = answered
                 .as_ref()
                 .and_then(|permission| {
                     permission
@@ -1350,7 +1355,7 @@ impl Waku {
                     |option| if option.allow { "allow" } else { "deny" },
                 );
             runtime.driver.respond(request_id, option_id);
-            runtime.pending_permission = None;
+            still_waiting = !runtime.pending_permissions.is_empty();
             Some(decision)
         } else {
             None
@@ -1363,7 +1368,8 @@ impl Waku {
                     decision,
                 });
         }
-        if let Some(session) = self.selected_session_mut() {
+        // Another request still waits: the turn stays paused on the person.
+        if !still_waiting && let Some(session) = self.selected_session_mut() {
             session.status = SessionStatus::Working;
             session.resume_active_turn(unix_time());
         }

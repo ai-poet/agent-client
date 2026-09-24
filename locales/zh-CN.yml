@@ -486,6 +486,12 @@ computer_use.take_control: 接管
 computer_use.preparing_preview: 正在准备预览…
 common.deny: 拒绝
 permission.allow_once: 仅允许一次
+shortcuts.access_now: "访问模式：%{mode}"
+shortcuts.mode_now: "模式：%{mode}"
+shortcuts.effort_now: "推理强度：%{effort}"
+permission.counter: "%{index}/%{total}"
+permission.deny_with_feedback: "拒绝并说明"
+permission.feedback_placeholder: "告诉智能体应该怎么做…"
 permission.allow_for_session: 本次任务允许
 permission.always_allow: 始终允许
 permission.always_deny: 始终拒绝
@@ -666,6 +672,8 @@ session.stopped: 已停止
 session.turn_completed: 本轮已完成
 session.agent_returned_nothing: "代理结束了本轮，但没有返回任何内容，也没有报错。可以查看该 CLI 自己的日志。"
 session.stopped_before_response: 智能体在返回回复前停止了
+notification.waiting_permission: "需要你的批准"
+notification.waiting_question: "有问题需要你回答"
 session.provider_exited_before_response: "%{provider} 在回复前意外退出"
 session.retry_as_new_turn: "该智能体无法回到这一轮之前，已把提示作为新一轮重新发送"
 error_banner.title: "本轮任务失败"
@@ -1705,3 +1713,6 @@ plan.ready_detail: "Agent 已完成计划，请求开始执行。可以批准执
 plan.summary_lead: "Agent 给出的计划如下。批准后开始执行，也可以退回继续规划。"
 plan.approve: "批准并执行"
 plan.keep_planning: "继续规划"
+plan.keep_planning_with_notes: "按说明继续规划"
+plan.expand_full: "展开全文"
+plan.collapse: "收起"

@@ -1163,7 +1163,7 @@ impl Waku {
     /// The markdown render context for one transcript row. Element keys are
     /// scoped to the row, so a virtualized remount recreates the same keys and
     /// an in-progress selection survives scrolling.
-    fn markdown_ctx<'a>(
+    pub(super) fn markdown_ctx<'a>(
         &self,
         row: String,
         palette: &'a MarkdownPalette,

@@ -994,6 +994,18 @@ common.deny:
   en: Deny
 permission.allow_once:
   en: Allow once
+shortcuts.access_now:
+  en: "Access: %{mode}"
+shortcuts.mode_now:
+  en: "Mode: %{mode}"
+shortcuts.effort_now:
+  en: "Reasoning: %{effort}"
+permission.counter:
+  en: "%{index}/%{total}"
+permission.deny_with_feedback:
+  en: "Deny and explain"
+permission.feedback_placeholder:
+  en: "Tell the agent what to do instead…"
 permission.allow_for_session:
   en: Allow for session
 permission.always_allow:
@@ -1366,6 +1378,10 @@ session.agent_returned_nothing:
   en: "The agent ended the turn without sending a response, and reported no error. Its own log may say more."
 session.stopped_before_response:
   en: The agent stopped before returning a response
+notification.waiting_permission:
+  en: "Needs your approval"
+notification.waiting_question:
+  en: "Has a question for you"
 session.provider_exited_before_response:
   en: "%{provider} exited before returning a response"
 session.retry_as_new_turn:
@@ -3444,3 +3460,9 @@ plan.approve:
   en: "Approve plan"
 plan.keep_planning:
   en: "Keep planning"
+plan.keep_planning_with_notes:
+  en: "Keep planning with these notes"
+plan.expand_full:
+  en: "Show the whole plan"
+plan.collapse:
+  en: "Show less"

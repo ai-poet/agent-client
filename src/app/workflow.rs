@@ -997,7 +997,7 @@ impl Waku {
         let mut changed = false;
         for (session_id, run_id, node_id) in entries {
             let awaiting = self.runtimes.get(&session_id).is_some_and(|runtime| {
-                runtime.pending_permission.is_some() || runtime.pending_user_input.is_some()
+                !runtime.pending_permissions.is_empty() || runtime.pending_user_input.is_some()
             });
             if let Some(run) = self.workflow.store.get_mut(&run_id)
                 && let Some(node) = run.node(&node_id)
