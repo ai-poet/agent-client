@@ -980,6 +980,7 @@ transcript.you_stopped_after: "%{duration} 後にタスクを停止しました"
 transcript.segment_stopped: "%{duration}で停止"
 transcript.segment_failed: "%{duration}で失敗"
 transcript.working_for: 作業中 · %{duration}
+transcript.steer_pending: "実行中のタスクへの指示を待っています…"
 session.context_compacting: "会話を圧縮しています…"
 session.context_compacted_auto: "コンテキストを自動で圧縮しました · %{before} → %{after}"
 session.context_compacted_manual: "コンテキストを圧縮しました · %{before} → %{after}"

@@ -931,6 +931,7 @@ transcript.you_stopped_after: 你在工作 %{duration} 后停止了
 transcript.segment_stopped: "已停止 · %{duration}"
 transcript.segment_failed: "失败 · %{duration}"
 transcript.working_for: 工作中 · %{duration}
+transcript.steer_pending: "等待引导当前任务…"
 session.context_compacting: "正在压缩上下文…"
 session.context_compacted_auto: "上下文已自动压缩 · %{before} → %{after}"
 session.context_compacted_manual: "上下文已压缩 · %{before} → %{after}"

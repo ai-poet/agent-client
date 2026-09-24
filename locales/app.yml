@@ -1915,6 +1915,8 @@ transcript.segment_failed:
   en: "Failed after %{duration}"
 transcript.working_for:
   en: Working for %{duration}
+transcript.steer_pending:
+  en: "Waiting to steer the current run…"
 session.context_compacting:
   en: "Compacting the conversation…"
 session.context_compacted_auto:

@@ -1239,7 +1239,8 @@ impl Waku {
             | TranscriptRowKind::TurnFold(..)
             | TranscriptRowKind::ResponseFooter(_, _)
             | TranscriptRowKind::ChangedFiles(_)
-            | TranscriptRowKind::WorkingIndicator => false,
+            | TranscriptRowKind::WorkingIndicator
+            | TranscriptRowKind::PendingSteer(_) => false,
         };
         let inner = match kind {
             TranscriptRowKind::Message(message_index) => self
@@ -1373,6 +1374,7 @@ impl Waku {
                 .render_changed_files_row(turn_id, &theme, cx)
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::WorkingIndicator => self.render_working_indicator_row(&theme),
+            TranscriptRowKind::PendingSteer(index) => self.render_pending_steer_row(index, &theme),
         };
         let mut row = div()
             .id(("transcript-row", index))
@@ -1829,14 +1831,92 @@ impl Waku {
             .items_center()
             .gap(px(8.0))
             .child(working_wave_dots(theme.text_tertiary))
+            .child(div().text_size(sp(13.5)).line_height(sp(18.0)).child(
+                motion::shimmer(label, theme.text_tertiary, theme.text).weight(FontWeight::MEDIUM),
+            ))
+            .into_any_element()
+    }
+
+    /// A steering message on its way into the running turn: the bubble it
+    /// will become, dimmed, with a caption saying it has not landed yet. The
+    /// composer has already cleared, so without this the message would seem
+    /// lost until the provider takes it.
+    fn render_pending_steer_row(&self, index: usize, theme: &Theme) -> AnyElement {
+        let Some(submission) = self
+            .selected_runtime()
+            .and_then(|runtime| runtime.pending_steers.get(index))
+        else {
+            return div().into_any_element();
+        };
+        let text = submission
+            .display_content
+            .clone()
+            .unwrap_or_else(|| submission.prompt.clone());
+        let attachments = submission
+            .attachments
+            .iter()
+            .map(|attachment| attachment.name.clone())
+            .collect::<Vec<_>>();
+        let bubble = div()
+            .flex()
+            .flex_col()
+            .items_end()
+            .gap(px(3.0))
+            .opacity(0.7)
+            .when(!attachments.is_empty(), |column| {
+                column.child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .justify_end()
+                        .gap(px(4.0))
+                        .children(attachments.into_iter().map(|name| {
+                            div()
+                                .h(px(22.0))
+                                .px(px(8.0))
+                                .rounded(px(6.0))
+                                .bg(theme.raised)
+                                .flex()
+                                .items_center()
+                                .gap(px(4.0))
+                                .text_size(sp(12.0))
+                                .text_color(theme.text_secondary)
+                                .child(icon("icons/paperclip.svg", 11.0, theme.text_tertiary))
+                                .child(name)
+                        })),
+                )
+            })
+            .when(!text.trim().is_empty(), |column| {
+                column.child(
+                    div()
+                        .max_w(px(540.0))
+                        .min_w_0()
+                        .rounded(px(12.0))
+                        .bg(theme.raised)
+                        .px(px(12.0))
+                        .py(px(8.0))
+                        .text_size(sp(14.0))
+                        .line_height(sp(20.0))
+                        .text_color(theme.text)
+                        .child(text),
+                )
+            });
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .items_end()
+            .gap(px(4.0))
+            .child(bubble)
             .child(
                 div()
-                    .text_size(sp(13.5))
-                    .line_height(sp(18.0))
-                    .child(
-                        motion::shimmer(label, theme.text_tertiary, theme.text)
-                            .weight(FontWeight::MEDIUM),
-                    ),
+                    .text_size(sp(12.0))
+                    .line_height(sp(16.0))
+                    .child(motion::shimmer(
+                        tr!("transcript.steer_pending"),
+                        theme.text_tertiary,
+                        theme.text_secondary,
+                    )),
             )
             .into_any_element()
     }

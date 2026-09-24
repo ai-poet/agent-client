@@ -21,6 +21,7 @@ impl Waku {
             .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
                 transcript_rows_fingerprint(session, &self.turn_fold_overrides)
             });
+        let fingerprint = mix(fingerprint, self.selected_pending_steer_count() as u64);
         if self.transcript_row_kinds_fingerprint.get() != Some(fingerprint) {
             let next_kinds = self.selected_transcript_row_kinds();
             *self.transcript_row_kinds.borrow_mut() = next_kinds;
@@ -30,9 +31,16 @@ impl Waku {
     }
 
     pub(super) fn selected_transcript_row_kinds(&self) -> Vec<TranscriptRowKind> {
-        self.selected_session().map_or_else(Vec::new, |session| {
+        let mut rows = self.selected_session().map_or_else(Vec::new, |session| {
             folded_transcript_row_kinds(session, &self.turn_fold_overrides)
-        })
+        });
+        rows.extend((0..self.selected_pending_steer_count()).map(TranscriptRowKind::PendingSteer));
+        rows
+    }
+
+    fn selected_pending_steer_count(&self) -> usize {
+        self.selected_runtime()
+            .map_or(0, |runtime| runtime.pending_steers.len())
     }
 
     /// The response footer's copy content and timestamp for `message_index`,
@@ -429,6 +437,10 @@ pub(super) enum TranscriptRowKind {
     /// that has not produced a chunk yet still shows visible progress, and a
     /// streaming one shows it below whatever content has arrived.
     WorkingIndicator,
+    /// A steering message sent but not yet taken by the provider, by its
+    /// place in the runtime's queue. Shown at once, so the message does not
+    /// vanish between the composer clearing and the provider accepting it.
+    PendingSteer(usize),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -640,7 +652,8 @@ pub(super) fn assistant_response_footer(
                 | TranscriptRowKind::TurnFold(..)
                 | TranscriptRowKind::ResponseFooter(_, _)
                 | TranscriptRowKind::ChangedFiles(_)
-                | TranscriptRowKind::WorkingIndicator => None,
+                | TranscriptRowKind::WorkingIndicator
+                | TranscriptRowKind::PendingSteer(_) => None,
             })
             .filter(|part| !part.content.trim().is_empty())
             .map(|part| part.content.as_str())
@@ -839,13 +852,18 @@ impl FoldOverrides for TurnFoldOverrides {
     }
 
     fn fold_fingerprint(&self) -> u64 {
-        let combined = self.iter().fold(0u64, |combined, ((turn_id, segment), open)| {
-            let entry = mix(
-                mix(mix_uuid(EMPTY_TRANSCRIPT_FINGERPRINT, *turn_id), *segment as u64),
-                *open as u64,
-            );
-            combined.wrapping_add(entry)
-        });
+        let combined = self
+            .iter()
+            .fold(0u64, |combined, ((turn_id, segment), open)| {
+                let entry = mix(
+                    mix(
+                        mix_uuid(EMPTY_TRANSCRIPT_FINGERPRINT, *turn_id),
+                        *segment as u64,
+                    ),
+                    *open as u64,
+                );
+                combined.wrapping_add(entry)
+            });
         mix(self.len() as u64, combined)
     }
 }
@@ -969,7 +987,8 @@ pub(super) fn folded_transcript_row_kinds(
     for turn in &session.turns {
         let turn_rows = turn_rows(session, turn.id);
         if turn.status != TurnStatus::Running
-            && let Some(message_index) = response_footer_message_index_from_rows(session, &turn_rows)
+            && let Some(message_index) =
+                response_footer_message_index_from_rows(session, &turn_rows)
         {
             response_footers.insert(turn.id, message_index);
         }
@@ -1143,7 +1162,9 @@ fn turn_segment_rows(
             TranscriptRowKind::TurnBlock(index) => session
                 .transcript_blocks
                 .get(index)
-                .map_or(message_count, |block| block.after_message.min(message_count)),
+                .map_or(message_count, |block| {
+                    block.after_message.min(message_count)
+                }),
             _ => continue,
         };
         segments[segment_of(&steers, position)].push(row);
@@ -1166,7 +1187,9 @@ pub(super) fn turn_fold_state(
         return (default_open, false);
     }
     (
-        overrides.open_override(turn.id, segment).unwrap_or(default_open),
+        overrides
+            .open_override(turn.id, segment)
+            .unwrap_or(default_open),
         true,
     )
 }
@@ -1181,7 +1204,8 @@ fn response_footer_message_index_from_rows(
         | TranscriptRowKind::TurnFold(..)
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
-        | TranscriptRowKind::WorkingIndicator => None,
+        | TranscriptRowKind::WorkingIndicator
+        | TranscriptRowKind::PendingSteer(_) => None,
     })?;
     let message = session.messages.get(message_index)?;
     if message.streaming {
@@ -1195,7 +1219,8 @@ fn response_footer_message_index_from_rows(
             | TranscriptRowKind::TurnFold(..)
             | TranscriptRowKind::ResponseFooter(_, _)
             | TranscriptRowKind::ChangedFiles(_)
-            | TranscriptRowKind::WorkingIndicator => None,
+            | TranscriptRowKind::WorkingIndicator
+            | TranscriptRowKind::PendingSteer(_) => None,
         })
         .any(|message| !message.content.trim().is_empty())
         .then_some(message_index)
@@ -1218,7 +1243,8 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
         | TranscriptRowKind::TurnFold(..)
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
-        | TranscriptRowKind::WorkingIndicator => false,
+        | TranscriptRowKind::WorkingIndicator
+        | TranscriptRowKind::PendingSteer(_) => false,
     };
     let Some(last_text) = turn_rows.iter().rposition(is_answer_text) else {
         return turn_rows.len();
@@ -1236,7 +1262,7 @@ fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Option<Uuid> {
         TranscriptRowKind::TurnFold(turn_id, _) => Some(turn_id),
         TranscriptRowKind::ResponseFooter(turn_id, _) => Some(turn_id),
         TranscriptRowKind::ChangedFiles(turn_id) => Some(turn_id),
-        TranscriptRowKind::WorkingIndicator => None,
+        TranscriptRowKind::WorkingIndicator | TranscriptRowKind::PendingSteer(_) => None,
     }
 }
 
@@ -1252,7 +1278,7 @@ pub(super) fn response_row_turn_id(session: &AgentSession, row: TranscriptRowKin
                 .filter(|message| message.role == MessageRole::Assistant)?
                 .turn_id
         }
-        TranscriptRowKind::WorkingIndicator => None,
+        TranscriptRowKind::WorkingIndicator | TranscriptRowKind::PendingSteer(_) => None,
         TranscriptRowKind::TurnBlock(_)
         | TranscriptRowKind::TurnFold(..)
         | TranscriptRowKind::ResponseFooter(_, _)
@@ -1279,7 +1305,9 @@ pub(super) fn turn_fold_label(session: &AgentSession, turn_id: Uuid, segment: us
     // have been stopped or have failed.
     let is_last = segment + 1 == segments.len();
     match turn.status {
-        TurnStatus::Interrupted if is_last => tr!("transcript.segment_stopped", duration = duration),
+        TurnStatus::Interrupted if is_last => {
+            tr!("transcript.segment_stopped", duration = duration)
+        }
         TurnStatus::Failed if is_last => tr!("transcript.segment_failed", duration = duration),
         _ => tr!("transcript.worked_for", duration = duration),
     }
