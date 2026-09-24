@@ -30,6 +30,32 @@ pub(super) fn resend_eligible(
         && !rewind_available
 }
 
+/// How a failed turn runs again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RetryMode {
+    /// Take the conversation back to before the turn and send its prompt in
+    /// its place.
+    Rewind,
+    /// Send the prompt again as a new turn after the failed one.
+    Resend,
+}
+
+/// Rewind where the provider can go back to before the turn — trivially,
+/// when the turn never reached it — and the task still has its folder;
+/// resend otherwise. The same gate the message rewind applies.
+pub(super) fn retry_mode(
+    supports_rollback: bool,
+    provider_turns: usize,
+    has_cursor: bool,
+    has_workspace: bool,
+) -> RetryMode {
+    if has_workspace && supports_rollback && (provider_turns == 0 || has_cursor) {
+        RetryMode::Rewind
+    } else {
+        RetryMode::Resend
+    }
+}
+
 impl Waku {
     pub(super) fn resend_action_for_message(&self, message_index: usize) -> Option<ResendAction> {
         let session = self.selected_session()?;
@@ -132,6 +158,16 @@ pub(super) fn menu_item(action: ResendAction, waku: gpui::WeakEntity<Waku>) -> M
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_turn_rewinds_only_where_the_provider_can_go_back() {
+        assert_eq!(retry_mode(true, 1, true, true), RetryMode::Rewind);
+        // Never reached the provider: nothing to roll back there.
+        assert_eq!(retry_mode(true, 0, false, true), RetryMode::Rewind);
+        assert_eq!(retry_mode(true, 1, false, true), RetryMode::Resend);
+        assert_eq!(retry_mode(false, 1, true, true), RetryMode::Resend);
+        assert_eq!(retry_mode(true, 1, true, false), RetryMode::Resend);
+    }
 
     #[test]
     fn resend_is_offered_only_where_rewind_is_not() {

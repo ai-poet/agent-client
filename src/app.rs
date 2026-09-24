@@ -1366,6 +1366,8 @@ pub struct Waku {
     /// Fold segments the person opened or closed by hand, by turn and
     /// segment. Everything else follows its turn's state.
     turn_fold_overrides: transcript::TurnFoldOverrides,
+    /// The failed turn whose full error the banner above the composer shows.
+    error_details_open: Option<Uuid>,
     /// Per-response file cards the user expanded beyond their three-file
     /// preview. Runtime-only, like the other transcript disclosures.
     expanded_changed_files: HashSet<Uuid>,
@@ -1720,6 +1722,7 @@ mod goal_dialog;
 mod components;
 mod composer;
 mod drafts;
+mod error_banner;
 mod file_search;
 mod image_preview;
 mod model_plaza;
@@ -3056,6 +3059,7 @@ impl Waku {
                 activity_groups_expanded: HashMap::new(),
                 expanded_activity_items: HashMap::new(),
                 turn_fold_overrides: HashMap::new(),
+                error_details_open: None,
                 expanded_changed_files: HashSet::new(),
                 transcript_control_focuses: RefCell::new(HashMap::new()),
                 session_navigation,

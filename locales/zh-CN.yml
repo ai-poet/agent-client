@@ -666,6 +666,13 @@ session.stopped: 已停止
 session.turn_completed: 本轮已完成
 session.agent_returned_nothing: "代理结束了本轮，但没有返回任何内容，也没有报错。可以查看该 CLI 自己的日志。"
 session.stopped_before_response: 智能体在返回回复前停止了
+session.provider_exited_before_response: "%{provider} 在回复前意外退出"
+session.retry_as_new_turn: "该智能体无法回到这一轮之前，已把提示作为新一轮重新发送"
+error_banner.title: "本轮任务失败"
+error_banner.retry: "重试"
+error_banner.show_details: "显示详情"
+error_banner.hide_details: "收起详情"
+error_banner.dismiss: "关闭"
 session.codex_exited_before_response: Codex app-server 在返回回复前退出了
 session.steer_rejected: 无法向智能体补充指示（%{error}）；消息已排队，将作为后续消息发送
 session.steer_rejected_plain: 无法向智能体补充指示；消息已排队，将作为后续消息发送

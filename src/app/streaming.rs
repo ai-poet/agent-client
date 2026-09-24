@@ -598,7 +598,7 @@ impl Waku {
                     },
                 );
                 let previous_kinds = self.snapshot_selected_transcript_rows(session_id);
-                runtime.last_driver_error = None;
+                let last_driver_error = runtime.last_driver_error.take();
                 // A settled turn moved the account's rate-limit needles; ask
                 // that provider's plan meter to refresh once its backoff
                 // allows.
@@ -651,16 +651,21 @@ impl Waku {
                     } else {
                         SessionStatus::Failed
                     };
-                    if needs_fallback {
-                        session.push_message(
-                            MessageRole::Assistant,
-                            summary.unwrap_or_else(|| {
-                                if success {
-                                    tr!("session.turn_completed")
-                                } else {
-                                    tr!("session.stopped_before_response")
-                                }
-                            }),
+                    // A provider's own closing words are an answer; a failure
+                    // is not one, and goes to the banner above the composer.
+                    if success {
+                        if needs_fallback
+                            && let Some(summary) =
+                                summary.filter(|summary| !summary.trim().is_empty())
+                        {
+                            session.push_message(MessageRole::Assistant, summary);
+                        }
+                    } else {
+                        session.set_latest_turn_error(
+                            summary
+                                .filter(|summary| !summary.trim().is_empty())
+                                .or(last_driver_error)
+                                .unwrap_or_else(|| tr!("session.stopped_before_response")),
                         );
                     }
                 }
@@ -710,37 +715,63 @@ impl Waku {
             DriverEvent::Error(error) => {
                 let error = compact_driver_error(&error);
                 runtime.last_driver_error = Some(error.clone());
-                if self.state.selected_session == Some(session_id) {
-                    self.show_toast(error.clone());
-                }
                 // An optimistic pursuit turn has no submission to fail with.
                 // Unwind it so the error cannot strand a spinner; if the
                 // pursuit does start later, its own start report recreates
                 // the turn.
                 self.unwind_unconfirmed_pursuit_turn(session_id);
-                let has_active_turn = self
+                let live_status = self
                     .state
                     .sessions
                     .iter()
                     .find(|session| session.id == session_id)
-                    .and_then(AgentSession::active_turn_id)
-                    .is_some();
-                let should_append = has_active_turn
-                    && !self.turn_has_assistant_message(session_id)
-                    && self
-                        .state
-                        .sessions
-                        .iter()
-                        .find(|session| session.id == session_id)
-                        .is_some_and(|session| session.status != SessionStatus::Working);
-                if let Some(session) = self.state.session_mut(session_id)
-                    && has_active_turn
-                {
-                    if session.status != SessionStatus::Working {
-                        session.status = SessionStatus::Failed;
+                    .filter(|session| session.active_turn_id().is_some())
+                    .map(|session| session.status);
+                match live_status {
+                    // Working, the provider carries on — a retry, a hiccup it
+                    // recovers from. Waiting, the card stays up for the
+                    // person. Either way say it in passing, and keep it on
+                    // the turn for the banner should the turn fail after all.
+                    // With no turn at all, the passing notice is everything.
+                    None | Some(SessionStatus::Working | SessionStatus::Waiting) => {
+                        if self.state.selected_session == Some(session_id) {
+                            self.show_toast(error.clone());
+                        }
+                        if live_status.is_some()
+                            && let Some(session) = self.state.session_mut(session_id)
+                        {
+                            session.set_latest_turn_error(error);
+                            self.state.mark_session_dirty(session_id);
+                        }
                     }
-                    if should_append {
-                        session.push_message(MessageRole::Assistant, error);
+                    // The turn never got going. End it as failed: left
+                    // running, it would sit under a spinner for good, since
+                    // nothing else is coming to finish it.
+                    Some(_) => {
+                        let previous_kinds = self.snapshot_selected_transcript_rows(session_id);
+                        self.finish_streaming_assistant(session_id);
+                        self.complete_turn_blocks(session_id, true);
+                        runtime.stream_phase = None;
+                        if let Some(session) = self.state.session_mut(session_id) {
+                            session.status = SessionStatus::Failed;
+                            session.set_latest_turn_error(error);
+                            session.updated_at = unix_time();
+                        }
+                        let finished = self
+                            .finish_active_turn_with_analytics(
+                                session_id,
+                                TurnStatus::Failed,
+                                crate::analytics::TurnOutcome::Failed,
+                            )
+                            .is_some();
+                        if finished {
+                            self.capture_latest_turn_checkpoint_for(session_id);
+                        }
+                        if let Some(previous_kinds) = previous_kinds.as_deref() {
+                            self.splice_active_transcript_rows_after_visibility_change(
+                                previous_kinds,
+                            );
+                        }
                     }
                 }
             }
@@ -755,11 +786,18 @@ impl Waku {
                 runtime.pending_computer_approval = None;
                 runtime.driver.cancel_computer_use();
                 runtime.computer_use_previews.clear();
-                let needs_fallback = !self.turn_has_assistant_message(session_id);
-                let failure_message = runtime
-                    .last_driver_error
-                    .take()
-                    .unwrap_or_else(|| tr!("session.codex_exited_before_response"));
+                let failure_message = runtime.last_driver_error.take().unwrap_or_else(|| {
+                    let provider = self
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .map_or("Agent", |session| session.provider.display_name());
+                    tr!(
+                        "session.provider_exited_before_response",
+                        provider = provider
+                    )
+                });
                 let should_finish_turn = if let Some(session) = self.state.session_mut(session_id)
                     && matches!(
                         session.status,
@@ -767,8 +805,8 @@ impl Waku {
                     ) {
                     session.status = SessionStatus::Failed;
                     session.updated_at = unix_time();
-                    if needs_fallback {
-                        session.push_message(MessageRole::Assistant, failure_message);
+                    if session.active_turn_id().is_some() {
+                        session.set_latest_turn_error(failure_message);
                     }
                     true
                 } else {

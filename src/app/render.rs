@@ -395,6 +395,7 @@ impl Render for Waku {
                             .into_any_element()
                     })
                     .children(permission)
+                    .children(self.render_error_banner(cx))
                     .when(self.selected_project().is_some(), |element| {
                         element
                             .children(self.render_queued_messages(cx))

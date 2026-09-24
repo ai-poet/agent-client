@@ -1366,6 +1366,20 @@ session.agent_returned_nothing:
   en: "The agent ended the turn without sending a response, and reported no error. Its own log may say more."
 session.stopped_before_response:
   en: The agent stopped before returning a response
+session.provider_exited_before_response:
+  en: "%{provider} exited before returning a response"
+session.retry_as_new_turn:
+  en: "This agent can't go back to before the turn, so the prompt was sent again as a new turn"
+error_banner.title:
+  en: "This run failed"
+error_banner.retry:
+  en: "Retry"
+error_banner.show_details:
+  en: "Show details"
+error_banner.hide_details:
+  en: "Hide details"
+error_banner.dismiss:
+  en: "Dismiss"
 session.codex_exited_before_response:
   en: Codex app-server exited before returning a response
 session.steer_rejected:

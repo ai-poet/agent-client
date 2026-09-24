@@ -700,6 +700,13 @@ session.stopped: 停止しました
 session.turn_completed: ターンが完了しました
 session.agent_returned_nothing: "エージェントは応答を返さずにターンを終了し、エラーも報告しませんでした。CLI 自身のログに手がかりがあるかもしれません。"
 session.stopped_before_response: エージェントは回答を返す前に停止しました
+session.provider_exited_before_response: "%{provider} は回答を返す前に終了しました"
+session.retry_as_new_turn: "このエージェントはターンの前に戻れないため、プロンプトを新しいターンとして再送信しました"
+error_banner.title: "このタスクは失敗しました"
+error_banner.retry: "再試行"
+error_banner.show_details: "詳細を表示"
+error_banner.hide_details: "詳細を隠す"
+error_banner.dismiss: "閉じる"
 session.codex_exited_before_response: Codex app-server は回答を返す前に終了しました
 session.steer_rejected: エージェントに追加の指示を送れませんでした（%{error}）。メッセージはフォローアップとしてキューに追加されました
 session.steer_rejected_plain: エージェントに追加の指示を送れませんでした。メッセージはフォローアップとしてキューに追加されました

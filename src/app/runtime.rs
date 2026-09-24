@@ -266,6 +266,48 @@ struct MessageRewindRequest {
     binary: Option<PathBuf>,
     driver: Option<DriverHandle>,
     driver_start: Option<DriverStartRequest>,
+    /// An edit puts the files back as they were before the turn; a retry
+    /// leaves them as the failed turn left them.
+    restore_workspace: bool,
+}
+
+/// What asked for a rewind: an edited message sent again in its place, or a
+/// failed turn run again as it was.
+#[derive(Clone)]
+enum RewindOrigin {
+    Edit(MessageEdit),
+    Retry {
+        session_id: Uuid,
+        message_id: Uuid,
+        turn_count: usize,
+    },
+}
+
+impl RewindOrigin {
+    fn session_id(&self) -> Uuid {
+        match self {
+            Self::Edit(edit) => edit.session_id,
+            Self::Retry { session_id, .. } => *session_id,
+        }
+    }
+
+    fn message_id(&self) -> Uuid {
+        match self {
+            Self::Edit(edit) => edit.message_id,
+            Self::Retry { message_id, .. } => *message_id,
+        }
+    }
+
+    fn turn_count(&self) -> usize {
+        match self {
+            Self::Edit(edit) => edit.turn_count,
+            Self::Retry { turn_count, .. } => *turn_count,
+        }
+    }
+
+    fn is_retry(&self) -> bool {
+        matches!(self, Self::Retry { .. })
+    }
 }
 
 struct PreparedMessageRewind {
@@ -279,6 +321,45 @@ struct PreparedMessageRewind {
 fn perform_message_rewind(
     mut request: MessageRewindRequest,
 ) -> Result<PreparedMessageRewind, String> {
+    let session_id = request.session_id;
+    let (provider_rewind_cursor, claude_fork, prepared_driver) = if request.restore_workspace {
+        rewind_workspace_and_provider(&mut request)?
+    } else {
+        // A retry keeps the files the failed turn left: only the
+        // conversation goes back. Starting over clean is what undo is for.
+        perform_provider_rewind(&mut request).map_err(|error| error.to_string())?
+    };
+    let cleanup_error = workspace_ack(
+        &request.workspace_client,
+        waku_client::WorkspaceOperation::DeleteTurnRefsAfter {
+            cwd: request.project_path.clone(),
+            session_id,
+            retained_turn_count: request.retained_turn_count,
+            previous_turn_count: request.previous_turn_count,
+        },
+    )
+    .err()
+    .map(|error| error.to_string());
+
+    Ok(PreparedMessageRewind {
+        provider_rewind_cursor,
+        claude_fork,
+        prepared_driver,
+        reset_native_session: request.rollback_turns > 0
+            && request.retained_turn_count == 0
+            && matches!(
+                request.provider,
+                ProviderKind::Claude | ProviderKind::Cursor | ProviderKind::Grok
+            ),
+        cleanup_error,
+    })
+}
+
+/// Put the files back as they were before the turn, then roll the provider
+/// back; if the provider refuses, the files return to how they were.
+fn rewind_workspace_and_provider(
+    request: &mut MessageRewindRequest,
+) -> Result<ProviderRewindResult, String> {
     let session_id = request.session_id;
     let turn_start_ref =
         checkpoint::turn_start_ref(session_id, request.retained_turn_count.saturating_add(1));
@@ -348,7 +429,7 @@ fn perform_message_rewind(
         );
     }
 
-    let provider_rewind = perform_provider_rewind(&mut request);
+    let provider_rewind = perform_provider_rewind(request);
     let (provider_rewind_cursor, claude_fork, prepared_driver) = match provider_rewind {
         Ok(rewind) => rewind,
         Err(error) => {
@@ -388,30 +469,7 @@ fn perform_message_rewind(
             git_ref: safety_ref,
         },
     );
-    let cleanup_error = workspace_ack(
-        &request.workspace_client,
-        waku_client::WorkspaceOperation::DeleteTurnRefsAfter {
-            cwd: request.project_path.clone(),
-            session_id,
-            retained_turn_count: request.retained_turn_count,
-            previous_turn_count: request.previous_turn_count,
-        },
-    )
-    .err()
-    .map(|error| error.to_string());
-
-    Ok(PreparedMessageRewind {
-        provider_rewind_cursor,
-        claude_fork,
-        prepared_driver,
-        reset_native_session: request.rollback_turns > 0
-            && request.retained_turn_count == 0
-            && matches!(
-                request.provider,
-                ProviderKind::Claude | ProviderKind::Cursor | ProviderKind::Grok
-            ),
-        cleanup_error,
-    })
+    Ok((provider_rewind_cursor, claude_fork, prepared_driver))
 }
 
 type ProviderRewindResult = (
@@ -2232,7 +2290,7 @@ impl Waku {
             .expect("edited text or retained attachments always form a submission");
         let display_content = (!edit.attachments.is_empty()).then_some(prompt);
         self.start_message_rewind(
-            edit.clone(),
+            RewindOrigin::Edit(edit.clone()),
             ComposerSubmission {
                 prompt: provider_prompt,
                 display_content,
@@ -2242,14 +2300,73 @@ impl Waku {
         );
     }
 
+    /// Run a failed turn again from its opening prompt. Where the provider
+    /// can go back, the conversation returns to before the turn and the
+    /// prompt goes out in its place; the files stay as the failed turn left
+    /// them. Where it cannot, the prompt goes out again as a new turn.
+    pub(super) fn retry_failed_turn(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        let Some(turn) = session
+            .turns
+            .last()
+            .filter(|turn| turn.status == TurnStatus::Failed)
+        else {
+            return;
+        };
+        let Some(opening) = session
+            .messages
+            .iter()
+            .find(|message| message.role == MessageRole::User && message.turn_id == Some(turn.id))
+        else {
+            self.show_toast(tr!("session.message_unavailable"));
+            cx.notify();
+            return;
+        };
+        let submission = ComposerSubmission {
+            prompt: opening.content.clone(),
+            display_content: opening.display_content.clone(),
+            attachments: opening.attachments.clone(),
+        };
+        let message_id = opening.id;
+        let turn_count = turn.turn_count;
+        let mode = super::message_resend::retry_mode(
+            session.provider.supports_conversation_rollback(),
+            session.provider_turns_after(turn_count.saturating_sub(1)),
+            session.provider_cursor.is_some(),
+            self.workspace_path_for_session(session).is_some(),
+        );
+        match mode {
+            super::message_resend::RetryMode::Rewind => self.start_message_rewind(
+                RewindOrigin::Retry {
+                    session_id,
+                    message_id,
+                    turn_count,
+                },
+                submission,
+                cx,
+            ),
+            super::message_resend::RetryMode::Resend => {
+                self.show_toast(tr!("session.retry_as_new_turn"));
+                self.submit_submission_for_session(session_id, submission, cx);
+            }
+        }
+    }
+
     fn start_message_rewind(
         &mut self,
-        edit: MessageEdit,
+        origin: RewindOrigin,
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
-        let session_id = edit.session_id;
-        let turn_count = edit.turn_count;
+        let session_id = origin.session_id();
+        let turn_count = origin.turn_count();
         let retained_turn_count = turn_count.saturating_sub(1);
         let Some(source) = self
             .state
@@ -2358,7 +2475,7 @@ impl Waku {
         let provider_cursor = source.provider_cursor.clone();
         let session_title = source.display_title().to_owned();
         let cursor_source = (provider == ProviderKind::Cursor).then(|| source.clone());
-        let edited_message_id = edit.message_id;
+        let edited_message_id = origin.message_id();
         let Some(edited_message_index) = source
             .turns
             .iter()
@@ -2391,6 +2508,7 @@ impl Waku {
             binary,
             driver,
             driver_start,
+            restore_workspace: !origin.is_retry(),
         };
 
         // Optimistically leave edit mode and show the replacement bubble at
@@ -2416,7 +2534,9 @@ impl Waku {
             cx.notify();
             return;
         };
-        self.message_edit = None;
+        if !origin.is_retry() {
+            self.message_edit = None;
+        }
         self.submission_preparations.insert(session_id);
         self.hide_toast();
         self.remeasure_transcript_message(edited_message_index);
@@ -2429,7 +2549,7 @@ impl Waku {
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
                 waku.finish_message_rewind(
-                    edit,
+                    origin,
                     submission,
                     edited_message_id,
                     original_message,
@@ -2444,7 +2564,7 @@ impl Waku {
 
     fn finish_message_rewind(
         &mut self,
-        edit: MessageEdit,
+        origin: RewindOrigin,
         submission: ComposerSubmission,
         edited_message_id: Uuid,
         original_message: Message,
@@ -2452,8 +2572,8 @@ impl Waku {
         result: Result<PreparedMessageRewind, String>,
         cx: &mut Context<Self>,
     ) {
-        let session_id = edit.session_id;
-        let turn_count = edit.turn_count;
+        let session_id = origin.session_id();
+        let turn_count = origin.turn_count();
         if !self.submission_preparations.remove(&session_id) {
             return;
         }
@@ -2473,7 +2593,10 @@ impl Waku {
                         session.status = previous_status;
                     }
                 }
-                if selected && self.message_edit.is_none() {
+                if let RewindOrigin::Edit(edit) = &origin
+                    && selected
+                    && self.message_edit.is_none()
+                {
                     self.message_edit = Some(edit.clone());
                 }
                 if selected
@@ -2594,14 +2717,16 @@ impl Waku {
             self.expanded_changed_files.clear();
             self.transcript_control_focuses.borrow_mut().clear();
             self.splice_transcript_rows_after_visibility_change(&previous_kinds);
-            self.show_toast(match cleanup_error {
-                None => tr!("session.rewound", turn = turn_count),
-                Some(error) => tr!(
+            // A retry needs no word: the turn running again says it.
+            match cleanup_error {
+                None if origin.is_retry() => {}
+                None => self.show_toast(tr!("session.rewound", turn = turn_count)),
+                Some(error) => self.show_toast(tr!(
                     "session.rewound_with_stale_refs",
                     turn = turn_count,
                     error = error
-                ),
-            });
+                )),
+            }
         }
         self.analytics
             .track(crate::analytics::Event::ConversationRolledBack {
