@@ -225,20 +225,6 @@ pub fn activity_icon(kind: ActivityKind) -> &'static str {
     }
 }
 
-pub fn activity_noun(kind: ActivityKind) -> (String, String) {
-    match kind {
-        ActivityKind::Reasoning => (tr!("activity.thought"), tr!("activity.thoughts")),
-        ActivityKind::Command => (tr!("activity.command"), tr!("activity.commands")),
-        ActivityKind::FileChange => (tr!("activity.file_edit"), tr!("activity.file_edits")),
-        ActivityKind::FileRead => (tr!("activity.file_read"), tr!("activity.file_reads")),
-        ActivityKind::FileSearch => (tr!("activity.file_search"), tr!("activity.file_searches")),
-        ActivityKind::FileList => (tr!("activity.file_list"), tr!("activity.file_lists")),
-        ActivityKind::Search => (tr!("activity.search"), tr!("activity.searches")),
-        ActivityKind::Plan => (tr!("activity.plan_step"), tr!("activity.plan_steps")),
-        ActivityKind::Tool => (tr!("activity.tool_call"), tr!("activity.tool_calls")),
-    }
-}
-
 /// A compact chip used as a dropdown-menu trigger. `selected` is driven by the
 /// menu's open state and renders as a soft fill.
 #[derive(IntoElement)]

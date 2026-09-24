@@ -804,6 +804,74 @@ activity.activity:
   en: Activity
 activity.tool:
   en: Tool
+activity.verb_reading:
+  en: "Reading"
+activity.verb_read:
+  en: "Read"
+activity.verb_searching:
+  en: "Searching"
+activity.verb_searched:
+  en: "Searched"
+activity.verb_listing:
+  en: "Listing"
+activity.verb_listed:
+  en: "Listed"
+activity.verb_editing:
+  en: "Editing"
+activity.verb_edited:
+  en: "Edited"
+activity.verb_running:
+  en: "Running"
+activity.verb_ran:
+  en: "Ran"
+activity.verb_planning:
+  en: "Planning"
+activity.verb_planned:
+  en: "Planned"
+activity.verb_calling:
+  en: "Calling"
+activity.verb_called:
+  en: "Called"
+activity.verb_thinking:
+  en: "Thinking"
+activity.verb_thought:
+  en: "Thought"
+activity.group_explore:
+  en: "Explored · %{parts}"
+activity.group_exploring:
+  en: "Exploring · %{parts}"
+activity.group_terminal:
+  en: "Terminal · %{parts}"
+activity.group_terminal_running:
+  en: "Running · %{parts}"
+activity.bucket_search_one:
+  en: "%{count} search"
+activity.bucket_search_other:
+  en: "%{count} searches"
+activity.bucket_list_one:
+  en: "%{count} listing"
+activity.bucket_list_other:
+  en: "%{count} listings"
+activity.bucket_file_one:
+  en: "%{count} file"
+activity.bucket_file_other:
+  en: "%{count} files"
+activity.bucket_command_one:
+  en: "%{count} command"
+activity.bucket_command_other:
+  en: "%{count} commands"
+activity.bucket_failed:
+  en: "%{count} failed"
+activity.bucket_stopped:
+  en: "%{count} stopped"
+activity.list_separator:
+  en: ", "
+activity.status_failed:
+  en: "Failed"
+activity.status_stopped:
+  en: "Stopped"
+activity.failed_click_to_copy:
+  en: "Click to copy the output"
 activity.plan_updated:
   en: Plan updated
 activity.output_truncated:

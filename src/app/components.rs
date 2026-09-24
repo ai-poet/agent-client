@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::activity_phase::{ActivityPhase, ExploreBucket, GroupKind};
 use chrono::{Datelike, Days};
 use std::path::Path;
 
@@ -904,56 +905,135 @@ pub(super) fn fenced_code(content: &str) -> Option<String> {
     (!code_blocks.is_empty()).then(|| code_blocks.join("\n\n"))
 }
 
-pub(super) fn activity_summary(activities: &[ActivityItem]) -> String {
-    let mut counts: Vec<(crate::model::ActivityKind, usize)> = Vec::new();
-    for activity in activities {
-        if let Some(entry) = counts.iter_mut().find(|(kind, _)| *kind == activity.kind) {
-            entry.1 += 1;
+/// Whether a call is still going: neither finished, failed nor cut off.
+/// Only meaningful inside the turn still running.
+pub(super) fn activity_is_running(activity: &ActivityItem) -> bool {
+    !activity.complete && !activity.failed && !activity.stopped
+}
+
+/// The shell command a command activity ran, for telling reading apart from
+/// other terminal work.
+pub(super) fn activity_command_text(activity: &ActivityItem) -> Option<&str> {
+    (activity.kind == crate::model::ActivityKind::Command)
+        .then(|| {
+            activity
+                .display_target
+                .as_deref()
+                .or(activity.arguments.as_deref())
+        })
+        .flatten()
+}
+
+/// A group's one line: what kind of work, then what it came to —
+/// "查阅 · 2 搜索，3 文件", "终端 · 4 个命令，1 个失败". Thinking inside the
+/// group is carried along uncounted.
+pub(super) fn activity_group_title(
+    kind: GroupKind,
+    members: &[ActivityItem],
+    phases: &[ActivityPhase],
+    running: bool,
+) -> String {
+    fn counted(count: usize, one: &str, other: &str) -> String {
+        if count == 1 {
+            tr!(one, count = count)
         } else {
-            counts.push((activity.kind, 1));
+            tr!(other, count = count)
         }
     }
-    let parts = counts
-        .into_iter()
-        .map(|(kind, count)| {
-            let (singular, plural) = activity_noun(kind);
-            tr!(
-                "activity.count",
-                count = count,
-                activity = if count == 1 { singular } else { plural }
-            )
+
+    let calls = || {
+        members
+            .iter()
+            .zip(phases)
+            .filter(|(_, phase)| **phase != ActivityPhase::Reasoning)
+    };
+    let mut parts = Vec::new();
+    match kind {
+        GroupKind::Explore => {
+            for (bucket, one, other) in [
+                (
+                    ExploreBucket::Search,
+                    "activity.bucket_search_one",
+                    "activity.bucket_search_other",
+                ),
+                (
+                    ExploreBucket::List,
+                    "activity.bucket_list_one",
+                    "activity.bucket_list_other",
+                ),
+                (
+                    ExploreBucket::File,
+                    "activity.bucket_file_one",
+                    "activity.bucket_file_other",
+                ),
+            ] {
+                let count = calls()
+                    .filter(|(_, phase)| **phase == ActivityPhase::Explore(bucket))
+                    .count();
+                if count > 0 {
+                    parts.push(counted(count, one, other));
+                }
+            }
+        }
+        GroupKind::Terminal => parts.push(counted(
+            calls().count(),
+            "activity.bucket_command_one",
+            "activity.bucket_command_other",
+        )),
+    }
+    let failed = calls().filter(|(activity, _)| activity.failed).count();
+    if failed > 0 {
+        parts.push(tr!("activity.bucket_failed", count = failed));
+    }
+    let stopped = calls()
+        .filter(|(activity, _)| activity.stopped && !activity.failed)
+        .count();
+    if stopped > 0 {
+        parts.push(tr!("activity.bucket_stopped", count = stopped));
+    }
+    let parts = parts.join(&tr!("activity.list_separator"));
+    match (kind, running) {
+        (GroupKind::Explore, false) => tr!("activity.group_explore", parts = parts),
+        (GroupKind::Explore, true) => tr!("activity.group_exploring", parts = parts),
+        (GroupKind::Terminal, false) => tr!("activity.group_terminal", parts = parts),
+        (GroupKind::Terminal, true) => tr!("activity.group_terminal_running", parts = parts),
+    }
+}
+
+/// The end of a failed call's output — where the error usually is — for the
+/// tooltip on its "failed" mark. `None` when it said nothing worth showing.
+pub(super) fn activity_failure_tail(activity: &ActivityItem) -> Option<String> {
+    const LINES: usize = 6;
+    const LINE_CHARS: usize = 160;
+    let text = activity
+        .output
+        .as_deref()
+        .map(str::trim)
+        .filter(|output| !output.is_empty())
+        .or_else(|| {
+            activity
+                .detail
+                .as_deref()
+                .map(str::trim)
+                .filter(|detail| !detail.is_empty() && !detail.eq_ignore_ascii_case("failed"))
+        })?;
+    let lines = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>();
+    let tail = lines[lines.len().saturating_sub(LINES)..]
+        .iter()
+        .map(|line| {
+            let line = line.trim_end();
+            if line.chars().count() > LINE_CHARS {
+                let kept = line.chars().take(LINE_CHARS - 1).collect::<String>();
+                format!("{kept}…")
+            } else {
+                line.to_owned()
+            }
         })
         .collect::<Vec<_>>();
-    let running = activities.iter().any(|activity| !activity.complete);
-    if running {
-        tr!("activity.running", activities = parts.join(" · "))
-    } else {
-        tr!("activity.ran", activities = parts.join(" · "))
-    }
-}
-
-pub(super) fn activity_group_is_live(
-    live_turn: bool,
-    latest_block: bool,
-    after_message: usize,
-    message_count: usize,
-) -> bool {
-    live_turn && latest_block && after_message == message_count
-}
-
-pub(super) fn activity_header_title(
-    activities: &[ActivityItem],
-    live_group: bool,
-    live_reasoning_id: Option<Uuid>,
-) -> String {
-    if live_group && let Some(activity) = activities.last() {
-        return activity.reasoning.as_ref().map_or_else(
-            || activity_display_title(activity),
-            |reasoning| reasoning_activity_title(reasoning, live_reasoning_id == Some(activity.id)),
-        );
-    }
-
-    activity_summary(activities)
+    Some(tail.join("\n"))
 }
 
 fn tool_name_leaf(name: &str) -> &str {
@@ -1177,19 +1257,38 @@ pub(super) fn activity_display_title(activity: &ActivityItem) -> String {
     }
 }
 
-pub(super) fn activity_action_label(activity: &ActivityItem) -> String {
+/// The verb a flat activity row opens with, in the tense of its state:
+/// "正在读取" while it runs, "已读取" once it finished, failed or was stopped.
+pub(super) fn activity_verb(activity: &ActivityItem, running: bool) -> String {
+    if is_ask_user_question(activity) {
+        return tr!("activity.ask_questions");
+    }
+    let (running_key, done_key) = crate::activity_phase::verb_keys(activity.kind);
+    if running {
+        tr!(running_key)
+    } else {
+        tr!(done_key)
+    }
+}
+
+/// What a flat row names after its verb: the file, query, command or tool.
+/// Never a sentence of its own — the verb already says what happened.
+pub(super) fn activity_row_target(activity: &ActivityItem) -> String {
     use crate::model::ActivityKind;
 
     match activity.kind {
-        ActivityKind::Reasoning => tr!("activity.action_think"),
-        ActivityKind::Command => tr!("activity.action_run"),
-        ActivityKind::FileChange => tr!("activity.action_edit"),
-        ActivityKind::FileRead => tr!("activity.action_read"),
-        ActivityKind::FileSearch | ActivityKind::Search => tr!("activity.action_search"),
-        ActivityKind::FileList => tr!("activity.action_list"),
-        ActivityKind::Plan => tr!("activity.action_plan"),
-        ActivityKind::Tool if is_ask_user_question(activity) => tr!("activity.ask_questions"),
-        ActivityKind::Tool => tr!("activity.tool"),
+        ActivityKind::FileSearch | ActivityKind::Search => activity
+            .display_target
+            .as_deref()
+            .map(str::trim)
+            .filter(|target| !target.is_empty())
+            .map(str::to_owned)
+            .or_else(|| {
+                (!crate::model::is_generic_activity_title(activity.kind, &activity.title))
+                    .then(|| activity.title.clone())
+            })
+            .unwrap_or_default(),
+        _ => activity_row_detail(activity, false),
     }
 }
 
@@ -1654,11 +1753,11 @@ mod message_time_tests {
             true,
         );
 
-        assert_eq!(activity_action_label(&named), "Tool");
-        assert_eq!(activity_row_detail(&named, false), "Create thread");
+        assert_eq!(activity_verb(&named, false), "Called");
+        assert_eq!(activity_row_target(&named), "Create thread");
         assert_eq!(activity_display_title(&named), "Create thread");
-        assert_eq!(activity_action_label(&unnamed), "Tool");
-        assert_eq!(activity_row_detail(&unnamed, false), "");
+        assert_eq!(activity_verb(&unnamed, true), "Calling");
+        assert_eq!(activity_row_target(&unnamed), "");
     }
 
     #[test]
@@ -1672,14 +1771,34 @@ mod message_time_tests {
         )
         .with_arguments(Some(r#"{"questions":[]}"#.into()));
 
-        assert_eq!(activity_action_label(&activity), "Ask questions");
-        assert_eq!(activity_row_detail(&activity, false), "");
+        assert_eq!(activity_verb(&activity, true), "Ask questions");
+        assert_eq!(activity_row_target(&activity), "");
         assert_eq!(activity_display_title(&activity), "Ask questions");
     }
 
+    fn command(command: &str, complete: bool) -> ActivityItem {
+        ActivityItem::new(
+            Some(format!("command-{command}")),
+            crate::model::ActivityKind::Command,
+            "bash",
+            None,
+            complete,
+        )
+        .with_arguments(Some(serde_json::json!({"command": command}).to_string()))
+    }
+
+    fn phases_of(activities: &[ActivityItem]) -> Vec<ActivityPhase> {
+        activities
+            .iter()
+            .map(|activity| {
+                crate::activity_phase::phase(activity.kind, activity_command_text(activity))
+            })
+            .collect()
+    }
+
     #[test]
-    fn activity_header_summarizes_only_after_the_group_leaves_the_live_tail() {
-        let reasoning = ActivityItem::from_reasoning(
+    fn a_reading_group_counts_each_kind_of_reading_and_leaves_thinking_out() {
+        let thought = ActivityItem::from_reasoning(
             ReasoningBlock {
                 content: "Inspecting history".into(),
                 started_at_ms: 1_000,
@@ -1687,39 +1806,57 @@ mod message_time_tests {
             },
             true,
         );
-        let command = ActivityItem::new(
-            Some("command-1".into()),
-            crate::model::ActivityKind::Command,
-            "bash",
-            None,
-            false,
-        )
-        .with_arguments(Some(
-            serde_json::json!({"command": "git log --oneline -15"}).to_string(),
-        ));
-        let mut activities = vec![reasoning, command];
+        let activities = vec![
+            command("rg -n TODO src", true),
+            thought,
+            command("cat src/lib.rs", true),
+            command("git log --oneline -15", false),
+        ];
+        let phases = phases_of(&activities);
 
         assert_eq!(
-            activity_header_title(&activities, true, None),
-            "Running git log --oneline -15"
+            activity_group_title(GroupKind::Explore, &activities, &phases, true),
+            "Exploring · 1 search, 2 files"
         );
-        assert!(activity_group_is_live(true, true, 1, 1));
-        activities[1].complete = true;
         assert_eq!(
-            activity_header_title(&activities, true, None),
-            "Ran git log --oneline -15"
+            activity_group_title(GroupKind::Explore, &activities, &phases, false),
+            "Explored · 1 search, 2 files"
         );
-        assert!(!activity_group_is_live(true, true, 1, 2));
+        assert_eq!(activity_verb(&activities[3], true), "Running");
+        assert_eq!(activity_row_target(&activities[3]), "git log --oneline -15");
+    }
+
+    #[test]
+    fn a_terminal_group_counts_its_failures_and_what_was_cut_off() {
+        let mut failed = command("cargo test", true);
+        failed.failed = true;
+        let mut stopped = command("cargo build", true);
+        stopped.stopped = true;
+        let activities = vec![command("npm install", true), failed, stopped];
+        let phases = phases_of(&activities);
+
         assert_eq!(
-            activity_header_title(&activities, false, None),
-            "Ran 1 thought · 1 command"
+            activity_group_title(GroupKind::Terminal, &activities, &phases, false),
+            "Terminal · 3 commands, 1 failed, 1 stopped"
         );
-        assert!(!activity_group_is_live(true, false, 1, 1));
-        assert!(!activity_group_is_live(false, true, 1, 1));
-        assert_eq!(activity_action_label(&activities[1]), "Run");
+        assert_eq!(activity_verb(&activities[2], false), "Ran");
+    }
+
+    #[test]
+    fn a_failure_tooltip_shows_the_end_of_the_output() {
+        let mut activity = command("cargo test", true);
+        activity.failed = true;
+        assert_eq!(activity_failure_tail(&activity), None);
+
+        activity.output = Some(
+            (1..=10)
+                .map(|line| format!("line {line}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
         assert_eq!(
-            activity_row_detail(&activities[1], false),
-            "git log --oneline -15"
+            activity_failure_tail(&activity).as_deref(),
+            Some("line 5\nline 6\nline 7\nline 8\nline 9\nline 10")
         );
     }
 

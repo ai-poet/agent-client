@@ -2588,7 +2588,7 @@ impl Waku {
             self.message_edit = None;
         }
         if selected {
-            self.activities_expanded.clear();
+            self.activity_groups_expanded.clear();
             self.expanded_activity_items.clear();
             self.turn_fold_overrides.clear();
             self.expanded_changed_files.clear();
@@ -3360,7 +3360,7 @@ impl Waku {
             });
         self.submission_preparations.insert(session_id);
         if selected {
-            self.activities_expanded.clear();
+            self.activity_groups_expanded.clear();
             self.expanded_activity_items.clear();
             self.turn_fold_overrides.clear();
             self.expanded_changed_files.clear();

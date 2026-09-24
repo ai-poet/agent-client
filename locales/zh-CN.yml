@@ -393,6 +393,40 @@ activity.updated_plan: 已更新计划
 activity.plan_update_failed: 更新计划失败
 activity.activity: 操作
 activity.tool: 工具
+activity.verb_reading: "正在读取"
+activity.verb_read: "已读取"
+activity.verb_searching: "正在搜索"
+activity.verb_searched: "已搜索"
+activity.verb_listing: "正在列出"
+activity.verb_listed: "已列出"
+activity.verb_editing: "正在编辑"
+activity.verb_edited: "已编辑"
+activity.verb_running: "正在执行"
+activity.verb_ran: "已执行"
+activity.verb_planning: "正在规划"
+activity.verb_planned: "已规划"
+activity.verb_calling: "正在调用"
+activity.verb_called: "已调用"
+activity.verb_thinking: "思考中"
+activity.verb_thought: "思考"
+activity.group_explore: "查阅 · %{parts}"
+activity.group_exploring: "正在查阅 · %{parts}"
+activity.group_terminal: "终端 · %{parts}"
+activity.group_terminal_running: "正在执行 · %{parts}"
+activity.bucket_search_one: "%{count} 搜索"
+activity.bucket_search_other: "%{count} 搜索"
+activity.bucket_list_one: "%{count} 列表"
+activity.bucket_list_other: "%{count} 列表"
+activity.bucket_file_one: "%{count} 文件"
+activity.bucket_file_other: "%{count} 文件"
+activity.bucket_command_one: "%{count} 个命令"
+activity.bucket_command_other: "%{count} 个命令"
+activity.bucket_failed: "%{count} 个失败"
+activity.bucket_stopped: "%{count} 个已停止"
+activity.list_separator: "，"
+activity.status_failed: "执行失败"
+activity.status_stopped: "已停止"
+activity.failed_click_to_copy: "点击复制输出"
 activity.plan_updated: 计划已更新
 activity.output_truncated: "\n\n… 输出已截断"
 activity.thought: 思考
@@ -938,7 +972,7 @@ session.context_compacted_manual: "上下文已压缩 · %{before} → %{after}"
 session.context_compacted: "上下文已压缩"
 session.context_compaction_failed: "上下文压缩失败，对话保持原样"
 transcript.thinking: 正在思考
-transcript.thought_for: 思考用时 %{duration}
+transcript.thought_for: 思考 · 持续了 %{duration}
 transcript.changed_file: 更改了 %{count} 个文件
 transcript.changed_files: 更改了 %{count} 个文件
 transcript.review_changes: 审阅

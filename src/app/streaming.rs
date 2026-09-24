@@ -202,10 +202,16 @@ impl Waku {
         }
     }
 
-    pub(super) fn complete_turn_blocks(&mut self, session_id: Uuid) {
+    /// Settle every activity still open. `stopped` says the turn ended
+    /// without finishing: a call cut off then is marked stopped rather than
+    /// passed off as done.
+    pub(super) fn complete_turn_blocks(&mut self, session_id: Uuid, stopped: bool) {
         if let Some(session) = self.state.session_mut(session_id) {
             for block in &mut session.transcript_blocks {
                 for activity in &mut block.activities {
+                    if stopped && !activity.complete && !activity.failed {
+                        activity.stopped = true;
+                    }
                     activity.complete = true;
                 }
             }
@@ -636,7 +642,7 @@ impl Waku {
                         })
                 });
                 self.finish_streaming_assistant(session_id);
-                self.complete_turn_blocks(session_id);
+                self.complete_turn_blocks(session_id, !success);
                 runtime.stream_phase = None;
                 let needs_fallback = !self.turn_has_assistant_message(session_id);
                 if let Some(session) = self.state.session_mut(session_id) {
@@ -742,7 +748,7 @@ impl Waku {
                 self.mark_background_work_lost(session_id);
                 let previous_kinds = self.snapshot_selected_transcript_rows(session_id);
                 self.finish_streaming_assistant(session_id);
-                self.complete_turn_blocks(session_id);
+                self.complete_turn_blocks(session_id, true);
                 runtime.stream_phase = None;
                 runtime.pending_permission = None;
                 runtime.pending_user_input = None;

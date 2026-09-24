@@ -1,5 +1,6 @@
 use super::right_panel::{DiffRowStyle, render_diff_code_row};
 use super::*;
+use crate::activity_phase::{self, ActivityPhase, ActivityRun, GroupKind};
 use base64::Engine as _;
 
 const CHANGED_FILES_PREVIEW_LIMIT: usize = 3;
@@ -9,7 +10,15 @@ const CHANGED_FILES_PREVIEW_LIMIT: usize = 3;
 const CHANGED_FILES_EXPANDED_LIMIT: usize = 12;
 /// An expanded edit stays one transcript row tall; past this the diff scrolls
 /// in place, the same as long command output.
-const ACTIVITY_DIFF_MAX_HEIGHT: f32 = 400.0;
+const ACTIVITY_DIFF_MAX_HEIGHT: f32 = 240.0;
+/// A command's output is a live terminal peek: a few lines that follow the
+/// tail while it runs, scrolling for the rest.
+const COMMAND_OUTPUT_MAX_HEIGHT: f32 = 100.0;
+/// Any other call's output, and an opened thought, scroll past this.
+const ACTIVITY_OUTPUT_MAX_HEIGHT: f32 = 240.0;
+const REASONING_MAX_HEIGHT: f32 = 240.0;
+/// The tail of the newest line a live thought shows beside "Thinking".
+const REASONING_TICKER_CHARS: usize = 80;
 /// Aligns a hunk separator with the line numbers in the rows below it; see
 /// `DiffRowStyle::ACTIVITY`.
 const ACTIVITY_DIFF_GUTTER_WIDTH: f32 = 52.0;
@@ -861,14 +870,18 @@ impl Waku {
         cx.notify();
     }
 
-    pub(super) fn toggle_activities(
+    /// Open or close a group of reading calls or commands. The state is kept
+    /// by the group's first call, which stays its first however the group
+    /// grows.
+    pub(super) fn toggle_activity_group(
         &mut self,
         block_index: usize,
+        first_id: Uuid,
         current: bool,
         cx: &mut Context<Self>,
     ) {
         self.toggle_block_disclosure(block_index, cx, |this| {
-            this.activities_expanded.insert(block_index, !current);
+            this.activity_groups_expanded.insert(first_id, !current);
         });
     }
 
@@ -1946,6 +1959,9 @@ impl Waku {
         .detach();
     }
 
+    /// A block's tool activity, laid out flat: consecutive reading calls and
+    /// consecutive terminal commands gather under one line each ("查阅 · 2
+    /// 搜索, 3 文件"), and every other call is a row of its own.
     pub(super) fn render_activities_row(
         &self,
         activities: &[ActivityItem],
@@ -1954,33 +1970,20 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // A completed child is not a group boundary: providers commonly emit
-        // the next tool after the previous result. The group leaves the live
-        // tail only when answer text is appended (so `after_message` falls
-        // behind) or when the turn itself settles.
-        let live_group = self.selected_session().is_some_and(|session| {
-            session
-                .transcript_blocks
-                .get(block_index)
-                .is_some_and(|block| {
-                    activity_group_is_live(
-                        session
-                            .active_turn_id()
-                            .is_some_and(|turn_id| block.turn_id == Some(turn_id)),
-                        block_index + 1 == session.transcript_blocks.len(),
-                        block.after_message,
-                        session.messages.len(),
-                    )
-                })
+        // Only a block of the turn still running can hold a call that is
+        // still going; anything unfinished elsewhere was cut off.
+        let live_turn = self.selected_session().is_some_and(|session| {
+            session.active_turn_id().is_some_and(|turn_id| {
+                session
+                    .transcript_blocks
+                    .get(block_index)
+                    .is_some_and(|block| block.turn_id == Some(turn_id))
+            })
         });
-        let expanded = self
-            .activities_expanded
-            .get(&block_index)
-            .copied()
-            .unwrap_or(live_group);
-        let live_reasoning_id = (self
-            .selected_runtime()
-            .is_some_and(|runtime| runtime.stream_phase == Some(StreamPhase::Reasoning))
+        let live_reasoning_id = (live_turn
+            && self
+                .selected_runtime()
+                .is_some_and(|runtime| runtime.stream_phase == Some(StreamPhase::Reasoning))
             && self
                 .selected_session()
                 .is_some_and(|session| session.status == SessionStatus::Working)
@@ -1993,591 +1996,806 @@ impl Waku {
                 .map(|activity| activity.id)
         })
         .flatten();
-        let header_title = activity_header_title(activities, live_group, live_reasoning_id);
-        let header_focus =
-            self.transcript_control_focus(format!("activity-toggle-{block_index}"), cx);
-        let cluster = div()
+        let phases = activities
+            .iter()
+            .map(|activity| activity_phase::phase(activity.kind, activity_command_text(activity)))
+            .collect::<Vec<_>>();
+        let mut column = div().w_full().min_w_0().flex().flex_col().gap(px(2.0));
+        for run in activity_phase::group_activities(&phases) {
+            let element = match run {
+                ActivityRun::Single(index) => self.render_activity_item(
+                    &activities[index],
+                    live_turn,
+                    live_reasoning_id,
+                    theme,
+                    window,
+                    cx,
+                ),
+                ActivityRun::Group { kind, members } => self.render_activity_group(
+                    ActivityGroupRender {
+                        kind,
+                        members: &activities[members.clone()],
+                        phases: &phases[members],
+                        block_index,
+                        live_turn,
+                        live_reasoning_id,
+                    },
+                    theme,
+                    window,
+                    cx,
+                ),
+            };
+            column = column.child(element);
+        }
+        column.into_any_element()
+    }
+
+    /// A run of reading calls or terminal commands as one line that says
+    /// what they came to, opening onto the calls themselves.
+    fn render_activity_group(
+        &self,
+        group: ActivityGroupRender<'_>,
+        theme: &Theme,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let ActivityGroupRender {
+            kind,
+            members,
+            phases,
+            block_index,
+            live_turn,
+            live_reasoning_id,
+        } = group;
+        let first_id = members[0].id;
+        let expanded = self
+            .activity_groups_expanded
+            .get(&first_id)
+            .copied()
+            .unwrap_or(false);
+        let running = live_turn
+            && members
+                .iter()
+                .any(|activity| activity.reasoning.is_none() && activity_is_running(activity));
+        let title = activity_group_title(kind, members, phases, running);
+        let key = format!("activity-group-{first_id}");
+        let focus = self.transcript_control_focus(key.clone(), cx);
+        let hover_group = SharedString::from(key);
+        let header = div()
+            .id(hover_group.clone())
+            .group(hover_group.clone())
+            .track_focus(&focus)
+            .tab_index(0)
             .w_full()
             .min_w_0()
+            .h(px(26.0))
             .flex()
-            .flex_col()
-            .gap(px(4.0))
+            .items_center()
+            .gap(px(8.0))
+            .text_size(sp(12.5))
+            .line_height(sp(16.0))
+            .cursor_default()
+            .child(icon(activity_group_icon(kind), 14.0, theme.text_tertiary))
             .child(
                 div()
-                    .id(SharedString::from(format!("activity-toggle-{block_index}")))
-                    .track_focus(&header_focus)
-                    .tab_index(0)
-                    .w_full()
                     .min_w_0()
-                    .h(px(26.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .text_size(sp(12.5))
-                    .line_height(sp(16.0))
-                    .cursor_default()
-                    .focus_visible(|style| style.text_color(theme.text))
-                    .hover(|style| style.text_color(theme.text))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text_secondary)
-                            .child(SharedString::from(header_title)),
-                    )
-                    .child(icon(
-                        if expanded {
-                            "icons/chevron-down.svg"
-                        } else {
-                            "icons/chevron-right.svg"
-                        },
-                        10.0,
-                        theme.text_tertiary,
-                    ))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_activities(block_index, expanded, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.toggle_activities(block_index, expanded, cx);
-                            cx.stop_propagation();
-                        }
-                    })),
-            );
+                    .truncate()
+                    .child(activity_label(title, running, theme)),
+            )
+            .child(disclosure_chevron(expanded, hover_group, theme))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.toggle_activity_group(block_index, first_id, expanded, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.toggle_activity_group(block_index, first_id, expanded, cx);
+                    cx.stop_propagation();
+                }
+            }));
         if !expanded {
-            return cluster.into_any_element();
+            return header.into_any_element();
         }
-        // `Theme::overlay` is 5% alpha and GPUI's `opacity` multiplies it.
-        let activity_surface = theme.surface.blend(theme.overlay.opacity(0.7));
-        let activity_hover_surface = theme.surface.blend(theme.overlay);
-        let activity_active_surface = theme.surface.blend(theme.overlay_strong.opacity(0.72));
-        let mut items = div()
-            .w_full()
+        let mut rows = div()
             .min_w_0()
-            .ml(px(6.0))
+            .ml(px(7.0))
             .pl(px(12.0))
-            .pb(px(2.0))
             .border_l_1()
             .border_color(theme.border)
             .flex()
             .flex_col()
-            .gap(px(8.0));
-        for activity in activities {
-            let id = activity.id;
-            let background_work = self
-                .state
-                .selected_session
-                .zip(activity.source_id.as_deref())
-                .and_then(|(session_id, source_id)| {
-                    self.background_work_for_activity(session_id, source_id)
-                        .map(|item| (session_id, item.key.clone(), item.status))
-                });
-            let background_badge = background_work.map(|(session_id, key, status)| {
-                let click_key = key.clone();
-                let focus = self.transcript_control_focus(format!("activity-background-{id}"), cx);
-                let color = work_status_color(status, *theme);
-                div()
-                    .id(SharedString::from(format!("activity-background-{id}")))
-                    .track_focus(&focus)
-                    .tab_index(0)
-                    .h(px(20.0))
-                    .px(px(6.0))
-                    .rounded(px(5.0))
-                    .border_1()
-                    .border_color(theme.border_strong)
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .cursor_default()
-                    .text_size(sp(12.5))
-                    .text_color(color)
-                    .focus_visible(|style| style.border_color(theme.accent))
-                    .hover(|style| style.bg(theme.overlay_strong))
-                    .child(work_status_label(status))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        cx.stop_propagation();
-                        this.open_background_work_surface(session_id, click_key.clone(), cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.open_background_work_surface(session_id, key.clone(), cx);
-                            cx.stop_propagation();
-                        }
-                    }))
+            .gap(px(2.0));
+        for activity in members {
+            rows = rows.child(self.render_activity_item(
+                activity,
+                live_turn,
+                live_reasoning_id,
+                theme,
+                window,
+                cx,
+            ));
+        }
+        div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .child(header)
+            .child(rows)
+            .into_any_element()
+    }
+
+    /// One call as a flat row — icon, verb in the tense of its state, what it
+    /// acted on — opening onto its detail when it has any.
+    fn render_activity_item(
+        &self,
+        activity: &ActivityItem,
+        live_turn: bool,
+        live_reasoning_id: Option<Uuid>,
+        theme: &Theme,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if let Some(reasoning) = activity.reasoning.as_ref() {
+            let live = live_reasoning_id == Some(activity.id);
+            return self.render_reasoning_item(activity, reasoning, live, theme, window, cx);
+        }
+        let id = activity.id;
+        let running = live_turn && activity_is_running(activity);
+        let background_work = self
+            .state
+            .selected_session
+            .zip(activity.source_id.as_deref())
+            .and_then(|(session_id, source_id)| {
+                self.background_work_for_activity(session_id, source_id)
+                    .map(|item| (session_id, item.key.clone(), item.status))
             });
-            let reasoning = activity.reasoning.as_ref();
-            let reasoning_live = live_reasoning_id == Some(id);
-            let sections = if reasoning.is_some() {
-                Vec::new()
-            } else {
-                activity_disclosure_sections(activity)
-            };
-            let preview = if reasoning.is_some() {
-                String::new()
-            } else {
-                activity_preview(activity)
-            };
-            let action_label = activity_action_label(activity);
-            let mut row_detail = activity_row_detail(activity, reasoning_live);
-            if row_detail.trim().is_empty() {
-                row_detail = preview;
-            }
-            let file_change_stats = activity_file_change_stats(activity);
-            // One changed file is unambiguous, so the row itself can offer to
-            // open it. A change touching several names each file in the diff
-            // below, and each of those rows opens its own.
-            let open_file_button = match activity.file_changes.as_slice() {
-                [change] if activity.kind == ActivityKind::FileChange => {
-                    Some(self.render_activity_open_file_button(
-                        format!("activity-open-{id}"),
-                        change.path.clone(),
-                        theme,
-                        cx,
-                    ))
-                }
-                _ => None,
-            };
-            let shows_diff = reasoning.is_none() && activity_shows_diff(activity);
-            let shows_todos = reasoning.is_none() && activity_shows_todos(activity);
-            let has_detail = reasoning
-                .is_some_and(|reasoning| !reasoning.content.trim().is_empty())
-                || !sections.is_empty()
-                || shows_diff
-                || shows_todos;
-            let item_expanded = has_detail
-                && self
-                    .expanded_activity_items
-                    .get(&id)
-                    .copied()
-                    .unwrap_or(reasoning_live);
-            let item_focus = self.transcript_control_focus(format!("activity-item-{id}"), cx);
-            let mut item = div()
-                .w_full()
-                .min_w_0()
-                .overflow_hidden()
-                .rounded(px(9.0))
+        let background_badge = background_work.map(|(session_id, key, status)| {
+            let click_key = key.clone();
+            let focus = self.transcript_control_focus(format!("activity-background-{id}"), cx);
+            let color = work_status_color(status, *theme);
+            div()
+                .id(SharedString::from(format!("activity-background-{id}")))
+                .track_focus(&focus)
+                .tab_index(0)
+                .h(px(20.0))
+                .px(px(6.0))
+                .rounded(px(5.0))
                 .border_1()
                 .border_color(theme.border_strong)
-                .bg(activity_surface)
+                .flex_none()
                 .flex()
-                .flex_col()
+                .items_center()
+                .cursor_default()
+                .text_size(sp(12.5))
+                .text_color(color)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .hover(|style| style.bg(theme.overlay_strong))
+                .child(work_status_label(status))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.open_background_work_surface(session_id, click_key.clone(), cx);
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.open_background_work_surface(session_id, key.clone(), cx);
+                        cx.stop_propagation();
+                    }
+                }))
+        });
+        let sections = activity_disclosure_sections(activity);
+        let mut target = activity_row_target(activity);
+        if target.trim().is_empty() {
+            target = activity_preview(activity);
+        }
+        let file_change_stats = activity_file_change_stats(activity);
+        // One changed file is unambiguous, so the row itself can offer to
+        // open it. A change touching several names each file in the diff
+        // below, and each of those rows opens its own.
+        let open_file_button = match activity.file_changes.as_slice() {
+            [change] if activity.kind == ActivityKind::FileChange => {
+                Some(self.render_activity_open_file_button(
+                    format!("activity-open-{id}"),
+                    change.path.clone(),
+                    theme,
+                    cx,
+                ))
+            }
+            _ => None,
+        };
+        let shows_diff = activity_shows_diff(activity);
+        let shows_todos = activity_shows_todos(activity);
+        let has_detail = !sections.is_empty() || shows_diff || shows_todos;
+        let item_expanded = has_detail
+            && self
+                .expanded_activity_items
+                .get(&id)
+                .copied()
+                .unwrap_or(false);
+        let failure = activity
+            .failed
+            .then(|| self.render_activity_failure(activity, theme, cx));
+        let hover_group = SharedString::from(format!("activity-item-{id}"));
+        let item_focus = self.transcript_control_focus(format!("activity-item-{id}"), cx);
+        let row = div()
+            .id(hover_group.clone())
+            .group(hover_group.clone())
+            .w_full()
+            .min_w_0()
+            .h(px(26.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .text_size(sp(12.5))
+            .line_height(sp(16.0))
+            .when(has_detail, |row| {
+                row.track_focus(&item_focus)
+                    .tab_index(0)
+                    .cursor_default()
+                    .focus_visible(|row| row.text_color(theme.text))
+            })
+            .child(icon(
+                activity_icon(activity.kind),
+                14.0,
+                theme.text_tertiary,
+            ))
+            .child(div().flex_none().child(activity_label(
+                activity_verb(activity, running),
+                running,
+                theme,
+            )))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(theme.text_tertiary)
+                    .when(has_detail, |target| {
+                        target.group_hover(hover_group.clone(), |style| {
+                            style.text_color(theme.text_secondary)
+                        })
+                    })
+                    .child(SharedString::from(target)),
+            )
+            .when_some(file_change_stats, |row, (additions, deletions)| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .text_color(theme.success)
+                        .child(SharedString::from(format!("+{additions}"))),
+                )
                 .child(
                     div()
-                        .id(SharedString::from(format!("activity-item-{id}")))
-                        // The parent owns a 1px border on each edge, so a
-                        // 28px row makes the visible activity header 30px.
-                        .h(px(28.0))
-                        .px(px(8.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .rounded_tl(px(8.0))
-                        .rounded_tr(px(8.0))
-                        .when(!item_expanded, |element| {
-                            element.rounded_bl(px(8.0)).rounded_br(px(8.0))
-                        })
-                        .text_size(sp(12.5))
-                        .line_height(sp(16.0))
-                        .when(has_detail, |element| {
-                            element
-                                .track_focus(&item_focus)
-                                .tab_index(0)
-                                .cursor_default()
-                                .focus_visible(|element| element.bg(activity_hover_surface))
-                                .hover(|element| element.bg(activity_hover_surface))
-                                .active(|element| element.bg(activity_active_surface))
-                        })
-                        .child(icon(
-                            activity_icon(activity.kind),
-                            12.0,
-                            theme.text_tertiary,
-                        ))
-                        .child(
-                            div()
-                                .flex_none()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme.text_secondary)
-                                .child(SharedString::from(action_label)),
-                        )
-                        .when(!row_detail.is_empty(), |element| {
-                            element.child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_color(theme.text_secondary)
-                                    .child(SharedString::from(row_detail)),
-                            )
-                        })
-                        .when_some(file_change_stats, |row, (additions, deletions)| {
-                            row.child(
-                                div()
-                                    .flex_none()
-                                    .text_color(theme.success)
-                                    .child(SharedString::from(format!("+{additions}"))),
-                            )
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .text_color(theme.danger)
-                                    .child(SharedString::from(format!("-{deletions}"))),
-                            )
-                        })
-                        .children(background_badge)
-                        .children(open_file_button)
-                        .when(has_detail, |element| {
-                            element.child(icon(
-                                if item_expanded {
-                                    "icons/chevron-down.svg"
-                                } else {
-                                    "icons/chevron-right.svg"
-                                },
-                                10.0,
-                                theme.text_tertiary,
-                            ))
-                        })
-                        .when(!has_detail && reasoning.is_none(), |element| {
-                            element
-                                .when(activity.failed, |element| {
-                                    element.child(
-                                        icon("icons/x.svg", 10.0, theme.danger).into_any_element(),
-                                    )
-                                })
-                                .when(!activity.complete && !activity.failed, |element| {
-                                    element.child(pulse_dot(5.0, theme.accent))
-                                })
-                        })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if has_detail {
-                                this.toggle_activity_item(id, item_expanded, cx);
-                            }
-                        }))
-                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                            if has_detail
-                                && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                            {
-                                this.toggle_activity_item(id, item_expanded, cx);
-                                cx.stop_propagation();
-                            }
-                        })),
-                );
-            if item_expanded && let Some(reasoning) = reasoning {
-                // Reasoning remains model prose even though it now shares the
-                // activity stream, so keep selectable markdown rather than
-                // presenting it as monospace tool output.
-                let mut palette = MarkdownPalette::from_theme(theme);
-                palette.text = theme.text_secondary;
-                palette.secondary = theme.text_tertiary;
-                let ctx = self.markdown_ctx(
-                    format!("reasoning-{id}"),
-                    &palette,
-                    self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
-                    reasoning_live && !cx.reduce_motion(),
-                );
-                let reasoning_viewport = self
-                    .activity_scroll_viewports
-                    .borrow_mut()
-                    .entry(id)
-                    .or_default()
-                    .clone();
-                let mut views = self.activity_markdown.borrow_mut();
-                let view = views.entry(id).or_default();
-                if reasoning_live {
-                    let start = self.live_reasoning_window_start(id, &reasoning.content, view);
-                    view.set_text(&reasoning.content[start..], true);
-                } else {
-                    self.reasoning_window_starts.borrow_mut().remove(&id);
-                    view.set_text(&reasoning.content, false);
-                }
-                let wheel_scroll = reasoning_viewport.scroll_handle.clone();
-                let wheel_follow_tail = reasoning_viewport.follow_tail.clone();
-                let markdown = if reasoning_live {
-                    // The live peek pins to the tail of a growing document;
-                    // building every block of a long think per pulse tick was
-                    // the remaining 40%-CPU streaming path.
-                    md::render::markdown_tail(view, &ctx, LIVE_REASONING_TAIL_BLOCKS)
-                } else {
-                    md::render::markdown(view, &ctx)
-                };
-                if reasoning_live && !cx.reduce_motion() && view.is_fading() {
-                    // The reasoning dissolve rides the half-rate lease: fast
-                    // thinking keeps a fade active for the whole phase, every
-                    // tick rebuilds each visible transcript row, and 15 fps
-                    // alpha on the dim compact peek is indistinguishable. The
-                    // answer text keeps the full-rate dissolve.
-                    motion::pulse_lease_slow(window.current_view(), cx);
-                }
-                item = item.child(
+                        .flex_none()
+                        .text_color(theme.danger)
+                        .child(SharedString::from(format!("-{deletions}"))),
+                )
+            })
+            .children(failure)
+            .when(activity.stopped && !activity.failed, |row| {
+                row.child(
                     div()
-                        .w_full()
-                        .min_w_0()
-                        .relative()
-                        .max_h(px(400.0))
-                        .overflow_hidden()
-                        .border_t_1()
-                        .border_color(theme.border_strong)
-                        .child(
-                            div()
-                                .id(SharedString::from(format!("reasoning-scroll-{id}")))
-                                .w_full()
-                                .min_w_0()
-                                .max_h(px(400.0))
-                                .overflow_y_scroll()
-                                .track_scroll(&reasoning_viewport.scroll_handle)
-                                .px(px(12.0))
-                                .py(px(8.0))
-                                .children(markdown)
-                                .on_scroll_wheel(move |_, window, cx| {
-                                    contain_scroll(&wheel_scroll, cx);
-                                    let scroll = wheel_scroll.clone();
-                                    let follow_tail = wheel_follow_tail.clone();
-                                    window.defer(cx, move |_, _| {
-                                        follow_tail.set(activity_scroll_at_bottom(&scroll));
-                                    });
-                                }),
-                        )
-                        .child(activity_scroll_fade(
-                            reasoning_viewport.scroll_handle.clone(),
-                            ActivityScrollFadeSide::Top,
-                            activity_surface,
-                        ))
-                        .child(activity_scroll_fade(
-                            reasoning_viewport.scroll_handle.clone(),
-                            ActivityScrollFadeSide::Bottom,
-                            activity_surface,
-                        ))
-                        .child(scrollbar::vertical(
-                            &reasoning_viewport.scroll_handle,
-                            &reasoning_viewport.scrollbar,
-                        ))
-                        .child(activity_scroll_guard(reasoning_viewport, reasoning_live)),
-                );
-            }
-            if item_expanded
-                && shows_todos
-                && let Some(todos) = activity.todos.as_deref()
-            {
-                let (mono_size, _) = self.activity_mono_text();
-                item = item.child(
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .border_t_1()
-                        .border_color(theme.border_strong)
-                        .px(px(12.0))
-                        .py(px(8.0))
-                        .child(super::todo_list::render_todo_list(todos, mono_size + 0.5, theme)),
-                );
-            }
-            if item_expanded && shows_diff {
-                let diff = self.activity_diff_rows(activity);
-                if !diff.is_empty() {
-                    item = item.child(self.render_activity_diff(
-                        id,
-                        &diff,
-                        activity_surface,
-                        theme,
-                        cx,
-                    ));
+                        .flex_none()
+                        .text_color(theme.text_ghost)
+                        .child(tr!("activity.status_stopped")),
+                )
+            })
+            .children(background_badge)
+            .children(open_file_button)
+            .when(has_detail, |row| {
+                row.child(disclosure_chevron(
+                    item_expanded,
+                    hover_group.clone(),
+                    theme,
+                ))
+            })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if has_detail {
+                    this.toggle_activity_item(id, item_expanded, cx);
                 }
-            }
-            if item_expanded
-                && reasoning.is_none()
-                && (!sections.is_empty() || !activity.image_urls.is_empty())
-            {
-                let palette = MarkdownPalette::from_theme(theme);
-                let ctx = self.markdown_ctx(
-                    format!("activity-{id}"),
-                    &palette,
-                    self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
-                    false,
-                );
-                let (mono_size, mono_line) = self.activity_mono_text();
-                let mut detail_card = div()
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if has_detail && matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.toggle_activity_item(id, item_expanded, cx);
+                    cx.stop_propagation();
+                }
+            }));
+        if !item_expanded {
+            return row.into_any_element();
+        }
+
+        // `Theme::overlay` is 5% alpha and GPUI's `opacity` multiplies it.
+        let activity_surface = theme.surface.blend(theme.overlay.opacity(0.7));
+        let mut parts: Vec<AnyElement> = Vec::new();
+        if shows_todos && let Some(todos) = activity.todos.as_deref() {
+            let (mono_size, _) = self.activity_mono_text();
+            parts.push(
+                div()
                     .w_full()
                     .min_w_0()
-                    .border_t_1()
-                    .border_color(theme.border_strong)
                     .px(px(12.0))
                     .py(px(8.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.0))
-                    .font_family(md::render::MONO_FAMILY)
-                    .text_size(px(mono_size))
-                    .line_height(px(mono_line))
-                    .text_color(theme.text_secondary)
-                    .whitespace_normal()
-                    .overflow_hidden();
-                for section in sections {
-                    let section_kind = section.kind;
-                    let content = section.content;
-                    let mut section_view = div().w_full().min_w_0().flex().flex_col().gap(px(3.0));
-                    if let Some(label) = section_kind.label() {
-                        let copy_content = content.clone();
-                        let copied = self
-                            .copied_activity_feedback
-                            .contains_key(&(id, section_kind));
-                        let copy_waku = cx.entity().downgrade();
-                        let copy_tooltip = SharedString::from(if copied {
-                            tr!("common.copied")
-                        } else {
-                            tr!("common.copy_named", name = label.to_lowercase())
-                        });
-                        section_view = section_view.child(
+                    .child(super::todo_list::render_todo_list(
+                        todos,
+                        mono_size + 0.5,
+                        theme,
+                    ))
+                    .into_any_element(),
+            );
+        }
+        if shows_diff {
+            let diff = self.activity_diff_rows(activity);
+            if !diff.is_empty() {
+                parts.push(self.render_activity_diff(id, &diff, activity_surface, theme, cx));
+            }
+        }
+        if !sections.is_empty() || !activity.image_urls.is_empty() {
+            parts.push(self.render_activity_sections(
+                activity,
+                sections,
+                activity_surface,
+                theme,
+                cx,
+            ));
+        }
+        if parts.is_empty() {
+            return row.into_any_element();
+        }
+        let mut card = div()
+            .w_full()
+            .min_w_0()
+            .overflow_hidden()
+            .rounded(px(9.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .bg(activity_surface)
+            .flex()
+            .flex_col();
+        for (index, part) in parts.into_iter().enumerate() {
+            card = card.child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .when(index > 0, |part| {
+                        part.border_t_1().border_color(theme.border_strong)
+                    })
+                    .child(part),
+            );
+        }
+        div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .child(row)
+            .child(div().min_w_0().pl(px(22.0)).pb(px(4.0)).child(card))
+            .into_any_element()
+    }
+
+    /// The red "failed" mark on a call that failed: the end of its output on
+    /// hover, and a click copies the whole of it.
+    fn render_activity_failure(
+        &self,
+        activity: &ActivityItem,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = activity.id;
+        let copied = self
+            .copied_activity_feedback
+            .contains_key(&(id, ActivityDisclosureSectionKind::Output));
+        let label = if copied {
+            tr!("common.copied")
+        } else {
+            tr!("activity.status_failed")
+        };
+        let mark = div()
+            .id(SharedString::from(format!("activity-failed-{id}")))
+            .flex_none()
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(theme.danger)
+            .child(label);
+        let Some(tail) = activity_failure_tail(activity) else {
+            return mark.into_any_element();
+        };
+        let output = activity
+            .output
+            .clone()
+            .filter(|output| !output.trim().is_empty())
+            .unwrap_or_else(|| tail.clone());
+        let waku = cx.entity().downgrade();
+        mark.cursor_default()
+            .tooltip(Tooltip::text(format!(
+                "{tail}\n\n{}",
+                tr!("activity.failed_click_to_copy")
+            )))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                cx.write_to_clipboard(ClipboardItem::new_string(output.clone()));
+                let _ = waku.update(cx, |this, cx| {
+                    this.show_activity_section_copied(
+                        id,
+                        ActivityDisclosureSectionKind::Output,
+                        cx,
+                    );
+                });
+            })
+            .into_any_element()
+    }
+
+    /// A thinking step: one line, collapsed. While the model thinks the line
+    /// follows the newest sentence it wrote; once it is done it says for how
+    /// long. Opened, the thought reads as prose beside a rule.
+    fn render_reasoning_item(
+        &self,
+        activity: &ActivityItem,
+        reasoning: &ReasoningBlock,
+        live: bool,
+        theme: &Theme,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = activity.id;
+        let has_detail = !reasoning.content.trim().is_empty();
+        let expanded = has_detail
+            && self
+                .expanded_activity_items
+                .get(&id)
+                .copied()
+                .unwrap_or(false);
+        let ticker = live
+            .then(|| {
+                activity_phase::reasoning_ticker_line(&reasoning.content, REASONING_TICKER_CHARS)
+            })
+            .flatten();
+        let hover_group = SharedString::from(format!("activity-item-{id}"));
+        let focus = self.transcript_control_focus(format!("activity-item-{id}"), cx);
+        let row = div()
+            .id(hover_group.clone())
+            .group(hover_group.clone())
+            .w_full()
+            .min_w_0()
+            .h(px(26.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .text_size(sp(12.5))
+            .line_height(sp(16.0))
+            .when(has_detail, |row| {
+                row.track_focus(&focus)
+                    .tab_index(0)
+                    .cursor_default()
+                    .focus_visible(|row| row.text_color(theme.text))
+            })
+            .child(icon(
+                activity_icon(ActivityKind::Reasoning),
+                14.0,
+                theme.text_tertiary,
+            ))
+            .child(div().flex_none().child(activity_label(
+                reasoning_activity_title(reasoning, live),
+                live,
+                theme,
+            )))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(theme.text_tertiary)
+                    .children(ticker.map(|line| SharedString::from(format!("· {line}")))),
+            )
+            .when(has_detail, |row| {
+                row.child(disclosure_chevron(expanded, hover_group.clone(), theme))
+            })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if has_detail {
+                    this.toggle_activity_item(id, expanded, cx);
+                }
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if has_detail && matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.toggle_activity_item(id, expanded, cx);
+                    cx.stop_propagation();
+                }
+            }));
+        if !expanded {
+            return row.into_any_element();
+        }
+
+        // Reasoning remains model prose even though it shares the activity
+        // stream, so keep selectable markdown rather than presenting it as
+        // monospace tool output.
+        let mut palette = MarkdownPalette::from_theme(theme);
+        palette.text = theme.text_secondary;
+        palette.secondary = theme.text_tertiary;
+        let ctx = self.markdown_ctx(
+            format!("reasoning-{id}"),
+            &palette,
+            self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
+            live && !cx.reduce_motion(),
+        );
+        let reasoning_viewport = self
+            .activity_scroll_viewports
+            .borrow_mut()
+            .entry(id)
+            .or_default()
+            .clone();
+        let mut views = self.activity_markdown.borrow_mut();
+        let view = views.entry(id).or_default();
+        if live {
+            let start = self.live_reasoning_window_start(id, &reasoning.content, view);
+            view.set_text(&reasoning.content[start..], true);
+        } else {
+            self.reasoning_window_starts.borrow_mut().remove(&id);
+            view.set_text(&reasoning.content, false);
+        }
+        let wheel_scroll = reasoning_viewport.scroll_handle.clone();
+        let wheel_follow_tail = reasoning_viewport.follow_tail.clone();
+        let markdown = if live {
+            // The live peek pins to the tail of a growing document; building
+            // every block of a long think per pulse tick was the remaining
+            // 40%-CPU streaming path.
+            md::render::markdown_tail(view, &ctx, LIVE_REASONING_TAIL_BLOCKS)
+        } else {
+            md::render::markdown(view, &ctx)
+        };
+        if live && !cx.reduce_motion() && view.is_fading() {
+            // The reasoning dissolve rides the half-rate lease: fast thinking
+            // keeps a fade active for the whole phase, every tick rebuilds
+            // each visible transcript row, and 15 fps alpha on the dim peek is
+            // indistinguishable. The answer text keeps the full-rate dissolve.
+            motion::pulse_lease_slow(window.current_view(), cx);
+        }
+        let body = div()
+            .min_w_0()
+            .ml(px(7.0))
+            .pl(px(12.0))
+            .border_l_1()
+            .border_color(theme.border)
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .relative()
+                    .max_h(px(REASONING_MAX_HEIGHT))
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("reasoning-scroll-{id}")))
+                            .w_full()
+                            .min_w_0()
+                            .max_h(px(REASONING_MAX_HEIGHT))
+                            .overflow_y_scroll()
+                            .track_scroll(&reasoning_viewport.scroll_handle)
+                            .py(px(4.0))
+                            .pr(px(8.0))
+                            .children(markdown)
+                            .on_scroll_wheel(move |_, window, cx| {
+                                contain_scroll(&wheel_scroll, cx);
+                                let scroll = wheel_scroll.clone();
+                                let follow_tail = wheel_follow_tail.clone();
+                                window.defer(cx, move |_, _| {
+                                    follow_tail.set(activity_scroll_at_bottom(&scroll));
+                                });
+                            }),
+                    )
+                    .child(activity_scroll_fade(
+                        reasoning_viewport.scroll_handle.clone(),
+                        ActivityScrollFadeSide::Top,
+                        theme.surface,
+                    ))
+                    .child(activity_scroll_fade(
+                        reasoning_viewport.scroll_handle.clone(),
+                        ActivityScrollFadeSide::Bottom,
+                        theme.surface,
+                    ))
+                    .child(scrollbar::vertical(
+                        &reasoning_viewport.scroll_handle,
+                        &reasoning_viewport.scrollbar,
+                    ))
+                    .child(activity_scroll_guard(reasoning_viewport, live)),
+            );
+        div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .child(row)
+            .child(body)
+            .into_any_element()
+    }
+
+    /// The arguments, output and images of an expanded call. Output scrolls
+    /// in a short window — a command's follows its tail while it runs — so a
+    /// long result stays one transcript row tall.
+    fn render_activity_sections(
+        &self,
+        activity: &ActivityItem,
+        sections: Vec<ActivityDisclosureSection>,
+        activity_surface: Hsla,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = activity.id;
+        let palette = MarkdownPalette::from_theme(theme);
+        let ctx = self.markdown_ctx(
+            format!("activity-{id}"),
+            &palette,
+            self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
+            false,
+        );
+        let (mono_size, mono_line) = self.activity_mono_text();
+        let output_height = if activity.kind == ActivityKind::Command {
+            COMMAND_OUTPUT_MAX_HEIGHT
+        } else {
+            ACTIVITY_OUTPUT_MAX_HEIGHT
+        };
+        let mut detail_card = div()
+            .w_full()
+            .min_w_0()
+            .px(px(12.0))
+            .py(px(8.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .font_family(md::render::MONO_FAMILY)
+            .text_size(px(mono_size))
+            .line_height(px(mono_line))
+            .text_color(theme.text_secondary)
+            .whitespace_normal()
+            .overflow_hidden();
+        for section in sections {
+            let section_kind = section.kind;
+            let content = section.content;
+            let mut section_view = div().w_full().min_w_0().flex().flex_col().gap(px(3.0));
+            if let Some(label) = section_kind.label() {
+                let copy_content = content.clone();
+                let copied = self
+                    .copied_activity_feedback
+                    .contains_key(&(id, section_kind));
+                let copy_waku = cx.entity().downgrade();
+                let copy_tooltip = SharedString::from(if copied {
+                    tr!("common.copied")
+                } else {
+                    tr!("common.copy_named", name = label.to_lowercase())
+                });
+                section_view = section_view.child(
+                    div()
+                        .h(px(20.0))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(
                             div()
-                                .h(px(20.0))
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text_secondary)
-                                        .child(label),
-                                )
-                                .when(!content.is_empty(), |header| {
-                                    header.child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "copy-activity-{}-{}",
-                                                id,
-                                                section_kind.id()
-                                            )))
-                                            .size(px(20.0))
-                                            .rounded(px(5.0))
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .cursor_default()
-                                            .hover(|button| button.bg(theme.overlay_strong))
-                                            .child(icon(
-                                                if copied {
-                                                    "icons/check.svg"
-                                                } else {
-                                                    "icons/copy.svg"
-                                                },
-                                                11.0,
-                                                theme.text_ghost,
-                                            ))
-                                            .tooltip(Tooltip::text(copy_tooltip.clone()))
-                                            .on_click(move |_, _, cx| {
-                                                cx.write_to_clipboard(ClipboardItem::new_string(
-                                                    copy_content.clone(),
-                                                ));
-                                                let _ = copy_waku.update(cx, |this, cx| {
-                                                    this.show_activity_section_copied(
-                                                        id,
-                                                        section_kind,
-                                                        cx,
-                                                    );
-                                                });
-                                            }),
-                                    )
-                                }),
-                        );
-                    }
-                    if !content.is_empty() {
-                        if activity.kind == ActivityKind::Command
-                            && section_kind == ActivityDisclosureSectionKind::Output
-                        {
-                            let output_viewport = self
-                                .activity_scroll_viewports
-                                .borrow_mut()
-                                .entry(id)
-                                .or_default()
-                                .clone();
-                            let wheel_scroll = output_viewport.scroll_handle.clone();
-                            let wheel_follow_tail = output_viewport.follow_tail.clone();
-                            section_view = section_view.child(
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text_secondary)
+                                .child(label),
+                        )
+                        .when(!content.is_empty(), |header| {
+                            header.child(
                                 div()
+                                    .id(SharedString::from(format!(
+                                        "copy-activity-{}-{}",
+                                        id,
+                                        section_kind.id()
+                                    )))
+                                    .size(px(20.0))
+                                    .rounded(px(5.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .cursor_default()
+                                    .hover(|button| button.bg(theme.overlay_strong))
+                                    .child(icon(
+                                        if copied {
+                                            "icons/check.svg"
+                                        } else {
+                                            "icons/copy.svg"
+                                        },
+                                        11.0,
+                                        theme.text_ghost,
+                                    ))
+                                    .tooltip(Tooltip::text(copy_tooltip.clone()))
+                                    .on_click(move |_, _, cx| {
+                                        cx.write_to_clipboard(ClipboardItem::new_string(
+                                            copy_content.clone(),
+                                        ));
+                                        let _ = copy_waku.update(cx, |this, cx| {
+                                            this.show_activity_section_copied(id, section_kind, cx);
+                                        });
+                                    }),
+                            )
+                        }),
+                );
+            }
+            if !content.is_empty() {
+                if section_kind == ActivityDisclosureSectionKind::Output {
+                    let output_viewport = self
+                        .activity_scroll_viewports
+                        .borrow_mut()
+                        .entry(id)
+                        .or_default()
+                        .clone();
+                    let wheel_scroll = output_viewport.scroll_handle.clone();
+                    let wheel_follow_tail = output_viewport.follow_tail.clone();
+                    section_view = section_view.child(
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .relative()
+                            .max_h(px(output_height))
+                            .overflow_hidden()
+                            .child(
+                                div()
+                                    .id(SharedString::from(format!("activity-output-scroll-{id}")))
                                     .w_full()
                                     .min_w_0()
-                                    .relative()
-                                    .max_h(px(400.0))
-                                    .overflow_hidden()
-                                    .child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "activity-output-scroll-{id}"
-                                            )))
-                                            .w_full()
-                                            .min_w_0()
-                                            .max_h(px(400.0))
-                                            .overflow_y_scroll()
-                                            .track_scroll(&output_viewport.scroll_handle)
-                                            .py(px(4.0))
-                                            .pr(px(8.0))
-                                            .child(md::render::plain_text(
-                                                content.clone(),
-                                                md::render::MONO_FAMILY,
-                                                FontWeight::NORMAL,
-                                                theme.text_secondary,
-                                                &ctx,
-                                            ))
-                                            .on_scroll_wheel(move |_, window, cx| {
-                                                contain_scroll(&wheel_scroll, cx);
-                                                let scroll = wheel_scroll.clone();
-                                                let follow_tail = wheel_follow_tail.clone();
-                                                window.defer(cx, move |_, _| {
-                                                    follow_tail
-                                                        .set(activity_scroll_at_bottom(&scroll));
-                                                });
-                                            }),
-                                    )
-                                    .child(activity_scroll_fade(
-                                        output_viewport.scroll_handle.clone(),
-                                        ActivityScrollFadeSide::Top,
-                                        activity_surface,
-                                    ))
-                                    .child(activity_scroll_fade(
-                                        output_viewport.scroll_handle.clone(),
-                                        ActivityScrollFadeSide::Bottom,
-                                        activity_surface,
-                                    ))
-                                    .child(scrollbar::vertical(
-                                        &output_viewport.scroll_handle,
-                                        &output_viewport.scrollbar,
-                                    ))
-                                    .child(activity_scroll_guard(
-                                        output_viewport,
-                                        !activity.complete,
-                                    )),
-                            );
-                        } else {
-                            section_view = section_view.child(
-                                div()
-                                    .w_full()
-                                    .min_w_0()
+                                    .max_h(px(output_height))
+                                    .overflow_y_scroll()
+                                    .track_scroll(&output_viewport.scroll_handle)
+                                    .py(px(4.0))
+                                    .pr(px(8.0))
                                     .child(md::render::plain_text(
                                         content.clone(),
                                         md::render::MONO_FAMILY,
                                         FontWeight::NORMAL,
                                         theme.text_secondary,
                                         &ctx,
-                                    )),
-                            );
-                        }
-                    }
-                    detail_card = detail_card.child(section_view);
+                                    ))
+                                    .on_scroll_wheel(move |_, window, cx| {
+                                        contain_scroll(&wheel_scroll, cx);
+                                        let scroll = wheel_scroll.clone();
+                                        let follow_tail = wheel_follow_tail.clone();
+                                        window.defer(cx, move |_, _| {
+                                            follow_tail.set(activity_scroll_at_bottom(&scroll));
+                                        });
+                                    }),
+                            )
+                            .child(activity_scroll_fade(
+                                output_viewport.scroll_handle.clone(),
+                                ActivityScrollFadeSide::Top,
+                                activity_surface,
+                            ))
+                            .child(activity_scroll_fade(
+                                output_viewport.scroll_handle.clone(),
+                                ActivityScrollFadeSide::Bottom,
+                                activity_surface,
+                            ))
+                            .child(scrollbar::vertical(
+                                &output_viewport.scroll_handle,
+                                &output_viewport.scrollbar,
+                            ))
+                            .child(activity_scroll_guard(output_viewport, !activity.complete)),
+                    );
+                } else {
+                    section_view =
+                        section_view.child(div().w_full().min_w_0().child(md::render::plain_text(
+                            content.clone(),
+                            md::render::MONO_FAMILY,
+                            FontWeight::NORMAL,
+                            theme.text_secondary,
+                            &ctx,
+                        )));
                 }
-                for (image_index, image_url) in activity.image_urls.iter().enumerate() {
-                    let image = self.image_for_reference(image_url, None, None, cx);
-                    detail_card = detail_card.child(render_activity_image(
-                        image_url,
-                        image,
-                        id,
-                        image_index,
-                        theme,
-                    ));
-                }
-                item = item.child(detail_card);
             }
-            items = items.child(item);
+            detail_card = detail_card.child(section_view);
         }
-        cluster.child(items).into_any_element()
+        for (image_index, image_url) in activity.image_urls.iter().enumerate() {
+            let image = self.image_for_reference(image_url, None, None, cx);
+            detail_card = detail_card.child(render_activity_image(
+                image_url,
+                image,
+                id,
+                image_index,
+                theme,
+            ));
+        }
+        detail_card.into_any_element()
     }
 
     /// The diff for an expanded file-change activity.
@@ -2646,8 +2864,6 @@ impl Waku {
             .relative()
             .max_h(px(ACTIVITY_DIFF_MAX_HEIGHT))
             .overflow_hidden()
-            .border_t_1()
-            .border_color(theme.border_strong)
             .child(rows)
             .child(activity_scroll_fade(
                 viewport.scroll_handle.clone(),
@@ -2783,6 +2999,62 @@ fn activity_diff_break_row(label: Option<String>, theme: &Theme) -> AnyElement {
                 .truncate()
                 .child(SharedString::from(label))
         }))
+        .into_any_element()
+}
+
+/// A run of activities [`activity_phase::group_activities`] gathered, with
+/// what rendering it needs from its block.
+struct ActivityGroupRender<'a> {
+    kind: GroupKind,
+    members: &'a [ActivityItem],
+    phases: &'a [ActivityPhase],
+    block_index: usize,
+    live_turn: bool,
+    live_reasoning_id: Option<Uuid>,
+}
+
+fn activity_group_icon(kind: GroupKind) -> &'static str {
+    match kind {
+        GroupKind::Explore => "icons/search.svg",
+        GroupKind::Terminal => "icons/terminal.svg",
+    }
+}
+
+/// An activity's verb or a group's title: a band of light passes over it
+/// while the work is still going, and it rests in secondary text after.
+fn activity_label(text: String, running: bool, theme: &Theme) -> AnyElement {
+    if running {
+        motion::shimmer(text, theme.text_tertiary, theme.text)
+            .weight(FontWeight::MEDIUM)
+            .into_any_element()
+    } else {
+        div()
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(theme.text_secondary)
+            .child(text)
+            .into_any_element()
+    }
+}
+
+/// A row's disclosure arrow: shown on hover, and kept while the row is open
+/// so it can be closed from where it was opened.
+fn disclosure_chevron(expanded: bool, hover_group: SharedString, theme: &Theme) -> AnyElement {
+    div()
+        .flex_none()
+        .when(!expanded, |chevron| {
+            chevron
+                .invisible()
+                .group_hover(hover_group, |style| style.visible())
+        })
+        .child(icon(
+            if expanded {
+                "icons/chevron-down.svg"
+            } else {
+                "icons/chevron-right.svg"
+            },
+            10.0,
+            theme.text_tertiary,
+        ))
         .into_any_element()
 }
 

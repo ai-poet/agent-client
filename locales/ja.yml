@@ -411,6 +411,40 @@ activity.updated_plan: プランを更新しました
 activity.plan_update_failed: プランの更新に失敗しました
 activity.activity: アクティビティ
 activity.tool: ツール
+activity.verb_reading: "読み込み中"
+activity.verb_read: "読み込み済み"
+activity.verb_searching: "検索中"
+activity.verb_searched: "検索済み"
+activity.verb_listing: "一覧取得中"
+activity.verb_listed: "一覧取得済み"
+activity.verb_editing: "編集中"
+activity.verb_edited: "編集済み"
+activity.verb_running: "実行中"
+activity.verb_ran: "実行済み"
+activity.verb_planning: "計画中"
+activity.verb_planned: "計画済み"
+activity.verb_calling: "呼び出し中"
+activity.verb_called: "呼び出し済み"
+activity.verb_thinking: "思考中"
+activity.verb_thought: "思考"
+activity.group_explore: "調査 · %{parts}"
+activity.group_exploring: "調査中 · %{parts}"
+activity.group_terminal: "ターミナル · %{parts}"
+activity.group_terminal_running: "実行中 · %{parts}"
+activity.bucket_search_one: "検索 %{count} 件"
+activity.bucket_search_other: "検索 %{count} 件"
+activity.bucket_list_one: "一覧 %{count} 件"
+activity.bucket_list_other: "一覧 %{count} 件"
+activity.bucket_file_one: "ファイル %{count} 件"
+activity.bucket_file_other: "ファイル %{count} 件"
+activity.bucket_command_one: "コマンド %{count} 件"
+activity.bucket_command_other: "コマンド %{count} 件"
+activity.bucket_failed: "失敗 %{count} 件"
+activity.bucket_stopped: "停止 %{count} 件"
+activity.list_separator: "、"
+activity.status_failed: "失敗"
+activity.status_stopped: "停止"
+activity.failed_click_to_copy: "クリックで出力をコピー"
 activity.plan_updated: プランを更新しました
 activity.output_truncated: "\n\n… 出力は省略されました"
 activity.thought: 思考
@@ -987,7 +1021,7 @@ session.context_compacted_manual: "コンテキストを圧縮しました · %{
 session.context_compacted: "コンテキストを圧縮しました"
 session.context_compaction_failed: "コンテキストを圧縮できませんでした。会話はそのままです"
 transcript.thinking: 思考中
-transcript.thought_for: 思考時間 %{duration}
+transcript.thought_for: 思考 · %{duration}
 transcript.changed_file: "%{count} 個のファイルを変更"
 transcript.changed_files: "%{count} 個のファイルを変更"
 transcript.review_changes: レビュー

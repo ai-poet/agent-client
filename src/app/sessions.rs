@@ -827,7 +827,7 @@ impl Waku {
     }
 
     pub(super) fn reset_visible_state(&mut self) {
-        self.activities_expanded.clear();
+        self.activity_groups_expanded.clear();
         self.expanded_activity_items.clear();
         self.turn_fold_overrides.clear();
         self.expanded_changed_files.clear();
@@ -1273,7 +1273,7 @@ impl Waku {
             .then(|| self.snapshot_selected_transcript_rows(session_id))
             .flatten();
         self.finish_streaming_assistant(session_id);
-        self.complete_turn_blocks(session_id);
+        self.complete_turn_blocks(session_id, true);
         self.settle_foreground_work(session_id, BackgroundWorkStatus::Stopped);
         if let Some(runtime) = runtime.as_mut() {
             runtime.stream_phase = None;

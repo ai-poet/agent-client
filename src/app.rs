@@ -62,8 +62,8 @@ use crate::terminal::TerminalView;
 use crate::theme::{Theme, ThemePreference, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
-    MenuChip, ProjectNameSelector, activity_icon, activity_noun, contain_scroll, file_icon, icon,
-    icon_button, motion, provider_color, provider_icon, status_color, toggle_switch,
+    MenuChip, ProjectNameSelector, activity_icon, contain_scroll, file_icon, icon, icon_button,
+    motion, provider_color, provider_icon, status_color, toggle_switch,
 };
 use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
@@ -1357,12 +1357,12 @@ pub struct Waku {
     pending_queue_drains: Vec<Uuid>,
     stream_state_dirty: bool,
     last_stream_save: Instant,
-    /// User expansion overrides keyed by persisted transcript block index.
-    activities_expanded: HashMap<usize, bool>,
-    /// Per-item disclosure overrides. Reasoning starts open while live; tool
-    /// details start closed, so the stored bool must preserve either choice.
+    /// Groups of reading calls or commands the person opened, by the group's
+    /// first activity. Groups start closed.
+    activity_groups_expanded: HashMap<Uuid, bool>,
+    /// Per-item disclosure overrides. Every item, thinking included, starts
+    /// closed.
     expanded_activity_items: HashMap<Uuid, bool>,
-    /// Settled turns whose folded work the user has reopened.
     /// Fold segments the person opened or closed by hand, by turn and
     /// segment. Everything else follows its turn's state.
     turn_fold_overrides: transcript::TurnFoldOverrides,
@@ -3053,7 +3053,7 @@ impl Waku {
                 pending_queue_drains: Vec::new(),
                 stream_state_dirty: false,
                 last_stream_save: Instant::now(),
-                activities_expanded: HashMap::new(),
+                activity_groups_expanded: HashMap::new(),
                 expanded_activity_items: HashMap::new(),
                 turn_fold_overrides: HashMap::new(),
                 expanded_changed_files: HashSet::new(),
