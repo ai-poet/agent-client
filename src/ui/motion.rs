@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyElement, App, EntityId, Global, IntoElement, RenderOnce, Svg, Transformation, Window,
-    ease_out_quint, percentage,
+    AnyElement, App, EntityId, FontWeight, Global, Hsla, IntoElement, RenderOnce, SharedString,
+    StyledText, Svg, TextRun, Transformation, Window, ease_out_quint, percentage,
 };
 
 /// Repeat-tick interval (~30 fps): visually equivalent for these chunky
@@ -198,6 +198,103 @@ impl RenderOnce for Pulse {
     }
 }
 
+/// One shimmer cycle: the bright band crosses the text, then rests.
+const SHIMMER_PERIOD: Duration = Duration::from_millis(2400);
+
+/// The share of a cycle the band spends crossing; the rest is a pause, so the
+/// motion reads as a glint rather than a scrolling marquee.
+const SHIMMER_SWEEP: f32 = 0.6;
+
+/// Brightness steps. Each step is a text run of its own, so fewer steps keep
+/// a long label from splitting into one run per character.
+const SHIMMER_STEPS: u8 = 7;
+
+/// A label that is still happening — "正在读取", "思考中" — drawn with a band of
+/// light passing across it on the shared clock, instead of a spinner per row.
+/// Under reduce-motion it is plain text.
+pub fn shimmer(text: impl Into<SharedString>, base: Hsla, highlight: Hsla) -> Shimmer {
+    Shimmer {
+        text: text.into(),
+        base,
+        highlight,
+        weight: FontWeight::NORMAL,
+    }
+}
+
+#[derive(IntoElement)]
+pub struct Shimmer {
+    text: SharedString,
+    base: Hsla,
+    highlight: Hsla,
+    weight: FontWeight,
+}
+
+impl Shimmer {
+    pub fn weight(mut self, weight: FontWeight) -> Self {
+        self.weight = weight;
+        self
+    }
+}
+
+impl RenderOnce for Shimmer {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // Every second tick is plenty for a slow sweep, and it halves what a
+        // transcript full of live rows costs to rebuild.
+        let phase = pulse_phase(SHIMMER_PERIOD, 2, window.current_view(), cx);
+        let mut font = window.text_style().font();
+        font.weight = self.weight;
+        let levels = shimmer_levels(self.text.chars().count(), phase);
+        let mut runs: Vec<TextRun> = Vec::new();
+        let mut current: Option<(u8, usize)> = None;
+        for (character, level) in self.text.chars().zip(levels) {
+            match &mut current {
+                Some((run_level, len)) if *run_level == level => *len += character.len_utf8(),
+                _ => {
+                    if let Some((run_level, len)) = current.take() {
+                        runs.push(shimmer_run(len, run_level, &self, &font));
+                    }
+                    current = Some((level, character.len_utf8()));
+                }
+            }
+        }
+        if let Some((run_level, len)) = current {
+            runs.push(shimmer_run(len, run_level, &self, &font));
+        }
+        StyledText::new(self.text.clone()).with_runs(runs)
+    }
+}
+
+fn shimmer_run(len: usize, level: u8, shimmer: &Shimmer, font: &gpui::Font) -> TextRun {
+    let strength = f32::from(level) / f32::from(SHIMMER_STEPS);
+    TextRun {
+        len,
+        font: font.clone(),
+        color: shimmer.base.blend(shimmer.highlight.opacity(strength)),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }
+}
+
+/// Brightness of each of `chars` characters at `phase` of a cycle, from 0
+/// (the base colour) to [`SHIMMER_STEPS`]. The band enters from the left
+/// edge, leaves past the right, and is gone for the rest of the cycle.
+pub fn shimmer_levels(chars: usize, phase: f32) -> Vec<u8> {
+    let width = (chars as f32 / 3.0).max(3.0);
+    if phase >= SHIMMER_SWEEP {
+        return vec![0; chars];
+    }
+    let travel = phase / SHIMMER_SWEEP;
+    let center = -width + travel * (chars as f32 + 2.0 * width);
+    (0..chars)
+        .map(|index| {
+            let distance = (index as f32 + 0.5 - center).abs();
+            let strength = (1.0 - distance / width).max(0.0);
+            (strength * f32::from(SHIMMER_STEPS)).round() as u8
+        })
+        .collect()
+}
+
 /// How long a side panel takes to slide open or shut. Zeron's panel
 /// transition (`crates/ui/src/motion.rs` `RESIZE`) is 200ms — long enough to
 /// read as travel rather than a jump cut, short enough that the layout is
@@ -246,6 +343,20 @@ fn width_at(from: f32, target: f32, elapsed: Duration) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shimmer_band_crosses_the_text_and_then_rests() {
+        // Before it enters and after it has passed, nothing is lit.
+        assert!(shimmer_levels(12, 0.0).iter().all(|level| *level == 0));
+        assert!(shimmer_levels(12, 0.9).iter().all(|level| *level == 0));
+        // Mid-sweep the middle is brightest and the edges are dark.
+        let middle = shimmer_levels(12, SHIMMER_SWEEP / 2.0);
+        let peak = middle.iter().copied().max().unwrap();
+        assert!(peak >= SHIMMER_STEPS - 1, "{middle:?}");
+        assert_eq!(middle[0], 0, "{middle:?}");
+        assert_eq!(middle[11], 0, "{middle:?}");
+        assert!(shimmer_levels(0, 0.3).is_empty());
+    }
 
     #[test]
     fn a_slide_eases_out_and_then_retires() {

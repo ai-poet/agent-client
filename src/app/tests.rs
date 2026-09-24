@@ -1935,11 +1935,12 @@ fn a_busy_turn_pins_the_working_indicator_after_the_last_row() {
         vec![Message(0), Message(1), WorkingIndicator]
     );
 
-    // A pending permission keeps the turn — and the indicator — alive.
+    // A pending permission keeps the turn alive, but the card above the
+    // composer says what it waits for: "Working" would claim otherwise.
     session.status = SessionStatus::Waiting;
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new()),
-        vec![Message(0), Message(1), WorkingIndicator]
+        vec![Message(0), Message(1)]
     );
 
     // A driver error can fail the session while its last turn is still

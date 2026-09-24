@@ -394,6 +394,9 @@ impl Waku {
                     });
                     if let Some(session) = self.state.session_mut(session_id) {
                         session.status = SessionStatus::Waiting;
+                        // Time spent waiting on the person is not work.
+                        session.pause_active_turn(unix_time());
+                        self.state.mark_session_dirty(session_id);
                     }
                 }
             }
@@ -409,6 +412,8 @@ impl Waku {
                     }
                     if let Some(session) = self.state.session_mut(session_id) {
                         session.status = SessionStatus::Waiting;
+                        session.pause_active_turn(unix_time());
+                        self.state.mark_session_dirty(session_id);
                     }
                 }
             }
@@ -558,8 +563,16 @@ impl Waku {
             } => {
                 if phase == crate::model::CompactionPhase::Started {
                     self.compacting_sessions.insert(session_id);
+                    // A compaction is a model call the person did not ask
+                    // for; the turn's working time leaves it out.
+                    if let Some(session) = self.state.session_mut(session_id) {
+                        session.pause_active_turn(unix_time());
+                    }
                 } else {
                     self.compacting_sessions.remove(&session_id);
+                    if let Some(session) = self.state.session_mut(session_id) {
+                        session.resume_active_turn(unix_time());
+                    }
                     let notice = compaction_notice(phase, automatic, tokens_before, tokens_after);
                     if let Some(session) = self.state.session_mut(session_id) {
                         session.push_message(MessageRole::System, notice);

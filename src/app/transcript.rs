@@ -829,10 +829,11 @@ pub(super) fn transcript_rows_fingerprint(
 ) -> u64 {
     let mut hash = mix_uuid(EMPTY_TRANSCRIPT_FINGERPRINT, session.id);
 
-    // The working indicator row exists only while the session is busy, and a
-    // driver error can drop the busy status without touching any turn — the
-    // turn statuses below would hold still while the rows moved.
-    hash = mix(hash, session.status.is_busy() as u64);
+    // The working indicator row exists only while the session is busy and
+    // not waiting on the person, and a driver error can drop the busy status
+    // without touching any turn — the turn statuses below would hold still
+    // while the rows moved.
+    hash = mix(hash, session.status as u64);
 
     hash = mix(hash, session.messages.len() as u64);
     for message in &session.messages {
@@ -950,7 +951,12 @@ pub(super) fn folded_transcript_row_kinds(
     // A busy session with a live turn closes with the working indicator. The
     // busy check matters on its own: a driver error can fail the session while
     // its turn is still marked running, and "Working" over a failure misleads.
-    if session.status.is_busy() && session.active_turn_id().is_some() {
+    // While it waits on the person the card above the composer says so;
+    // "Working" over a question nobody has answered yet would mislead.
+    if session.status.is_busy()
+        && session.status != SessionStatus::Waiting
+        && session.active_turn_id().is_some()
+    {
         rows.push(TranscriptRowKind::WorkingIndicator);
     }
 
@@ -1158,10 +1164,9 @@ pub(super) fn turn_fold_label(session: &AgentSession, turn_id: Uuid) -> String {
     let Some(turn) = session.turns.iter().find(|turn| turn.id == turn_id) else {
         return tr!("transcript.worked");
     };
+    // Working time: waits on approvals, answers and compactions left out.
     let seconds = turn
-        .completed_at
-        .unwrap_or_else(unix_time)
-        .saturating_sub(turn.started_at)
+        .active_seconds(turn.started_at, turn.completed_at.unwrap_or_else(unix_time))
         .max(1);
     let duration = format_worked_duration(seconds);
     if turn.status == TurnStatus::Interrupted {

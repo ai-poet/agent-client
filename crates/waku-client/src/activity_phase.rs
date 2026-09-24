@@ -139,6 +139,29 @@ pub fn verb_keys(kind: ActivityKind) -> (&'static str, &'static str) {
     }
 }
 
+/// The one line a thinking row shows while the model is still thinking: the
+/// newest line it wrote, without markdown decoration, and only its end when
+/// it is long — the reader follows where the thought is going.
+pub fn reasoning_ticker_line(content: &str, max_chars: usize) -> Option<String> {
+    let line = content
+        .lines()
+        .rev()
+        .map(|line| {
+            line.trim()
+                .trim_start_matches(['#', '>', '-', '*'])
+                .replace(['*', '`'], "")
+                .trim()
+                .to_owned()
+        })
+        .find(|line| !line.is_empty())?;
+    let count = line.chars().count();
+    if count <= max_chars || max_chars == 0 {
+        return Some(line);
+    }
+    let tail: String = line.chars().skip(count - max_chars.saturating_sub(1)).collect();
+    Some(format!("…{tail}"))
+}
+
 /// What a shell command reads, when all it does is read: the bucket of its
 /// first reading step. `None` for anything that writes, or runs something
 /// this cannot vouch for — that is terminal work.
@@ -446,6 +469,23 @@ fn tokenize(segment: &str) -> Vec<String> {
 mod tests {
     use super::*;
     use ExploreBucket::{File, List, Search};
+
+    #[test]
+    fn the_ticker_shows_the_newest_line_and_its_end() {
+        assert_eq!(
+            reasoning_ticker_line("First idea.\n\n**Checking** the `parser`\n  \n", 40).as_deref(),
+            Some("Checking the parser")
+        );
+        assert_eq!(
+            reasoning_ticker_line("## Plan", 40).as_deref(),
+            Some("Plan")
+        );
+        assert_eq!(
+            reasoning_ticker_line("abcdefghij", 5).as_deref(),
+            Some("…ghij")
+        );
+        assert_eq!(reasoning_ticker_line(" \n\n", 5), None);
+    }
 
     #[test]
     fn reading_commands_are_exploring() {

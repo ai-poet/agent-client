@@ -1365,6 +1365,7 @@ impl Waku {
         }
         if let Some(session) = self.selected_session_mut() {
             session.status = SessionStatus::Working;
+            session.resume_active_turn(unix_time());
         }
         cx.notify();
     }
@@ -1531,6 +1532,7 @@ impl Waku {
                 .respond_user_input(pending.request_id, answers);
             if let Some(session) = self.state.session_mut(session_id) {
                 session.status = SessionStatus::Working;
+                session.resume_active_turn(unix_time());
             }
             self.user_input_answer
                 .update(cx, |input, cx| input.clear(cx));
@@ -1589,6 +1591,7 @@ impl Waku {
         }
         if let Some(session) = self.state.session_mut(session_id) {
             session.status = SessionStatus::Working;
+            session.resume_active_turn(unix_time());
         }
         self.analytics
             .track(crate::analytics::Event::PermissionResponded {

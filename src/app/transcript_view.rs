@@ -1802,7 +1802,7 @@ impl Waku {
             .selected_session()
             .and_then(|session| session.turns.last())
             .filter(|turn| turn.status == TurnStatus::Running)
-            .map(|turn| unix_time().saturating_sub(turn.started_at))
+            .map(|turn| turn.active_seconds(turn.started_at, unix_time()))
             .unwrap_or(0);
         // A compaction is a long, silent model call; say what it is.
         let label = if self
@@ -1827,9 +1827,10 @@ impl Waku {
                 div()
                     .text_size(sp(13.5))
                     .line_height(sp(18.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text_tertiary)
-                    .child(SharedString::from(label)),
+                    .child(
+                        motion::shimmer(label, theme.text_tertiary, theme.text)
+                            .weight(FontWeight::MEDIUM),
+                    ),
             )
             .into_any_element()
     }
