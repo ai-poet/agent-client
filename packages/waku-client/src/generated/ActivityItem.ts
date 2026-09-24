@@ -38,4 +38,9 @@ reasoning?: ReasoningBlock | null,
  * a `TodoWrite`, a plan update. Parsed once, when the event arrives, in
  * every agent's own shape (`crate::todo::parse_todo_list`).
  */
-todos?: Array<TodoItem> | null, };
+todos?: Array<TodoItem> | null,
+/**
+ * The turn was stopped while this was still running: it neither
+ * finished nor failed.
+ */
+stopped?: boolean, };

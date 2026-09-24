@@ -273,6 +273,9 @@ fn history_from_updates(provider: ProviderKind, updates: &[Value]) -> ProviderSe
                     started_at: 0,
                     completed_at: Some(0),
                     checkpoint: None,
+                    pauses: Vec::new(),
+                    error: None,
+                    undone_at: None,
                 });
                 history
                     .messages

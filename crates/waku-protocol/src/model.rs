@@ -821,6 +821,56 @@ pub struct AgentTurn {
     pub completed_at: Option<u64>,
     #[serde(default)]
     pub checkpoint: Option<Checkpoint>,
+    /// Stretches of the turn spent waiting — on an approval, an answer, a
+    /// compaction — which its working time leaves out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pauses: Vec<TurnPause>,
+    /// Why the turn failed, when it did: what the error banner shows, and
+    /// whether the person already dismissed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<TurnError>,
+    /// When the turn's file changes were undone, if they were.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undone_at: Option<u64>,
+}
+
+/// A stretch of a turn spent waiting rather than working.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct TurnPause {
+    pub started_at: u64,
+    /// `None` while the wait is still going on.
+    #[serde(default)]
+    pub ended_at: Option<u64>,
+}
+
+/// Why a turn failed.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct TurnError {
+    pub message: String,
+    #[serde(default)]
+    pub dismissed: bool,
+}
+
+impl AgentTurn {
+    /// Seconds between `from` and `to` spent working: the span less every
+    /// pause that overlaps it. A pause still open counts up to `to`.
+    pub fn active_seconds(&self, from: u64, to: u64) -> u64 {
+        let paused: u64 = self
+            .pauses
+            .iter()
+            .map(|pause| {
+                let start = pause.started_at.max(from);
+                let end = pause.ended_at.unwrap_or(to).min(to);
+                end.saturating_sub(start)
+            })
+            .sum();
+        to.saturating_sub(from).saturating_sub(paused)
+    }
+
+    /// Whether the turn is waiting right now.
+    pub fn is_paused(&self) -> bool {
+        self.pauses.last().is_some_and(|pause| pause.ended_at.is_none())
+    }
 }
 
 /// How full the provider's context window is, from the latest main-thread
@@ -1344,6 +1394,9 @@ impl AgentSession {
                 started_at,
                 completed_at: Some(completed_at),
                 checkpoint: None,
+                pauses: Vec::new(),
+                error: None,
+                undone_at: None,
             });
         }
     }
@@ -1370,6 +1423,9 @@ impl AgentSession {
             started_at: now,
             completed_at: None,
             checkpoint: None,
+            pauses: Vec::new(),
+            error: None,
+            undone_at: None,
         });
         self.messages.push(
             Message::new_for_turn(MessageRole::User, prompt, id)
@@ -1397,6 +1453,9 @@ impl AgentSession {
             started_at: now,
             completed_at: None,
             checkpoint: None,
+            pauses: Vec::new(),
+            error: None,
+            undone_at: None,
         });
         self.last_reply_at = Some(now);
         self.updated_at = now;
@@ -1485,9 +1544,56 @@ impl AgentSession {
         let completed_at = unix_time();
         turn.status = status;
         turn.completed_at = Some(completed_at);
+        // A turn that ends while waiting stops waiting with it.
+        if let Some(pause) = turn.pauses.last_mut().filter(|pause| pause.ended_at.is_none()) {
+            pause.ended_at = Some(completed_at);
+        }
         let result = (turn.id, turn.turn_count);
         self.last_reply_at = Some(completed_at);
         Some(result)
+    }
+
+    /// Start a wait on the running turn — an approval, a question, a
+    /// compaction. Returns whether one started: a wait already open covers
+    /// the new one.
+    pub fn pause_active_turn(&mut self, now: u64) -> bool {
+        let Some(turn) = self
+            .turns
+            .last_mut()
+            .filter(|turn| turn.status == TurnStatus::Running && !turn.is_paused())
+        else {
+            return false;
+        };
+        turn.pauses.push(TurnPause {
+            started_at: now,
+            ended_at: None,
+        });
+        true
+    }
+
+    /// End the running turn's open wait. Returns whether there was one.
+    pub fn resume_active_turn(&mut self, now: u64) -> bool {
+        let Some(pause) = self
+            .turns
+            .last_mut()
+            .filter(|turn| turn.status == TurnStatus::Running)
+            .and_then(|turn| turn.pauses.last_mut())
+            .filter(|pause| pause.ended_at.is_none())
+        else {
+            return false;
+        };
+        pause.ended_at = Some(now.max(pause.started_at));
+        true
+    }
+
+    /// Record why the latest turn failed, replacing an earlier reason.
+    pub fn set_latest_turn_error(&mut self, message: impl Into<String>) {
+        if let Some(turn) = self.turns.last_mut() {
+            turn.error = Some(TurnError {
+                message: message.into(),
+                dismissed: false,
+            });
+        }
     }
 
     pub fn push_message(&mut self, role: MessageRole, content: impl Into<String>) -> Uuid {
@@ -2212,6 +2318,10 @@ pub struct ActivityItem {
     /// every agent's own shape (`crate::todo::parse_todo_list`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub todos: Option<Vec<crate::todo::TodoItem>>,
+    /// The turn was stopped while this was still running: it neither
+    /// finished nor failed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stopped: bool,
 }
 
 impl ActivityItem {
@@ -2240,6 +2350,7 @@ impl ActivityItem {
             display_description: None,
             reasoning: None,
             todos: None,
+            stopped: false,
         }
     }
 
@@ -4624,6 +4735,56 @@ mod tests {
         let checkpoint = session.turns[0].checkpoint.as_ref().unwrap();
         assert_eq!((checkpoint.additions, checkpoint.deletions), (10, 7));
         assert!(checkpoint.totals_are_current());
+    }
+
+    /// Waiting on the person — an approval, an answer — is not work; the
+    /// turn's working time leaves it out, and a turn that ends mid-wait
+    /// closes the wait.
+    #[test]
+    fn a_turns_working_time_leaves_out_its_waits() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Native);
+        session.begin_turn("go");
+        let started = session.turns[0].started_at;
+
+        assert!(session.pause_active_turn(started + 10));
+        // A second wait while one is open is the same wait.
+        assert!(!session.pause_active_turn(started + 12));
+        assert!(session.turns[0].is_paused());
+        // An open wait counts up to the moment asked about.
+        assert_eq!(session.turns[0].active_seconds(started, started + 30), 10);
+
+        assert!(session.resume_active_turn(started + 40));
+        assert!(!session.resume_active_turn(started + 41));
+        assert_eq!(session.turns[0].active_seconds(started, started + 50), 20);
+        // Only the overlap with the window counts.
+        assert_eq!(session.turns[0].active_seconds(started + 35, started + 50), 10);
+
+        session.pause_active_turn(started + 50);
+        session.finish_active_turn(TurnStatus::Completed);
+        assert!(!session.turns[0].is_paused());
+
+        session.set_latest_turn_error("the provider exited");
+        assert_eq!(
+            session.turns[0].error.as_ref().map(|error| error.message.as_str()),
+            Some("the provider exited")
+        );
+    }
+
+    #[test]
+    fn a_turn_saved_before_waits_were_recorded_still_loads() {
+        let turn: AgentTurn = serde_json::from_value(serde_json::json!({
+            "id": Uuid::nil(),
+            "turn_count": 1,
+            "status": "completed",
+            "started_at": 100,
+            "completed_at": 160
+        }))
+        .unwrap();
+        assert!(turn.pauses.is_empty() && turn.error.is_none() && turn.undone_at.is_none());
+        assert_eq!(turn.active_seconds(100, 160), 60);
+        // And the new fields stay out of documents that do not need them.
+        let saved = serde_json::to_value(&turn).unwrap();
+        assert!(saved.get("pauses").is_none() && saved.get("error").is_none());
     }
 
     #[test]

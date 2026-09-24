@@ -90,6 +90,8 @@ export type { TodoItem } from "./TodoItem";
 export type { TodoStatus } from "./TodoStatus";
 export type { TokenTotals } from "./TokenTotals";
 export type { TranscriptBlock } from "./TranscriptBlock";
+export type { TurnError } from "./TurnError";
+export type { TurnPause } from "./TurnPause";
 export type { TurnStatus } from "./TurnStatus";
 export type { UsageHistory } from "./UsageHistory";
 export type { UsageProvider } from "./UsageProvider";

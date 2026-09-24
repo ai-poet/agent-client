@@ -132,6 +132,9 @@ fn start_import_turn(history: &mut ProviderSessionHistory, timestamp: u64) -> Uu
         started_at: timestamp,
         completed_at: None,
         checkpoint: None,
+        pauses: Vec::new(),
+        error: None,
+        undone_at: None,
     });
     id
 }

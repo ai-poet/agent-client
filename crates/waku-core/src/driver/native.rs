@@ -464,6 +464,9 @@ pub(crate) fn provider_session_history(
             started_at: now,
             completed_at: Some(now),
             checkpoint: None,
+            pauses: Vec::new(),
+            error: None,
+            undone_at: None,
         });
         if index < first_visible {
             continue;
