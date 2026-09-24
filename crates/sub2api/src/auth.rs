@@ -82,6 +82,13 @@ pub struct Credentials {
     /// its platform's slot.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub model_routes: BTreeMap<String, i64>,
+    /// The group each image model was last seen to draw through, learned by
+    /// the image studio. A group has to be granted image generation on its
+    /// own, and the catalog lists image models under groups that were not,
+    /// so this is found by asking and kept: it outranks `model_routes` for
+    /// its models, which sends the agents' image calls there too.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub image_groups: BTreeMap<String, i64>,
     /// The user turned gateway routing off without signing out. Stored
     /// inverted so the serde default (false) means the common case: signing
     /// in routes.
@@ -318,6 +325,7 @@ pub fn credentials_from_fragment(fragment: &str, expected_endpoint: &str) -> Res
         codex_group_id: None,
         group_keys: BTreeMap::new(),
         model_routes: BTreeMap::new(),
+        image_groups: BTreeMap::new(),
         // Signing in is an explicit request to route through the service.
         routing_disabled: false,
     })

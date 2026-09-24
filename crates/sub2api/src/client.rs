@@ -284,6 +284,26 @@ pub struct PricingDetails {
     pub long_context_input_threshold: i64,
     #[serde(default, deserialize_with = "null_to_default")]
     pub intervals: Vec<PriceInterval>,
+    /// Per-resolution unit prices of an image or video model — `1K`, `2K`,
+    /// `4K` for images — priced for `best_group`. Empty for token models.
+    #[serde(default, deserialize_with = "null_to_default")]
+    pub media_tiers: Vec<MediaTier>,
+    /// What one `media_tiers` price buys: `image`, or `second` of video.
+    #[serde(default, deserialize_with = "null_to_default")]
+    pub media_unit: String,
+}
+
+/// One resolution tier of an image or video model's price.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct MediaTier {
+    #[serde(default)]
+    pub tier: String,
+    #[serde(default)]
+    pub official_usd: Option<f64>,
+    #[serde(default)]
+    pub effective_usd: Option<f64>,
+    #[serde(default)]
+    pub is_default_tier: bool,
 }
 
 /// Another group a catalog entry is available through, with its own pricing.

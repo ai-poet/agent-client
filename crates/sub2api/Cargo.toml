@@ -10,6 +10,8 @@ license = "GPL-3.0-only"
 # the same crate cc-switch uses for Codex/Grok config writes.
 toml_edit = "0.23"
 anyhow = "1.0"
+# Decoding the pictures the Images API returns (`images`).
+base64 = "0.22"
 dirs = "6.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

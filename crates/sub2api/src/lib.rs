@@ -38,6 +38,7 @@ pub mod gateway;
 pub mod gateway_origin;
 pub mod global_config;
 pub mod http;
+pub mod images;
 pub mod mcp_stdio;
 pub mod migrate;
 pub mod model_routing;
@@ -406,7 +407,15 @@ pub fn refresh_model_routes(
             })
     });
     let bindings = model_routing::Bindings::from_credentials(credentials, general_platform);
-    let routes = model_routing::resolve(&offers, &bindings, &subscribed);
+    let mut routes = model_routing::resolve(&offers, &bindings, &subscribed);
+    // An image model goes where it was last seen to draw: the catalog cannot
+    // tell a group granted image generation from one that was not.
+    routes.extend(
+        credentials
+            .image_groups
+            .iter()
+            .map(|(model, group)| (model.clone(), *group)),
+    );
 
     let needed: BTreeSet<i64> = routes.values().copied().chain(subscribed.iter().copied()).collect();
     ensure_group_keys(credentials, &needed)?;

@@ -133,7 +133,22 @@ pub struct Request {
     method: Option<String>,
     headers: Vec<String>,
     body: Option<String>,
+    form: Vec<FormPart>,
+    output: Option<std::path::PathBuf>,
     timeout_seconds: Option<u32>,
+}
+
+/// One part of a `multipart/form-data` body.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum FormPart {
+    /// Sent as given: curl's `form-string` reads no `@` or `<` out of it.
+    Text { name: String, value: String },
+    /// Read by curl itself, so the bytes never pass through this process.
+    File {
+        name: String,
+        path: std::path::PathBuf,
+        mime: String,
+    },
 }
 
 impl Request {
@@ -159,6 +174,35 @@ impl Request {
 
     pub fn method(mut self, method: &str) -> Self {
         self.method = Some(method.to_owned());
+        self
+    }
+
+    /// Add a text field to a `multipart/form-data` body. curl sets the
+    /// content type and boundary, and posts.
+    pub fn form_text(mut self, name: &str, value: &str) -> Self {
+        self.form.push(FormPart::Text {
+            name: name.to_owned(),
+            value: value.to_owned(),
+        });
+        self
+    }
+
+    /// Add a file to a `multipart/form-data` body, uploaded under its own
+    /// file name with `mime` as its type.
+    pub fn form_file(mut self, name: &str, path: &std::path::Path, mime: &str) -> Self {
+        self.form.push(FormPart::File {
+            name: name.to_owned(),
+            path: path.to_owned(),
+            mime: mime.to_owned(),
+        });
+        self
+    }
+
+    /// Write the response body to `path` instead of returning it: for
+    /// binary downloads, which [`Response::body`] cannot hold. Redirects are
+    /// followed, and the status is that of the last response.
+    pub fn download_to(mut self, path: &std::path::Path) -> Self {
+        self.output = Some(path.to_owned());
         self
     }
 
@@ -191,6 +235,38 @@ impl Request {
         }
         if let Some(body) = &self.body {
             config.push_str(&format!("data-binary = {}\n", quote(body)));
+        }
+        if !self.form.is_empty() {
+            // Past about a megabyte curl asks `Expect: 100-continue`, and the
+            // interim `100 Continue` block would then be the first thing
+            // `-D -` prints. An empty header turns the handshake off.
+            config.push_str("header = \"Expect:\"\n");
+        }
+        for part in &self.form {
+            match part {
+                FormPart::Text { name, value } => {
+                    config.push_str(&format!(
+                        "form-string = {}\n",
+                        quote(&format!("{name}={value}"))
+                    ));
+                }
+                FormPart::File { name, path, mime } => {
+                    // Quoted inside the form value too, so a `;` or `,` in a
+                    // path is not read as the start of another option.
+                    let path = path
+                        .to_string_lossy()
+                        .replace('\\', "\\\\")
+                        .replace('"', "\\\"");
+                    config.push_str(&format!(
+                        "form = {}\n",
+                        quote(&format!("{name}=@\"{path}\";type={mime}"))
+                    ));
+                }
+            }
+        }
+        if let Some(output) = &self.output {
+            config.push_str(&format!("output = {}\n", quote(&output.to_string_lossy())));
+            config.push_str("location\n");
         }
         config
     }
@@ -269,21 +345,38 @@ fn quote(value: &str) -> String {
 }
 
 /// `-D -` prefixes the body with the response headers: the status code sits on
-/// the first line and the body follows the blank separator line.
+/// the first line and the body follows the blank separator line. An interim
+/// `1xx` block, or a redirect curl followed, comes first with its own
+/// headers; the status is the last block's.
 fn parse(raw: &str) -> Result<Response> {
-    let status = raw
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|code| code.parse::<u16>().ok())
-        .ok_or_else(|| anyhow!("curl returned no status line"))?;
-    let body = raw
-        .find("\r\n\r\n")
-        .map(|index| &raw[index + 4..])
-        .or_else(|| raw.find("\n\n").map(|index| &raw[index + 2..]))
-        .unwrap_or("")
-        .to_owned();
-    Ok(Response { status, body })
+    let mut rest = raw;
+    let mut status = None;
+    loop {
+        let Some(code) = rest
+            .lines()
+            .next()
+            .filter(|line| line.starts_with("HTTP/"))
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|code| code.parse::<u16>().ok())
+        else {
+            break;
+        };
+        status = Some(code);
+        rest = rest
+            .find("\r\n\r\n")
+            .map(|index| &rest[index + 4..])
+            .or_else(|| rest.find("\n\n").map(|index| &rest[index + 2..]))
+            .unwrap_or("");
+        let interim = (100..200).contains(&code) || (300..400).contains(&code);
+        if !(interim && rest.starts_with("HTTP/")) {
+            break;
+        }
+    }
+    let status = status.ok_or_else(|| anyhow!("curl returned no status line"))?;
+    Ok(Response {
+        status,
+        body: rest.to_owned(),
+    })
 }
 
 /// Pull a human-readable message out of an error body, falling back to the
@@ -364,6 +457,56 @@ mod tests {
         assert!(config.contains(r#"header = "Content-Type: application/json""#));
         assert!(config.contains(r#"request = "POST""#));
         assert!(config.contains(r#"data-binary = "{\"name\":\"desktop\"}""#));
+    }
+
+    #[test]
+    fn interim_and_redirect_blocks_give_way_to_the_final_response() {
+        let raw = "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 201 Created\r\nA: b\r\n\r\n{}";
+        let response = parse(raw).expect("parse");
+        assert_eq!(response.status, 201);
+        assert_eq!(response.body, "{}");
+
+        let raw = "HTTP/1.1 302 Found\r\nLocation: x\r\n\r\nHTTP/2 200\r\n\r\n";
+        assert_eq!(parse(raw).expect("parse").status, 200);
+
+        // A final response is not re-read even if its body looks like one.
+        let raw = "HTTP/1.1 200 OK\r\n\r\nHTTP/1.1 500 no";
+        let response = parse(raw).expect("parse");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, "HTTP/1.1 500 no");
+    }
+
+    #[test]
+    fn form_parts_are_quoted_for_curl() {
+        let config = Request::new()
+            .bearer("k")
+            .form_text("prompt", "a \"cat\"; b=c\nline")
+            .form_file(
+                "image[]",
+                std::path::Path::new(r"C:\Users\me\in;put.png"),
+                "image/png",
+            )
+            .config();
+        assert!(config.contains("header = \"Expect:\"\n"));
+        assert!(config.contains(r#"form-string = "prompt=a \"cat\"; b=c\nline""#));
+        // The path is quoted for the form value, then the whole value for
+        // the config line: each backslash doubles twice.
+        assert!(
+            config.contains(
+                r#"form = "image[]=@\"C:\\\\Users\\\\me\\\\in;put.png\";type=image/png""#
+            ),
+            "{config}"
+        );
+        assert!(!config.contains("data-binary"));
+    }
+
+    #[test]
+    fn a_download_writes_to_the_file_and_follows_redirects() {
+        let config = Request::new()
+            .download_to(std::path::Path::new(r"C:\out\a.png"))
+            .config();
+        assert!(config.contains(r#"output = "C:\\out\\a.png""#));
+        assert!(config.contains("location\n"));
     }
 
     #[test]
