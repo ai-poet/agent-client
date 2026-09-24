@@ -62,7 +62,10 @@ pub use permission::EXIT_PLAN_MODE_DETAIL;
 pub use oneshot::one_shot;
 pub use session::AgentSession;
 
-/// Names of the built-in tools a session loads.
+/// Names of the built-in tools a session loads and a person can switch off.
+///
+/// Leaves out the tools no session is offered here, and `GoalComplete`,
+/// which comes and goes with the goal rather than with a setting.
 ///
 /// The Tools settings page cannot call this — the desktop does not link the
 /// engine — so it carries its own copy, `sub2api::agent_settings::BUILTIN_TOOLS`.
@@ -71,6 +74,10 @@ pub fn tool_names() -> Vec<String> {
     let mut names: Vec<String> = claurst_tools::all_tools()
         .iter()
         .map(|tool| tool.name().to_string())
+        .filter(|name| {
+            !session::UNAVAILABLE_TOOLS.contains(&name.as_str())
+                && name != session::GOAL_COMPLETE_TOOL
+        })
         .collect();
     names.push(claurst_tools::Tool::name(&claurst_query::AgentTool).to_string());
     names.sort();
@@ -96,14 +103,13 @@ mod tests {
     // Duplicated here rather than imported: `sub2api` is not a dependency of
     // this crate, and must not become one. Keep in step with
     // `sub2api::agent_settings::BUILTIN_TOOLS`.
-    const BUILTIN_TOOLS_FROM_SETTINGS: [&str; 45] = [
+    const BUILTIN_TOOLS_FROM_SETTINGS: [&str; 37] = [
         "Agent", "ApplyPatch", "AskUserQuestion", "Bash", "BatchEdit", "Brief",
-        "Config", "CronCreate", "CronDelete", "CronList", "Edit", "EnterPlanMode",
-        "EnterWorktree", "ExitPlanMode", "ExitWorktree", "Glob", "GoalComplete",
-        "Grep", "LSP", "ListMcpResources", "NotebookEdit", "PowerShell", "REPL",
-        "Read", "ReadMcpResource", "RemoteTrigger", "SendMessage", "Skill", "Sleep",
+        "Config", "Edit", "EnterPlanMode", "EnterWorktree", "ExitPlanMode",
+        "ExitWorktree", "Glob", "Grep", "LSP", "ListMcpResources", "NotebookEdit",
+        "PowerShell", "REPL", "Read", "ReadMcpResource", "Skill", "Sleep",
         "StructuredOutput", "TaskCreate", "TaskGet", "TaskList", "TaskOutput",
-        "TaskStop", "TaskUpdate", "TeamCreate", "TeamDelete", "TodoWrite",
-        "ToolSearch", "WebFetch", "WebSearch", "Write", "mcp__auth", "monitor",
+        "TaskStop", "TaskUpdate", "TodoWrite", "ToolSearch", "WebFetch",
+        "WebSearch", "Write", "mcp__auth", "monitor",
     ];
 }

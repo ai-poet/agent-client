@@ -155,6 +155,7 @@ impl NativeDriver {
             narration_language: narration_language(),
             history,
             computer_use: wiring,
+            session_id: Some(session_id.to_string()),
         };
 
         let sink = EventTranslator::new(events.clone(), store.clone());
@@ -255,7 +256,7 @@ impl DriverControl for NativeDriver {
     }
 
     fn rollback(&self, turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
-        let removed = self.session.rollback(turns)?;
+        let removed = self.session.rollback(turns).map_err(localize_rewind_error)?;
         if removed == 0 {
             return Ok(None);
         }
@@ -266,7 +267,7 @@ impl DriverControl for NativeDriver {
     }
 
     fn fork(&self, turns_to_remove: usize) -> anyhow::Result<ProviderResumeCursor> {
-        let branched = self.session.fork(turns_to_remove)?;
+        let branched = self.session.fork(turns_to_remove).map_err(localize_rewind_error)?;
         // The branch is a new session with its own transcript file. Waku
         // creates the session and starts a driver against this cursor; the
         // history has to be on disk before that happens.
@@ -275,6 +276,19 @@ impl DriverControl for NativeDriver {
         Ok(ProviderResumeCursor::Native {
             session_id: branch_id.to_string(),
         })
+    }
+}
+
+/// A rewind that would cut into a compaction summary is refused by the
+/// bridge; the person sees why in their own language.
+fn localize_rewind_error(error: anyhow::Error) -> anyhow::Error {
+    if error
+        .downcast_ref::<waku_agent_bridge::history::RewindPastCompaction>()
+        .is_some()
+    {
+        anyhow!(tr!("native.rewind_past_compaction"))
+    } else {
+        error
     }
 }
 
@@ -603,6 +617,9 @@ impl EventTranslator {
                 context_tokens,
                 context_window,
             }),
+            // The meter follows through the `Usage` the bridge sends after a
+            // finished compaction; the event itself has no transcript row.
+            AgentEvent::Compaction { .. } => {}
             AgentEvent::Permission {
                 request_id,
                 tool_name,

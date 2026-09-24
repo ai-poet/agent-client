@@ -1586,6 +1586,7 @@ commands.plan_exited: "ビルドモード — 変更が適用されます"
 
 native.plan_mode_denied: "実行されていません — 計画モードのため何も適用されません。下でビルドに切り替えてからもう一度依頼してください。"
 native.keep_planning: "計画を続けることを選んだので、エージェントは計画の改善を続けます。"
+native.rewind_past_compaction: "この時点より前の会話は圧縮済みのため、そこまで巻き戻せません。"
 
 
 computer_use.system_access: "システムアクセス"

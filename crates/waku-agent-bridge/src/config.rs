@@ -220,6 +220,10 @@ pub struct AgentStartOptions {
     /// Desktop control and image generation, when the user has turned
     /// Computer Use on. `None` leaves the session without either.
     pub computer_use: Option<ComputerUseWiring>,
+    /// The id Waku stores this conversation under. The engine keys its
+    /// per-session state by it — the todo list, the goal, shell state — so a
+    /// resumed session finds its own again. `None` for a throwaway session.
+    pub session_id: Option<String>,
 }
 
 /// What the session needs to reach the Computer Use REPL.
@@ -270,6 +274,7 @@ impl Default for AgentStartOptions {
             narration_language: None,
             history: Vec::new(),
             computer_use: None,
+            session_id: None,
         }
     }
 }
@@ -314,7 +319,39 @@ pub struct TurnOptions {
 /// a second answer to that question, and the two would disagree the moment a
 /// user has both.
 pub fn build_config(options: &AgentStartOptions) -> anyhow::Result<Config> {
-    Ok(build_config_from(load_settings()?, options))
+    let mut config = build_config_from(load_settings()?, options);
+    apply_compaction_settings(&mut config, settings_document().as_ref());
+    Ok(config)
+}
+
+/// What the Agent settings page shows when a key is absent: compaction on, at
+/// 80 % of the window.
+const DEFAULT_AUTO_COMPACT: bool = true;
+const DEFAULT_COMPACT_THRESHOLD: f32 = 0.8;
+
+/// The settings file as a plain document, for the keys whose absence means
+/// something the typed `Config` cannot say.
+pub(crate) fn settings_document() -> Option<serde_json::Value> {
+    let raw = std::fs::read_to_string(Settings::global_settings_path()).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// Apply the compaction switch and threshold the way the settings page
+/// presents them. The typed `Config` reads a missing `auto_compact` as
+/// `false` — its container default — while the page shows it on, so a
+/// session would never compact for anyone who had not touched the switch.
+pub(crate) fn apply_compaction_settings(config: &mut Config, document: Option<&serde_json::Value>) {
+    let section = document.and_then(|document| document.get("config"));
+    config.auto_compact = section
+        .and_then(|config| config.get("auto_compact"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(DEFAULT_AUTO_COMPACT);
+    config.compact_threshold = section
+        .and_then(|config| config.get("compact_threshold"))
+        .and_then(serde_json::Value::as_f64)
+        .map(|value| value as f32)
+        .filter(|value| *value > 0.0 && *value < 1.0)
+        .unwrap_or(DEFAULT_COMPACT_THRESHOLD);
 }
 
 /// The engine's global settings.
@@ -1439,6 +1476,29 @@ mod tests {
     fn a_message_has_no_step_cap() {
         let query = build_query_config(&Config::default(), &AgentStartOptions::default());
         assert_eq!(query.max_turns, u32::MAX);
+    }
+
+    /// Compaction runs as the settings page shows it: on at 80 % until the
+    /// person changes either, whatever the typed config defaults to.
+    #[test]
+    fn compaction_follows_what_the_settings_page_shows() {
+        let mut config = Config::default();
+        apply_compaction_settings(&mut config, None);
+        assert!(config.auto_compact);
+        assert!((config.compact_threshold - 0.8).abs() < f32::EPSILON);
+
+        let chosen = serde_json::json!({
+            "config": { "auto_compact": false, "compact_threshold": 0.6 }
+        });
+        apply_compaction_settings(&mut config, Some(&chosen));
+        assert!(!config.auto_compact);
+        assert!((config.compact_threshold - 0.6).abs() < 1e-6);
+
+        // A threshold that could never or always fire is not a threshold.
+        let nonsense = serde_json::json!({ "config": { "compact_threshold": 1.5 } });
+        apply_compaction_settings(&mut config, Some(&nonsense));
+        assert!(config.auto_compact);
+        assert!((config.compact_threshold - 0.8).abs() < f32::EPSILON);
     }
 
     #[test]

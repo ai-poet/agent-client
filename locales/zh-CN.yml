@@ -1534,6 +1534,7 @@ commands.plan_exited: "已切到构建模式，改动会真的执行"
 
 native.plan_mode_denied: "没有执行——当前是计划模式，不会改动任何东西。在下方切到构建模式后再让它做一次。"
 native.keep_planning: "你选择了继续规划，Agent 会接着完善计划。"
+native.rewind_past_compaction: "此前的对话已压缩，无法回退到压缩点之前。"
 
 
 computer_use.system_access: "系统访问"

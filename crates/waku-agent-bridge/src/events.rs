@@ -48,6 +48,15 @@ pub enum AgentEvent {
         context_tokens: Option<u64>,
         context_window: Option<u64>,
     },
+    /// The engine is compacting the conversation, or has.
+    Compaction {
+        phase: CompactionPhase,
+        /// `false` when the person asked for it (`/compact`).
+        automatic: bool,
+        tokens_before: u64,
+        /// Estimated, once `phase` is `Finished`.
+        tokens_after: Option<u64>,
+    },
     /// The engine wants a decision before running a tool. Answered with
     /// [`crate::AgentSession::respond`].
     Permission {
@@ -101,6 +110,24 @@ pub enum AgentEvent {
         success: bool,
         summary: Option<String>,
     },
+}
+
+/// Where a compaction is.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CompactionPhase {
+    Started,
+    Finished,
+    Failed,
+}
+
+impl From<claurst_query::CompactionPhase> for CompactionPhase {
+    fn from(phase: claurst_query::CompactionPhase) -> Self {
+        match phase {
+            claurst_query::CompactionPhase::Started => Self::Started,
+            claurst_query::CompactionPhase::Finished => Self::Finished,
+            claurst_query::CompactionPhase::Failed => Self::Failed,
+        }
+    }
 }
 
 /// One answer offered on a [`AgentEvent::Permission`].
@@ -179,6 +206,10 @@ pub struct StreamDecoder {
     /// The window of the model this turn runs on, so the context gauge has
     /// a denominator. The engine reports occupancy but not capacity.
     context_window: Option<u64>,
+    /// Set by a finished compaction until the next request goes out. The
+    /// Messages branch reports the step's usage after compacting, and that
+    /// figure describes the conversation before it shrank.
+    compacted: bool,
 }
 
 impl StreamDecoder {
@@ -187,6 +218,7 @@ impl StreamDecoder {
             tool_names: std::collections::HashMap::new(),
             turn_open: false,
             context_window,
+            compacted: false,
         }
     }
 
@@ -198,6 +230,7 @@ impl StreamDecoder {
         match event {
             Q::Stream(frame) => match frame {
                 Frame::MessageStart { .. } => {
+                    self.compacted = false;
                     if self.turn_open {
                         Vec::new()
                     } else {
@@ -268,6 +301,7 @@ impl StreamDecoder {
                 }
                 events
             }
+            Q::TurnComplete { .. } if self.compacted => Vec::new(),
             Q::TurnComplete { usage, .. } => {
                 let context_tokens = usage.as_ref().map(|usage| {
                     (usage.total_input() as u64).saturating_add(usage.output_tokens as u64)
@@ -278,6 +312,28 @@ impl StreamDecoder {
                 }]
             }
             Q::TokenWarning { .. } => Vec::new(),
+            Q::Compaction {
+                phase,
+                automatic,
+                tokens_before,
+                tokens_after,
+            } => {
+                let phase = CompactionPhase::from(phase);
+                let mut events = vec![AgentEvent::Compaction {
+                    phase,
+                    automatic,
+                    tokens_before,
+                    tokens_after,
+                }];
+                if phase == CompactionPhase::Finished {
+                    self.compacted = true;
+                    events.push(AgentEvent::Usage {
+                        context_tokens: tokens_after,
+                        context_window: self.context_window,
+                    });
+                }
+                events
+            }
             Q::Status(_) => {
                 // The engine's status line is TUI furniture ("Thinking…",
                 // spinner verbs). It is not assistant content and must never
@@ -376,6 +432,36 @@ mod tests {
         ));
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], AgentEvent::ToolFinished { .. }));
+    }
+
+    /// The Messages branch reports a step's usage after compacting it away;
+    /// the meter shows the compacted size until the next request reports.
+    #[test]
+    fn the_meter_follows_a_compaction_not_the_usage_reported_after_it() {
+        let mut decoder = StreamDecoder::new(Some(200_000));
+        let events = decoder.push(QueryEvent::Compaction {
+            phase: claurst_query::CompactionPhase::Finished,
+            automatic: true,
+            tokens_before: 170_000,
+            tokens_after: Some(20_000),
+        });
+        assert!(matches!(
+            events[0],
+            AgentEvent::Compaction { phase: CompactionPhase::Finished, .. }
+        ));
+        assert!(matches!(
+            events[1],
+            AgentEvent::Usage { context_tokens: Some(20_000), .. }
+        ));
+        let stale = decoder.push(QueryEvent::TurnComplete {
+            turn: 3,
+            stop_reason: "tool_use".into(),
+            usage: Some(claurst_core::types::UsageInfo {
+                input_tokens: 170_000,
+                ..Default::default()
+            }),
+        });
+        assert!(stale.is_empty());
     }
 
     #[test]

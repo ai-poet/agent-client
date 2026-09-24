@@ -87,6 +87,30 @@ fn decode_tool_arguments(arguments: Option<&Value>, tool: &str) -> Value {
     }
 }
 
+/// Read a Responses `usage` object.
+///
+/// Fork: the Responses API counts cached tokens *inside* `input_tokens` and
+/// reports them again under `input_tokens_details.cached_tokens`, where the
+/// Messages API reports the two apart. Carried over as-is, every cached token
+/// was counted twice — the context meter read high, and compaction would fire
+/// early. The cached share is taken out of `input_tokens` here so
+/// `UsageInfo::total_input` means the same on every route.
+fn responses_usage(usage: Option<&Value>) -> UsageInfo {
+    let count = |value: Option<&Value>| value.and_then(Value::as_u64).unwrap_or(0);
+    let input = count(usage.and_then(|value| value.get("input_tokens")));
+    let cached = count(
+        usage
+            .and_then(|value| value.get("input_tokens_details"))
+            .and_then(|value| value.get("cached_tokens")),
+    );
+    UsageInfo {
+        input_tokens: input.saturating_sub(cached),
+        output_tokens: count(usage.and_then(|value| value.get("output_tokens"))),
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: cached,
+    }
+}
+
 impl CodexProvider {
     pub fn new(tokens: CodexTokens) -> Self {
         let http_client = reqwest::Client::builder()
@@ -878,23 +902,7 @@ impl LlmProvider for CodexProvider {
                                         yield Ok(StreamEvent::ContentBlockStop { index });
                                     }
 
-                                    let usage_json = response.get("usage");
-                                    let usage = UsageInfo {
-                                        input_tokens: usage_json
-                                            .and_then(|value| value.get("input_tokens"))
-                                            .and_then(|value| value.as_u64())
-                                            .unwrap_or(0),
-                                        output_tokens: usage_json
-                                            .and_then(|value| value.get("output_tokens"))
-                                            .and_then(|value| value.as_u64())
-                                            .unwrap_or(0),
-                                        cache_creation_input_tokens: 0,
-                                        cache_read_input_tokens: usage_json
-                                            .and_then(|value| value.get("input_tokens_details"))
-                                            .and_then(|value| value.get("cached_tokens"))
-                                            .and_then(|value| value.as_u64())
-                                            .unwrap_or(0),
-                                    };
+                                    let usage = responses_usage(response.get("usage"));
 
                                     let stop_reason = if saw_tool_call {
                                         StopReason::ToolUse
@@ -1012,6 +1020,21 @@ impl LlmProvider for CodexProvider {
 #[cfg(test)]
 mod fork_argument_decoding_tests {
     use super::*;
+
+    /// Cached tokens are part of the Responses `input_tokens`; counted once.
+    #[test]
+    fn cached_input_is_counted_once() {
+        let usage = responses_usage(Some(&json!({
+            "input_tokens": 100_000,
+            "output_tokens": 800,
+            "input_tokens_details": { "cached_tokens": 90_000 }
+        })));
+        assert_eq!(usage.input_tokens, 10_000);
+        assert_eq!(usage.cache_read_input_tokens, 90_000);
+        assert_eq!(usage.total_input(), 100_000);
+        assert_eq!(usage.output_tokens, 800);
+        assert_eq!(responses_usage(None).total_input(), 0);
+    }
 
     #[test]
     fn the_specified_string_form_is_decoded() {

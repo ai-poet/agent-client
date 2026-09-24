@@ -3113,6 +3113,8 @@ native.plan_mode_denied:
   en: "Not run — plan mode is on, so nothing is applied. Switch to Build below and ask again."
 native.keep_planning:
   en: "You chose to keep planning, so the agent will carry on refining the plan."
+native.rewind_past_compaction:
+  en: "The conversation before this point was compacted, so it can no longer be rewound to."
 
 
 computer_use.system_access:

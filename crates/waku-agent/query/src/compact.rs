@@ -294,7 +294,7 @@ pub async fn micro_compact_if_needed(
     );
 
     let target_tokens = config.summary_target_tokens as u32;
-    match summarise_head(client, messages, split_at, model, target_tokens).await {
+    match summarise_head(client, messages, split_at, model, target_tokens, None).await {
         Ok(new_msgs) => {
             info!(
                 original = total,
@@ -871,6 +871,15 @@ pub fn resolve_context_window(
                 return window;
             }
         }
+        // Waku: the route's provider id is not always the one models.dev
+        // files the model under — the Responses route is `codex`, which it
+        // does not have, and Grok lives under `xai`. Ask the registry's own
+        // family table before settling for the 100k guess.
+        if let Some(owner) = registry.find_provider_for_model(stripped) {
+            if let Some(window) = registry_context_window(registry, &owner.to_string(), stripped) {
+                return window;
+            }
+        }
     }
     context_window_for_model(model)
 }
@@ -946,24 +955,54 @@ pub fn should_auto_compact_for_window(
     input_tokens >= threshold
 }
 
+/// Waku: [`should_auto_compact_for_window`] against a caller-chosen fraction
+/// of the window — the one the Agent settings page writes — rather than the
+/// fixed 90 %.
+pub fn should_auto_compact_at(
+    input_tokens: u64,
+    window: u64,
+    fraction: f64,
+    state: &AutoCompactState,
+) -> bool {
+    if state.disabled || window == 0 {
+        return false;
+    }
+    let fraction = if fraction > 0.0 && fraction < 1.0 {
+        fraction
+    } else {
+        AUTOCOMPACT_TRIGGER_FRACTION
+    };
+    input_tokens >= (window as f64 * fraction) as u64
+}
+
 // ---------------------------------------------------------------------------
 // Core compaction logic
 // ---------------------------------------------------------------------------
 
-/// Summarise `messages[..split_at]` using the Anthropic API using the
-/// carefully crafted compaction prompt from TypeScript prompt.ts.
-/// Returns a new conversation: [summary user msg] + messages[split_at..].
-async fn summarise_head(
-    client: &claurst_api::AnthropicClient,
+/// Waku: what opens a compaction summary's payload, so a caller can tell a
+/// summary from an ordinary user message.
+pub const COMPACT_SUMMARY_OPEN: &str = "<compact-summary>";
+
+/// The system prompt every summary is written under.
+const SUMMARY_SYSTEM_PROMPT: &str =
+    "You are a helpful assistant that creates concise yet thorough conversation summaries. \
+     Preserve all technical details, file names, code snippets, and decisions that would \
+     be important for continuing the work. Follow the structured format exactly.";
+
+/// Waku: the request half of a summary, split out of `summarise_head` so the
+/// Messages client and every other provider adapter ask the same question.
+struct SummaryPrompt {
+    /// The single user message the summariser answers.
+    user_content: String,
+    /// A summary an earlier compaction left in the head, folded forward.
+    previous_summary: Option<String>,
+}
+
+fn summary_prompt(
     messages: &[Message],
     split_at: usize,
-    model: &str,
-    max_summary_tokens: u32,
-) -> Result<Vec<Message>, ClaudeError> {
-    if split_at == 0 {
-        return Ok(messages.to_vec());
-    }
-
+    instructions: Option<&str>,
+) -> SummaryPrompt {
     let head = &messages[..split_at];
 
     // Iterative UPDATE mode: if a prior <compact-summary> already lives in the
@@ -985,7 +1024,7 @@ async fn summarise_head(
         let text = msg.get_all_text();
         // Skip the prior compact summary itself — it is fed separately in a
         // <previous-summary> block, so rendering it here would duplicate it.
-        if !text.is_empty() && !text.contains("<compact-summary>") {
+        if !text.is_empty() && !text.contains(COMPACT_SUMMARY_OPEN) {
             transcript.push_str(&format!("{}: {}\n\n", role_label, text));
         }
         // Also render tool use/result blocks
@@ -1023,7 +1062,7 @@ async fn summarise_head(
         .map(strip_files_touched_section);
 
     // Select the UPDATE prompt variant when a prior summary is present.
-    let compact_prompt = get_compact_prompt(None, previous_summary_for_prompt.as_deref());
+    let compact_prompt = get_compact_prompt(instructions, previous_summary_for_prompt.as_deref());
 
     let user_content = if let Some(prev) = previous_summary_for_prompt.as_deref() {
         format!(
@@ -1044,48 +1083,35 @@ async fn summarise_head(
         )
     };
 
-    let api_msgs = vec![ApiMessage {
-        role: "user".to_string(),
-        content: Value::String(user_content),
-    }];
-
-    let request = CreateMessageRequest::builder(model, max_summary_tokens)
-        .messages(api_msgs)
-        .system(SystemPrompt::Text(
-            "You are a helpful assistant that creates concise yet thorough conversation summaries. \
-             Preserve all technical details, file names, code snippets, and decisions that would \
-             be important for continuing the work. Follow the structured format exactly."
-                .to_string(),
-        ))
-        .build();
-
-    // Use a null handler since we just want the final accumulated message.
-    let handler: Arc<dyn StreamHandler> = Arc::new(claurst_api::streaming::NullStreamHandler);
-    let mut rx = client.create_message_stream(request, handler).await?;
-    let mut acc = StreamAccumulator::new();
-
-    while let Some(evt) = rx.recv().await {
-        acc.on_event(&evt);
-        if matches!(evt, AnthropicStreamEvent::MessageStop) {
-            break;
-        }
+    SummaryPrompt {
+        user_content,
+        previous_summary,
     }
+}
 
-    let (summary_msg, _usage, _stop) = acc.finish();
-    let raw_summary = summary_msg.get_all_text();
-
-    if raw_summary.is_empty() {
+/// Waku: the answer half of a summary — the new conversation built from the
+/// summariser's raw text: [summary user msg] + messages[split_at..].
+fn compacted_history(
+    messages: &[Message],
+    split_at: usize,
+    raw_summary: &str,
+    previous_summary: Option<&str>,
+) -> Result<Vec<Message>, ClaudeError> {
+    if raw_summary.trim().is_empty() {
         return Err(ClaudeError::Other("Compact summary was empty".to_string()));
     }
+    let head = &messages[..split_at];
+    let original_count = head.len();
+    let original_token_estimate = estimate_tokens_for_messages(head);
 
-    let formatted_summary = format_compact_summary(&raw_summary);
+    let formatted_summary = format_compact_summary(raw_summary);
 
     // Files-touched manifest: files this batch read/wrote/edited, unioned with
     // any manifest carried in the prior summary so the agent doesn't forget what
     // it worked on across successive compactions. Appended deterministically
     // (bounded via MAX_MANIFEST_FILES) rather than trusting the model.
     let mut file_ops = extract_file_operations(head);
-    if let Some(prev) = &previous_summary {
+    if let Some(prev) = previous_summary {
         file_ops.union(&parse_files_touched(prev));
     }
     let formatted_summary = if file_ops.is_empty() {
@@ -1110,6 +1136,112 @@ async fn summarise_head(
     new_messages.extend_from_slice(&messages[split_at..]);
 
     Ok(new_messages)
+}
+
+/// Summarise `messages[..split_at]` using the Anthropic API using the
+/// carefully crafted compaction prompt from TypeScript prompt.ts.
+/// Returns a new conversation: [summary user msg] + messages[split_at..].
+async fn summarise_head(
+    client: &claurst_api::AnthropicClient,
+    messages: &[Message],
+    split_at: usize,
+    model: &str,
+    max_summary_tokens: u32,
+    instructions: Option<&str>,
+) -> Result<Vec<Message>, ClaudeError> {
+    if split_at == 0 {
+        return Ok(messages.to_vec());
+    }
+
+    let prompt = summary_prompt(messages, split_at, instructions);
+
+    let api_msgs = vec![ApiMessage {
+        role: "user".to_string(),
+        content: Value::String(prompt.user_content),
+    }];
+
+    let request = CreateMessageRequest::builder(model, max_summary_tokens)
+        .messages(api_msgs)
+        .system(SystemPrompt::Text(SUMMARY_SYSTEM_PROMPT.to_string()))
+        .build();
+
+    // Use a null handler since we just want the final accumulated message.
+    let handler: Arc<dyn StreamHandler> = Arc::new(claurst_api::streaming::NullStreamHandler);
+    let mut rx = client.create_message_stream(request, handler).await?;
+    let mut acc = StreamAccumulator::new();
+
+    while let Some(evt) = rx.recv().await {
+        acc.on_event(&evt);
+        if matches!(evt, AnthropicStreamEvent::MessageStop) {
+            break;
+        }
+    }
+
+    let (summary_msg, _usage, _stop) = acc.finish();
+    let raw_summary = summary_msg.get_all_text();
+
+    compacted_history(
+        messages,
+        split_at,
+        &raw_summary,
+        prompt.previous_summary.as_deref(),
+    )
+}
+
+/// Waku: [`summarise_head`] through any provider adapter, for the routes that
+/// do not speak the Messages API (Responses, Chat Completions). The summary is
+/// asked of the same model the session runs on, over the same route.
+async fn summarise_head_via_provider(
+    provider: &dyn claurst_api::LlmProvider,
+    model: &str,
+    messages: &[Message],
+    split_at: usize,
+    max_summary_tokens: u32,
+    instructions: Option<&str>,
+) -> Result<Vec<Message>, ClaudeError> {
+    use futures::StreamExt as _;
+
+    if split_at == 0 {
+        return Ok(messages.to_vec());
+    }
+
+    let prompt = summary_prompt(messages, split_at, instructions);
+    let request = claurst_api::ProviderRequest {
+        model: model.to_string(),
+        messages: vec![Message::user(prompt.user_content)],
+        system_prompt: Some(SystemPrompt::Text(SUMMARY_SYSTEM_PROMPT.to_string())),
+        tools: Vec::new(),
+        max_tokens: max_summary_tokens,
+        temperature: None,
+        top_p: None,
+        top_k: None,
+        stop_sequences: Vec::new(),
+        thinking: None,
+        provider_options: Value::Object(serde_json::Map::new()),
+    };
+
+    let mut stream = provider
+        .create_message_stream(request)
+        .await
+        .map_err(|error| ClaudeError::Api(error.to_string()))?;
+    let mut raw_summary = String::new();
+    while let Some(event) = stream.next().await {
+        match event.map_err(|error| ClaudeError::Api(error.to_string()))? {
+            claurst_api::StreamEvent::TextDelta { text, .. } => raw_summary.push_str(&text),
+            claurst_api::StreamEvent::Error { message, .. } => {
+                return Err(ClaudeError::Api(message));
+            }
+            claurst_api::StreamEvent::MessageStop => break,
+            _ => {}
+        }
+    }
+
+    compacted_history(
+        messages,
+        split_at,
+        &raw_summary,
+        prompt.previous_summary.as_deref(),
+    )
 }
 
 /// Does this message carry any `tool_result` blocks?
@@ -1168,6 +1300,17 @@ pub async fn compact_conversation(
     messages: &[Message],
     model: &str,
 ) -> Result<Vec<Message>, ClaudeError> {
+    compact_conversation_with(client, messages, model, None).await
+}
+
+/// Waku: [`compact_conversation`] with the person's own instructions for the
+/// summary (`/compact focus on the schema changes`).
+pub async fn compact_conversation_with(
+    client: &claurst_api::AnthropicClient,
+    messages: &[Message],
+    model: &str,
+    instructions: Option<&str>,
+) -> Result<Vec<Message>, ClaudeError> {
     let total = messages.len();
 
     // Token-budget keep: summarise everything older than the most recent
@@ -1191,7 +1334,39 @@ pub async fn compact_conversation(
     );
 
     // Use a generous token budget for the summary (20k mirrors TypeScript MAX_OUTPUT_TOKENS_FOR_SUMMARY)
-    summarise_head(client, messages, split_at, model, 20_000).await
+    summarise_head(client, messages, split_at, model, 20_000, instructions).await
+}
+
+/// Waku: [`compact_conversation_with`] through a provider adapter. The summary
+/// may be at most `max_tokens` long, capped at the 20k the Messages path
+/// uses: a Chat Completions model can refuse a larger output limit than its
+/// own, and the session's is one it is known to accept.
+pub async fn compact_conversation_via_provider(
+    provider: &dyn claurst_api::LlmProvider,
+    model: &str,
+    messages: &[Message],
+    max_tokens: u32,
+    instructions: Option<&str>,
+) -> Result<Vec<Message>, ClaudeError> {
+    let split_at = compute_keep_split_index(messages, KEEP_RECENT_TOKENS);
+    if split_at == 0 {
+        return Ok(messages.to_vec());
+    }
+    info!(
+        total = messages.len(),
+        split_at,
+        model,
+        "Compacting conversation through the provider adapter"
+    );
+    summarise_head_via_provider(
+        provider,
+        model,
+        messages,
+        split_at,
+        max_tokens.min(20_000),
+        instructions,
+    )
+    .await
 }
 
 /// Auto-compact `messages` if needed.  Updates `state` in place.
@@ -1434,7 +1609,7 @@ pub async fn reactive_compact(
         estimate_tokens_for_messages(&stripped[..split_at]) as u64;
 
     let mut new_messages =
-        summarise_head(client, &stripped, split_at, &config.model, 20_000).await?;
+        summarise_head(client, &stripped, split_at, &config.model, 20_000, None).await?;
 
     // The summary lives as the first message in new_messages.
     let summary_text = new_messages

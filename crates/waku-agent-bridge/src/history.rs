@@ -6,12 +6,27 @@
 //! deserialize.
 //!
 //! The one subtlety is what counts as a turn. In the Anthropic message format
-//! a tool result is also a `user` message, so counting `Role::User` would make
-//! "rewind one turn" land in the middle of a tool exchange and leave a
-//! `tool_use` with no matching `tool_result` — a history the API rejects. A
-//! turn boundary here is a user message that carries no tool result.
+//! a tool result is also a `user` message, and the engine adds user messages
+//! of its own mid-turn — a steering message, a goal's "keep going", the
+//! recovery note after an output limit, a compaction summary. Waku counts a
+//! turn per prompt the person sent, so the prompts that start one are marked
+//! (in `Message.uuid`, which is stored and never sent to the model) and only
+//! marked messages count. Cutting anywhere else would land in the middle of
+//! a tool exchange and leave a `tool_use` with no matching `tool_result` — a
+//! history the API rejects.
+//!
+//! A compaction summary stands in for the turns it replaced and is marked
+//! with how many there were, so the count Waku keeps stays right. Rewinding
+//! into one is refused: the turns it replaced are no longer there to cut.
 
 use claurst_core::types::{ContentBlock, Message, MessageContent, Role};
+use claurst_query::COMPACT_SUMMARY_OPEN;
+
+/// `Message.uuid` prefix on a prompt that started a turn.
+const TURN_MARK: &str = "waku:turn:";
+/// `Message.uuid` prefix on a compaction summary; the rest is how many turns
+/// it replaced.
+const COMPACT_MARK: &str = "waku:compact:";
 
 /// Serialize for Waku's session store.
 pub fn serialize(messages: &[Message]) -> Vec<u8> {
@@ -21,24 +36,107 @@ pub fn serialize(messages: &[Message]) -> Vec<u8> {
 /// Read back what [`serialize`] wrote. An unreadable or empty payload restores
 /// an empty conversation rather than failing the session: losing history is
 /// bad, but refusing to open the session loses the user their project too.
+///
+/// A transcript written before turns were marked is marked here, once, by the
+/// rule that used to be applied on every count.
 pub fn deserialize(bytes: &[u8]) -> Vec<Message> {
     if bytes.is_empty() {
         return Vec::new();
     }
-    serde_json::from_slice(bytes).unwrap_or_else(|error| {
+    let mut messages: Vec<Message> = serde_json::from_slice(bytes).unwrap_or_else(|error| {
         tracing::warn!(%error, "agent: unreadable session history, starting empty");
         Vec::new()
-    })
+    });
+    adopt_legacy(&mut messages);
+    messages
 }
 
-/// Indices where a user-authored turn begins.
+/// Mark `message` as the prompt that starts a turn. Returns the mark, which
+/// finds the message again after the engine has rearranged the history.
+pub fn mark_turn(message: &mut Message) -> String {
+    let mark = format!("{TURN_MARK}{}", uuid::Uuid::new_v4());
+    message.uuid = Some(mark.clone());
+    mark
+}
+
+/// Mark the turns of a transcript that predates marking: every user message
+/// without a tool result, which is what used to be counted. A compaction
+/// summary among them counts as the one turn it used to.
+fn adopt_legacy(messages: &mut [Message]) {
+    if messages.iter().any(|message| mark_of(message).is_some()) {
+        return;
+    }
+    for message in messages.iter_mut() {
+        if message.role != Role::User || carries_tool_result(message) {
+            continue;
+        }
+        if is_compaction_summary(message) {
+            message.uuid = Some(format!("{COMPACT_MARK}1"));
+        } else {
+            mark_turn(message);
+        }
+    }
+}
+
+/// After a turn in which the engine compacted, mark its summary with the
+/// number of turns it replaced: whatever the conversation weighed before the
+/// turn, less what is still there to count.
+pub fn settle_compaction(weight_before: usize, messages: &mut [Message]) {
+    let Some(index) = messages
+        .iter()
+        .position(|message| mark_of(message).is_none() && is_compaction_summary(message))
+    else {
+        return;
+    };
+    let remaining: usize = messages.iter().map(weight).sum();
+    let replaced = weight_before.saturating_sub(remaining);
+    messages[index].uuid = Some(format!("{COMPACT_MARK}{replaced}"));
+}
+
+fn mark_of(message: &Message) -> Option<&str> {
+    message
+        .uuid
+        .as_deref()
+        .filter(|uuid| uuid.starts_with(TURN_MARK) || uuid.starts_with(COMPACT_MARK))
+}
+
+/// How many turns a message stands for.
+fn weight(message: &Message) -> usize {
+    match message.uuid.as_deref() {
+        Some(uuid) if uuid.starts_with(TURN_MARK) => 1,
+        Some(uuid) => uuid
+            .strip_prefix(COMPACT_MARK)
+            .and_then(|count| count.parse().ok())
+            .unwrap_or(0),
+        None => 0,
+    }
+}
+
+fn is_compaction_summary(message: &Message) -> bool {
+    message.role == Role::User && message.get_all_text().contains(COMPACT_SUMMARY_OPEN)
+}
+
+/// Indices of the prompts that started a turn.
 fn turn_starts(messages: &[Message]) -> Vec<usize> {
     messages
         .iter()
         .enumerate()
-        .filter(|(_, message)| message.role == Role::User && !carries_tool_result(message))
+        .filter(|(_, message)| {
+            message
+                .uuid
+                .as_deref()
+                .is_some_and(|uuid| uuid.starts_with(TURN_MARK))
+        })
         .map(|(index, _)| index)
         .collect()
+}
+
+/// Where the prompt carrying `mark` sits now, or `None` once a compaction has
+/// folded it into a summary.
+pub fn position_of(messages: &[Message], mark: &str) -> Option<usize> {
+    messages
+        .iter()
+        .position(|message| message.uuid.as_deref() == Some(mark))
 }
 
 fn carries_tool_result(message: &Message) -> bool {
@@ -50,37 +148,67 @@ fn carries_tool_result(message: &Message) -> bool {
     }
 }
 
-/// Number of user-authored turns in the conversation.
+/// Number of turns in the conversation, counting the ones a compaction
+/// summary replaced.
 pub fn turn_count(messages: &[Message]) -> usize {
-    turn_starts(messages).len()
+    messages.iter().map(weight).sum()
 }
 
-/// Drop the last `turns` user turns and everything that followed them.
+/// Rewinding would have to cut inside a compaction summary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RewindPastCompaction;
+
+impl std::fmt::Display for RewindPastCompaction {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(
+            "the conversation before this point was compacted and can no longer be rewound to",
+        )
+    }
+}
+
+impl std::error::Error for RewindPastCompaction {}
+
+/// Drop the last `turns` turns and everything that followed them.
 ///
 /// Returns the number actually removed, which is smaller than `turns` when the
 /// conversation is shorter than the request. Removing zero turns is a no-op
 /// rather than an error — the UI gates this, and a bypassed gate should not
-/// destroy a conversation.
-pub fn rollback(messages: &mut Vec<Message>, turns: usize) -> usize {
+/// destroy a conversation. Reaching back past a compaction summary that
+/// replaced turns is an error and changes nothing.
+pub fn rollback(messages: &mut Vec<Message>, turns: usize) -> Result<usize, RewindPastCompaction> {
     if turns == 0 {
-        return 0;
+        return Ok(0);
     }
-    let starts = turn_starts(messages);
-    if starts.is_empty() {
-        return 0;
+    let mut removed = 0;
+    let mut cut = None;
+    for (index, message) in messages.iter().enumerate().rev() {
+        if removed == turns {
+            break;
+        }
+        match weight(message) {
+            0 => {}
+            1 if message.uuid.as_deref().is_some_and(|uuid| uuid.starts_with(TURN_MARK)) => {
+                removed += 1;
+                cut = Some(index);
+            }
+            _ => return Err(RewindPastCompaction),
+        }
     }
-    let removed = turns.min(starts.len());
-    let cut = starts[starts.len() - removed];
-    messages.truncate(cut);
-    removed
+    if let Some(cut) = cut {
+        messages.truncate(cut);
+    }
+    Ok(removed)
 }
 
 /// A copy of the conversation with the last `turns_to_remove` turns dropped,
 /// for seeding a branch. The original is untouched.
-pub fn fork(messages: &[Message], turns_to_remove: usize) -> Vec<Message> {
+pub fn fork(
+    messages: &[Message],
+    turns_to_remove: usize,
+) -> Result<Vec<Message>, RewindPastCompaction> {
     let mut branched = messages.to_vec();
-    rollback(&mut branched, turns_to_remove);
-    branched
+    rollback(&mut branched, turns_to_remove)?;
+    Ok(branched)
 }
 
 /// One user turn as a reader would see it: what they wrote, and what the
@@ -208,14 +336,26 @@ mod tests {
         }])
     }
 
+    fn prompt(text: &str) -> Message {
+        let mut message = Message::user(text);
+        mark_turn(&mut message);
+        message
+    }
+
+    fn summary(replaced_text: &str) -> Message {
+        Message::user(format!(
+            "This session is being continued.\n\n<compact-summary>\n{replaced_text}\n</compact-summary>"
+        ))
+    }
+
     /// One user turn that ran a tool: user → tool_use → tool_result → answer.
     fn conversation() -> Vec<Message> {
         vec![
-            Message::user("first"),
+            prompt("first"),
             tool_use("t1"),
             tool_result("t1"),
             Message::assistant("done one"),
-            Message::user("second"),
+            prompt("second"),
             Message::assistant("done two"),
         ]
     }
@@ -225,10 +365,87 @@ mod tests {
         assert_eq!(turn_count(&conversation()), 2);
     }
 
+    /// A steering message, a goal's "keep going" and the engine's recovery
+    /// note are user messages too, but nobody pressed send for them: Waku's
+    /// turn count does not include them, so neither may this one.
+    #[test]
+    fn messages_the_engine_added_mid_turn_are_not_turns() {
+        let mut messages = conversation();
+        messages.insert(4, Message::user("also check the tests"));
+        messages.push(Message::user("Continue working toward the goal."));
+        messages.push(Message::assistant("continuing"));
+        assert_eq!(turn_count(&messages), 2);
+
+        // Rewinding one turn removes the second prompt and everything after
+        // it, and keeps the steer that belonged to the first turn.
+        assert_eq!(rollback(&mut messages, 1), Ok(1));
+        assert_eq!(messages.len(), 5);
+        assert_eq!(visible_text(&messages[4]), "also check the tests");
+    }
+
+    #[test]
+    fn a_transcript_from_before_marking_is_marked_by_the_old_rule_on_load() {
+        let unmarked = vec![
+            Message::user("first"),
+            tool_use("t1"),
+            tool_result("t1"),
+            Message::assistant("done one"),
+            Message::user("second"),
+        ];
+        let restored = deserialize(&serialize(&unmarked));
+        assert_eq!(turn_count(&restored), 2);
+        assert!(restored[0].uuid.as_deref().unwrap().starts_with(TURN_MARK));
+        assert!(restored[2].uuid.is_none(), "a tool result is never a turn");
+
+        // Already-marked transcripts are left exactly as they were.
+        let marked = conversation();
+        let again = deserialize(&serialize(&marked));
+        assert_eq!(again[0].uuid, marked[0].uuid);
+    }
+
+    #[test]
+    fn a_compaction_summary_counts_the_turns_it_replaced() {
+        // Three turns, then the engine folded the first two into a summary
+        // and kept the third verbatim.
+        let before = vec![
+            prompt("one"),
+            Message::assistant("a"),
+            prompt("two"),
+            Message::assistant("b"),
+            prompt("three"),
+            Message::assistant("c"),
+        ];
+        let weight_before = turn_count(&before);
+        let mut after = vec![summary("one and two")];
+        after.extend_from_slice(&before[4..]);
+
+        settle_compaction(weight_before, &mut after);
+        assert_eq!(turn_count(&after), 3);
+        assert_eq!(after[0].uuid.as_deref(), Some("waku:compact:2"));
+
+        // The kept turn can still be rewound; reaching into the summary cannot.
+        let mut rewound = after.clone();
+        assert_eq!(rollback(&mut rewound, 1), Ok(1));
+        assert_eq!(rewound.len(), 1);
+        let mut too_far = after.clone();
+        assert_eq!(rollback(&mut too_far, 2), Err(RewindPastCompaction));
+        assert_eq!(too_far.len(), after.len(), "a refused rewind changes nothing");
+        assert!(fork(&after, 3).is_err());
+    }
+
+    #[test]
+    fn a_prompt_is_found_again_until_a_compaction_folds_it_away() {
+        let mut message = Message::user("go");
+        let mark = mark_turn(&mut message);
+        let messages = vec![Message::assistant("earlier"), message];
+        assert_eq!(position_of(&messages, &mark), Some(1));
+        assert_eq!(position_of(&[summary("go")], &mark), None);
+    }
+
     #[test]
     fn rewinding_one_turn_keeps_the_whole_previous_exchange() {
         let mut messages = conversation();
-        assert_eq!(rollback(&mut messages, 1), 1);
+        assert_eq!(rollback(&mut messages, 1), Ok(1));
         assert_eq!(messages.len(), 4);
         // The tool_use and its matching tool_result both survived.
         assert!(matches!(messages[1].role, Role::Assistant));
@@ -238,21 +455,21 @@ mod tests {
     #[test]
     fn rewinding_past_the_start_empties_the_conversation_without_panicking() {
         let mut messages = conversation();
-        assert_eq!(rollback(&mut messages, 99), 2);
+        assert_eq!(rollback(&mut messages, 99), Ok(2));
         assert!(messages.is_empty());
     }
 
     #[test]
     fn rewinding_zero_turns_changes_nothing() {
         let mut messages = conversation();
-        assert_eq!(rollback(&mut messages, 0), 0);
+        assert_eq!(rollback(&mut messages, 0), Ok(0));
         assert_eq!(messages.len(), 6);
     }
 
     #[test]
     fn a_branch_does_not_disturb_the_conversation_it_came_from() {
         let messages = conversation();
-        let branched = fork(&messages, 1);
+        let branched = fork(&messages, 1).unwrap();
         assert_eq!(branched.len(), 4);
         assert_eq!(messages.len(), 6);
     }
@@ -283,7 +500,7 @@ mod tests {
 
     #[test]
     fn a_turn_still_running_has_an_empty_answer_rather_than_none() {
-        let turns = turns_for_display(&[Message::user("hello")]);
+        let turns = turns_for_display(&[prompt("hello")]);
         assert_eq!(
             turns,
             vec![TranscriptTurn {

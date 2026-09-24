@@ -54,6 +54,41 @@ pub struct AgentSession {
 
 type ToolSet = Arc<Vec<Box<dyn Tool>>>;
 
+/// Engine tools that exist but do nothing in this process. Their runners —
+/// the team swarm, the inbox reader, the cron scheduler, remote triggers —
+/// belong to the engine's CLI, which is not here, so a model that calls them
+/// is told it succeeded at something that never happens.
+pub(crate) const UNAVAILABLE_TOOLS: [&str; 7] = [
+    "TeamCreate",
+    "TeamDelete",
+    "SendMessage",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "RemoteTrigger",
+];
+
+/// Offered only while a goal is active: with none, calling it would report a
+/// goal completed that was never set.
+pub(crate) const GOAL_COMPLETE_TOOL: &str = "GoalComplete";
+
+/// The two tool sets a turn can start with — with `GoalComplete` and
+/// without. Built side by side because a boxed tool cannot be cloned.
+#[derive(Clone)]
+struct ToolSets {
+    plain: ToolSet,
+    goal: ToolSet,
+}
+
+impl ToolSets {
+    fn build(disallowed: &[String], mcp: Option<&Arc<claurst_mcp::McpManager>>) -> Self {
+        Self {
+            plain: builtin_tools(disallowed, mcp, false),
+            goal: builtin_tools(disallowed, mcp, true),
+        }
+    }
+}
+
 struct Inner {
     events: EventSink,
     id: String,
@@ -64,7 +99,7 @@ struct Inner {
     client: Mutex<Arc<AnthropicClient>>,
     /// Replaced, not mutated, when the MCP roster connects: a turn already
     /// running keeps the set it started with.
-    tools: Mutex<ToolSet>,
+    tools: Mutex<ToolSets>,
     cost_tracker: Arc<CostTracker>,
     file_history: Arc<Mutex<claurst_core::file_history::FileHistory>>,
     manager: Arc<std::sync::Mutex<PermissionManager>>,
@@ -102,7 +137,11 @@ impl AgentSession {
     /// Build a session and its engine runtime. Does not contact the model.
     pub fn start(options: AgentStartOptions, events: EventSink) -> anyhow::Result<Self> {
         let loaded = load_settings()?;
-        let config = build_config_from(loaded.clone(), &options);
+        let mut config = build_config_from(loaded.clone(), &options);
+        crate::config::apply_compaction_settings(
+            &mut config,
+            crate::config::settings_document().as_ref(),
+        );
         let settings = Arc::new(Mutex::new(loaded));
         let mut query = build_query_config(&config, &options);
 
@@ -140,10 +179,13 @@ impl AgentSession {
             None => crate::computer_use::remove_skill(),
         }
 
-        let tools = builtin_tools(&config.disallowed_tools, None);
+        let tools = ToolSets::build(&config.disallowed_tools, None);
         let inner = Arc::new(Inner {
             events,
-            id: uuid::Uuid::new_v4().to_string(),
+            id: options
+                .session_id
+                .clone()
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             cwd: options.cwd.clone(),
             client: Mutex::new(client),
             tools: Mutex::new(tools),
@@ -375,19 +417,21 @@ impl AgentSession {
 
     /// Drop the last `turns` user turns. Refused while a turn is running: the
     /// loop holds a working copy, and truncating underneath it would be
-    /// undone the moment that copy is written back.
+    /// undone the moment that copy is written back. Also refused, with
+    /// [`history::RewindPastCompaction`], when the cut would fall inside a
+    /// compaction summary.
     pub fn rollback(&self, turns: usize) -> anyhow::Result<usize> {
         if self.is_busy() {
             anyhow::bail!("cannot rewind while a turn is running");
         }
-        let removed = history::rollback(&mut self.inner.history.lock(), turns);
+        let removed = history::rollback(&mut self.inner.history.lock(), turns)?;
         Ok(removed)
     }
 
     /// A copy of the conversation with the last `turns_to_remove` turns
     /// dropped, ready to seed a branch. Leaves this session untouched.
     pub fn fork(&self, turns_to_remove: usize) -> anyhow::Result<Vec<u8>> {
-        let branched = history::fork(&self.inner.history.lock(), turns_to_remove);
+        let branched = history::fork(&self.inner.history.lock(), turns_to_remove)?;
         Ok(history::serialize(&branched))
     }
 }
@@ -446,10 +490,15 @@ pub(crate) fn build_clients(
 fn builtin_tools(
     disallowed: &[String],
     mcp: Option<&Arc<claurst_mcp::McpManager>>,
+    with_goal: bool,
 ) -> ToolSet {
     let mut tools: Vec<Box<dyn Tool>> = claurst_tools::all_tools();
     tools.push(Box::new(claurst_query::AgentTool));
     tools.retain(|tool| !disallowed.iter().any(|name| name == tool.name()));
+    tools.retain(|tool| !UNAVAILABLE_TOOLS.contains(&tool.name()));
+    if !with_goal {
+        tools.retain(|tool| tool.name() != GOAL_COMPLETE_TOOL);
+    }
     // The PowerShell tool runs `pwsh`, which a Mac or Linux machine almost
     // never has; a tool the model can call but not run only teaches it to
     // fail. Claude Code and Pi offer it on Windows alone.
@@ -484,7 +533,7 @@ fn connect_mcp_in_background(inner: &Arc<Inner>) {
             tracing::warn!(%server, %error, "agent: MCP server did not connect");
         }
         let disallowed = inner.config.lock().disallowed_tools.clone();
-        *inner.tools.lock() = builtin_tools(&disallowed, Some(&manager));
+        *inner.tools.lock() = ToolSets::build(&disallowed, Some(&manager));
         *inner.mcp.lock() = Some(manager);
     });
 }
@@ -553,10 +602,16 @@ async fn run_turn(
     // tool calls, tool results, and synthetic results for anything abandoned
     // by a cancel — and the result is what gets written back.
     let mut messages = inner.history.lock().clone();
-    messages.push(Message::user(prompt));
-    // Everything from here on is this turn's, which is what lets a turn that
-    // produced nothing be told apart from one that answered.
-    let turn_start = messages.len();
+    // What the conversation weighed going in, for marking a summary the
+    // engine may write this turn with the turns it replaced.
+    let weight_before = history::turn_count(&messages) + 1;
+    let mut prompt = Message::user(prompt);
+    // Found again by its mark rather than by index: a compaction mid-turn
+    // rewrites everything before it, and everything after the prompt is this
+    // turn's — which is what lets a turn that produced nothing be told apart
+    // from one that answered.
+    let turn_mark = history::mark_turn(&mut prompt);
+    messages.push(prompt);
 
     let config = inner.config.lock().clone();
     let mut query = inner.query.lock().clone();
@@ -575,7 +630,7 @@ async fn run_turn(
         model: query.model.clone(),
         api_base: config.resolve_anthropic_api_base(),
     };
-    let tools = inner.tools.lock().clone();
+    let tools = inner.tools.lock().plain.clone();
     // `None` means "nobody here knows", and the meter then shows a token
     // count with no percentage rather than a percentage of the wrong number.
     // The engine's heuristic would have answered 100k for every model this
@@ -638,6 +693,13 @@ async fn run_turn(
     // treats "no turn" as "idle" and clones the history to start the next
     // loop; if that could happen between these two steps the next turn would
     // start from a transcript missing this one, and then overwrite it.
+    history::settle_compaction(weight_before, &mut messages);
+    // A prompt a compaction folded away was followed by enough work to fill
+    // the context, so the turn did not go quiet.
+    let produced_output = match history::position_of(&messages, &turn_mark) {
+        Some(index) => history::produced_visible_output(&messages, index + 1),
+        None => true,
+    };
     *inner.history.lock() = messages;
 
     // Now let the next prompt in. Whatever steering was still queued is
@@ -651,7 +713,6 @@ async fn run_turn(
     };
     inner.questions.lock().clear();
 
-    let produced_output = history::produced_visible_output(&inner.history.lock(), turn_start);
     // Only a turn the engine called *finished* counts as empty. A cancel
     // produces nothing either, and saying "the model ended without saying
     // anything" to someone who just pressed stop would be a lie.
@@ -893,14 +954,28 @@ mod tests {
 
     #[test]
     fn the_builtin_tool_set_includes_the_sub_agent_tool() {
-        let tools = builtin_tools(&[], None);
+        let tools = builtin_tools(&[], None, false);
         assert!(tools.iter().any(|tool| tool.name() == "Agent"));
         assert!(tools.iter().any(|tool| tool.name() == "Read"));
     }
 
+    /// Tools whose runner is not in this process would report success at
+    /// something that never happens; GoalComplete would close a goal that
+    /// was never set.
+    #[test]
+    fn tools_that_cannot_work_here_are_never_offered() {
+        let plain = builtin_tools(&[], None, false);
+        for name in UNAVAILABLE_TOOLS.iter().chain([&GOAL_COMPLETE_TOOL]) {
+            assert!(!plain.iter().any(|tool| tool.name() == *name), "{name}");
+        }
+        let goal = builtin_tools(&[], None, true);
+        assert!(goal.iter().any(|tool| tool.name() == GOAL_COMPLETE_TOOL));
+        assert!(!goal.iter().any(|tool| tool.name() == "TeamCreate"));
+    }
+
     #[test]
     fn a_disallowed_tool_is_not_offered_at_all() {
-        let tools = builtin_tools(&["WebSearch".to_string()], None);
+        let tools = builtin_tools(&["WebSearch".to_string()], None, false);
         assert!(!tools.iter().any(|tool| tool.name() == "WebSearch"));
         assert!(tools.iter().any(|tool| tool.name() == "Read"));
     }

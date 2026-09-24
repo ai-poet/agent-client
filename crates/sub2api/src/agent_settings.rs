@@ -137,15 +137,13 @@ pub struct AgentSettings {
 /// `claurst_query`. `waku-agent-bridge` asserts in its tests that this list
 /// and the engine's agree, so the page cannot drift from what the model is
 /// actually offered — and this crate stays free of the engine crates.
-pub const BUILTIN_TOOLS: [&str; 45] = [
+pub const BUILTIN_TOOLS: [&str; 37] = [
     "Agent", "ApplyPatch", "AskUserQuestion", "Bash", "BatchEdit", "Brief", "Config",
-    "CronCreate", "CronDelete", "CronList", "Edit", "EnterPlanMode", "EnterWorktree",
-    "ExitPlanMode", "ExitWorktree", "Glob", "GoalComplete", "Grep", "LSP",
-    "ListMcpResources", "NotebookEdit", "PowerShell", "REPL", "Read",
-    "ReadMcpResource", "RemoteTrigger", "SendMessage", "Skill", "Sleep",
-    "StructuredOutput", "TaskCreate", "TaskGet", "TaskList", "TaskOutput", "TaskStop",
-    "TaskUpdate", "TeamCreate", "TeamDelete", "TodoWrite", "ToolSearch", "WebFetch",
-    "WebSearch", "Write", "mcp__auth", "monitor",
+    "Edit", "EnterPlanMode", "EnterWorktree", "ExitPlanMode", "ExitWorktree", "Glob",
+    "Grep", "LSP", "ListMcpResources", "NotebookEdit", "PowerShell", "REPL", "Read",
+    "ReadMcpResource", "Skill", "Sleep", "StructuredOutput", "TaskCreate", "TaskGet",
+    "TaskList", "TaskOutput", "TaskStop", "TaskUpdate", "TodoWrite", "ToolSearch",
+    "WebFetch", "WebSearch", "Write", "mcp__auth", "monitor",
 ];
 
 /// Tools the page does not offer to disable: without them the agent cannot

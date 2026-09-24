@@ -53,6 +53,7 @@ pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result
         // One prompt with no tools has nothing to control and nothing to
         // draw with.
         computer_use: None,
+        session_id: None,
     };
     let config = build_config(&options)?;
     let mut query = build_query_config(&config, &options);

@@ -45,8 +45,10 @@ pub use skill_prefetch::{
 pub use sanitize::sanitize_history;
 pub use compact::{
     AutoCompactState, CompactResult, CompactTrigger, MicroCompactConfig, MessageGroup, TokenWarningState,
-    auto_compact_if_needed, calculate_messages_to_keep_index, calculate_token_warning_state,
-    calculate_token_warning_state_for_window, compact_conversation, context_collapse,
+    COMPACT_SUMMARY_OPEN, auto_compact_if_needed, calculate_messages_to_keep_index,
+    calculate_token_warning_state, calculate_token_warning_state_for_window,
+    compact_conversation, compact_conversation_via_provider, compact_conversation_with,
+    context_collapse, should_auto_compact_at,
     context_window_for_model, estimate_context_tokens, format_compact_summary, get_compact_prompt,
     group_messages_for_compact, micro_compact_if_needed, reactive_compact,
     resolve_context_window, should_auto_compact, should_auto_compact_for_window, should_compact,
@@ -256,6 +258,26 @@ pub enum QueryEvent {
     /// `state` is Warning (≥ 80 %) or Critical (≥ 95 %).
     /// `pct_used` is the fraction of the context window consumed (0.0–1.0).
     TokenWarning { state: TokenWarningState, pct_used: f64 },
+    /// Waku: the loop is compacting the conversation, or has. Replaces the
+    /// `Status` strings the proactive path used to send, so a client can show
+    /// it without matching on English.
+    Compaction {
+        phase: CompactionPhase,
+        /// Always `true` from the loop; a caller compacting on request says so
+        /// itself.
+        automatic: bool,
+        tokens_before: u64,
+        /// Estimated, once `phase` is `Finished`.
+        tokens_after: Option<u64>,
+    },
+}
+
+/// Waku: where a compaction is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactionPhase {
+    Started,
+    Finished,
+    Failed,
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +328,22 @@ fn merge_provider_stream_usage(current: &mut UsageInfo, update: &UsageInfo) {
 
 // Spinner verbs are imported from claurst_core::spinner
 
+/// Waku: the latest user message a person wrote, skipping the tool-result
+/// messages the loop adds after every tool round. Reading those instead made
+/// a keyword-raised effort or persona last exactly one model request: from
+/// the second step of the prompt that asked for it, the "last user message"
+/// was a tool result with no text at all.
+fn last_written_user_message(messages: &[Message]) -> Option<&Message> {
+    messages.iter().rev().find(|message| {
+        message.role == Role::User
+            && !matches!(
+                &message.content,
+                claurst_core::types::MessageContent::Blocks(blocks)
+                    if blocks.iter().any(|block| matches!(block, ContentBlock::ToolResult { .. }))
+            )
+    })
+}
+
 /// Resolve the effective effort level for a turn.
 ///
 /// Ultracode is a keyword-activated effort: if the most recent user message
@@ -321,7 +359,7 @@ fn effective_effort_for_turn(
     config_effort: Option<claurst_core::effort::EffortLevel>,
     messages: &[Message],
 ) -> Option<claurst_core::effort::EffortLevel> {
-    if let Some(last_user) = messages.iter().rev().find(|m| m.role == Role::User) {
+    if let Some(last_user) = last_written_user_message(messages) {
         if claurst_core::effort::text_triggers_ultracode(&last_user.get_all_text()) {
             return Some(claurst_core::effort::EffortLevel::Ultracode);
         }
@@ -348,7 +386,7 @@ fn effective_output_style_for_turn(
     claurst_core::system_prompt::OutputStyle,
     Option<String>,
 ) {
-    if let Some(last_user) = messages.iter().rev().find(|m| m.role == Role::User) {
+    if let Some(last_user) = last_written_user_message(messages) {
         if let Some(style_name) =
             claurst_core::keywords::inline_persona_style(&last_user.get_all_text())
         {
@@ -576,19 +614,18 @@ pub async fn run_query_loop(
             }
         }
 
-        // T1-4: Drain the priority command queue (if wired up) and prepend any
+        // T1-4: Drain the priority command queue (if wired up) and append any
         // resulting messages to the conversation before the API call.
         // Mirrors the TS `messageQueueManager` priority-queue drain.
+        //
+        // Waku: appended, not prepended. `drain_command_queue` already orders
+        // them by priority among themselves; putting them in front of the
+        // whole conversation made a steering message the first thing the
+        // model read, before the prompt it was steering.
         if let Some(ref cq) = config.command_queue {
-            if !cq.is_empty() {
-                let injected = drain_command_queue(cq);
-                if !injected.is_empty() {
-                    debug!(count = injected.len(), "Injecting command-queue messages");
-                    // Prepend so that higher-priority commands appear first.
-                    let tail = std::mem::take(messages);
-                    messages.extend(injected);
-                    messages.extend(tail);
-                }
+            let injected = inject_command_queue(messages, cq);
+            if injected > 0 {
+                debug!(count = injected, "Injecting command-queue messages");
             }
         }
 
@@ -1293,6 +1330,30 @@ pub async fn run_query_loop(
                             cost: None,
                             snapshot_patch: None,
                         });
+                        // Waku: this branch used to go straight round again,
+                        // so a Responses or Chat Completions session never
+                        // compacted and its meter only moved when the whole
+                        // prompt ended. Report the round, then do what the
+                        // Messages branch does after one.
+                        if let Some(ref tx) = event_tx {
+                            let _ = tx.send(QueryEvent::TurnComplete {
+                                turn,
+                                stop_reason: "tool_use".to_string(),
+                                usage: Some(usage.clone()),
+                            });
+                        }
+                        manage_provider_context(
+                            messages,
+                            provider.as_ref(),
+                            &provider_id_str,
+                            &model_id_str,
+                            &usage,
+                            config,
+                            &tool_ctx.config,
+                            &mut compact_state,
+                            event_tx.as_ref(),
+                        )
+                        .await;
                         continue; // loop for next turn
                     }
 
@@ -1341,6 +1402,21 @@ pub async fn run_query_loop(
                             assistant_msg.snapshot_patch = Some(patch);
                         }
                     }
+
+                    // Waku: as after a tool round, so the next prompt starts
+                    // from a conversation that fits.
+                    manage_provider_context(
+                        messages,
+                        provider.as_ref(),
+                        &provider_id_str,
+                        &model_id_str,
+                        &usage,
+                        config,
+                        &tool_ctx.config,
+                        &mut compact_state,
+                        event_tx.as_ref(),
+                    )
+                    .await;
 
                     continue_or_end!(assistant_msg, usage);
                 } else if provider_id_str != "anthropic" {
@@ -1658,23 +1734,22 @@ pub async fn run_query_loop(
             }
         } else if stop == "end_turn" || stop == "tool_use" {
             // Proactive auto-compact (original path, used when reactive compact is off).
-            if let Some(new_msgs) = compact::auto_compact_if_needed(
-                client,
+            // Waku: gated on the Agent settings' switch and threshold, and
+            // reported as a `Compaction` event — shared with the provider
+            // branch, which used to skip this block entirely.
+            auto_compact_on_route(
                 messages,
+                Summariser::Messages {
+                    client,
+                    model: &config.model,
+                },
                 context_tokens,
-                &config.model,
                 context_window,
+                &tool_ctx.config,
                 &mut compact_state,
+                event_tx.as_ref(),
             )
-            .await
-            {
-                *messages = new_msgs;
-                if let Some(ref tx) = event_tx {
-                    let _ = tx.send(QueryEvent::Status(
-                        "Context compacted to stay within limits.".to_string(),
-                    ));
-                }
-            }
+            .await;
         }
 
         if let Some(ref tx) = event_tx {
@@ -2095,6 +2170,177 @@ impl StreamHandler for ChannelStreamHandler {
     }
 }
 
+/// Waku: what a compaction's summary is asked of.
+enum Summariser<'a> {
+    /// The Messages client the Anthropic branch streams through.
+    Messages {
+        client: &'a claurst_api::AnthropicClient,
+        model: &'a str,
+    },
+    /// The adapter the provider branch dispatched through, with the output
+    /// limit the session already runs at.
+    Provider {
+        provider: &'a dyn claurst_api::LlmProvider,
+        model: &'a str,
+        max_tokens: u32,
+    },
+}
+
+/// Waku: tell the client how full the context is once it passes the warning
+/// thresholds.
+fn emit_token_warning(
+    context_tokens: u64,
+    context_window: u64,
+    event_tx: Option<&mpsc::UnboundedSender<QueryEvent>>,
+) {
+    let state = compact::calculate_token_warning_state_for_window(context_tokens, context_window);
+    if state == compact::TokenWarningState::Ok || context_window == 0 {
+        return;
+    }
+    if let Some(tx) = event_tx {
+        let _ = tx.send(QueryEvent::TokenWarning {
+            state,
+            pct_used: context_tokens as f64 / context_window as f64,
+        });
+    }
+}
+
+/// Waku: compact once the context passes the threshold the Agent settings
+/// page writes, if its switch is on. The loop never read either setting, so
+/// both did nothing.
+async fn auto_compact_on_route(
+    messages: &mut Vec<Message>,
+    summariser: Summariser<'_>,
+    context_tokens: u64,
+    context_window: u64,
+    settings: &Config,
+    state: &mut compact::AutoCompactState,
+    event_tx: Option<&mpsc::UnboundedSender<QueryEvent>>,
+) {
+    if !settings.auto_compact
+        || !compact::should_auto_compact_at(
+            context_tokens,
+            context_window,
+            f64::from(settings.effective_compact_threshold()),
+            state,
+        )
+    {
+        return;
+    }
+    let send = |phase, tokens_after| {
+        if let Some(tx) = event_tx {
+            let _ = tx.send(QueryEvent::Compaction {
+                phase,
+                automatic: true,
+                tokens_before: context_tokens,
+                tokens_after,
+            });
+        }
+    };
+    send(CompactionPhase::Started, None);
+    info!(context_tokens, context_window, "Auto-compact triggered");
+    let result = match summariser {
+        Summariser::Messages { client, model } => {
+            compact::compact_conversation_with(client, messages, model, None).await
+        }
+        Summariser::Provider {
+            provider,
+            model,
+            max_tokens,
+        } => {
+            compact::compact_conversation_via_provider(provider, model, messages, max_tokens, None)
+                .await
+        }
+    };
+    match result {
+        // Nothing old enough to fold away: the context is full of what the
+        // recent tail must keep. Counted as a failure so the breaker stops
+        // retrying it every round.
+        Ok(compacted) if compacted.len() >= messages.len() => {
+            state.on_failure();
+            send(CompactionPhase::Failed, None);
+        }
+        Ok(compacted) => {
+            *messages = compacted;
+            state.on_success();
+            let after = compact::estimate_context_tokens(messages, None);
+            send(CompactionPhase::Finished, Some(after));
+        }
+        Err(error) => {
+            warn!(error = %error, "Auto-compact failed; conversation preserved");
+            state.on_failure();
+            send(CompactionPhase::Failed, None);
+        }
+    }
+}
+
+/// Waku: the provider branch's context check. Sized from what the provider
+/// reported for the request just made, plus the tool results added since.
+#[allow(clippy::too_many_arguments)]
+async fn manage_provider_context(
+    messages: &mut Vec<Message>,
+    provider: &dyn claurst_api::LlmProvider,
+    provider_id: &str,
+    model_id: &str,
+    usage: &UsageInfo,
+    config: &QueryConfig,
+    settings: &Config,
+    state: &mut compact::AutoCompactState,
+    event_tx: Option<&mpsc::UnboundedSender<QueryEvent>>,
+) {
+    let context_window =
+        compact::resolve_context_window(config.model_registry.as_deref(), provider_id, model_id);
+    let context_tokens = provider_context_tokens(messages, usage);
+    emit_token_warning(context_tokens, context_window, event_tx);
+    auto_compact_on_route(
+        messages,
+        Summariser::Provider {
+            provider,
+            model: model_id,
+            max_tokens: config.max_tokens,
+        },
+        context_tokens,
+        context_window,
+        settings,
+        state,
+        event_tx,
+    )
+    .await;
+}
+
+/// Waku: what the next request will carry — the last request's reported
+/// input and output, plus an estimate of any tool results since. Estimated
+/// whole when the provider reported nothing.
+fn provider_context_tokens(messages: &[Message], usage: &UsageInfo) -> u64 {
+    let reported = usage.total_input() + usage.output_tokens;
+    if reported == 0 {
+        return compact::estimate_context_tokens(messages, None);
+    }
+    let since = messages
+        .iter()
+        .rposition(|message| message.role == Role::Assistant)
+        .map_or(&messages[..0], |index| &messages[index + 1..]);
+    let added = if since.is_empty() {
+        0
+    } else {
+        compact::estimate_context_tokens(since, None)
+    };
+    reported + added
+}
+
+/// Waku: move whatever the command queue holds to the end of the
+/// conversation, where the model reads it after the tool results it reacts
+/// to. Returns how many messages were added.
+fn inject_command_queue(messages: &mut Vec<Message>, queue: &CommandQueue) -> usize {
+    if queue.is_empty() {
+        return 0;
+    }
+    let injected = drain_command_queue(queue);
+    let count = injected.len();
+    messages.extend(injected);
+    count
+}
+
 // ---------------------------------------------------------------------------
 // Provider stream event mapping
 // ---------------------------------------------------------------------------
@@ -2107,6 +2353,76 @@ impl StreamHandler for ChannelStreamHandler {
 mod tests {
     use super::*;
     use claurst_api::SystemPrompt;
+
+    /// Waku: the provider branch sizes the next request from what the last
+    /// one reported plus the tool results added since — not from the chars/4
+    /// estimate of everything, which a cached prompt makes meaningless.
+    #[test]
+    fn the_provider_branch_counts_reported_usage_plus_new_tool_results() {
+        let usage = UsageInfo {
+            input_tokens: 40_000,
+            output_tokens: 1_000,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 60_000,
+        };
+        let answered = vec![Message::user("go"), Message::assistant("done")];
+        assert_eq!(provider_context_tokens(&answered, &usage), 101_000);
+
+        let mut with_results = answered.clone();
+        with_results.push(Message::user("x".repeat(4_000)));
+        assert!(provider_context_tokens(&with_results, &usage) > 101_000);
+
+        // Nothing reported: estimate the whole conversation instead of zero.
+        let silent = provider_context_tokens(&with_results, &UsageInfo::default());
+        assert!(silent > 0 && silent < 10_000, "{silent}");
+    }
+
+    /// Waku: an `ultracode` prompt keeps its effort through the tool rounds it
+    /// sets off, instead of dropping back after the first one.
+    #[test]
+    fn a_keyword_prompt_keeps_its_effort_across_tool_rounds() {
+        let messages = vec![
+            Message::user("please ultracode the parser"),
+            Message::assistant_blocks(vec![ContentBlock::ToolUse {
+                id: "t1".into(),
+                name: "Read".into(),
+                input: serde_json::json!({}),
+                thought_signature: None,
+            }]),
+            Message::user_blocks(vec![ContentBlock::ToolResult {
+                tool_use_id: "t1".into(),
+                content: ToolResultContent::Text("fn parse() {}".into()),
+                is_error: None,
+            }]),
+        ];
+        assert_eq!(
+            effective_effort_for_turn(None, &messages),
+            Some(claurst_core::effort::EffortLevel::Ultracode)
+        );
+    }
+
+    /// Waku: a steering message lands after the conversation it steers, not
+    /// in front of it.
+    #[test]
+    fn queued_messages_are_appended_in_the_order_they_were_sent() {
+        let queue = CommandQueue::new();
+        queue.push(
+            QueuedCommand::InjectUserMessage("first steer".into()),
+            CommandPriority::Normal,
+        );
+        queue.push(
+            QueuedCommand::InjectUserMessage("second steer".into()),
+            CommandPriority::Normal,
+        );
+        let mut messages = vec![Message::user("the prompt"), Message::assistant("working")];
+
+        assert_eq!(inject_command_queue(&mut messages, &queue), 2);
+
+        let texts: Vec<String> = messages.iter().map(Message::get_all_text).collect();
+        assert_eq!(texts, ["the prompt", "working", "first steer", "second steer"]);
+        assert!(queue.is_empty());
+        assert_eq!(inject_command_queue(&mut messages, &queue), 0);
+    }
 
     #[test]
     fn final_stream_usage_supplies_prompt_tokens_to_turn_usage() {
