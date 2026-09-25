@@ -29,6 +29,20 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.2.3]
+
+- 国模可以按量付费：订阅和按量付费分组都提供的模型（DeepSeek、智谱 GLM、Kimi 等），在内置 Agent 的模型选择里多出一项「按量付费」，选它就按余额计费。订阅那一项仍优先使用订阅额度，额度用完或订阅过期后自动改走按量付费，下一轮对话即生效，额度恢复后再切回订阅
+
+  Chinese models can be paid by use: a model both a subscription and a pay-as-you-go group serve (DeepSeek, Zhipu GLM, Kimi and the like) gets a second "Pay as you go" entry in the built-in agent's model picker, billed to your balance. The subscription entry still spends the subscription first, and once its limit is used up or it lapses it moves to pay-as-you-go on its own from the next turn, returning to the subscription when the limit resets
+
+- 内置 Agent 重新显示模型的思考过程：Claude、GPT 以及 DeepSeek、GLM、Kimi 的推理内容都会出现在对话里
+
+  The built-in agent shows the model's reasoning again: Claude's, GPT's and DeepSeek's, GLM's and Kimi's thinking all appear in the conversation
+
+- 没有手动选过推理强度的对话，现在按模型默认的强度发送，与菜单上显示的一致——此前 Claude 不会思考，GPT 固定用「中」；GPT-6 系列也能收到所选的推理强度；对话中途切换模型不再沿用上一个模型的推理强度
+
+  A conversation that never picked a reasoning effort now sends the model's default, the one the menu shows — before, Claude did not think at all and GPT always ran at medium. The GPT-6 family receives the chosen effort too, and switching models mid-conversation no longer carries the previous model's effort over
+
 ## [0.2.2]
 
 - 设置 → 套餐：浏览在售套餐，直接在应用内购买或续费。价格、原价、有效期、每日/每周/每月额度、适用的 CLI 和模型一目了然，已持有的套餐标出到期时间和用量。用支付宝或微信扫码付款，付款后套餐自动开通——订阅分组、密钥和模型路由随即就绪；如果套餐对应的 Claude Code 或 Codex 还在走别的分组，一键切换过去
