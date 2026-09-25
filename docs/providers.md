@@ -1005,11 +1005,25 @@ model instead (`crates/sub2api/src/model_routing.rs`):
    lists the model. A bound group that lists nothing at all is trusted and
    the model keeps the slot's key: accounts without a model mapping add no
    catalog entries, so silence says nothing about what the group serves.
-2. Otherwise an active subscription group that lists it.
-3. Otherwise any group that lists it.
+2. Otherwise a subscription group that lists it and still has room in every
+   window (`SubscriptionProgress::is_exhausted` says otherwise once a daily,
+   weekly or monthly limit is spent, or the subscription is no longer
+   active).
+3. Otherwise a pay-as-you-go group — any group that is not a subscription —
+   that lists it. The live "国模按量付费分组" is one of these, on `openai`.
+4. Otherwise a spent subscription, since nothing else serves the model.
 
-Within 2 and 3 the model's own platform beats a composite group, which beats
-anything else, then the lower rate. A subscription group the catalog is
+Within each rule the model's own platform beats a composite group, which
+beats anything else; a group a CLI slot is bound to then sorts last (it is
+that slot's family's, and the Codex group listing a DeepSeek model was the
+503 above); then the lower rate. A model that both a subscription and a
+pay-as-you-go group serve — and that rule 1 did not claim — also gets its
+pay-as-you-go group on its own (`Credentials::payg_routes`): the picker lists
+it a second time, as `deepseek+payg::deepseek-v4.1-flash`, subtitled "pay as
+you go", for the user who wants to pay by use while the subscription still
+has room. The bridge strips the `+payg` mark in `split_model`, and
+`select_route` reads that row's key from `gateway_keys.payg_models` before
+the plain `gateway_keys.models`. A subscription group the catalog is
 silent about is asked with one of its keys (`GET /v1/models`), believed only
 where it cannot be a platform default in disguise — the model's family is
 the group's platform, or the group is composite.
@@ -1020,12 +1034,19 @@ lands: it reads the active subscriptions (`GET /api/v1/subscriptions/progress`),
 keeps one key per subscription group and per routed group in
 `Credentials::group_keys` — reusing an active key the account already has in
 that group before minting one, and dropping a kept key the listing shows
-gone — and stores the answer in `Credentials::model_routes`. The refresh runs
-on a copy; only those two tables are merged back into the live session, so a
-group switch made meanwhile is not undone. The routing writer then files one
-key per model (`gateway_keys.models` beside the per-platform keys, one table
-so it is released with them), and the picker names the subscription a model
-goes through in its subtitle.
+gone — and stores the answer in `Credentials::model_routes` and
+`Credentials::payg_routes`. The refresh runs on a copy; only those tables are
+merged back into the live session, so a group switch made meanwhile is not
+undone. The routing writer then files one key per model
+(`gateway_keys.models`, and `gateway_keys.payg_models` for the second rows,
+beside the per-platform keys, one table so they are released together), and
+the picker names the subscription a model goes through in its subtitle — or
+that it ran out and the model is on pay-as-you-go for now. The balance poll
+re-reads the subscriptions every minute; when the set of spent ones changes it
+re-routes, and a changed table is pushed to every live built-in session
+(`apply_session_options`), so a subscription that runs out hands over from
+the next turn. One group refusing a key no longer fails the whole refresh:
+its models keep their platform's key.
 
 Settings → Cloud Account lists the subscriptions — group, days left, spend
 against each daily, weekly and monthly limit, and which of the built-in
@@ -1242,9 +1263,32 @@ families over Responses turn it into `reasoning.effort`. Grok was the
 exception until the engine's reasoning-model list stopped leaving it out — a
 recorded departure — and the gateway normalizes the value per model and
 drops it for the ones that cannot use it, so the ladder is honest rather
-than decorative. A model the user declared on their own endpoint gets no
+than decorative. GPT-6 was the same story: the list read `gpt-5` as a prefix,
+so `gpt-6-*` went out with no effort until it took every generation from 5
+on. A model the user declared on their own endpoint gets no
 ladder: the engine decides by model name, an arbitrary name does not match,
 and guessing would send a field the upstream may reject.
+
+A session that never picked an effort sends the model's own default — the
+one the traits menu already draws as selected — rather than none
+(`session_options` in `src/app/runtime.rs`, built-in agent only; a CLI keeps
+"none" to mean its own configuration). Before, Claude went out with no
+thinking at all and GPT with the engine's fixed "medium". Switching model
+mid-session carries the new model's effort, even when that is none
+(`apply_options` in the bridge).
+
+**Reasoning in the transcript** — each API hands it over differently, and the
+engine read none of the three the way the gateway sends them. Claude's current
+families default to `thinking.display: "omitted"`, which streams every
+thinking block empty, so adaptive thinking goes out with `"summarized"`, as
+Claude Code's `--thinking-display summarized` does. Responses streams its
+summary as `response.reasoning_summary_text.delta`, which the Codex parser
+now reads (it is shown, not sent back: a `reasoning` input item needs the id
+of one the API produced). Chat Completions streams DeepSeek's, GLM's and
+Kimi's as `reasoning_content`, which the OpenAI parser now reads; that request
+already drops thinking, and the Anthropic request leaves out any thinking
+block without a signature, so a session that moves from a Chat model to
+Claude does not send one.
 
 **Tool results** — the bridge sets `tool_result_budget` well above what a
 single tool call may return. The engine's own default is half of one Bash

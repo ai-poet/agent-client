@@ -135,14 +135,28 @@ fn normalized_platform(platform: Option<&str>) -> Option<String> {
 
 /// The model id the picker sends carries the platform ahead of a `::`, so a
 /// bare id — the fallback list, a session from before this existed — reads
-/// as Anthropic. Nothing downstream ever sees the prefix.
+/// as Anthropic. Nothing downstream ever sees the prefix, nor the
+/// [`PAY_AS_YOU_GO_MARK`] the platform may carry.
 pub fn split_model(id: &str) -> (Option<String>, String) {
     match id.split_once("::") {
         Some((platform, model)) if !platform.is_empty() && !model.is_empty() => {
+            let platform = platform.strip_suffix(PAY_AS_YOU_GO_MARK).unwrap_or(platform);
             (Some(platform.to_owned()), model.to_owned())
         }
         _ => (None, id.to_owned()),
     }
+}
+
+/// What the picker appends to the platform of a model's "pay as you go"
+/// row: `deepseek+payg::deepseek-v4.1-flash`. Kept in step with the desktop's
+/// `native_agent::PAY_AS_YOU_GO_MARK`, which cannot import this crate.
+pub const PAY_AS_YOU_GO_MARK: &str = "+payg";
+
+/// Whether a picker model id is a "pay as you go" row: sent with the key of
+/// the model's pay-as-you-go group even while a subscription also serves it.
+pub fn pays_as_you_go(id: &str) -> bool {
+    id.split_once("::")
+        .is_some_and(|(platform, _)| platform.ends_with(PAY_AS_YOU_GO_MARK))
 }
 
 /// How much the agent may do without asking. Mirrors Waku's `RuntimeMode`,
@@ -202,6 +216,9 @@ pub struct AgentStartOptions {
     /// The gateway platform the model belongs to (`anthropic`, `openai`,
     /// `gemini`, …). Decides which of the account's keys is used.
     pub platform: Option<String>,
+    /// The picker's "pay as you go" row: the model's pay-as-you-go key is
+    /// tried before any other ([`pays_as_you_go`]).
+    pub pay_as_you_go: bool,
     /// `None` takes the platform's native format.
     pub wire_format: Option<WireFormat>,
     /// Waku's reasoning-effort id (`low`, `medium`, `high`, `xhigh`, `max`).
@@ -269,6 +286,7 @@ impl Default for AgentStartOptions {
             plan_mode: false,
             model: None,
             platform: None,
+            pay_as_you_go: false,
             wire_format: None,
             reasoning_effort: None,
             narration_language: None,
@@ -302,6 +320,7 @@ pub struct TurnOptions {
     pub plan_mode: Option<bool>,
     pub model: Option<String>,
     pub platform: Option<Option<String>>,
+    pub pay_as_you_go: Option<bool>,
     pub wire_format: Option<Option<WireFormat>>,
     pub reasoning_effort: Option<String>,
 }
@@ -468,13 +487,20 @@ fn select_route(config: &mut Config, options: &AgentStartOptions) {
     // group it knows, because the group that serves a model is not always
     // the one holding its platform's key — a DeepSeek model sent with the
     // Codex group's key comes back "no available channel".
-    let model_key = gateway_keys.as_ref().and_then(|keys| {
-        let model = options.model.as_deref()?.trim();
-        keys.get(MODEL_KEYS_MEMBER)?
-            .get(model)?
-            .as_str()
-            .map(str::to_owned)
-    });
+    let keyed_by_model = |member: &str| {
+        gateway_keys.as_ref().and_then(|keys| {
+            let model = options.model.as_deref()?.trim();
+            keys.get(member)?.get(model)?.as_str().map(str::to_owned)
+        })
+    };
+    // The "pay as you go" row asks for its own group first. Without one —
+    // the refresh that named it has not landed yet — it takes the model's
+    // usual route rather than failing.
+    let model_key = options
+        .pay_as_you_go
+        .then(|| keyed_by_model(PAYG_MODEL_KEYS_MEMBER))
+        .flatten()
+        .or_else(|| keyed_by_model(MODEL_KEYS_MEMBER));
     let key = model_key.or_else(|| {
         gateway_keys.as_ref().and_then(|keys| {
             platform
@@ -529,6 +555,11 @@ pub const GATEWAY_KEYS_OPTION: &str = "gateway_keys";
 /// The member of that table holding one key per model. Kept in step with
 /// `sub2api::global_config::native::MODEL_KEYS_MEMBER`.
 pub const MODEL_KEYS_MEMBER: &str = "models";
+
+/// The member holding each model's pay-as-you-go key, read for a session on
+/// the picker's "pay as you go" row. Kept in step with
+/// `sub2api::global_config::native::PAYG_MODEL_KEYS_MEMBER`.
+pub const PAYG_MODEL_KEYS_MEMBER: &str = "payg_models";
 
 /// A route with nothing to authenticate it.
 ///
@@ -1375,6 +1406,46 @@ mod tests {
         assert_eq!(config.api_key.as_deref(), Some("sk-codex"));
     }
 
+    /// The picker's "pay as you go" row goes out with that group's key while
+    /// the plain row keeps the subscription's; with no such key it falls back
+    /// to the plain route rather than failing.
+    #[test]
+    fn the_pay_as_you_go_row_takes_its_own_key() {
+        let mut config = Config::default();
+        let mut anthropic = ProviderConfig::default();
+        anthropic.api_base = Some("https://gw.example".into());
+        anthropic.options.insert(
+            GATEWAY_KEYS_OPTION.into(),
+            serde_json::json!({
+                "default": "sk-general",
+                "models": {"deepseek-v4.1-flash": "sk-subscription", "kimi-k3": "sk-subscription"},
+                "payg_models": {"deepseek-v4.1-flash": "sk-payg"}
+            }),
+        );
+        config.provider_configs.insert("anthropic".into(), anthropic);
+
+        let route = |id: &str, config: &mut Config| {
+            let (platform, model) = split_model(id);
+            let options = AgentStartOptions {
+                platform,
+                model: Some(model),
+                pay_as_you_go: pays_as_you_go(id),
+                ..AgentStartOptions::default()
+            };
+            select_route(config, &options);
+            config.api_key.clone()
+        };
+        assert_eq!(
+            route("deepseek+payg::deepseek-v4.1-flash", &mut config).as_deref(),
+            Some("sk-payg")
+        );
+        assert_eq!(
+            route("deepseek::deepseek-v4.1-flash", &mut config).as_deref(),
+            Some("sk-subscription")
+        );
+        assert_eq!(route("kimi+payg::kimi-k3", &mut config).as_deref(), Some("sk-subscription"));
+    }
+
     #[test]
     fn a_catalog_models_family_outranks_whatever_the_session_stored() {
         // A session persisted before the rule existed heals on the next turn
@@ -1433,6 +1504,15 @@ mod tests {
             split_model("meta-llama/Llama-3.3"),
             (None, "meta-llama/Llama-3.3".into())
         );
+        // The "pay as you go" mark never reaches the platform.
+        assert_eq!(
+            split_model("deepseek+payg::deepseek-v4.1-flash"),
+            (Some("deepseek".into()), "deepseek-v4.1-flash".into())
+        );
+        assert!(pays_as_you_go("deepseek+payg::deepseek-v4.1-flash"));
+        assert!(!pays_as_you_go("deepseek::deepseek-v4.1-flash"));
+        assert!(!pays_as_you_go("claude-sonnet-5"));
+        assert_eq!(PAY_AS_YOU_GO_MARK, "+payg");
     }
 
     #[test]

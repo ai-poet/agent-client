@@ -2748,13 +2748,26 @@ impl Waku {
                 .map(|model| model.id.clone())
         });
         let model_metadata = self.model_metadata_for_session(session);
-        let reasoning_effort = session.reasoning_effort.clone().filter(|effort| {
+        let offered = |effort: &String| {
             model_metadata.is_some_and(|model| {
                 model
                     .reasoning_efforts
                     .iter()
                     .any(|option| option.id == *effort)
             })
+        };
+        // Fork addition: the built-in agent sends the model's own default when
+        // the session never chose one — the traits menu already draws that
+        // default as selected, and the engine would otherwise send no effort
+        // at all to Claude and a fixed "medium" to GPT. A CLI keeps `None`,
+        // which means "whatever the CLI itself is configured with".
+        let reasoning_effort = session.reasoning_effort.clone().filter(offered).or_else(|| {
+            session
+                .provider
+                .is_builtin()
+                .then(|| model_metadata.and_then(|model| model.default_reasoning_effort.clone()))
+                .flatten()
+                .filter(offered)
         });
         let service_tier = session.service_tier.clone().filter(|tier| {
             tier == "default"

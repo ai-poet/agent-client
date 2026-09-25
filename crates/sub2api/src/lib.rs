@@ -273,7 +273,8 @@ pub fn ensure_group_keys(
                 .any(|key| usable(key) && key.key == *kept)
         });
     }
-    for group in wanted {
+    let mut refused: Option<anyhow::Error> = None;
+    for group in wanted.iter().copied() {
         if credentials.group_keys.contains_key(&group) {
             continue;
         }
@@ -283,19 +284,32 @@ pub fn ensure_group_keys(
             .find(|key| key.group_id == Some(group) && usable(key))
         {
             Some(key) => key.key.clone(),
-            None => {
-                client
-                    .create_key(
-                        &credentials.access_token,
-                        &format!("{} desktop", brand::DISPLAY_NAME),
-                        Some(group),
-                    )?
-                    .key
-            }
+            // One group refusing a key must not cost every other group its
+            // route: the models behind it keep their platform's key, and the
+            // next refresh asks again.
+            None => match client.create_key(
+                &credentials.access_token,
+                &format!("{} desktop", brand::DISPLAY_NAME),
+                Some(group),
+            ) {
+                Ok(created) => created.key,
+                Err(error) => {
+                    eprintln!("warning: no key for group {group}: {error:#}");
+                    refused.get_or_insert(error);
+                    continue;
+                }
+            },
         };
         credentials.group_keys.insert(group, key);
     }
-    Ok(())
+    // Only a refusal that left nothing keyed is the caller's problem — the
+    // one-group callers need to hear why.
+    match refused {
+        Some(error) if wanted.iter().all(|group| key_for_group(credentials, *group).is_none()) => {
+            Err(error)
+        }
+        _ => Ok(()),
+    }
 }
 
 /// The models a group serves by the gateway's own account (`GET /v1/models`
@@ -324,16 +338,19 @@ pub struct ModelRoutesRefresh {
     pub group_keys: std::collections::BTreeMap<i64, String>,
     /// The new `Credentials::model_routes`.
     pub model_routes: std::collections::BTreeMap<String, i64>,
+    /// The new `Credentials::payg_routes`.
+    pub payg_routes: std::collections::BTreeMap<String, i64>,
 }
 
 impl ModelRoutesRefresh {
-    /// Put the result into the session the app holds now. Only the two
+    /// Put the result into the session the app holds now. Only the routing
     /// tables are taken: the refresh ran on a copy, and the user may have
     /// switched a group meanwhile — copying the whole struct back would
     /// undo that.
     pub fn apply_to(&self, credentials: &mut Credentials) {
         credentials.group_keys = self.group_keys.clone();
         credentials.model_routes = self.model_routes.clone();
+        credentials.payg_routes = self.payg_routes.clone();
     }
 }
 
@@ -362,6 +379,14 @@ pub fn refresh_model_routes(
         .flatten()
         .map(client::SubscriptionProgress::group_id)
         .filter(|id| *id > 0)
+        .collect();
+    // The ones that can take nothing more right now: their models go through
+    // a pay-as-you-go group until the window resets.
+    let exhausted: BTreeSet<i64> = subscriptions
+        .iter()
+        .flatten()
+        .filter(|subscription| subscription.is_exhausted())
+        .map(client::SubscriptionProgress::group_id)
         .collect();
 
     // Every subscription gets a key up front: it is what the user bought,
@@ -408,7 +433,8 @@ pub fn refresh_model_routes(
             })
     });
     let bindings = model_routing::Bindings::from_credentials(credentials, general_platform);
-    let mut routes = model_routing::resolve(&offers, &bindings, &subscribed);
+    let resolved = model_routing::resolve(&offers, &bindings, &subscribed, &exhausted);
+    let mut routes = resolved.routes;
     // An image model goes where it was last seen to draw: the catalog cannot
     // tell a group granted image generation from one that was not.
     routes.extend(
@@ -418,19 +444,24 @@ pub fn refresh_model_routes(
             .map(|(model, group)| (model.clone(), *group)),
     );
 
-    let needed: BTreeSet<i64> = routes.values().copied().chain(subscribed.iter().copied()).collect();
+    let needed: BTreeSet<i64> = routes
+        .values()
+        .chain(resolved.pay_as_you_go.values())
+        .copied()
+        .chain(subscribed.iter().copied())
+        .collect();
     ensure_group_keys(credentials, &needed)?;
     credentials.group_keys.retain(|group, _| needed.contains(group));
     // A group that could not be given a key leaves its models on their
     // platform's key rather than on nothing.
-    let model_routes = routes
-        .into_iter()
-        .filter(|(_, group)| key_for_group(credentials, *group).is_some())
-        .collect();
+    let keyed = |(_, group): &(String, i64)| key_for_group(credentials, *group).is_some();
+    let model_routes = routes.into_iter().filter(keyed).collect();
+    let payg_routes = resolved.pay_as_you_go.into_iter().filter(keyed).collect();
     Ok(ModelRoutesRefresh {
         subscriptions,
         group_keys: credentials.group_keys.clone(),
         model_routes,
+        payg_routes,
     })
 }
 
@@ -465,8 +496,14 @@ mod group_key_tests {
                 ("deepseek-v4.1-flash".to_owned(), 20),
                 ("glm-5".to_owned(), 30),
             ]),
+            payg_routes: std::collections::BTreeMap::from([
+                ("deepseek-v4.1-flash".to_owned(), 40),
+                ("glm-5".to_owned(), 41),
+            ]),
             ..Credentials::default()
         };
+        let mut credentials = credentials;
+        credentials.group_keys.insert(40, "sk-payg".to_owned());
         let config = gateway_config_from(&credentials, true);
         assert_eq!(
             config.model_keys,
@@ -474,6 +511,14 @@ mod group_key_tests {
                 ("deepseek-v4.1-flash".to_owned(), "sk-sub".to_owned()),
                 ("gpt-5.6-sol".to_owned(), "sk-codex".to_owned()),
             ])
+        );
+        // The pay-as-you-go table follows the same rule.
+        assert_eq!(
+            config.payg_model_keys,
+            std::collections::BTreeMap::from([(
+                "deepseek-v4.1-flash".to_owned(),
+                "sk-payg".to_owned()
+            )])
         );
     }
 }
@@ -560,6 +605,14 @@ pub fn gateway_config_with_origin(
     enabled: bool,
     origin: Option<&str>,
 ) -> GatewayConfig {
+    let keys_for = |routes: &std::collections::BTreeMap<String, i64>| {
+        routes
+            .iter()
+            .filter_map(|(model, group)| {
+                key_for_group(credentials, *group).map(|key| (model.clone(), key.to_owned()))
+            })
+            .collect::<std::collections::BTreeMap<String, String>>()
+    };
     GatewayConfig {
         enabled,
         endpoint: origin
@@ -569,13 +622,8 @@ pub fn gateway_config_with_origin(
         claude_api_key: credentials.claude_api_key.clone(),
         codex_api_key: credentials.codex_api_key.clone(),
         codex_model: None,
-        model_keys: credentials
-            .model_routes
-            .iter()
-            .filter_map(|(model, group)| {
-                key_for_group(credentials, *group).map(|key| (model.clone(), key.to_owned()))
-            })
-            .collect(),
+        model_keys: keys_for(&credentials.model_routes),
+        payg_model_keys: keys_for(&credentials.payg_routes),
     }
 }
 

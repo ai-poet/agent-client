@@ -2531,7 +2531,7 @@ cloud.turn_off:
 cloud.subscriptions_title:
   en: "Subscriptions"
 cloud.subscriptions_detail:
-  en: "Billed by period: usage counts against the subscription's limits, not your balance. Built-in agent models no CLI group covers — DeepSeek, Kimi, GLM and the like — go through the subscription that serves them."
+  en: "Billed by period: usage counts against the subscription's limits, not your balance. Built-in agent models no CLI group covers — DeepSeek, Kimi, GLM and the like — go through the subscription that serves them while it has room, and through pay-as-you-go once it runs out. Where both serve a model, the picker also lists it as a separate pay-as-you-go entry."
 cloud.subscription_menu:
   en: "Subscription %{group}"
 cloud.subscription_expires_in:
@@ -2556,6 +2556,12 @@ cloud.subscription_no_models:
   en: "No built-in agent model goes through this subscription yet."
 native.via_subscription:
   en: "Subscription: %{group}"
+native.subscription_spent:
+  en: "Subscription: %{group} (used up)"
+native.subscription_spent_payg:
+  en: "%{group} used up — pay as you go for now"
+native.pay_as_you_go:
+  en: "Pay as you go"
 cloud.group_title:
   en: "Model group"
 cloud.group_detail:

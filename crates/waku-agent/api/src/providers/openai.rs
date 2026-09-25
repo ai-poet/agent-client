@@ -946,6 +946,27 @@ impl LlmProvider for OpenAiProvider {
                         None => continue,
                     };
 
+                    // Fork (Waku): reasoning delta. DeepSeek, GLM and Kimi
+                    // stream their thinking as `reasoning_content` (some
+                    // gateways rename it `reasoning`); this parser read only
+                    // `content`, so a Chat Completions turn showed no
+                    // reasoning at all. Its own index keeps it apart from the
+                    // text block at 0 and the tool calls from 1. The request
+                    // side still drops thinking (see
+                    // `assistant_content_to_openai`), so what is sent back is
+                    // unchanged.
+                    for field in ["reasoning_content", "reasoning"] {
+                        if let Some(reasoning) = delta.get(field).and_then(|r| r.as_str()) {
+                            if !reasoning.is_empty() {
+                                yield Ok(StreamEvent::ReasoningDelta {
+                                    index: usize::MAX - 100,
+                                    reasoning: reasoning.to_string(),
+                                });
+                                break;
+                            }
+                        }
+                    }
+
                     // Text content delta
                     if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
                         if !content.is_empty() {

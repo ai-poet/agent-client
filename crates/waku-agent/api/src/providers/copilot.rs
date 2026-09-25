@@ -382,16 +382,17 @@ impl CopilotProvider {
                                             .unwrap_or_else(|_| "{}".to_string()),
                                     }));
                                 }
-                                ContentBlock::Thinking { thinking, .. } if !thinking.is_empty() => {
-                                    flush_assistant_content(&mut input, &mut message_parts);
-                                    input.push(json!({
-                                        "type": "reasoning",
-                                        "summary": [{
-                                            "type": "summary_text",
-                                            "text": thinking,
-                                        }],
-                                    }));
-                                }
+                                // Fork departure (Waku): plain thinking text is
+                                // not sent back. A `reasoning` input item
+                                // stands for one the API produced and is known
+                                // by its id; a summary rebuilt from text has
+                                // none, and the Responses stream now keeps its
+                                // reasoning summary for the transcript — so
+                                // replaying it would put an item the API cannot
+                                // place into every later request. The model
+                                // loses nothing: a summary was never its
+                                // reasoning.
+                                ContentBlock::Thinking { .. } => {}
                                 ContentBlock::RedactedThinking { data } if !data.is_empty() => {
                                     flush_assistant_content(&mut input, &mut message_parts);
                                     input.push(json!({

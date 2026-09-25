@@ -234,7 +234,14 @@ impl Waku {
                         this.cloud_account.user = Some(user);
                         this.cloud_account.error = None;
                         if let Some(subscriptions) = subscriptions {
+                            let spent_before = this.exhausted_subscriptions();
                             this.cloud_account.subscriptions = Some(subscriptions);
+                            // A subscription that just ran out (or reset)
+                            // moves its models to pay-as-you-go (or back).
+                            if this.exhausted_subscriptions() != spent_before {
+                                this.refresh_model_routes(cx);
+                                this.sync_native_models();
+                            }
                         }
                     }
                     // The service refused the refresh token itself: no retry

@@ -36,6 +36,11 @@ pub struct GatewayConfig {
     /// takes one key for its whole run.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub model_keys: std::collections::BTreeMap<String, String>,
+    /// The key for each model's pay-as-you-go group, where a subscription
+    /// also serves it (`Credentials::payg_routes`): what the picker's
+    /// "pay as you go" row goes out with.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub payg_model_keys: std::collections::BTreeMap<String, String>,
 }
 
 impl GatewayConfig {
@@ -95,6 +100,7 @@ mod tests {
             codex_api_key: None,
             codex_model: None,
             model_keys: Default::default(),
+            payg_model_keys: Default::default(),
         }
     }
 

@@ -186,6 +186,24 @@ impl SubscriptionProgress {
             .map(|group| group.platform.trim().to_ascii_lowercase())
             .unwrap_or_default()
     }
+
+    /// Whether this subscription can take no more requests right now: it is
+    /// no longer active, or one of its windows has spent its whole limit. A
+    /// model it serves then goes through a pay-as-you-go group instead,
+    /// until the window resets.
+    pub fn is_exhausted(&self) -> bool {
+        let status = self.subscription.status.trim();
+        if !status.is_empty() && !status.eq_ignore_ascii_case("active") {
+            return true;
+        }
+        let Some(progress) = self.progress.as_ref() else {
+            return false;
+        };
+        [&progress.daily, &progress.weekly, &progress.monthly]
+            .into_iter()
+            .flatten()
+            .any(|window| window.limit_usd > 0.0 && window.used_usd >= window.limit_usd)
+    }
 }
 
 /// A gateway API key. `key` is the secret the agent CLIs authenticate with.
@@ -785,6 +803,31 @@ fn unwrap_envelope<T: serde::de::DeserializeOwned>(response: &Response) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_subscription_is_exhausted_when_a_window_is_spent_or_it_lapsed() {
+        let window = |limit_usd: f64, used_usd: f64| SubscriptionWindow {
+            limit_usd,
+            used_usd,
+            ..SubscriptionWindow::default()
+        };
+        let with = |status: &str, daily: Option<SubscriptionWindow>| SubscriptionProgress {
+            subscription: UserSubscription {
+                status: status.into(),
+                ..UserSubscription::default()
+            },
+            progress: Some(SubscriptionUsage {
+                daily,
+                ..SubscriptionUsage::default()
+            }),
+        };
+        assert!(!with("active", Some(window(10.0, 3.0))).is_exhausted());
+        assert!(with("active", Some(window(10.0, 10.0))).is_exhausted());
+        // No limit on a window is no limit to reach.
+        assert!(!with("active", Some(window(0.0, 50.0))).is_exhausted());
+        assert!(!with("", None).is_exhausted());
+        assert!(with("expired", None).is_exhausted());
+    }
 
     fn ok(body: &str) -> Response {
         Response {

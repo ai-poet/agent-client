@@ -7,7 +7,9 @@
 //! group that serves it at all. The built-in agent therefore picks a group
 //! per model ([`sub2api::model_routing`]): the CLI slot's group for the
 //! families a CLI speaks for (Claude, GPT, Grok), a subscription group for
-//! the rest when the user has one.
+//! the rest while it has room, and a pay-as-you-go group once it has run out
+//! or when there is none. A model a subscription and a pay-as-you-go group
+//! both serve is also offered pinned to pay-as-you-go, as a second row.
 //!
 //! This module re-derives that routing whenever the catalog or the group
 //! list lands, and shows the subscriptions — on Settings → Cloud Account
@@ -75,12 +77,14 @@ impl Waku {
                                 let before = (
                                     credentials.group_keys.clone(),
                                     credentials.model_routes.clone(),
+                                    credentials.payg_routes.clone(),
                                 );
                                 refresh.apply_to(credentials);
                                 before
                                     != (
                                         credentials.group_keys.clone(),
                                         credentials.model_routes.clone(),
+                                        credentials.payg_routes.clone(),
                                     )
                             });
                         if changed {
@@ -92,6 +96,12 @@ impl Waku {
                             // The built-in agent reads its keys from the
                             // routing the CLIs share; rewrite it.
                             this.apply_cloud_routing();
+                            // A live session read its key when it started;
+                            // re-applying its options makes it read the new
+                            // table, so a subscription that ran out hands
+                            // over from the next turn rather than the next
+                            // session.
+                            this.reapply_built_in_session_options(cx);
                         }
                         this.sync_native_models();
                     }
@@ -109,14 +119,43 @@ impl Waku {
         .detach();
     }
 
+    /// Push the current options — and with them the current key table — to
+    /// every built-in agent session that has a live runtime.
+    fn reapply_built_in_session_options(&mut self, cx: &mut Context<Self>) {
+        let live: Vec<Uuid> = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| {
+                session.provider.is_builtin() && self.runtimes.contains_key(&session.id)
+            })
+            .map(|session| session.id)
+            .collect();
+        for session_id in live {
+            self.apply_session_options(session_id, cx);
+        }
+    }
+
+    /// The subscriptions that can take nothing more right now, by group.
+    pub(super) fn exhausted_subscriptions(&self) -> std::collections::BTreeSet<i64> {
+        self.cloud_account
+            .subscriptions
+            .iter()
+            .flatten()
+            .filter(|subscription| subscription.is_exhausted())
+            .map(|subscription| subscription.group_id())
+            .collect()
+    }
+
     /// What the built-in agent's picker needs to label a model with the
-    /// subscription it goes through.
+    /// subscription it goes through, and to offer its pay-as-you-go row.
     pub(super) fn native_routing(&self) -> super::native_agent::NativeRouting {
-        let routes = self
-            .cloud_account
-            .credentials
-            .as_ref()
+        let credentials = self.cloud_account.credentials.as_ref();
+        let routes = credentials
             .map(|credentials| credentials.model_routes.clone())
+            .unwrap_or_default();
+        let payg = credentials
+            .map(|credentials| credentials.payg_routes.clone())
             .unwrap_or_default();
         let subscriptions = self
             .cloud_account
@@ -127,7 +166,9 @@ impl Waku {
             .collect();
         super::native_agent::NativeRouting {
             routes,
+            payg,
             subscriptions,
+            exhausted: self.exhausted_subscriptions(),
         }
     }
 

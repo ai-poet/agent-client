@@ -46,6 +46,10 @@ pub(crate) fn google_thinking_level_for_effort(
 pub(crate) fn is_openai_reasoning_model(model_id: &str) -> bool {
     let model_id = model_id.to_ascii_lowercase();
     model_id.starts_with("gpt-5")
+        // Fork departure (Waku): every GPT generation from 5 on reasons, not
+        // just the one this list was written for. `gpt-6-*` fell through it
+        // and went out with no `reasoning` field, whatever the picker said.
+        || gpt_major_version(&model_id).is_some_and(|major| major >= 5)
         || model_id.starts_with("o1")
         || model_id.starts_with("o3")
         || model_id.starts_with("o4")
@@ -56,6 +60,14 @@ pub(crate) fn is_openai_reasoning_model(model_id: &str) -> bool {
         // per model and drops it for the ones that cannot use it, so naming
         // the family here is safe.
         || model_id.starts_with("grok")
+}
+
+/// Fork (Waku): the major version of a `gpt-<n>…` name — `6` for
+/// `gpt-6-sol`, `5` for `gpt-5.6-terra` — or `None` for any other name.
+fn gpt_major_version(model_id: &str) -> Option<u32> {
+    let rest = model_id.strip_prefix("gpt-")?;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
 }
 
 /// Fork (Waku): the model's own name, lowercased, without a router's

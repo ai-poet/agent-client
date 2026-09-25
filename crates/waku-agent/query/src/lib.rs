@@ -2726,6 +2726,28 @@ mod tests {
         assert_eq!(options["usage"]["include"], serde_json::json!(true));
     }
 
+    /// Fork (Waku): GPT-6 reasons like GPT-5; it used to fall through the
+    /// reasoning-model list and go out with no effort at all.
+    #[test]
+    fn test_build_provider_options_codex_gpt6_carries_its_effort() {
+        for model in ["gpt-6-sol", "gpt-6-astra"] {
+            let options = build_provider_options(
+                "codex",
+                model,
+                Some(claurst_core::effort::EffortLevel::High),
+                None,
+            );
+            assert_eq!(options["reasoningEffort"], serde_json::json!("high"), "{model}");
+        }
+        let options = build_provider_options(
+            "codex",
+            "gpt-4o",
+            Some(claurst_core::effort::EffortLevel::High),
+            None,
+        );
+        assert!(options.get("reasoningEffort").is_none());
+    }
+
     #[test]
     fn test_build_provider_options_codex_effort_ladder() {
         // Codex maps the lower tiers like any OpenAI reasoning model...

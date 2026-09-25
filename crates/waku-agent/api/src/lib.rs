@@ -227,6 +227,13 @@ pub mod types {
         pub thinking_type: String,
         #[serde(default, skip_serializing_if = "is_zero")]
         pub budget_tokens: u32,
+        /// Fork (Waku): what the response carries of the thinking. The
+        /// current Claude families default to `"omitted"` — thinking blocks
+        /// with empty text — so a caller that shows reasoning has to ask for
+        /// `"summarized"`. `None` leaves the field out for endpoints that do
+        /// not know it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub display: Option<String>,
     }
 
     fn is_zero(value: &u32) -> bool {
@@ -238,6 +245,7 @@ pub mod types {
             Self {
                 thinking_type: "enabled".to_string(),
                 budget_tokens: budget,
+                display: None,
             }
         }
 
@@ -245,7 +253,15 @@ pub mod types {
             Self {
                 thinking_type: "adaptive".to_string(),
                 budget_tokens: 0,
+                display: None,
             }
+        }
+
+        /// Fork (Waku): ask for a readable summary of the thinking — what
+        /// Claude Code's `--thinking-display summarized` sends.
+        pub fn summarized(mut self) -> Self {
+            self.display = Some("summarized".to_string());
+            self
         }
     }
 
@@ -296,7 +312,21 @@ pub mod types {
             let content = match &msg.content {
                 MessageContent::Text(t) => Value::String(t.clone()),
                 MessageContent::Blocks(blocks) => {
-                    serde_json::to_value(blocks).unwrap_or(Value::Null)
+                    // Fork (Waku): a thinking block without a signature was
+                    // not written by Claude — it is the reasoning a Chat
+                    // Completions model streamed, kept for the transcript.
+                    // Anthropic refuses an unsigned thinking block, so a
+                    // session that moves to Claude leaves those behind.
+                    let signed: Vec<&ContentBlock> = blocks
+                        .iter()
+                        .filter(|block| {
+                            !matches!(
+                                block,
+                                ContentBlock::Thinking { signature, .. } if signature.is_empty()
+                            )
+                        })
+                        .collect();
+                    serde_json::to_value(signed).unwrap_or(Value::Null)
                 }
             };
             Self {
@@ -1607,6 +1637,31 @@ impl StreamAccumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fork (Waku): reasoning a Chat Completions model streamed is kept as an
+    /// unsigned thinking block; Claude's own blocks carry a signature. Only
+    /// the signed ones may go to Anthropic.
+    #[test]
+    fn unsigned_thinking_stays_out_of_an_anthropic_request() {
+        let message = Message::assistant_blocks(vec![
+            ContentBlock::Thinking {
+                thinking: "from deepseek".into(),
+                signature: String::new(),
+            },
+            ContentBlock::Thinking {
+                thinking: "from claude".into(),
+                signature: "sig".into(),
+            },
+            ContentBlock::Text {
+                text: "answer".into(),
+            },
+        ]);
+        let api = types::ApiMessage::from(&message);
+        let blocks = api.content.as_array().expect("blocks");
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0]["thinking"], "from claude");
+        assert_eq!(blocks[1]["text"], "answer");
+    }
 
     #[test]
     fn test_sse_parser_basic() {

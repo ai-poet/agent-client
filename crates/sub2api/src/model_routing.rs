@@ -19,12 +19,22 @@
 //!    the binding is trusted and the model is left to the per-platform key,
 //!    exactly as before this existed. The same holds for a family whose slot
 //!    is still the account default.
-//! 2. Otherwise through an active subscription group that lists it.
-//! 3. Otherwise through any group that lists it.
+//! 2. Otherwise through a subscription group that lists it and still has
+//!    room in every window.
+//! 3. Otherwise through a pay-as-you-go group — any group that is not a
+//!    subscription — that lists it.
+//! 4. Otherwise through a subscription that has run out, since nothing else
+//!    serves the model at all.
 //!
-//! Within 2 and 3 a group on the model's own platform beats a composite one,
-//! which beats any other; then the lower rate wins, then the lower id, so the
-//! answer is stable between refreshes.
+//! A model that both a subscription and a pay-as-you-go group serve also
+//! gets its pay-as-you-go group on its own ([`Routes::pay_as_you_go`]): the
+//! picker lists it a second time for the user who wants to pay by use even
+//! while the subscription has room. Rule 1's models get none — their slot
+//! already decides.
+//!
+//! Within each rule a group on the model's own platform beats a composite
+//! one, which beats any other; then the lower rate wins, then the lower id,
+//! so the answer is stable between refreshes.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -229,25 +239,38 @@ fn slot_for(family: Option<&str>, bindings: &Bindings) -> Slot {
     }
 }
 
-/// The group each model goes through. Models absent from the result keep
-/// the per-platform key.
+/// What [`resolve`] decided.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Routes {
+    /// The group each model goes through. Models absent here keep the
+    /// per-platform key.
+    pub routes: BTreeMap<String, i64>,
+    /// For a model both a subscription and a pay-as-you-go group serve, the
+    /// pay-as-you-go group — where the picker's "pay as you go" row sends it.
+    pub pay_as_you_go: BTreeMap<String, i64>,
+}
+
+/// Where each model goes. `subscriptions` are the groups the user holds a
+/// subscription to; `exhausted` the ones of those that can take nothing more
+/// right now (see [`crate::client::SubscriptionProgress::is_exhausted`]).
 pub fn resolve(
     offers: &[Offer],
     bindings: &Bindings,
     subscriptions: &BTreeSet<i64>,
-) -> BTreeMap<String, i64> {
+    exhausted: &BTreeSet<i64>,
+) -> Routes {
     let listing_groups: BTreeSet<i64> = offers.iter().map(|offer| offer.group_id).collect();
     let mut by_model: BTreeMap<&str, Vec<&Offer>> = BTreeMap::new();
     for offer in offers {
         by_model.entry(offer.model.as_str()).or_default().push(offer);
     }
 
-    let mut routes = BTreeMap::new();
+    let mut resolved = Routes::default();
     for (model, candidates) in by_model {
         let family = model_family(model);
         match slot_for(family, bindings) {
             Slot::Bound(group) if candidates.iter().any(|offer| offer.group_id == group) => {
-                routes.insert(model.to_owned(), group);
+                resolved.routes.insert(model.to_owned(), group);
                 continue;
             }
             // The bound group lists nothing, so nothing says it does not
@@ -256,10 +279,20 @@ pub fn resolve(
             Slot::AccountDefault => continue,
             _ => {}
         }
+        // A group a CLI slot is bound to belongs to that slot's family — rule
+        // 1 already took it where this model is that family's — so it only
+        // serves this model when nothing else does. The Codex group listing
+        // a DeepSeek model it answered 503 for is the case that taught this;
+        // the pay-as-you-go group is on `openai` too, and cheaper rates must
+        // not hand the choice back to Codex.
+        let bound_elsewhere = |group: i64| {
+            [bindings.claude, bindings.codex, bindings.general].contains(&Some(group))
+        };
         let rank = |offer: &&&Offer| {
             (
                 Some(offer.platform.as_str()) != family,
                 offer.platform != "composite",
+                bound_elsewhere(offer.group_id),
                 // Rates are compared as integers so the ordering is total;
                 // a missing rate (0) sorts as cheapest, like the gateway's own
                 // "group default".
@@ -267,15 +300,30 @@ pub fn resolve(
                 offer.group_id,
             )
         };
-        let subscribed = candidates
+        let subscribed = |offer: &&&Offer| subscriptions.contains(&offer.group_id);
+        let usable = candidates
             .iter()
-            .filter(|offer| subscriptions.contains(&offer.group_id))
+            .filter(|offer| subscribed(offer) && !exhausted.contains(&offer.group_id))
             .min_by_key(rank);
-        if let Some(offer) = subscribed.or_else(|| candidates.iter().min_by_key(rank)) {
-            routes.insert(model.to_owned(), offer.group_id);
+        let pay_as_you_go = candidates
+            .iter()
+            .filter(|offer| !subscribed(offer))
+            .min_by_key(rank);
+        // Any subscription at all, spent or not: the last resort, and what
+        // makes a pay-as-you-go group an alternative rather than the route.
+        let held = candidates.iter().filter(|offer| subscribed(offer)).min_by_key(rank);
+        if let Some(offer) = usable.or(pay_as_you_go).or(held) {
+            resolved.routes.insert(model.to_owned(), offer.group_id);
+        }
+        if held.is_some()
+            && let Some(offer) = pay_as_you_go
+        {
+            resolved
+                .pay_as_you_go
+                .insert(model.to_owned(), offer.group_id);
         }
     }
-    routes
+    resolved
 }
 
 #[cfg(test)]
@@ -317,7 +365,7 @@ mod tests {
             offer("grok-4.6", 9, "grok", 1.0),
             offer("grok-4.6", 20, "composite", 0.5),
         ];
-        let routes = resolve(&offers, &bindings(), &BTreeSet::from([20]));
+        let routes = resolve(&offers, &bindings(), &BTreeSet::from([20]), &BTreeSet::new()).routes;
         assert_eq!(routes.get("gpt-5.6-sol"), Some(&7));
         assert_eq!(routes.get("grok-4.6"), Some(&9));
         assert_eq!(routes.get("deepseek-v4.1-flash"), Some(&20));
@@ -336,7 +384,7 @@ mod tests {
             offer("glm-5", 7, "openai", 0.1),
             offer("glm-5", 30, "composite", 0.2),
         ];
-        let routes = resolve(&offers, &bindings(), &BTreeSet::new());
+        let routes = resolve(&offers, &bindings(), &BTreeSet::new(), &BTreeSet::new()).routes;
         assert_eq!(routes.get("deepseek-v4.1-flash"), Some(&32));
         assert_eq!(routes.get("glm-5"), Some(&30));
     }
@@ -352,7 +400,7 @@ mod tests {
             offer("claude-opus-5-5", 20, "composite", 0.5),
             offer("claude-sonnet-5", 3, "anthropic", 1.0),
         ];
-        let routes = resolve(&offers, &bindings(), &BTreeSet::from([20]));
+        let routes = resolve(&offers, &bindings(), &BTreeSet::from([20]), &BTreeSet::new()).routes;
         // Codex group 7 lists nothing: GPT stays on the Codex key.
         assert_eq!(routes.get("gpt-5.6-sol"), None);
         // Claude group 3 lists Sonnet but not Opus 5.5: Opus moves.
@@ -370,7 +418,7 @@ mod tests {
             offer("grok-4.6", 20, "composite", 0.5),
         ];
         let defaults = Bindings::default();
-        let routes = resolve(&offers, &defaults, &BTreeSet::from([20]));
+        let routes = resolve(&offers, &defaults, &BTreeSet::from([20]), &BTreeSet::new()).routes;
         assert!(routes.is_empty(), "{routes:?}");
 
         let general_elsewhere = Bindings {
@@ -378,8 +426,57 @@ mod tests {
             general_platform: Some("deepseek".into()),
             ..Bindings::default()
         };
-        let routes = resolve(&offers, &general_elsewhere, &BTreeSet::from([20]));
+        let routes = resolve(&offers, &general_elsewhere, &BTreeSet::from([20]), &BTreeSet::new()).routes;
         assert_eq!(routes.get("grok-4.6"), Some(&20));
+    }
+
+    /// The shape the live service has: a DeepSeek subscription (20), and the
+    /// "国模按量付费分组" (40) — a pay-as-you-go group on `openai` — serving
+    /// the same models. The subscription keeps the model while it has room;
+    /// the pay-as-you-go group is on offer beside it all the while, and
+    /// takes the model over once the subscription runs out.
+    #[test]
+    fn a_subscription_goes_first_and_hands_over_to_pay_as_you_go_when_spent() {
+        let offers = [
+            offer("deepseek-v4.1-flash", 20, "composite", 0.0),
+            offer("deepseek-v4.1-flash", 40, "openai", 1.0),
+            // The Codex group listing it too — cheaper, and the one that
+            // answered 503. Bound to Codex, it loses to the real one.
+            offer("deepseek-v4.1-flash", 7, "openai", 0.25),
+            offer("glm-5.3", 40, "openai", 1.0),
+        ];
+        let subscribed = BTreeSet::from([20]);
+
+        let fresh = resolve(&offers, &bindings(), &subscribed, &BTreeSet::new());
+        assert_eq!(fresh.routes.get("deepseek-v4.1-flash"), Some(&20));
+        assert_eq!(fresh.pay_as_you_go.get("deepseek-v4.1-flash"), Some(&40));
+        // Only pay-as-you-go serves it: that is simply its route, with no
+        // second row to offer.
+        assert_eq!(fresh.routes.get("glm-5.3"), Some(&40));
+        assert_eq!(fresh.pay_as_you_go.get("glm-5.3"), None);
+
+        let spent = resolve(&offers, &bindings(), &subscribed, &BTreeSet::from([20]));
+        assert_eq!(spent.routes.get("deepseek-v4.1-flash"), Some(&40));
+        assert_eq!(spent.pay_as_you_go.get("deepseek-v4.1-flash"), Some(&40));
+
+        // A spent subscription that is all there is still carries the model.
+        let only = [offer("kimi-k3", 20, "composite", 0.0)];
+        let routes = resolve(&only, &bindings(), &subscribed, &BTreeSet::from([20]));
+        assert_eq!(routes.routes.get("kimi-k3"), Some(&20));
+        assert!(routes.pay_as_you_go.is_empty());
+    }
+
+    /// Rule 1's models are their slot's to route: no pay-as-you-go row, even
+    /// when a subscription lists them too.
+    #[test]
+    fn a_bound_family_gets_no_pay_as_you_go_row() {
+        let offers = [
+            offer("gpt-5.6-sol", 7, "openai", 1.0),
+            offer("gpt-5.6-sol", 20, "composite", 0.5),
+        ];
+        let resolved = resolve(&offers, &bindings(), &BTreeSet::from([20]), &BTreeSet::new());
+        assert_eq!(resolved.routes.get("gpt-5.6-sol"), Some(&7));
+        assert!(resolved.pay_as_you_go.is_empty());
     }
 
     /// Same reading of a name as the gateway's composite routing.

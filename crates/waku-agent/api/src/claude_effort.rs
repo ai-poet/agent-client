@@ -12,6 +12,10 @@
 //! (`backend/internal/pkg/claude/effort_catalog.go`). Opus 4.5 is left out on
 //! purpose: its effort still needs a beta header, so it keeps its budget.
 //! Every model not in the list keeps the budget too.
+//!
+//! Adaptive thinking goes out with `display: "summarized"`: these families
+//! default to `"omitted"`, which streams every thinking block empty, so the
+//! transcript showed no reasoning once they moved off the budget.
 
 use claurst_core::effort::EffortLevel;
 
@@ -52,8 +56,12 @@ impl ClaudeReasoning {
     /// The request fields for this choice: `thinking`, then `output_config`.
     pub fn fields(&self) -> (Option<ThinkingConfig>, Option<OutputConfig>) {
         match self {
+            // Summarized, as Claude Code asks: these families default to
+            // `display: "omitted"`, whose thinking blocks stream empty — the
+            // transcript then shows no reasoning at all, and the notes the
+            // model writes between tool calls are lost with it.
             Self::Effort(effort) => (
-                Some(ThinkingConfig::adaptive()),
+                Some(ThinkingConfig::adaptive().summarized()),
                 Some(OutputConfig {
                     effort: effort.clone(),
                 }),
@@ -233,7 +241,12 @@ mod tests {
     fn the_request_fields_match_what_claude_code_sends() {
         let (thinking, output) = ClaudeReasoning::Effort("high".into()).fields();
         let thinking = serde_json::to_value(thinking.unwrap()).unwrap();
-        assert_eq!(thinking, serde_json::json!({"type": "adaptive"}));
+        // Summarized: the families that take an effort stream empty thinking
+        // blocks otherwise, and the transcript shows no reasoning.
+        assert_eq!(
+            thinking,
+            serde_json::json!({"type": "adaptive", "display": "summarized"})
+        );
         let output = serde_json::to_value(output.unwrap()).unwrap();
         assert_eq!(output, serde_json::json!({"effort": "high"}));
 

@@ -40,20 +40,63 @@ use super::*;
 use crate::model::{ProviderModel, ProviderModelOption};
 
 /// Where the built-in agent's models are sent, for labelling them: the
-/// group model routing picked for each (`Credentials::model_routes`) and the
-/// account's subscription groups, by id, with their names.
+/// group model routing picked for each (`Credentials::model_routes`), the
+/// pay-as-you-go group of each model a subscription also serves
+/// (`Credentials::payg_routes`), and the account's subscription groups, by
+/// id, with their names — plus which of them have run out.
 #[derive(Clone, Debug, Default)]
 pub(super) struct NativeRouting {
     pub routes: std::collections::BTreeMap<String, i64>,
+    pub payg: std::collections::BTreeMap<String, i64>,
     pub subscriptions: std::collections::BTreeMap<i64, String>,
+    pub exhausted: std::collections::BTreeSet<i64>,
 }
 
 impl NativeRouting {
-    /// The subscription `model` goes through, by name, when it goes through
-    /// one.
-    fn subscription_for(&self, model: &str) -> Option<&str> {
-        let group = self.routes.get(model)?;
-        self.subscriptions.get(group).map(String::as_str)
+    /// What a model's plain row says about the subscription behind it, if
+    /// one is: the one it goes through, that one having run out, or — when a
+    /// spent subscription has handed it to pay-as-you-go — that.
+    ///
+    /// `groups` are every group the catalog lists the model under.
+    fn subscription_note(&self, model: &str, groups: &[i64]) -> Option<String> {
+        let routed = self.routes.get(model).copied();
+        if let Some(group) = routed
+            && let Some(name) = self.subscriptions.get(&group)
+        {
+            return Some(if self.exhausted.contains(&group) {
+                tr!("native.subscription_spent", group = name.clone())
+            } else {
+                tr!("native.via_subscription", group = name.clone())
+            });
+        }
+        groups
+            .iter()
+            .find(|group| self.exhausted.contains(*group))
+            .and_then(|group| self.subscriptions.get(group))
+            .map(|name| tr!("native.subscription_spent_payg", group = name.clone()))
+    }
+}
+
+/// What the picker appends to the platform of a model's "pay as you go" row:
+/// `deepseek+payg::deepseek-v4.1-flash`. Kept in step with
+/// `waku_agent_bridge::PAY_AS_YOU_GO_MARK`, which the desktop does not link;
+/// the bridge strips it and sends that row with its pay-as-you-go key.
+pub(super) const PAY_AS_YOU_GO_MARK: &str = "+payg";
+
+/// A picker id taken apart: the platform ahead of the `::` (lowercased, no
+/// [`PAY_AS_YOU_GO_MARK`]), the model after it, and whether it is a "pay as
+/// you go" row. A bare id carries no platform — that is what a model the
+/// user declared on their own endpoint looks like.
+pub(super) fn native_route_parts(id: &str) -> (String, &str, bool) {
+    match id.split_once("::") {
+        Some((platform, model)) => {
+            let (platform, pay_as_you_go) = match platform.strip_suffix(PAY_AS_YOU_GO_MARK) {
+                Some(platform) => (platform, true),
+                None => (platform, false),
+            };
+            (platform.trim().to_ascii_lowercase(), model, pay_as_you_go)
+        }
+        None => (String::new(), id, false),
     }
 }
 
@@ -73,71 +116,60 @@ pub(super) fn native_models_from_catalog(items: &[ModelCatalogItem]) -> Vec<Prov
 /// default, since it is the engine's own default family.
 ///
 /// The catalog lists a model once per group that serves it; the picker
-/// lists it once. The row comes from the entry of the group routing sends it
-/// through, when routing has picked one, so its name and platform are that
-/// group's.
+/// lists it once — twice when a subscription and a pay-as-you-go group both
+/// serve it, the second row pinned to pay-as-you-go. The plain row comes
+/// from the entry of the group routing sends it through, when routing has
+/// picked one, so its name and platform are that group's.
 pub(super) fn native_models_routed(
     items: &[ModelCatalogItem],
     routing: &NativeRouting,
 ) -> Vec<ProviderModel> {
     let mut order: Vec<String> = Vec::new();
-    let mut chosen: std::collections::HashMap<String, &ModelCatalogItem> =
+    let mut offered: std::collections::HashMap<String, Vec<&ModelCatalogItem>> =
         std::collections::HashMap::new();
     for item in items
         .iter()
         .filter(|item| is_chat_model(item) && !item.model.trim().is_empty())
     {
         let key = item.model.trim().to_ascii_lowercase();
-        let routed = routing.routes.get(item.model.trim()) == Some(&item.best_group.id);
-        if !chosen.contains_key(&key) {
-            order.push(key.clone());
-            chosen.insert(key, item);
-        } else if routed {
-            chosen.insert(key, item);
+        let entries = offered.entry(key.clone()).or_default();
+        if entries.is_empty() {
+            order.push(key);
+        }
+        entries.push(item);
+    }
+    let mut models: Vec<ProviderModel> = Vec::new();
+    for key in &order {
+        let entries = &offered[key];
+        let model_id = entries[0].model.trim();
+        let through = |group: Option<&i64>| {
+            group.and_then(|group| {
+                entries
+                    .iter()
+                    .copied()
+                    .find(|item| item.best_group.id == *group)
+            })
+        };
+        let item = through(routing.routes.get(model_id)).unwrap_or(entries[0]);
+        let platform = native_platform(item);
+        let groups: Vec<i64> = entries.iter().map(|item| item.best_group.id).collect();
+        let note = routing.subscription_note(model_id, &groups);
+        // No API to send it over means it is not a choice, however well it
+        // reads in a catalog.
+        let Some(row) = native_row(item, &platform, format!("{platform}::{model_id}"), note) else {
+            continue;
+        };
+        models.push(row);
+        if let Some(payg) = through(routing.payg.get(model_id)) {
+            let platform = native_platform(payg);
+            models.extend(native_row(
+                payg,
+                &platform,
+                format!("{platform}{PAY_AS_YOU_GO_MARK}::{model_id}"),
+                Some(tr!("native.pay_as_you_go")),
+            ));
         }
     }
-    let mut models: Vec<ProviderModel> = order
-        .iter()
-        .filter_map(|key| {
-            let item = chosen[key];
-            let model_id = item.model.trim();
-            let platform = native_platform(item);
-            // No API to send it over means it is not a choice, however well
-            // it reads in a catalog.
-            let format = native_format_for_model(&platform, model_id)?;
-            let name = if item.display_name.trim().is_empty() {
-                model_id.to_owned()
-            } else {
-                item.display_name.clone()
-            };
-            let mut model = ProviderModel::new(format!("{platform}::{model_id}"), name);
-            model.sub_provider = Some(match routing.subscription_for(model_id) {
-                Some(group) => format!(
-                    "{platform} \u{00b7} {}",
-                    tr!("native.via_subscription", group = group.to_owned())
-                ),
-                None => platform.clone(),
-            });
-            if let Some(entry) = native_format_option(format) {
-                model = model.service_tiers(
-                    [
-                        ProviderModelOption::new(entry.id, crate::i18n::translate(entry.label))
-                            .description(crate::i18n::translate(entry.description)),
-                    ],
-                    entry.id,
-                );
-            }
-            if let Some(ladder) = reasoning_ladder(&platform, model_id) {
-                model = model.reasoning(
-                    ladder.into_iter().map(|effort| {
-                        ProviderModelOption::new(effort, reasoning_effort_label(effort))
-                    }),
-                    "high",
-                );
-            }
-            Some(model)
-        })
-        .collect();
 
     if let Some(default) = models
         .iter()
@@ -147,6 +179,46 @@ pub(super) fn native_models_routed(
         models[default].is_default = true;
     }
     models
+}
+
+/// One picker row for a catalog entry: `id` as the picker sends it, the
+/// subtitle the platform plus `note`, the one API the model is reachable
+/// over and its reasoning ladder. `None` when there is no API to send it
+/// over.
+fn native_row(
+    item: &ModelCatalogItem,
+    platform: &str,
+    id: String,
+    note: Option<String>,
+) -> Option<ProviderModel> {
+    let model_id = item.model.trim();
+    let format = native_format_for_model(platform, model_id)?;
+    let name = if item.display_name.trim().is_empty() {
+        model_id.to_owned()
+    } else {
+        item.display_name.clone()
+    };
+    let mut model = ProviderModel::new(id, name);
+    model.sub_provider = Some(match note {
+        Some(note) => format!("{platform} \u{00b7} {note}"),
+        None => platform.to_owned(),
+    });
+    if let Some(entry) = native_format_option(format) {
+        model = model.service_tiers(
+            [ProviderModelOption::new(entry.id, crate::i18n::translate(entry.label))
+                .description(crate::i18n::translate(entry.description))],
+            entry.id,
+        );
+    }
+    if let Some(ladder) = reasoning_ladder(platform, model_id) {
+        model = model.reasoning(
+            ladder
+                .into_iter()
+                .map(|effort| ProviderModelOption::new(effort, reasoning_effort_label(effort))),
+            "high",
+        );
+    }
+    Some(model)
 }
 
 /// The platform a catalog model is filed under in the picker: its family,
@@ -468,16 +540,16 @@ pub(super) fn native_vendor(id: &str) -> &'static NativeVendor {
 /// platform ahead of the `::` only for a name that gives nothing away: a
 /// composite group reports `composite` for everything in it.
 pub(super) fn native_vendor_of(model: &ProviderModel) -> &'static str {
-    let Some((platform, name)) = model.id.split_once("::") else {
+    if !model.id.contains("::") {
         if model.sub_provider.as_deref() == Some("custom") {
             return CUSTOM_VENDOR;
         }
         return vendor_by_name(&model.id).unwrap_or(OTHER_VENDOR);
-    };
+    }
+    let (platform, name, _) = native_route_parts(&model.id);
     if let Some(vendor) = vendor_by_name(name) {
         return vendor;
     }
-    let platform = platform.trim().to_ascii_lowercase();
     NATIVE_VENDORS
         .iter()
         .map(|vendor| vendor.id)
@@ -888,6 +960,7 @@ mod tests {
         let routing = NativeRouting {
             routes: std::collections::BTreeMap::from([("deepseek-v4.1-flash".to_owned(), 20)]),
             subscriptions: std::collections::BTreeMap::from([(20, "DeepSeek 包月".to_owned())]),
+            ..NativeRouting::default()
         };
         let models = native_models_routed(&[codex, subscription], &routing);
         assert_eq!(models.len(), 1);
@@ -902,6 +975,59 @@ mod tests {
         let models = native_models_from_catalog(&[item("glm-5", "composite")]);
         assert_eq!(models[0].id, "zhipu::glm-5");
         assert_eq!(models[0].sub_provider.as_deref(), Some("zhipu"));
+    }
+
+    /// The live shape: a DeepSeek subscription and the "国模按量付费分组"
+    /// (an `openai` group) both serve the model. The picker lists it twice —
+    /// the subscription row, and one pinned to pay-as-you-go — and once the
+    /// subscription runs out the plain row says so.
+    #[test]
+    fn a_model_a_subscription_and_pay_as_you_go_both_serve_is_listed_twice() {
+        let mut subscription = item("deepseek-v4.1-flash", "composite");
+        subscription.best_group.id = 20;
+        let mut payg = item("deepseek-v4.1-flash", "openai");
+        payg.best_group.id = 40;
+        let mut routing = NativeRouting {
+            routes: std::collections::BTreeMap::from([("deepseek-v4.1-flash".to_owned(), 20)]),
+            payg: std::collections::BTreeMap::from([("deepseek-v4.1-flash".to_owned(), 40)]),
+            subscriptions: std::collections::BTreeMap::from([(20, "DeepSeek 包月".to_owned())]),
+            ..NativeRouting::default()
+        };
+        let catalog = [subscription, payg];
+
+        let models = native_models_routed(&catalog, &routing);
+        let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["deepseek::deepseek-v4.1-flash", "deepseek+payg::deepseek-v4.1-flash"]
+        );
+        assert!(models[0].sub_provider.as_deref().unwrap_or_default().contains("DeepSeek 包月"));
+        let payg_subtitle = models[1].sub_provider.as_deref().unwrap_or_default();
+        assert_eq!(payg_subtitle, format!("deepseek \u{00b7} {}", tr!("native.pay_as_you_go")));
+        // Same API and ladder as the plain row, and the same vendor.
+        assert_eq!(models[1].default_service_tier.as_deref(), Some("chat"));
+        assert_eq!(models[1].reasoning_efforts.len(), models[0].reasoning_efforts.len());
+        assert_eq!(native_vendor_of(&models[1]), "deepseek");
+        assert_eq!(
+            native_route_parts(&models[1].id),
+            ("deepseek".to_owned(), "deepseek-v4.1-flash", true)
+        );
+
+        // Spent: routing moved the plain row to pay-as-you-go, and it says why.
+        routing.routes.insert("deepseek-v4.1-flash".to_owned(), 40);
+        routing.exhausted.insert(20);
+        let models = native_models_routed(&catalog, &routing);
+        assert_eq!(models.len(), 2);
+        assert_eq!(
+            models[0].sub_provider.as_deref(),
+            Some(
+                format!(
+                    "deepseek \u{00b7} {}",
+                    tr!("native.subscription_spent_payg", group = "DeepSeek 包月".to_owned())
+                )
+                .as_str()
+            )
+        );
     }
 
     #[test]

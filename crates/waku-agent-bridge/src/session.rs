@@ -400,11 +400,18 @@ impl AgentSession {
         if let Some(plan) = changes.plan_mode {
             options.plan_mode = plan;
         }
+        // The effort belongs to the model: a switch carries the new model's
+        // effort even when that is none, so the previous model's does not
+        // ride along to one that never asked for it.
         if changes.model.is_some() {
             options.model = changes.model;
+            options.reasoning_effort = changes.reasoning_effort.clone();
         }
         if let Some(platform) = changes.platform {
             options.platform = platform;
+        }
+        if let Some(pay_as_you_go) = changes.pay_as_you_go {
+            options.pay_as_you_go = pay_as_you_go;
         }
         if let Some(format) = changes.wire_format {
             options.wire_format = format;

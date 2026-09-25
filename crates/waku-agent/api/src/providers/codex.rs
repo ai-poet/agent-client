@@ -851,6 +851,54 @@ impl LlmProvider for CodexProvider {
                                     });
                                 }
                             }
+                            // Fork (Waku): the reasoning summary the request
+                            // asks for (`reasoning.summary: "auto"`). This
+                            // match had no arm for it, so every GPT turn
+                            // streamed its summary into `_ => {}` and the
+                            // transcript showed no reasoning. It rides out as
+                            // thinking; the request side does not send it back
+                            // (see `CopilotProvider::to_responses_input_pub`).
+                            "response.reasoning_summary_part.added" => {
+                                // A new part is a new paragraph of the summary.
+                                let part = json_val
+                                    .get("summary_index")
+                                    .and_then(|value| value.as_u64())
+                                    .unwrap_or(0);
+                                if part > 0 {
+                                    let output_index = json_val
+                                        .get("output_index")
+                                        .and_then(|value| value.as_u64())
+                                        .unwrap_or(0) as usize;
+                                    yield Ok(StreamEvent::ThinkingDelta {
+                                        index: output_index,
+                                        thinking: "\n\n".to_string(),
+                                    });
+                                }
+                            }
+                            "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
+                                let output_index = json_val
+                                    .get("output_index")
+                                    .and_then(|value| value.as_u64())
+                                    .unwrap_or(0) as usize;
+                                let delta = json_val
+                                    .get("delta")
+                                    .and_then(|value| value.as_str())
+                                    .unwrap_or("");
+                                if !message_started {
+                                    yield Ok(StreamEvent::MessageStart {
+                                        id: message_id.clone(),
+                                        model: model_name.clone(),
+                                        usage: UsageInfo::default(),
+                                    });
+                                    message_started = true;
+                                }
+                                if !delta.is_empty() {
+                                    yield Ok(StreamEvent::ThinkingDelta {
+                                        index: output_index,
+                                        thinking: delta.to_string(),
+                                    });
+                                }
+                            }
                             "response.function_call_arguments.delta" => {
                                 let output_index = json_val
                                     .get("output_index")

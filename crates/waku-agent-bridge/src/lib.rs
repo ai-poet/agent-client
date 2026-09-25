@@ -53,7 +53,7 @@ mod session;
 pub use background::{BackgroundEntry, BackgroundKind, BackgroundStatus};
 pub use config::{
     AccessMode, AgentStartOptions, COMPUTER_USE_TOOLS, ComputerUseWiring, MissingApiKey,
-    TurnOptions, WireFormat, split_model,
+    PAY_AS_YOU_GO_MARK, TurnOptions, WireFormat, pays_as_you_go, split_model,
 };
 pub use events::{AgentEvent, CompactionPhase, EventSink, PermissionChoice, TokenCounts};
 pub use goal::{GoalOp, GoalSnapshot, GoalState};
