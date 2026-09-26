@@ -1005,6 +1005,13 @@ model instead (`crates/sub2api/src/model_routing.rs`):
    lists the model. A bound group that lists nothing at all is trusted and
    the model keeps the slot's key: accounts without a model mapping add no
    catalog entries, so silence says nothing about what the group serves.
+   The Chinese models — DeepSeek, GLM, Kimi, MiniMax, Qwen
+   (`model_routing::is_domestic_model`) — answer to a slot of their own
+   instead, `Credentials::domestic_group_id`, and never to a CLI's: the
+   group picked there takes the model when it lists it, unless it is a
+   subscription that is spent or no longer held, when the best
+   pay-as-you-go group listing the model takes it until the subscription
+   has room again.
 2. Otherwise a subscription group that lists it and still has room in every
    window (`SubscriptionProgress::is_exhausted` says otherwise once a daily,
    weekly or monthly limit is spent, or the subscription is no longer
@@ -1016,14 +1023,7 @@ model instead (`crates/sub2api/src/model_routing.rs`):
 Within each rule the model's own platform beats a composite group, which
 beats anything else; a group a CLI slot is bound to then sorts last (it is
 that slot's family's, and the Codex group listing a DeepSeek model was the
-503 above); then the lower rate. A model that both a subscription and a
-pay-as-you-go group serve — and that rule 1 did not claim — also gets its
-pay-as-you-go group on its own (`Credentials::payg_routes`): the picker lists
-it a second time, as `deepseek+payg::deepseek-v4.1-flash`, subtitled "pay as
-you go", for the user who wants to pay by use while the subscription still
-has room. The bridge strips the `+payg` mark in `split_model`, and
-`select_route` reads that row's key from `gateway_keys.payg_models` before
-the plain `gateway_keys.models`. A subscription group the catalog is
+503 above); then the lower rate. A subscription group the catalog is
 silent about is asked with one of its keys (`GET /v1/models`), believed only
 where it cannot be a platform default in disguise — the model's family is
 the group's platform, or the group is composite.
@@ -1034,19 +1034,54 @@ lands: it reads the active subscriptions (`GET /api/v1/subscriptions/progress`),
 keeps one key per subscription group and per routed group in
 `Credentials::group_keys` — reusing an active key the account already has in
 that group before minting one, and dropping a kept key the listing shows
-gone — and stores the answer in `Credentials::model_routes` and
-`Credentials::payg_routes`. The refresh runs on a copy; only those tables are
-merged back into the live session, so a group switch made meanwhile is not
-undone. The routing writer then files one key per model
-(`gateway_keys.models`, and `gateway_keys.payg_models` for the second rows,
-beside the per-platform keys, one table so they are released together), and
-the picker names the subscription a model goes through in its subtitle — or
-that it ran out and the model is on pay-as-you-go for now. The balance poll
+gone — and stores the answer in `Credentials::model_routes`. The refresh
+runs on a copy; only those tables are merged back into the live session, so
+a group switch made meanwhile is not undone (the Chinese models' key is kept
+when their group was picked meanwhile). The routing writer then files one
+key per model (`gateway_keys.models`, beside the per-platform keys, one table
+so they are released together), and the picker names the group a Chinese
+model goes through in its subtitle — the subscription, the pay-as-you-go
+group, or that the subscription ran out and the model is on pay-as-you-go
+for now. The balance poll
 re-reads the subscriptions every minute; when the set of spent ones changes it
 re-routes, and a changed table is pushed to every live built-in session
 (`apply_session_options`), so a subscription that runs out hands over from
 the next turn. One group refusing a key no longer fails the whole refresh:
 its models keep their platform's key.
+
+A turn does not wait for the full refresh. Right after sign-in
+`gateway_keys.models` held none of the Chinese models, the bridge fell back
+to the general key, and the first DeepSeek turn went to a Grok group — "not
+supported by any configured account in this group", fixed by a retry once
+the refresh landed. `native_route_need` (`cloud_subscriptions.rs`) spots a
+Chinese model the catalog lists with no keyed route; picking it, or sending
+on it, runs `sub2api::route_one_model` in the background — the same
+`resolve` over that model's offers alone, then `ensure_group_keys` for that
+one group, which reuses an active key before minting one — and the message
+is held (a toast says so, fifteen seconds at most) until the route is
+merged, the routing re-applied and the live session given the new table.
+The lookup and the full refresh never run side by side, so the two cannot
+mint a key for the same group; a model the lookup finds nothing for goes out
+as it is and is not looked up again until the next full refresh.
+
+**The Chinese models' groups are a lane of their own.** The live
+subscription and pay-as-you-go groups for them are `openai` groups, so filed
+by platform they sat in Codex's list, and a Codex slot pointed at one broke
+every GPT request. `model_routing::group_lane` files a group under
+`DOMESTIC_LANE` when its platform is DeepSeek, Kimi, Zhipu or MiniMax, or
+every model the catalog lists for it is a Chinese one; Settings → Cloud
+Account, the account menu, the plans page and failover all go by lane, so no
+Codex list offers those groups and the Chinese models' lane has no failover
+(the fallback to pay-as-you-go is built in). `pending_group_bindings`
+(`cloud_groups.rs`) fills the slot once the catalog is in — with the group
+a Codex or general slot held, moving that slot onto its own lane's first
+group, else a held subscription, else the first pay-as-you-go group — and
+waits for the catalog before binding either lane, since without it the
+Chinese models' groups read as `openai`. 0.2.3's second "pay as you go" row
+in the picker (`deepseek+payg::…`) is gone with its plumbing: the slot says
+which group pays. `migrate_legacy_pay_as_you_go` (`native_agent.rs`)
+rewrites saved sessions, stars and the last pick on launch, and the bridge's
+`split_model` still strips the `+payg` mark from an id that got past it.
 
 Settings → Cloud Account lists the subscriptions — group, days left, spend
 against each daily, weekly and monthly limit, and which of the built-in

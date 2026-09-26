@@ -410,9 +410,6 @@ impl AgentSession {
         if let Some(platform) = changes.platform {
             options.platform = platform;
         }
-        if let Some(pay_as_you_go) = changes.pay_as_you_go {
-            options.pay_as_you_go = pay_as_you_go;
-        }
         if let Some(format) = changes.wire_format {
             options.wire_format = format;
         }

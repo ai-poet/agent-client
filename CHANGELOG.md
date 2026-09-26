@@ -29,6 +29,14 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- 国模有了自己的分组：设置 → 云账号和账户菜单新增「国模」一栏，在国模订阅和国模按量付费分组之间手动选择；选订阅时额度用完自动改走按量付费，额度恢复后切回。国模分组不再出现在 Codex 的分组里，此前把 Codex 切到国模分组后 GPT 请求报错的问题随之解决——更新后 Codex 会自动换回 Codex 分组，原来选的国模分组移到「国模」一栏。模型选择里的「按量付费」一项随之去掉，走哪个分组由「国模」一栏决定，模型副标题会写明；选过那一项的对话自动沿用，无需重选
+
+  Chinese models get a group of their own: Settings → Cloud Account and the account menu gain a "Chinese models" lane where you pick their subscription or pay-as-you-go group; with the subscription picked they move to pay-as-you-go once its limit is used up, and back once it resets. Their groups no longer appear among Codex's, which fixes GPT failing after Codex was pointed at one — after the update Codex moves back to a Codex group on its own, and the group it held becomes the Chinese models' pick. The model picker's "Pay as you go" entry is gone with it: the lane decides, and each model's subtitle names the group it goes through. Conversations on that entry carry on without being picked again
+
+- 刚登录就用国模发消息，不再报「unknown model」要点重试：发送前会先为这个模型准备好所在分组的密钥（账户里已有就直接复用），短暂提示「正在准备模型路由…」后自动发出
+
+  A Chinese model used right after signing in no longer answers "unknown model" until retried: the message waits a moment ("Getting this model's route ready…") while the key for its group is found — or made, when the account has none there — and then goes out on its own
+
 ## [0.2.3]
 
 - 国模可以按量付费：订阅和按量付费分组都提供的模型（DeepSeek、智谱 GLM、Kimi 等），在内置 Agent 的模型选择里多出一项「按量付费」，选它就按余额计费。订阅那一项仍优先使用订阅额度，额度用完或订阅过期后自动改走按量付费，下一轮对话即生效，额度恢复后再切回订阅

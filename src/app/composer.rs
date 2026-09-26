@@ -4054,10 +4054,10 @@ pub(super) fn model_picker_subtitle(provider: ProviderKind, sub_provider: Option
 
 /// Split a picker model id into the platform ahead of the `::` and the model
 /// after it. A bare id carries no platform — that is what a model the user
-/// declared on their own endpoint looks like. A "pay as you go" row speaks
-/// the same API as the plain one, so its mark is dropped here.
+/// declared on their own endpoint looks like. An id 0.2.3 saved on its "pay
+/// as you go" row speaks the same API as the plain one; its mark is dropped.
 fn native_platform_and_model(id: Option<&str>) -> (String, String) {
-    let (platform, model, _) = super::native_agent::native_route_parts(id.unwrap_or_default());
+    let (platform, model) = super::native_agent::native_route_parts(id.unwrap_or_default());
     (platform, model.to_owned())
 }
 

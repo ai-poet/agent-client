@@ -123,10 +123,6 @@ pub struct NativeRoutes {
     /// `platform_keys`: the group that serves a model is not always the one
     /// holding its platform's key. Same invariant as `platform_keys`.
     pub model_keys: BTreeMap<String, String>,
-    /// The key for each model's pay-as-you-go group where a subscription
-    /// serves it too, consulted first for the picker's "pay as you go" row.
-    /// Same invariant as `platform_keys`.
-    pub payg_model_keys: BTreeMap<String, String>,
 }
 
 impl NativeRoutes {
@@ -196,19 +192,15 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
             .any(|slot| custom.routed_endpoint(slot).is_some());
         let mut platform_keys = BTreeMap::new();
         let mut model_keys = BTreeMap::new();
-        let mut payg_model_keys = BTreeMap::new();
-        let usable = |table: &BTreeMap<String, String>| -> BTreeMap<String, String> {
-            table
-                .iter()
-                .filter(|(_, key)| !key.trim().is_empty())
-                .map(|(model, key)| (model.clone(), key.trim().to_owned()))
-                .collect()
-        };
         // Only while every line is the gateway's. A per-platform table next
         // to somebody else's endpoint would hand that server our key.
         if let Some(config) = cloud.filter(|_| !any_custom) {
-            model_keys = usable(&config.model_keys);
-            payg_model_keys = usable(&config.payg_model_keys);
+            model_keys = config
+                .model_keys
+                .iter()
+                .filter(|(_, key)| !key.trim().is_empty())
+                .map(|(model, key)| (model.clone(), key.trim().to_owned()))
+                .collect();
             for (platform, key) in [
                 ("anthropic", config.key_for("claude")),
                 ("openai", config.key_for("codex")),
@@ -228,7 +220,6 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
                 .or_else(|| cloud_target(cloud.and_then(|config| config.api_key.as_deref()))),
             platform_keys,
             model_keys,
-            payg_model_keys,
         };
         (!routes.is_empty()).then_some(routes)
     };
@@ -594,7 +585,6 @@ mod tests {
             codex_api_key: None,
             codex_model: None,
             model_keys: Default::default(),
-            payg_model_keys: Default::default(),
         };
         let mut custom = CustomApiConfig::default();
         let mut entry = ProviderEntry::new("Mine", ApiFormat::Anthropic);
@@ -640,7 +630,6 @@ mod tests {
             codex_api_key: None,
             codex_model: None,
             model_keys: Default::default(),
-            payg_model_keys: Default::default(),
         };
         let mut custom = CustomApiConfig::default();
         custom.set(
@@ -753,7 +742,6 @@ mod tests {
             codex_api_key: None,
             codex_model: None,
             model_keys: Default::default(),
-            payg_model_keys: Default::default(),
         };
         let mut custom = CustomApiConfig::default();
         custom.set(
@@ -823,7 +811,6 @@ mod tests {
                     ("openai".to_owned(), "sk-x".to_owned()),
                 ]),
                 model_keys: BTreeMap::new(),
-                payg_model_keys: BTreeMap::new(),
             }),
             claude: Some(target("https://gw.example.org", "sk-c")),
             codex: Some(target("https://gw.example.org", "sk-x")),

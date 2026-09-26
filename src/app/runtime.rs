@@ -3375,6 +3375,12 @@ impl Waku {
         if self.response_fork_preparations.contains_key(&session_id) {
             return;
         }
+        // Fork addition: a Chinese model with no key yet (right after signing
+        // in) would go out with the general key and fail; route it first.
+        if self.ensure_native_model_route(session_id, cx) {
+            self.hold_for_route(session_id, submission, cx);
+            return;
+        }
         let selected = self.state.selected_session == Some(session_id);
         let Some(session) = self
             .state

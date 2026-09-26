@@ -372,7 +372,16 @@ impl Waku {
                     .text_color(theme.text)
                     .child(plan.name.clone()),
             );
-        if let Some(platform) = plan.platform.as_deref().filter(|platform| !platform.is_empty()) {
+        // A plan for the Chinese models is sold on an `openai` group; filed
+        // by platform it read as Codex's, and "use for Codex" broke GPT.
+        let lane = plan
+            .platform
+            .as_deref()
+            .filter(|platform| !platform.is_empty())
+            .map(|platform| {
+                sub2api::model_routing::group_lane(plan.group_id, platform, &self.model_plaza.items)
+            });
+        if let Some(platform) = lane.as_deref() {
             header = header.child(
                 div()
                     .flex_none()
@@ -566,13 +575,17 @@ impl Waku {
             cx,
             move |this, _, cx| this.open_plan_purchase(buy_plan.clone(), cx),
         ));
-        // A held plan for a CLI routed through another group sits idle for
-        // that CLI's models; offer to point it here.
+        // A held plan for a CLI — or for the Chinese models — routed through
+        // another group sits idle for those models; offer to point it here.
+        // Until the catalog lands a Chinese-models plan reads as `openai`:
+        // no Codex offer before then.
+        let catalog_ready = !self.model_plaza.items.is_empty();
         if held
-            && let Some(platform) = plan
-                .platform
-                .as_deref()
-                .filter(|platform| matches!(*platform, "anthropic" | "openai"))
+            && let Some(platform) = lane.as_deref().filter(|platform| {
+                *platform == "anthropic"
+                    || (*platform == "openai" && catalog_ready)
+                    || *platform == sub2api::model_routing::DOMESTIC_LANE
+            })
         {
             let bound = self
                 .cloud_account

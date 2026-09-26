@@ -2531,7 +2531,7 @@ cloud.turn_off:
 cloud.subscriptions_title:
   en: "Subscriptions"
 cloud.subscriptions_detail:
-  en: "Billed by period: usage counts against the subscription's limits, not your balance. Built-in agent models no CLI group covers — DeepSeek, Kimi, GLM and the like — go through the subscription that serves them while it has room, and through pay-as-you-go once it runs out. Where both serve a model, the picker also lists it as a separate pay-as-you-go entry."
+  en: "Billed by period: usage counts against the subscription's limits, not your balance. Chinese models — DeepSeek, Kimi, GLM and the like — go through the Chinese models group picked under Model group; other built-in agent models no CLI group covers go through the subscription that serves them while it has room, and through pay-as-you-go once it runs out."
 cloud.subscription_menu:
   en: "Subscription %{group}"
 cloud.subscription_expires_in:
@@ -2560,8 +2560,16 @@ native.subscription_spent:
   en: "Subscription: %{group} (used up)"
 native.subscription_spent_payg:
   en: "%{group} used up — pay as you go for now"
-native.pay_as_you_go:
-  en: "Pay as you go"
+native.pay_as_you_go_group:
+  en: "Pay as you go: %{group}"
+native.preparing_route:
+  en: "Getting this model's route ready…"
+cloud.lane_domestic:
+  en: "Chinese models"
+cloud.lane_domestic_detail:
+  en: "The built-in agent's Chinese models — DeepSeek, Kimi, GLM and the like — go through this group; no CLI uses it. With a subscription group picked they switch to pay-as-you-go once it runs out, and back once it has room again."
+cloud.domestic_switched:
+  en: "Chinese models now go through %{group}"
 cloud.group_title:
   en: "Model group"
 cloud.group_detail:

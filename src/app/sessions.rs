@@ -987,6 +987,9 @@ impl Waku {
                 self.apply_session_options(session_id, cx);
             }
             self.save();
+            // Fork addition: route a Chinese model as soon as it is picked,
+            // so its key is usually in place before the message is typed.
+            self.ensure_native_model_route(session_id, cx);
             cx.notify();
         }
     }

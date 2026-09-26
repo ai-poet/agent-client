@@ -19,8 +19,7 @@ use claurst_tools::{Tool, ToolContext};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{
-    AccessMode, AgentStartOptions, WireFormat, build_config, build_query_config, pays_as_you_go,
-    split_model,
+    AccessMode, AgentStartOptions, WireFormat, build_config, build_query_config, split_model,
 };
 use crate::runtime;
 use crate::session::build_clients;
@@ -32,7 +31,6 @@ use crate::session::build_clients;
 /// otherwise commit with no message.
 pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result<String> {
     let rt = runtime::shared()?;
-    let pay_as_you_go = model.is_some_and(pays_as_you_go);
     let (platform, model) = model.map(split_model).map_or((None, None), |(platform, model)| {
         (platform, Some(model))
     });
@@ -44,7 +42,6 @@ pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result
         plan_mode: false,
         model,
         platform,
-        pay_as_you_go,
         // One prompt, one answer: the engine's primary path is the one to
         // trust for it, whatever the session itself speaks.
         wire_format: Some(WireFormat::Messages),

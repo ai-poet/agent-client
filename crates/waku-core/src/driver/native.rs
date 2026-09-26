@@ -28,7 +28,7 @@ use uuid::Uuid;
 use waku_agent_bridge::{
     AccessMode, AgentEvent, AgentSession, AgentStartOptions, BackgroundEntry, BackgroundKind,
     BackgroundStatus, ComputerUseWiring, GoalOp, GoalSnapshot, GoalState, MissingApiKey,
-    TurnOptions, WireFormat, pays_as_you_go, split_model,
+    TurnOptions, WireFormat, split_model,
 };
 
 use super::activity;
@@ -151,7 +151,6 @@ impl NativeDriver {
             plan_mode: options.interaction_mode == InteractionMode::Plan,
             model,
             platform,
-            pay_as_you_go: options.model.as_deref().is_some_and(pays_as_you_go),
             wire_format: wire_format_of(options.service_tier.as_deref()),
             reasoning_effort: options.reasoning_effort.clone(),
             narration_language: narration_language(),
@@ -264,7 +263,6 @@ impl DriverControl for NativeDriver {
             plan_mode: Some(options.interaction_mode == InteractionMode::Plan),
             model,
             platform: Some(platform),
-            pay_as_you_go: Some(options.model.as_deref().is_some_and(pays_as_you_go)),
             wire_format: Some(wire_format_of(options.service_tier.as_deref())),
             reasoning_effort: options.reasoning_effort,
         })

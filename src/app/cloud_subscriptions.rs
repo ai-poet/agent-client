@@ -23,6 +23,43 @@ use super::*;
 /// before summing up the rest.
 const LISTED_MODELS: usize = 6;
 
+/// How long a message may wait for its model's key before it goes out as
+/// it is. A lookup is one or two requests; this only guards a stuck one.
+const ROUTE_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// The model behind picker id `id` when a turn on it must first be routed:
+/// a Chinese model the catalog lists with no route — or no key for its
+/// route's group — that no earlier lookup already came up empty for.
+///
+/// Only the Chinese models: they are the ones the routing always places
+/// when the catalog lists them, so a missing route means "not worked out
+/// yet". Claude and GPT may be left to their CLI slot's key on purpose. A
+/// model on the user's own endpoint carries no `::` and needs no gateway
+/// key at all.
+pub(super) fn native_route_need(
+    id: &str,
+    credentials: &sub2api::Credentials,
+    catalog: &[sub2api::client::ModelCatalogItem],
+    misses: &std::collections::HashSet<String>,
+) -> Option<String> {
+    if !id.contains("::") {
+        return None;
+    }
+    let (_, model) = super::native_agent::native_route_parts(id);
+    let model = model.trim();
+    if !sub2api::model_routing::is_domestic_model(model) || misses.contains(model) {
+        return None;
+    }
+    if !catalog.iter().any(|item| item.model.trim() == model) {
+        return None;
+    }
+    let routed = credentials
+        .model_routes
+        .get(model)
+        .is_some_and(|group| sub2api::key_for_group(credentials, *group).is_some());
+    (!routed).then(|| model.to_owned())
+}
+
 impl Waku {
     /// Re-derive which group each of the built-in agent's models goes
     /// through, and with it the subscriptions the account holds.
@@ -38,7 +75,9 @@ impl Waku {
         if self.model_plaza.items.is_empty() {
             return;
         }
-        if self.cloud_account.routes_refreshing {
+        // One route writer at a time: a one-model lookup running now would
+        // otherwise race this refresh to mint a key for the same group.
+        if self.cloud_account.routes_refreshing || self.cloud_account.route_lookup.is_some() {
             self.cloud_account.routes_stale = true;
             return;
         }
@@ -77,14 +116,12 @@ impl Waku {
                                 let before = (
                                     credentials.group_keys.clone(),
                                     credentials.model_routes.clone(),
-                                    credentials.payg_routes.clone(),
                                 );
                                 refresh.apply_to(credentials);
                                 before
                                     != (
                                         credentials.group_keys.clone(),
                                         credentials.model_routes.clone(),
-                                        credentials.payg_routes.clone(),
                                     )
                             });
                         if changed {
@@ -103,6 +140,9 @@ impl Waku {
                             // session.
                             this.reapply_built_in_session_options(cx);
                         }
+                        // Every model was routed afresh; one a lookup found
+                        // nothing for may have a group now.
+                        this.cloud_account.route_misses.clear();
                         this.sync_native_models();
                     }
                     Err(error) if sub2api::session_ended(&error) => this.end_cloud_session(cx),
@@ -113,10 +153,167 @@ impl Waku {
                 if std::mem::take(&mut this.cloud_account.routes_stale) {
                     this.refresh_model_routes(cx);
                 }
+                // Messages that waited for this refresh go out now — routed,
+                // or looked up one by one where it could not route them.
+                this.drain_route_sends(cx);
                 cx.notify();
             });
         })
         .detach();
+    }
+
+    /// The Chinese model a built-in session's next turn needs a route for,
+    /// or `None` when it has one (or cannot have one).
+    pub(super) fn native_route_needed(&self, session_id: Uuid) -> Option<String> {
+        if !self.cloud_account.routing_enabled {
+            return None;
+        }
+        let credentials = self.cloud_account.credentials.as_ref()?;
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)?;
+        if !session.provider.is_builtin() {
+            return None;
+        }
+        let id = self.model_for_session(session)?;
+        native_route_need(
+            id,
+            credentials,
+            &self.model_plaza.items,
+            &self.cloud_account.route_misses,
+        )
+    }
+
+    /// Make sure a built-in session's model has a key before its turn goes
+    /// out; returns whether the turn has to wait for one.
+    ///
+    /// Right after signing in, the full route refresh has not finished — it
+    /// waits for the catalog, the subscriptions and a key for every group —
+    /// and a turn sent then went out with the general key, which the gateway
+    /// answered with "no account in this group supports the model". This
+    /// routes the one model at once instead: the group the routing rules
+    /// pick for it, with the key the account already has there, or a new one
+    /// ([`sub2api::route_one_model`]). Only one lookup runs at a time, never
+    /// beside a full refresh; a turn that finds either running waits for it.
+    pub(super) fn ensure_native_model_route(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(model) = self.native_route_needed(session_id) else {
+            return false;
+        };
+        if self.cloud_account.routes_refreshing || self.cloud_account.route_lookup.is_some() {
+            return true;
+        }
+        let Some(credentials) = self.cloud_account.credentials.clone() else {
+            return false;
+        };
+        self.cloud_account.route_lookup = Some(model.clone());
+        let catalog = self.model_plaza.items.clone();
+        let groups = self.cloud_account.groups.clone();
+        let lookup_model = model.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut credentials = credentials;
+                    let group = sub2api::route_one_model(
+                        &mut credentials,
+                        &catalog,
+                        &groups,
+                        &lookup_model,
+                    )?;
+                    anyhow::Ok((credentials, group))
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.cloud_account.route_lookup = None;
+                match result {
+                    Ok((found, Some(group))) => {
+                        this.adopt_cloud_tokens(found.clone());
+                        let saved = this
+                            .cloud_account
+                            .credentials
+                            .as_mut()
+                            .map(|live| {
+                                sub2api::merge_model_route(&found, &model, group, live);
+                                live.save()
+                            });
+                        if let Some(Err(error)) = saved {
+                            this.show_toast(format!("{error:#}"));
+                        }
+                        // The routing writer files the new key; the running
+                        // session re-reads it before the held turn goes out.
+                        this.apply_cloud_routing();
+                        this.reapply_built_in_session_options(cx);
+                        this.sync_native_models();
+                    }
+                    Ok((found, None)) => {
+                        this.adopt_cloud_tokens(found);
+                        this.cloud_account.route_misses.insert(model.clone());
+                    }
+                    Err(error) if sub2api::session_ended(&error) => this.end_cloud_session(cx),
+                    Err(error) => {
+                        eprintln!("warning: no route for {model}: {error:#}");
+                        this.cloud_account.route_misses.insert(model.clone());
+                    }
+                }
+                if std::mem::take(&mut this.cloud_account.routes_stale) {
+                    this.refresh_model_routes(cx);
+                }
+                this.drain_route_sends(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+        true
+    }
+
+    /// Hold a message until its model has a key. Released when the lookup
+    /// or refresh it waits for ends — or after [`ROUTE_WAIT`] regardless, so
+    /// a stuck request never swallows it.
+    pub(super) fn hold_for_route(
+        &mut self,
+        session_id: Uuid,
+        submission: super::ComposerSubmission,
+        cx: &mut Context<Self>,
+    ) {
+        self.cloud_account
+            .pending_route_sends
+            .push((session_id, submission));
+        self.show_toast(tr!("native.preparing_route"));
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(ROUTE_WAIT).await;
+            let _ = this.update(cx, |this, cx| this.release_route_sends(cx));
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Send what was held for a route. A message whose model still has
+    /// none starts (or waits on) another lookup; one that found nothing is
+    /// in `route_misses` and goes out as it is.
+    pub(super) fn drain_route_sends(&mut self, cx: &mut Context<Self>) {
+        for (session_id, submission) in
+            std::mem::take(&mut self.cloud_account.pending_route_sends)
+        {
+            self.submit_submission_for_session(session_id, submission, cx);
+        }
+    }
+
+    /// The wait ran out: send every held message as it is.
+    fn release_route_sends(&mut self, cx: &mut Context<Self>) {
+        let waiting: Vec<String> = self
+            .cloud_account
+            .pending_route_sends
+            .iter()
+            .filter_map(|(session_id, _)| self.native_route_needed(*session_id))
+            .collect();
+        self.cloud_account.route_misses.extend(waiting);
+        self.drain_route_sends(cx);
     }
 
     /// Push the current options — and with them the current key table — to
@@ -148,14 +345,13 @@ impl Waku {
     }
 
     /// What the built-in agent's picker needs to label a model with the
-    /// subscription it goes through, and to offer its pay-as-you-go row.
+    /// group it goes through.
     pub(super) fn native_routing(&self) -> super::native_agent::NativeRouting {
-        let credentials = self.cloud_account.credentials.as_ref();
-        let routes = credentials
+        let routes = self
+            .cloud_account
+            .credentials
+            .as_ref()
             .map(|credentials| credentials.model_routes.clone())
-            .unwrap_or_default();
-        let payg = credentials
-            .map(|credentials| credentials.payg_routes.clone())
             .unwrap_or_default();
         let subscriptions = self
             .cloud_account
@@ -164,11 +360,17 @@ impl Waku {
             .flatten()
             .map(|subscription| (subscription.group_id(), subscription.group_name()))
             .collect();
+        let group_names = self
+            .cloud_account
+            .groups
+            .iter()
+            .map(|group| (group.id, group.name.clone()))
+            .collect();
         super::native_agent::NativeRouting {
             routes,
-            payg,
             subscriptions,
             exhausted: self.exhausted_subscriptions(),
+            group_names,
         }
     }
 
@@ -454,7 +656,12 @@ fn subscription_card(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sub2api::client::{Group, SubscriptionProgress, SubscriptionUsage, SubscriptionWindow, UserSubscription};
+    use std::collections::HashSet;
+
+    use sub2api::client::{
+        Group, GroupRef, ModelCatalogItem, SubscriptionProgress, SubscriptionUsage,
+        SubscriptionWindow, UserSubscription,
+    };
 
     fn subscription(progress: Option<SubscriptionUsage>, group: Group) -> SubscriptionProgress {
         SubscriptionProgress {
@@ -493,5 +700,59 @@ mod tests {
             .map(|(_, window)| (window.used_usd, window.limit_usd))
             .collect();
         assert_eq!(figures, [(0.0, 10.0), (50.0, 200.0)]);
+    }
+
+    /// Bug 1: right after sign-in a pay-as-you-go-only account's DeepSeek
+    /// turn went out on the general key — a Grok group — before the full
+    /// refresh had routed it. Such a turn now waits for its model's key.
+    #[test]
+    fn a_chinese_model_without_a_keyed_route_is_looked_up_first() {
+        let catalog = [ModelCatalogItem {
+            model: "deepseek-v4.1-flash".into(),
+            platform: "openai".into(),
+            best_group: GroupRef {
+                id: 15,
+                ..GroupRef::default()
+            },
+            ..ModelCatalogItem::default()
+        }];
+        let none = HashSet::new();
+        let fresh = sub2api::Credentials::default();
+        let id = "deepseek::deepseek-v4.1-flash";
+        assert_eq!(
+            native_route_need(id, &fresh, &catalog, &none).as_deref(),
+            Some("deepseek-v4.1-flash")
+        );
+
+        // Routed, but the group's key is not known yet: still looked up.
+        let mut routed = fresh.clone();
+        routed.model_routes.insert("deepseek-v4.1-flash".into(), 15);
+        assert!(native_route_need(id, &routed, &catalog, &none).is_some());
+        routed.group_keys.insert(15, "sk-payg".into());
+        assert_eq!(native_route_need(id, &routed, &catalog, &none), None);
+
+        // An id 0.2.3 saved on its pay-as-you-go row is the same model.
+        assert!(native_route_need("deepseek+payg::deepseek-v4.1-flash", &fresh, &catalog, &none).is_some());
+
+        // A lookup that already came up empty is not repeated per message.
+        let missed: HashSet<String> = ["deepseek-v4.1-flash".to_owned()].into();
+        assert_eq!(native_route_need(id, &fresh, &catalog, &missed), None);
+
+        // The user's own endpoint: no `::`, no gateway key involved.
+        assert_eq!(native_route_need("deepseek-v4.1-flash", &fresh, &catalog, &none), None);
+    }
+
+    #[test]
+    fn only_the_chinese_models_the_catalog_lists_wait_for_a_route() {
+        let none = HashSet::new();
+        let fresh = sub2api::Credentials::default();
+        let gpt = [ModelCatalogItem {
+            model: "gpt-5.6-sol".into(),
+            ..ModelCatalogItem::default()
+        }];
+        // GPT and Claude may ride their CLI slot's key on purpose.
+        assert_eq!(native_route_need("openai::gpt-5.6-sol", &fresh, &gpt, &none), None);
+        // Not in the catalog: there is no group to look up.
+        assert_eq!(native_route_need("deepseek::deepseek-v4.1-flash", &fresh, &gpt, &none), None);
     }
 }

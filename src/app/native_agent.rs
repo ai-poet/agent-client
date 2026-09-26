@@ -41,62 +41,120 @@ use crate::model::{ProviderModel, ProviderModelOption};
 
 /// Where the built-in agent's models are sent, for labelling them: the
 /// group model routing picked for each (`Credentials::model_routes`), the
-/// pay-as-you-go group of each model a subscription also serves
-/// (`Credentials::payg_routes`), and the account's subscription groups, by
-/// id, with their names — plus which of them have run out.
+/// account's subscription groups by id with their names — plus which of
+/// them have run out — and every group's name, for the Chinese models'
+/// pay-as-you-go line.
 #[derive(Clone, Debug, Default)]
 pub(super) struct NativeRouting {
     pub routes: std::collections::BTreeMap<String, i64>,
-    pub payg: std::collections::BTreeMap<String, i64>,
     pub subscriptions: std::collections::BTreeMap<i64, String>,
     pub exhausted: std::collections::BTreeSet<i64>,
+    pub group_names: std::collections::BTreeMap<i64, String>,
 }
 
 impl NativeRouting {
-    /// What a model's plain row says about the subscription behind it, if
-    /// one is: the one it goes through, that one having run out, or — when a
-    /// spent subscription has handed it to pay-as-you-go — that.
+    /// What a model's row says about the group behind it: the subscription
+    /// it goes through (or that one having run out), and for a Chinese model
+    /// on pay-as-you-go, that — or that a spent subscription handed it there.
+    /// Claude and GPT on their CLI group say nothing: that is the usual case.
     ///
     /// `groups` are every group the catalog lists the model under.
-    fn subscription_note(&self, model: &str, groups: &[i64]) -> Option<String> {
-        let routed = self.routes.get(model).copied();
-        if let Some(group) = routed
-            && let Some(name) = self.subscriptions.get(&group)
-        {
-            return Some(if self.exhausted.contains(&group) {
+    fn route_note(&self, model: &str, groups: &[i64]) -> Option<String> {
+        let routed = self.routes.get(model).copied()?;
+        if let Some(name) = self.subscriptions.get(&routed) {
+            return Some(if self.exhausted.contains(&routed) {
                 tr!("native.subscription_spent", group = name.clone())
             } else {
                 tr!("native.via_subscription", group = name.clone())
             });
         }
-        groups
+        if !sub2api::model_routing::is_domestic_model(model) {
+            return None;
+        }
+        if let Some(name) = groups
             .iter()
             .find(|group| self.exhausted.contains(*group))
             .and_then(|group| self.subscriptions.get(group))
-            .map(|name| tr!("native.subscription_spent_payg", group = name.clone()))
+        {
+            return Some(tr!("native.subscription_spent_payg", group = name.clone()));
+        }
+        self.group_names
+            .get(&routed)
+            .map(|name| tr!("native.pay_as_you_go_group", group = name.clone()))
     }
 }
 
-/// What the picker appends to the platform of a model's "pay as you go" row:
-/// `deepseek+payg::deepseek-v4.1-flash`. Kept in step with
-/// `waku_agent_bridge::PAY_AS_YOU_GO_MARK`, which the desktop does not link;
-/// the bridge strips it and sends that row with its pay-as-you-go key.
-pub(super) const PAY_AS_YOU_GO_MARK: &str = "+payg";
+/// What 0.2.3's picker appended to the platform of a model's "pay as you go"
+/// row: `deepseek+payg::deepseek-v4.1-flash`. That row is gone — the Chinese
+/// models' group decides now — and ids saved with it are rewritten to the
+/// plain row on load ([`legacy_plain_id`]). Kept in step with
+/// `waku_agent_bridge::LEGACY_PAY_AS_YOU_GO_MARK`, which the desktop does not
+/// link.
+pub(super) const LEGACY_PAY_AS_YOU_GO_MARK: &str = "+payg";
 
-/// A picker id taken apart: the platform ahead of the `::` (lowercased, no
-/// [`PAY_AS_YOU_GO_MARK`]), the model after it, and whether it is a "pay as
-/// you go" row. A bare id carries no platform — that is what a model the
-/// user declared on their own endpoint looks like.
-pub(super) fn native_route_parts(id: &str) -> (String, &str, bool) {
+/// The plain row's id for one 0.2.3 saved on its "pay as you go" row, or
+/// `None` for any other id.
+pub(super) fn legacy_plain_id(id: &str) -> Option<String> {
+    let (platform, model) = id.split_once("::")?;
+    let platform = platform.strip_suffix(LEGACY_PAY_AS_YOU_GO_MARK)?;
+    Some(format!("{platform}::{model}"))
+}
+
+/// Rewrite every built-in agent id 0.2.3 saved on its "pay as you go" row
+/// — sessions, favorites, the last pick — to the plain row, which the
+/// Chinese models' group now routes. Returns whether anything changed.
+pub(super) fn migrate_legacy_pay_as_you_go(state: &mut PersistedState) -> bool {
+    let mut changed = false;
+    let mut plain = |id: &mut String| {
+        if let Some(rewritten) = legacy_plain_id(id) {
+            *id = rewritten;
+            changed = true;
+        }
+    };
+    for session in state
+        .sessions
+        .iter_mut()
+        .filter(|session| session.provider.is_builtin())
+    {
+        if let Some(model) = session.model.as_mut() {
+            plain(model);
+        }
+    }
+    for favorite in state
+        .favorite_models
+        .iter_mut()
+        .filter(|favorite| favorite.provider.is_builtin())
+    {
+        plain(&mut favorite.model);
+    }
+    if state.last_provider.is_builtin()
+        && let Some(model) = state.last_model.as_mut()
+    {
+        plain(model);
+    }
+    if changed {
+        // Both rows starred collapse into one star.
+        let mut seen = std::collections::HashSet::new();
+        state
+            .favorite_models
+            .retain(|favorite| seen.insert((favorite.provider, favorite.model.clone())));
+    }
+    changed
+}
+
+/// A picker id taken apart: the platform ahead of the `::` (lowercased,
+/// without a [`LEGACY_PAY_AS_YOU_GO_MARK`]) and the model after it. A bare
+/// id carries no platform — that is what a model the user declared on their
+/// own endpoint looks like.
+pub(super) fn native_route_parts(id: &str) -> (String, &str) {
     match id.split_once("::") {
         Some((platform, model)) => {
-            let (platform, pay_as_you_go) = match platform.strip_suffix(PAY_AS_YOU_GO_MARK) {
-                Some(platform) => (platform, true),
-                None => (platform, false),
-            };
-            (platform.trim().to_ascii_lowercase(), model, pay_as_you_go)
+            let platform = platform
+                .strip_suffix(LEGACY_PAY_AS_YOU_GO_MARK)
+                .unwrap_or(platform);
+            (platform.trim().to_ascii_lowercase(), model)
         }
-        None => (String::new(), id, false),
+        None => (String::new(), id),
     }
 }
 
@@ -116,10 +174,10 @@ pub(super) fn native_models_from_catalog(items: &[ModelCatalogItem]) -> Vec<Prov
 /// default, since it is the engine's own default family.
 ///
 /// The catalog lists a model once per group that serves it; the picker
-/// lists it once — twice when a subscription and a pay-as-you-go group both
-/// serve it, the second row pinned to pay-as-you-go. The plain row comes
-/// from the entry of the group routing sends it through, when routing has
-/// picked one, so its name and platform are that group's.
+/// lists it once. The row comes from the entry of the group routing sends it
+/// through, when routing has picked one, so its name and platform are that
+/// group's — and its subtitle says which group that is, where it is not the
+/// obvious one.
 pub(super) fn native_models_routed(
     items: &[ModelCatalogItem],
     routing: &NativeRouting,
@@ -153,22 +211,10 @@ pub(super) fn native_models_routed(
         let item = through(routing.routes.get(model_id)).unwrap_or(entries[0]);
         let platform = native_platform(item);
         let groups: Vec<i64> = entries.iter().map(|item| item.best_group.id).collect();
-        let note = routing.subscription_note(model_id, &groups);
+        let note = routing.route_note(model_id, &groups);
         // No API to send it over means it is not a choice, however well it
         // reads in a catalog.
-        let Some(row) = native_row(item, &platform, format!("{platform}::{model_id}"), note) else {
-            continue;
-        };
-        models.push(row);
-        if let Some(payg) = through(routing.payg.get(model_id)) {
-            let platform = native_platform(payg);
-            models.extend(native_row(
-                payg,
-                &platform,
-                format!("{platform}{PAY_AS_YOU_GO_MARK}::{model_id}"),
-                Some(tr!("native.pay_as_you_go")),
-            ));
-        }
+        models.extend(native_row(item, &platform, format!("{platform}::{model_id}"), note));
     }
 
     if let Some(default) = models
@@ -546,7 +592,7 @@ pub(super) fn native_vendor_of(model: &ProviderModel) -> &'static str {
         }
         return vendor_by_name(&model.id).unwrap_or(OTHER_VENDOR);
     }
-    let (platform, name, _) = native_route_parts(&model.id);
+    let (platform, name) = native_route_parts(&model.id);
     if let Some(vendor) = vendor_by_name(name) {
         return vendor;
     }
@@ -977,57 +1023,101 @@ mod tests {
         assert_eq!(models[0].sub_provider.as_deref(), Some("zhipu"));
     }
 
-    /// The live shape: a DeepSeek subscription and the "国模按量付费分组"
-    /// (an `openai` group) both serve the model. The picker lists it twice —
-    /// the subscription row, and one pinned to pay-as-you-go — and once the
-    /// subscription runs out the plain row says so.
+    /// The live shape: the Chinese models' subscription (14) and
+    /// pay-as-you-go (15) groups, both on `openai`, serving the same model.
+    /// One row, whose subtitle names the group it goes through: the
+    /// subscription, the pay-as-you-go group, or a spent subscription that
+    /// handed it there.
     #[test]
-    fn a_model_a_subscription_and_pay_as_you_go_both_serve_is_listed_twice() {
-        let mut subscription = item("deepseek-v4.1-flash", "composite");
-        subscription.best_group.id = 20;
+    fn a_chinese_model_is_listed_once_and_names_its_group() {
+        let mut subscription = item("deepseek-v4.1-flash", "openai");
+        subscription.best_group.id = 14;
         let mut payg = item("deepseek-v4.1-flash", "openai");
-        payg.best_group.id = 40;
+        payg.best_group.id = 15;
         let mut routing = NativeRouting {
-            routes: std::collections::BTreeMap::from([("deepseek-v4.1-flash".to_owned(), 20)]),
-            payg: std::collections::BTreeMap::from([("deepseek-v4.1-flash".to_owned(), 40)]),
-            subscriptions: std::collections::BTreeMap::from([(20, "DeepSeek 包月".to_owned())]),
+            routes: std::collections::BTreeMap::from([("deepseek-v4.1-flash".to_owned(), 14)]),
+            subscriptions: std::collections::BTreeMap::from([(14, "国模订阅".to_owned())]),
+            group_names: std::collections::BTreeMap::from([
+                (14, "国模订阅".to_owned()),
+                (15, "国模按量付费分组".to_owned()),
+            ]),
             ..NativeRouting::default()
         };
         let catalog = [subscription, payg];
+        let subtitle = |routing: &NativeRouting| {
+            let models = native_models_routed(&catalog, routing);
+            assert_eq!(models.len(), 1);
+            assert_eq!(models[0].id, "deepseek::deepseek-v4.1-flash");
+            models[0].sub_provider.clone().unwrap_or_default()
+        };
 
-        let models = native_models_routed(&catalog, &routing);
-        let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
-        assert_eq!(
-            ids,
-            ["deepseek::deepseek-v4.1-flash", "deepseek+payg::deepseek-v4.1-flash"]
-        );
-        assert!(models[0].sub_provider.as_deref().unwrap_or_default().contains("DeepSeek 包月"));
-        let payg_subtitle = models[1].sub_provider.as_deref().unwrap_or_default();
-        assert_eq!(payg_subtitle, format!("deepseek \u{00b7} {}", tr!("native.pay_as_you_go")));
-        // Same API and ladder as the plain row, and the same vendor.
-        assert_eq!(models[1].default_service_tier.as_deref(), Some("chat"));
-        assert_eq!(models[1].reasoning_efforts.len(), models[0].reasoning_efforts.len());
-        assert_eq!(native_vendor_of(&models[1]), "deepseek");
-        assert_eq!(
-            native_route_parts(&models[1].id),
-            ("deepseek".to_owned(), "deepseek-v4.1-flash", true)
-        );
+        assert!(subtitle(&routing).contains("国模订阅"));
 
-        // Spent: routing moved the plain row to pay-as-you-go, and it says why.
-        routing.routes.insert("deepseek-v4.1-flash".to_owned(), 40);
-        routing.exhausted.insert(20);
-        let models = native_models_routed(&catalog, &routing);
-        assert_eq!(models.len(), 2);
+        routing.routes.insert("deepseek-v4.1-flash".to_owned(), 15);
         assert_eq!(
-            models[0].sub_provider.as_deref(),
-            Some(
-                format!(
-                    "deepseek \u{00b7} {}",
-                    tr!("native.subscription_spent_payg", group = "DeepSeek 包月".to_owned())
-                )
-                .as_str()
+            subtitle(&routing),
+            format!(
+                "deepseek \u{00b7} {}",
+                tr!("native.pay_as_you_go_group", group = "国模按量付费分组".to_owned())
             )
         );
+
+        routing.exhausted.insert(14);
+        assert_eq!(
+            subtitle(&routing),
+            format!(
+                "deepseek \u{00b7} {}",
+                tr!("native.subscription_spent_payg", group = "国模订阅".to_owned())
+            )
+        );
+    }
+
+    /// 0.2.3 saved sessions on a "pay as you go" row; they become the plain
+    /// row, and the mark never reaches the platform.
+    #[test]
+    fn a_legacy_pay_as_you_go_id_becomes_the_plain_row() {
+        assert_eq!(
+            legacy_plain_id("deepseek+payg::deepseek-v4.1-flash").as_deref(),
+            Some("deepseek::deepseek-v4.1-flash")
+        );
+        assert_eq!(legacy_plain_id("deepseek::deepseek-v4.1-flash"), None);
+        assert_eq!(legacy_plain_id("claude-sonnet-5"), None);
+        assert_eq!(
+            native_route_parts("deepseek+payg::deepseek-v4.1-flash"),
+            ("deepseek".to_owned(), "deepseek-v4.1-flash")
+        );
+    }
+
+    /// Updating the client is all it takes: saved sessions, stars and the
+    /// last pick move off the removed row on first launch.
+    #[test]
+    fn saved_pay_as_you_go_picks_move_to_the_plain_row() {
+        let legacy = "deepseek+payg::deepseek-v4.1-flash";
+        let plain = "deepseek::deepseek-v4.1-flash";
+        let mut state = PersistedState::fresh(std::path::PathBuf::from("."));
+        let project = state.projects[0].id;
+        let mut native = AgentSession::new(project, ProviderKind::Native);
+        native.model = Some(legacy.to_owned());
+        state.sessions.push(native);
+        state.favorite_models = [legacy, plain]
+            .into_iter()
+            .map(|model| FavoriteModel {
+                provider: ProviderKind::Native,
+                model: model.to_owned(),
+            })
+            .collect();
+        state.last_provider = ProviderKind::Native;
+        state.last_model = Some(legacy.to_owned());
+
+        assert!(migrate_legacy_pay_as_you_go(&mut state));
+        let session = state.sessions.last().expect("session");
+        assert_eq!(session.model.as_deref(), Some(plain));
+        assert_eq!(state.last_model.as_deref(), Some(plain));
+        let stars: Vec<&str> = state.favorite_models.iter().map(|f| f.model.as_str()).collect();
+        assert_eq!(stars, [plain]);
+
+        // Nothing left to move: a second launch saves nothing.
+        assert!(!migrate_legacy_pay_as_you_go(&mut state));
     }
 
     #[test]

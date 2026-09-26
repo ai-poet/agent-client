@@ -60,11 +60,6 @@ pub const GATEWAY_KEYS_OPTION: &str = "gateway_keys";
 /// code path. No platform is called `models`.
 pub const MODEL_KEYS_MEMBER: &str = "models";
 
-/// The member holding the pay-as-you-go keys, per model — what the picker's
-/// "pay as you go" row goes out with. Same unit, same reason. No platform is
-/// called `payg_models` either.
-pub const PAYG_MODEL_KEYS_MEMBER: &str = "payg_models";
-
 /// The table as written: platform keys, plus the per-model ones when there
 /// are any.
 fn gateway_keys_value(routes: &NativeRoutes) -> Value {
@@ -75,12 +70,6 @@ fn gateway_keys_value(routes: &NativeRoutes) -> Value {
         .collect();
     if !routes.model_keys.is_empty() {
         table.insert(MODEL_KEYS_MEMBER.to_owned(), json!(routes.model_keys));
-    }
-    if !routes.payg_model_keys.is_empty() {
-        table.insert(
-            PAYG_MODEL_KEYS_MEMBER.to_owned(),
-            json!(routes.payg_model_keys),
-        );
     }
     Value::Object(table)
 }
@@ -385,7 +374,6 @@ mod tests {
             chat: at("https://gateway.example.org", "sk-claude"),
             platform_keys: keys(),
             model_keys: BTreeMap::new(),
-            payg_model_keys: BTreeMap::new(),
         }
     }
 
@@ -509,7 +497,6 @@ mod tests {
             chat: at("https://chat.example.org", "sk-chat"),
             platform_keys: BTreeMap::new(),
             model_keys: BTreeMap::new(),
-            payg_model_keys: BTreeMap::new(),
         };
         take_over(&dir, &routes, &mut backups).unwrap();
 
@@ -542,10 +529,6 @@ mod tests {
         let mut backups = CliBackups::default();
         let routes = NativeRoutes {
             model_keys: BTreeMap::from([("deepseek-v4.1-flash".to_owned(), "sk-sub".to_owned())]),
-            payg_model_keys: BTreeMap::from([(
-                "deepseek-v4.1-flash".to_owned(),
-                "sk-payg".to_owned(),
-            )]),
             ..routes()
         };
         take_over(&dir, &routes, &mut backups).unwrap();
@@ -554,10 +537,6 @@ mod tests {
             .cloned()
             .expect("key table");
         assert_eq!(table.pointer("/models/deepseek-v4.1-flash").unwrap(), "sk-sub");
-        assert_eq!(
-            table.pointer("/payg_models/deepseek-v4.1-flash").unwrap(),
-            "sk-payg"
-        );
         assert_eq!(table.get("openai").unwrap(), "sk-codex");
 
         let custom = NativeRoutes {
@@ -592,7 +571,6 @@ mod tests {
             chat: None,
             platform_keys: BTreeMap::new(),
             model_keys: BTreeMap::new(),
-            payg_model_keys: BTreeMap::new(),
         };
         take_over(&dir, &custom, &mut backups).unwrap();
         let root = read(&settings_path(&dir));

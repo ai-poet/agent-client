@@ -71,10 +71,16 @@ pub struct Credentials {
     /// Group `codex_api_key` is bound to, when the user picked one per CLI.
     #[serde(default)]
     pub codex_group_id: Option<i64>,
-    /// Keys for groups no CLI slot is bound to — subscriptions and the
-    /// pay-as-you-go groups beside them — by group id. The built-in agent
-    /// sends each model through the group that serves it, which is often not
-    /// one of the three slots.
+    /// The Chinese models' group (DeepSeek, GLM, Kimi, …): a subscription or
+    /// a pay-as-you-go group, picked on Settings → Cloud Account. No CLI
+    /// holds it — its key lives in `group_keys` — and only the built-in
+    /// agent's routing reads it ([`crate::model_routing::Bindings::domestic`]).
+    #[serde(default)]
+    pub domestic_group_id: Option<i64>,
+    /// Keys for groups no CLI slot is bound to — the domestic group,
+    /// subscriptions and the pay-as-you-go groups beside them — by group id.
+    /// The built-in agent sends each model through the group that serves it,
+    /// which is often not one of the three slots.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub group_keys: BTreeMap<i64, String>,
     /// The group each of the built-in agent's models goes through, as
@@ -83,11 +89,6 @@ pub struct Credentials {
     /// its platform's slot.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub model_routes: BTreeMap<String, i64>,
-    /// For a model a subscription and a pay-as-you-go group both serve, the
-    /// pay-as-you-go group — what the picker's "pay as you go" row goes
-    /// through ([`crate::model_routing::Routes::pay_as_you_go`]).
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub payg_routes: BTreeMap<String, i64>,
     /// The group each image model was last seen to draw through, learned by
     /// the image studio. A group has to be granted image generation on its
     /// own, and the catalog lists image models under groups that were not,
@@ -329,9 +330,9 @@ pub fn credentials_from_fragment(fragment: &str, expected_endpoint: &str) -> Res
         group_id: None,
         claude_group_id: None,
         codex_group_id: None,
+        domestic_group_id: None,
         group_keys: BTreeMap::new(),
         model_routes: BTreeMap::new(),
-        payg_routes: BTreeMap::new(),
         image_groups: BTreeMap::new(),
         // Signing in is an explicit request to route through the service.
         routing_disabled: false,

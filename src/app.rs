@@ -1737,6 +1737,10 @@ mod background_work;
 mod branches;
 mod cli_setup;
 mod cloud_account;
+mod cloud_failover;
+mod cloud_groups;
+mod cloud_menu;
+mod cloud_origins;
 mod cloud_pay;
 mod cloud_subscriptions;
 mod cloud_usage;
@@ -2115,6 +2119,8 @@ impl Waku {
         let composer_draft_store = ComposerDraftStore::remote(daemon.clone());
         let composer_drafts = composer_draft_store.load().unwrap_or_default();
         let mut state = store.load_or_fresh(cwd);
+        // Fork addition: 0.2.3's "pay as you go" picker rows are gone.
+        let migrated_payg_rows = native_agent::migrate_legacy_pay_as_you_go(&mut state);
         let home_directory = crate::projectless::home_directory();
         state.apply_daemon_settings(daemon.settings());
         if let Err(error) = daemon.update_settings(state.daemon_settings()) {
@@ -2231,7 +2237,7 @@ impl Waku {
         let workspace_client = waku_client::WorkspaceClient::new(daemon.client());
         let (projectless_migrated, projectless_migration_error) =
             migrate_legacy_projectless_projects(&mut state, &workspace_client);
-        let projectless_save_error = projectless_migrated
+        let projectless_save_error = (projectless_migrated || migrated_payg_rows)
             .then(|| store.save(&mut state).err())
             .flatten();
         let startup_toast = projectless_migration_error

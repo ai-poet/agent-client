@@ -254,6 +254,9 @@ impl Waku {
                         // The built-in agent's picker reads this same listing,
                         // and routes each of its models by it.
                         this.sync_native_models();
+                        // It also tells a group of the Chinese models from a
+                        // Codex one, which the bindings wait for.
+                        this.ensure_cloud_group_bindings(cx);
                         this.refresh_model_routes(cx);
                     }
                     Err(error) => this.model_plaza.error = Some(format!("{error:#}")),
