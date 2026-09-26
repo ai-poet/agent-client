@@ -29,6 +29,8 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.2.5]
+
 - 国模有了自己的分组：设置 → 云账号和账户菜单新增「国模」一栏，在国模订阅和国模按量付费分组之间手动选择；选订阅时额度用完自动改走按量付费，额度恢复后切回。国模分组不再出现在 Codex 的分组里，此前把 Codex 切到国模分组后 GPT 请求报错的问题随之解决——更新后 Codex 会自动换回 Codex 分组，原来选的国模分组移到「国模」一栏。模型选择里的「按量付费」一项随之去掉，走哪个分组由「国模」一栏决定，模型副标题会写明；选过那一项的对话自动沿用，无需重选
 
   Chinese models get a group of their own: Settings → Cloud Account and the account menu gain a "Chinese models" lane where you pick their subscription or pay-as-you-go group; with the subscription picked they move to pay-as-you-go once its limit is used up, and back once it resets. Their groups no longer appear among Codex's, which fixes GPT failing after Codex was pointed at one — after the update Codex moves back to a Codex group on its own, and the group it held becomes the Chinese models' pick. The model picker's "Pay as you go" entry is gone with it: the lane decides, and each model's subtitle names the group it goes through. Conversations on that entry carry on without being picked again
