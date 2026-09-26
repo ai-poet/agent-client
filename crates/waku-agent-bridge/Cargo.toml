@@ -16,6 +16,7 @@ license = "GPL-3.0-only"
 [dependencies]
 anyhow = "1.0"
 async-trait = { workspace = true }
+base64 = { workspace = true }
 claurst-api = { workspace = true }
 claurst-core = { workspace = true }
 claurst-mcp = { workspace = true }

@@ -1019,11 +1019,15 @@ pub async fn run_query_loop(
                             if let claurst_core::types::MessageContent::Blocks(ref mut blocks) = msg.content {
                                 for block in blocks.iter_mut() {
                                     match block {
-                                        claurst_core::types::ContentBlock::Image { .. } if !caps.image_input => {
-                                            *block = claurst_core::types::ContentBlock::Text {
-                                                text: "[Image not supported by this model]".to_string(),
-                                            };
-                                        }
+                                        // Fork (Waku): images go out whatever
+                                        // the registry says of the model.
+                                        // Behind a gateway a model name says
+                                        // nothing certain about the upstream,
+                                        // and the Responses adapter declares
+                                        // no image input at all, so GPT lost
+                                        // every picture. A model that cannot
+                                        // read one says so in its API error
+                                        // rather than answering a placeholder.
                                         claurst_core::types::ContentBlock::Document { .. } if !caps.pdf_input => {
                                             *block = claurst_core::types::ContentBlock::Text {
                                                 text: "[PDF not supported by this model]".to_string(),

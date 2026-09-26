@@ -678,7 +678,8 @@ async fn run_turn(
     // What the conversation weighed going in, for marking a summary the
     // engine may write this turn with the turns it replaced.
     let weight_before = history::turn_count(&messages) + 1;
-    let mut prompt = Message::user(prompt);
+    // The pictures the prompt mentions go with it, for every model.
+    let mut prompt = crate::images::user_message(prompt, &inner.cwd);
     // Found again by its mark rather than by index: a compaction mid-turn
     // rewrites everything before it, and everything after the prompt is this
     // turn's — which is what lets a turn that produced nothing be told apart

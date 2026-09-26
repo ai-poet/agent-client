@@ -1411,6 +1411,23 @@ was told would be a way to drop a file anywhere on its host. Only `SKILL.md`
 is touched, through a sibling temporary file, so anything else in that
 directory survives.
 
+**Pictures in a prompt** — the desktop hands every agent the same prompt:
+the text, then one `@path` per attachment. Claude Code and Codex open those
+paths themselves; the engine does not, and its file reader answers an image
+with a line of text, so a pasted screenshot reached the built-in agent as a
+file name. `waku-agent-bridge/src/images.rs` reads every picture a prompt
+mentions — PNG, JPEG, GIF or WebP by their bytes, not their name, up to
+20 MB, relative paths against the session's directory, and since paths are
+not quoted a mention runs to the next `@` and is cut back at spaces until
+the disk agrees — and sends them as image blocks ahead of the text. The
+engine used to replace an image with "[Image not supported by this model]"
+wherever the model registry or the adapter said no vision (the Responses
+adapter says so for every model, so GPT never saw one); a recorded departure
+in `query/src/lib.rs` sends them regardless. Which model reads pictures is
+the gateway's to say: one that cannot answers with its API's error. The
+picture stays in the transcript, so later turns carry it too. A message sent
+while a turn runs is steering text and carries its mentions only as paths.
+
 **Computer Use and image generation** — the built-in agent reaches both
 through the same `waku_js_repl` MCP server every wired CLI uses, registered
 into the session's `Config.mcp_servers` at start rather than written to

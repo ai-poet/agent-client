@@ -43,6 +43,7 @@ mod config;
 mod events;
 mod goal;
 pub mod history;
+mod images;
 mod mcp_tool;
 mod oneshot;
 mod permission;

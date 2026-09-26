@@ -37,6 +37,10 @@ the original feature bullet instead of adding separate entries for them.
 
   A Chinese model used right after signing in no longer answers "unknown model" until retried: the message waits a moment ("Getting this model's route ready…") while the key for its group is found — or made, when the account has none there — and then goes out on its own
 
+- 内置 Agent 能看图了：粘贴、拖入或选择的图片会随消息一起发给模型，所有模型都一样（此前模型只收到图片的文件路径，GPT 更是一张图都看不到）；不支持图片的模型会由接口直接报错说明
+
+  The built-in agent can see pictures: images you paste, drop or pick go to the model with your message, whatever the model (before, it only got the file's path, and GPT never saw a picture at all). A model that cannot read images says so in the API's error
+
 ## [0.2.3]
 
 - 国模可以按量付费：订阅和按量付费分组都提供的模型（DeepSeek、智谱 GLM、Kimi 等），在内置 Agent 的模型选择里多出一项「按量付费」，选它就按余额计费。订阅那一项仍优先使用订阅额度，额度用完或订阅过期后自动改走按量付费，下一轮对话即生效，额度恢复后再切回订阅
