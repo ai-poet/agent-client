@@ -60,6 +60,13 @@ pub const GATEWAY_KEYS_OPTION: &str = "gateway_keys";
 /// code path. No platform is called `models`.
 pub const MODEL_KEYS_MEMBER: &str = "models";
 
+/// Where each model's context window is filed (`{"<model>": <tokens>}`), in
+/// the options of every provider entry this writer points somewhere. The
+/// bridge reads the same path: it sizes the usage meter and the engine's
+/// auto-compact threshold by it, since the engine's own model table predates
+/// most of the models the gateway serves.
+pub const CONTEXT_WINDOWS_OPTION: &str = "context_windows";
+
 /// The table as written: platform keys, plus the per-model ones when there
 /// are any.
 fn gateway_keys_value(routes: &NativeRoutes) -> Value {
@@ -167,6 +174,9 @@ pub fn take_over(
             json!(anthropic_base_url(&target.base_url)),
         );
         entry.insert("enabled".to_owned(), json!(true));
+        write_context_windows(entry, routes, &previous_providers, provider).map_err(|_| {
+            anyhow!("the {provider} provider options in {} are not an object", path.display())
+        })?;
     }
 
     // The per-platform key table rides on the anthropic entry. It is empty
@@ -215,6 +225,43 @@ pub fn take_over(
     write_settings(&path, &root)
 }
 
+/// File the window table in one provider entry's options, or — with no table
+/// to write — put back whatever the backup had there. `Err` when `options`
+/// exists and is not an object.
+fn write_context_windows(
+    entry: &mut Map<String, Value>,
+    routes: &NativeRoutes,
+    previous_providers: &Map<String, Value>,
+    provider: &str,
+) -> std::result::Result<(), ()> {
+    if routes.context_windows.is_empty() {
+        let previous_options = previous_providers
+            .get(provider)
+            .and_then(Value::as_object)
+            .and_then(|entry| entry.get("options"))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        if let Some(options) = entry.get_mut("options").and_then(Value::as_object_mut) {
+            restore_key(options, CONTEXT_WINDOWS_OPTION, &previous_options);
+            if options.is_empty() {
+                entry.remove("options");
+            }
+        }
+        return Ok(());
+    }
+    let options = entry
+        .entry("options")
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or(())?;
+    options.insert(
+        CONTEXT_WINDOWS_OPTION.to_owned(),
+        json!(routes.context_windows),
+    );
+    Ok(())
+}
+
 /// The `config` block as it stood before we took over, from the backup.
 fn previous_config(backup: Option<&FileBackup>) -> Map<String, Value> {
     backup
@@ -249,6 +296,7 @@ fn restore_provider_entry(
         .unwrap_or_default();
     if let Some(options) = entry.get_mut("options").and_then(Value::as_object_mut) {
         restore_key(options, GATEWAY_KEYS_OPTION, &previous_options);
+        restore_key(options, CONTEXT_WINDOWS_OPTION, &previous_options);
         if options.is_empty() {
             entry.remove("options");
         }
@@ -374,6 +422,7 @@ mod tests {
             chat: at("https://gateway.example.org", "sk-claude"),
             platform_keys: keys(),
             model_keys: BTreeMap::new(),
+            context_windows: BTreeMap::new(),
         }
     }
 
@@ -497,6 +546,7 @@ mod tests {
             chat: at("https://chat.example.org", "sk-chat"),
             platform_keys: BTreeMap::new(),
             model_keys: BTreeMap::new(),
+            context_windows: BTreeMap::new(),
         };
         take_over(&dir, &routes, &mut backups).unwrap();
 
@@ -551,6 +601,51 @@ mod tests {
         );
     }
 
+    /// The window table rides on every entry that is pointed somewhere, so
+    /// whichever route a session selects finds it; a route going away takes
+    /// its copy with it, and releasing the file leaves none behind.
+    #[test]
+    fn context_windows_ride_on_every_routed_entry_and_leave_with_it() {
+        let dir = tempdir();
+        let mut backups = CliBackups::default();
+        let windowed = NativeRoutes {
+            chat: None,
+            context_windows: BTreeMap::from([("gpt-5.6-sol".to_owned(), 400_000)]),
+            ..routes()
+        };
+        take_over(&dir, &windowed, &mut backups).unwrap();
+        let root = read(&settings_path(&dir));
+        for provider in ["anthropic", "codex"] {
+            assert_eq!(
+                root.pointer(&format!(
+                    "/config/provider_configs/{provider}/options/context_windows/gpt-5.6-sol"
+                ))
+                .unwrap(),
+                &json!(400_000),
+                "{provider}"
+            );
+        }
+        assert!(root.pointer("/config/provider_configs/openai").is_none());
+        // The key table beside it is untouched.
+        assert_eq!(
+            root.pointer("/config/provider_configs/anthropic/options/gateway_keys/openai")
+                .unwrap(),
+            "sk-codex"
+        );
+
+        // No table: the entries carry none.
+        take_over(&dir, &routes(), &mut backups).unwrap();
+        assert!(
+            read(&settings_path(&dir))
+                .pointer("/config/provider_configs/codex/options")
+                .is_none()
+        );
+
+        take_over(&dir, &windowed, &mut backups).unwrap();
+        restore(&dir, &backups).unwrap();
+        assert!(!settings_path(&dir).exists());
+    }
+
     /// Switching from the managed gateway to an endpoint of your own has to
     /// drop the key table the gateway left behind, or every session keeps
     /// authenticating with the gateway's key against your server.
@@ -571,6 +666,7 @@ mod tests {
             chat: None,
             platform_keys: BTreeMap::new(),
             model_keys: BTreeMap::new(),
+            context_windows: BTreeMap::new(),
         };
         take_over(&dir, &custom, &mut backups).unwrap();
         let root = read(&settings_path(&dir));

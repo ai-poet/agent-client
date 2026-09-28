@@ -2154,6 +2154,13 @@ pub enum BackgroundWorkEvent {
         key: BackgroundWorkKey,
         message: String,
     },
+    /// One entry of a sub-agent's record, for the panel that shows it live.
+    /// Clients that do not show the record ignore it; the item's `output`
+    /// still carries the final report.
+    Transcript {
+        key: BackgroundWorkKey,
+        entry: SubagentTranscriptEntry,
+    },
 }
 
 /// A slash command a live provider process advertised for its session.
@@ -2322,6 +2329,72 @@ pub struct ActivityItem {
     /// finished nor failed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stopped: bool,
+    /// Set when this call hands a task to a sub-agent (`Agent`, `Task`).
+    /// The transcript shows such a call as one summary line that opens the
+    /// sub-agent's own record; parsed once, when the call arrives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent: Option<SubagentCall>,
+}
+
+/// What a sub-agent call says about the agent it starts.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentCall {
+    /// The kind of agent asked for (`Explore`, `general-purpose`), when the
+    /// provider has kinds. Claude Code's `subagent_type`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_type: Option<String>,
+    /// The short task description the call carries.
+    pub description: String,
+}
+
+impl SubagentCall {
+    /// The sub-agent a tool call starts, when it is one: `Agent` or `Task`
+    /// (the name differs between Claude Code versions and engines) with a
+    /// description to show.
+    pub fn from_tool(name: &str, input: Option<&serde_json::Value>) -> Option<Self> {
+        if !name.eq_ignore_ascii_case("agent") && !name.eq_ignore_ascii_case("task") {
+            return None;
+        }
+        let input = input?;
+        let text = |key: &str| {
+            input
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        };
+        Some(Self {
+            agent_type: text("subagent_type"),
+            description: text("description")?,
+        })
+    }
+}
+
+/// One entry of a sub-agent's own record, as its driver streams it into the
+/// panel that shows it. Keyed by `id`: a later entry with the same id
+/// replaces the earlier one (a tool call finishing), or — for text with
+/// `append` — extends it.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentTranscriptEntry {
+    pub id: String,
+    pub body: SubagentTranscriptBody,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SubagentTranscriptBody {
+    /// What the sub-agent wrote. `append` extends the entry with this id
+    /// rather than replacing it.
+    Text {
+        text: String,
+        #[serde(default)]
+        append: bool,
+    },
+    /// One of its tool calls, whole, in its current state.
+    Activity { activity: ActivityItem },
 }
 
 impl ActivityItem {
@@ -2351,6 +2424,7 @@ impl ActivityItem {
             reasoning: None,
             todos: None,
             stopped: false,
+            subagent: None,
         }
     }
 
@@ -2392,6 +2466,11 @@ impl ActivityItem {
 
     pub fn with_todos(mut self, todos: Option<Vec<crate::todo::TodoItem>>) -> Self {
         self.todos = todos;
+        self
+    }
+
+    pub fn with_subagent(mut self, subagent: Option<SubagentCall>) -> Self {
+        self.subagent = subagent;
         self
     }
 

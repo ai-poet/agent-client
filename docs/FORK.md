@@ -171,6 +171,14 @@ lines below.
 | `crates/waku-protocol/src/{model,workspace,lib}.rs` (agent flow) | additive: `AgentTurn::{pauses, error, undone_at}`, `ActivityItem::stopped` (all `serde(default)`), `PlanTurnUndo` / `ApplyTurnUndo` and their results, `TurnUndoPlan` / `UndoFile` / `UndoReason`, `TURN_UNDO_STALE`; TS bindings regenerated | ~150 |
 | `crates/waku-core/src/{checkpoint,workspace}.rs` (agent flow) | `plan_turn_undo` / `apply_turn_undo` and the undo backup ref, cleared with the turn's other refs | ~300 + tests |
 | `.github/workflows/{test,release,sync-release}.yml` | no Linux: the test matrix drops Ubuntu and the generated-protocol checks move to the macOS runner; the two Linux release jobs, the `*.tar.gz` upload and `latest-linux.txt` are gone. The version, draft-release and R2-sync jobs still run on `ubuntu-latest` — they build nothing for Linux | ~140 removed |
+| `crates/waku-protocol/src/model.rs` (sub-agents) | additive: `ActivityItem::subagent` (`serde(default)`) with `SubagentCall` and `with_subagent`; `BackgroundWorkEvent::Transcript` with `SubagentTranscriptEntry` / `SubagentTranscriptBody`; TS bindings regenerated (`SubagentCall.ts`) | ~90 |
+| `crates/waku-agent-bridge/src/{session,events,background,lib}.rs` (sub-agents) | `builtin_tools` offers the bridge's `SubagentTool` instead of `claurst_query::AgentTool` (`engine_tools` split out for the child's set); `Inner.subagents` with `begin_turn`/`end_turn` around the loop, `announce`/`forget` in `forward_events`, `stop` ahead of `background::stop`, `cancel_all` on drop; `AgentEvent::Subagent` + `SubagentEvent`/`SubagentStatus`; `background::snapshot_owned` | ~120 |
+| `crates/waku-agent-bridge/src/config.rs`, `session.rs` (context window) | `CONTEXT_WINDOWS_OPTION`, `declared_windows`, `context_window_for`, `session_model_registry` / `window_overrides`; `build_query_config` uses the overlaid registry; the meter's window at turn start and after `/compact` comes from `context_window_for` | ~140 |
+| `crates/waku-core/src/driver/{mod,native}.rs` (sub-agents) | `mod subagent;`; native rows carry `SubagentCall`, `Agent` titled by its description, `AgentEvent::Subagent` → one `BackgroundWorkItem` + `Transcript` entries (`handle_subagent`), registry sub-agents linked to their row | ~150 |
+| `crates/waku-core/src/driver/claude.rs` (sub-agents) | `#[path] mod claude_subagent`; state fields `task_keys` / `subagent_feeds` / `subagent_calls` (replacing `streamed_task_output`); `forward_subagent_transcript` replaced by `claude_subagent::{forward_assistant, forward_tool_results}`; `link_task` + `rekey` in `handle_claude_system`; `note_parent_call`, `with_subagent` on the task row, `settle_parent` on its result | ~40 |
+| `crates/sub2api/src/{client,auth,lib,gateway}.rs`, `global_config/{mod,native}.rs`, `src/app/{cloud_subscriptions,model_providers_page}.rs` (context window) | `ModelCatalogItem::context_window`; `Credentials::model_windows` filled by `refresh_model_routes`; `GatewayConfig::model_windows`; `NativeRoutes::context_windows` (+ custom declarations); the writer files `options.context_windows`; a routing refresh compares windows too, and a Model Providers save re-applies live built-in sessions | ~120 |
+| `src/app/{background_work,transcript_view,streaming,runtime,right_panel}.rs`, `src/app.rs` (sub-agents) | the registry keeps each sub-agent's record (`transcripts`, `transcript_entry`, refreshed on the output tick) and the surface branches to `render_subagent_surface` (takes `window` now); `render_activity_item` is `pub(super)` and hands sub-agent calls to `render_subagent_row`; `toggle_activity_item` also toggles rows outside the transcript; `update_activity` merges `subagent`; record text batched like log output in the event pump; three `mod` lines | ~50 |
+| `locales/{app,zh-CN,ja}.yml` | `subagent.*` keys | 21 |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `CheapRouter` in `locales/` and the two i18n test expectations.
@@ -185,6 +193,9 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `src/app/daemon_banner.rs`, `src/app/agent_page.rs`, `src/app/native_agent.rs`,
 `src/app/model_providers_page.rs`, `src/app/cloud_subscriptions.rs`,
 `crates/waku-core/src/driver/turn_diagnosis.rs`,
+`crates/waku-core/src/driver/{subagent,claude_subagent}.rs`,
+`crates/waku-agent-bridge/src/subagent.rs`,
+`src/app/{subagent_row,subagent_panel,subagent_transcript}.rs`,
 `src/app/cloud_usage.rs`, `src/app/model_plaza.rs`, `src/app/cloud_pay.rs`,
 `src/app/announcements.rs`, `src/app/workflow.rs`, `assets/icons/{bell,circle-x,store,wallet}.svg`,
 `src/app/error_banner.rs`, `src/app/turn_undo.rs`, `src/app/status_capsule.rs`,

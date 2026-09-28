@@ -2,6 +2,7 @@
 import type { ActivityFileChange } from "./ActivityFileChange";
 import type { ActivityKind } from "./ActivityKind";
 import type { ReasoningBlock } from "./ReasoningBlock";
+import type { SubagentCall } from "./SubagentCall";
 import type { TodoItem } from "./TodoItem";
 
 export type ActivityItem = { id: string, source_id: string | null, kind: ActivityKind, title: string, detail: string | null, arguments?: string | null, output?: string | null,
@@ -43,4 +44,10 @@ todos?: Array<TodoItem> | null,
  * The turn was stopped while this was still running: it neither
  * finished nor failed.
  */
-stopped?: boolean, };
+stopped?: boolean,
+/**
+ * Set when this call hands a task to a sub-agent (`Agent`, `Task`).
+ * The transcript shows such a call as one summary line that opens the
+ * sub-agent's own record; parsed once, when the call arrives.
+ */
+subagent?: SubagentCall | null, };

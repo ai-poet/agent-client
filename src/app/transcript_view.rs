@@ -890,6 +890,14 @@ impl Waku {
             .iter()
             .position(|block| block.activities.iter().any(|activity| activity.id == id));
         let Some(block_index) = block_index else {
+            // Not a transcript row: a row of a sub-agent's record, in the
+            // right panel, which re-renders whole and needs no remeasure.
+            self.expanded_activity_items.insert(id, !current);
+            if current {
+                self.activity_diffs.borrow_mut().remove(&id);
+                self.activity_diff_viewports.borrow_mut().remove(&id);
+            }
+            cx.notify();
             return;
         };
         self.toggle_block_disclosure(block_index, cx, |this| {
@@ -2152,7 +2160,7 @@ impl Waku {
 
     /// One call as a flat row — icon, verb in the tense of its state, what it
     /// acted on — opening onto its detail when it has any.
-    fn render_activity_item(
+    pub(super) fn render_activity_item(
         &self,
         activity: &ActivityItem,
         live_turn: bool,
@@ -2164,6 +2172,11 @@ impl Waku {
         if let Some(reasoning) = activity.reasoning.as_ref() {
             let live = live_reasoning_id == Some(activity.id);
             return self.render_reasoning_item(activity, reasoning, live, theme, window, cx);
+        }
+        // Fork: a call that starts a sub-agent is one summary line that
+        // opens the sub-agent's record (`subagent_row.rs`).
+        if let Some(call) = activity.subagent.as_ref() {
+            return self.render_subagent_row(activity, call, live_turn, theme, cx);
         }
         let id = activity.id;
         let running = live_turn && activity_is_running(activity);

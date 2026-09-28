@@ -350,6 +350,37 @@ pub struct ModelRoutesRefresh {
     pub group_keys: std::collections::BTreeMap<i64, String>,
     /// The new `Credentials::model_routes`.
     pub model_routes: std::collections::BTreeMap<String, i64>,
+    /// The new `Credentials::model_windows`.
+    pub model_windows: std::collections::BTreeMap<String, u64>,
+}
+
+/// The smallest window taken from the catalog as real. Kept in step with the
+/// bridge's `MIN_PLAUSIBLE_REGISTRY_WINDOW`: a smaller figure is a
+/// placeholder, and a meter sized by it would read full at once.
+const MIN_CATALOG_CONTEXT_WINDOW: u64 = 8192;
+
+/// Each catalog model's context window, where the catalog states one. A
+/// model listed under several groups carries the same window in each; the
+/// largest wins should two ever disagree.
+pub fn model_windows_from_catalog(
+    catalog: &[client::ModelCatalogItem],
+) -> std::collections::BTreeMap<String, u64> {
+    let mut windows = std::collections::BTreeMap::new();
+    for item in catalog {
+        let model = item.model.trim();
+        let Some(window) = item
+            .context_window
+            .filter(|window| *window >= MIN_CATALOG_CONTEXT_WINDOW)
+        else {
+            continue;
+        };
+        if model.is_empty() {
+            continue;
+        }
+        let entry = windows.entry(model.to_owned()).or_insert(window);
+        *entry = (*entry).max(window);
+    }
+    windows
 }
 
 impl ModelRoutesRefresh {
@@ -370,6 +401,7 @@ impl ModelRoutesRefresh {
             credentials.group_keys.entry(group).or_insert(key);
         }
         credentials.model_routes = self.model_routes.clone();
+        credentials.model_windows = self.model_windows.clone();
     }
 }
 
@@ -482,6 +514,7 @@ pub fn refresh_model_routes(
         subscriptions,
         group_keys: credentials.group_keys.clone(),
         model_routes,
+        model_windows: model_windows_from_catalog(catalog),
     })
 }
 
@@ -616,6 +649,23 @@ mod group_key_tests {
         assert_eq!(key_for_group(&live, 14), Some("sk-sub"));
     }
 
+    /// The catalog's `context_window` is read, a placeholder-sized one is
+    /// not, and a model listed under two groups keeps one window.
+    #[test]
+    fn catalog_windows_are_read_and_placeholders_dropped() {
+        let catalog: Vec<client::ModelCatalogItem> = serde_json::from_value(serde_json::json!([
+            {"model": "gpt-5.6-sol", "context_window": 400000},
+            {"model": "gpt-5.6-sol", "context_window": 400000, "platform": "openai"},
+            {"model": "tiny", "context_window": 4096},
+            {"model": "unknown"},
+        ]))
+        .unwrap();
+        assert_eq!(
+            model_windows_from_catalog(&catalog),
+            std::collections::BTreeMap::from([("gpt-5.6-sol".to_owned(), 400_000)])
+        );
+    }
+
     /// One model's route lands in the live session with only the key it
     /// needs.
     #[test]
@@ -742,6 +792,7 @@ pub fn gateway_config_with_origin(
                 key_for_group(credentials, *group).map(|key| (model.clone(), key.to_owned()))
             })
             .collect(),
+        model_windows: credentials.model_windows.clone(),
     }
 }
 

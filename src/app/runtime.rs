@@ -3834,9 +3834,15 @@ impl Waku {
                     break;
                 };
                 let background_event = matches!(event, DriverEvent::BackgroundWork(_));
+                // A sub-agent's streamed text is batched the same way as log
+                // output (see `subagent_transcript.rs`); its tool rows repaint.
                 let background_output_delta = matches!(
-                    event,
+                    &event,
                     DriverEvent::BackgroundWork(BackgroundWorkEvent::OutputDelta { .. })
+                ) || matches!(
+                    &event,
+                    DriverEvent::BackgroundWork(BackgroundWorkEvent::Transcript { entry, .. })
+                        if matches!(entry.body, crate::model::SubagentTranscriptBody::Text { .. })
                 );
                 force_save |= matches!(
                     event,

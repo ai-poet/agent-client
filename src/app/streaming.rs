@@ -159,6 +159,10 @@ impl Waku {
                     if item.todos.is_some() {
                         activity.todos = item.todos;
                     }
+                    // A call's completion need not repeat what it started.
+                    if item.subagent.is_some() {
+                        activity.subagent = item.subagent;
+                    }
                     session.updated_at = unix_time();
                     runtime.stream_phase = Some(StreamPhase::Activity);
                     if replaces_changes {

@@ -933,6 +933,13 @@ background.agents: サブエージェント
 background.process: プロセス
 background.monitor: モニター
 background.subagent: サブエージェント
+subagent.label: サブエージェント
+subagent.open: サイドパネルで開く
+subagent.waiting: サブエージェントの開始を待っています…
+subagent.trimmed: 以前の %{count} ステップは表示されていません
+subagent.result: 結果
+subagent.show_prompt: プロンプトを表示
+subagent.hide_prompt: プロンプトを隠す
 background.no_work: バックグラウンドの作業はありません
 background.no_work_description: 長時間実行されるコマンドとサブエージェントがここに表示されます。
 background.view: 表示

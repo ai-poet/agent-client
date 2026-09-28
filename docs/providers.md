@@ -442,6 +442,20 @@ CLI's own plan mode asks there too — except writes to the plan file
 | `user` with `isReplay: true` | ignored — Waku's own prompt echoed by `--replay-user-messages` |
 | `result` | `TurnFinished` |
 | `system` status/thinking-token notices, `rate_limit_event` | ignored |
+| `system` / `task_started` … `task_notification` | a `BackgroundWorkItem` per task; a sub-agent's is linked to its `Task`/`Agent` row by `tool_use_id` |
+| `assistant` / `user` with `parent_tool_use_id` | the sub-agent's record: its text and its tool calls as rows, completed by their results (`driver/claude_subagent.rs`) — never this session's transcript or meter |
+
+**Sub-agents** — a sub-agent's own messages arrive on the main stream with
+`parent_tool_use_id` naming the call that started it. They become entries of
+that sub-agent's record (`BackgroundWorkEvent::Transcript`), which the right
+panel shows live, as the built-in agent's are. The record hangs off the
+task's panel entry, normally created by `task_started` and keyed by the task
+id; when a sub-agent's message comes first, or a CLI announces no task, the
+entry is created from that message and keyed by the call's id, a later
+`task_started` for the call is filed under that key (its control id stays the
+task id, which is what a stop names), and the call's own `tool_result`
+settles it. `task_notification`'s summary — the sub-agent's final report —
+stays the entry's output, for clients that show the entry but not the record.
 
 **Approvals** — `control_request` / `subtype: "can_use_tool"` carries the tool
 name, input, `tool_use_id`, the `blocked_path` that tripped the check, and
@@ -891,11 +905,15 @@ sender, which the tool reports to the model as an unanswered question.
 **Background work** — the engine keeps one process-global registry of
 background shells (`bg: <command>`) and background sub-agents
 (`subagent: <description>`). `refresh_background_work` and the end of every
-turn snapshot it as `ReconcileLive`; the task id is the control id. Stopping a
-sub-agent goes through the registry's cancel token. Stopping a shell cannot —
-the engine holds the child in a detached task that never drops it — so the
-driver signals the pid (`kill -TERM` / `taskkill /T /F`) and reports
-`StopFailed` with the reason when it cannot.
+turn snapshot it as `ReconcileLive`; the task id is the control id. A
+sub-agent's task id is the id of the `Agent` call that started it, and a
+session's snapshot lists only the sub-agents that session started
+(`background::snapshot_owned`) — shells carry nothing that says whose they
+are and are still listed everywhere. Stopping a sub-agent goes through its
+cancel token. Stopping a shell cannot — the engine holds the child in a
+detached task that never drops it — so the driver signals the pid
+(`kill -TERM` / `taskkill /T /F`) and reports `StopFailed` with the reason
+when it cannot.
 
 **MCP** — the engine's `McpManager` connects the configured servers in the
 background after session start; a turn that begins before they are up runs
@@ -906,10 +924,42 @@ it raises its own, server-naming approval — without that the engine's central
 backstop would ask a second time. Servers that fail to connect are reported as
 `Error` events with the server's name.
 
-**Sub-agent transcripts** — the engine forwards no events from a sub-agent's
-own loop, so a foreground `Agent` call is one tool row that completes when the
-sub-agent does. What it did in between is in its result, not in the transcript.
-Background sub-agents appear in the background-work panel instead.
+**Sub-agents** — the `Agent` tool is the bridge's
+(`waku-agent-bridge/src/subagent.rs`), not the engine's `claurst_query::AgentTool`,
+which stays vendored and unused. The engine's runs a child with no event
+channel, a fresh client holding the plain Anthropic key rather than the
+session's gateway key, a re-parsed model table and `all_tools()` — no MCP, no
+Computer Use, the user's switched-off tools back on, none of the session's
+rules. Ours runs the same public `run_query_loop` with:
+
+- the parent's client, provider and model registries, cost tracker (so the
+  session's totals include the child) and tool set — MCP included, the
+  user's switches honoured — minus `Agent`, `AskUserQuestion`, the plan-mode
+  and worktree switches and `GoalComplete`;
+- the turn's config without its steering queue or goal continuation, and the
+  session's rules re-derived for an agent that is not the one planning, plus a
+  rule saying it is a sub-agent (and, in plan mode, that it only researches);
+- a context of its own for what the engine keeps per session: no question
+  channel (a background child holding the parent's kept the turn from
+  finishing), its own step counter, its own session id suffix for the shell's
+  cwd and the todo list, and a child cancel token.
+
+The schema is the engine's minus `model` and `isolation`: keys and routes are
+chosen for the session's model, and the engine's worktree isolation
+force-removes the worktree when the child ends, edits and all.
+
+What the child does is forwarded as `AgentEvent::Subagent { parent_tool_id, … }`
+— `Started`, text, its tool calls, `Finished` — which `native.rs` turns into one
+`BackgroundWorkItem` of kind `Subagent` keyed by the parent call's id, and a
+stream of `BackgroundWorkEvent::Transcript` entries (`driver/subagent.rs`):
+the record the right panel shows live. The call's id is not passed to
+`Tool::execute`, so the session's event forwarder hands each `Agent` call's
+`ToolStart` to the tool, which claims the one whose description and prompt
+match its input (see the module docs for the ordering). A foreground child
+dropped by a cancelled turn still ends its record as stopped; one the user
+stops from the panel ends with its own error result and the parent goes on.
+A background child is also registered in the engine's task registry under the
+same id, so `monitor task_id=<id>` works as before.
 
 **Commit messages** — `generate_message` asks the engine directly through
 `waku_agent_bridge::one_shot`: the same prompt every CLI gets, run through the
@@ -1334,6 +1384,28 @@ the model read it, while the transcript still showed the full text, because
 the event that feeds the transcript is emitted before the budget runs.
 Running out of context is handled by auto-compact instead, which summarises
 at 90% of the window.
+
+**Context window** — the engine sizes its auto-compact threshold, and the
+bridge sizes the usage meter, by the model's window, and the engine's bundled
+models.dev snapshot stops at the -4-5 generation: most models the gateway
+serves are not in it, so the meter showed no percentage while compaction ran
+against a guess (200k for Claude, 256k for anything else). The gateway's
+model catalog states each model's window (`context_window`, from LiteLLM's
+`max_input_tokens`); `sub2api::refresh_model_routes` keeps it in
+`Credentials::model_windows`, and the routing writer files it — with the
+windows the user declared for the models of an endpoint of their own on top —
+as `options.context_windows` on every provider entry it points somewhere.
+The bridge reads that table (`config::declared_windows`) for the meter
+(`context_window_for`: declared, then the snapshot, then nothing), and lays
+it over a fresh parse of the snapshot as `modelOverrides` for the engine
+(`session_model_registry`, rebuilt only when the table changes, and shared by
+every session until then). Each override is keyed under the provider that
+*owns* the model (`find_provider_for_model`), never the route's: on the
+Responses and Chat routes the engine reads a model's capabilities from the
+entry under the route's provider, and an entry the override created there
+would be a text-only model with no reasoning. The engine's window lookup asks
+the owner anyway. The user's own `modelOverrides`, which the engine parses but
+never applied, now apply as written.
 
 **Language** — the daemon renders user-facing text of its own (every driver's
 `tr!` call) and had no way to know which language to use, so those strings

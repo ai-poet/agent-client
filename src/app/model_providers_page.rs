@@ -1290,6 +1290,10 @@ impl Waku {
                         // section; nothing else would notice until the next
                         // catalog fetch.
                         this.sync_native_models();
+                        // A live built-in agent session read its route and
+                        // its models' windows when it started; re-applying
+                        // its options makes the next turn read the new ones.
+                        this.reapply_built_in_session_options(cx);
                         if let Some(toast) = toast {
                             this.show_toast(toast);
                         }
@@ -1907,6 +1911,7 @@ impl Waku {
                             this.show_toast(warnings.join("\n"));
                         }
                         this.sync_native_models();
+                        this.reapply_built_in_session_options(cx);
                     }
                     Err(error) => this.show_toast(format!("{error:#}")),
                 }

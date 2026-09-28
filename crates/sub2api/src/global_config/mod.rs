@@ -123,6 +123,11 @@ pub struct NativeRoutes {
     /// `platform_keys`: the group that serves a model is not always the one
     /// holding its platform's key. Same invariant as `platform_keys`.
     pub model_keys: BTreeMap<String, String>,
+    /// Each model's context window in tokens: the gateway catalog's, with
+    /// what the user declared for the models of an endpoint of their own on
+    /// top. Not a secret and not tied to a route, so it has no invariant of
+    /// its own — a window is a property of the model name.
+    pub context_windows: BTreeMap<String, u64>,
 }
 
 impl NativeRoutes {
@@ -220,6 +225,7 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
                 .or_else(|| cloud_target(cloud.and_then(|config| config.api_key.as_deref()))),
             platform_keys,
             model_keys,
+            context_windows: native_context_windows(cloud, custom),
         };
         (!routes.is_empty()).then_some(routes)
     };
@@ -234,6 +240,37 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
         opencode: custom_target("opencode"),
         pi: custom_target("pi"),
     }
+}
+
+/// The context windows the built-in agent sizes its models by: the gateway
+/// catalog's, then — winning — the ones the user declared for the models of
+/// each endpoint a native line is routed through. Only declared values count;
+/// `ModelEntry::context_window_or_default`'s fallback is a guess, and the
+/// engine already has guesses of its own.
+fn native_context_windows(
+    cloud: Option<&GatewayConfig>,
+    custom: &CustomApiConfig,
+) -> BTreeMap<String, u64> {
+    let mut windows = cloud
+        .map(|config| config.model_windows.clone())
+        .unwrap_or_default();
+    for slot in NATIVE_SLOTS {
+        if custom.routed_endpoint(slot).is_none() {
+            continue;
+        }
+        let Some(entry) = custom.bound_provider(slot) else {
+            continue;
+        };
+        for model in &entry.models {
+            let id = model.id.trim();
+            if let Some(window) = model.context_window.filter(|window| *window > 0)
+                && !id.is_empty()
+            {
+                windows.insert(id.to_owned(), u64::from(window));
+            }
+        }
+    }
+    windows
 }
 
 /// Which configuration a CLI runs with right now.
@@ -585,6 +622,7 @@ mod tests {
             codex_api_key: None,
             codex_model: None,
             model_keys: Default::default(),
+            model_windows: Default::default(),
         };
         let mut custom = CustomApiConfig::default();
         let mut entry = ProviderEntry::new("Mine", ApiFormat::Anthropic);
@@ -620,6 +658,46 @@ mod tests {
         assert!(!native.platform_keys.is_empty());
     }
 
+    /// The catalog's windows reach the built-in agent, and what the user
+    /// declared for a model of their own endpoint wins — but only a declared
+    /// window: the fallback a model entry answers with is a guess.
+    #[test]
+    fn native_windows_are_the_catalogs_with_the_users_declarations_on_top() {
+        let cloud = GatewayConfig {
+            enabled: true,
+            endpoint: "https://cloud.example.org".into(),
+            api_key: Some("sk-general".into()),
+            claude_api_key: Some("sk-claude".into()),
+            model_windows: BTreeMap::from([
+                ("gpt-5.6-sol".to_owned(), 400_000),
+                ("claude-sonnet-5".to_owned(), 1_000_000),
+            ]),
+            ..GatewayConfig::default()
+        };
+        let mut custom = CustomApiConfig::default();
+        let mut entry = ProviderEntry::new("Mine", ApiFormat::Anthropic);
+        entry.base_url = "https://mine.example.org".into();
+        entry.api_key = "sk-mine".into();
+        entry.models = vec![
+            crate::providers::ModelEntry {
+                context_window: Some(200_000),
+                ..crate::providers::ModelEntry::new("claude-sonnet-5")
+            },
+            crate::providers::ModelEntry::new("undeclared"),
+        ];
+        let id = custom.registry.add(entry);
+        assert!(custom.bind_provider("native_messages", Some(&id)));
+
+        let native = desired_routes(Some(&cloud), &custom).native.unwrap();
+        assert_eq!(
+            native.context_windows,
+            BTreeMap::from([
+                ("claude-sonnet-5".to_owned(), 200_000),
+                ("gpt-5.6-sol".to_owned(), 400_000),
+            ])
+        );
+    }
+
     #[test]
     fn active_route_kind_prefers_cloud_over_custom() {
         let cloud = GatewayConfig {
@@ -630,6 +708,7 @@ mod tests {
             codex_api_key: None,
             codex_model: None,
             model_keys: Default::default(),
+            model_windows: Default::default(),
         };
         let mut custom = CustomApiConfig::default();
         custom.set(
@@ -742,6 +821,7 @@ mod tests {
             codex_api_key: None,
             codex_model: None,
             model_keys: Default::default(),
+            model_windows: Default::default(),
         };
         let mut custom = CustomApiConfig::default();
         custom.set(
@@ -811,6 +891,7 @@ mod tests {
                     ("openai".to_owned(), "sk-x".to_owned()),
                 ]),
                 model_keys: BTreeMap::new(),
+                context_windows: BTreeMap::new(),
             }),
             claude: Some(target("https://gw.example.org", "sk-c")),
             codex: Some(target("https://gw.example.org", "sk-x")),

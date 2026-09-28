@@ -122,12 +122,14 @@ impl Waku {
                                 let before = (
                                     credentials.group_keys.clone(),
                                     credentials.model_routes.clone(),
+                                    credentials.model_windows.clone(),
                                 );
                                 refresh.apply_to(credentials);
                                 before
                                     != (
                                         credentials.group_keys.clone(),
                                         credentials.model_routes.clone(),
+                                        credentials.model_windows.clone(),
                                     )
                             });
                         if changed {

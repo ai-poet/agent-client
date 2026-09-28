@@ -19,6 +19,8 @@ pub(super) struct BackgroundWorkRegistry {
     last_output_cache_refresh: Option<Instant>,
     output_viewports: HashMap<BackgroundWorkKey, BackgroundOutputViewport>,
     selection: TranscriptSelection,
+    /// Each sub-agent's record, beside its entry (`subagent_transcript.rs`).
+    transcripts: HashMap<BackgroundWorkKey, super::subagent_transcript::SubagentTranscript>,
 }
 
 #[derive(Clone)]
@@ -102,6 +104,11 @@ impl BackgroundWorkRegistry {
                     item.detail = Some(message);
                     item.updated_at_ms = unix_time_millis();
                 }
+            }
+            // Kept even when the entry is not here yet: a record's first
+            // entries can overtake the entry itself on a busy event pump.
+            BackgroundWorkEvent::Transcript { key, entry } => {
+                self.transcripts.entry(key).or_default().apply(entry);
             }
         }
         self.trim_settled();
@@ -238,6 +245,7 @@ impl BackgroundWorkRegistry {
         self.rendered_output.remove(key);
         self.dirty_output.remove(key);
         self.output_viewports.remove(key);
+        self.transcripts.remove(key);
         self.order.retain(|entry| entry != key);
     }
 
@@ -331,13 +339,33 @@ impl BackgroundWorkRegistry {
         self.selection.selection.borrow().selected_text()
     }
 
+    /// A sub-agent's record, made on first use: its panel keeps view state
+    /// (the folded prompt) before the first entry arrives.
+    pub(super) fn transcript_entry(
+        &mut self,
+        key: &BackgroundWorkKey,
+    ) -> &mut super::subagent_transcript::SubagentTranscript {
+        self.transcripts.entry(key.clone()).or_default()
+    }
+
+    fn has_stale_transcripts(&self) -> bool {
+        self.transcripts.values().any(|record| record.is_stale())
+    }
+
     fn refresh_output_cache(&mut self) -> bool {
-        if self.dirty_output.is_empty()
+        if (self.dirty_output.is_empty() && !self.has_stale_transcripts())
             || self
                 .last_output_cache_refresh
                 .is_some_and(|last| last.elapsed() < OUTPUT_CACHE_REFRESH_INTERVAL)
         {
             return false;
+        }
+        for (key, record) in &mut self.transcripts {
+            // Follow a live record to its newest step, the way a live
+            // output log follows its tail.
+            if record.refresh() && self.items.get(key).is_some_and(|item| item.status.is_live()) {
+                record.scroll.scroll_to_bottom();
+            }
         }
         let dirty = std::mem::take(&mut self.dirty_output);
         for key in dirty {
@@ -354,7 +382,7 @@ impl BackgroundWorkRegistry {
     }
 
     fn output_refresh_delay(&self) -> Option<Duration> {
-        (!self.dirty_output.is_empty()).then(|| {
+        (!self.dirty_output.is_empty() || self.has_stale_transcripts()).then(|| {
             self.last_output_cache_refresh
                 .map(|last| OUTPUT_CACHE_REFRESH_INTERVAL.saturating_sub(last.elapsed()))
                 .unwrap_or_default()
@@ -447,7 +475,7 @@ fn background_summary_process_status_icon(
     }
 }
 
-fn rendered_work_status_icon(status: BackgroundWorkStatus, size: f32, color: Hsla) -> AnyElement {
+pub(super) fn rendered_work_status_icon(status: BackgroundWorkStatus, size: f32, color: Hsla) -> AnyElement {
     let icon = icon(work_status_icon(status), size, color);
     if matches!(
         status,
@@ -480,7 +508,7 @@ pub(super) fn work_kind_icon(kind: BackgroundWorkKind) -> &'static str {
     }
 }
 
-fn work_elapsed(item: &BackgroundWorkItem) -> String {
+pub(super) fn work_elapsed(item: &BackgroundWorkItem) -> String {
     let duration_ms = item.duration_ms.unwrap_or_else(|| {
         let end = if item.status.is_live() {
             unix_time_millis()
@@ -1088,6 +1116,7 @@ impl Waku {
     pub(super) fn render_background_work_surface(
         &self,
         key: &BackgroundWorkKey,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
@@ -1185,6 +1214,11 @@ impl Waku {
                     })
             })
         });
+        // Fork: a sub-agent opens onto its live record (`subagent_panel.rs`).
+        if item.key.kind == BackgroundWorkKind::Subagent {
+            let record = registry.and_then(|registry| registry.transcripts.get(key));
+            return self.render_subagent_surface(item, record, selection, stop, window, cx);
+        }
         let card = div()
             .w_full()
             .flex()
@@ -1393,7 +1427,7 @@ impl Waku {
     }
 }
 
-fn background_work_selection_input(selection: TranscriptSelection) -> impl IntoElement {
+pub(super) fn background_work_selection_input(selection: TranscriptSelection) -> impl IntoElement {
     canvas(
         |_, _, _| (),
         move |_, _, window, _| md::render::install_selection_input(window, &selection),
@@ -2040,6 +2074,44 @@ mod tests {
                 agent_cli_thread_id: Some("019cfd7a-6942-78b1-9d47-30576c562321".into()),
             }
         );
+    }
+
+    /// A sub-agent's record is kept even when its first entries overtake the
+    /// entry itself, stays when the sub-agent settles, and leaves with it.
+    #[test]
+    fn a_sub_agents_record_lives_and_leaves_with_its_entry() {
+        use crate::model::{SubagentTranscriptBody, SubagentTranscriptEntry};
+
+        let mut registry = BackgroundWorkRegistry::default();
+        let key = BackgroundWorkKey::new(BackgroundWorkKind::Subagent, "toolu_1");
+        registry.apply(BackgroundWorkEvent::Transcript {
+            key: key.clone(),
+            entry: SubagentTranscriptEntry {
+                id: "text-1".into(),
+                body: SubagentTranscriptBody::Text {
+                    text: "Looking.".into(),
+                    append: false,
+                },
+            },
+        });
+        assert!(registry.has_stale_transcripts());
+        let mut agent = BackgroundWorkItem::new(
+            BackgroundWorkKind::Subagent,
+            "toolu_1",
+            "Find it",
+            BackgroundWorkStatus::Running,
+        );
+        registry.apply(BackgroundWorkEvent::Upsert(agent.clone()));
+        assert!(registry.refresh_output_cache());
+        assert!(!registry.has_stale_transcripts());
+
+        // A foreground sub-agent that settles is kept, record and all.
+        agent.status = BackgroundWorkStatus::Completed;
+        registry.apply(BackgroundWorkEvent::Upsert(agent));
+        assert!(registry.transcripts.get(&key).is_some_and(|record| !record.is_empty()));
+
+        registry.remove(&key);
+        assert!(registry.transcripts.is_empty());
     }
 
     #[test]

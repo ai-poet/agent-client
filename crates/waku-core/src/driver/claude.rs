@@ -13,7 +13,7 @@
 //! invocation, not guessed. `--permission-prompt-tool` in particular is absent
 //! from `claude --help`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 #[cfg(unix)]
 use std::fs::File;
 #[cfg(unix)]
@@ -34,6 +34,9 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::activity;
+// Fork: sub-agent records, kept out of this upstream file.
+#[path = "claude_subagent.rs"]
+mod claude_subagent;
 use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
@@ -703,17 +706,23 @@ struct ClaudeStreamState {
     /// the command, so keep it here until the matching tool result arrives.
     tools: HashMap<String, (ActivityKind, String, String, Option<String>)>,
     background_task_kinds: HashMap<String, BackgroundWorkKind>,
-    /// Task tool-use id → task id, so a subagent's own messages — they arrive
-    /// on the main channel with `parent_tool_use_id` set — can be routed into
-    /// that task's output pane instead of this session's transcript.
+    /// Task tool-use id → the key its panel entry is filed under (the task
+    /// id, or the call's own id when its messages came first), so a
+    /// subagent's own messages — they arrive on the main channel with
+    /// `parent_tool_use_id` set — are routed into that entry's record instead
+    /// of this session's transcript.
     subagent_tasks: HashMap<String, String>,
+    /// Task id → the key its entry was already filed under, for a task
+    /// announced after its sub-agent's messages created the entry.
+    task_keys: HashMap<String, String>,
+    /// Each sub-agent's record, by entry key. See `claude_subagent`.
+    subagent_feeds: HashMap<String, super::subagent::SubagentFeed>,
+    /// What each `Task` / `Agent` call on the main stream asked for.
+    subagent_calls: HashMap<String, (crate::model::SubagentCall, Option<String>)>,
     /// The description each task started with. Progress events reuse the
     /// `description` field for the agent's current activity line, which
     /// belongs in the detail row, never the title.
     task_descriptions: HashMap<String, String>,
-    /// Tasks whose output pane already carries streamed transcript; the
-    /// settle notification's summary would only duplicate it.
-    streamed_task_output: HashSet<String>,
     /// Stop handles for native Bash output files currently being tailed.
     task_output_tails: ClaudeTaskOutputTails,
     pending_task_stops: Arc<Mutex<HashMap<String, BackgroundWorkKey>>>,
@@ -1091,13 +1100,10 @@ fn claude_task_item(
                 .and_then(|id| state.tools.get(id))
                 .and_then(|(_, _, _, command)| command.clone())
         });
-    // The settle notification's summary is the subagent's final report and
-    // belongs in the output pane — unless the live transcript already
-    // streamed there.
-    if subtype == "task_notification"
-        && kind == BackgroundWorkKind::Subagent
-        && !state.streamed_task_output.contains(&task_id)
-    {
+    // The settle notification's summary is the subagent's final report. Its
+    // record carries the run; the report is what a client without the
+    // record shows, and what the panel falls back on.
+    if subtype == "task_notification" && kind == BackgroundWorkKind::Subagent {
         item.output = value
             .get("summary")
             .and_then(Value::as_str)
@@ -1185,6 +1191,7 @@ fn handle_claude_system(
                 item.background = true;
                 item.can_stop = true;
                 item.control_id = Some(task_id);
+                claude_subagent::rekey(state, &mut item);
                 Some(item)
             })
             .collect();
@@ -1195,17 +1202,19 @@ fn handle_claude_system(
     }
     if let Some(subtype @ ("task_started" | "task_progress" | "task_updated" | "task_notification")) =
         subtype
-        && let Some(item) = claude_task_item(subtype, value, state)
+        && let Some(mut item) = claude_task_item(subtype, value, state)
     {
         let task_id = item.key.provider_id.clone();
         state
             .background_task_kinds
             .insert(task_id.clone(), item.key.kind);
         if subtype == "task_started"
+            && item.key.kind == BackgroundWorkKind::Subagent
             && let Some(tool_use_id) = item.origin_activity_id.clone()
         {
-            state.subagent_tasks.insert(tool_use_id, task_id.clone());
+            claude_subagent::link_task(state, &task_id, &tool_use_id);
         }
+        claude_subagent::rekey(state, &mut item);
         let output_tail_item = (subtype == "task_started"
             && item.key.kind == BackgroundWorkKind::Process)
             .then(|| item.clone());
@@ -1236,78 +1245,6 @@ fn handle_claude_system(
             stop.store(true, Ordering::Release);
         }
     }
-}
-
-/// Renders a subagent message into its task's output pane: narrative text
-/// as-is, tool calls as single `› tool · subject` lines.
-fn forward_subagent_transcript(
-    parent_tool_use_id: &str,
-    value: &Value,
-    events: &impl DriverEventSink,
-    state: &mut ClaudeStreamState,
-) {
-    let Some(task_id) = state.subagent_tasks.get(parent_tool_use_id).cloned() else {
-        return;
-    };
-    let Some(content) = value.pointer("/message/content").and_then(Value::as_array) else {
-        return;
-    };
-    let mut delta = String::new();
-    for block in content {
-        match block.get("type").and_then(Value::as_str) {
-            Some("text") => {
-                if let Some(text) = block
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|text| !text.is_empty())
-                {
-                    delta.push_str(text);
-                    delta.push_str("\n\n");
-                }
-            }
-            Some("tool_use") => {
-                let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
-                let input = block.get("input");
-                let subject = activity::input_title(input).or_else(|| {
-                    input.and_then(|input| {
-                        [
-                            "command",
-                            "file_path",
-                            "path",
-                            "pattern",
-                            "query",
-                            "url",
-                            "description",
-                        ]
-                        .into_iter()
-                        .find_map(|key| input.get(key).and_then(Value::as_str))
-                        .and_then(one_line)
-                    })
-                });
-                match subject {
-                    Some(subject) => delta.push_str(&format!("› {name} · {subject}\n")),
-                    None => delta.push_str(&format!("› {name}\n")),
-                }
-            }
-            _ => {}
-        }
-    }
-    if delta.is_empty() {
-        return;
-    }
-    let kind = state
-        .background_task_kinds
-        .get(&task_id)
-        .copied()
-        .unwrap_or(BackgroundWorkKind::Subagent);
-    state.streamed_task_output.insert(task_id.clone());
-    let _ = events.send(DriverEvent::BackgroundWork(
-        BackgroundWorkEvent::OutputDelta {
-            key: BackgroundWorkKey::new(kind, task_id),
-            delta,
-        },
-    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1459,7 +1396,7 @@ fn handle_message(
             // context and belongs to its task's output pane, not this
             // session's transcript or usage meter.
             if let Some(parent) = value.get("parent_tool_use_id").and_then(Value::as_str) {
-                forward_subagent_transcript(parent, value, events, state);
+                claude_subagent::forward_assistant(parent, value, events, state);
                 return;
             }
             if let Some(usage) = value.pointer("/message/usage") {
@@ -1532,30 +1469,39 @@ fn handle_message(
                                 id.clone(),
                                 (kind, title.clone(), wire_title.clone(), command),
                             );
+                            claude_subagent::note_parent_call(
+                                id,
+                                &wire_title,
+                                block.get("input"),
+                                state,
+                            );
                         }
-                        let _ = events.send(DriverEvent::RichActivity(activity::tool_activity(
-                            id,
-                            kind,
-                            title,
-                            block.get("input"),
-                            None,
-                            None,
-                            false,
-                            false,
-                        )));
+                        let _ = events.send(DriverEvent::RichActivity(
+                            activity::tool_activity(
+                                id,
+                                kind,
+                                title,
+                                block.get("input"),
+                                None,
+                                None,
+                                false,
+                                false,
+                            )
+                            .with_subagent(crate::model::SubagentCall::from_tool(
+                                &wire_title,
+                                block.get("input"),
+                            )),
+                        ));
                     }
                     _ => {}
                 }
             }
         }
         Some("user") => {
-            // A subagent's tool results echo on the main channel too; its
-            // transcript lives in the task's output pane, not here.
-            if value
-                .get("parent_tool_use_id")
-                .and_then(Value::as_str)
-                .is_some()
-            {
+            // A subagent's tool results echo on the main channel too; they
+            // complete the rows of its record, not this session's transcript.
+            if let Some(parent) = value.get("parent_tool_use_id").and_then(Value::as_str) {
+                claude_subagent::forward_tool_results(parent, value, events, state);
                 return;
             }
             // `--replay-user-messages` echoes Waku's own prompts back; they are
@@ -1584,6 +1530,9 @@ fn handle_message(
                         None,
                     ));
                 let failed = block.get("is_error").and_then(Value::as_bool) == Some(true);
+                if let Some(id) = id.as_deref() {
+                    claude_subagent::settle_parent(id, failed, block.get("content"), events, state);
+                }
                 // The result text of an edit is only a confirmation sentence.
                 // The positioned hunks Claude actually applied ride alongside
                 // it, so hand them over as the activity's source and the diff
@@ -2477,21 +2426,42 @@ mod tests {
         while let Ok(event) = event_rx.try_recv() {
             seen.push(event);
         }
-        assert_eq!(
-            seen.len(),
-            1,
-            "subagent content must not reach the transcript or usage meter"
-        );
-        let DriverEvent::BackgroundWork(BackgroundWorkEvent::OutputDelta { key, delta }) = &seen[0]
+        let entries: Vec<_> = seen
+            .iter()
+            .map(|event| match event {
+                DriverEvent::BackgroundWork(BackgroundWorkEvent::Transcript { key, entry }) => {
+                    assert_eq!(key.provider_id, "agent-42");
+                    assert_eq!(key.kind, BackgroundWorkKind::Subagent);
+                    entry.clone()
+                }
+                other => panic!(
+                    "subagent content must not reach the transcript or usage meter: {other:?}"
+                ),
+            })
+            .collect();
+        assert_eq!(entries.len(), 3);
+        assert!(matches!(
+            &entries[0].body,
+            crate::model::SubagentTranscriptBody::Text { text, .. } if text == "Scanning the panel."
+        ));
+        let crate::model::SubagentTranscriptBody::Activity { activity: running } = &entries[1].body
         else {
-            panic!("the subagent message should stream into its task output");
+            panic!("the tool call should be a row of the record");
         };
-        assert_eq!(key.provider_id, "agent-42");
-        assert_eq!(key.kind, BackgroundWorkKind::Subagent);
-        assert_eq!(delta, "Scanning the panel.\n\n› Bash · rg overlay src\n");
+        assert_eq!(entries[1].id, "toolu-sub-1");
+        assert!(!running.complete);
+        assert_eq!(running.kind, ActivityKind::Command);
+        let crate::model::SubagentTranscriptBody::Activity { activity: done } = &entries[2].body
+        else {
+            panic!("the tool result should complete the row");
+        };
+        assert_eq!(entries[2].id, "toolu-sub-1");
+        assert!(done.complete);
+        assert_eq!(done.output.as_deref(), Some("hits"));
+        assert!(done.arguments.as_deref().is_some_and(|args| args.contains("rg overlay src")));
 
-        // The settle notification's summary would duplicate the streamed
-        // transcript; the pane keeps what it already has.
+        // The settle notification's summary is the final report, kept for
+        // the clients that do not show the record.
         handle_message(
             &json!({
                 "type": "system",
@@ -2512,7 +2482,109 @@ mod tests {
         else {
             panic!("task_notification should settle the background item");
         };
-        assert!(settled.output.is_none());
+        assert_eq!(settled.output.as_deref(), Some("Scanning the panel."));
+    }
+
+    /// A sub-agent whose messages come before any `task_started` — or from a
+    /// CLI that announces none — still gets an entry, named from its call,
+    /// and settles when the call returns.
+    #[test]
+    fn messages_before_task_started_create_the_entry() {
+        let (events, event_rx, commands, _command_rx, turn, mut state) = harness();
+        let wire = [
+            json!({"type": "assistant", "message": {"content": [{
+                "type": "tool_use", "id": "toolu-agent", "name": "Task",
+                "input": {"description": "Map the panel", "prompt": "Dig in.", "subagent_type": "Explore"}
+            }]}}),
+            json!({"type": "assistant", "parent_tool_use_id": "toolu-agent", "message": {
+                "content": [{"type": "text", "text": "Looking."}]
+            }}),
+        ];
+        for message in wire {
+            handle_message(&message, "s", &events, &commands, &turn, true, &mut state);
+        }
+        let seen: Vec<_> = std::iter::from_fn(|| event_rx.try_recv().ok()).collect();
+        let DriverEvent::RichActivity(row) = &seen[0] else {
+            panic!("the call's row first");
+        };
+        assert_eq!(
+            row.subagent.as_ref().and_then(|call| call.agent_type.as_deref()),
+            Some("Explore")
+        );
+        let DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)) = &seen[1] else {
+            panic!("the entry before its record");
+        };
+        assert_eq!(item.key.provider_id, "toolu-agent");
+        assert_eq!(item.title, "Map the panel");
+        assert_eq!(item.role.as_deref(), Some("Explore"));
+        assert_eq!(item.command.as_deref(), Some("Dig in."));
+        assert_eq!(item.origin_activity_id.as_deref(), Some("toolu-agent"));
+        assert!(matches!(
+            &seen[2],
+            DriverEvent::BackgroundWork(BackgroundWorkEvent::Transcript { key, .. })
+                if key.provider_id == "toolu-agent"
+        ));
+
+        handle_message(
+            &json!({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "toolu-agent", "content": [{"type": "text", "text": "Done."}]}
+            ]}}),
+            "s",
+            &events,
+            &commands,
+            &turn,
+            true,
+            &mut state,
+        );
+        let settled = std::iter::from_fn(|| event_rx.try_recv().ok())
+            .find_map(|event| match event {
+                DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)) => Some(item),
+                _ => None,
+            })
+            .expect("the entry settles when its call returns");
+        assert_eq!(settled.key.provider_id, "toolu-agent");
+        assert_eq!(settled.status, BackgroundWorkStatus::Completed);
+        assert_eq!(settled.output.as_deref(), Some("Done."));
+    }
+
+    /// A task announced after its sub-agent's messages made the entry is
+    /// filed under that entry — including in the level signal — while a stop
+    /// still names the task.
+    #[test]
+    fn a_late_task_started_keeps_one_entry() {
+        let (events, event_rx, commands, _command_rx, turn, mut state) = harness();
+        let wire = [
+            json!({"type": "assistant", "parent_tool_use_id": "toolu-agent", "message": {
+                "content": [{"type": "text", "text": "Looking."}]
+            }}),
+            json!({
+                "type": "system", "subtype": "task_started", "task_id": "agent-42",
+                "tool_use_id": "toolu-agent", "task_type": "local_agent",
+                "description": "Map the panel", "is_backgrounded": true
+            }),
+            json!({"type": "system", "subtype": "background_tasks_changed",
+                   "background_tasks": [{"task_id": "agent-42", "task_type": "local_agent"}]}),
+        ];
+        for message in wire {
+            handle_message(&message, "s", &events, &commands, &turn, true, &mut state);
+        }
+        let seen: Vec<_> = std::iter::from_fn(|| event_rx.try_recv().ok()).collect();
+        let started = seen
+            .iter()
+            .filter_map(|event| match event {
+                DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)) => Some(item),
+                _ => None,
+            })
+            .last()
+            .expect("task_started upserts its entry");
+        assert_eq!(started.key.provider_id, "toolu-agent");
+        assert_eq!(started.control_id.as_deref(), Some("agent-42"));
+        let Some(DriverEvent::BackgroundWork(BackgroundWorkEvent::ReconcileLive { items })) =
+            seen.last()
+        else {
+            panic!("expected the level signal last");
+        };
+        assert_eq!(items[0].key.provider_id, "toolu-agent");
     }
 
     #[test]

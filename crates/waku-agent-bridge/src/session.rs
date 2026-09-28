@@ -40,6 +40,7 @@ use crate::history;
 use crate::mcp_tool::McpTool;
 use crate::permission::{GuiPermissionHandler, PermissionBridge};
 use crate::runtime;
+use crate::subagent::{SubagentHost, SubagentTool, TurnScope};
 
 /// How often the steer watcher checks whether the queue was drained. The
 /// engine drains between turns, so this only decides how promptly the composer
@@ -81,10 +82,14 @@ struct ToolSets {
 }
 
 impl ToolSets {
-    fn build(disallowed: &[String], mcp: Option<&Arc<claurst_mcp::McpManager>>) -> Self {
+    fn build(
+        disallowed: &[String],
+        mcp: Option<&Arc<claurst_mcp::McpManager>>,
+        subagents: &Arc<SubagentHost>,
+    ) -> Self {
         Self {
-            plain: builtin_tools(disallowed, mcp, false),
-            goal: builtin_tools(disallowed, mcp, true),
+            plain: builtin_tools(disallowed, mcp, false, subagents),
+            goal: builtin_tools(disallowed, mcp, true, subagents),
         }
     }
 }
@@ -120,6 +125,8 @@ struct Inner {
     turn_counter: Arc<AtomicUsize>,
     /// `AskUserQuestion` calls waiting on the user, by request id.
     questions: Mutex<HashMap<String, oneshot::Sender<String>>>,
+    /// The sub-agents this session starts, through its `Agent` tool.
+    subagents: Arc<SubagentHost>,
 }
 
 /// The parts of a running turn that outside callers need to reach.
@@ -179,7 +186,8 @@ impl AgentSession {
             None => crate::computer_use::remove_skill(),
         }
 
-        let tools = ToolSets::build(&config.disallowed_tools, None);
+        let subagents = SubagentHost::new(events.clone());
+        let tools = ToolSets::build(&config.disallowed_tools, None, &subagents);
         let inner = Arc::new(Inner {
             events,
             id: options
@@ -204,6 +212,7 @@ impl AgentSession {
             turn: Mutex::new(None),
             turn_counter: Arc::new(AtomicUsize::new(0)),
             questions: Mutex::new(HashMap::new()),
+            subagents,
         });
 
         connect_mcp_in_background(&inner);
@@ -373,16 +382,21 @@ impl AgentSession {
 
     /// Publish the current state of every piece of background work.
     pub fn refresh_background_work(&self) {
-        self.inner
-            .events
-            .emit(AgentEvent::BackgroundWork(background::snapshot()));
+        self.inner.events.emit(AgentEvent::BackgroundWork(
+            background::snapshot_owned(&self.inner.subagents.owned_background()),
+        ));
     }
 
-    /// Stop one piece of background work by the id the snapshot reported.
-    /// The refreshed snapshot follows either way, so the panel shows the
+    /// Stop one piece of background work by the id the snapshot reported —
+    /// or a sub-agent, foreground or not, by the id of the call that started
+    /// it. The refreshed snapshot follows either way, so the panel shows the
     /// entry's real state rather than an optimistic one.
     pub fn stop_background_work(&self, id: &str) -> Result<(), String> {
-        let outcome = background::stop(id);
+        let outcome = if self.inner.subagents.stop(id) {
+            Ok(())
+        } else {
+            background::stop(id)
+        };
         self.refresh_background_work();
         outcome
     }
@@ -516,6 +530,7 @@ impl Drop for Inner {
         }
         self.bridge.release_all();
         self.questions.lock().clear();
+        self.subagents.cancel_all();
     }
 }
 
@@ -554,8 +569,8 @@ pub(crate) fn build_clients(
     Ok((client, registry))
 }
 
-/// The built-in tools, minus the ones the user switched off, plus every
-/// tool the connected MCP servers advertise.
+/// The built-in tools, minus the ones the user switched off, plus the
+/// sub-agent tool and every tool the connected MCP servers advertise.
 ///
 /// Filtering here rather than in the prompt is what makes the Tools page
 /// reliable: a tool that is not in this list is not sent to the model at all,
@@ -564,24 +579,47 @@ fn builtin_tools(
     disallowed: &[String],
     mcp: Option<&Arc<claurst_mcp::McpManager>>,
     with_goal: bool,
+    subagents: &Arc<SubagentHost>,
 ) -> ToolSet {
-    let mut tools: Vec<Box<dyn Tool>> = claurst_tools::all_tools();
-    tools.push(Box::new(claurst_query::AgentTool));
-    tools.retain(|tool| !disallowed.iter().any(|name| name == tool.name()));
-    tools.retain(|tool| !UNAVAILABLE_TOOLS.contains(&tool.name()));
+    let mut tools = engine_builtins(disallowed);
+    // Ours, not the engine's `claurst_query::AgentTool`: see `crate::subagent`.
+    if !disallowed.iter().any(|name| name == crate::subagent::AGENT_TOOL_NAME) {
+        tools.push(Box::new(SubagentTool::new(subagents.clone())));
+    }
     if !with_goal {
         tools.retain(|tool| tool.name() != GOAL_COMPLETE_TOOL);
     }
+    if let Some(manager) = mcp {
+        tools.extend(McpTool::all(manager));
+    }
+    Arc::new(tools)
+}
+
+/// Every tool a session could offer save the sub-agent tool: the engine's
+/// built-ins the user left on, then the MCP servers' tools. What a
+/// sub-agent's own set is cut from.
+pub(crate) fn engine_tools(
+    disallowed: &[String],
+    mcp: Option<&Arc<claurst_mcp::McpManager>>,
+) -> Vec<Box<dyn Tool>> {
+    let mut tools = engine_builtins(disallowed);
+    if let Some(manager) = mcp {
+        tools.extend(McpTool::all(manager));
+    }
+    tools
+}
+
+fn engine_builtins(disallowed: &[String]) -> Vec<Box<dyn Tool>> {
+    let mut tools: Vec<Box<dyn Tool>> = claurst_tools::all_tools();
+    tools.retain(|tool| !disallowed.iter().any(|name| name == tool.name()));
+    tools.retain(|tool| !UNAVAILABLE_TOOLS.contains(&tool.name()));
     // The PowerShell tool runs `pwsh`, which a Mac or Linux machine almost
     // never has; a tool the model can call but not run only teaches it to
     // fail. Claude Code and Pi offer it on Windows alone.
     if !cfg!(windows) {
         tools.retain(|tool| tool.name() != "PowerShell");
     }
-    if let Some(manager) = mcp {
-        tools.extend(McpTool::all(manager));
-    }
-    Arc::new(tools)
+    tools
 }
 
 /// Connect the configured MCP servers without holding up session start, and
@@ -606,7 +644,7 @@ fn connect_mcp_in_background(inner: &Arc<Inner>) {
             tracing::warn!(%server, %error, "agent: MCP server did not connect");
         }
         let disallowed = inner.config.lock().disallowed_tools.clone();
-        *inner.tools.lock() = ToolSets::build(&disallowed, Some(&manager));
+        *inner.tools.lock() = ToolSets::build(&disallowed, Some(&manager), &inner.subagents);
         *inner.mcp.lock() = Some(manager);
     });
 }
@@ -691,10 +729,11 @@ async fn run_turn(
     let mut query = inner.query.lock().clone();
     // Re-derived every turn: an instruction file edited between turns applies
     // to the next one. Locked on its own, after the two above, as elsewhere.
-    {
-        let options = inner.options.lock().clone();
-        crate::config::refresh_session_rules(&mut query, &config, &options);
-    }
+    let options = inner.options.lock().clone();
+    crate::config::refresh_session_rules(&mut query, &config, &options);
+    // What a sub-agent started this turn runs with: this turn's config, taken
+    // before the steering queue — the parent's alone — is attached.
+    let subagent_query = query.clone();
     query.command_queue = Some(queue.clone());
     // A session with an active goal keeps going after each answer until the
     // model closes it with `GoalComplete` — the one tool set that has it.
@@ -730,9 +769,14 @@ async fn run_turn(
     // count with no percentage rather than a percentage of the wrong number.
     // The engine's heuristic answers a fixed guess for every model it does
     // not know, which is no basis for a percentage.
-    let context_window = crate::config::registry_context_window(&query.model, &route.provider);
+    let context_window = crate::config::context_window_for(&config, &query.model, &route.provider);
 
     let client = inner.client.lock().clone();
+    inner.subagents.begin_turn(TurnScope {
+        client: client.clone(),
+        query: subagent_query,
+        options,
+    });
     let handler: Arc<dyn claurst_core::PermissionHandler> =
         Arc::new(GuiPermissionHandler::new(inner.bridge.clone()));
 
@@ -783,6 +827,7 @@ async fn run_turn(
     drop(tool_ctx);
     let _ = forwarder.await;
     let _ = questions.await;
+    inner.subagents.end_turn();
 
     // Write the transcript back *before* the turn is taken down. `prompt`
     // treats "no turn" as "idle" and clones the history to start the next
@@ -834,9 +879,9 @@ async fn run_turn(
     )));
     // A turn is the only thing that creates background work, so this is the
     // moment the panel needs a fresh level signal.
-    inner
-        .events
-        .emit(AgentEvent::BackgroundWork(background::snapshot()));
+    inner.events.emit(AgentEvent::BackgroundWork(background::snapshot_owned(
+        &inner.subagents.owned_background(),
+    )));
     let goal_follow_up = settle_goal(&inner, goal_mode, had_goal, tokens_before, cancelled);
 
     // Steering messages the watcher had not yet accounted for. The queue
@@ -927,7 +972,7 @@ async fn compact_now(inner: Arc<Inner>, instructions: Option<String>, cancel: Ca
             report(CompactionPhase::Finished, Some(tokens_after));
             inner.events.emit(AgentEvent::Usage {
                 context_tokens: Some(tokens_after),
-                context_window: crate::config::registry_context_window(&query.model, &provider_id),
+                context_window: crate::config::context_window_for(&config, &query.model, &provider_id),
             });
             (true, None)
         }
@@ -1073,7 +1118,31 @@ async fn forward_events(
                 AgentEvent::ToolFinished { name, failed: false, .. }
                     if name == GOAL_COMPLETE_TOOL
             );
+            // After the row is out, so the record a sub-agent starts always
+            // has a row to hang off.
+            let agent_call = match &translated {
+                AgentEvent::ToolStarted { id, name, input }
+                    if name == crate::subagent::AGENT_TOOL_NAME =>
+                {
+                    Some((id.clone(), input.clone()))
+                }
+                _ => None,
+            };
+            let agent_done = match &translated {
+                AgentEvent::ToolFinished { id, name, .. }
+                    if name == crate::subagent::AGENT_TOOL_NAME =>
+                {
+                    Some(id.clone())
+                }
+                _ => None,
+            };
             inner.events.emit(translated);
+            if let Some((id, input)) = agent_call {
+                inner.subagents.announce(&id, &input);
+            }
+            if let Some(id) = agent_done {
+                inner.subagents.forget(&id);
+            }
             // The model just marked the goal complete; the chip should say
             // so now, not when the run winds down.
             if closed_goal && let Some(store) = crate::goal::open_store() {
@@ -1227,11 +1296,17 @@ mod tests {
         assert!(summary.is_some(), "the user should still be told why it stopped");
     }
 
+    fn host() -> Arc<SubagentHost> {
+        SubagentHost::new(EventSink::new(|_| {}))
+    }
+
     #[test]
     fn the_builtin_tool_set_includes_the_sub_agent_tool() {
-        let tools = builtin_tools(&[], None, false);
+        let tools = builtin_tools(&[], None, false, &host());
         assert!(tools.iter().any(|tool| tool.name() == "Agent"));
         assert!(tools.iter().any(|tool| tool.name() == "Read"));
+        // Exactly one: ours, not the engine's beside it.
+        assert_eq!(tools.iter().filter(|tool| tool.name() == "Agent").count(), 1);
     }
 
     /// Tools whose runner is not in this process would report success at
@@ -1239,19 +1314,20 @@ mod tests {
     /// was never set.
     #[test]
     fn tools_that_cannot_work_here_are_never_offered() {
-        let plain = builtin_tools(&[], None, false);
+        let plain = builtin_tools(&[], None, false, &host());
         for name in UNAVAILABLE_TOOLS.iter().chain([&GOAL_COMPLETE_TOOL]) {
             assert!(!plain.iter().any(|tool| tool.name() == *name), "{name}");
         }
-        let goal = builtin_tools(&[], None, true);
+        let goal = builtin_tools(&[], None, true, &host());
         assert!(goal.iter().any(|tool| tool.name() == GOAL_COMPLETE_TOOL));
         assert!(!goal.iter().any(|tool| tool.name() == "TeamCreate"));
     }
 
     #[test]
     fn a_disallowed_tool_is_not_offered_at_all() {
-        let tools = builtin_tools(&["WebSearch".to_string()], None, false);
+        let tools = builtin_tools(&["WebSearch".to_string(), "Agent".to_string()], None, false, &host());
         assert!(!tools.iter().any(|tool| tool.name() == "WebSearch"));
+        assert!(!tools.iter().any(|tool| tool.name() == "Agent"));
         assert!(tools.iter().any(|tool| tool.name() == "Read"));
     }
 }

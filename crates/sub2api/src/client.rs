@@ -363,6 +363,10 @@ pub struct ModelCatalogItem {
     pub pricing_details: PricingDetails,
     #[serde(default, deserialize_with = "null_to_default")]
     pub other_groups: Vec<GroupCompanion>,
+    /// The model's context window in tokens; absent when the gateway does
+    /// not know it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
 }
 
 /// Headline figures above the catalog.

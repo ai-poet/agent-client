@@ -1785,6 +1785,10 @@ mod sidebar;
 mod skills_page;
 mod status_capsule;
 mod streaming;
+// Fork: sub-agent records (summary row, right-panel view, their store).
+mod subagent_panel;
+mod subagent_row;
+mod subagent_transcript;
 mod task_switcher;
 mod todo_list;
 mod transcript;

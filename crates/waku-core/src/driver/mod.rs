@@ -10,6 +10,7 @@ mod deepseek;
 mod native;
 mod opencode;
 mod pi;
+mod subagent;
 mod support;
 mod title_refresh;
 // Fork addition: naming an empty turn's cause.

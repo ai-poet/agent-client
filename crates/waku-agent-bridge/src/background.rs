@@ -57,6 +57,17 @@ pub fn snapshot() -> Vec<BackgroundEntry> {
     global_registry().list().iter().map(entry).collect()
 }
 
+/// [`snapshot`] as one session sees it: the registry is process-wide, and a
+/// sub-agent belongs to the session that started it (`owned`, by id).
+/// Shells carry nothing that says whose they are, so they stay listed
+/// everywhere, as before.
+pub fn snapshot_owned(owned: &std::collections::HashSet<String>) -> Vec<BackgroundEntry> {
+    snapshot()
+        .into_iter()
+        .filter(|entry| entry.kind != BackgroundKind::Subagent || owned.contains(&entry.id))
+        .collect()
+}
+
 fn entry(task: &BackgroundTask) -> BackgroundEntry {
     let (kind, title) = classify(&task.name);
     let (status, detail) = match &task.status {
@@ -200,5 +211,28 @@ mod tests {
     #[test]
     fn stopping_untracked_work_says_so() {
         assert!(stop("no-such-task").is_err());
+    }
+
+    /// Another session's sub-agent is not this session's to list; a shell
+    /// says nothing about whose it is and stays.
+    #[test]
+    fn a_session_sees_only_its_own_sub_agents() {
+        let mut mine = BackgroundTask::new("subagent: mine");
+        mine.id = format!("mine-{}", uuid::Uuid::new_v4());
+        let mut theirs = BackgroundTask::new("subagent: theirs");
+        theirs.id = format!("theirs-{}", uuid::Uuid::new_v4());
+        let mut shell = BackgroundTask::new("bg: sleep 1");
+        shell.id = format!("shell-{}", uuid::Uuid::new_v4());
+        for task in [&mine, &theirs, &shell] {
+            let _ = global_registry().register(task.clone());
+        }
+        let owned = std::collections::HashSet::from([mine.id.clone()]);
+        let ids: Vec<String> = snapshot_owned(&owned)
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect();
+        assert!(ids.contains(&mine.id));
+        assert!(ids.contains(&shell.id));
+        assert!(!ids.contains(&theirs.id));
     }
 }

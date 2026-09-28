@@ -364,6 +364,101 @@ mod tests {
         assert_eq!(session.cached_input, 9_000);
     }
 
+    /// A sub-agent's record crosses the daemon wire entry by entry, text and
+    /// tool calls alike, and the call that started it keeps its mark.
+    #[test]
+    fn subagent_records_round_trip_through_the_daemon_wire() {
+        use crate::model::{
+            ActivityItem, ActivityKind, BackgroundWorkEvent, BackgroundWorkKey, BackgroundWorkKind,
+            SubagentCall, SubagentTranscriptBody, SubagentTranscriptEntry,
+        };
+
+        let key = BackgroundWorkKey::new(BackgroundWorkKind::Subagent, "toolu_1");
+        let text = event_to_wire(DriverEvent::BackgroundWork(BackgroundWorkEvent::Transcript {
+            key: key.clone(),
+            entry: SubagentTranscriptEntry {
+                id: "text-1".into(),
+                body: SubagentTranscriptBody::Text {
+                    text: "Looking.".into(),
+                    append: true,
+                },
+            },
+        }))
+        .unwrap();
+        let DriverEvent::BackgroundWork(BackgroundWorkEvent::Transcript { key: back, entry }) =
+            event_from_wire(text).unwrap()
+        else {
+            panic!("expected a transcript entry");
+        };
+        assert_eq!(back, key);
+        assert!(matches!(
+            entry.body,
+            SubagentTranscriptBody::Text { ref text, append: true } if text == "Looking."
+        ));
+
+        let row = ActivityItem::new(Some("toolu_2".into()), ActivityKind::Search, "auth", None, true);
+        let activity = event_to_wire(DriverEvent::BackgroundWork(BackgroundWorkEvent::Transcript {
+            key,
+            entry: SubagentTranscriptEntry {
+                id: "toolu_2".into(),
+                body: SubagentTranscriptBody::Activity {
+                    activity: row.clone(),
+                },
+            },
+        }))
+        .unwrap();
+        let DriverEvent::BackgroundWork(BackgroundWorkEvent::Transcript { entry, .. }) =
+            event_from_wire(activity).unwrap()
+        else {
+            panic!("expected a transcript entry");
+        };
+        let SubagentTranscriptBody::Activity { activity } = entry.body else {
+            panic!("expected an activity");
+        };
+        assert_eq!(activity.id, row.id);
+        assert_eq!(activity.source_id.as_deref(), Some("toolu_2"));
+
+        let call = ActivityItem::new(Some("toolu_1".into()), ActivityKind::Tool, "Find it", None, false)
+            .with_subagent(Some(SubagentCall {
+                agent_type: Some("Explore".into()),
+                description: "Find it".into(),
+            }));
+        let wire = event_to_wire(DriverEvent::RichActivity(call)).unwrap();
+        let DriverEvent::RichActivity(back) = event_from_wire(wire).unwrap() else {
+            panic!("expected an activity");
+        };
+        assert_eq!(
+            back.subagent.and_then(|call| call.agent_type).as_deref(),
+            Some("Explore")
+        );
+
+        // Rows saved before the field existed still load.
+        let mut legacy = serde_json::to_value(ActivityItem::new(
+            None,
+            ActivityKind::Tool,
+            "Agent",
+            None,
+            true,
+        ))
+        .unwrap();
+        legacy.as_object_mut().unwrap().remove("subagent");
+        let legacy: ActivityItem = serde_json::from_value(legacy).unwrap();
+        assert!(legacy.subagent.is_none());
+    }
+
+    /// Only `Agent` and `Task` calls with a description start a sub-agent.
+    #[test]
+    fn a_subagent_call_is_read_from_agent_and_task_inputs() {
+        use crate::model::SubagentCall;
+        let input = json!({"description": " Find the login code ", "prompt": "…", "subagent_type": "Explore"});
+        let call = SubagentCall::from_tool("Task", Some(&input)).unwrap();
+        assert_eq!(call.description, "Find the login code");
+        assert_eq!(call.agent_type.as_deref(), Some("Explore"));
+        assert!(SubagentCall::from_tool("Agent", Some(&json!({"description": "x"}))).is_some());
+        assert!(SubagentCall::from_tool("Bash", Some(&input)).is_none());
+        assert!(SubagentCall::from_tool("Agent", Some(&json!({"prompt": "no description"}))).is_none());
+    }
+
     #[test]
     fn interaction_mode_update_round_trips_through_the_daemon_wire() {
         let wire = event_to_wire(DriverEvent::InteractionModeUpdated(InteractionMode::Plan))

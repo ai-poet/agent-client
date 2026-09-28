@@ -84,6 +84,7 @@ export type { SkillsCatalog } from "./SkillsCatalog";
 export type { SlashCommand } from "./SlashCommand";
 export type { StoredAttachment } from "./StoredAttachment";
 export type { StoredTranscriptBlockContent } from "./StoredTranscriptBlockContent";
+export type { SubagentCall } from "./SubagentCall";
 export type { ThreadGoal } from "./ThreadGoal";
 export type { ThreadGoalStatus } from "./ThreadGoalStatus";
 export type { TodoItem } from "./TodoItem";

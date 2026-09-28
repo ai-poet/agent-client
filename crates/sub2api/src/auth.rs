@@ -198,6 +198,12 @@ pub struct Credentials {
     /// its models, which sends the agents' image calls there too.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub image_groups: BTreeMap<String, i64>,
+    /// Each catalog model's context window in tokens, as the catalog last
+    /// reported it. Written into the built-in agent's settings, where it
+    /// sizes the usage meter and the auto-compact threshold: the engine's own
+    /// model table predates most of the models the gateway serves.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub model_windows: BTreeMap<String, u64>,
     /// The user turned gateway routing off without signing out. Stored
     /// inverted so the serde default (false) means the common case: signing
     /// in routes.
@@ -323,6 +329,7 @@ impl Credentials {
             group_keys: BTreeMap::new(),
             model_routes: BTreeMap::new(),
             image_groups: BTreeMap::new(),
+            model_windows: BTreeMap::new(),
             // Signing in is an explicit request to route through the service.
             routing_disabled: false,
             session_id: new_session_id()?,

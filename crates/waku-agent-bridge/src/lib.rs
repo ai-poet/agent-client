@@ -19,6 +19,7 @@
 //! | mid-turn steering | the engine's shared command queue |
 //! | approvals that persist | the engine's own `PermissionManager` |
 //! | background work, stoppable | the engine's task registry ([`background`]) |
+//! | sub-agents with a live record | our own `Agent` tool (`subagent`) over the engine's loop |
 //! | questions to the user | `AskUserQuestion`'s reply channel |
 //! | MCP server tools | [`mcp_tool`], the adapter upstream keeps in its CLI |
 //!
@@ -50,13 +51,17 @@ mod permission;
 mod project_context;
 mod runtime;
 mod session;
+mod subagent;
 
 pub use background::{BackgroundEntry, BackgroundKind, BackgroundStatus};
 pub use config::{
     AccessMode, AgentStartOptions, COMPUTER_USE_TOOLS, ComputerUseWiring, MissingApiKey,
     TurnOptions, WireFormat, split_model,
 };
-pub use events::{AgentEvent, CompactionPhase, EventSink, PermissionChoice, TokenCounts};
+pub use events::{
+    AgentEvent, CompactionPhase, EventSink, PermissionChoice, SubagentEvent, SubagentStatus,
+    TokenCounts,
+};
 pub use goal::{GoalOp, GoalSnapshot, GoalState};
 // The two refusals whose wording is the fork's rather than the engine's, so
 // the driver can recognise them exactly and say them in the user's language.
@@ -82,7 +87,7 @@ pub fn tool_names() -> Vec<String> {
                 && name != session::GOAL_COMPLETE_TOOL
         })
         .collect();
-    names.push(claurst_tools::Tool::name(&claurst_query::AgentTool).to_string());
+    names.push(subagent::AGENT_TOOL_NAME.to_string());
     names.sort();
     names
 }

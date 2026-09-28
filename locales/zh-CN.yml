@@ -892,6 +892,13 @@ background.agents: 子智能体
 background.process: 进程
 background.monitor: 监控
 background.subagent: 子智能体
+subagent.label: 子智能体
+subagent.open: 在右侧打开
+subagent.waiting: 等待子智能体开始…
+subagent.trimmed: 较早的 %{count} 步未显示
+subagent.result: 结果
+subagent.show_prompt: 显示提示词
+subagent.hide_prompt: 收起提示词
 background.no_work: 暂无后台工作
 background.no_work_description: 长时间运行的命令和子智能体显示在这里。
 background.view: 查看

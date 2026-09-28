@@ -28,10 +28,11 @@ use uuid::Uuid;
 use waku_agent_bridge::{
     AccessMode, AgentEvent, AgentSession, AgentStartOptions, BackgroundEntry, BackgroundKind,
     BackgroundStatus, ComputerUseWiring, GoalOp, GoalSnapshot, GoalState, MissingApiKey,
-    TurnOptions, WireFormat, split_model,
+    SubagentEvent, SubagentStatus, TurnOptions, WireFormat, split_model,
 };
 
 use super::activity;
+use super::subagent::{ChildCall, SubagentFeed};
 use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
@@ -39,7 +40,8 @@ use crate::model::{
     ActivityKind, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey,
     BackgroundWorkKind, BackgroundWorkStatus, CompactionPhase, DriverEvent, InteractionMode,
     Message, MessageRole, PermissionOption, ProviderResumeCursor, ProviderSessionHistory,
-    RuntimeMode, TurnStatus, UserInputAnswer, UserInputOption, UserInputQuestion, unix_time_millis,
+    RuntimeMode, SubagentCall, TurnStatus, UserInputAnswer, UserInputOption, UserInputQuestion,
+    unix_time_millis,
 };
 
 pub struct NativeDriver {
@@ -573,14 +575,26 @@ struct EventTranslator {
     events: DriverEventSender,
     store: SessionStore,
     tools: Mutex<std::collections::HashMap<String, ToolCall>>,
+    /// The sub-agents running now, by the `Agent` call that started each.
+    /// Kept apart from `tools`: a background one outlives the turn, and
+    /// `tools` is cleared at every turn's start.
+    subagents: Mutex<std::collections::HashMap<String, RunningSubagent>>,
 }
 
 /// What a tool call looked like when it started, so its completion can be
 /// rendered as the same row rather than a second one.
 struct ToolCall {
+    name: String,
     kind: ActivityKind,
     title: String,
     input: Value,
+}
+
+/// A sub-agent between its `Started` and its `Finished`: its panel entry as
+/// last sent, and the stream of its record.
+struct RunningSubagent {
+    item: BackgroundWorkItem,
+    feed: SubagentFeed,
 }
 
 /// Replace an engine refusal the fork owns the wording of with the user's
@@ -629,6 +643,7 @@ impl EventTranslator {
             events,
             store,
             tools: Mutex::new(std::collections::HashMap::new()),
+            subagents: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -655,19 +670,28 @@ impl EventTranslator {
             AgentEvent::ToolStarted { id, name, input } => {
                 let kind = activity_kind(&name);
                 let title = tool_title(&name, &input);
-                self.send(DriverEvent::RichActivity(activity::tool_activity(
-                    Some(id.clone()),
-                    kind,
-                    title.clone(),
-                    Some(&input),
-                    None,
-                    None,
-                    false,
-                    false,
-                )));
-                self.tools
-                    .lock()
-                    .insert(id, ToolCall { kind, title, input });
+                self.send(DriverEvent::RichActivity(
+                    activity::tool_activity(
+                        Some(id.clone()),
+                        kind,
+                        title.clone(),
+                        Some(&input),
+                        None,
+                        None,
+                        false,
+                        false,
+                    )
+                    .with_subagent(SubagentCall::from_tool(&name, Some(&input))),
+                ));
+                self.tools.lock().insert(
+                    id,
+                    ToolCall {
+                        name,
+                        kind,
+                        title,
+                        input,
+                    },
+                );
             }
             AgentEvent::ToolFinished {
                 id,
@@ -682,21 +706,29 @@ impl EventTranslator {
                     kind: activity_kind(&name),
                     title: name.clone(),
                     input: Value::Null,
+                    name,
                 });
                 let output = localize_refusal(&output).unwrap_or(output);
                 // Images arrive on their own sideband rather than inside
                 // `output`, which is also what the model reads back.
-                self.send(DriverEvent::RichActivity(activity::tool_activity(
-                    Some(id),
-                    call.kind,
-                    call.title,
-                    Some(&call.input),
-                    Some(&output),
-                    image_source.as_ref(),
-                    failed,
-                    true,
-                )));
+                self.send(DriverEvent::RichActivity(
+                    activity::tool_activity(
+                        Some(id),
+                        call.kind,
+                        call.title,
+                        Some(&call.input),
+                        Some(&output),
+                        image_source.as_ref(),
+                        failed,
+                        true,
+                    )
+                    .with_subagent(SubagentCall::from_tool(&call.name, Some(&call.input))),
+                ));
             }
+            AgentEvent::Subagent {
+                parent_tool_id,
+                event,
+            } => self.handle_subagent(parent_tool_id, event),
             AgentEvent::Usage {
                 context_tokens,
                 context_window,
@@ -827,6 +859,119 @@ impl EventTranslator {
     fn send(&self, event: DriverEvent) {
         let _ = DriverEventSink::send(&self.events, event);
     }
+
+    /// One step of a sub-agent's run: its entry in the background-work
+    /// panel, keyed by the `Agent` call that started it (so the call's row
+    /// finds it), and its record, streamed into that entry.
+    fn handle_subagent(&self, parent_tool_id: String, event: SubagentEvent) {
+        let mut running = self.subagents.lock();
+        match event {
+            SubagentEvent::Started {
+                description,
+                prompt,
+                model,
+                background,
+                started_at_ms,
+            } => {
+                let mut item = BackgroundWorkItem::new(
+                    BackgroundWorkKind::Subagent,
+                    parent_tool_id.clone(),
+                    description,
+                    BackgroundWorkStatus::Running,
+                );
+                item.origin_activity_id = Some(parent_tool_id.clone());
+                item.command = Some(prompt);
+                item.model = Some(model).filter(|model| !model.trim().is_empty());
+                item.background = background;
+                item.can_stop = true;
+                item.control_id = Some(parent_tool_id.clone());
+                item.started_at_ms = started_at_ms;
+                let feed = SubagentFeed::new(item.key.clone());
+                self.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
+                    item.clone(),
+                )));
+                running.insert(parent_tool_id, RunningSubagent { item, feed });
+            }
+            SubagentEvent::Text(text) => {
+                if let Some(event) = running
+                    .get_mut(&parent_tool_id)
+                    .and_then(|child| child.feed.text(&text))
+                {
+                    self.send(DriverEvent::BackgroundWork(event));
+                }
+            }
+            SubagentEvent::ToolStarted { id, name, input } => {
+                let Some(child) = running.get_mut(&parent_tool_id) else {
+                    return;
+                };
+                let kind = activity_kind(&name);
+                let title = tool_title(&name, &input);
+                let row = activity::tool_activity(
+                    Some(id.clone()),
+                    kind,
+                    title.clone(),
+                    Some(&input),
+                    None,
+                    None,
+                    false,
+                    false,
+                );
+                child.feed.remember(&id, ChildCall { kind, title, input });
+                self.send(DriverEvent::BackgroundWork(child.feed.activity(row)));
+            }
+            SubagentEvent::ToolFinished {
+                id,
+                name,
+                output,
+                failed,
+                image_source,
+            } => {
+                let Some(child) = running.get_mut(&parent_tool_id) else {
+                    return;
+                };
+                let call = child.feed.take(&id).unwrap_or_else(|| ChildCall {
+                    kind: activity_kind(&name),
+                    title: name.clone(),
+                    input: Value::Null,
+                });
+                let output = localize_refusal(&output).unwrap_or(output);
+                let row = activity::tool_activity(
+                    Some(id),
+                    call.kind,
+                    call.title,
+                    Some(&call.input),
+                    Some(&output),
+                    image_source.as_ref(),
+                    failed,
+                    true,
+                );
+                self.send(DriverEvent::BackgroundWork(child.feed.activity(row)));
+            }
+            SubagentEvent::Finished {
+                status,
+                summary,
+                result,
+                duration_ms,
+            } => {
+                let Some(RunningSubagent { mut item, .. }) = running.remove(&parent_tool_id) else {
+                    return;
+                };
+                item.status = match status {
+                    SubagentStatus::Completed => BackgroundWorkStatus::Completed,
+                    SubagentStatus::Failed => BackgroundWorkStatus::Failed,
+                    SubagentStatus::Stopped => BackgroundWorkStatus::Stopped,
+                };
+                item.can_stop = false;
+                item.duration_ms = Some(duration_ms);
+                item.updated_at_ms = unix_time_millis();
+                item.detail = summary;
+                // The final report, for any client that shows the entry but
+                // not the record.
+                item.output = result;
+                self.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)));
+            }
+        }
+    }
 }
 
 /// The engine's tool names that `ActivityKind::from_tool_name` does not
@@ -862,6 +1007,11 @@ fn background_item(entry: BackgroundEntry) -> BackgroundWorkItem {
     if kind == BackgroundWorkKind::Process {
         item.command = Some(entry.title);
     }
+    // A sub-agent's task id is the id of the `Agent` call that started it
+    // (the bridge files it so), which is what links the entry to its row.
+    if kind == BackgroundWorkKind::Subagent {
+        item.origin_activity_id = Some(entry.id.clone());
+    }
     item.detail = entry.detail.or_else(|| entry.pid.map(|pid| format!("PID {pid}")));
     item.output = entry.output;
     item.started_at_ms = entry.started_at_ms;
@@ -883,6 +1033,10 @@ fn background_item(entry: BackgroundEntry) -> BackgroundWorkItem {
 fn tool_title(name: &str, input: &Value) -> String {
     if let Some(title) = activity::input_title(Some(input)) {
         return title;
+    }
+    // A sub-agent is named by the task it was given, as Claude Code's are.
+    if let Some(call) = SubagentCall::from_tool(name, Some(input)) {
+        return call.description;
     }
     for key in ["command", "query", "pattern", "file_path", "path", "url"] {
         if let Some(value) = input.get(key).and_then(Value::as_str) {
@@ -988,6 +1142,148 @@ mod tests {
         assert!(computer_use_wiring(&config).skill_markdown.is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn translator() -> (EventTranslator, crossbeam_channel::Receiver<DriverEvent>) {
+        let (events, received) = crate::driver::test_event_channel();
+        (EventTranslator::new(events, SessionStore::new(Uuid::new_v4())), received)
+    }
+
+    /// An `Agent` call reads as the task it hands over, and carries the mark
+    /// that makes the transcript show it as a sub-agent — on its start and
+    /// on its completion alike.
+    #[test]
+    fn an_agent_call_is_titled_by_its_task_and_marked_as_a_sub_agent() {
+        let (translator, received) = translator();
+        let input = serde_json::json!({"description": "Find the login code", "prompt": "Look for it"});
+        translator.handle(AgentEvent::ToolStarted {
+            id: "toolu_1".into(),
+            name: "Agent".into(),
+            input,
+        });
+        translator.handle(AgentEvent::ToolFinished {
+            id: "toolu_1".into(),
+            name: "Agent".into(),
+            output: Value::String("Found it in auth.rs".into()),
+            failed: false,
+            image_source: None,
+        });
+        let rows: Vec<_> = received
+            .try_iter()
+            .filter_map(|event| match event {
+                DriverEvent::RichActivity(row) => Some(row),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(rows.len(), 2);
+        for row in rows {
+            assert_eq!(row.title, "Find the login code");
+            assert_eq!(
+                row.subagent.as_ref().map(|call| call.description.as_str()),
+                Some("Find the login code")
+            );
+        }
+    }
+
+    /// A sub-agent's run becomes one panel entry keyed by the call that
+    /// started it, with its text and tool calls streamed into its record,
+    /// and settles with its report.
+    #[test]
+    fn a_sub_agents_run_streams_into_one_entry() {
+        let (translator, received) = translator();
+        let step = |event| {
+            translator.handle(AgentEvent::Subagent {
+                parent_tool_id: "toolu_1".into(),
+                event,
+            })
+        };
+        step(SubagentEvent::Started {
+            description: "Find it".into(),
+            prompt: "Look for the login code".into(),
+            model: "claude-sonnet-5".into(),
+            background: false,
+            started_at_ms: 1_000,
+        });
+        step(SubagentEvent::Text("Looking ".into()));
+        step(SubagentEvent::Text("around.".into()));
+        step(SubagentEvent::ToolStarted {
+            id: "child_1".into(),
+            name: "Grep".into(),
+            input: serde_json::json!({"pattern": "login"}),
+        });
+        step(SubagentEvent::ToolFinished {
+            id: "child_1".into(),
+            name: "Grep".into(),
+            output: Value::String("src/auth.rs".into()),
+            failed: false,
+            image_source: None,
+        });
+        step(SubagentEvent::Finished {
+            status: SubagentStatus::Completed,
+            summary: None,
+            result: Some("It is in src/auth.rs".into()),
+            duration_ms: 4_000,
+        });
+
+        let work: Vec<BackgroundWorkEvent> = received
+            .try_iter()
+            .filter_map(|event| match event {
+                DriverEvent::BackgroundWork(work) => Some(work),
+                _ => None,
+            })
+            .collect();
+        let BackgroundWorkEvent::Upsert(started) = &work[0] else {
+            panic!("expected the entry first");
+        };
+        assert_eq!(started.key, BackgroundWorkKey::new(BackgroundWorkKind::Subagent, "toolu_1"));
+        assert_eq!(started.origin_activity_id.as_deref(), Some("toolu_1"));
+        assert_eq!(started.control_id.as_deref(), Some("toolu_1"));
+        assert_eq!(started.command.as_deref(), Some("Look for the login code"));
+        assert!(started.can_stop);
+
+        let entries: Vec<_> = work[1..work.len() - 1]
+            .iter()
+            .map(|event| match event {
+                BackgroundWorkEvent::Transcript { entry, .. } => entry.clone(),
+                other => panic!("expected a record entry, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[0].id, entries[1].id, "the text runs into one entry");
+        assert!(matches!(
+            &entries[1].body,
+            crate::model::SubagentTranscriptBody::Text { append: true, .. }
+        ));
+        assert_eq!(entries[2].id, "child_1");
+        let crate::model::SubagentTranscriptBody::Activity { activity } = &entries[3].body else {
+            panic!("expected the finished call");
+        };
+        assert!(activity.complete);
+        assert_eq!(activity.output.as_deref(), Some("src/auth.rs"));
+
+        let Some(BackgroundWorkEvent::Upsert(done)) = work.last() else {
+            panic!("expected the settled entry last");
+        };
+        assert_eq!(done.status, BackgroundWorkStatus::Completed);
+        assert_eq!(done.output.as_deref(), Some("It is in src/auth.rs"));
+        assert!(!done.can_stop);
+    }
+
+    /// A background sub-agent the registry reports links back to its row.
+    #[test]
+    fn a_registry_sub_agent_links_back_to_its_row() {
+        let item = background_item(BackgroundEntry {
+            id: "toolu_7".into(),
+            kind: BackgroundKind::Subagent,
+            title: "Survey the crate".into(),
+            status: BackgroundStatus::Running,
+            detail: None,
+            pid: None,
+            output: None,
+            started_at_ms: 0,
+            finished_at_ms: None,
+        });
+        assert_eq!(item.origin_activity_id.as_deref(), Some("toolu_7"));
     }
 
     /// Driving the desktop reads as a command in the transcript, not as the

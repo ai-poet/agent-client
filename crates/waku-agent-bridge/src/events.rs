@@ -84,6 +84,12 @@ pub enum AgentEvent {
         /// always acceptable too.
         options: Vec<String>,
     },
+    /// Something a sub-agent did, for the record of the `Agent` call
+    /// `parent_tool_id` that started it. See [`crate::subagent`].
+    Subagent {
+        parent_tool_id: String,
+        event: SubagentEvent,
+    },
     /// Everything the engine's background registry holds — a level signal,
     /// sent on demand and after each turn. Stop failures are not an event:
     /// [`crate::AgentSession::stop_background_work`] answers synchronously,
@@ -120,6 +126,55 @@ pub enum AgentEvent {
         success: bool,
         summary: Option<String>,
     },
+}
+
+/// One step of a sub-agent's run, in the order it happened.
+#[derive(Clone, Debug)]
+pub enum SubagentEvent {
+    /// The run began. Always the first event for its call.
+    Started {
+        description: String,
+        prompt: String,
+        model: String,
+        /// Started with `run_in_background`: the parent's turn goes on
+        /// without waiting for it.
+        background: bool,
+        started_at_ms: u64,
+    },
+    /// Text it wrote.
+    Text(String),
+    /// One of its tool calls is about to run.
+    ToolStarted {
+        id: String,
+        name: String,
+        input: Value,
+    },
+    /// One of its tool calls finished.
+    ToolFinished {
+        id: String,
+        name: String,
+        output: Value,
+        failed: bool,
+        image_source: Option<Value>,
+    },
+    /// The run is over. Always the last event for its call.
+    Finished {
+        status: SubagentStatus,
+        /// Why it failed, when it did.
+        summary: Option<String>,
+        /// Its final report, when it produced one.
+        result: Option<String>,
+        duration_ms: u64,
+    },
+}
+
+/// How a sub-agent's run ended.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SubagentStatus {
+    Completed,
+    Failed,
+    /// Stopped by the user, or by the end of the turn that was waiting on it.
+    Stopped,
 }
 
 /// Tokens split the way the Messages API reports them; the Responses

@@ -36,6 +36,10 @@ pub struct GatewayConfig {
     /// takes one key for its whole run.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub model_keys: std::collections::BTreeMap<String, String>,
+    /// Each catalog model's context window (`Credentials::model_windows`).
+    /// Only the built-in agent reads it; the CLIs know their own models.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub model_windows: std::collections::BTreeMap<String, u64>,
 }
 
 impl GatewayConfig {
@@ -95,6 +99,7 @@ mod tests {
             codex_api_key: None,
             codex_model: None,
             model_keys: Default::default(),
+            model_windows: Default::default(),
         }
     }
 

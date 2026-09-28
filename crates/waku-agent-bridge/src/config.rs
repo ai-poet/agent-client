@@ -5,12 +5,12 @@
 //! which is *per turn* — model, effort, budgets. That split is what lets a
 //! model change take effect on the next turn without restarting anything.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use anyhow::Context as _;
-use claurst_core::config::{Config, McpServerConfig, McpServerOrigin, Settings};
+use claurst_core::config::{Config, McpServerConfig, McpServerOrigin, ModelOverride, Settings};
 use claurst_core::effort::EffortLevel;
 use claurst_core::{PermissionMode, ProviderConfig};
 use claurst_query::QueryConfig;
@@ -620,12 +620,13 @@ const MIN_PLAUSIBLE_REGISTRY_WINDOW: u64 = 8192;
 ///
 /// Deliberately not `claurst_query::resolve_context_window`: that one returns
 /// a plain `u64` because it always falls back to a heuristic that answers a
-/// fixed guess for everything it does not recognise — which is every model
-/// this app actually offers. A meter that says nothing beats a meter that
-/// shows a percentage of a guess.
+/// fixed guess for everything it does not recognise — which is most models
+/// this app offers. A meter that says nothing beats a meter that shows a
+/// percentage of a guess.
 ///
-/// The engine's auto-compact keeps using the heuristic, and should: it needs
-/// *a* threshold to act on, where the meter needs the truth or silence.
+/// The engine's auto-compact keeps the heuristic for a model nobody declared,
+/// and should: it needs *a* threshold to act on, where the meter needs the
+/// truth or silence. [`context_window_for`] asks the declared windows first.
 pub fn registry_context_window(model: &str, fallback_provider: &str) -> Option<u64> {
     let provider = registry_provider_for(model, fallback_provider);
     model_registry()
@@ -651,14 +652,145 @@ pub fn registry_provider_for(model: &str, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_owned())
 }
 
+/// Where the routing writer files the context window of each model it knows
+/// (`{"<model>": <tokens>}`), on every provider entry it manages. Kept in step
+/// with `sub2api::global_config::native::CONTEXT_WINDOWS_OPTION`, which this
+/// crate cannot import.
+///
+/// The gateway's catalog knows the window of every model it serves, and a
+/// user declares one for each model of their own endpoint; the bundled
+/// snapshot knows neither the newer models nor anybody's own.
+pub const CONTEXT_WINDOWS_OPTION: &str = "context_windows";
+
+/// The windows the routing writer declared, by bare model id. The selected
+/// provider's entry first, then the others the writer manages — the writer
+/// puts the same table on each, so any one of them answers.
+pub(crate) fn declared_windows(config: &Config) -> BTreeMap<String, u64> {
+    let providers = config
+        .provider
+        .as_deref()
+        .into_iter()
+        .chain(["anthropic", "codex", "openai"]);
+    for provider in providers {
+        let Some(table) = config
+            .provider_configs
+            .get(provider)
+            .and_then(|entry| entry.options.get(CONTEXT_WINDOWS_OPTION))
+            .and_then(serde_json::Value::as_object)
+        else {
+            continue;
+        };
+        let windows: BTreeMap<String, u64> = table
+            .iter()
+            .filter_map(|(model, window)| Some((model.trim().to_owned(), window.as_u64()?)))
+            .filter(|(model, window)| {
+                !model.is_empty() && *window >= MIN_PLAUSIBLE_REGISTRY_WINDOW
+            })
+            .collect();
+        if !windows.is_empty() {
+            return windows;
+        }
+    }
+    BTreeMap::new()
+}
+
+/// The model's context window for the usage meter: what the routing writer
+/// declared, else what the bundled registry knows, else `None`.
+pub fn context_window_for(config: &Config, model: &str, route_provider: &str) -> Option<u64> {
+    declared_windows(config)
+        .get(model.trim())
+        .copied()
+        .or_else(|| registry_context_window(model, route_provider))
+}
+
+/// The registry a session's turns size themselves against: the bundled one,
+/// with the declared windows and the user's own `modelOverrides` laid over
+/// it.
+///
+/// This is what makes the engine's auto-compact fire at the threshold of the
+/// window the meter shows rather than of a guess. `ModelRegistry` cannot be
+/// cloned, so an overlay is a fresh parse of the bundle; it is kept and handed
+/// to every session until the overrides change, which happens when the
+/// catalog does.
+pub(crate) fn session_model_registry(config: &Config) -> Arc<claurst_api::ModelRegistry> {
+    static OVERLAID: OnceLock<
+        parking_lot::Mutex<Option<(BTreeMap<String, ModelOverride>, Arc<claurst_api::ModelRegistry>)>>,
+    > = OnceLock::new();
+
+    let overrides = window_overrides(
+        model_registry(),
+        &declared_windows(config),
+        &config.model_overrides,
+    );
+    if overrides.is_empty() {
+        return model_registry().clone();
+    }
+    let mut cached = OVERLAID.get_or_init(Default::default).lock();
+    if let Some((built_from, registry)) = cached.as_ref()
+        && *built_from == overrides
+    {
+        return registry.clone();
+    }
+    let mut registry = claurst_api::ModelRegistry::new();
+    let keyed: HashMap<String, ModelOverride> = overrides.clone().into_iter().collect();
+    registry.apply_model_overrides(&keyed);
+    let registry = Arc::new(registry);
+    *cached = Some((overrides, registry.clone()));
+    registry
+}
+
+/// The `"provider/model"` overrides that carry `windows` into `base`.
+///
+/// Keyed under the provider that *owns* each model, never the route's: on the
+/// Responses and Chat routes the engine reads a model's capabilities from the
+/// entry under the route provider, and an entry the override creates there
+/// would be a text-only model with no reasoning — quietly switching thinking
+/// off. The window lookup asks the owner anyway. Entries the registry already
+/// holds under other providers for the same id are patched as well (patching
+/// changes nothing but the window). A model no family table recognises gets no
+/// entry: the meter still reads its declared window, and compaction keeps the
+/// engine's heuristic. The user's own overrides go in as they wrote them, and
+/// win.
+fn window_overrides(
+    base: &claurst_api::ModelRegistry,
+    windows: &BTreeMap<String, u64>,
+    user: &HashMap<String, ModelOverride>,
+) -> BTreeMap<String, ModelOverride> {
+    let mut overrides = BTreeMap::new();
+    let mut add = |key: String, window: u64| {
+        let window = u32::try_from(window).unwrap_or(u32::MAX);
+        overrides.entry(key).or_insert_with(|| ModelOverride {
+            context_window: Some(window),
+            ..ModelOverride::default()
+        });
+    };
+    if !windows.is_empty() {
+        for entry in base.list_all() {
+            if let Some(window) = windows.get(entry.info.id.to_string().as_str()) {
+                add(format!("{}/{}", entry.info.provider_id, entry.info.id), *window);
+            }
+        }
+    }
+    for (model, window) in windows {
+        if let Some(owner) = base.find_provider_for_model(model) {
+            add(format!("{owner}/{model}"), *window);
+        }
+    }
+    for (key, value) in user {
+        overrides.insert(key.clone(), value.clone());
+    }
+    overrides
+}
+
 /// Build the per-turn config from the project config plus this turn's options.
 pub fn build_query_config(config: &Config, options: &AgentStartOptions) -> QueryConfig {
-    let mut query = QueryConfig::from_config_with_registry(config, model_registry());
+    let registry = session_model_registry(config);
+    let mut query = QueryConfig::from_config_with_registry(config, &registry);
     // `from_config_with_registry` consults the registry to resolve the model
     // name but does not keep it, so hand it over as well: that is what sizes
     // the engine's own auto-compact against the model's real window instead
     // of the heuristic's guess.
-    query.model_registry = Some(model_registry().clone());
+    query.model_registry = Some(registry);
     query.working_directory = Some(options.cwd.display().to_string());
     // `QueryConfig::from_config` copies neither of these, so the Agent
     // settings page wrote house rules into a file nothing read. The engine
@@ -900,6 +1032,109 @@ mod tests {
     #[test]
     fn a_placeholder_window_counts_as_unknown() {
         assert!(MIN_PLAUSIBLE_REGISTRY_WINDOW > 4096);
+    }
+
+    /// A config whose managed entries carry the routing writer's window
+    /// table, the way `sub2api::global_config::native` writes it.
+    fn declaring(windows: serde_json::Value) -> Config {
+        let mut config = Config::default();
+        for provider in ["anthropic", "codex", "openai"] {
+            let mut entry = ProviderConfig::default();
+            entry
+                .options
+                .insert(CONTEXT_WINDOWS_OPTION.to_owned(), windows.clone());
+            config.provider_configs.insert(provider.to_owned(), entry);
+        }
+        config.provider = Some("codex".to_owned());
+        config
+    }
+
+    /// What the gateway declares is the meter's answer, ahead of the
+    /// snapshot; a model it does not list still gets the snapshot's; a
+    /// placeholder-sized declaration counts for nothing.
+    #[test]
+    fn a_declared_window_outranks_the_bundled_one() {
+        let config = declaring(serde_json::json!({
+            "gpt-5.6-sol": 400_000,
+            "claude-sonnet-4-5": 1_000_000,
+            "tiny": 4096,
+        }));
+        assert_eq!(context_window_for(&config, "gpt-5.6-sol", "codex"), Some(400_000));
+        assert_eq!(
+            context_window_for(&config, "claude-sonnet-4-5", "anthropic"),
+            Some(1_000_000)
+        );
+        assert_eq!(context_window_for(&config, "tiny", "openai"), None);
+        assert_eq!(context_window_for(&Config::default(), "claude-sonnet-4-5", "anthropic"), Some(200_000));
+    }
+
+    /// The engine's compaction sizes itself against the declared window too,
+    /// found through the model's owner however the route names its provider
+    /// — and never by an entry filed under the route provider, which would
+    /// hand the route a text-only model with no reasoning.
+    #[test]
+    fn the_engine_registry_carries_the_declared_windows() {
+        let config = declaring(serde_json::json!({
+            "gpt-5.6-sol": 400_000,
+            "deepseek-v4.1-flash": 128_000,
+            "my-own-model": 64_000,
+        }));
+        let registry = session_model_registry(&config);
+        assert_eq!(
+            claurst_query::resolve_context_window(Some(registry.as_ref()), "codex", "gpt-5.6-sol"),
+            400_000
+        );
+        assert_eq!(
+            claurst_query::resolve_context_window(
+                Some(registry.as_ref()),
+                "openai",
+                "deepseek-v4.1-flash"
+            ),
+            128_000
+        );
+        assert!(registry.get("codex", "gpt-5.6-sol").is_none());
+
+        let overrides = window_overrides(
+            model_registry(),
+            &declared_windows(&config),
+            &HashMap::new(),
+        );
+        assert!(overrides.contains_key("openai/gpt-5.6-sol"));
+        assert!(overrides.keys().all(|key| !key.starts_with("codex/")));
+        // Nobody owns it, so the engine gets nothing to misfile.
+        assert!(!overrides.keys().any(|key| key.ends_with("/my-own-model")));
+
+        // Built once per table: the next session with the same table shares it.
+        assert!(Arc::ptr_eq(&registry, &session_model_registry(&config)));
+    }
+
+    /// Nothing declared, nothing parsed again: every session shares the one
+    /// bundled registry.
+    #[test]
+    fn no_declared_windows_keep_the_shared_registry() {
+        assert!(Arc::ptr_eq(
+            &session_model_registry(&Config::default()),
+            model_registry()
+        ));
+    }
+
+    /// The user's own `modelOverrides` are applied as written, and win over a
+    /// declared window for the same key.
+    #[test]
+    fn the_users_own_overrides_win() {
+        let user = HashMap::from([(
+            "openai/gpt-5.6-sol".to_owned(),
+            ModelOverride {
+                context_window: Some(123_456),
+                ..ModelOverride::default()
+            },
+        )]);
+        let overrides = window_overrides(
+            model_registry(),
+            &BTreeMap::from([("gpt-5.6-sol".to_owned(), 400_000)]),
+            &user,
+        );
+        assert_eq!(overrides["openai/gpt-5.6-sol"].context_window, Some(123_456));
     }
     use super::*;
 

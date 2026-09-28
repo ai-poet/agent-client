@@ -1825,6 +1825,20 @@ background.monitor:
   en: Monitor
 background.subagent:
   en: Subagent
+subagent.label:
+  en: SubAgent
+subagent.open:
+  en: Open in the side panel
+subagent.waiting:
+  en: Waiting for the subagent to start…
+subagent.trimmed:
+  en: "%{count} earlier steps not shown"
+subagent.result:
+  en: Result
+subagent.show_prompt:
+  en: Show prompt
+subagent.hide_prompt:
+  en: Hide prompt
 background.no_work:
   en: No background work
 background.no_work_description:
