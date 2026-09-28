@@ -128,17 +128,19 @@ impl Waku {
     ) -> Vec<Stateful<Div>> {
         match step {
             Step::SignIn => {
-                let pending = self.cloud_account.pending;
+                // While a sign-in is under way the button brings its window
+                // back rather than going dead.
+                let signing_in = self.cloud_account.sign_in.is_some();
                 vec![onboarding_button(
                     theme,
                     "onboarding-sign-in",
-                    if pending {
+                    if signing_in {
                         tr!("cloud.onboarding_waiting")
                     } else {
                         tr!("cloud.sign_in")
                     },
                     true,
-                    pending,
+                    false,
                     cx,
                     |this, _, cx| this.start_cloud_sign_in(cx),
                 )]

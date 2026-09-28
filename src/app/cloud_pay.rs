@@ -170,12 +170,11 @@ impl Waku {
         ))
     }
 
-    /// Take a pay call's renewed token — unless the user signed out while
-    /// it ran, which must not bring the session back.
-    pub(super) fn adopt_pay_tokens(&mut self, credentials: sub2api::Credentials) {
-        if self.cloud_account.credentials.is_some() {
-            self.adopt_cloud_tokens(credentials);
-        }
+    /// Take a pay call's renewed token. `false` when the user signed out (or
+    /// in as someone else) while it ran: the answer is moot, and neither it
+    /// nor a refusal of the old session may touch the current one.
+    pub(super) fn adopt_pay_tokens(&mut self, credentials: sub2api::Credentials) -> bool {
+        self.adopt_cloud_tokens(credentials)
     }
 
     fn cloud_pay_load_config(&mut self, cx: &mut Context<Self>) {
@@ -201,7 +200,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.adopt_pay_tokens(credentials);
+                if !this.adopt_pay_tokens(credentials) {
+                    return;
+                }
                 if let Err(error) = &loaded
                     && sub2api::session_ended(error)
                 {
@@ -332,7 +333,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.adopt_pay_tokens(credentials);
+                if !this.adopt_pay_tokens(credentials) {
+                    return;
+                }
                 if let Err(error) = &created {
                     if sub2api::session_ended(error) {
                         this.close_cloud_pay_modal(cx);
@@ -581,7 +584,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.adopt_pay_tokens(credentials);
+                if !this.adopt_pay_tokens(credentials) {
+                    return;
+                }
                 if let Err(error) = &outcome
                     && sub2api::session_ended(error)
                 {
@@ -792,7 +797,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.adopt_pay_tokens(credentials);
+                if !this.adopt_pay_tokens(credentials) {
+                    return;
+                }
                 match token {
                     Ok(token) => {
                         cx.open_url(&client.pay_center_url(&token));

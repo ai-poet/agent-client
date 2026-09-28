@@ -15,14 +15,21 @@
 //! footer chip, account menu and balance badge in `cloud_menu.rs`, and
 //! subscriptions and model routing in `cloud_subscriptions.rs`.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use sub2api::auth::{
+    Delivery, LoginCodeRejected, NotALoginCode, Pkce, RelayText, SignInCancelled, SignInTimedOut,
+    error_is,
+};
 use sub2api::model_routing::DOMESTIC_LANE;
 
 use super::*;
 
-/// How long the loopback listener waits for the browser before giving up.
-const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
+/// How long a sign-in attempt waits for the browser before giving up — as
+/// long as the one-time code the sign-in page shows stays valid.
+const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// How long subscription usage read with the balance stays fresh. The balance
 /// refresh runs after every settled turn; this keeps it from reading usage on
@@ -45,8 +52,13 @@ pub(super) struct CloudAccountState {
     pub user: Option<sub2api::client::User>,
     /// Whether agents should be routed through the gateway.
     pub routing_enabled: bool,
-    /// A sign-in or fetch is in flight.
-    pub pending: bool,
+    /// The balance refresh is in flight.
+    pub refreshing: bool,
+    /// The browser sign-in under way, and its window.
+    pub sign_in: Option<SignInAttempt>,
+    /// Numbers sign-in attempts, so a late answer for an abandoned one is
+    /// recognised and dropped.
+    pub sign_in_counter: u64,
     /// Last failure, shown inline rather than as a transient toast so the user
     /// can still read it afterwards.
     pub error: Option<String>,
@@ -104,6 +116,44 @@ pub(super) struct CloudAccountState {
     pub pending_route_sends: Vec<(Uuid, super::ComposerSubmission)>,
 }
 
+/// One browser sign-in, from opening the browser until a session arrives —
+/// over the loopback redirect or as a code pasted into the sign-in window,
+/// whichever comes first — or the user gives up.
+pub(super) struct SignInAttempt {
+    pub id: u64,
+    /// Service the attempt signs in to; a code is redeemed there.
+    pub endpoint: String,
+    /// What the browser was sent to, for "open again" and "copy link".
+    pub login_url: String,
+    /// Redeems a pasted code; only this attempt's codes accept it.
+    pub pkce: Pkce,
+    /// Stops the loopback wait. `None` when no listener could be opened —
+    /// then the sign-in page shows its code and pasting is the only way.
+    pub cancel: Option<Arc<AtomicBool>>,
+    /// The loopback listener is still waiting.
+    pub listening: bool,
+    /// A session was delivered and is being stored, or a pasted code is
+    /// being redeemed.
+    pub exchanging: bool,
+    /// A session was delivered and is being stored; any later delivery is
+    /// surplus.
+    pub storing: bool,
+    pub error: Option<String>,
+    /// The sign-in window is showing. Closing it keeps the attempt alive;
+    /// the footer chip and the sign-in buttons bring it back.
+    pub dialog_open: bool,
+    pub link_copied: bool,
+}
+
+impl SignInAttempt {
+    fn stop_listening(&mut self) {
+        if let Some(cancel) = &self.cancel {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        self.listening = false;
+    }
+}
+
 /// What a card's button does.
 #[derive(Clone, Copy)]
 enum CloudAction {
@@ -120,12 +170,25 @@ impl Waku {
         self.migrate_legacy_routing_transport();
         self.cloud_account.failover = sub2api::failover::load();
         self.cloud_account.gateway_origin = sub2api::gateway_origin::load();
-        let Some(credentials) = sub2api::Credentials::load() else {
+        let Some(mut credentials) = sub2api::Credentials::load() else {
             // Reconcile anyway: custom endpoints apply while signed out, and
             // a takeover left behind by a wiped login must be restored.
             self.apply_cloud_routing();
             return;
         };
+        // A file from before sessions had an identity gets one now, before
+        // any background task takes a copy to compare against.
+        if credentials.session_id.is_empty() {
+            match sub2api::auth::new_session_id() {
+                Ok(id) => {
+                    credentials.session_id = id;
+                    if let Err(error) = credentials.establish() {
+                        self.show_toast(format!("{error:#}"));
+                    }
+                }
+                Err(error) => eprintln!("warning: {error:#}"),
+            }
+        }
         self.cloud_account.routing_enabled = !credentials.routing_disabled;
         self.cloud_account.credentials = Some(credentials);
         // Startup reconcile: an app update may write the files differently,
@@ -161,20 +224,36 @@ impl Waku {
         self.save();
     }
 
+    /// Whether `session` — the [`sub2api::Credentials::session_id`] a
+    /// background task captured when it started — is still the signed-in
+    /// one. A task finding it is not must drop its result without touching
+    /// any state: the sign-out already reset it, and anything the task wrote
+    /// would put the old account back on screen.
+    pub(super) fn cloud_session_is(&self, session: &str) -> bool {
+        self.cloud_account
+            .credentials
+            .as_ref()
+            .is_some_and(|credentials| credentials.session_id == session)
+    }
+
     /// Fold a background task's renewed session into the in-memory one.
     ///
     /// Only the token fields are taken. The background clone was made before
     /// the task ran, so adopting it wholesale would silently roll back
     /// anything the user did meanwhile — picking a group rebinds `api_key`,
     /// and a balance poll finishing a moment later must not undo that.
-    pub(super) fn adopt_cloud_tokens(&mut self, renewed: sub2api::Credentials) {
+    ///
+    /// Returns `false`, taking nothing, when the clone belongs to a session
+    /// that is no longer the signed-in one.
+    pub(super) fn adopt_cloud_tokens(&mut self, renewed: sub2api::Credentials) -> bool {
         match self.cloud_account.credentials.as_mut() {
-            Some(existing) if existing.endpoint == renewed.endpoint => {
+            Some(existing) if existing.session_id == renewed.session_id => {
                 existing.access_token = renewed.access_token;
                 existing.refresh_token = renewed.refresh_token;
                 existing.expires_at = renewed.expires_at;
+                true
             }
-            _ => self.cloud_account.credentials = Some(renewed),
+            _ => false,
         }
     }
 
@@ -189,10 +268,10 @@ impl Waku {
         let Some(credentials) = self.cloud_account.credentials.clone() else {
             return;
         };
-        if self.cloud_account.pending {
+        if self.cloud_account.refreshing {
             return;
         }
-        self.cloud_account.pending = true;
+        self.cloud_account.refreshing = true;
         // Usage rides along behind its own TTL: what a failed turn's paywall
         // prompt reads when the driver lost the gateway's code.
         let read_subscriptions = self
@@ -204,6 +283,7 @@ impl Waku {
         }
         cx.notify();
 
+        let session = credentials.session_id.clone();
         cx.spawn(async move |this, cx| {
             let fetched = cx
                 .background_executor()
@@ -219,7 +299,13 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.cloud_account.pending = false;
+                // Signed out meanwhile: this is the old account's balance.
+                // Writing it back is exactly what used to put the email
+                // back in the footer a moment after signing out.
+                if !this.cloud_session_is(&session) {
+                    return;
+                }
+                this.cloud_account.refreshing = false;
                 match fetched {
                     Ok((credentials, user, subscriptions)) => {
                         this.adopt_cloud_tokens(credentials);
@@ -247,87 +333,299 @@ impl Waku {
         .detach();
     }
 
-    /// Open the browser and wait for the sign-in redirect.
+    /// Start a browser sign-in, or bring back the window of the one already
+    /// under way.
+    ///
+    /// The browser is sent to the sign-in page with a PKCE challenge; the
+    /// session comes back over the loopback redirect, or — where the browser
+    /// cannot reach `127.0.0.1` — as the one-time code the page shows, pasted
+    /// into the sign-in window.
     pub(super) fn start_cloud_sign_in(&mut self, cx: &mut Context<Self>) {
-        if self.cloud_account.pending {
+        if self.cloud_account.credentials.is_some() {
             return;
         }
-        self.cloud_account.pending = true;
+        if let Some(attempt) = self.cloud_account.sign_in.as_mut() {
+            attempt.dialog_open = true;
+            cx.notify();
+            return;
+        }
         self.cloud_account.error = None;
-        cx.notify();
 
-        let endpoint = sub2api::brand::MANAGED_SERVICE_URL.to_owned();
-        cx.spawn(async move |this, cx| {
-            // Bind before opening the browser: a redirect arriving at a closed
-            // port is unrecoverable, and the user would see the login page fail
-            // with no way back.
-            let flow = match sub2api::auth::LoginFlow::start(&endpoint) {
-                Ok(flow) => flow,
+        // Normalized, because a pasted link's `endpoint` is compared with it.
+        let endpoint = sub2api::auth::normalize_endpoint(sub2api::brand::MANAGED_SERVICE_URL)
+            .unwrap_or_else(|_| sub2api::brand::MANAGED_SERVICE_URL.to_owned());
+        // Bind before opening the browser: a redirect arriving at a closed
+        // port is unrecoverable. Without a port at all the page still shows
+        // the code to paste, so the attempt goes ahead either way.
+        let (pkce, login_url, flow) =
+            match sub2api::auth::LoginFlow::start(&endpoint, self.sign_in_relay_text()) {
+                Ok(flow) => (flow.pkce().clone(), flow.login_url(), Some(flow)),
                 Err(error) => {
-                    let _ = this.update(cx, |this, cx| {
-                        this.cloud_account.pending = false;
-                        this.cloud_account.error = Some(format!("{error:#}"));
-                        cx.notify();
-                    });
-                    return;
+                    eprintln!("warning: no loopback listener for the sign-in: {error:#}");
+                    let pkce = match Pkce::generate() {
+                        Ok(pkce) => pkce,
+                        Err(error) => {
+                            self.cloud_account.error = Some(format!("{error:#}"));
+                            cx.notify();
+                            return;
+                        }
+                    };
+                    let url = sub2api::auth::build_code_login_url(&endpoint, &pkce.challenge);
+                    (pkce, url, None)
                 }
             };
-            let url = flow.login_url();
-            let _ = this.update(cx, |_, cx| cx.open_url(&url));
 
+        self.cloud_account.sign_in_counter += 1;
+        let id = self.cloud_account.sign_in_counter;
+        self.cloud_account.sign_in = Some(SignInAttempt {
+            id,
+            endpoint,
+            login_url: login_url.clone(),
+            pkce,
+            cancel: flow.as_ref().map(|flow| flow.cancel_handle()),
+            listening: flow.is_some(),
+            exchanging: false,
+            storing: false,
+            error: None,
+            dialog_open: true,
+            link_copied: false,
+        });
+        self.cloud_sign_in_input
+            .update(cx, |input, cx| input.clear(cx));
+        cx.open_url(&login_url);
+        cx.notify();
+
+        let Some(flow) = flow else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move {
-                    let credentials = flow.wait(SIGN_IN_TIMEOUT)?;
-                    credentials.save()?;
-                    let user = sub2api::Client::new(credentials.endpoint.clone())
-                        .me(&credentials.access_token)?;
-                    anyhow::Ok((credentials, user))
-                })
+                .spawn(async move { flow.wait(SIGN_IN_TIMEOUT) })
                 .await;
-
-            let _ = this.update(cx, |this, cx| {
-                this.cloud_account.pending = false;
-                match result {
-                    Ok((credentials, user)) => {
-                        this.cloud_account.credentials = Some(credentials);
-                        this.cloud_account.user = Some(user);
-                        this.cloud_account.error = None;
-                        // Signing in is an explicit request to use the service,
-                        // so routing starts on rather than needing a second
-                        // switch nobody would find.
-                        this.cloud_account.routing_enabled = true;
-                        this.apply_cloud_routing();
-                        this.load_cloud_details(cx);
-                        // A new account reaches a different set of models.
-                        this.refresh_native_catalog(true, cx);
-                    }
-                    Err(error) => this.cloud_account.error = Some(format!("{error:#}")),
-                }
-                cx.notify();
-            });
+            let _ = this.update(cx, |this, cx| this.deliver_cloud_sign_in(id, result, cx));
         })
         .detach();
     }
 
-    /// Forget the session and stop routing.
-    pub(super) fn sign_out_cloud(&mut self, cx: &mut Context<Self>) {
-        if let Err(error) = sub2api::Credentials::clear() {
-            self.show_toast(format!("{error:#}"));
+    /// Redeem what the user pasted into the sign-in window: the code the
+    /// sign-in page shows, or the address-bar link of a callback page that
+    /// would not load.
+    pub(super) fn submit_pasted_sign_in(&mut self, cx: &mut Context<Self>) {
+        let pasted = self.cloud_sign_in_input.read(cx).content().to_owned();
+        let Some(attempt) = self.cloud_account.sign_in.as_mut() else {
+            return;
+        };
+        if attempt.exchanging {
+            return;
         }
-        self.cloud_account.credentials = None;
-        self.cloud_account.user = None;
-        self.cloud_account.subscriptions = None;
-        self.cloud_account.subscriptions_at = None;
-        self.cloud_account.routing_enabled = false;
-        self.cloud_account.error = None;
-        self.reset_plans();
-        self.apply_cloud_routing();
-        // The catalog was this account's; the built-in agent drops back to
-        // its fallback list until someone signs in again.
-        self.clear_model_plaza();
-        self.sync_native_models();
+        let delivery = match sub2api::auth::parse_pasted_login(&pasted, &attempt.endpoint) {
+            Ok(delivery) => delivery,
+            Err(error) => {
+                attempt.error = Some(sign_in_error_message(&error));
+                cx.notify();
+                return;
+            }
+        };
+        attempt.exchanging = true;
+        attempt.error = None;
         cx.notify();
+
+        let id = attempt.id;
+        let endpoint = attempt.endpoint.clone();
+        let verifier = attempt.pkce.verifier.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    match delivery {
+                        Delivery::Session(credentials) => Ok(credentials),
+                        Delivery::Code(code) => {
+                            sub2api::auth::exchange_login_code(&endpoint, &code, &verifier)
+                        }
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| this.deliver_cloud_sign_in(id, result, cx));
+        })
+        .detach();
+    }
+
+    /// A session arrived for attempt `id` — over loopback or from a paste —
+    /// or the loopback wait ended without one.
+    fn deliver_cloud_sign_in(
+        &mut self,
+        id: u64,
+        result: anyhow::Result<sub2api::Credentials>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(attempt) = self
+            .cloud_account
+            .sign_in
+            .as_mut()
+            .filter(|attempt| attempt.id == id)
+        else {
+            // Cancelled, or already signed in by the other path.
+            return;
+        };
+        let credentials = match result {
+            // First delivery wins. A second one — the loopback and a paste
+            // both getting through — would store another session over it.
+            Ok(credentials) if attempt.storing => {
+                revoke_in_background(credentials, cx);
+                return;
+            }
+            Ok(credentials) => credentials,
+            // The other path won and stopped the listener, or the user
+            // cancelled; either way there is nothing to say.
+            Err(error) if error_is::<SignInCancelled>(&error) => return,
+            Err(_) if attempt.storing => return,
+            Err(error) => {
+                if error_is::<SignInTimedOut>(&error) {
+                    attempt.listening = false;
+                }
+                attempt.exchanging = false;
+                attempt.error = Some(sign_in_error_message(&error));
+                cx.notify();
+                return;
+            }
+        };
+        attempt.stop_listening();
+        attempt.storing = true;
+        attempt.exchanging = true;
+        attempt.error = None;
+        cx.notify();
+
+        cx.spawn(async move |this, cx| {
+            let stored = cx
+                .background_executor()
+                .spawn(async move {
+                    credentials.establish()?;
+                    // The summary is decoration: the balance refresh fetches
+                    // it again, and a hiccup here must not undo a sign-in
+                    // whose code is already spent.
+                    let user = sub2api::Client::new(credentials.endpoint.clone())
+                        .me(&credentials.access_token)
+                        .ok();
+                    anyhow::Ok((credentials, user))
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| this.complete_cloud_sign_in(id, stored, cx));
+        })
+        .detach();
+    }
+
+    fn complete_cloud_sign_in(
+        &mut self,
+        id: u64,
+        stored: anyhow::Result<(sub2api::Credentials, Option<sub2api::client::User>)>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(attempt) = self
+            .cloud_account
+            .sign_in
+            .as_mut()
+            .filter(|attempt| attempt.id == id)
+        else {
+            // Cancelled while the session was being stored. The file may
+            // already hold it; forget it the way a sign-out would.
+            if let Ok((credentials, _)) = stored
+                && self.cloud_account.credentials.is_none()
+            {
+                let _ = sub2api::Credentials::clear();
+                revoke_in_background(credentials, cx);
+            }
+            return;
+        };
+        let (credentials, user) = match stored {
+            Ok(stored) => stored,
+            Err(error) => {
+                attempt.storing = false;
+                attempt.exchanging = false;
+                attempt.error = Some(sign_in_error_message(&error));
+                cx.notify();
+                return;
+            }
+        };
+        self.cloud_account.sign_in = None;
+        self.cloud_sign_in_input
+            .update(cx, |input, cx| input.clear(cx));
+        let identity = user
+            .as_ref()
+            .map(|user| {
+                if user.email.is_empty() {
+                    user.username.clone()
+                } else {
+                    user.email.clone()
+                }
+            })
+            .unwrap_or_default();
+        self.cloud_account.credentials = Some(credentials);
+        self.cloud_account.user = user;
+        self.cloud_account.error = None;
+        // Signing in is an explicit request to use the service, so routing
+        // starts on rather than needing a second switch nobody would find.
+        self.cloud_account.routing_enabled = true;
+        self.apply_cloud_routing();
+        self.load_cloud_details(cx);
+        // A new account reaches a different set of models.
+        self.refresh_native_catalog(true, cx);
+        // Balance, subscriptions and announcements are this account's, not
+        // whatever the previous one left behind.
+        self.refresh_cloud_account(cx);
+        self.refresh_cloud_announcements(true, cx);
+        self.poll_cloud_failover(cx);
+        self.show_toast(if identity.is_empty() {
+            tr!("cloud.sign_in_dialog.signed_in")
+        } else {
+            tr!("cloud.sign_in_dialog.signed_in_as", name = identity)
+        });
+        cx.notify();
+    }
+
+    /// Give up on the sign-in under way and release its port.
+    pub(super) fn cancel_cloud_sign_in(&mut self, cx: &mut Context<Self>) {
+        if let Some(mut attempt) = self.cloud_account.sign_in.take() {
+            attempt.stop_listening();
+        }
+        self.cloud_sign_in_input
+            .update(cx, |input, cx| input.clear(cx));
+        cx.notify();
+    }
+
+    /// Put the sign-in window away. The attempt keeps listening: finishing
+    /// in the browser still signs in, and the footer chip reopens it.
+    pub(super) fn close_cloud_sign_in_dialog(&mut self, cx: &mut Context<Self>) {
+        if let Some(attempt) = self.cloud_account.sign_in.as_mut() {
+            attempt.dialog_open = false;
+            cx.notify();
+        }
+    }
+
+    /// The loopback page's text, in the app's language.
+    fn sign_in_relay_text(&self) -> RelayText {
+        RelayText {
+            lang: self.state.language.locale().to_owned(),
+            finishing: tr!("cloud.relay.finishing"),
+            finishing_detail: tr!("cloud.relay.finishing_detail"),
+            done: tr!("cloud.relay.done"),
+            done_detail: tr!("cloud.relay.done_detail"),
+            failed: tr!("cloud.relay.failed"),
+            failed_hint: tr!("cloud.relay.failed_hint"),
+            missing: tr!("cloud.relay.missing"),
+            missing_detail: tr!("cloud.relay.missing_detail"),
+            gone_detail: tr!("cloud.relay.gone_detail"),
+            code_rejected: tr!("cloud.sign_in_dialog.code_rejected"),
+        }
+    }
+
+    /// Sign out at the user's request.
+    pub(super) fn sign_out_cloud(&mut self, cx: &mut Context<Self>) {
+        self.forget_cloud_session(cx);
+        // Make the consequence explicit: from here the agents run on
+        // whatever the user's own CLIs are configured with, exactly as if
+        // this app were stock.
+        self.show_toast(tr!("cloud.signed_out_note"));
     }
 
     /// The stored session can no longer be renewed. Forget it the way a
@@ -335,9 +633,66 @@ impl Waku {
     /// restored - and say why, so the user sees "sign in again" rather than
     /// a footer that still claims to be signed in while every request fails.
     pub(super) fn end_cloud_session(&mut self, cx: &mut Context<Self>) {
-        self.sign_out_cloud(cx);
+        self.forget_cloud_session(cx);
         self.cloud_account.error = Some(tr!("cloud.session_expired"));
         self.show_toast(tr!("cloud.session_expired"));
+        cx.notify();
+    }
+
+    /// Forget the session and everything learned under it, and stop routing.
+    ///
+    /// Requests still in flight for it are not waited for: each checks
+    /// [`Self::cloud_session_is`] when it lands and drops its answer, and the
+    /// credential file refuses their writes ([`sub2api::Credentials::save`]).
+    /// So every in-flight flag they would have cleared is cleared here.
+    fn forget_cloud_session(&mut self, cx: &mut Context<Self>) {
+        if let Err(error) = sub2api::Credentials::clear() {
+            self.show_toast(format!("{error:#}"));
+        }
+        if let Some(credentials) = self.cloud_account.credentials.take() {
+            // Revoke the desktop's session on the service too, so nothing
+            // signed out is left able to renew itself.
+            revoke_in_background(credentials, cx);
+        }
+
+        let account = &mut self.cloud_account;
+        account.user = None;
+        account.routing_enabled = false;
+        account.refreshing = false;
+        account.busy = false;
+        account.error = None;
+        account.groups.clear();
+        account.referral = None;
+        account.group_status.clear();
+        account.group_status_at = None;
+        account.failover_history.clear();
+        account.failed_over.clear();
+        account.subscriptions = None;
+        account.subscriptions_at = None;
+        account.routes_refreshing = false;
+        account.routes_stale = false;
+        account.route_lookup = None;
+        account.route_misses.clear();
+        // A domain measurement still running reports to nobody.
+        account.origin_generation += 1;
+        account.origin_test = None;
+        account.origin_checked = false;
+
+        self.cloud_usage = Default::default();
+        self.cloud_announcements = Default::default();
+        self.close_cloud_pay_modal(cx);
+        self.reset_plans();
+        // The catalog was this account's; the built-in agent drops back to
+        // its fallback list until someone signs in again.
+        self.clear_model_plaza();
+        self.sync_native_models();
+        self.apply_cloud_routing();
+        // Running built-in sessions still hold the gateway key they started
+        // with, and the CLIs' model lists came from the gateway.
+        self.reapply_built_in_session_options(cx);
+        self.refresh_provider_detection(None);
+        // Messages held for a route go out as they are.
+        self.drain_route_sends(cx);
         cx.notify();
     }
 
@@ -372,7 +727,10 @@ impl Waku {
                     // poll reports the same problem, and this data is optional.
                     return;
                 };
-                this.adopt_cloud_tokens(credentials);
+                // Signed out meanwhile: these groups were the old account's.
+                if !this.adopt_cloud_tokens(credentials) {
+                    return;
+                }
                 this.cloud_account.groups = groups;
                 this.cloud_account.referral = referral;
                 this.ensure_cloud_group_bindings(cx);
@@ -398,6 +756,7 @@ impl Waku {
         self.cloud_account.error = None;
         cx.notify();
 
+        let session = credentials.session_id.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -409,6 +768,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                if !this.cloud_session_is(&session) {
+                    return;
+                }
                 this.cloud_account.busy = false;
                 match result {
                     Ok((renewed, redeemed)) => {
@@ -524,7 +886,8 @@ impl Waku {
     pub(super) fn render_cloud_account_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let signed_in = self.cloud_account.credentials.is_some();
-        let pending = self.cloud_account.pending;
+        let pending = self.cloud_account.refreshing;
+        let signing_in = self.cloud_account.sign_in.is_some();
         let routing_enabled = self.cloud_account.routing_enabled;
         let balance = self.cloud_account.user.as_ref().map(|user| user.balance);
         let identity = match self.cloud_account.user.as_ref() {
@@ -545,10 +908,13 @@ impl Waku {
             identity,
             Some(if signed_in {
                 (tr!("cloud.sign_out"), CloudAction::SignOut)
+            } else if signing_in {
+                (tr!("cloud.sign_in_dialog.resume"), CloudAction::SignIn)
             } else {
                 (tr!("cloud.sign_in"), CloudAction::SignIn)
             }),
-            pending,
+            // Signing in or out never waits for a balance refresh.
+            false,
             cx,
         ));
 
@@ -648,6 +1014,32 @@ impl Waku {
             false,
             cx,
         )
+    }
+}
+
+/// Revoke a session's refresh token on the service. Best effort: the local
+/// copy is gone either way, and the token expires on its own.
+fn revoke_in_background(credentials: sub2api::Credentials, cx: &mut Context<Waku>) {
+    cx.background_executor()
+        .spawn(async move {
+            let client = sub2api::Client::new(credentials.endpoint.clone());
+            if let Err(error) = client.logout(&credentials.refresh_token) {
+                eprintln!("warning: could not revoke the session: {error:#}");
+            }
+        })
+        .detach();
+}
+
+/// A sign-in failure as the sign-in window says it.
+fn sign_in_error_message(error: &anyhow::Error) -> String {
+    if error_is::<NotALoginCode>(error) {
+        tr!("cloud.sign_in_dialog.not_a_code")
+    } else if error_is::<LoginCodeRejected>(error) {
+        tr!("cloud.sign_in_dialog.code_rejected")
+    } else if error_is::<SignInTimedOut>(error) {
+        tr!("cloud.sign_in_dialog.timed_out")
+    } else {
+        format!("{error:#}")
     }
 }
 

@@ -461,7 +461,8 @@ async fn run_image_job(this: WeakEntity<Waku>, plan: JobPlan, cx: &mut gpui::Asy
                 key
             }
             Err(error) => {
-                if sub2api::session_ended(&error) {
+                // No other group will do better once the account is gone.
+                if sub2api::session_ended(&error) || sub2api::signed_out(&error) {
                     return JobEnd::Failed(
                         ImageError::new(ImageErrorKind::Unauthorized, format!("{error:#}")),
                         credentials,
@@ -1203,7 +1204,10 @@ impl Waku {
         drew: Option<(&str, i64)>,
     ) {
         let keys = renewed.group_keys.clone();
-        self.adopt_cloud_tokens(renewed);
+        // A job that outlived its account keeps its picture, not its keys.
+        if !self.adopt_cloud_tokens(renewed) {
+            return;
+        }
         let Some(credentials) = self.cloud_account.credentials.as_mut() else {
             return;
         };

@@ -1543,6 +1543,9 @@ pub struct Waku {
     announcement_selection: TranscriptSelection,
     /// Fork addition: redeem-code field on the Cloud Account page.
     cloud_redeem_input: Entity<TextInput>,
+    /// Fork addition: where a sign-in code is pasted when the browser cannot
+    /// get back to the app.
+    cloud_sign_in_input: Entity<TextInput>,
     /// Bumped per scan; a result from a superseded scan is discarded.
     skills_scan_generation: u64,
     skills_scan_pending: bool,
@@ -1742,6 +1745,7 @@ mod cloud_groups;
 mod cloud_menu;
 mod cloud_origins;
 mod cloud_pay;
+mod cloud_sign_in;
 mod cloud_subscriptions;
 mod cloud_usage;
 mod command_palette;
@@ -2204,6 +2208,12 @@ impl Waku {
             TextInput::new(window, cx)
                 .select_all_on_focus_click()
                 .placeholder(tr!("cloud.redeem_placeholder"))
+        });
+        // Fork addition: the one-time code field in the sign-in window.
+        let cloud_sign_in_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("cloud.sign_in_dialog.placeholder"))
         });
         // Fork addition: search field on the Model Plaza page.
         let plaza_search_input = cx.new(|cx| {
@@ -2792,6 +2802,21 @@ impl Waku {
                 },
             )
             .detach();
+            // Fork addition: Enter in the sign-in window redeems the code.
+            cx.subscribe(
+                &cloud_sign_in_input,
+                |this: &mut Self, _, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => this.submit_pasted_sign_in(cx),
+                    InputEvent::Edited => {
+                        if let Some(attempt) = this.cloud_account.sign_in.as_mut() {
+                            attempt.error = None;
+                        }
+                        cx.notify();
+                    }
+                    _ => {}
+                },
+            )
+            .detach();
             cx.subscribe(
                 &session_rename_input,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
@@ -3217,6 +3242,7 @@ impl Waku {
                 announcement_markdown: RefCell::new(None),
                 announcement_selection: TranscriptSelection::default(),
                 cloud_redeem_input,
+                cloud_sign_in_input,
                 skills_scan_generation: 0,
                 skills_scan_pending: false,
                 skills_scanned_at: None,

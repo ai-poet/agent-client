@@ -80,6 +80,7 @@ impl Waku {
         self.cloud_usage.loading = true;
         cx.notify();
 
+        let session = credentials.session_id.clone();
         cx.spawn(async move |this, cx| {
             let fetched = cx
                 .background_executor()
@@ -93,6 +94,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                if !this.cloud_session_is(&session) {
+                    return;
+                }
                 this.cloud_usage.loading = false;
                 this.cloud_usage.loaded_at = Some(Instant::now());
                 match fetched {

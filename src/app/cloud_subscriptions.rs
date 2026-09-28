@@ -90,6 +90,7 @@ impl Waku {
             .origin()
             .unwrap_or_else(|| credentials.endpoint.clone());
 
+        let session = credentials.session_id.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -101,6 +102,11 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                // Signed out meanwhile: the sign-out cleared the route state
+                // and sent what was waiting on it.
+                if !this.cloud_session_is(&session) {
+                    return;
+                }
                 this.cloud_account.routes_refreshing = false;
                 match result {
                     Ok((renewed, refresh)) => {
@@ -215,6 +221,7 @@ impl Waku {
         let catalog = self.model_plaza.items.clone();
         let groups = self.cloud_account.groups.clone();
         let lookup_model = model.clone();
+        let session = credentials.session_id.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -230,6 +237,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                if !this.cloud_session_is(&session) {
+                    return;
+                }
                 this.cloud_account.route_lookup = None;
                 match result {
                     Ok((found, Some(group))) => {
@@ -318,7 +328,7 @@ impl Waku {
 
     /// Push the current options — and with them the current key table — to
     /// every built-in agent session that has a live runtime.
-    fn reapply_built_in_session_options(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn reapply_built_in_session_options(&mut self, cx: &mut Context<Self>) {
         let live: Vec<Uuid> = self
             .state
             .sessions

@@ -60,6 +60,7 @@ impl Waku {
         self.cloud_announcements.loading = true;
         cx.notify();
 
+        let session = credentials.session_id.clone();
         cx.spawn(async move |this, cx| {
             let fetched = cx
                 .background_executor()
@@ -72,6 +73,11 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                // Signed out meanwhile: the sign-out reset this state, and
+                // the old account's list must not reappear.
+                if !this.cloud_session_is(&session) {
+                    return;
+                }
                 this.cloud_announcements.loading = false;
                 match fetched {
                     Ok((credentials, items)) => {

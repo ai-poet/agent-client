@@ -51,6 +51,7 @@ impl Waku {
         self.cloud_account.busy = true;
         cx.notify();
 
+        let session = credentials.session_id.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -67,6 +68,10 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                // Signed out meanwhile: the bindings were the old account's.
+                if !this.cloud_session_is(&session) {
+                    return;
+                }
                 this.cloud_account.busy = false;
                 match result {
                     Ok(renewed) => {
@@ -141,6 +146,7 @@ impl Waku {
         // No CLI reads the Chinese models' slot: the built-in agent's live
         // sessions take it once their routes are refreshed, not at restart.
         let domestic = platform == DOMESTIC_LANE;
+        let session = credentials.session_id.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -151,6 +157,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                if !this.cloud_session_is(&session) {
+                    return;
+                }
                 this.cloud_account.busy = false;
                 match result {
                     Ok(renewed) => {

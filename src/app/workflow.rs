@@ -698,6 +698,7 @@ impl Waku {
         self.save_workflows(cx);
         cx.notify();
 
+        let session = credentials.session_id.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -718,7 +719,7 @@ impl Waku {
                 if this.workflow.planner_generation != generation {
                     return;
                 }
-                this.apply_workflow_decision(&run_id, result, &allowed, cx);
+                this.apply_workflow_decision(&run_id, &session, result, &allowed, cx);
             });
         })
         .detach();
@@ -727,13 +728,16 @@ impl Waku {
     fn apply_workflow_decision(
         &mut self,
         run_id: &str,
+        session: &str,
         result: anyhow::Result<(sub2api::Credentials, orchestrator::Decision)>,
         allowed: &[String],
         cx: &mut Context<Self>,
     ) {
         let (renewed, decision) = match result {
             Err(error) => {
-                if sub2api::session_ended(&error) {
+                // Only the session this call ran for can be ended by it; one
+                // signed in since is not the one that was refused.
+                if sub2api::session_ended(&error) && self.cloud_session_is(session) {
                     self.end_cloud_session(cx);
                 }
                 let message = format!("{error:#}");

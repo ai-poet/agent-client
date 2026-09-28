@@ -44,6 +44,7 @@ impl Waku {
         // failing endpoint is retried at the TTL, not every render.
         self.cloud_account.group_status_at = Some(Instant::now());
 
+        let session = credentials.session_id.clone();
         cx.spawn(async move |this, cx| {
             let fetched = cx
                 .background_executor()
@@ -57,6 +58,9 @@ impl Waku {
                 .await;
             if let Ok(statuses) = fetched {
                 let _ = this.update(cx, |this, cx| {
+                    if !this.cloud_session_is(&session) {
+                        return;
+                    }
                     this.cloud_account.group_status = statuses;
                     this.evaluate_cloud_failover(cx);
                     cx.notify();

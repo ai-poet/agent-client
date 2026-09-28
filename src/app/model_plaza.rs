@@ -205,6 +205,10 @@ impl Waku {
         self.model_plaza.statuses.clear();
         self.model_plaza.error = None;
         self.model_plaza.loaded_at = None;
+        // A load in flight belonged to that account and will be dropped on
+        // arrival; the next account's load must not wait for it.
+        self.model_plaza.loading = false;
+        self.model_plaza.load_scheduled.set(false);
     }
 
     /// Fetch the catalog and group health when stale.
@@ -227,6 +231,7 @@ impl Waku {
         self.model_plaza.loading = true;
         cx.notify();
 
+        let session = credentials.session_id.clone();
         cx.spawn(async move |this, cx| {
             let fetched = cx
                 .background_executor()
@@ -242,6 +247,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                if !this.cloud_session_is(&session) {
+                    return;
+                }
                 this.model_plaza.loading = false;
                 this.model_plaza.loaded_at = Some(Instant::now());
                 match fetched {

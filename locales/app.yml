@@ -2632,6 +2632,62 @@ cloud.session_expired:
   en: "Your sign-in is no longer valid. Sign in again to keep routing through the cloud"
 cloud.signed_out_note:
   en: "Signed out — agents now use your own CLI configuration"
+cloud.sign_in_dialog.title:
+  en: "Sign in to %{name}"
+cloud.sign_in_dialog.waiting:
+  en: "The sign-in page is open in your browser. Sign in there and you'll be brought back here automatically."
+cloud.sign_in_dialog.paste_only:
+  en: "Sign in in your browser, then paste the code shown on the page below."
+cloud.sign_in_dialog.finishing:
+  en: "Finishing sign-in…"
+cloud.sign_in_dialog.reopen:
+  en: "Open browser again"
+cloud.sign_in_dialog.copy_link:
+  en: "Copy sign-in link"
+cloud.sign_in_dialog.link_copied:
+  en: "Link copied"
+cloud.sign_in_dialog.fallback_title:
+  en: "Browser didn't come back?"
+cloud.sign_in_dialog.paste_hint:
+  en: "Paste the sign-in code shown on the web page here. The whole link from the address bar works too."
+cloud.sign_in_dialog.placeholder:
+  en: "Sign-in code, e.g. K7QM-3XPD"
+cloud.sign_in_dialog.submit:
+  en: "Sign in"
+cloud.sign_in_dialog.signing_in:
+  en: "Signing in…"
+cloud.sign_in_dialog.cancel:
+  en: "Cancel sign-in"
+cloud.sign_in_dialog.resume:
+  en: "Continue signing in"
+cloud.sign_in_dialog.not_a_code:
+  en: "That isn't a sign-in code. Copy the code shown on the web page, or the whole link from the address bar."
+cloud.sign_in_dialog.code_rejected:
+  en: "The sign-in code is invalid, expired or already used. Cancel and sign in again."
+cloud.sign_in_dialog.timed_out:
+  en: "The sign-in timed out. Cancel and sign in again."
+cloud.sign_in_dialog.signed_in:
+  en: "Signed in"
+cloud.sign_in_dialog.signed_in_as:
+  en: "Signed in as %{name}"
+cloud.relay.finishing:
+  en: "Finishing sign-in…"
+cloud.relay.finishing_detail:
+  en: "You can close this tab in a moment."
+cloud.relay.done:
+  en: "Signed in"
+cloud.relay.done_detail:
+  en: "You can close this tab and return to the app."
+cloud.relay.failed:
+  en: "Sign-in failed"
+cloud.relay.failed_hint:
+  en: "If the sign-in page showed a code, go back, copy it and paste it into the app's sign-in window."
+cloud.relay.missing:
+  en: "Sign-in did not complete"
+cloud.relay.missing_detail:
+  en: "No session was returned. Start again from the app."
+cloud.relay.gone_detail:
+  en: "The app is no longer waiting for this sign-in. Start again from the app, or paste the sign-in code into it."
 cli_setup.env_title:
   en: "Runtime"
 settings.cloud_usage:

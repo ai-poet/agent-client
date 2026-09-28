@@ -158,6 +158,7 @@ lines below.
 | `crates/waku-core/src/driver/support.rs` | `optional_computer_use` (+ test) | ~30 |
 | `src/app.rs` (subscriptions) | `mod cloud_subscriptions` | 1 |
 | `src/app.rs` (cloud account split) | `mod cloud_failover` / `cloud_groups` / `cloud_menu` / `cloud_origins` | 4 |
+| `src/app.rs`, `src/app/render.rs` (sign-in window) | `mod cloud_sign_in`; the `cloud_sign_in_input` field, initializer and its `Submit` / `Edited` subscription beside `skills_search`'s; `render_cloud_sign_in_modal` beside the announcements modal in both render branches | ~25 |
 | `src/app/usage_meter.rs` | `meter_bar` is `pub(super)`, reused by the subscription cards | 1 |
 | `crates/waku-core/src/git_commit.rs`, `crates/waku-core/src/driver/codex.rs` (Codex pins) | Codex commit messages and titles pinned to `gpt-5.6-terra` instead of `gpt-5.6-luna`, commit effort `low` instead of `none` (+ the title test's name and assertion) | 5 |
 | `src/js_repl.rs` (test) | `repl_supports_top_level_await_and_lazy_native_sky` expects `linux` off macOS and Windows | 6 |
@@ -177,7 +178,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 ### Files that are ours entirely
 
 `crates/sub2api/**`, `crates/workflow-engine/**`, `src/app/cloud_account.rs`,
-`src/app/{cloud_failover,cloud_groups,cloud_menu,cloud_origins}.rs`, `src/app/cli_setup.rs`,
+`src/app/{cloud_failover,cloud_groups,cloud_menu,cloud_origins,cloud_sign_in}.rs`, `src/app/cli_setup.rs`,
 `src/app/providers_page.rs`, `src/app/confirm_dialog.rs`,
 `src/app/onboarding.rs`, `src/app/message_resend.rs`, `src/app/task_rows.rs`,
 `src/app/runtime_prewarm.rs`, `src/app/update_banner.rs`, `src/app/surface_bar.rs`,

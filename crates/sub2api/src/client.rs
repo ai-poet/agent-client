@@ -587,6 +587,25 @@ pub struct TokenPair {
     pub expires_in: i64,
 }
 
+/// A desktop session as the login bridge hands it over: a token pair of its
+/// own and the gateway keys the bridge prepared. The shape of both the code
+/// exchange's answer and the older bridge's callback fragment.
+#[derive(Clone, Default, Deserialize)]
+pub struct DesktopSession {
+    #[serde(default)]
+    pub access_token: String,
+    #[serde(default)]
+    pub refresh_token: String,
+    #[serde(default)]
+    pub expires_in: i64,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub claude_api_key: Option<String>,
+    #[serde(default)]
+    pub codex_api_key: Option<String>,
+}
+
 /// Blocking client. Callers run it off the UI thread.
 #[derive(Clone, Debug)]
 pub struct Client {
@@ -674,6 +693,28 @@ impl Client {
             None,
             serde_json::json!({ "refresh_token": refresh_token }),
         )
+    }
+
+    /// Redeem the one-time code the login bridge showed, with the PKCE
+    /// verifier of the sign-in attempt it was issued to. Unauthenticated:
+    /// the code and verifier are the credential.
+    pub fn exchange_desktop_code(&self, code: &str, code_verifier: &str) -> Result<DesktopSession> {
+        self.post(
+            "/auth/desktop-session/exchange",
+            None,
+            serde_json::json!({ "code": code, "code_verifier": code_verifier }),
+        )
+    }
+
+    /// Revoke a refresh token on the service, so a signed-out desktop leaves
+    /// no live session behind. Unauthenticated, like the refresh itself.
+    pub fn logout(&self, refresh_token: &str) -> Result<()> {
+        self.post::<serde_json::Value>(
+            "/auth/logout",
+            None,
+            serde_json::json!({ "refresh_token": refresh_token }),
+        )
+        .map(|_| ())
     }
 
     /// Model catalog with gateway pricing.

@@ -13,6 +13,10 @@ anyhow = "1.0"
 # Decoding the pictures the Images API returns (`images`).
 base64 = "0.22"
 dirs = "6.0"
+# PKCE verifiers and session ids for the browser sign-in (`auth`); the same
+# majors the app crate already uses.
+getrandom = "0.2"
+sha2 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 

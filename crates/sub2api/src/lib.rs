@@ -9,17 +9,16 @@
 //! logic compiles and tests in seconds without building the UI.
 //!
 //! ```text
-//! desktop process                        daemon process
-//! ┌──────────────────────────┐           ┌────────────────────────────┐
-//! │ auth: browser sign-in    │           │ gateway::env_for(provider) │
-//! │ client: /auth/me, /keys  │           │   ↓ applied at spawn       │
-//! │ credentials  (local file)│           │ agent CLI → gateway        │
-//! └───────────┬──────────────┘           └──────────────┬─────────────┘
-//!             │ gateway keys only, via DaemonSettings.extra
-//!             └───────────────────────────────────────┘
+//! desktop process
+//! ┌──────────────────────────┐   gateway keys only   ┌──────────────────────┐
+//! │ auth: browser sign-in    │ ────────────────────▶ │ global_config: each  │
+//! │ client: /auth/me, /keys  │                       │ CLI's own config file│
+//! │ credentials  (local file)│                       └──────────────────────┘
+//! └──────────────────────────┘
 //! ```
 //!
-//! OAuth tokens never reach the daemon; only derived gateway keys do.
+//! OAuth tokens never leave the desktop's credential file; the CLIs only ever
+//! see derived gateway keys.
 
 pub mod agent_settings;
 pub mod auth;
@@ -51,7 +50,7 @@ pub mod speedtest;
 #[cfg(windows)]
 pub mod win_process;
 
-pub use auth::Credentials;
+pub use auth::{Credentials, SignedOut};
 pub use client::Client;
 pub use gateway::GatewayConfig;
 
@@ -95,6 +94,12 @@ pub fn session_ended(error: &anyhow::Error) -> bool {
         .any(|cause| cause.downcast_ref::<SessionEnded>().is_some())
 }
 
+/// Whether `error` means the session the caller worked for was signed out
+/// (or replaced by another sign-in) while it ran — its result is moot.
+pub fn signed_out(error: &anyhow::Error) -> bool {
+    auth::error_is::<SignedOut>(error)
+}
+
 /// Where the session is persisted. The desktop uses the credential file; the
 /// tests use memory so a refresh probe never touches the real sign-in.
 pub trait CredentialStore {
@@ -130,6 +135,10 @@ impl CredentialStore for FileCredentialStore {
 /// the session is gone on the next restart. Inside the lock the caller's clone
 /// is first reconciled with the file, so whoever lost the race adopts the
 /// winner's tokens instead of refreshing again.
+///
+/// A clone whose session is no longer the stored one — the user signed out,
+/// or signed in again, since it was taken — fails with [`SignedOut`] before
+/// any request: renewing it would only write a dead account back to disk.
 pub fn refresh_if_needed(credentials: &mut Credentials) -> anyhow::Result<bool> {
     refresh_if_needed_with(credentials, &FileCredentialStore)
 }
@@ -145,12 +154,15 @@ pub fn refresh_if_needed_with(
         .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     let mut changed = false;
-    if let Some(stored) = store.load()
-        && stored.endpoint == credentials.endpoint
-        && stored.expires_at > credentials.expires_at
-    {
-        *credentials = stored;
-        changed = true;
+    match store.load() {
+        Some(stored) if stored.session_id == credentials.session_id => {
+            if stored.endpoint == credentials.endpoint && stored.expires_at > credentials.expires_at
+            {
+                *credentials = stored;
+                changed = true;
+            }
+        }
+        _ => return Err(SignedOut.into()),
     }
 
     let now = auth::now_unix();
@@ -753,6 +765,12 @@ mod refresh_tests {
             Self(Mutex::new(None))
         }
 
+        /// A store holding `credentials` — the signed-in state every
+        /// refresh starts from.
+        fn holding(credentials: &Credentials) -> Self {
+            Self(Mutex::new(Some(credentials.clone())))
+        }
+
         fn saved(&self) -> Option<Credentials> {
             self.0.lock().unwrap().clone()
         }
@@ -888,8 +906,8 @@ mod refresh_tests {
         assert_eq!(browser.refresh_token, "rt_2");
 
         // The desktop still holds rt_1.
-        let store = MemoryStore::empty();
         let mut desktop = stale_desktop_credentials(&server.endpoint, "rt_1");
+        let store = MemoryStore::holding(&desktop);
         let error = refresh_if_needed_with(&mut desktop, &store).expect_err("rt_1 is dead");
 
         // The symptom the user sees is "signed out"; the app must be able to
@@ -897,7 +915,7 @@ mod refresh_tests {
         assert!(session_ended(&error), "{error:#}");
         assert!(error.to_string().contains("invalid refresh token"), "{error:#}");
         // Nothing was written: the dead pair is not re-saved.
-        assert!(store.saved().is_none());
+        assert_eq!(store.saved(), Some(desktop));
         assert_eq!(
             server.presented.lock().unwrap().as_slice(),
             ["rt_1", "rt_1"]
@@ -907,8 +925,8 @@ mod refresh_tests {
     #[test]
     fn refresh_rotates_and_persists_the_new_pair() {
         let server = spawn_server("rt_1");
-        let store = MemoryStore::empty();
         let mut desktop = stale_desktop_credentials(&server.endpoint, "rt_1");
+        let store = MemoryStore::holding(&desktop);
 
         assert!(refresh_if_needed_with(&mut desktop, &store).expect("refresh"));
 
@@ -932,9 +950,9 @@ mod refresh_tests {
     #[test]
     fn a_stale_clone_adopts_the_stored_renewal_instead_of_refreshing_again() {
         let server = spawn_server("rt_1");
-        let store = MemoryStore::empty();
         let mut first = stale_desktop_credentials(&server.endpoint, "rt_1");
         let mut second = first.clone();
+        let store = MemoryStore::holding(&first);
 
         assert!(refresh_if_needed_with(&mut first, &store).expect("first"));
         // The second caller still holds rt_1 — the token the first just
@@ -950,12 +968,61 @@ mod refresh_tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         drop(listener);
-        let store = MemoryStore::empty();
         let mut desktop = stale_desktop_credentials(&endpoint, "rt_1");
+        let store = MemoryStore::holding(&desktop);
 
         let error = refresh_if_needed_with(&mut desktop, &store).expect_err("unreachable");
         assert!(!session_ended(&error), "{error:#}");
         assert_eq!(desktop.refresh_token, "rt_1");
+    }
+
+    #[test]
+    fn a_fresh_session_is_not_refreshed() {
+        let mut credentials = Credentials {
+            access_token: "at".into(),
+            refresh_token: "rt".into(),
+            expires_at: auth::now_unix() + 3600,
+            endpoint: "https://a.org".into(),
+            session_id: "s1".into(),
+            ..Credentials::default()
+        };
+        let store = MemoryStore::holding(&credentials);
+        // Far from expiry, so this must return without touching the network.
+        assert!(!refresh_if_needed_with(&mut credentials, &store).expect("no refresh"));
+    }
+
+    #[test]
+    fn a_signed_out_session_is_neither_renewed_nor_written_back() {
+        // The user signed out while a request held this clone: nothing may
+        // be presented to the service and nothing may land on disk again.
+        let server = spawn_server("rt_1");
+        let store = MemoryStore::empty();
+        let mut desktop = stale_desktop_credentials(&server.endpoint, "rt_1");
+
+        let error = refresh_if_needed_with(&mut desktop, &store).expect_err("signed out");
+        assert!(signed_out(&error), "{error:#}");
+        assert!(!session_ended(&error), "{error:#}");
+        assert!(store.saved().is_none());
+        assert!(server.presented.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_clone_of_the_previous_account_does_not_take_the_new_one() {
+        // Signed out as one account and in as another while a request held
+        // the first account's clone: it must not adopt the second's tokens.
+        let server = spawn_server("rt_1");
+        let mut old = stale_desktop_credentials(&server.endpoint, "rt_1");
+        old.session_id = "old".into();
+        let mut new = stale_desktop_credentials(&server.endpoint, "rt_new");
+        new.session_id = "new".into();
+        new.expires_at = auth::now_unix() + 3600;
+        let store = MemoryStore::holding(&new);
+
+        let error = refresh_if_needed_with(&mut old, &store).expect_err("replaced");
+        assert!(signed_out(&error), "{error:#}");
+        assert_eq!(old.refresh_token, "rt_1");
+        assert_eq!(store.saved(), Some(new));
+        assert!(server.presented.lock().unwrap().is_empty());
     }
 }
 
@@ -991,16 +1058,4 @@ mod tests {
         assert!(encoded.contains("sk-claude"));
     }
 
-    #[test]
-    fn a_fresh_session_is_not_refreshed() {
-        let mut credentials = Credentials {
-            access_token: "at".into(),
-            refresh_token: "rt".into(),
-            expires_at: auth::now_unix() + 3600,
-            endpoint: "https://a.org".into(),
-            ..Credentials::default()
-        };
-        // Far from expiry, so this must return without touching the network.
-        assert!(!refresh_if_needed(&mut credentials).expect("no refresh"));
-    }
 }

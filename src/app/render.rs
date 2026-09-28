@@ -251,6 +251,7 @@ impl Render for Waku {
             // and the account menu alike.
             let cloud_pay = self.render_cloud_pay_modal(window, cx);
             let cloud_announcements = self.render_announcements_modal(window, cx);
+            let cloud_sign_in = self.render_cloud_sign_in_modal(window, cx);
             let confirm_dialog = self.render_confirm_dialog(window, cx);
             let toast = self.render_active_toast(cx);
             let content = div()
@@ -283,6 +284,7 @@ impl Render for Waku {
                 .children(goal_dialog)
                 .children(cloud_pay)
                 .children(cloud_announcements)
+                .children(cloud_sign_in)
                 .children(confirm_dialog)
                 .children(image_preview)
                 .children(task_switcher)
@@ -304,6 +306,7 @@ impl Render for Waku {
         // the account menu.
         let cloud_pay = self.render_cloud_pay_modal(window, cx);
         let cloud_announcements = self.render_announcements_modal(window, cx);
+        let cloud_sign_in = self.render_cloud_sign_in_modal(window, cx);
         let confirm_dialog = self.render_confirm_dialog(window, cx);
         let toast = self.render_active_toast(cx);
         let content = div()
@@ -464,6 +467,7 @@ impl Render for Waku {
             .children(goal_dialog)
             .children(cloud_pay)
             .children(cloud_announcements)
+            .children(cloud_sign_in)
             .children(confirm_dialog)
             .children(image_preview)
             .children(task_switcher)

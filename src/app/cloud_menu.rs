@@ -26,8 +26,8 @@ impl Waku {
             None => tr!("cloud.sidebar_sign_in"),
         };
 
-        let pending = self.cloud_account.pending;
-        let label = if !signed_in && pending {
+        let signing_in = !signed_in && self.cloud_account.sign_in.is_some();
+        let label = if signing_in {
             tr!("cloud.onboarding_waiting")
         } else {
             label
@@ -54,14 +54,12 @@ impl Waku {
 
         if !signed_in {
             // Straight into the browser flow — routing the user through a
-            // settings page to find the same button is a detour.
+            // settings page to find the same button is a detour. While one
+            // is under way this brings its window back, where the code from
+            // the sign-in page can be pasted.
             return trigger
-                .opacity(if pending { 0.6 } else { 1.0 })
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if !pending {
-                        this.start_cloud_sign_in(cx);
-                    }
-                }))
+                .opacity(if signing_in { 0.75 } else { 1.0 })
+                .on_click(cx.listener(|this, _, _, cx| this.start_cloud_sign_in(cx)))
                 .into_any_element();
         }
 
@@ -232,13 +230,7 @@ impl Waku {
                 items.push(MenuItem::Separator);
                 let sign_out_weak = weak.clone();
                 items.push(MenuItem::new(tr!("cloud.sign_out"), move |_, cx| {
-                    let _ = sign_out_weak.update(cx, |this, cx| {
-                        this.sign_out_cloud(cx);
-                        // Make the consequence explicit: from here the agents
-                        // run on whatever the user's own CLIs are configured
-                        // with, exactly as if this app were stock.
-                        this.show_toast(tr!("cloud.signed_out_note"));
-                    });
+                    let _ = sign_out_weak.update(cx, |this, cx| this.sign_out_cloud(cx));
                 }));
                 items
             },
