@@ -29,6 +29,16 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.2.6]
+
+- 登录更稳：浏览器登录后跳不回客户端（比如打不开 127.0.0.1）时，登录页会显示一个一次性登录码，把它粘贴到客户端的登录窗口即可完成登录，也可以粘贴地址栏里的整条链接。登录窗口在点击登录时弹出，可以重新打开浏览器、复制登录链接到其他设备上登录，或取消登录；关掉窗口不会中断登录，点左下角可以重新打开。登录码 10 分钟内有效、只能用一次，离开发起登录的这台客户端就无法使用
+
+  Sturdier sign-in: when the browser can't get back to the app after you sign in (for example, it can't open 127.0.0.1), the sign-in page shows a one-time code — paste it into the app's sign-in window to finish, or paste the whole link from the address bar. The window opens when you click Sign in and lets you open the browser again, copy the sign-in link to finish on another device, or cancel; closing it doesn't stop the sign-in, and the footer brings it back. A code is valid for 10 minutes, works once, and only in the app that started the sign-in
+
+- 修复退出登录后左下角又显示回账号、重启后又自动登录的问题。退出登录现在立即生效，并会在服务端注销这次登录；退出后马上换个账号登录，也不会混入上一个账号的数据
+
+  Fixed signing out not sticking: the footer no longer shows the account again a moment later, and a restart no longer signs you back in. Signing out now takes effect at once and also ends the session on the service; signing straight in as someone else no longer picks up the previous account's data
+
 ## [0.2.5]
 
 - 国模有了自己的分组：设置 → 云账号和账户菜单新增「国模」一栏，在国模订阅和国模按量付费分组之间手动选择；选订阅时额度用完自动改走按量付费，额度恢复后切回。国模分组不再出现在 Codex 的分组里，此前把 Codex 切到国模分组后 GPT 请求报错的问题随之解决——更新后 Codex 会自动换回 Codex 分组，原来选的国模分组移到「国模」一栏。模型选择里的「按量付费」一项随之去掉，走哪个分组由「国模」一栏决定，模型副标题会写明；选过那一项的对话自动沿用，无需重选
