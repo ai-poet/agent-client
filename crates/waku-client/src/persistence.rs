@@ -78,7 +78,8 @@ fn default_analytics_enabled() -> bool {
 }
 
 fn default_provider() -> ProviderKind {
-    ProviderKind::Codex
+    // Fork: the built-in agent, which works with nothing installed.
+    ProviderKind::Native
 }
 
 fn default_sidebar_width() -> f32 {
@@ -432,7 +433,7 @@ impl PersistedState {
             sessions: Vec::new(),
             selected_project: None,
             selected_session: None,
-            last_provider: ProviderKind::Codex,
+            last_provider: ProviderKind::Native,
             last_runtime_mode: RuntimeMode::default(),
             last_model: None,
             last_reasoning_effort: None,
@@ -465,7 +466,7 @@ impl PersistedState {
 
     pub fn fresh(cwd: PathBuf) -> Self {
         let project = Project::from_path(cwd);
-        let session = AgentSession::new(project.id, ProviderKind::Codex);
+        let session = AgentSession::new(project.id, ProviderKind::Native);
         Self {
             selected_project: Some(project.id),
             selected_session: Some(session.id),

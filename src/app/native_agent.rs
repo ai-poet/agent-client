@@ -142,6 +142,53 @@ pub(super) fn migrate_legacy_pay_as_you_go(state: &mut PersistedState) -> bool {
     changed
 }
 
+/// Move someone who never chose a provider onto the built-in agent.
+///
+/// Upstream's new-session default was Codex, and the first launch wrote it
+/// into the app state before anyone picked anything — so a newcomer's first
+/// task opened on a CLI they most likely do not have, instead of on the
+/// agent that works with nothing installed. New state now starts on the
+/// built-in agent (`waku_client::persistence`); this carries over a state
+/// written by an earlier build, but only while it still reads as untouched:
+/// the old default provider, no model ever picked, no task ever started on a
+/// CLI, and the built-in agent not switched off. Unstarted drafts on the old
+/// default move with it. Returns whether anything changed.
+pub(super) fn adopt_built_in_default(state: &mut PersistedState) -> bool {
+    let untouched = state.last_provider == ProviderKind::Codex
+        && state.last_model.is_none()
+        && !state.disabled_providers.contains(&ProviderKind::Native)
+        && !state
+            .sessions
+            .iter()
+            .any(|session| !session.provider.is_builtin() && session.has_started());
+    if !untouched {
+        return false;
+    }
+    state.last_provider = ProviderKind::Native;
+    state.last_reasoning_effort = None;
+    state.last_service_tier = None;
+    state.last_context_window = None;
+    let drafts: Vec<Uuid> = state
+        .sessions
+        .iter()
+        .filter(|session| {
+            session.provider == ProviderKind::Codex
+                && session.model.is_none()
+                && !session.has_started()
+        })
+        .map(|session| session.id)
+        .collect();
+    for id in drafts {
+        if let Some(session) = state.session_mut(id) {
+            session.provider = ProviderKind::Native;
+            session.reasoning_effort = None;
+            session.service_tier = None;
+            session.context_window = None;
+        }
+    }
+    true
+}
+
 /// A picker id taken apart: the platform ahead of the `::` (lowercased,
 /// without a [`LEGACY_PAY_AS_YOU_GO_MARK`]) and the model after it. A bare
 /// id carries no platform — that is what a model the user declared on their
@@ -1118,6 +1165,53 @@ mod tests {
 
         // Nothing left to move: a second launch saves nothing.
         assert!(!migrate_legacy_pay_as_you_go(&mut state));
+    }
+
+    /// A newcomer starts on the built-in agent; a state an earlier build
+    /// wrote before anyone chose anything moves there too, draft and all.
+    #[test]
+    fn a_newcomer_starts_on_the_built_in_agent() {
+        let state = PersistedState::fresh(std::path::PathBuf::from("."));
+        assert_eq!(state.last_provider, ProviderKind::Native);
+        assert_eq!(state.sessions[0].provider, ProviderKind::Native);
+
+        let mut earlier = PersistedState::fresh(std::path::PathBuf::from("."));
+        earlier.last_provider = ProviderKind::Codex;
+        earlier.sessions[0].provider = ProviderKind::Codex;
+        assert!(adopt_built_in_default(&mut earlier));
+        assert_eq!(earlier.last_provider, ProviderKind::Native);
+        assert_eq!(earlier.sessions[0].provider, ProviderKind::Native);
+        // Done once: the next launch finds nothing to move.
+        assert!(!adopt_built_in_default(&mut earlier));
+    }
+
+    /// Anything that reads as a choice stays: a picked model, a task run on
+    /// a CLI, or the built-in agent switched off.
+    #[test]
+    fn a_provider_someone_chose_is_left_alone() {
+        let codex = || {
+            let mut state = PersistedState::fresh(std::path::PathBuf::from("."));
+            state.last_provider = ProviderKind::Codex;
+            state.sessions[0].provider = ProviderKind::Codex;
+            state
+        };
+
+        let mut picked = codex();
+        picked.last_model = Some("gpt-5.6-sol".into());
+        assert!(!adopt_built_in_default(&mut picked));
+
+        let mut used = codex();
+        used.sessions[0].begin_turn("hello");
+        assert!(!adopt_built_in_default(&mut used));
+        assert_eq!(used.last_provider, ProviderKind::Codex);
+
+        let mut switched_off = codex();
+        switched_off.disabled_providers.push(ProviderKind::Native);
+        assert!(!adopt_built_in_default(&mut switched_off));
+
+        let mut claude = codex();
+        claude.last_provider = ProviderKind::Claude;
+        assert!(!adopt_built_in_default(&mut claude));
     }
 
     #[test]

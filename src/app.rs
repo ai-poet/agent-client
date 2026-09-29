@@ -2129,6 +2129,8 @@ impl Waku {
         let mut state = store.load_or_fresh(cwd);
         // Fork addition: 0.2.3's "pay as you go" picker rows are gone.
         let migrated_payg_rows = native_agent::migrate_legacy_pay_as_you_go(&mut state);
+        // Fork addition: nobody who never chose starts on a CLI.
+        let adopted_built_in = native_agent::adopt_built_in_default(&mut state);
         let home_directory = crate::projectless::home_directory();
         state.apply_daemon_settings(daemon.settings());
         if let Err(error) = daemon.update_settings(state.daemon_settings()) {
@@ -2251,7 +2253,7 @@ impl Waku {
         let workspace_client = waku_client::WorkspaceClient::new(daemon.client());
         let (projectless_migrated, projectless_migration_error) =
             migrate_legacy_projectless_projects(&mut state, &workspace_client);
-        let projectless_save_error = (projectless_migrated || migrated_payg_rows)
+        let projectless_save_error = (projectless_migrated || migrated_payg_rows || adopted_built_in)
             .then(|| store.save(&mut state).err())
             .flatten();
         let startup_toast = projectless_migration_error
