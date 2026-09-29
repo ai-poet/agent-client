@@ -29,6 +29,20 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.2.7]
+
+- 子智能体看得见了：内置 Agent 和 Claude Code 派出的子智能体在对话里显示为一行摘要（智能体类型、任务，运行中有动画），点击即在右侧面板实时查看它的每一步——写了什么、调用了哪些工具，工具行可展开看参数和输出，运行中可随时停止。内置 Agent 的子智能体现在和主会话用同一个网关、同一套 MCP 工具和设置；后台子智能体只出现在启动它的会话里，也不会再拖住当前这一轮的结束
+
+  Sub-agents you can follow: a sub-agent started by the built-in agent or Claude Code shows as one line in the conversation (its kind and its task, animated while it runs); click it to watch every step live in the side panel — what it wrote and the tools it called, each tool row expandable to its input and output — and stop it at any time. The built-in agent's sub-agents now use the same gateway, MCP tools and settings as the conversation that started them; a background sub-agent appears only in its own conversation and no longer holds up the end of the turn
+
+- 内置 Agent 现在知道网关上每个模型的上下文窗口（自定义端点里填写的窗口也算），用量环显示百分比，自动压缩按模型真实的窗口触发
+
+  The built-in agent now knows the context window of every model the gateway serves (and the ones you enter for your own endpoints): the usage ring shows a percentage, and auto-compaction fires at the model's real window
+
+- 新用户默认使用内置 Agent 和它的默认模型，不再默认选中需要另外安装的 Codex CLI；之前装过但从未选过的，也会自动切换过去
+
+  New users start on the built-in agent and its default model instead of the Codex CLI, which needs a separate install; if you installed before and never picked one, you're moved over too
+
 ## [0.2.6]
 
 - 登录更稳：浏览器登录后跳不回客户端（比如打不开 127.0.0.1）时，登录页会显示一个一次性登录码，把它粘贴到客户端的登录窗口即可完成登录，也可以粘贴地址栏里的整条链接。登录窗口在点击登录时弹出，可以重新打开浏览器、复制登录链接到其他设备上登录，或取消登录；关掉窗口不会中断登录，点左下角可以重新打开。登录码 10 分钟内有效、只能用一次，离开发起登录的这台客户端就无法使用
