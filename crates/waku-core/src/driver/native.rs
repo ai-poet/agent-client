@@ -28,7 +28,7 @@ use uuid::Uuid;
 use waku_agent_bridge::{
     AccessMode, AgentEvent, AgentSession, AgentStartOptions, BackgroundEntry, BackgroundKind,
     BackgroundStatus, ComputerUseWiring, GoalOp, GoalSnapshot, GoalState, MissingApiKey,
-    SubagentEvent, SubagentStatus, TurnOptions, WireFormat, split_model,
+    SubagentEvent, SubagentStatus, TurnOptions, UnknownEndpoint, WireFormat, split_model,
 };
 
 use super::activity;
@@ -165,15 +165,20 @@ impl NativeDriver {
         // A missing key is the one start failure a user can fix without
         // reading code: say which route, and that signing in is the fix.
         let session = AgentSession::start(start, sink.into_sink()).map_err(|error| {
-            match error.downcast_ref::<MissingApiKey>() {
-                Some(missing) => anyhow!(tr!(
+            if let Some(missing) = error.downcast_ref::<MissingApiKey>() {
+                return anyhow!(tr!(
                     "native.no_api_key",
                     name = sub2api::brand::DISPLAY_NAME,
                     provider = missing.provider.clone(),
                     path = missing.settings_path.display().to_string()
-                )),
-                None => error,
+                ));
             }
+            // The model belongs to an endpoint of the user's own that is no
+            // longer there; the fix is on the providers page, not in code.
+            if error.downcast_ref::<UnknownEndpoint>().is_some() {
+                return anyhow!(tr!("native.endpoint_unavailable"));
+            }
+            error
         })?;
 
         // Report the cursor immediately rather than after the first turn: the
@@ -848,6 +853,18 @@ impl EventTranslator {
                 provider = provider,
                 endpoint = api_base
             ))),
+            AgentEvent::RouteNotFound {
+                provider,
+                model,
+                url,
+                detail,
+            } => self.send(DriverEvent::Error(tr!(
+                "native.route_not_found",
+                model = model,
+                provider = provider,
+                url = url,
+                detail = detail
+            ))),
             AgentEvent::Error(message) => self.send(DriverEvent::Error(message)),
             AgentEvent::TurnFinished { success, summary } => {
                 self.tools.lock().clear();
@@ -1354,6 +1371,16 @@ mod tests {
             (Some("openai".into()), Some("gpt-5.6-sol".into()))
         );
         assert_eq!(route_of(Some("claude-sonnet-5")), (None, Some("claude-sonnet-5".into())));
+        // A model on an endpoint of the user's own carries that endpoint as
+        // its platform, and its model id intact.
+        assert_eq!(
+            route_of(Some("custom:pr-1::glm-5.1")),
+            (Some("custom:pr-1".into()), Some("glm-5.1".into()))
+        );
+        assert_eq!(
+            route_of(Some("custom:pr-1::qwen3:32b")),
+            (Some("custom:pr-1".into()), Some("qwen3:32b".into()))
+        );
         assert_eq!(wire_format_of(Some("responses")), Some(WireFormat::Responses));
         assert_eq!(wire_format_of(Some("default")), None);
         assert_eq!(wire_format_of(None), None);

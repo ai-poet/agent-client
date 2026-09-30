@@ -71,9 +71,56 @@ pub fn anthropic_base_url(endpoint: &str) -> String {
     normalize_endpoint(endpoint)
 }
 
-/// OpenAI-compatible clients expect the versioned path.
+/// OpenAI-compatible clients expect the versioned path: `/v1`, unless the
+/// endpoint already ends in a version of its own (`…/api/paas/v4`).
 pub fn openai_base_url(endpoint: &str) -> String {
-    format!("{}/v1", normalize_endpoint(endpoint))
+    let base = normalize_endpoint(endpoint);
+    if ends_with_version_segment(&base) {
+        base
+    } else {
+        format!("{base}/v1")
+    }
+}
+
+/// `<base>/<path>` when `base` already ends in a version segment, else
+/// `<base>/v1/<path>`.
+///
+/// Kept in step with `claurst_api::endpoint::versioned_url`, which is what
+/// the built-in agent's adapters build their requests with; a probe from
+/// here has to reach the URL the agent will.
+pub fn versioned_url(base: &str, path: &str) -> String {
+    let base = base.trim().trim_end_matches('/');
+    let path = path.trim_start_matches('/');
+    if ends_with_version_segment(base) {
+        format!("{base}/{path}")
+    } else {
+        format!("{base}/v1/{path}")
+    }
+}
+
+/// Whether the last path segment of `base` names an API version (`v1`,
+/// `v4`, `v1beta`, `v2alpha1`). A bare origin answers false.
+pub fn ends_with_version_segment(base: &str) -> bool {
+    let base = base.trim().trim_end_matches('/');
+    let after_scheme = base.split_once("://").map_or(base, |(_, rest)| rest);
+    let Some((_, path)) = after_scheme.split_once('/') else {
+        return false;
+    };
+    let segment = path.rsplit('/').next().unwrap_or_default().to_ascii_lowercase();
+    let Some(rest) = segment.strip_prefix('v') else {
+        return false;
+    };
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    if digits == 0 {
+        return false;
+    }
+    let rest = &rest[digits..];
+    if rest.is_empty() {
+        return true;
+    }
+    rest.strip_prefix("alpha")
+        .or_else(|| rest.strip_prefix("beta"))
+        .is_some_and(|tail| tail.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 /// Strip trailing slashes and a trailing `/v1`, which users often paste in.
@@ -111,6 +158,33 @@ mod tests {
         assert_eq!(openai_base_url("https://a.org"), "https://a.org/v1");
         // Already-versioned input must not become /v1/v1.
         assert_eq!(openai_base_url("https://a.org/v1"), "https://a.org/v1");
+        // A provider that versions its API elsewhere keeps its own version.
+        assert_eq!(
+            openai_base_url("https://open.bigmodel.cn/api/paas/v4/"),
+            "https://open.bigmodel.cn/api/paas/v4"
+        );
+        assert_eq!(
+            openai_base_url("https://ark.cn-beijing.volces.com/api/v3"),
+            "https://ark.cn-beijing.volces.com/api/v3"
+        );
+        assert_eq!(openai_base_url("https://a.org/video"), "https://a.org/video/v1");
+    }
+
+    #[test]
+    fn versioned_urls_match_the_agents_adapters() {
+        assert_eq!(
+            versioned_url("https://a.org", "chat/completions"),
+            "https://a.org/v1/chat/completions"
+        );
+        assert_eq!(versioned_url("https://a.org/v1/", "/models"), "https://a.org/v1/models");
+        assert_eq!(
+            versioned_url("https://open.bigmodel.cn/api/paas/v4", "chat/completions"),
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        );
+        assert!(ends_with_version_segment("https://a.org/v1beta"));
+        for base in ["https://a.org", "https://a.org/v2proxy", "https://v1.a.org", "a.org:8080"] {
+            assert!(!ends_with_version_segment(base), "{base}");
+        }
     }
 
     #[test]

@@ -2260,6 +2260,17 @@ fn the_built_in_agents_api_is_decided_by_the_model() {
         native_wire_format(None, Some("composite::grok-4.6")),
         "responses"
     );
+    // A model on an endpoint of the user's own speaks what the endpoint
+    // declared, which its tier carries — a Claude name over Chat, a Kimi
+    // name over Messages.
+    assert_eq!(
+        native_wire_format(Some("chat"), Some("custom:pr-1::claude-sonnet-5")),
+        "chat"
+    );
+    assert_eq!(
+        native_wire_format(Some("messages"), Some("custom:pr-1::kimi-k3")),
+        "messages"
+    );
     // A bare id is a model the user declared on their own endpoint: nothing
     // places it, so its stored format stands, and Chat is where it goes.
     assert_eq!(native_wire_format(None, Some("my-local-model")), "chat");
@@ -2308,11 +2319,14 @@ fn the_signed_out_fallback_is_filed_under_anthropic() {
 
     assert_eq!(vendor("anthropic").len(), fallback.len());
     assert!(vendor("custom").is_empty());
-    let column: Vec<(&str, usize)> = native_vendors_present(&fallback)
+    let column: Vec<(String, usize)> = native_vendors_present(&fallback)
         .into_iter()
-        .map(|(vendor, count)| (vendor.id, count))
+        .map(|entry| (entry.id, entry.count))
         .collect();
-    assert_eq!(column, [("anthropic", fallback.len()), ("custom", 0)]);
+    assert_eq!(
+        column,
+        [("anthropic".to_owned(), fallback.len()), ("custom".to_owned(), 0)]
+    );
 }
 
 /// A vendor is picked by the model's name, so a query naming the vendor finds
@@ -2323,8 +2337,8 @@ fn the_built_in_agents_list_is_filed_by_vendor() {
     use super::composer::visible_picker_models;
     use crate::model::{ProviderModel, ProviderProbe};
 
-    let mut custom = ProviderModel::new("deepseek-local", "DeepSeek on my box");
-    custom.sub_provider = Some("custom".into());
+    let mut custom = ProviderModel::new("custom:pr-1::deepseek-local", "DeepSeek on my box");
+    custom.sub_provider = Some("My box".into());
     let probes = [ProviderProbe {
         provider: ProviderKind::Native,
         installed: true,
@@ -2355,10 +2369,16 @@ fn the_built_in_agents_list_is_filed_by_vendor() {
 
     assert_eq!(list("zhipu", ""), ["zhipu::glm-5", "composite::glm-4.6"]);
     assert_eq!(list("deepseek", ""), ["deepseek::deepseek-v4"]);
-    // The user's own endpoint keeps its models, whatever they are called.
-    assert_eq!(list("custom", ""), ["deepseek-local"]);
-    // A search crosses vendors.
-    assert_eq!(list("zhipu", "deepseek"), ["deepseek::deepseek-v4", "deepseek-local"]);
+    // The user's own endpoint keeps its models, whatever they are called,
+    // under the endpoint itself.
+    assert_eq!(list("custom:pr-1", ""), ["custom:pr-1::deepseek-local"]);
+    assert!(list("deepseek", "").iter().all(|id| !id.starts_with("custom:")));
+    // A search crosses vendors, and finds an endpoint's models by its name.
+    assert_eq!(
+        list("zhipu", "deepseek"),
+        ["deepseek::deepseek-v4", "custom:pr-1::deepseek-local"]
+    );
+    assert_eq!(list("zhipu", "my box"), ["custom:pr-1::deepseek-local"]);
 }
 
 #[test]
@@ -2371,22 +2391,24 @@ fn tab_steps_through_the_built_in_agents_vendors() {
         ModelPickerTab::Provider(ProviderKind::Claude),
         ModelPickerTab::Provider(ProviderKind::Native),
     ];
-    let stops = picker_stops(&tabs, &["anthropic", "deepseek", "custom"]);
+    // Every endpoint of the user's own is a stop of its own, like a vendor.
+    let stops = picker_stops(&tabs, &["anthropic", "deepseek", "custom:pr-1"]);
+    let native = ModelPickerTab::Provider(ProviderKind::Native);
     assert_eq!(
         stops,
         [
             (ModelPickerTab::Favorites, None),
             (ModelPickerTab::Provider(ProviderKind::Claude), None),
-            (ModelPickerTab::Provider(ProviderKind::Native), Some("anthropic")),
-            (ModelPickerTab::Provider(ProviderKind::Native), Some("deepseek")),
-            (ModelPickerTab::Provider(ProviderKind::Native), Some("custom")),
+            (native, Some("anthropic".to_owned())),
+            (native, Some("deepseek".to_owned())),
+            (native, Some("custom:pr-1".to_owned())),
         ]
     );
     // Wraps at both ends.
     assert_eq!(next_picker_highlight(Some(4), stops.len(), "down"), Some(0));
     assert_eq!(next_picker_highlight(Some(0), stops.len(), "up"), Some(4));
     // Without a vendor list the built-in tab is one stop like any other.
-    assert_eq!(picker_stops(&tabs, &[]).len(), 3);
+    assert_eq!(picker_stops::<&str>(&tabs, &[]).len(), 3);
 }
 
 #[test]

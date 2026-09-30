@@ -43,7 +43,9 @@ pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result
         model,
         platform,
         // One prompt, one answer: the engine's primary path is the one to
-        // trust for it, whatever the session itself speaks.
+        // trust for it, whatever the session itself speaks. A model on an
+        // endpoint of the user's own is the exception, and needs none: its
+        // entry names the one format it speaks and `select_route` uses that.
         wire_format: Some(WireFormat::Messages),
         reasoning_effort: None,
         // A commit message is read by git, not by the user, and the caller

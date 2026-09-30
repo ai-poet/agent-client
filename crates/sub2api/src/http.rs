@@ -221,6 +221,12 @@ impl Request {
         self.timeout_seconds
     }
 
+    /// The body as it would be sent, for tests that check a request without
+    /// sending it.
+    pub fn body_text(&self) -> Option<&str> {
+        self.body.as_deref()
+    }
+
     /// Render the curl config passed on stdin.
     ///
     /// Separated from [`Self::send`] so the escaping is unit-testable without

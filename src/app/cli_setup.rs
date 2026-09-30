@@ -55,6 +55,14 @@ pub(super) struct CliSetupState {
 }
 
 impl CliSetupState {
+    /// A fresh state whose endpoint cache already holds what launch read,
+    /// so the first frame does not read the file a second time.
+    pub fn with_custom_cache(config: sub2api::custom_api::CustomApiConfig) -> Self {
+        let state = Self::default();
+        *state.custom_cache.borrow_mut() = Some(config);
+        state
+    }
+
     pub fn snapshot_pending(&self) -> bool {
         self.snapshot_pending.get()
     }

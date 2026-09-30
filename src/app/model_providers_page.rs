@@ -67,9 +67,22 @@ pub(super) struct ModelProvidersPageState {
     pub speed: Option<super::providers_page::SpeedTest>,
     /// Which model's metadata is open for editing, if any.
     pub editing_model: Option<String>,
+    /// The last Test of each model of the open provider, by model id.
+    pub model_tests: std::collections::HashMap<String, super::providers_page::EndpointTest>,
     test_generation: u64,
     speed_generation: u64,
+    model_test_generation: u64,
+    /// Registry changes asked for while a save was running. Applied as soon
+    /// as that save lands: dropping them would let a model typed right after
+    /// creating a provider, or a fetch that lands mid-save, vanish unsaved.
+    queued: Vec<QueuedChange>,
 }
+
+/// One registry change waiting for the save in flight, with its toast.
+type QueuedChange = (
+    Option<String>,
+    Box<dyn FnOnce(&mut sub2api::providers::ProviderRegistry) + Send>,
+);
 
 /// How long each candidate gets in a speed test. Short on purpose: this
 /// measures reachability from here, not how fast the model answers.
@@ -449,6 +462,20 @@ impl Waku {
                 .child(self.render_format_picker(entry, theme, cx)),
         );
         if let Some(url) = state.inputs.url.clone() {
+            // The whole URL a request goes to, from what is typed: the path
+            // hint alone did not show that `/api/paas/v4` keeps its version
+            // rather than gaining a `/v1`. Pure string work, fine on a frame.
+            let typed = url.read(cx).content().trim().to_owned();
+            let hint = match sub2api::custom_api::normalize_base_url(&typed) {
+                Ok(base) => tr!(
+                    "model_providers.request_url_hint",
+                    url = sub2api::gateway::versioned_url(&base, entry.format.endpoint_path())
+                ),
+                Err(_) => tr!(
+                    "model_providers.path_hint",
+                    path = entry.format.request_path()
+                ),
+            };
             form = form.child(
                 div()
                     .flex()
@@ -460,10 +487,7 @@ impl Waku {
                         div()
                             .text_size(sp(10.5))
                             .text_color(theme.text_tertiary)
-                            .child(tr!(
-                                "model_providers.path_hint",
-                                path = entry.format.request_path()
-                            )),
+                            .child(hint),
                     ),
             );
         }
@@ -662,6 +686,16 @@ impl Waku {
                     .child(tr!("model_providers.models_empty")),
             );
         }
+        // A test needs somewhere to go: the entry switched on and an address
+        // and a key typed. Reading the fields is an in-memory read.
+        let typed = |input: &Option<Entity<TextInput>>| {
+            input
+                .as_ref()
+                .is_some_and(|input| !input.read(cx).content().trim().is_empty())
+        };
+        let testable = entry.enabled
+            && typed(&self.model_providers.inputs.url)
+            && typed(&self.model_providers.inputs.key);
         for model in &entry.models {
             let model_id = model.id.clone();
             let entry_id = id.clone();
@@ -670,6 +704,9 @@ impl Waku {
                 continue;
             }
             let edit_id = model_id.clone();
+            let test_id = model_id.clone();
+            let test = self.model_providers.model_tests.get(&model_id);
+            let testing = test.is_some_and(|test| test.running);
             section = section.child(
                 div()
                     .flex()
@@ -701,6 +738,19 @@ impl Waku {
                     )
                     .child(card_button(
                         theme,
+                        SharedString::from(format!("model-test-{entry_id}-{model_id}")),
+                        tr!("model_providers.model_test"),
+                        false,
+                        testing || !testable,
+                        cx,
+                        move |this, _, cx| {
+                            if testable && !testing {
+                                this.test_provider_model(test_id.clone(), cx);
+                            }
+                        },
+                    ))
+                    .child(card_button(
+                        theme,
                         SharedString::from(format!("model-edit-{entry_id}-{model_id}")),
                         tr!("model_providers.model_edit"),
                         false,
@@ -722,6 +772,13 @@ impl Waku {
                         },
                     )),
             );
+            if let Some(test) = test {
+                section = section.child(
+                    div()
+                        .pl(px(10.0))
+                        .child(model_test_status_line(theme, test)),
+                );
+            }
         }
         if let Some(input) = self.model_providers.inputs.model.clone() {
             section = section.child(
@@ -753,7 +810,33 @@ impl Waku {
                     )),
             );
         }
-        section
+        // Whether these models are in the built-in agent's picker, and what
+        // is missing when they are not. An icon with the words, so the state
+        // never rests on colour alone.
+        let (listed, status) = picker_status(entry);
+        section.child(
+            div()
+                .flex()
+                .items_start()
+                .gap(px(6.0))
+                .pt(px(2.0))
+                .text_size(sp(11.5))
+                .text_color(if listed {
+                    theme.text_tertiary
+                } else {
+                    theme.warning
+                })
+                .child(icon(
+                    if listed {
+                        "icons/check.svg"
+                    } else {
+                        "icons/alert.svg"
+                    },
+                    12.0,
+                    if listed { theme.success } else { theme.warning },
+                ))
+                .child(div().flex_1().min_w_0().child(status)),
+        )
     }
 
     fn render_provider_actions(
@@ -965,6 +1048,7 @@ impl Waku {
         // Measurements belong to the endpoint that was measured.
         self.model_providers.speed = None;
         self.model_providers.editing_model = None;
+        self.model_providers.model_tests.clear();
         cx.notify();
     }
 
@@ -1257,6 +1341,9 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         if self.model_providers.saving {
+            self.model_providers
+                .queued
+                .push((toast, Box::new(mutate)));
             return;
         }
         self.model_providers.saving = true;
@@ -1300,11 +1387,130 @@ impl Waku {
                     }
                     Err(error) => this.model_providers.error = Some(format!("{error:#}")),
                 }
+                // What was asked for while this one ran goes out now, as one
+                // more read-modify-write, in the order it was asked for.
+                let queued = std::mem::take(&mut this.model_providers.queued);
+                if !queued.is_empty() {
+                    let toast = queued.iter().rev().find_map(|(toast, _)| toast.clone());
+                    let changes: Vec<_> = queued.into_iter().map(|(_, change)| change).collect();
+                    this.commit_registry(
+                        toast,
+                        move |registry| {
+                            for change in changes {
+                                change(registry);
+                            }
+                        },
+                        cx,
+                    );
+                }
                 cx.notify();
             });
         })
         .detach();
     }
+
+    /// Ask one model for one token on the endpoint as typed, in its format.
+    ///
+    /// The endpoint test proves the address and the key; this proves the
+    /// model — a relay lists models its upstream no longer serves, and plenty
+    /// of servers answer no listing at all. The request goes to the URL the
+    /// built-in agent will use, so a green result means the agent can talk
+    /// to that model there.
+    fn test_provider_model(&mut self, model_id: String, cx: &mut Context<Self>) {
+        let Some(entry) = self.selected_provider() else {
+            return;
+        };
+        let (Some(url_input), Some(key_input)) = (
+            self.model_providers.inputs.url.clone(),
+            self.model_providers.inputs.key.clone(),
+        ) else {
+            return;
+        };
+        let raw_url = url_input.read(cx).content().trim().to_owned();
+        let api_key = key_input.read(cx).content().trim().to_owned();
+        let base_url = match sub2api::custom_api::normalize_base_url(&raw_url) {
+            Ok(url) => url,
+            Err(error) => {
+                self.model_providers.error = Some(super::providers_page::url_error_label(&error));
+                cx.notify();
+                return;
+            }
+        };
+        self.model_providers.model_test_generation += 1;
+        let generation = self.model_providers.model_test_generation;
+        self.model_providers.error = None;
+        self.model_providers.model_tests.insert(
+            model_id.clone(),
+            super::providers_page::EndpointTest {
+                running: true,
+                result: None,
+                generation,
+            },
+        );
+        cx.notify();
+
+        let format = entry.format;
+        let model = model_id.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    sub2api::model_test::test_model(format, &base_url, &api_key, &model)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                // Another provider opened, or the test run again since: this
+                // answer belongs to neither.
+                let Some(test) = this.model_providers.model_tests.get_mut(&model_id) else {
+                    return;
+                };
+                if test.generation != generation {
+                    return;
+                }
+                test.running = false;
+                test.result = Some(result);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+}
+
+/// A model test's line: the answer's latency when it answered, otherwise
+/// what the endpoint test would say about the same failure.
+fn model_test_status_line(theme: Theme, test: &super::providers_page::EndpointTest) -> Div {
+    match &test.result {
+        Some(result)
+            if !test.running && result.verdict == sub2api::custom_api::ProbeVerdict::Ok =>
+        {
+            super::providers_page::status_line(
+                theme,
+                "icons/check.svg",
+                theme.success,
+                tr!("model_providers.model_test_ok", ms = result.latency_ms),
+            )
+        }
+        _ => probe_status_line(theme, test),
+    }
+}
+
+/// Whether, and why not, an endpoint's models are in the built-in agent's
+/// picker — the question behind "I added my API and cannot find the model".
+fn picker_status(entry: &ProviderEntry) -> (bool, String) {
+    if entry.offers_models_to_agent() {
+        return (
+            true,
+            tr!("model_providers.picker_listed", count = entry.models.len()),
+        );
+    }
+    let reason = if !entry.enabled {
+        tr!("model_providers.picker_disabled")
+    } else if !entry.is_usable() {
+        tr!("model_providers.picker_needs_key")
+    } else {
+        tr!("model_providers.picker_needs_models")
+    };
+    (false, reason)
 }
 
 /// What to call a slot in a sentence. The ids are internal; these are the

@@ -42,7 +42,9 @@ pub(super) fn native_route_need(
     catalog: &[sub2api::client::ModelCatalogItem],
     misses: &std::collections::HashSet<String>,
 ) -> Option<String> {
-    if !id.contains("::") {
+    // A model on an endpoint of the user's own is routed by that endpoint,
+    // never by a gateway group — a lookup would only hold its first turn.
+    if !id.contains("::") || sub2api::providers::parse_agent_model_id(id).is_some() {
         return None;
     }
     let (_, model) = super::native_agent::native_route_parts(id);
@@ -752,6 +754,12 @@ mod tests {
 
         // The user's own endpoint: no `::`, no gateway key involved.
         assert_eq!(native_route_need("deepseek-v4.1-flash", &fresh, &catalog, &none), None);
+        // Nor on one named in the id: that endpoint routes it, whatever the
+        // catalog lists under the same name.
+        assert_eq!(
+            native_route_need("custom:pr-1::deepseek-v4.1-flash", &fresh, &catalog, &none),
+            None
+        );
     }
 
     #[test]

@@ -128,11 +128,36 @@ pub struct NativeRoutes {
     /// top. Not a secret and not tied to a route, so it has no invariant of
     /// its own — a window is a property of the model name.
     pub context_windows: BTreeMap<String, u64>,
+    /// Every endpoint of the user's own whose models the picker lists, by
+    /// provider id. A session on one of those models (`custom:<id>::<model>`)
+    /// goes to that endpoint in its declared format, whatever the three lines
+    /// above say.
+    ///
+    /// Not subject to the key invariant: a session names its endpoint
+    /// explicitly and never consults `platform_keys` or `model_keys`, so
+    /// listing endpoints here does not empty them.
+    pub endpoints: BTreeMap<String, EndpointRoute>,
+}
+
+/// One endpoint of the user's own, as the built-in agent reaches it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EndpointRoute {
+    pub format: crate::providers::ApiFormat,
+    /// The stored address; the writer normalizes it like every other base.
+    pub base_url: String,
+    pub api_key: String,
+    /// The windows the user declared for this endpoint's models. Kept per
+    /// endpoint: the same model name on the gateway, or on another relay,
+    /// may have another window.
+    pub context_windows: BTreeMap<String, u64>,
 }
 
 impl NativeRoutes {
     pub fn is_empty(&self) -> bool {
-        self.messages.is_none() && self.responses.is_none() && self.chat.is_none()
+        self.messages.is_none()
+            && self.responses.is_none()
+            && self.chat.is_none()
+            && self.endpoints.is_empty()
     }
 
     /// The line feeding one engine provider entry.
@@ -226,6 +251,7 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
             platform_keys,
             model_keys,
             context_windows: native_context_windows(cloud, custom),
+            endpoints: native_endpoints(custom),
         };
         (!routes.is_empty()).then_some(routes)
     };
@@ -240,6 +266,40 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
         opencode: custom_target("opencode"),
         pi: custom_target("pi"),
     }
+}
+
+/// The endpoints whose models the built-in agent's picker lists: every
+/// provider the user described that routes and declares a model
+/// ([`crate::providers::ProviderEntry::offers_models_to_agent`]). Bound to a
+/// slot or not — describing an endpoint and its models is what puts them in
+/// the picker.
+fn native_endpoints(custom: &CustomApiConfig) -> BTreeMap<String, EndpointRoute> {
+    custom
+        .registry
+        .providers
+        .iter()
+        .filter(|entry| entry.offers_models_to_agent())
+        .map(|entry| {
+            let context_windows = entry
+                .models
+                .iter()
+                .filter_map(|model| {
+                    let id = model.id.trim();
+                    let window = model.context_window.filter(|window| *window > 0)?;
+                    (!id.is_empty()).then(|| (id.to_owned(), u64::from(window)))
+                })
+                .collect();
+            (
+                entry.id.clone(),
+                EndpointRoute {
+                    format: entry.format,
+                    base_url: entry.base_url.trim().to_owned(),
+                    api_key: entry.api_key.trim().to_owned(),
+                    context_windows,
+                },
+            )
+        })
+        .collect()
 }
 
 /// The context windows the built-in agent sizes its models by: the gateway
@@ -658,6 +718,99 @@ mod tests {
         assert!(!native.platform_keys.is_empty());
     }
 
+    fn signed_in() -> GatewayConfig {
+        GatewayConfig {
+            enabled: true,
+            endpoint: "https://cloud.example.org".into(),
+            api_key: Some("sk-general".into()),
+            claude_api_key: Some("sk-claude".into()),
+            ..GatewayConfig::default()
+        }
+    }
+
+    fn relay(name: &str, format: ApiFormat, models: &[&str]) -> ProviderEntry {
+        let mut entry = ProviderEntry::new(name, format);
+        entry.base_url = format!("https://{name}.example.org");
+        entry.api_key = format!("sk-{name}");
+        entry.set_model_ids(models.iter().copied());
+        entry
+    }
+
+    /// Describing an endpoint and its models is what puts them in front of
+    /// the built-in agent — on any of the three formats, bound to a line or
+    /// not.
+    #[test]
+    fn every_usable_provider_with_models_is_offered_to_the_agent() {
+        let mut custom = CustomApiConfig::default();
+        let mut messages = relay("kimi", ApiFormat::Anthropic, &["kimi-k3"]);
+        messages.models[0].context_window = Some(256_000);
+        let messages = custom.registry.add(messages);
+        let responses = custom
+            .registry
+            .add(relay("ark", ApiFormat::OpenAiResponses, &["doubao-seed"]));
+        let chat = custom.registry.add(relay("glm", ApiFormat::OpenAiChat, &["glm-5.1"]));
+
+        let native = desired_routes(Some(&signed_in()), &custom).native.unwrap();
+        let ids: Vec<&str> = native.endpoints.keys().map(String::as_str).collect();
+        let mut expected = vec![messages.as_str(), responses.as_str(), chat.as_str()];
+        expected.sort_unstable();
+        assert_eq!(ids, expected);
+        let kimi = &native.endpoints[&messages];
+        assert_eq!(kimi.format, ApiFormat::Anthropic);
+        assert_eq!(kimi.base_url, "https://kimi.example.org");
+        assert_eq!(kimi.api_key, "sk-kimi");
+        assert_eq!(kimi.context_windows, BTreeMap::from([("kimi-k3".to_owned(), 256_000)]));
+        // Undeclared windows stay undeclared.
+        assert!(native.endpoints[&chat].context_windows.is_empty());
+    }
+
+    #[test]
+    fn disabled_incomplete_or_empty_providers_are_not() {
+        let mut custom = CustomApiConfig::default();
+        let mut off = relay("off", ApiFormat::OpenAiChat, &["m"]);
+        off.enabled = false;
+        custom.registry.add(off);
+        let mut keyless = relay("keyless", ApiFormat::OpenAiChat, &["m"]);
+        keyless.api_key.clear();
+        custom.registry.add(keyless);
+        custom.registry.add(relay("empty", ApiFormat::OpenAiChat, &[]));
+
+        let native = desired_routes(Some(&signed_in()), &custom).native.unwrap();
+        assert!(native.endpoints.is_empty());
+    }
+
+    /// Endpoints are chosen by name, never by platform, so listing one does
+    /// not cost the gateway models their per-model keys. Binding a line
+    /// still does: that line sends gateway model ids to the user's server.
+    #[test]
+    fn offering_providers_keeps_the_gateway_key_tables() {
+        let mut custom = CustomApiConfig::default();
+        let id = custom.registry.add(relay("glm", ApiFormat::OpenAiChat, &["glm-5.1"]));
+
+        let native = desired_routes(Some(&signed_in()), &custom).native.unwrap();
+        assert!(!native.endpoints.is_empty());
+        assert!(!native.platform_keys.is_empty());
+        assert_eq!(
+            native.chat.as_ref().map(|route| route.base_url.as_str()),
+            Some("https://cloud.example.org")
+        );
+
+        assert!(custom.bind_provider("native_chat", Some(&id)));
+        let native = desired_routes(Some(&signed_in()), &custom).native.unwrap();
+        assert!(native.platform_keys.is_empty(), "a bound line still empties them");
+    }
+
+    /// Signed out with nothing bound, an endpoint of their own is still a
+    /// route the built-in agent has to be told about.
+    #[test]
+    fn providers_alone_take_the_agent_over() {
+        let mut custom = CustomApiConfig::default();
+        custom.registry.add(relay("glm", ApiFormat::OpenAiChat, &["glm-5.1"]));
+        let native = desired_routes(None, &custom).native.expect("routed");
+        assert!(native.messages.is_none() && native.responses.is_none() && native.chat.is_none());
+        assert_eq!(native.endpoints.len(), 1);
+    }
+
     /// The catalog's windows reach the built-in agent, and what the user
     /// declared for a model of their own endpoint wins — but only a declared
     /// window: the fallback a model entry answers with is a guess.
@@ -892,6 +1045,7 @@ mod tests {
                 ]),
                 model_keys: BTreeMap::new(),
                 context_windows: BTreeMap::new(),
+                endpoints: BTreeMap::new(),
             }),
             claude: Some(target("https://gw.example.org", "sk-c")),
             codex: Some(target("https://gw.example.org", "sk-x")),

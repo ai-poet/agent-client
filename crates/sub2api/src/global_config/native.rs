@@ -22,6 +22,11 @@
 //! (`config.provider`, then a `provider/` prefix, then Anthropic) is
 //! undisturbed for anyone running the engine outside Waku.
 //!
+//! Beside the key table sits `options.endpoints`: every endpoint of the
+//! user's own whose models the picker lists, with its format, address, key
+//! and declared windows. A session on one of those models is routed by that
+//! entry alone and never sees a gateway key.
+//!
 //! Only the keys below are touched. The engine's own model pin, MCP roster,
 //! permission rules, hooks and agent definitions live in the same file and are
 //! left exactly as the user left them.
@@ -52,6 +57,12 @@ pub const MANAGED_PROVIDERS: [&str; 3] = ["anthropic", "openai", "codex"];
 /// Where the per-platform keys live inside the anthropic entry's free-form
 /// options. The bridge reads the same path.
 pub const GATEWAY_KEYS_OPTION: &str = "gateway_keys";
+
+/// Where the user's own endpoints live inside the anthropic entry's options:
+/// `{"<provider id>": {"format", "api_base", "api_key", "context_windows"}}`.
+/// A session on `custom:<provider id>::<model>` is routed by its entry alone.
+/// Kept in step with `waku_agent_bridge::ENDPOINTS_OPTION`.
+pub const ENDPOINTS_OPTION: &str = "endpoints";
 
 /// The member of that table holding the per-model keys. Nested rather than
 /// an option of its own so it is written, cleared and restored with the
@@ -218,11 +229,79 @@ pub fn take_over(
             providers.remove("anthropic");
         }
     }
+    write_endpoints(providers, routes, &previous_providers).map_err(|_| {
+        anyhow!("the anthropic provider entry in {} is not an object", path.display())
+    })?;
     if providers.is_empty() {
         config.remove("provider_configs");
     }
 
     write_settings(&path, &root)
+}
+
+/// File the user's own endpoints on the anthropic entry, beside the gateway
+/// key table — or, with none to list, put back whatever the backup had there.
+///
+/// Only the bridge reads it: the engine never sends a provider entry's
+/// `options` anywhere, and the bridge takes the table out of the loaded
+/// config before a session is built, so an endpoint's key reaches that
+/// endpoint and nothing else.
+fn write_endpoints(
+    providers: &mut Map<String, Value>,
+    routes: &NativeRoutes,
+    previous_providers: &Map<String, Value>,
+) -> std::result::Result<(), ()> {
+    if routes.endpoints.is_empty() {
+        let previous_options = previous_providers
+            .get("anthropic")
+            .and_then(Value::as_object)
+            .and_then(|entry| entry.get("options"))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let Some(entry) = providers.get_mut("anthropic").and_then(Value::as_object_mut) else {
+            return Ok(());
+        };
+        if let Some(options) = entry.get_mut("options").and_then(Value::as_object_mut) {
+            restore_key(options, ENDPOINTS_OPTION, &previous_options);
+            if options.is_empty() {
+                entry.remove("options");
+            }
+        }
+        if entry.is_empty() {
+            providers.remove("anthropic");
+        }
+        return Ok(());
+    }
+    let table: Map<String, Value> = routes
+        .endpoints
+        .iter()
+        .map(|(id, route)| {
+            (
+                id.clone(),
+                json!({
+                    "format": route.format.wire_id(),
+                    // Bare origin like every other base the writer files, so
+                    // the adapters' own `/v1` rule decides the path.
+                    "api_base": anthropic_base_url(&route.base_url),
+                    "api_key": route.api_key,
+                    "context_windows": route.context_windows,
+                }),
+            )
+        })
+        .collect();
+    let entry = providers
+        .entry("anthropic")
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or(())?;
+    let options = entry
+        .entry("options")
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or(())?;
+    options.insert(ENDPOINTS_OPTION.to_owned(), Value::Object(table));
+    Ok(())
 }
 
 /// File the window table in one provider entry's options, or — with no table
@@ -297,6 +376,7 @@ fn restore_provider_entry(
     if let Some(options) = entry.get_mut("options").and_then(Value::as_object_mut) {
         restore_key(options, GATEWAY_KEYS_OPTION, &previous_options);
         restore_key(options, CONTEXT_WINDOWS_OPTION, &previous_options);
+        restore_key(options, ENDPOINTS_OPTION, &previous_options);
         if options.is_empty() {
             entry.remove("options");
         }
@@ -423,6 +503,7 @@ mod tests {
             platform_keys: keys(),
             model_keys: BTreeMap::new(),
             context_windows: BTreeMap::new(),
+            endpoints: BTreeMap::new(),
         }
     }
 
@@ -534,6 +615,104 @@ mod tests {
         assert_eq!(written, expected);
     }
 
+    fn glm_endpoint() -> BTreeMap<String, crate::global_config::EndpointRoute> {
+        BTreeMap::from([(
+            "pr-1".to_owned(),
+            crate::global_config::EndpointRoute {
+                format: crate::providers::ApiFormat::OpenAiChat,
+                base_url: "https://open.bigmodel.cn/api/paas/v4/".to_owned(),
+                api_key: "sk-glm".to_owned(),
+                context_windows: BTreeMap::from([("glm-5.1".to_owned(), 200_000)]),
+            },
+        )])
+    }
+
+    #[test]
+    fn the_endpoint_table_rides_on_the_anthropic_entry() {
+        let dir = tempdir();
+        let mut backups = CliBackups::default();
+        let routes = NativeRoutes {
+            endpoints: glm_endpoint(),
+            ..routes()
+        };
+        take_over(&dir, &routes, &mut backups).unwrap();
+
+        let root = read(&settings_path(&dir));
+        let endpoint = root
+            .pointer("/config/provider_configs/anthropic/options/endpoints/pr-1")
+            .expect("the endpoint is filed");
+        assert_eq!(
+            endpoint,
+            &json!({
+                "format": "chat",
+                // Written as stored: its own version is part of the address.
+                "api_base": "https://open.bigmodel.cn/api/paas/v4",
+                "api_key": "sk-glm",
+                "context_windows": {"glm-5.1": 200_000},
+            })
+        );
+        // Listing an endpoint is not binding a line: the gateway keeps its
+        // keys and all three entries keep pointing at it.
+        assert_eq!(
+            root.pointer("/config/provider_configs/anthropic/options/gateway_keys/openai")
+                .unwrap(),
+            "sk-codex"
+        );
+        assert_eq!(
+            root.pointer("/config/provider_configs/openai/api_base").unwrap(),
+            "https://gateway.example.org"
+        );
+    }
+
+    /// Signed out, with endpoints of their own and no line bound: the table
+    /// is all there is, and nothing else is invented around it.
+    #[test]
+    fn an_endpoint_table_alone_leaves_the_three_entries_alone() {
+        let dir = tempdir();
+        let mut backups = CliBackups::default();
+        let routes = NativeRoutes {
+            endpoints: glm_endpoint(),
+            ..NativeRoutes::default()
+        };
+        take_over(&dir, &routes, &mut backups).unwrap();
+
+        let root = read(&settings_path(&dir));
+        let anthropic = root.pointer("/config/provider_configs/anthropic").unwrap();
+        assert_eq!(anthropic.as_object().unwrap().len(), 1, "{anthropic}");
+        assert!(anthropic.pointer("/options/endpoints/pr-1").is_some());
+        assert!(root.pointer("/config/provider_configs/openai").is_none());
+        assert!(root.pointer("/config/provider_configs/codex").is_none());
+    }
+
+    #[test]
+    fn releasing_routing_removes_the_endpoint_table() {
+        let dir = tempdir();
+        let mut backups = CliBackups::default();
+        let with = NativeRoutes {
+            endpoints: glm_endpoint(),
+            ..routes()
+        };
+        take_over(&dir, &with, &mut backups).unwrap();
+
+        // The last endpoint goes away while the gateway stays.
+        take_over(&dir, &routes(), &mut backups).unwrap();
+        let root = read(&settings_path(&dir));
+        assert!(
+            root.pointer("/config/provider_configs/anthropic/options/endpoints")
+                .is_none()
+        );
+        assert!(
+            root.pointer("/config/provider_configs/anthropic/options/gateway_keys")
+                .is_some()
+        );
+
+        // And a full release takes it with everything else.
+        take_over(&dir, &with, &mut backups).unwrap();
+        restore(&dir, &backups).unwrap();
+        let path = settings_path(&dir);
+        assert!(!path.exists() || read(&path).pointer("/config/provider_configs").is_none());
+    }
+
     /// The point of three slots: three addresses and three keys that do not
     /// bleed into one another.
     #[test]
@@ -547,6 +726,7 @@ mod tests {
             platform_keys: BTreeMap::new(),
             model_keys: BTreeMap::new(),
             context_windows: BTreeMap::new(),
+            endpoints: BTreeMap::new(),
         };
         take_over(&dir, &routes, &mut backups).unwrap();
 
@@ -667,6 +847,7 @@ mod tests {
             platform_keys: BTreeMap::new(),
             model_keys: BTreeMap::new(),
             context_windows: BTreeMap::new(),
+            endpoints: BTreeMap::new(),
         };
         take_over(&dir, &custom, &mut backups).unwrap();
         let root = read(&settings_path(&dir));

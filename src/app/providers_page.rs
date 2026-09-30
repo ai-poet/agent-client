@@ -195,7 +195,7 @@ pub(super) fn probe_status_line(theme: Theme, test: &EndpointTest) -> Div {
 }
 
 /// A status line inside a card: icon, tinted text.
-fn status_line(theme: Theme, icon_path: &'static str, color: gpui::Hsla, text: String) -> Div {
+pub(super) fn status_line(theme: Theme, icon_path: &'static str, color: gpui::Hsla, text: String) -> Div {
     let _ = theme;
     div()
         .flex()

@@ -18,10 +18,14 @@
 //! The wire format — Anthropic Messages, OpenAI Responses, OpenAI Chat
 //! Completions — is a property of the model, and each model has exactly one.
 //! Claude is served over Messages; the GPT and Grok families over Responses;
-//! DeepSeek, Kimi, GLM and MiniMax over Chat Completions, which is also where
-//! the models a user declared on their own endpoint go. A model belonging to
-//! none of those is not offered at all — there is no API to send it over, so
-//! listing it would only promise something that fails.
+//! DeepSeek, Kimi, GLM and MiniMax over Chat Completions. A model belonging
+//! to none of those is not offered at all — there is no API to send it over,
+//! so listing it would only promise something that fails.
+//!
+//! The models a user declared on an endpoint of their own are listed too,
+//! every endpoint under its own name, as `custom:<provider id>::<model>`
+//! ([`native_endpoint_models`]). No rule reads those names: they go to that
+//! endpoint in the format it declared, with the key it holds.
 //!
 //! That one format lands in the model's "service tier" slot, which is what
 //! the composer's traits menu names. The picker does not file the list by
@@ -32,7 +36,10 @@
 //! Pure mapping plus the hooks that apply it; the fetch is the Plaza's.
 
 use sub2api::client::ModelCatalogItem;
-use sub2api::providers::ModelEntry;
+use sub2api::custom_api::CustomApiConfig;
+use sub2api::providers::{
+    AGENT_MODEL_PREFIX, ApiFormat, ProviderEntry, agent_model_id, parse_agent_model_id,
+};
 
 use super::*;
 // Explicit rather than relying on the glob: `ProviderModelOption` is used by
@@ -142,6 +149,65 @@ pub(super) fn migrate_legacy_pay_as_you_go(state: &mut PersistedState) -> bool {
     changed
 }
 
+/// Rewrite the built-in agent ids earlier builds saved for a model of the
+/// endpoint bound to Chat Completions — bare, `my-model` — to the id the
+/// picker lists it under now, `custom:<provider id>::my-model`, so a session
+/// keeps its model and its star.
+///
+/// Only the ids the old path really sent there: ones `chat` lists, and that
+/// no name rule placed — a bare `claude-*` went to Messages whatever the
+/// list said, and still routes that way untouched. `chat` is the endpoint
+/// that line is bound to, when it offers models. Returns whether anything
+/// changed; a second run finds nothing bare to move.
+pub(super) fn migrate_bare_endpoint_ids(
+    state: &mut PersistedState,
+    chat: Option<&ProviderEntry>,
+) -> bool {
+    let Some(chat) = chat.filter(|entry| entry.offers_models_to_agent()) else {
+        return false;
+    };
+    let mut changed = false;
+    let mut moved = |id: &mut String| {
+        let bare = id.trim();
+        if bare.contains("::")
+            || native_format_for_model("", bare).is_some()
+            || !chat.models.iter().any(|model| model.id.trim() == bare)
+        {
+            return;
+        }
+        *id = agent_model_id(&chat.id, bare);
+        changed = true;
+    };
+    for session in state
+        .sessions
+        .iter_mut()
+        .filter(|session| session.provider.is_builtin())
+    {
+        if let Some(model) = session.model.as_mut() {
+            moved(model);
+        }
+    }
+    for favorite in state
+        .favorite_models
+        .iter_mut()
+        .filter(|favorite| favorite.provider.is_builtin())
+    {
+        moved(&mut favorite.model);
+    }
+    if state.last_provider.is_builtin()
+        && let Some(model) = state.last_model.as_mut()
+    {
+        moved(model);
+    }
+    if changed {
+        let mut seen = std::collections::HashSet::new();
+        state
+            .favorite_models
+            .retain(|favorite| seen.insert((favorite.provider, favorite.model.clone())));
+    }
+    changed
+}
+
 /// Move someone who never chose a provider onto the built-in agent.
 ///
 /// Upstream's new-session default was Codex, and the first launch wrote it
@@ -217,8 +283,8 @@ pub(super) fn native_models_from_catalog(items: &[ModelCatalogItem]) -> Vec<Prov
 /// Token-billed models on every platform qualify; image and per-request
 /// products are not something a coding agent can drive. Anthropic and OpenAI
 /// families get the reasoning ladder the engine understands, with
-/// `ultracode` on the ones that accept `xhigh`. The first Sonnet 5 is the
-/// default, since it is the engine's own default family.
+/// `ultracode` on the ones that accept `xhigh`. Sonnet 5.5 is the default
+/// ([`default_row`]), else the first Sonnet 5: the engine's own default family.
 ///
 /// The catalog lists a model once per group that serves it; the picker
 /// lists it once. The row comes from the entry of the group routing sends it
@@ -264,14 +330,31 @@ pub(super) fn native_models_routed(
         models.extend(native_row(item, &platform, format!("{platform}::{model_id}"), note));
     }
 
-    if let Some(default) = models
-        .iter()
-        .position(|model| model.id.contains("sonnet-5"))
-        .or_else(|| (!models.is_empty()).then_some(0))
-    {
+    if let Some(default) = default_row(&models) {
         models[default].is_default = true;
     }
     models
+}
+
+/// The row the built-in agent starts on: Sonnet 5.5, else the first Sonnet 5,
+/// else the first row. Read off the bare model id, so the catalog's order —
+/// which follows price, not recency — cannot decide it.
+fn default_row(models: &[ProviderModel]) -> Option<usize> {
+    let bare = |model: &ProviderModel| -> String {
+        native_route_parts(&model.id)
+            .1
+            .trim()
+            .to_ascii_lowercase()
+            .replace('.', "-")
+    };
+    models
+        .iter()
+        .position(|model| {
+            let id = bare(model);
+            id == "claude-sonnet-5-5" || id.starts_with("claude-sonnet-5-5-")
+        })
+        .or_else(|| models.iter().position(|model| bare(model).contains("sonnet-5")))
+        .or_else(|| (!models.is_empty()).then_some(0))
 }
 
 /// One picker row for a catalog entry: `id` as the picker sends it, the
@@ -488,8 +571,8 @@ pub(super) static NATIVE_WIRE_FORMATS: [WireFormatOption; 3] = [
 ///
 /// Chat Completions carries DeepSeek, Kimi, GLM and MiniMax: the gateway
 /// serves them from accounts that speak it and forwards it as it is. The
-/// models a user declared on their own endpoint ([`native_custom_models`])
-/// land there too, by another road.
+/// models a user declared on their own endpoint ([`native_endpoint_models`])
+/// never come through here: their endpoint declared its format.
 pub(super) fn native_format_for_model(platform: &str, model: &str) -> Option<&'static str> {
     let model = model.trim().to_ascii_lowercase();
     if model.starts_with("claude") {
@@ -616,8 +699,14 @@ pub(super) static NATIVE_VENDORS: [NativeVendor; 11] = [
 ];
 
 /// The column entry for one vendor id; an id the table does not know is
-/// filed under "other".
+/// filed under "other". One of the user's own endpoints (`custom:<id>`)
+/// wears the `custom` mark.
 pub(super) fn native_vendor(id: &str) -> &'static NativeVendor {
+    let id = if id.starts_with(AGENT_MODEL_PREFIX) {
+        CUSTOM_VENDOR
+    } else {
+        id
+    };
     NATIVE_VENDORS
         .iter()
         .find(|vendor| vendor.id == id)
@@ -627,19 +716,28 @@ pub(super) fn native_vendor(id: &str) -> &'static NativeVendor {
 
 /// Which vendor the picker files one of the built-in agent's models under.
 ///
-/// A model on the user's own endpoint is theirs whatever it is called — its
-/// route and key are the user's, not the vendor's — so it goes under
-/// `custom`. Otherwise the name decides, the way it decides the API, and the
-/// platform ahead of the `::` only for a name that gives nothing away: a
-/// composite group reports `composite` for everything in it.
-pub(super) fn native_vendor_of(model: &ProviderModel) -> &'static str {
-    if !model.id.contains("::") {
-        if model.sub_provider.as_deref() == Some("custom") {
-            return CUSTOM_VENDOR;
-        }
-        return vendor_by_name(&model.id).unwrap_or(OTHER_VENDOR);
+/// A model on one of the user's own endpoints is that endpoint's whatever
+/// it is called — its route and key are the user's, not the vendor's — so
+/// it is filed under the endpoint itself, `custom:<provider id>`, and each
+/// endpoint gets a column entry of its own. Otherwise the name decides, the
+/// way it decides the API, and the platform ahead of the `::` only for a
+/// name that gives nothing away: a composite group reports `composite` for
+/// everything in it.
+pub(super) fn native_vendor_of(model: &ProviderModel) -> &str {
+    native_vendor_of_id(&model.id)
+}
+
+/// [`native_vendor_of`] for a bare picker id.
+pub(super) fn native_vendor_of_id(id: &str) -> &str {
+    if parse_agent_model_id(id).is_some()
+        && let Some((platform, _)) = id.split_once("::")
+    {
+        return platform.trim();
     }
-    let (platform, name) = native_route_parts(&model.id);
+    if !id.contains("::") {
+        return vendor_by_name(id).unwrap_or(OTHER_VENDOR);
+    }
+    let (platform, name) = native_route_parts(id);
     if let Some(vendor) = vendor_by_name(name) {
         return vendor;
     }
@@ -659,24 +757,84 @@ fn vendor_by_name(model: &str) -> Option<&'static str> {
     (name.starts_with("qwen") || name.starts_with("qwq")).then_some("qwen")
 }
 
-/// The vendors the column draws for a list, in table order, each with how
-/// many models it holds. A vendor with none is left out, except `custom`,
-/// which is always there to say where the user's own models go.
-pub(super) fn native_vendors_present(
-    models: &[ProviderModel],
-) -> Vec<(&'static NativeVendor, usize)> {
+/// One entry of the vendor column as drawn: a vendor of the table, or one
+/// of the user's own endpoints, which the table cannot name in advance.
+#[derive(Clone)]
+pub(super) struct VendorEntry {
+    /// What the column filters by — a table id, or `custom:<provider id>`.
+    pub id: String,
+    /// The name shown, already in the UI's language.
+    pub label: String,
+    /// The mark and hue drawn beside it.
+    pub vendor: &'static NativeVendor,
+    pub count: usize,
+}
+
+/// The vendors the column draws for a list: the table's vendors that hold
+/// models, in table order, then each of the user's own endpoints under its
+/// own name, in the order the list has them — the way ZCode gives every
+/// provider a group of its own. With no endpoint listed, a `custom` entry
+/// stands in their place, to say where models of the user's own go.
+pub(super) fn native_vendors_present(models: &[ProviderModel]) -> Vec<VendorEntry> {
     let mut counts = vec![0usize; NATIVE_VENDORS.len()];
+    let mut endpoints: Vec<VendorEntry> = Vec::new();
     for model in models {
         let id = native_vendor_of(model);
-        if let Some(index) = NATIVE_VENDORS.iter().position(|vendor| vendor.id == id) {
+        if id.starts_with(AGENT_MODEL_PREFIX) {
+            match endpoints.iter_mut().find(|entry| entry.id == id) {
+                Some(entry) => entry.count += 1,
+                None => endpoints.push(VendorEntry {
+                    id: id.to_owned(),
+                    label: model
+                        .sub_provider
+                        .clone()
+                        .filter(|label| !label.trim().is_empty())
+                        .unwrap_or_else(|| tr!("model_providers.unnamed")),
+                    vendor: native_vendor(CUSTOM_VENDOR),
+                    count: 1,
+                }),
+            }
+        } else if let Some(index) = NATIVE_VENDORS.iter().position(|vendor| vendor.id == id) {
             counts[index] += 1;
         }
     }
-    NATIVE_VENDORS
+    let mut present: Vec<VendorEntry> = NATIVE_VENDORS
         .iter()
         .zip(counts)
-        .filter(|(vendor, count)| *count > 0 || vendor.id == CUSTOM_VENDOR)
-        .collect()
+        .filter(|(vendor, count)| *count > 0 && vendor.id != CUSTOM_VENDOR)
+        .map(|(vendor, count)| VendorEntry {
+            id: vendor.id.to_owned(),
+            label: crate::i18n::translate(vendor.label),
+            vendor,
+            count,
+        })
+        .collect();
+    if endpoints.is_empty() {
+        let custom = native_vendor(CUSTOM_VENDOR);
+        present.push(VendorEntry {
+            id: custom.id.to_owned(),
+            label: crate::i18n::translate(custom.label),
+            vendor: custom,
+            count: 0,
+        });
+    } else {
+        present.extend(endpoints);
+    }
+    present
+}
+
+/// Whether the column entry `id` is where models of the user's own go —
+/// the placeholder, or one of their endpoints — which is where the picker
+/// offers a way to manage them.
+pub(super) fn is_endpoint_vendor(id: &str) -> bool {
+    id == CUSTOM_VENDOR || id.starts_with(AGENT_MODEL_PREFIX)
+}
+
+/// The provider id behind an endpoint's column entry (`custom:<id>`), or
+/// `None` for a vendor of the table and for the placeholder.
+pub(super) fn endpoint_of_vendor(id: &str) -> Option<&str> {
+    id.strip_prefix(AGENT_MODEL_PREFIX)
+        .filter(|provider| sub2api::providers::is_safe_endpoint_id(provider))
 }
 
 fn reasoning_effort_label(effort: &str) -> String {
@@ -691,39 +849,50 @@ fn reasoning_effort_label(effort: &str) -> String {
     }
 }
 
-/// The models a user declared on their own endpoint for the built-in agent.
+/// The picker rows for the models the user declared on one endpoint of
+/// their own.
 ///
-/// These are the Chat Completions list: the managed catalog never puts
-/// anything there, because the gateway's own model families each have a
-/// better route. An endpoint the user points somewhere else is the one case
-/// where this app cannot know what the models are called or what they speak,
-/// so it takes their word for it.
-pub(super) fn native_custom_models(models: &[ModelEntry]) -> Vec<ProviderModel> {
+/// This app cannot know what somebody else's endpoint serves or what it
+/// speaks, so it takes the user's word for all of it: the id goes out as
+/// written, the one API is the endpoint's declared format, and the
+/// reasoning ladder is the tiers declared for the model. Each id names its
+/// endpoint (`custom:<provider id>::<model>`), which is what routes it there
+/// and what lets two endpoints list the same model name side by side.
+pub(super) fn native_endpoint_models(entry: &ProviderEntry) -> Vec<ProviderModel> {
+    let label = entry
+        .label()
+        .unwrap_or_else(|| tr!("model_providers.unnamed"));
+    let format = native_format_option(entry.format.wire_id());
     let mut seen = std::collections::HashSet::new();
-    models
+    entry
+        .models
         .iter()
         .filter(|model| !model.id.trim().is_empty())
         .filter(|model| seen.insert(model.id.trim().to_string()))
         .map(|model| {
-            let id = model.id.trim();
-            let mut entry = ProviderModel::new(id, model.display_name());
-            entry.sub_provider = Some("custom".to_owned());
-            let entry = entry.service_tiers(
-                [ProviderModelOption::new("chat", crate::i18n::translate("model_option.wire_chat"))
-                    .description(crate::i18n::translate("model_option.wire_chat_description"))],
-                "chat",
+            let mut row = ProviderModel::new(
+                agent_model_id(&entry.id, &model.id),
+                model.display_name(),
             );
+            row.sub_provider = Some(label.clone());
+            if let Some(format) = format {
+                row = row.service_tiers(
+                    [ProviderModelOption::new(format.id, crate::i18n::translate(format.label))
+                        .description(crate::i18n::translate(format.description))],
+                    format.id,
+                );
+            }
             // The tiers the user declared, in the order they wrote them. An
             // endpoint that does not reason declares none, and the traits
             // menu then offers no ladder rather than one that is refused.
             if model.reasoning_efforts.is_empty() {
-                return entry;
+                return row;
             }
             let default = model
                 .default_reasoning_effort()
                 .unwrap_or(&model.reasoning_efforts[0])
                 .to_owned();
-            entry.reasoning(
+            row.reasoning(
                 model.reasoning_efforts.iter().map(|effort| {
                     ProviderModelOption::new(effort.clone(), reasoning_effort_label(effort))
                 }),
@@ -733,17 +902,57 @@ pub(super) fn native_custom_models(models: &[ModelEntry]) -> Vec<ProviderModel> 
         .collect()
 }
 
-/// What the built-in agent's probe lists: the catalog plus the user's own
-/// endpoint models, or the engine's fallback list when both are empty. Never
-/// empty, so a signed-out picker still has rows and a signed-in one never
-/// blanks between a sign-out and the next catalog.
+/// The formats whose gateway rows a bound line hides.
+///
+/// A line of Settings → Agent bound to an endpoint of the user's own sends
+/// everything of its format there — the gateway's rows of that format would
+/// no longer reach the gateway, so listing them would be a lie. Only when
+/// that endpoint lists models of its own, though: otherwise those rows are
+/// the only way to reach the line at all.
+pub(super) fn shadowed_formats(custom: &CustomApiConfig) -> Vec<&'static str> {
+    sub2api::custom_api::NATIVE_SLOTS
+        .into_iter()
+        .filter(|slot| custom.routed_endpoint(slot).is_some())
+        .filter(|slot| {
+            custom
+                .bound_provider(slot)
+                .is_some_and(ProviderEntry::offers_models_to_agent)
+        })
+        .filter_map(sub2api::providers::format_for_slot)
+        .map(ApiFormat::wire_id)
+        .collect()
+}
+
+/// What the built-in agent's probe lists: the catalog — less the rows a
+/// bound line takes away from the gateway — then every endpoint of the
+/// user's own that offers models, in the order Settings → Model providers
+/// lists them; or the engine's fallback list when all of that is empty.
+/// Never empty, so a signed-out picker still has rows and a signed-in one
+/// never blanks between a sign-out and the next catalog.
 pub(super) fn native_probe_models(
     items: &[ModelCatalogItem],
     routing: &NativeRouting,
-    custom: &[ModelEntry],
+    endpoints: &[ProviderEntry],
+    shadowed: &[&str],
 ) -> Vec<ProviderModel> {
     let mut models = native_models_routed(items, routing);
-    models.extend(native_custom_models(custom));
+    if !shadowed.is_empty() {
+        models.retain(|model| {
+            !model
+                .default_service_tier
+                .as_deref()
+                .is_some_and(|tier| shadowed.contains(&tier))
+        });
+        // The default may have been one of the rows just dropped.
+        if !models.iter().any(|model| model.is_default)
+            && let Some(index) = default_row(&models)
+        {
+            models[index].is_default = true;
+        }
+    }
+    for entry in endpoints.iter().filter(|entry| entry.offers_models_to_agent()) {
+        models.extend(native_endpoint_models(entry));
+    }
     if models.is_empty() {
         crate::model_catalog::fallback_models(ProviderKind::Native)
     } else {
@@ -753,23 +962,25 @@ pub(super) fn native_probe_models(
 
 impl Waku {
     /// Re-derive the built-in agent's model list from the catalog held in
-    /// `model_plaza.items`, the one source of truth for it.
+    /// `model_plaza.items` and the endpoints held in the provider registry.
     ///
     /// Idempotent and cheap, so it runs after anything that could have
     /// replaced the probe's list: a catalog landing, a sign-out clearing
     /// it, a daemon probe answering with the fallback list, a language
-    /// change relabelling the reasoning ladder.
+    /// change relabelling the reasoning ladder, an endpoint saved.
     pub(super) fn sync_native_models(&mut self) {
-        // Through the binding, so the models the picker offers are the ones
-        // on the endpoint that actually routes — not a copy a slot happens
-        // to still carry.
+        // Every endpoint that offers models, bound to a line or not: the
+        // picker used to read only the one bound to Chat Completions, so an
+        // endpoint on Messages or Responses — or on no line at all — never
+        // showed its models anywhere.
         let stored = self.custom_api_snapshot();
-        let custom = stored
-            .bound_provider("native_chat")
-            .filter(|entry| entry.is_routable())
-            .map(|entry| entry.models.clone())
-            .unwrap_or_default();
-        let models = native_probe_models(&self.model_plaza.items, &self.native_routing(), &custom);
+        let shadowed = shadowed_formats(&stored);
+        let models = native_probe_models(
+            &self.model_plaza.items,
+            &self.native_routing(),
+            &stored.registry.providers,
+            &shadowed,
+        );
         if let Some(probe) = self
             .probes
             .iter_mut()
@@ -798,6 +1009,7 @@ impl Waku {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sub2api::providers::ModelEntry;
 
     fn item(model: &str, platform: &str) -> ModelCatalogItem {
         ModelCatalogItem {
@@ -884,8 +1096,17 @@ mod tests {
         assert!(native_models_from_catalog(&[item("some-unknown-model", "")]).is_empty());
     }
 
+    fn endpoint(id: &str, name: &str, format: ApiFormat, models: &[&str]) -> ProviderEntry {
+        let mut entry = ProviderEntry::new(name, format);
+        entry.id = id.to_owned();
+        entry.base_url = "https://relay.example.org".to_owned();
+        entry.api_key = "sk-relay".to_owned();
+        entry.set_model_ids(models.iter().copied());
+        entry
+    }
+
     #[test]
-    fn the_chat_section_holds_the_chat_families_and_the_users_own_models() {
+    fn the_chat_section_holds_the_chat_families() {
         // Of the managed catalog, only the families the gateway serves over
         // Chat Completions land there.
         let catalog = native_models_from_catalog(&[
@@ -900,35 +1121,79 @@ mod tests {
             .map(|model| model.id.as_str())
             .collect();
         assert_eq!(chat, ["deepseek::deepseek-v4.1-flash"]);
+    }
 
-        let declared = native_custom_models(&[
-            ModelEntry::new("my-model"),
-            ModelEntry::new(" "),
-            ModelEntry::new("my-model"),
-        ]);
+    /// The report this fixes: an endpoint bound to Messages or Responses —
+    /// or to no line at all — never showed its models. Every endpoint that
+    /// routes and declares models is listed, under its own name.
+    #[test]
+    fn every_usable_provider_is_listed_under_its_own_name() {
+        let mut entry = endpoint("pr-1", "Kimi", ApiFormat::Anthropic, &["kimi-k3", " ", "kimi-k3"]);
+        entry.models.push(ModelEntry::new(" "));
+        let declared = native_endpoint_models(&entry);
         let ids: Vec<&str> = declared.iter().map(|model| model.id.as_str()).collect();
-        assert_eq!(ids, ["my-model"], "blank and duplicate entries are dropped");
-        assert_eq!(declared[0].default_service_tier.as_deref(), Some("chat"));
-        // A bare id, with no platform ahead of a `::`: nothing on the
-        // gateway claims it.
-        assert!(!declared[0].id.contains("::"));
+        assert_eq!(ids, ["custom:pr-1::kimi-k3"], "blank and duplicate entries are dropped");
+        assert_eq!(declared[0].sub_provider.as_deref(), Some("Kimi"));
+        assert_eq!(declared[0].name, "kimi-k3");
         // Nothing declared, so no ladder is offered — one whose tiers the
         // endpoint refuses is worse than none.
         assert!(declared[0].reasoning_efforts.is_empty());
-        assert_eq!(declared[0].name, "my-model");
+
+        let models = native_probe_models(
+            &[item("claude-sonnet-5", "anthropic")],
+            &NativeRouting::default(),
+            &[
+                entry,
+                endpoint("pr-2", "", ApiFormat::OpenAiResponses, &["doubao-seed"]),
+                endpoint("pr-3", "Off", ApiFormat::OpenAiChat, &[]),
+            ],
+            &[],
+        );
+        let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "anthropic::claude-sonnet-5",
+                "custom:pr-1::kimi-k3",
+                "custom:pr-2::doubao-seed"
+            ]
+        );
+        // An unnamed endpoint is called by its host.
+        assert_eq!(models[2].sub_provider.as_deref(), Some("relay.example.org"));
+    }
+
+    /// The endpoint said what it speaks; the name does not get a vote.
+    #[test]
+    fn a_providers_declared_format_is_never_overruled_by_the_name() {
+        for (format, model, tier) in [
+            (ApiFormat::OpenAiChat, "claude-sonnet-5", "chat"),
+            (ApiFormat::Anthropic, "glm-5.1", "messages"),
+            (ApiFormat::OpenAiResponses, "deepseek-v4", "responses"),
+        ] {
+            let declared = native_endpoint_models(&endpoint("pr-1", "Relay", format, &[model]));
+            let tiers: Vec<&str> = declared[0]
+                .service_tiers
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect();
+            assert_eq!(tiers, [tier], "{model}");
+            assert_eq!(declared[0].default_service_tier.as_deref(), Some(tier));
+        }
     }
 
     /// What the user typed about their own models is the only thing anything
     /// knows about them, so it has to reach the picker intact.
     #[test]
     fn a_declared_name_and_reasoning_ladder_reach_the_picker() {
-        let declared = native_custom_models(&[ModelEntry {
+        let mut entry = endpoint("pr-1", "Relay", ApiFormat::OpenAiChat, &[]);
+        entry.models = vec![ModelEntry {
             name: "My relay's Sonnet".to_owned(),
             reasoning_efforts: vec!["low".to_owned(), "high".to_owned()],
             default_reasoning: Some("high".to_owned()),
             ..ModelEntry::new("relay-sonnet")
-        }]);
-        assert_eq!(declared[0].id, "relay-sonnet");
+        }];
+        let declared = native_endpoint_models(&entry);
+        assert_eq!(declared[0].id, "custom:pr-1::relay-sonnet");
         assert_eq!(declared[0].name, "My relay's Sonnet");
         let tiers: Vec<&str> = declared[0]
             .reasoning_efforts
@@ -940,12 +1205,118 @@ mod tests {
 
         // A default naming a tier that is not offered falls back to the
         // first, rather than starting the session on something refused.
-        let stray = native_custom_models(&[ModelEntry {
+        entry.models = vec![ModelEntry {
             reasoning_efforts: vec!["low".to_owned()],
             default_reasoning: Some("max".to_owned()),
             ..ModelEntry::new("relay-sonnet")
-        }]);
+        }];
+        let stray = native_endpoint_models(&entry);
         assert_eq!(stray[0].default_reasoning_effort.as_deref(), Some("low"));
+    }
+
+    /// A line bound to an endpoint with models of its own sends everything
+    /// of that format there, so the gateway's rows of that format go.
+    #[test]
+    fn a_bound_slot_hides_the_gateway_rows_it_shadows() {
+        let catalog = [
+            item("claude-sonnet-5-5", "anthropic"),
+            item("deepseek-v4.1-flash", "deepseek"),
+            item("gpt-6.1-sol", "openai"),
+        ];
+        let glm = endpoint("pr-1", "GLM", ApiFormat::OpenAiChat, &["glm-5.1"]);
+        let models = native_probe_models(
+            &catalog,
+            &NativeRouting::default(),
+            std::slice::from_ref(&glm),
+            &["chat"],
+        );
+        let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "anthropic::claude-sonnet-5-5",
+                "openai::gpt-6.1-sol",
+                "custom:pr-1::glm-5.1"
+            ]
+        );
+
+        let mut custom = CustomApiConfig::default();
+        let id = custom.registry.add(glm);
+        assert!(custom.bind_provider("native_chat", Some(&id)));
+        assert_eq!(shadowed_formats(&custom), ["chat"]);
+    }
+
+    #[test]
+    fn a_bound_slot_without_models_hides_nothing() {
+        let mut custom = CustomApiConfig::default();
+        let id = custom
+            .registry
+            .add(endpoint("pr-1", "Relay", ApiFormat::Anthropic, &[]));
+        assert!(custom.bind_provider("native_messages", Some(&id)));
+        assert!(custom.routed_endpoint("native_messages").is_some());
+        assert!(shadowed_formats(&custom).is_empty());
+        // And an endpoint no line is bound to hides nothing either.
+        let mut custom = CustomApiConfig::default();
+        custom
+            .registry
+            .add(endpoint("pr-2", "Relay", ApiFormat::Anthropic, &["m"]));
+        assert!(shadowed_formats(&custom).is_empty());
+    }
+
+    /// When the bound line took the default's row away, another one is
+    /// picked rather than none.
+    #[test]
+    fn hiding_the_default_row_picks_another() {
+        let models = native_probe_models(
+            &[item("claude-sonnet-5-5", "anthropic"), item("gpt-6.1-sol", "openai")],
+            &NativeRouting::default(),
+            &[endpoint("pr-1", "Relay", ApiFormat::Anthropic, &["relay-model"])],
+            &["messages"],
+        );
+        let defaults: Vec<&str> = models
+            .iter()
+            .filter(|model| model.is_default)
+            .map(|model| model.id.as_str())
+            .collect();
+        assert_eq!(defaults, ["openai::gpt-6.1-sol"]);
+    }
+
+    /// Ids the old Chat-slot path saved bare move to the endpoint they
+    /// belong to; anything a name rule placed stays where it routes.
+    #[test]
+    fn bare_ids_saved_on_the_chat_slot_move_to_their_provider() {
+        let chat = endpoint("pr-1", "Relay", ApiFormat::OpenAiChat, &["my-model", "claude-sonnet-5"]);
+        let mut state = PersistedState::fresh(std::path::PathBuf::from("."));
+        let project = state.projects[0].id;
+        let mut session = AgentSession::new(project, ProviderKind::Native);
+        session.model = Some("my-model".to_owned());
+        let mut claude = AgentSession::new(project, ProviderKind::Native);
+        claude.model = Some("claude-sonnet-5".to_owned());
+        state.sessions.push(session);
+        state.sessions.push(claude);
+        state.favorite_models = vec![
+            FavoriteModel {
+                provider: ProviderKind::Native,
+                model: "my-model".to_owned(),
+            },
+            FavoriteModel {
+                provider: ProviderKind::Native,
+                model: "custom:pr-1::my-model".to_owned(),
+            },
+        ];
+        state.last_provider = ProviderKind::Native;
+        state.last_model = Some("my-model".to_owned());
+
+        assert!(migrate_bare_endpoint_ids(&mut state, Some(&chat)));
+        assert_eq!(state.sessions[state.sessions.len() - 2].model.as_deref(), Some("custom:pr-1::my-model"));
+        // A bare `claude-*` went to Messages under the old rule, and still does.
+        assert_eq!(state.sessions[state.sessions.len() - 1].model.as_deref(), Some("claude-sonnet-5"));
+        assert_eq!(state.last_model.as_deref(), Some("custom:pr-1::my-model"));
+        // Both stars were the same model; one is left.
+        assert_eq!(state.favorite_models.len(), 1);
+
+        assert!(!migrate_bare_endpoint_ids(&mut state, Some(&chat)), "a second launch moves nothing");
+        assert!(!migrate_bare_endpoint_ids(&mut state, None));
     }
 
     #[test]
@@ -1000,11 +1371,11 @@ mod tests {
         };
         let fallback = ids(crate::model_catalog::fallback_models(ProviderKind::Native));
         assert!(!fallback.is_empty());
-        assert_eq!(ids(native_probe_models(&[], &NativeRouting::default(), &[])), fallback);
+        assert_eq!(ids(native_probe_models(&[], &NativeRouting::default(), &[], &[])), fallback);
         // A catalog with nothing a coding agent can drive counts as empty.
         let mut image = item("gpt-image-2", "openai");
         image.billing_mode = "image".into();
-        assert_eq!(ids(native_probe_models(&[image], &NativeRouting::default(), &[])), fallback);
+        assert_eq!(ids(native_probe_models(&[image], &NativeRouting::default(), &[], &[])), fallback);
     }
 
     #[test]
@@ -1012,6 +1383,7 @@ mod tests {
         let models = native_probe_models(
             &[item("claude-sonnet-5", "anthropic")],
             &NativeRouting::default(),
+            &[],
             &[],
         );
         let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
@@ -1023,9 +1395,14 @@ mod tests {
         // Signed out of the managed service but pointed at an endpoint of
         // their own: the picker lists what they declared, not the built-in
         // Anthropic list they cannot reach.
-        let models = native_probe_models(&[], &NativeRouting::default(), &[ModelEntry::new("my-model")]);
+        let models = native_probe_models(
+            &[],
+            &NativeRouting::default(),
+            &[endpoint("pr-1", "Mine", ApiFormat::OpenAiChat, &["my-model"])],
+            &[],
+        );
         let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
-        assert_eq!(ids, ["my-model"]);
+        assert_eq!(ids, ["custom:pr-1::my-model"]);
     }
 
     #[test]
@@ -1036,6 +1413,43 @@ mod tests {
         ]);
         assert!(!models[0].is_default);
         assert!(models[1].is_default);
+    }
+
+    /// The catalog orders by price, so which Sonnet 5 came first used to
+    /// decide the default. The newest one wins now, however it is spelled.
+    #[test]
+    fn sonnet_5_5_is_preferred_as_default() {
+        let models = native_models_from_catalog(&[
+            item("claude-sonnet-5", "anthropic"),
+            item("claude-opus-5-5", "anthropic"),
+            item("claude-sonnet-5-5", "anthropic"),
+        ]);
+        let default: Vec<&str> = models
+            .iter()
+            .filter(|model| model.is_default)
+            .map(|model| model.id.as_str())
+            .collect();
+        assert_eq!(default, ["anthropic::claude-sonnet-5-5"]);
+
+        let dotted = native_models_from_catalog(&[
+            item("claude-sonnet-5", "anthropic"),
+            item("claude-sonnet-5.5", "anthropic"),
+        ]);
+        assert!(!dotted[0].is_default);
+        assert!(dotted[1].is_default);
+    }
+
+    #[test]
+    fn gpt_6_1_sol_goes_over_responses_with_a_ladder() {
+        let models = native_models_from_catalog(&[item("gpt-6.1-sol", "openai")]);
+        assert_eq!(models[0].id, "openai::gpt-6.1-sol");
+        assert_eq!(models[0].default_service_tier.as_deref(), Some("responses"));
+        let ladder: Vec<&str> = models[0]
+            .reasoning_efforts
+            .iter()
+            .map(|option| option.id.as_str())
+            .collect();
+        assert_eq!(ladder, ["low", "medium", "high", "xhigh", "max"]);
     }
 
     /// The report that started per-model routing: the Codex group also
@@ -1264,7 +1678,7 @@ mod tests {
 
     #[test]
     fn a_model_is_filed_under_its_vendor() {
-        let vendor = |id: &str| native_vendor_of(&ProviderModel::new(id, id));
+        let vendor = |id: &str| native_vendor_of_id(id).to_owned();
         assert_eq!(vendor("zhipu::glm-5"), "zhipu");
         // The name beats the group's platform, as it does for the API.
         assert_eq!(vendor("composite::glm-4.6"), "zhipu");
@@ -1279,9 +1693,18 @@ mod tests {
         // The signed-out fallback list: bare ids, read by name.
         assert_eq!(vendor("claude-sonnet-5"), "anthropic");
 
-        // The user's own endpoint keeps its models whatever they are called.
-        let declared = native_custom_models(&[ModelEntry::new("deepseek-chat")]);
-        assert_eq!(native_vendor_of(&declared[0]), CUSTOM_VENDOR);
+        // The user's own endpoint keeps its models whatever they are called,
+        // each endpoint under itself.
+        let declared = native_endpoint_models(&endpoint(
+            "pr-1",
+            "Relay",
+            ApiFormat::OpenAiChat,
+            &["deepseek-chat"],
+        ));
+        assert_eq!(native_vendor_of(&declared[0]), "custom:pr-1");
+        assert_eq!(native_vendor("custom:pr-1").id, CUSTOM_VENDOR);
+        assert!(is_endpoint_vendor("custom:pr-1") && is_endpoint_vendor(CUSTOM_VENDOR));
+        assert!(!is_endpoint_vendor("anthropic"));
     }
 
     #[test]
@@ -1292,20 +1715,49 @@ mod tests {
             item("claude-sonnet-5", "anthropic"),
             item("claude-opus-5", "anthropic"),
         ]);
-        let column = |models: &[ProviderModel]| -> Vec<(&str, usize)> {
+        let column = |models: &[ProviderModel]| -> Vec<(String, usize)> {
             native_vendors_present(models)
                 .into_iter()
-                .map(|(vendor, count)| (vendor.id, count))
+                .map(|entry| (entry.id, entry.count))
                 .collect()
+        };
+        let pairs = |expected: &[(&str, usize)]| -> Vec<(String, usize)> {
+            expected.iter().map(|(id, count)| ((*id).to_owned(), *count)).collect()
         };
         assert_eq!(
             column(&models),
-            [("anthropic", 2), ("deepseek", 1), ("zhipu", 1), ("custom", 0)]
+            pairs(&[("anthropic", 2), ("deepseek", 1), ("zhipu", 1), ("custom", 0)])
         );
 
-        // Custom stays last, and counts what the user declared.
-        models.extend(native_custom_models(&[ModelEntry::new("my-model")]));
-        assert_eq!(column(&models).last(), Some(&("custom", 1)));
+        // Each endpoint of the user's own gets an entry of its own, last,
+        // named after it — and the placeholder goes, having nothing to say.
+        models.extend(native_endpoint_models(&endpoint(
+            "pr-1",
+            "GLM",
+            ApiFormat::OpenAiChat,
+            &["glm-5.1", "glm-5.1-air"],
+        )));
+        models.extend(native_endpoint_models(&endpoint(
+            "pr-2",
+            "Kimi",
+            ApiFormat::Anthropic,
+            &["kimi-k3"],
+        )));
+        assert_eq!(
+            column(&models),
+            pairs(&[
+                ("anthropic", 2),
+                ("deepseek", 1),
+                ("zhipu", 1),
+                ("custom:pr-1", 2),
+                ("custom:pr-2", 1)
+            ])
+        );
+        let labels: Vec<String> = native_vendors_present(&models)
+            .into_iter()
+            .map(|entry| entry.label)
+            .collect();
+        assert_eq!(labels[3..], ["GLM".to_owned(), "Kimi".to_owned()]);
 
         // An id the table does not know reads as "other".
         assert_eq!(native_vendor("nope").id, "other");

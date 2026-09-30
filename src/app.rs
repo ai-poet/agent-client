@@ -2129,6 +2129,14 @@ impl Waku {
         let mut state = store.load_or_fresh(cwd);
         // Fork addition: 0.2.3's "pay as you go" picker rows are gone.
         let migrated_payg_rows = native_agent::migrate_legacy_pay_as_you_go(&mut state);
+        // Fork addition: a model saved bare for the endpoint bound to Chat
+        // Completions moves to the id the picker lists it under now. One read
+        // of the endpoint file at launch, kept as the page cache below.
+        let custom_api = sub2api::custom_api::load();
+        let migrated_endpoint_ids = native_agent::migrate_bare_endpoint_ids(
+            &mut state,
+            custom_api.bound_provider("native_chat"),
+        );
         // Fork addition: nobody who never chose starts on a CLI.
         let adopted_built_in = native_agent::adopt_built_in_default(&mut state);
         let home_directory = crate::projectless::home_directory();
@@ -2253,7 +2261,10 @@ impl Waku {
         let workspace_client = waku_client::WorkspaceClient::new(daemon.client());
         let (projectless_migrated, projectless_migration_error) =
             migrate_legacy_projectless_projects(&mut state, &workspace_client);
-        let projectless_save_error = (projectless_migrated || migrated_payg_rows || adopted_built_in)
+        let projectless_save_error = (projectless_migrated
+            || migrated_payg_rows
+            || migrated_endpoint_ids
+            || adopted_built_in)
             .then(|| store.save(&mut state).err())
             .flatten();
         let startup_toast = projectless_migration_error
@@ -3228,7 +3239,7 @@ impl Waku {
                 settings_page: None,
                 skills_catalog: None,
                 cloud_account: cloud_account::CloudAccountState::default(),
-                cli_setup: cli_setup::CliSetupState::default(),
+                cli_setup: cli_setup::CliSetupState::with_custom_cache(custom_api),
                 onboarding: onboarding::OnboardingViewState::default(),
                 agent_page: agent_page::AgentPageState::default(),
                 model_providers: model_providers_page::ModelProvidersPageState::default(),

@@ -1722,10 +1722,13 @@ native.vendor.other: "其他"
 native.vendor.custom: "自定义"
 
 native.empty_turn: "%{model} 结束了这一轮，但什么也没说。请求发往 %{endpoint}，走的是 %{provider} 接口。可以给这个模型换一种接口格式，或者换个模型。"
+native.route_not_found: "找不到 %{model}：%{provider} 接口在 %{url} 返回了 404。请检查模型 ID 和接口地址。（%{detail}）"
+native.endpoint_unavailable: "这个模型所属的接口已不可用：可能已被删除、停用，或缺少地址、密钥或模型。请换一个模型，或到「设置 → 模型接口」修复。"
 
 models.wire_format: "接口格式"
 
-models.declare_your_own: "这里还没有模型。在「设置 → 服务商」里填上自定义接入点的模型名，它们就会出现在这里。"
+models.declare_your_own: "这里还没有模型。在「设置 → 模型接口」添加接口和模型后，它们会出现在这里，每个接口一组。"
+models.manage_models: "管理模型…"
 
 cli_setup.native_route_messages: "Anthropic Messages"
 cli_setup.native_route_responses: "OpenAI Responses"
@@ -1765,7 +1768,11 @@ skills.installed_toast: "已安装 %{name}"
 skills.install_failed: "安装 skill 失败：%{error}"
 
 agent.endpoints_title: "接口路由"
-agent.endpoints_description: "内置 Agent 支持三种接口类型，每种独立路由。可分别为其指定自定义接口，未指定的将继续使用托管网关。"
+agent.endpoints_description: "在「模型接口」里添加接口和模型后，它们会直接出现在模型选择器中，无需在这里绑定。若把某个接口绑定到下列三种接口类型之一，该类型的所有模型都会改走这个接口，而不再走托管网关。"
+agent.picker_sources_title: "模型选择器中的接口"
+agent.picker_sources_empty: "还没有自己的接口。可在「模型接口」中添加接口和模型。"
+agent.picker_source_row: "%{name} · %{count} 个模型 · %{format}"
+agent.endpoint_hides_gateway: "该接口接管此接口类型期间，托管网关中同类型的模型不会显示在模型选择器里。"
 
 agent.endpoint_path_hint: "请求将发送至下方地址的 %{path}，接口需实现此路径。"
 
@@ -1815,6 +1822,13 @@ model_providers.model_display_name_placeholder: "留空则显示模型 ID"
 model_providers.model_context: "上下文窗口"
 model_providers.model_context_placeholder: "例如 200000、200k 或 1M，未知可留空"
 model_providers.model_context_invalid: "无法识别为 token 数量，请填写如 200000、200k 或 1M 的格式。"
+model_providers.model_test: "测试"
+model_providers.model_test_ok: "已响应，耗时 %{ms} ms"
+model_providers.request_url_hint: "请求将发送至 %{url}，接口需实现此路径。"
+model_providers.picker_listed: "已出现在内置 Agent 的模型选择器中（%{count} 个模型）。"
+model_providers.picker_disabled: "未出现在模型选择器中：该接口已停用。"
+model_providers.picker_needs_key: "尚未出现在模型选择器中：请先保存地址和 API 密钥。"
+model_providers.picker_needs_models: "尚未出现在模型选择器中：请至少添加一个模型，或点击获取模型列表。"
 model_providers.model_efforts: "推理档位"
 model_providers.model_efforts_placeholder: "例如 low、medium、high，不支持推理可留空"
 

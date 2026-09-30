@@ -20,6 +20,7 @@ use std::time::Duration;
 use claurst_api::AnthropicClient;
 use claurst_api::client::ClientConfig;
 use claurst_core::config::{Config, Settings};
+use claurst_core::error::ClaudeError;
 use claurst_core::types::Message;
 use claurst_core::{CostTracker, PermissionManager};
 use claurst_query::{
@@ -32,8 +33,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::background;
 use crate::config::{
-    AgentStartOptions, TurnOptions, build_config, build_config_from, build_query_config,
-    load_settings, missing_route_key,
+    AgentStartOptions, TurnOptions, WireFormat, build_config, build_config_from, build_query_config,
+    load_settings, missing_route_key, route_fingerprint,
 };
 use crate::events::{AgentEvent, EventSink, PermissionChoice, StreamDecoder};
 use crate::history;
@@ -441,13 +442,12 @@ impl AgentSession {
             }
         };
         let mut query = build_query_config(&config, &options);
-        let route_changed = {
-            let current = self.inner.config.lock();
-            current.provider != config.provider
-                || current.api_key != config.api_key
-                || current.provider_configs.get("anthropic").map(|entry| entry.api_base.clone())
-                    != config.provider_configs.get("anthropic").map(|entry| entry.api_base.clone())
-        };
+        // Every base and key the route could use, not only the anthropic
+        // one: two endpoints of the user's own can share a format and differ
+        // only in address, and switching between them must not keep the
+        // previous endpoint's client.
+        let route_changed =
+            route_fingerprint(&self.inner.config.lock()) != route_fingerprint(&config);
         if route_changed {
             match build_clients(&config, options.platform.as_deref()) {
                 Ok((client, registry)) => {
@@ -752,11 +752,7 @@ async fn run_turn(
     // Read while `config` is still here: it moves into the tool context
     // below, and a turn that ends up saying nothing has to name the route it
     // tried.
-    let route = Route {
-        provider: config.selected_provider_id().to_owned(),
-        model: query.model.clone(),
-        api_base: config.resolve_anthropic_api_base(),
-    };
+    let route = Route::of(&config, &query.model);
     let tools = {
         let sets = inner.tools.lock();
         if goal_mode {
@@ -858,16 +854,27 @@ async fn run_turn(
     // anything" to someone who just pressed stop would be a lie.
     let ended_empty = !produced_output && matches!(outcome, QueryOutcome::EndTurn { .. });
     let cancelled = matches!(outcome, QueryOutcome::Cancelled);
+    let not_found = match &outcome {
+        QueryOutcome::Error(error) if is_not_found(error) => Some(error.to_string()),
+        _ => None,
+    };
     let (success, summary) = describe(outcome, produced_output, &route);
     if !success && let Some(reason) = summary.clone() {
-        // The empty turn gets its own event so the desktop can say it in the
-        // user's language; the sentence in `summary` is the fallback for any
-        // client that does not.
+        // The empty turn and the 404 get events of their own so the desktop
+        // can say them in the user's language; the sentence in `summary` is
+        // the fallback for any client that does not.
         if ended_empty {
             inner.events.emit(AgentEvent::ProducedNothing {
                 provider: route.provider.clone(),
                 model: route.model.clone(),
                 api_base: route.api_base.clone(),
+            });
+        } else if let Some(detail) = not_found {
+            inner.events.emit(AgentEvent::RouteNotFound {
+                provider: route.provider.clone(),
+                model: route.model.clone(),
+                url: route.url.clone(),
+                detail,
             });
         } else {
             inner.events.emit(AgentEvent::Error(reason));
@@ -1154,13 +1161,45 @@ async fn forward_events(
     }
 }
 
-/// What to tell the transcript about how the turn ended.
-///
-/// What a turn was pointed at, for the message an empty turn has to write.
+/// What a turn was pointed at, for the messages a failed turn has to write.
 struct Route {
     provider: String,
     model: String,
+    /// The base the selected provider entry resolves to.
     api_base: String,
+    /// The request URL on that base, the way the route's adapter builds it.
+    url: String,
+}
+
+impl Route {
+    fn of(config: &Config, model: &str) -> Self {
+        let provider = config.selected_provider_id().to_owned();
+        let api_base = config.resolve_api_base();
+        let path = WireFormat::for_engine_provider(&provider)
+            .unwrap_or(WireFormat::Messages)
+            .request_path();
+        let url = claurst_api::endpoint::versioned_url(&api_base, path);
+        Self {
+            provider,
+            model: model.to_owned(),
+            api_base,
+            url,
+        }
+    }
+}
+
+/// Whether a turn failed because the server answered 404.
+///
+/// The engine says it two ways: the Messages client keeps the status
+/// (`ApiStatus { status: 404 }`), while the Responses and Chat adapters turn
+/// every 404 into `Model not found: unknown` and drop the rest. Either way
+/// the usual cause is a wrong address or a model id the endpoint does not
+/// serve, and neither message said which address was asked.
+fn is_not_found(error: &ClaudeError) -> bool {
+    match error {
+        ClaudeError::ApiStatus { status, .. } => *status == 404,
+        other => other.to_string().contains("Model not found"),
+    }
 }
 
 /// `MaxTokens` counts as a success: the model produced an answer and the
@@ -1172,6 +1211,7 @@ struct Route {
 /// that added no assistant text is not a success either, whatever the stop
 /// reason said. It names the route it tried, because the thing that went
 /// wrong is upstream of here and that is the only handle the user has on it.
+/// A 404 names it too, with the full URL, for the same reason.
 fn describe(
     outcome: QueryOutcome,
     produced_output: bool,
@@ -1198,6 +1238,14 @@ fn describe(
                 "This session has spent ${cost_usd:.2}, past its ${limit_usd:.2} cap."
             )),
         ),
+        QueryOutcome::Error(error) if is_not_found(&error) => (
+            false,
+            Some(format!(
+                "`{}` was not found: the `{}` route answered 404 at {}. \
+                 Check the model id and the endpoint's address. ({error})",
+                route.model, route.provider, route.url
+            )),
+        ),
         QueryOutcome::Error(error) => (false, Some(error.to_string())),
     }
 }
@@ -1211,7 +1259,80 @@ mod tests {
             provider: "anthropic".into(),
             model: "claude-sonnet-5".into(),
             api_base: "https://gateway.example.org".into(),
+            url: "https://gateway.example.org/v1/messages".into(),
         }
+    }
+
+    /// What the Responses and Chat adapters report for any 404: no model,
+    /// no address. The rewrite has to supply both.
+    #[test]
+    fn a_404_names_the_model_the_route_and_the_url() {
+        let route = Route {
+            provider: "openai".into(),
+            model: "glm-5.1".into(),
+            api_base: "https://open.bigmodel.cn/api/paas/v4".into(),
+            url: "https://open.bigmodel.cn/api/paas/v4/chat/completions".into(),
+        };
+        let error = ClaudeError::Api("[openai] Model not found: unknown".into());
+        assert!(is_not_found(&error));
+        let (success, summary) = describe(QueryOutcome::Error(error), false, &route);
+        assert!(!success);
+        let summary = summary.unwrap();
+        assert!(summary.contains("glm-5.1"), "{summary}");
+        assert!(summary.contains("`openai`"), "{summary}");
+        assert!(
+            summary.contains("https://open.bigmodel.cn/api/paas/v4/chat/completions"),
+            "{summary}"
+        );
+    }
+
+    #[test]
+    fn an_anthropic_404_names_the_route_too() {
+        let error = ClaudeError::ApiStatus {
+            status: 404,
+            message: "not_found_error".into(),
+        };
+        assert!(is_not_found(&error));
+        let (_, summary) = describe(QueryOutcome::Error(error), false, &route());
+        let summary = summary.unwrap();
+        assert!(summary.contains("https://gateway.example.org/v1/messages"), "{summary}");
+        assert!(summary.contains("not_found_error"), "{summary}");
+    }
+
+    #[test]
+    fn other_errors_are_reported_as_they_are() {
+        let error = ClaudeError::ApiStatus {
+            status: 500,
+            message: "overloaded".into(),
+        };
+        assert!(!is_not_found(&error));
+        let expected = error.to_string();
+        let (_, summary) = describe(QueryOutcome::Error(error), false, &route());
+        assert_eq!(summary.as_deref(), Some(expected.as_str()));
+    }
+
+    /// The route names the base of the entry the session selected — a Chat
+    /// session used to be reported with the anthropic entry's base.
+    #[test]
+    fn a_route_names_its_own_entrys_url() {
+        let mut config = Config::default();
+        config.provider = Some("openai".into());
+        for (name, base) in [
+            ("anthropic", "https://gateway.example.org"),
+            ("openai", "https://open.bigmodel.cn/api/paas/v4"),
+        ] {
+            config.provider_configs.insert(
+                name.into(),
+                claurst_core::ProviderConfig {
+                    api_base: Some(base.into()),
+                    ..Default::default()
+                },
+            );
+        }
+        let route = Route::of(&config, "glm-5.1");
+        assert_eq!(route.provider, "openai");
+        assert_eq!(route.api_base, "https://open.bigmodel.cn/api/paas/v4");
+        assert_eq!(route.url, "https://open.bigmodel.cn/api/paas/v4/chat/completions");
     }
 
     #[test]

@@ -387,7 +387,8 @@ impl OpenAiProvider {
         merge_openai_compatible_options(&mut body, &request.provider_options);
 
         let (auth_key, auth_val) = self.auth_header();
-        let url = format!("{}/v1/chat/completions", self.base_url);
+        // Fork (Waku): a base with its own version path keeps it.
+        let url = crate::endpoint::versioned_url(&self.base_url, "chat/completions");
 
         let resp = self
             .http_client
@@ -603,7 +604,8 @@ impl OpenAiProvider {
         merge_openai_compatible_options(&mut body, &request.provider_options);
 
         let (auth_key, auth_val) = self.auth_header();
-        let url = format!("{}/v1/chat/completions", self.base_url);
+        // Fork (Waku): a base with its own version path keeps it.
+        let url = crate::endpoint::versioned_url(&self.base_url, "chat/completions");
 
         let resp = self
             .http_client
@@ -1077,7 +1079,8 @@ impl LlmProvider for OpenAiProvider {
 
     async fn health_check(&self) -> Result<ProviderStatus, ProviderError> {
         let (auth_key, auth_val) = self.auth_header();
-        let url = format!("{}/v1/models", self.base_url);
+        // Fork (Waku): a base with its own version path keeps it.
+        let url = crate::endpoint::versioned_url(&self.base_url, "models");
 
         let resp = self
             .http_client

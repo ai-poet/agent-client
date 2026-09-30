@@ -41,6 +41,7 @@ pub mod images;
 pub mod mcp_stdio;
 pub mod migrate;
 pub mod model_routing;
+pub mod model_test;
 pub mod node_install;
 pub mod onboarding;
 pub mod pay;

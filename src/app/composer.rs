@@ -872,9 +872,19 @@ impl Waku {
         } else {
             Vec::new()
         };
+        // Under the user's own endpoints the list ends in a row that opens
+        // Settings → Model providers — on that endpoint when one is open —
+        // the way ZCode's picker ends in "manage models". It counts as a row
+        // for the keyboard cursor, after the models.
+        let manage_models = (handle.is_open()
+            && selected_tab == ModelPickerTab::Provider(ProviderKind::Native)
+            && !searching
+            && super::native_agent::is_endpoint_vendor(&picker_vendor))
+        .then(|| super::native_agent::endpoint_of_vendor(&picker_vendor).map(str::to_owned));
+        let row_count = available_models.len() + usize::from(manage_models.is_some());
         let highlight = self
             .model_picker_highlight
-            .filter(|index| *index < available_models.len());
+            .filter(|index| *index < row_count);
         let scroll = self.model_picker_scroll.clone();
         let scrollbar_state = self.model_picker_scrollbar.clone();
 
@@ -1070,10 +1080,16 @@ impl Waku {
                     };
                     rows = rows.child(
                         div()
-                            .h_full()
+                            // Above the manage row when there is one, rather
+                            // than filling the list and pushing it away.
+                            .when(manage_models.is_none(), |element| element.h_full())
+                            .when(manage_models.is_some(), |element| {
+                                element.px(px(12.0)).py(px(24.0))
+                            })
                             .flex()
                             .items_center()
                             .justify_center()
+                            .text_center()
                             .text_size(sp(12.5))
                             .text_color(theme.text_ghost)
                             .child(label),
@@ -1213,9 +1229,48 @@ impl Waku {
                             }),
                     );
                 }
-                let next_models = available_models.clone();
-                let previous_models = available_models.clone();
+                if let Some(target) = manage_models.clone() {
+                    let is_highlighted = highlight == Some(available_models.len());
+                    let manage_weak = weak.clone();
+                    let manage_popover = popover.clone();
+                    rows = rows.child(
+                        div()
+                            .id("model-picker-manage-models")
+                            .mt(px(4.0))
+                            .h(px(40.0))
+                            .px(px(12.0))
+                            .rounded(px(9.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(10.0))
+                            .cursor_default()
+                            .border_1()
+                            .border_color(gpui::transparent_black())
+                            .when(is_highlighted, |element| {
+                                element.bg(theme.overlay).border_color(theme.accent)
+                            })
+                            .hover(|element| element.bg(theme.overlay))
+                            .active(|element| element.opacity(0.85))
+                            .child(icon("icons/settings.svg", 14.0, theme.text_secondary))
+                            .child(
+                                div()
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("models.manage_models")),
+                            )
+                            .on_click(move |_, window, cx| {
+                                open_model_providers_from_picker(
+                                    &manage_weak,
+                                    &manage_popover,
+                                    target.clone(),
+                                    window,
+                                    cx,
+                                );
+                            }),
+                    );
+                }
                 let confirm_models = available_models.clone();
+                let confirm_manage = manage_models.clone();
                 let next_weak = weak.clone();
                 let previous_weak = weak.clone();
                 let next_tab_weak = weak.clone();
@@ -1241,12 +1296,12 @@ impl Waku {
                     // focused text field.
                     .on_action(move |_: &SelectNextEntry, _, cx| {
                         let _ = next_weak.update(cx, |this, cx| {
-                            this.move_model_picker_highlight("down", &next_models, cx);
+                            this.move_model_picker_highlight("down", row_count, cx);
                         });
                     })
                     .on_action(move |_: &SelectPreviousEntry, _, cx| {
                         let _ = previous_weak.update(cx, |this, cx| {
-                            this.move_model_picker_highlight("up", &previous_models, cx);
+                            this.move_model_picker_highlight("up", row_count, cx);
                         });
                     })
                     .on_action(move |_: &SelectNextTab, _, cx| {
@@ -1260,6 +1315,26 @@ impl Waku {
                         });
                     })
                     .on_action(move |_: &ConfirmEntry, window, cx| {
+                        // The manage row sits right after the models, so it
+                        // is the cursor's when the cursor is past them — and
+                        // `enter` in an empty section means it too.
+                        let on_manage = confirm_manage.is_some()
+                            && confirm_weak
+                                .read_with(cx, |this, _| {
+                                    this.model_picker_highlight.unwrap_or(0)
+                                        == confirm_models.len()
+                                })
+                                .unwrap_or(false);
+                        if on_manage {
+                            open_model_providers_from_picker(
+                                &confirm_weak,
+                                &confirm_popover,
+                                confirm_manage.clone().flatten(),
+                                window,
+                                cx,
+                            );
+                            return;
+                        }
                         let _ = confirm_weak.update(cx, |this, cx| {
                             this.choose_highlighted_model(&confirm_models, cx);
                         });
@@ -1308,16 +1383,11 @@ impl Waku {
 
     /// Move the picker's drawn selection. Nothing is focused: the filter field
     /// keeps focus so typing continues to narrow the list.
-    fn move_model_picker_highlight(
-        &mut self,
-        key: &str,
-        models: &[(ProviderKind, ProviderModel)],
-        cx: &mut Context<Self>,
-    ) {
-        let current = self
-            .model_picker_highlight
-            .filter(|index| *index < models.len());
-        let Some(next) = next_picker_highlight(current, models.len(), key) else {
+    /// `rows` counts every row the cursor can land on: the models, plus the
+    /// manage row when the section has one.
+    fn move_model_picker_highlight(&mut self, key: &str, rows: usize, cx: &mut Context<Self>) {
+        let current = self.model_picker_highlight.filter(|index| *index < rows);
+        let Some(next) = next_picker_highlight(current, rows, key) else {
             return;
         };
         self.model_picker_highlight = Some(next);
@@ -1344,29 +1414,31 @@ impl Waku {
             &self.state.disabled_providers,
             locked_provider,
         );
-        let native_vendors: Vec<&'static str> = self
+        let native_vendors: Vec<String> = self
             .probes
             .iter()
             .find(|probe| probe.provider == ProviderKind::Native)
             .map(|probe| {
                 super::native_agent::native_vendors_present(&probe.models)
                     .into_iter()
-                    .map(|(vendor, _)| vendor.id)
+                    .map(|entry| entry.id)
                     .collect()
             })
             .unwrap_or_default();
         let stops = picker_stops(&tabs, &native_vendors);
         let current = stops.iter().position(|(tab, vendor)| {
             *tab == self.model_picker_tab
-                && vendor.is_none_or(|vendor| vendor == self.model_picker_vendor)
+                && vendor
+                    .as_deref()
+                    .is_none_or(|vendor| vendor == self.model_picker_vendor)
         });
         let Some(next) = next_picker_highlight(current, stops.len(), key) else {
             return;
         };
-        let (tab, vendor) = stops[next];
+        let (tab, vendor) = stops[next].clone();
         self.select_model_picker_tab(tab, cx);
         if let Some(vendor) = vendor {
-            self.show_model_picker_vendor(vendor, cx);
+            self.show_model_picker_vendor(&vendor, cx);
         }
     }
 
@@ -3884,10 +3956,10 @@ pub(super) fn visible_picker_tabs(
 /// Where `tab`/`shift-tab` can land in the picker, in order: the rail's tabs,
 /// with the built-in agent's tab opened out into its vendor column so the
 /// keyboard reaches every vendor the mouse can.
-pub(super) fn picker_stops(
+pub(super) fn picker_stops<S: AsRef<str>>(
     tabs: &[ModelPickerTab],
-    native_vendors: &[&'static str],
-) -> Vec<(ModelPickerTab, Option<&'static str>)> {
+    native_vendors: &[S],
+) -> Vec<(ModelPickerTab, Option<String>)> {
     tabs.iter()
         .flat_map(|tab| match tab {
             ModelPickerTab::Provider(provider)
@@ -3895,7 +3967,7 @@ pub(super) fn picker_stops(
             {
                 native_vendors
                     .iter()
-                    .map(|vendor| (*tab, Some(*vendor)))
+                    .map(|vendor| (*tab, Some(vendor.as_ref().to_owned())))
                     .collect::<Vec<_>>()
             }
             _ => vec![(*tab, None)],
@@ -4010,6 +4082,26 @@ fn open_provider_settings_from_picker(
     });
 }
 
+/// Dismiss the picker and land on Settings → Model providers, on `provider`
+/// when the section open in the picker was one of the user's endpoints.
+/// Closing first, for the same reason as [`open_provider_settings_from_picker`].
+fn open_model_providers_from_picker(
+    waku: &WeakEntity<Waku>,
+    popover: &ContextMenuHandle,
+    provider: Option<String>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    popover.close(window, cx);
+    let _ = waku.update(cx, |this, cx| {
+        this.open_settings_action(&OpenSettings, window, cx);
+        this.open_settings_page(SettingsPage::ModelProviders, cx);
+        if let Some(provider) = provider {
+            this.open_provider(provider, window, cx);
+        }
+    });
+}
+
 /// Whether the rail draws a tab for the provider at all, usable or not.
 ///
 /// Installed on this machine and not switched off in the Providers settings.
@@ -4074,8 +4166,15 @@ pub(super) fn native_wire_format(
     selected_tier: Option<&str>,
     selected_model: Option<&str>,
 ) -> String {
+    // A model on one of the user's own endpoints speaks what that endpoint
+    // declared, which rides in its tier; its name is nobody's business.
+    let own_endpoint = selected_model
+        .and_then(sub2api::providers::parse_agent_model_id)
+        .is_some();
     let (platform, model) = native_platform_and_model(selected_model);
-    if let Some(format) = super::native_agent::native_format_for_model(&platform, &model) {
+    if !own_endpoint
+        && let Some(format) = super::native_agent::native_format_for_model(&platform, &model)
+    {
         return format.to_owned();
     }
     selected_tier
@@ -4092,7 +4191,7 @@ pub(super) fn native_wire_format(
 /// colour alone.
 fn native_vendor_column(
     theme: Theme,
-    vendors: &[(&'static super::native_agent::NativeVendor, usize)],
+    vendors: &[super::native_agent::VendorEntry],
     active: &str,
     weak: gpui::WeakEntity<Waku>,
 ) -> impl IntoElement {
@@ -4108,8 +4207,10 @@ fn native_vendor_column(
         .overflow_y_scroll()
         .border_r_1()
         .border_color(theme.border);
-    for &(vendor, count) in vendors {
-        let id = vendor.id;
+    for entry in vendors {
+        let vendor = entry.vendor;
+        let count = entry.count;
+        let id = entry.id.clone();
         let selected = id == active;
         let weak = weak.clone();
         column = column.child(
@@ -4129,7 +4230,7 @@ fn native_vendor_column(
                         .hover(|element| element.bg(theme.overlay))
                         .on_click(move |_, _, cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.show_model_picker_vendor(id, cx);
+                                this.show_model_picker_vendor(&id, cx);
                             });
                         })
                 })
@@ -4154,7 +4255,7 @@ fn native_vendor_column(
                         } else {
                             theme.text_secondary
                         })
-                        .child(SharedString::from(crate::i18n::translate(vendor.label))),
+                        .child(SharedString::from(entry.label.clone())),
                 )
                 .when(count > 0, |element| {
                     element.child(

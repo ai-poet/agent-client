@@ -31,6 +31,7 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         })
         .collect(),
         ProviderKind::Codex => [
+            ProviderModel::new("gpt-6.1-sol", "GPT-6.1-Sol"),
             ProviderModel::new("gpt-6-astra", "GPT-6-Astra"),
             ProviderModel::new("gpt-6-sol", "GPT-6-Sol"),
             ProviderModel::new("gpt-5.6-sol", "GPT-5.6-Sol").default(),
@@ -61,6 +62,10 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
             claude_long_context(claude_ultracode_model("claude-opus-4-7", "Claude Opus 4.7")),
             claude_long_context(claude_reasoning_model("claude-opus-4-6", "Claude Opus 4.6")),
             claude_reasoning_model("claude-opus-4-5", "Claude Opus 4.5"),
+            claude_long_context(claude_ultracode_model(
+                "claude-sonnet-5-5",
+                "Claude Sonnet 5.5",
+            )),
             claude_long_context(claude_ultracode_model("claude-sonnet-5", "Claude Sonnet 5"))
                 .default(),
             claude_long_context(claude_reasoning_model(
@@ -96,9 +101,10 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // reached through Claude Code's `[1m]` model-id suffix, which is a
         // trait of that CLI and not of the API.
         ProviderKind::Native => vec![
+            claude_ultracode_model("claude-sonnet-5-5", "Claude Sonnet 5.5").default(),
             claude_ultracode_model("claude-fable-5-1", "Claude Fable 5.1"),
             claude_ultracode_model("claude-opus-5", "Claude Opus 5"),
-            claude_ultracode_model("claude-sonnet-5", "Claude Sonnet 5").default(),
+            claude_ultracode_model("claude-sonnet-5", "Claude Sonnet 5"),
             claude_reasoning_model("claude-opus-4-6", "Claude Opus 4.6"),
             claude_reasoning_model("claude-sonnet-4-6", "Claude Sonnet 4.6"),
             ProviderModel::new("claude-haiku-4-5", "Claude Haiku 4.5"),
@@ -1372,6 +1378,7 @@ mod tests {
         assert_eq!(
             ids,
             [
+                "gpt-6.1-sol",
                 "gpt-6-astra",
                 "gpt-6-sol",
                 "gpt-5.6-sol",
@@ -1446,12 +1453,47 @@ mod tests {
             ["low", "medium", "high", "xhigh", "max", "ultracode"]
         );
         assert_eq!(
+            efforts("claude-sonnet-5-5"),
+            ["low", "medium", "high", "xhigh", "max", "ultracode"]
+        );
+        assert!(
+            models
+                .iter()
+                .find(|model| model.id == "claude-sonnet-5-5")
+                .is_some_and(|model| model.context_windows.iter().any(|option| option.id == "1m"))
+        );
+        // Claude Code's own default stays on the alias target it resolves.
+        let defaults: Vec<&str> = models
+            .iter()
+            .filter(|model| model.is_default)
+            .map(|model| model.id.as_str())
+            .collect();
+        assert_eq!(defaults, ["claude-sonnet-5"]);
+        assert_eq!(
             efforts("claude-sonnet-4-6"),
             ["low", "medium", "high", "xhigh", "max"]
         );
         assert!(efforts("claude-haiku-4-5").is_empty());
         assert_eq!(models[0].id, "claude-fable-5-1");
         assert!(models[0].context_windows.iter().any(|option| option.id == "1m"));
+    }
+
+    /// The built-in agent starts on the newest Sonnet, in the daemon's list
+    /// and in the one the desktop shows before the daemon has answered.
+    #[test]
+    fn native_fallback_starts_on_sonnet_5_5() {
+        let default_of = |models: Vec<ProviderModel>| -> Vec<String> {
+            models
+                .into_iter()
+                .filter(|model| model.is_default)
+                .map(|model| model.id)
+                .collect()
+        };
+        assert_eq!(default_of(fallback_models(ProviderKind::Native)), ["claude-sonnet-5-5"]);
+        assert_eq!(
+            default_of(waku_protocol::model_catalog::fallback_models(ProviderKind::Native)),
+            ["claude-sonnet-5-5"]
+        );
     }
 
     #[test]

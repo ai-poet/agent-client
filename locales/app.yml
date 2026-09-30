@@ -3495,12 +3495,18 @@ native.vendor.custom:
 
 native.empty_turn:
   en: "%{model} ended the turn without saying anything. The request went to %{endpoint} over the %{provider} API. Try this model over a different API, or a different model."
+native.route_not_found:
+  en: "%{model} was not found: the %{provider} API answered 404 at %{url}. Check the model ID and the endpoint's address. (%{detail})"
+native.endpoint_unavailable:
+  en: "The endpoint this model belongs to is no longer available: it was removed, switched off, or is missing its address, key or models. Pick another model, or fix it in Settings → Model providers."
 
 models.wire_format:
   en: "API"
 
 models.declare_your_own:
-  en: "Nothing here yet. Models on your own endpoint are listed after you name them in Settings → Providers."
+  en: "Nothing here yet. Add an endpoint and its models in Settings → Model providers and they are listed here, one group per endpoint."
+models.manage_models:
+  en: "Manage models…"
 
 cli_setup.native_route_messages:
   en: "Anthropic Messages"
@@ -3572,7 +3578,15 @@ skills.install_failed:
 agent.endpoints_title:
   en: "Endpoints"
 agent.endpoints_description:
-  en: "The built-in agent supports three API formats and routes each one independently. Assign a custom endpoint to any of them; the rest continue to use the managed gateway."
+  en: "Models on your own endpoints appear in the model picker as soon as you add them in Model providers; nothing needs to be bound here. Binding an endpoint to one of these three API formats sends every model of that format to it instead of the managed gateway."
+agent.picker_sources_title:
+  en: "In the model picker"
+agent.picker_sources_empty:
+  en: "No endpoint of your own yet. Add one with its models in Model providers."
+agent.picker_source_row:
+  en: "%{name} · %{count} models · %{format}"
+agent.endpoint_hides_gateway:
+  en: "The managed gateway's models of this API format are hidden from the picker while this endpoint handles it."
 
 agent.endpoint_path_hint:
   en: "Requests are sent to %{path} on the address below. The endpoint must implement this path."
@@ -3665,6 +3679,20 @@ model_providers.model_context_placeholder:
   en: "For example 200000, 200k or 1M. Leave empty if unknown."
 model_providers.model_context_invalid:
   en: "Not a valid token count. Use a format such as 200000, 200k or 1M."
+model_providers.model_test:
+  en: "Test"
+model_providers.model_test_ok:
+  en: "Answered in %{ms} ms"
+model_providers.request_url_hint:
+  en: "Requests go to %{url}. The endpoint must implement this path."
+model_providers.picker_listed:
+  en: "Listed in the built-in agent's model picker (%{count} models)."
+model_providers.picker_disabled:
+  en: "Not in the model picker: this endpoint is switched off."
+model_providers.picker_needs_key:
+  en: "Not in the model picker yet: save an address and an API key first."
+model_providers.picker_needs_models:
+  en: "Not in the model picker yet: add at least one model, or fetch them."
 model_providers.model_efforts:
   en: "Reasoning levels"
 model_providers.model_efforts_placeholder:

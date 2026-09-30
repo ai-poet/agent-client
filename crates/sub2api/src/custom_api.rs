@@ -177,7 +177,7 @@ fn next_profile_id() -> String {
 
 /// The host of a normalized origin, for naming an entry the user never
 /// named. `https://user@api.relay.org:8443/v1` becomes `api.relay.org`.
-fn host_of(base_url: &str) -> Option<String> {
+pub(crate) fn host_of(base_url: &str) -> Option<String> {
     let rest = base_url
         .split_once("://")
         .map_or(base_url, |(_, rest)| rest);
@@ -825,9 +825,11 @@ pub fn probe_request_for_format(
     let key = api_key.trim();
     let mut request = crate::http::Request::new().timeout_seconds(timeout_secs);
     if format.is_anthropic() {
-        let url = format!(
-            "{}/v1/models",
-            crate::gateway::anthropic_base_url(base_url)
+        // Where the built-in agent's Messages client will ask: `/v1` on the
+        // root, unless the address already carries a version of its own.
+        let url = crate::gateway::versioned_url(
+            &crate::gateway::anthropic_base_url(base_url),
+            "models",
         );
         request = request.header("anthropic-version", "2023-06-01");
         if !key.is_empty() {
@@ -920,6 +922,12 @@ mod tests {
         assert_eq!(
             normalize_base_url("https://gw.example.org/V1"),
             Ok("https://gw.example.org".to_owned())
+        );
+        // A version other than `/v1` is part of the address, not a paste
+        // artefact: the adapters append nothing more to it.
+        assert_eq!(
+            normalize_base_url("https://open.bigmodel.cn/api/paas/v4/"),
+            Ok("https://open.bigmodel.cn/api/paas/v4".to_owned())
         );
         assert_eq!(normalize_base_url(""), Err(UrlError::Empty));
         assert_eq!(normalize_base_url("   "), Err(UrlError::Empty));
@@ -1020,6 +1028,24 @@ mod tests {
             let openai = format!("{request:?}");
             assert!(!openai.contains("anthropic-version"), "{slot}: {openai}");
         }
+    }
+
+    #[test]
+    fn a_versioned_base_is_probed_under_its_own_version() {
+        let (url, _) = probe_request_for_format(
+            ApiFormat::OpenAiChat,
+            "https://open.bigmodel.cn/api/paas/v4",
+            "sk-a",
+            PROBE_TIMEOUT_SECS,
+        );
+        assert_eq!(url, "https://open.bigmodel.cn/api/paas/v4/models");
+        let (url, _) = probe_request_for_format(
+            ApiFormat::Anthropic,
+            "https://relay.example.org/anthropic/v2",
+            "sk-a",
+            PROBE_TIMEOUT_SECS,
+        );
+        assert_eq!(url, "https://relay.example.org/anthropic/v2/models");
     }
 
     #[test]

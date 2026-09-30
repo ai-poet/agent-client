@@ -30,6 +30,7 @@ const FAMILIES: &[(&str, &[&str])] = &[
     ("claude-mythos-5", LOW_TO_MAX_WITH_XHIGH),
     ("claude-fable-5", LOW_TO_MAX_WITH_XHIGH),
     ("claude-sonnet-4-6", LOW_MEDIUM_HIGH_MAX),
+    ("claude-sonnet-5-5", LOW_TO_MAX_WITH_XHIGH),
     ("claude-sonnet-5", LOW_TO_MAX_WITH_XHIGH),
     ("claude-opus-4-8", LOW_TO_MAX_WITH_XHIGH),
     ("claude-opus-4-7", LOW_TO_MAX_WITH_XHIGH),
@@ -127,7 +128,9 @@ fn clamp(effort: EffortLevel, levels: &'static [&'static str]) -> Option<&'stati
 }
 
 /// A model id as the families above name it: no provider or `anthropic.`
-/// prefix, no `-thinking` suffix, no date stamp.
+/// prefix, no `-thinking` suffix, no date stamp, and a dotted minor version
+/// (`claude-sonnet-5.5`, as OpenRouter-style relays write it) read as the
+/// dashed one.
 fn normalize_model_id(model: &str) -> String {
     let mut id = model.trim().to_ascii_lowercase();
     if let Some((_, rest)) = id.split_once("::") {
@@ -137,6 +140,7 @@ fn normalize_model_id(model: &str) -> String {
         id = rest.to_string();
     }
     let id = id.strip_prefix("anthropic.").unwrap_or(&id).to_string();
+    let id = dash_dotted_versions(&id);
     let id = id.strip_suffix("-thinking").unwrap_or(&id).to_string();
     let bytes = id.as_bytes();
     if bytes.len() > 9
@@ -148,9 +152,49 @@ fn normalize_model_id(model: &str) -> String {
     id
 }
 
+/// `claude-opus-5.5` → `claude-opus-5-5`: every `.` between two digits of a
+/// Claude id becomes a `-`. The gateway maps the same two spellings
+/// (`backend/internal/pkg/claude/effort_catalog.go`); this covers every
+/// family rather than naming them.
+fn dash_dotted_versions(id: &str) -> String {
+    if !id.starts_with("claude-") {
+        return id.to_string();
+    }
+    let bytes = id.as_bytes();
+    id.char_indices()
+        .map(|(index, ch)| {
+            let between_digits = ch == '.'
+                && index > 0
+                && bytes[index - 1].is_ascii_digit()
+                && bytes.get(index + 1).is_some_and(u8::is_ascii_digit);
+            if between_digits { '-' } else { ch }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sonnet_5_5_takes_the_full_ladder() {
+        assert_eq!(effort_levels("claude-sonnet-5-5"), Some(LOW_TO_MAX_WITH_XHIGH));
+        assert_eq!(
+            claude_reasoning("claude-sonnet-5-5", Some(EffortLevel::XHigh), Some(16_000)),
+            ClaudeReasoning::Effort("xhigh".into())
+        );
+    }
+
+    #[test]
+    fn dotted_minor_versions_read_like_dashed_ones() {
+        assert_eq!(normalize_model_id("claude-sonnet-5.5"), "claude-sonnet-5-5");
+        assert_eq!(normalize_model_id("anthropic/claude-opus-5.5"), "claude-opus-5-5");
+        assert_eq!(normalize_model_id("anthropic/claude-sonnet-4.6"), "claude-sonnet-4-6");
+        assert_eq!(effort_levels("claude-sonnet-4.6"), Some(LOW_MEDIUM_HIGH_MAX));
+        // Only Claude ids, and only a dot between digits.
+        assert_eq!(normalize_model_id("gpt-6.1-sol"), "gpt-6.1-sol");
+        assert_eq!(normalize_model_id("claude-x.y"), "claude-x.y");
+    }
 
     #[test]
     fn current_claude_families_send_adaptive_thinking_with_an_effort() {

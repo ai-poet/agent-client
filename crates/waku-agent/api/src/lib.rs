@@ -67,6 +67,10 @@ pub mod prompt_cache;
 // Fork departure (Waku): Claude's reasoning effort as `output_config.effort`.
 pub mod claude_effort;
 
+// Fork departure (Waku): request URLs on a base that may carry its own
+// version path (`…/api/paas/v4`).
+pub mod endpoint;
+
 // ---------------------------------------------------------------------------
 // Public re-exports
 // ---------------------------------------------------------------------------
@@ -933,7 +937,8 @@ pub mod client {
         /// callers can fall back to the hardcoded default list instead of
         /// surfacing an error.
         pub async fn fetch_available_models(&self) -> anyhow::Result<Vec<crate::AvailableModel>> {
-            let url = format!("{}/v1/models", self.config.api_base);
+            // Fork (Waku): a base with its own version path keeps it.
+            let url = crate::endpoint::versioned_url(&self.config.api_base, "models");
 
             let mut req = self
                 .http
@@ -978,7 +983,8 @@ pub mod client {
             &self,
             body: &Value,
         ) -> Result<reqwest::Response, ClaudeError> {
-            let url = format!("{}/v1/messages", self.config.api_base);
+            // Fork (Waku): a base with its own version path keeps it.
+            let url = crate::endpoint::versioned_url(&self.config.api_base, "messages");
             let mut attempts = 0u32;
             let mut delay = self.config.initial_retry_delay;
 

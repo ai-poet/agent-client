@@ -1017,7 +1017,7 @@ Completions — is a property of the model, and each model has exactly one:
 |---|---|
 | Anthropic Messages | the Claude family |
 | OpenAI Responses | the GPT family (`gpt-*`, `o1`/`o3`/`o4`, `codex-*`) and Grok |
-| OpenAI Chat Completions | DeepSeek, Kimi, GLM and MiniMax, and whatever the user declared on their own endpoint |
+| OpenAI Chat Completions | DeepSeek, Kimi, GLM and MiniMax |
 
 The model's *name* decides, with the group's platform as a tie-breaker for
 a name that carries no family. DeepSeek, Kimi, GLM and MiniMax go over Chat
@@ -1050,8 +1050,10 @@ for Chat Completions. `native_vendor_column` in `composer.rs` draws a
 vertical column of vendors (mark, name, model count) beside the list,
 outside the scrolling container so it reads at any scroll position;
 `native_vendor_of` in `native_agent.rs` files each model by its name first
-and the group's platform only for a name that gives nothing away, and the
-models on the user's own endpoint go under "custom", which is always drawn.
+and the group's platform only for a name that gives nothing away, and each
+endpoint of the user's own gets an entry of its own, named after it ("custom"
+stands in, empty, while there is none). Those sections end in a "Manage
+models…" row that opens Settings → Model providers on that endpoint.
 The vendor that opens is the one holding the session's current model, and
 `tab`/`shift-tab` step through the vendors as well as the rail.
 
@@ -1154,11 +1156,50 @@ subscription. The CLIs are unchanged: each takes one key for its whole run,
 and the group switcher already lets a CLI's slot point at a subscription
 group.
 
-The user's own endpoint is the one case this app cannot discover: nothing
-lists the models behind somebody else's base URL, so the built-in agent's
-Chat Completions route takes a model list, and those are the Chat section.
-They carry a bare id with no platform ahead of a `::`, which is how
-everything downstream tells them from a catalog model.
+**Your own endpoints in the picker** — nothing lists the models behind
+somebody else's base URL reliably, so the user declares them on Settings →
+Model providers (typed, or filled from the endpoint's own listing). Every
+entry there that routes (switched on, address and key) and declares a model
+(`ProviderEntry::offers_models_to_agent`) is listed in the picker, whatever
+format it speaks and whether or not a line of Settings → Agent is bound to
+it — this used to read only the endpoint bound to Chat Completions, which is
+why an endpoint on Messages or Responses "had no models". Each model's id is
+`custom:<provider id>::<model>` (`sub2api::providers::agent_model_id`): the
+platform everything downstream sees is `custom:<provider id>`, and the model
+id goes out exactly as written.
+
+No name rule places those models. The row carries the endpoint's declared
+format as its one tier, `native_wire_format` and `WireFormat::resolve` both
+skip the family table for a `custom:` platform, and `select_route` takes the
+format from the endpoint's own entry anyway — a `claude-*` on a Chat relay
+stays on Chat, a `kimi-*` on an Anthropic-compatible URL stays on Messages.
+The reasoning ladder is only what the user declared for the model.
+
+The routing writer files each such endpoint under
+`provider_configs.anthropic.options.endpoints` — format, address (bare, like
+every base it writes), key and declared windows — beside the gateway key
+table. For a session on one of those models, `select_route` points all three
+engine entries at that endpoint in memory and removes the gateway key table
+and the endpoint table from the session's config, so nothing in that
+session can carry a gateway key or another endpoint's key; for every other
+session it only removes the endpoint table. Listing endpoints therefore does
+not empty the gateway key tables — only binding a line does (below). A
+session naming an endpoint that no longer routes fails to start with
+`UnknownEndpoint`, localized as `native.endpoint_unavailable`. Ids an earlier
+build saved bare for the Chat line move to the new form once at launch
+(`native_agent::migrate_bare_endpoint_ids`); one left bare still routes the
+old way.
+
+Each model row on Model providers has a Test that sends one token in the
+endpoint's format to the URL the agent will use (`sub2api::model_test`), the
+address field shows that URL, and the models section says whether — and why
+not — the endpoint is in the picker. A turn that fails with a 404 is reported
+with the model, the route and that URL (`AgentEvent::RouteNotFound`), because
+the Responses and Chat adapters say only "Model not found: unknown" and the
+usual cause is a wrong address. A base whose last segment is a version
+(`…/api/paas/v4`, `…/api/v3`) keeps it: the adapters append `/v1` only to a
+base that has none (`claurst_api::endpoint::versioned_url`, a recorded
+departure, mirrored by `sub2api::gateway::versioned_url`).
 
 **What the model is told** — the engine's own system prompt (Claurst's) is a
 short generic list, so the bridge appends the rest, in this order
@@ -1290,6 +1331,11 @@ unbound falls back to the managed gateway, so signing in and pointing one API
 somewhere of your own are not mutually exclusive. This is also the one place
 the usual precedence is inverted: for a CLI the gateway outranks a bound
 endpoint, but here a binding is an instruction about that API and wins.
+A binding is no longer how an endpoint's models reach the picker (above); it
+sends *every* model of that format there, so while the bound endpoint
+declares models of its own the picker hides the gateway's rows of that
+format (`native_agent::shadowed_formats`) — they would no longer reach the
+gateway.
 
 Two things make three keys actually work, and both are easy to undo by
 accident. The writer no longer pins the top-level `config.api_key`

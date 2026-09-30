@@ -26,6 +26,7 @@ use super::providers_page::card_button;
 use super::settings::abbreviate_home_path;
 use super::*;
 
+use crate::ui::ActivationExt as _;
 use crate::ui::text_field::TextField;
 
 /// Presets for the compaction threshold, as fractions of the window.
@@ -391,11 +392,14 @@ impl Waku {
         for endpoint in NativeEndpoint::ALL {
             let active = endpoint == selected;
             // The dot says "pointed somewhere of your own" — the gateway
-            // needs no mention, it is the default.
-            let custom = stored.get(endpoint.id()).is_some();
+            // needs no mention, it is the default. Read through the binding,
+            // which is what routes, not the copy a slot may still carry.
+            let custom = stored.routed_endpoint(endpoint.id()).is_some();
             list = list.child(
                 div()
                     .id(SharedString::from(format!("agent-endpoint-{}", endpoint.id())))
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
                     .px(px(10.0))
                     .py(px(7.0))
                     .rounded(px(7.0))
@@ -420,16 +424,25 @@ impl Waku {
                             .text_color(if active { theme.text } else { theme.text_secondary })
                             .child(SharedString::from(endpoint.label())),
                     )
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_activation(cx, move |this, _, cx| {
                         this.agent_page.selected_endpoint = endpoint;
                         cx.notify();
-                    })),
+                    }),
             );
         }
+
+        // Binding a line to an endpoint with models of its own takes that
+        // line away from the gateway, and the picker drops the gateway's
+        // rows of that format — say so where the binding is made.
+        let hides_gateway = stored.routed_endpoint(selected.id()).is_some()
+            && stored
+                .bound_provider(selected.id())
+                .is_some_and(sub2api::providers::ProviderEntry::offers_models_to_agent);
 
         section_card(theme)
             .child(section_title(theme, tr!("agent.endpoints_title")))
             .child(section_description(theme, tr!("agent.endpoints_description")))
+            .child(self.render_agent_picker_sources(&stored, theme, cx))
             .child(
                 div()
                     .mt(px(10.0))
@@ -461,9 +474,101 @@ impl Waku {
                                         "agent.endpoint_path_hint",
                                         path = selected.request_path()
                                     )),
-                            ),
+                            )
+                            .when(hides_gateway, |pane| {
+                                pane.child(
+                                    div()
+                                        .flex()
+                                        .items_start()
+                                        .gap(px(6.0))
+                                        .text_size(sp(11.5))
+                                        .text_color(theme.warning)
+                                        .child(icon("icons/alert.svg", 12.0, theme.warning))
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .child(tr!("agent.endpoint_hides_gateway")),
+                                        ),
+                                )
+                            }),
                     ),
             )
+    }
+
+    /// Which endpoints of the user's own feed the built-in agent's picker.
+    ///
+    /// Describing an endpoint and its models on Model providers is all it
+    /// takes now — no line has to be bound — so this page says which ones
+    /// are listed, rather than leaving the user to look for them here.
+    fn render_agent_picker_sources(
+        &self,
+        stored: &sub2api::custom_api::CustomApiConfig,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let sources: Vec<String> = stored
+            .registry
+            .providers
+            .iter()
+            .filter(|entry| entry.offers_models_to_agent())
+            .map(|entry| {
+                tr!(
+                    "agent.picker_source_row",
+                    name = entry
+                        .label()
+                        .unwrap_or_else(|| tr!("model_providers.unnamed")),
+                    count = entry.models.len(),
+                    format = super::native_agent::native_format_option(entry.format.wire_id())
+                        .map(|option| crate::i18n::translate(option.label))
+                        .unwrap_or_default()
+                )
+            })
+            .collect();
+        let summary = if sources.is_empty() {
+            tr!("agent.picker_sources_empty")
+        } else {
+            sources.join(" · ")
+        };
+        div()
+            .mt(px(10.0))
+            .px(px(12.0))
+            .py(px(9.0))
+            .rounded(px(9.0))
+            .bg(theme.inset)
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.0))
+                    .child(
+                        div()
+                            .text_size(sp(12.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("agent.picker_sources_title")),
+                    )
+                    .child(
+                        div()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(summary),
+                    ),
+            )
+            .child(card_button(
+                theme,
+                SharedString::from("agent-picker-sources-manage"),
+                tr!("model_providers.manage"),
+                false,
+                false,
+                cx,
+                |this, _, cx| this.open_settings_page(SettingsPage::ModelProviders, cx),
+            ))
     }
 
     fn render_agent_header(&self, theme: Theme, cx: &mut Context<Self>) -> Div {

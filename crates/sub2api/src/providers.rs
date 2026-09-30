@@ -69,6 +69,66 @@ impl ApiFormat {
     pub fn is_anthropic(self) -> bool {
         matches!(self, Self::Anthropic)
     }
+
+    /// The id the built-in agent names this format by — the picker's
+    /// service tier and `waku_agent_bridge::WireFormat::id`, which this
+    /// crate cannot import.
+    pub fn wire_id(self) -> &'static str {
+        match self {
+            Self::Anthropic => "messages",
+            Self::OpenAiResponses => "responses",
+            Self::OpenAiChat => "chat",
+        }
+    }
+
+    /// The format a wire id names, the inverse of [`ApiFormat::wire_id`].
+    pub fn from_wire_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|format| format.wire_id() == id)
+    }
+
+    /// The path below the version root: [`ApiFormat::request_path`] without
+    /// its `/v1`, for a base that carries a version of its own
+    /// (`crate::gateway::versioned_url`).
+    pub fn endpoint_path(self) -> &'static str {
+        match self {
+            Self::Anthropic => "messages",
+            Self::OpenAiResponses => "responses",
+            Self::OpenAiChat => "chat/completions",
+        }
+    }
+}
+
+/// What the built-in agent's picker puts ahead of a provider id: a model on
+/// one of the user's own endpoints is `custom:<provider id>::<model>`.
+///
+/// The `::` is the separator every reader of a picker id already splits on,
+/// so the platform those readers see is `custom:<provider id>` and the model
+/// is the id as the endpoint knows it. Kept in step with
+/// `waku_agent_bridge::ENDPOINT_PLATFORM_PREFIX`.
+pub const AGENT_MODEL_PREFIX: &str = "custom:";
+
+/// The picker id for `model` on the provider `provider_id`.
+pub fn agent_model_id(provider_id: &str, model: &str) -> String {
+    format!("{AGENT_MODEL_PREFIX}{provider_id}::{}", model.trim())
+}
+
+/// The provider id and model of a picker id built by [`agent_model_id`], or
+/// `None` for any other id — a gateway row, the fallback list, or a bare id
+/// saved by an earlier build.
+pub fn parse_agent_model_id(id: &str) -> Option<(&str, &str)> {
+    let (platform, model) = id.split_once("::")?;
+    let provider = platform.trim().strip_prefix(AGENT_MODEL_PREFIX)?;
+    (is_safe_endpoint_id(provider) && !model.trim().is_empty()).then_some((provider, model))
+}
+
+/// Whether a provider id can ride inside a picker id and a settings key
+/// unchanged. Ids this app makes (`pr-<ms>-<n>`) always can; a hand-edited
+/// one with a `:` or whitespace in it would be read back as something else.
+pub fn is_safe_endpoint_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
 /// The one format a slot can be routed with.
@@ -247,6 +307,26 @@ impl ProviderEntry {
     /// What routes, which is nothing while the entry is switched off.
     pub fn is_routable(&self) -> bool {
         self.enabled && self.is_usable()
+    }
+
+    /// Whether the built-in agent's picker lists this endpoint's models:
+    /// it routes, it declares at least one model, and its id can be carried
+    /// in a picker id. No slot binding is involved — describing an endpoint
+    /// and its models is enough.
+    pub fn offers_models_to_agent(&self) -> bool {
+        self.is_routable()
+            && is_safe_endpoint_id(&self.id)
+            && self.models.iter().any(|model| !model.id.trim().is_empty())
+    }
+
+    /// What to call this endpoint where a name is needed: the user's name,
+    /// else the host of its address, else `None`.
+    pub fn label(&self) -> Option<String> {
+        let name = self.name.trim();
+        if !name.is_empty() {
+            return Some(name.to_owned());
+        }
+        crate::custom_api::host_of(&self.base_url)
     }
 
     /// The entry as the writers still want it: address, key, model ids.
@@ -509,6 +589,73 @@ mod tests {
             paths,
             ["/v1/messages", "/v1/responses", "/v1/chat/completions"]
         );
+    }
+
+    /// The bridge names formats by these strings (`WireFormat::id`), and the
+    /// routing table and the picker's service tier carry them across.
+    #[test]
+    fn wire_ids_match_the_bridges_format_ids() {
+        let ids: Vec<_> = ApiFormat::ALL.into_iter().map(ApiFormat::wire_id).collect();
+        assert_eq!(ids, ["messages", "responses", "chat"]);
+        for format in ApiFormat::ALL {
+            assert_eq!(ApiFormat::from_wire_id(format.wire_id()), Some(format));
+            assert_eq!(format.request_path(), format!("/v1/{}", format.endpoint_path()));
+        }
+        assert_eq!(ApiFormat::from_wire_id("anthropic"), None);
+    }
+
+    #[test]
+    fn agent_model_ids_round_trip() {
+        let id = agent_model_id("pr-1759200000000-0", " glm-5.1 ");
+        assert_eq!(id, "custom:pr-1759200000000-0::glm-5.1");
+        assert_eq!(parse_agent_model_id(&id), Some(("pr-1759200000000-0", "glm-5.1")));
+        // Model names keep whatever they carry after the first `::`.
+        assert_eq!(
+            parse_agent_model_id("custom:pr-1::qwen3:32b"),
+            Some(("pr-1", "qwen3:32b"))
+        );
+        assert_eq!(parse_agent_model_id("custom:pr-1::a/b"), Some(("pr-1", "a/b")));
+        // Gateway rows, bare ids and malformed ones are not endpoint ids.
+        for other in [
+            "anthropic::claude-sonnet-5",
+            "claude-sonnet-5",
+            "custom::glm-5",
+            "custom:pr 1::glm-5",
+            "custom:pr-1::",
+        ] {
+            assert_eq!(parse_agent_model_id(other), None, "{other}");
+        }
+    }
+
+    #[test]
+    fn an_unsafe_or_empty_provider_offers_nothing() {
+        let mut entry = ProviderEntry::new("Relay", ApiFormat::OpenAiChat);
+        entry.base_url = "https://relay.example.org".to_owned();
+        entry.api_key = "sk-relay".to_owned();
+        assert!(!entry.offers_models_to_agent(), "no models declared");
+
+        entry.add_model(ModelEntry::new("glm-5.1"));
+        assert!(entry.offers_models_to_agent());
+
+        entry.enabled = false;
+        assert!(!entry.offers_models_to_agent(), "switched off");
+        entry.enabled = true;
+
+        entry.api_key.clear();
+        assert!(!entry.offers_models_to_agent(), "no key");
+        entry.api_key = "sk-relay".to_owned();
+
+        entry.id = "hand edited::id".to_owned();
+        assert!(!entry.offers_models_to_agent(), "an id a picker id cannot carry");
+    }
+
+    #[test]
+    fn an_unnamed_endpoint_is_labelled_by_its_host() {
+        let mut entry = ProviderEntry::new("", ApiFormat::OpenAiChat);
+        entry.base_url = "https://open.bigmodel.cn/api/paas/v4".to_owned();
+        assert_eq!(entry.label().as_deref(), Some("open.bigmodel.cn"));
+        entry.name = "GLM".to_owned();
+        assert_eq!(entry.label().as_deref(), Some("GLM"));
     }
 
     /// An undeclared window is a default, and the `[1m]` marker is read

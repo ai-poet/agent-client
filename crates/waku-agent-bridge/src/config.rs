@@ -103,11 +103,54 @@ impl WireFormat {
     /// rule, and what stops a stale tier reaching the wire. Only a model the
     /// catalog does not place falls back to the request, which is the case a
     /// user-declared endpoint model is in.
+    ///
+    /// A model on one of the user's own endpoints (platform
+    /// `custom:<id>`) is never placed by its name: the endpoint declared
+    /// what it speaks, and a `claude-*` served over Chat Completions is
+    /// exactly as likely as a `glm-*` served over Messages. [`select_route`]
+    /// then takes the format from the endpoint's own entry.
     pub fn resolve(requested: Option<Self>, platform: Option<&str>, model: &str) -> Self {
+        if endpoint_id(platform).is_some() {
+            return requested.unwrap_or(Self::Chat);
+        }
         Self::for_model(platform, model)
             .or(requested)
             .unwrap_or(Self::Chat)
     }
+
+    /// The path below the API's version root, for naming the URL a request
+    /// went to.
+    pub fn request_path(self) -> &'static str {
+        match self {
+            Self::Messages => "messages",
+            Self::Responses => "responses",
+            Self::Chat => "chat/completions",
+        }
+    }
+
+    /// The format an engine provider entry speaks, the inverse of
+    /// [`WireFormat::engine_provider`].
+    pub fn for_engine_provider(provider: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|format| format.engine_provider() == provider)
+    }
+}
+
+/// What the picker puts ahead of the provider id of an endpoint of the
+/// user's own: a session on `custom:<id>::<model>` carries the platform
+/// `custom:<id>`. Kept in step with `sub2api::providers::AGENT_MODEL_PREFIX`,
+/// which this crate cannot import.
+pub const ENDPOINT_PLATFORM_PREFIX: &str = "custom:";
+
+/// The endpoint a session's platform names, or `None` for a gateway
+/// platform and for no platform at all.
+pub fn endpoint_id(platform: Option<&str>) -> Option<&str> {
+    platform?
+        .trim()
+        .strip_prefix(ENDPOINT_PLATFORM_PREFIX)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
 }
 
 /// The families the gateway serves over Chat Completions, by the same name
@@ -304,6 +347,12 @@ impl AgentStartOptions {
             self.model.as_deref().unwrap_or_default(),
         )
     }
+
+    /// The endpoint of the user's own this session's model lives on, if it
+    /// is one of those.
+    pub fn endpoint_id(&self) -> Option<&str> {
+        endpoint_id(self.platform.as_deref())
+    }
 }
 
 /// The per-turn options that can change without a restart.
@@ -330,7 +379,19 @@ pub struct TurnOptions {
 /// a second answer to that question, and the two would disagree the moment a
 /// user has both.
 pub fn build_config(options: &AgentStartOptions) -> anyhow::Result<Config> {
-    let mut config = build_config_from(load_settings()?, options);
+    let settings = load_settings()?;
+    // A model on an endpoint that is gone — deleted, switched off, emptied —
+    // has nowhere to go. Say so by name rather than failing later on a key
+    // the scrubbed route no longer has.
+    if let Some(id) = options.endpoint_id()
+        && endpoint_route(&settings.effective_config(), id).is_none()
+    {
+        return Err(UnknownEndpoint {
+            endpoint: id.to_owned(),
+        }
+        .into());
+    }
+    let mut config = build_config_from(settings, options);
     apply_compaction_settings(&mut config, settings_document().as_ref());
     Ok(config)
 }
@@ -463,6 +524,21 @@ fn install_repl_server(config: &mut Config, wiring: &ComputerUseWiring, cwd: &Pa
 /// but the writer did not create (a self-hosted setup) inherits the anthropic
 /// entry's base, so a custom endpoint works for all three formats too.
 fn select_route(config: &mut Config, options: &AgentStartOptions) {
+    // The endpoint table is routing input for this function alone. Taken out
+    // of the loaded config first, so no session — gateway or endpoint —
+    // carries anybody else's key past this point.
+    let endpoints = config
+        .provider_configs
+        .get_mut("anthropic")
+        .and_then(|entry| entry.options.remove(ENDPOINTS_OPTION));
+    if let Some(id) = options.endpoint_id() {
+        match endpoints.as_ref().and_then(|table| parse_endpoint(table.get(id)?)) {
+            Some(route) => apply_endpoint_route(config, &route),
+            None => scrub_routes(config),
+        }
+        return;
+    }
+
     let format = options.wire_format();
     let provider = format.engine_provider();
 
@@ -515,6 +591,145 @@ fn select_route(config: &mut Config, options: &AgentStartOptions) {
     }
 }
 
+/// The engine provider entries the routing writer manages, one per format.
+const MANAGED_ENGINE_PROVIDERS: [&str; 3] = ["anthropic", "codex", "openai"];
+
+/// One endpoint of the user's own, as the routing writer filed it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct EndpointRoute {
+    pub format: WireFormat,
+    pub api_base: String,
+    pub api_key: String,
+    pub context_windows: serde_json::Map<String, serde_json::Value>,
+}
+
+/// The endpoint `id` in the loaded config's table, when it is complete
+/// enough to route: a format this bridge speaks, an address and a key.
+pub(crate) fn endpoint_route(config: &Config, id: &str) -> Option<EndpointRoute> {
+    config
+        .provider_configs
+        .get("anthropic")?
+        .options
+        .get(ENDPOINTS_OPTION)?
+        .get(id)
+        .and_then(parse_endpoint)
+}
+
+fn parse_endpoint(value: &serde_json::Value) -> Option<EndpointRoute> {
+    let text = |key: &str| {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned)
+    };
+    Some(EndpointRoute {
+        format: WireFormat::from_id(&text("format")?)?,
+        api_base: text("api_base")?,
+        api_key: text("api_key")?,
+        context_windows: value
+            .get(CONTEXT_WINDOWS_OPTION)
+            .and_then(serde_json::Value::as_object)
+            .cloned()
+            .unwrap_or_default(),
+    })
+}
+
+/// Point the whole session at one endpoint of the user's own.
+///
+/// All three managed entries, not only the one the format selects: the
+/// engine builds an Anthropic client for every session whatever it speaks,
+/// and that client, left on the gateway, would be the one piece of the
+/// session still holding a gateway key. Rewritten, the session's `Config`
+/// names this endpoint's address and key and nothing else — the gateway key
+/// table and the catalog's windows go with it, and the endpoint's declared
+/// windows take their place.
+fn apply_endpoint_route(config: &mut Config, route: &EndpointRoute) {
+    config.provider = Some(route.format.engine_provider().to_owned());
+    for name in MANAGED_ENGINE_PROVIDERS {
+        let entry = config
+            .provider_configs
+            .entry(name.to_owned())
+            .or_insert_with(ProviderConfig::default);
+        entry.api_base = Some(route.api_base.clone());
+        entry.api_key = Some(route.api_key.clone());
+        entry.enabled = true;
+        entry.options.remove(GATEWAY_KEYS_OPTION);
+        if route.context_windows.is_empty() {
+            entry.options.remove(CONTEXT_WINDOWS_OPTION);
+        } else {
+            entry.options.insert(
+                CONTEXT_WINDOWS_OPTION.to_owned(),
+                serde_json::Value::Object(route.context_windows.clone()),
+            );
+        }
+    }
+    config.api_key = Some(route.api_key.clone());
+}
+
+/// A session naming an endpoint that is not there routes nowhere: every key
+/// and address the writer manages is cleared, so it cannot quietly fall
+/// through to the gateway with a gateway key.
+fn scrub_routes(config: &mut Config) {
+    config.api_key = None;
+    for name in MANAGED_ENGINE_PROVIDERS {
+        if let Some(entry) = config.provider_configs.get_mut(name) {
+            entry.api_key = None;
+            entry.api_base = None;
+            entry.options.remove(GATEWAY_KEYS_OPTION);
+        }
+    }
+}
+
+/// Everything about a config that decides where its requests go and with
+/// which key. Two configs with the same fingerprint can share clients; any
+/// difference — a switch between two endpoints of the same format, a key
+/// edited on one — means the clients have to be rebuilt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RouteFingerprint {
+    provider: Option<String>,
+    api_key: Option<String>,
+    bases_and_keys: Vec<(Option<String>, Option<String>)>,
+}
+
+pub(crate) fn route_fingerprint(config: &Config) -> RouteFingerprint {
+    RouteFingerprint {
+        provider: config.provider.clone(),
+        api_key: config.api_key.clone(),
+        bases_and_keys: MANAGED_ENGINE_PROVIDERS
+            .into_iter()
+            .map(|name| {
+                config
+                    .provider_configs
+                    .get(name)
+                    .map(|entry| (entry.api_base.clone(), entry.api_key.clone()))
+                    .unwrap_or_default()
+            })
+            .collect(),
+    }
+}
+
+/// The session's model lives on an endpoint that no longer routes.
+#[derive(Clone, Debug)]
+pub struct UnknownEndpoint {
+    /// The provider id the session named.
+    pub endpoint: String,
+}
+
+impl std::fmt::Display for UnknownEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the endpoint `{}` this model belongs to is not available: it was removed, \
+             switched off, or has no address, key or models",
+            self.endpoint
+        )
+    }
+}
+
+impl std::error::Error for UnknownEndpoint {}
+
 /// How much of the conversation may be tool output before the engine starts
 /// shedding the oldest of it.
 ///
@@ -540,6 +755,12 @@ pub const GATEWAY_KEYS_OPTION: &str = "gateway_keys";
 /// The member of that table holding one key per model. Kept in step with
 /// `sub2api::global_config::native::MODEL_KEYS_MEMBER`.
 pub const MODEL_KEYS_MEMBER: &str = "models";
+
+/// Where the routing writer files the user's own endpoints, beside the key
+/// table on the anthropic entry: `{"<id>": {"format", "api_base", "api_key",
+/// "context_windows"}}`. Kept in step with
+/// `sub2api::global_config::native::ENDPOINTS_OPTION`.
+pub const ENDPOINTS_OPTION: &str = "endpoints";
 
 /// A route with nothing to authenticate it.
 ///
@@ -1436,6 +1657,195 @@ mod tests {
     fn fresh_settings() -> Settings {
         serde_json::from_str(FRESH_TAKEOVER_SETTINGS)
             .expect("the routing writer's document must load as engine settings")
+    }
+
+    /// The signed-in document with two endpoints of the user's own filed
+    /// beside the gateway keys, as the routing writer files them.
+    fn settings_with_endpoints() -> Settings {
+        let mut document: serde_json::Value =
+            serde_json::from_str(FRESH_TAKEOVER_SETTINGS).unwrap();
+        document["config"]["provider_configs"]["anthropic"]["options"][ENDPOINTS_OPTION] = serde_json::json!({
+            "pr-glm": {
+                "format": "chat",
+                "api_base": "https://open.bigmodel.cn/api/paas/v4",
+                "api_key": "sk-glm",
+                "context_windows": {"glm-5.1": 200_000}
+            },
+            "pr-kimi": {
+                "format": "messages",
+                "api_base": "https://api.moonshot.cn/anthropic",
+                "api_key": "sk-kimi",
+                "context_windows": {}
+            }
+        });
+        serde_json::from_value(document).unwrap()
+    }
+
+    fn on_endpoint(id: &str, model: &str, requested: Option<WireFormat>) -> AgentStartOptions {
+        AgentStartOptions {
+            platform: Some(format!("{ENDPOINT_PLATFORM_PREFIX}{id}")),
+            model: Some(model.into()),
+            wire_format: requested,
+            ..AgentStartOptions::default()
+        }
+    }
+
+    #[test]
+    fn an_endpoint_model_goes_to_its_endpoint_with_its_key_and_format() {
+        // Requested Messages by a stale tier; the endpoint's own entry says
+        // Chat, and that is what it speaks.
+        let options = on_endpoint("pr-glm", "glm-5.1", Some(WireFormat::Messages));
+        let config = build_config_from(settings_with_endpoints(), &options);
+        assert_eq!(config.provider.as_deref(), Some("openai"));
+        assert_eq!(config.api_key.as_deref(), Some("sk-glm"));
+        assert_eq!(
+            config.resolve_api_base(),
+            "https://open.bigmodel.cn/api/paas/v4"
+        );
+        assert_eq!(
+            config.resolve_provider_api_key("openai").as_deref(),
+            Some("sk-glm")
+        );
+    }
+
+    #[test]
+    fn a_messages_endpoint_points_the_anthropic_client_at_it() {
+        let options = on_endpoint("pr-kimi", "kimi-k3", None);
+        let config = build_config_from(settings_with_endpoints(), &options);
+        assert_eq!(config.provider.as_deref(), Some("anthropic"));
+        assert_eq!(
+            config.resolve_anthropic_api_base(),
+            "https://api.moonshot.cn/anthropic"
+        );
+        assert_eq!(config.api_key.as_deref(), Some("sk-kimi"));
+    }
+
+    /// The containment property: nothing in an endpoint session's config can
+    /// carry a gateway key or another endpoint's key anywhere.
+    #[test]
+    fn an_endpoint_session_holds_no_gateway_key_anywhere() {
+        let options = on_endpoint("pr-glm", "glm-5.1", None);
+        let config = build_config_from(settings_with_endpoints(), &options);
+        let rendered = format!(
+            "{} {}",
+            serde_json::to_string(&config.provider_configs).unwrap(),
+            config.api_key.clone().unwrap_or_default()
+        );
+        for secret in ["sk-claude", "sk-codex", "sk-general", "sk-kimi"] {
+            assert!(!rendered.contains(secret), "{secret} leaked: {rendered}");
+        }
+        for name in ["anthropic", "codex", "openai"] {
+            let options = &config.provider_configs[name].options;
+            assert!(!options.contains_key(GATEWAY_KEYS_OPTION), "{name}");
+            assert!(!options.contains_key(ENDPOINTS_OPTION), "{name}");
+        }
+    }
+
+    /// A gateway session never sees the endpoint table either.
+    #[test]
+    fn a_gateway_session_ignores_the_endpoint_table() {
+        let options = AgentStartOptions {
+            platform: Some("anthropic".into()),
+            model: Some("claude-sonnet-5-5".into()),
+            ..AgentStartOptions::default()
+        };
+        let config = build_config_from(settings_with_endpoints(), &options);
+        assert_eq!(config.api_key.as_deref(), Some("sk-claude"));
+        let rendered = serde_json::to_string(&config.provider_configs).unwrap();
+        assert!(!rendered.contains("sk-glm"), "{rendered}");
+        assert!(!rendered.contains("sk-kimi"), "{rendered}");
+    }
+
+    #[test]
+    fn a_removed_endpoint_is_refused_and_scrubbed() {
+        let options = on_endpoint("pr-gone", "glm-5.1", Some(WireFormat::Chat));
+        let settings = settings_with_endpoints();
+        assert!(endpoint_route(&settings.effective_config(), "pr-gone").is_none());
+        let config = build_config_from(settings, &options);
+        assert!(config.api_key.is_none());
+        for name in ["anthropic", "codex", "openai"] {
+            let entry = &config.provider_configs[name];
+            assert!(entry.api_key.is_none(), "{name}");
+            assert!(entry.api_base.is_none(), "{name}");
+        }
+        let error = UnknownEndpoint {
+            endpoint: "pr-gone".into(),
+        };
+        assert!(error.to_string().contains("pr-gone"));
+    }
+
+    #[test]
+    fn switching_between_two_endpoints_changes_the_route_fingerprint() {
+        let glm = build_config_from(
+            settings_with_endpoints(),
+            &on_endpoint("pr-glm", "glm-5.1", None),
+        );
+        let kimi = build_config_from(
+            settings_with_endpoints(),
+            &on_endpoint("pr-kimi", "kimi-k3", None),
+        );
+        let gateway = build_config_from(
+            settings_with_endpoints(),
+            &AgentStartOptions {
+                platform: Some("anthropic".into()),
+                model: Some("claude-sonnet-5".into()),
+                ..AgentStartOptions::default()
+            },
+        );
+        assert_ne!(route_fingerprint(&glm), route_fingerprint(&kimi));
+        assert_ne!(route_fingerprint(&glm), route_fingerprint(&gateway));
+        let again = build_config_from(
+            settings_with_endpoints(),
+            &on_endpoint("pr-glm", "glm-5.1-air", None),
+        );
+        assert_eq!(route_fingerprint(&glm), route_fingerprint(&again));
+    }
+
+    #[test]
+    fn an_endpoints_declared_windows_replace_the_catalogs() {
+        let mut settings = settings_with_endpoints();
+        settings
+            .config
+            .provider_configs
+            .get_mut("openai")
+            .unwrap()
+            .options
+            .insert(
+                CONTEXT_WINDOWS_OPTION.into(),
+                serde_json::json!({"glm-5.1": 128_000, "gpt-5.6-sol": 400_000}),
+            );
+        let config = build_config_from(settings, &on_endpoint("pr-glm", "glm-5.1", None));
+        assert_eq!(
+            declared_windows(&config),
+            BTreeMap::from([("glm-5.1".to_owned(), 200_000)])
+        );
+    }
+
+    #[test]
+    fn an_endpoint_models_declared_format_is_never_overruled_by_its_name() {
+        for (model, requested) in [
+            ("claude-sonnet-5", WireFormat::Chat),
+            ("glm-5.1", WireFormat::Messages),
+            ("gpt-6.1-sol", WireFormat::Chat),
+        ] {
+            assert_eq!(
+                WireFormat::resolve(Some(requested), Some("custom:pr-1"), model),
+                requested,
+                "{model}"
+            );
+        }
+        assert_eq!(
+            WireFormat::resolve(None, Some("custom:pr-1"), "claude-sonnet-5"),
+            WireFormat::Chat
+        );
+        assert_eq!(endpoint_id(Some(" custom:pr-1 ")), Some("pr-1"));
+        assert_eq!(endpoint_id(Some("custom:")), None);
+        assert_eq!(endpoint_id(Some("anthropic")), None);
+        // Gateway ids still follow the name.
+        assert_eq!(
+            WireFormat::resolve(Some(WireFormat::Chat), Some("anthropic"), "claude-sonnet-5"),
+            WireFormat::Messages
+        );
     }
 
     #[test]

@@ -957,8 +957,14 @@ impl Waku {
         // staying put — what this model was last used with when that still
         // works, its own route otherwise.
         if provider.is_builtin() {
+            // A model on an endpoint of the user's own speaks what that
+            // endpoint declares now, not what it was last used with: the
+            // format is the endpoint's, and it may have been changed since.
+            let declared = sub2api::providers::parse_agent_model_id(&model)
+                .and_then(|_| self.probe_model(provider, &model))
+                .and_then(|row| row.default_service_tier.clone());
             service_tier = Some(super::composer::native_wire_format(
-                service_tier.as_deref(),
+                declared.as_deref().or(service_tier.as_deref()),
                 Some(model.as_str()),
             ));
         }
@@ -1068,21 +1074,15 @@ impl Waku {
         };
         // A model the list no longer carries under that id (a session saved
         // before the catalog filed it by platform, say) is read by its name.
-        let current = model.as_deref().map(|id| {
-            models
-                .iter()
-                .find(|entry| entry.id == id)
-                .map(super::native_agent::native_vendor_of)
-                .unwrap_or_else(|| {
-                    super::native_agent::native_vendor_of(&ProviderModel::new(id, id))
-                })
-        });
+        let current = model
+            .as_deref()
+            .map(|id| super::native_agent::native_vendor_of_id(id).to_owned());
         let present = super::native_agent::native_vendors_present(models);
         let vendor = current
-            .filter(|id| present.iter().any(|(vendor, _)| vendor.id == *id))
-            .or_else(|| present.first().map(|(vendor, _)| vendor.id));
+            .filter(|id| present.iter().any(|entry| entry.id == *id))
+            .or_else(|| present.first().map(|entry| entry.id.clone()));
         if let Some(vendor) = vendor {
-            self.model_picker_vendor = vendor.to_owned();
+            self.model_picker_vendor = vendor;
         }
     }
 

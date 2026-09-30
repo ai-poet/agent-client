@@ -20,6 +20,7 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         })
         .collect(),
         ProviderKind::Codex => [
+            ProviderModel::new("gpt-6.1-sol", "GPT-6.1-Sol"),
             ProviderModel::new("gpt-6-astra", "GPT-6-Astra"),
             ProviderModel::new("gpt-6-sol", "GPT-6-Sol"),
             ProviderModel::new("gpt-5.6-sol", "GPT-5.6-Sol").default(),
@@ -50,6 +51,10 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
             claude_long_context(claude_ultracode_model("claude-opus-4-7", "Claude Opus 4.7")),
             claude_long_context(claude_reasoning_model("claude-opus-4-6", "Claude Opus 4.6")),
             claude_reasoning_model("claude-opus-4-5", "Claude Opus 4.5"),
+            claude_long_context(claude_ultracode_model(
+                "claude-sonnet-5-5",
+                "Claude Sonnet 5.5",
+            )),
             claude_long_context(claude_ultracode_model("claude-sonnet-5", "Claude Sonnet 5"))
                 .default(),
             claude_long_context(claude_reasoning_model(
@@ -65,7 +70,8 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // shorter list is what the client falls back to before the daemon has
         // answered.
         ProviderKind::Native => vec![
-            claude_reasoning_model("claude-sonnet-5", "Claude Sonnet 5").default(),
+            claude_reasoning_model("claude-sonnet-5-5", "Claude Sonnet 5.5").default(),
+            claude_reasoning_model("claude-sonnet-5", "Claude Sonnet 5"),
             claude_reasoning_model("claude-opus-5", "Claude Opus 5"),
             ProviderModel::new("claude-haiku-4-5", "Claude Haiku 4.5"),
         ],

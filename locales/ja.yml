@@ -1774,10 +1774,13 @@ native.vendor.other: "その他"
 native.vendor.custom: "カスタム"
 
 native.empty_turn: "%{model} は何も返さずにターンを終了しました。リクエストは %{provider} API 経由で %{endpoint} に送られています。このモデルで別の API 形式を試すか、別のモデルを選んでください。"
+native.route_not_found: "%{model} が見つかりません。%{provider} API が %{url} で 404 を返しました。モデル ID とエンドポイントのアドレスを確認してください。（%{detail}）"
+native.endpoint_unavailable: "このモデルが属するエンドポイントは利用できなくなりました。削除・無効化されたか、アドレス・キー・モデルが不足しています。別のモデルを選ぶか、設定 → モデルエンドポイントで修正してください。"
 
 models.wire_format: "API 形式"
 
-models.declare_your_own: "まだ何もありません。設定 → プロバイダーで独自エンドポイントのモデル名を書くと、ここに並びます。"
+models.declare_your_own: "まだ何もありません。設定 → モデルエンドポイントでエンドポイントとモデルを追加すると、エンドポイントごとにここに並びます。"
+models.manage_models: "モデルを管理…"
 
 cli_setup.native_route_messages: "Anthropic Messages"
 cli_setup.native_route_responses: "OpenAI Responses"
@@ -1817,7 +1820,11 @@ skills.installed_toast: "%{name} をインストールしました"
 skills.install_failed: "スキルをインストールできませんでした：%{error}"
 
 agent.endpoints_title: "エンドポイント"
-agent.endpoints_description: "内蔵エージェントは 3 種類の API 形式に対応し、それぞれ独立してルーティングされます。個別にカスタムエンドポイントを指定でき、指定しないものはマネージドゲートウェイを使用します。"
+agent.endpoints_description: "モデルエンドポイントで追加したエンドポイントのモデルは、ここで割り当てなくてもすぐにモデル選択に表示されます。エンドポイントを下の 3 種類の API 形式のいずれかに割り当てると、その形式のモデルはすべてマネージドゲートウェイではなくそのエンドポイントに送られます。"
+agent.picker_sources_title: "モデル選択に表示中"
+agent.picker_sources_empty: "独自のエンドポイントはまだありません。モデルエンドポイントでモデルと一緒に追加してください。"
+agent.picker_source_row: "%{name} · %{count} モデル · %{format}"
+agent.endpoint_hides_gateway: "このエンドポイントがこの API 形式を担当している間、マネージドゲートウェイの同じ形式のモデルはモデル選択に表示されません。"
 
 agent.endpoint_path_hint: "リクエストは下記アドレスの %{path} に送信されます。エンドポイントはこのパスに対応している必要があります。"
 
@@ -1867,6 +1874,13 @@ model_providers.model_display_name_placeholder: "空欄の場合はモデル ID 
 model_providers.model_context: "コンテキスト長"
 model_providers.model_context_placeholder: "例: 200000、200k、1M。不明な場合は空欄"
 model_providers.model_context_invalid: "トークン数として認識できません。200000、200k、1M のような形式で入力してください。"
+model_providers.model_test: "テスト"
+model_providers.model_test_ok: "%{ms} ms で応答しました"
+model_providers.request_url_hint: "リクエストは %{url} に送信されます。エンドポイントはこのパスに対応している必要があります。"
+model_providers.picker_listed: "内蔵エージェントのモデル選択に表示されています（%{count} モデル）。"
+model_providers.picker_disabled: "モデル選択に表示されていません：このエンドポイントは無効です。"
+model_providers.picker_needs_key: "まだモデル選択に表示されていません：先にアドレスと API キーを保存してください。"
+model_providers.picker_needs_models: "まだモデル選択に表示されていません：モデルを 1 つ以上追加するか、取得してください。"
 model_providers.model_efforts: "推論レベル"
 model_providers.model_efforts_placeholder: "例: low、medium、high。推論に対応していない場合は空欄"
 

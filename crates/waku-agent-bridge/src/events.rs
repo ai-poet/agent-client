@@ -118,6 +118,19 @@ pub enum AgentEvent {
         /// Where the request went.
         api_base: String,
     },
+    /// The turn failed on a 404. The engine reports that as "Model not
+    /// found: unknown" on two of its three routes, which names neither the
+    /// model nor where it was looked for; the usual cause is a wrong address,
+    /// so this carries the URL that was asked.
+    RouteNotFound {
+        /// The engine provider the wire format selected.
+        provider: String,
+        model: String,
+        /// The request URL on the route's base.
+        url: String,
+        /// The engine's own error text.
+        detail: String,
+    },
     /// Something went wrong. A turn may still settle afterwards.
     Error(String),
     /// The turn is over. `success` is false for cancellation, an unrecoverable

@@ -4003,8 +4003,15 @@ pub(super) fn find_model<'a>(models: &'a [ProviderModel], model: &str) -> Option
     if let Some(found) = models.iter().find(|candidate| candidate.id == model) {
         return Some(found);
     }
+    // A model on an endpoint of the user's own is that endpoint's: one that
+    // is gone must not borrow a gateway row's name and ladder, nor a gateway
+    // model an endpoint row's.
+    let endpoint = |id: &str| sub2api::providers::parse_agent_model_id(id).is_some();
+    if endpoint(model) {
+        return None;
+    }
     let bare = bare_model_name(model);
-    models
-        .iter()
-        .find(|candidate| bare_model_name(&candidate.id).eq_ignore_ascii_case(bare))
+    models.iter().find(|candidate| {
+        !endpoint(&candidate.id) && bare_model_name(&candidate.id).eq_ignore_ascii_case(bare)
+    })
 }

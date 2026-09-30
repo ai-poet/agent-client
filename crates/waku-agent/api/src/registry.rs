@@ -27,11 +27,10 @@ fn normalize_openai_compat_base(override_base: &str) -> String {
 }
 
 /// Fork: the Responses route on a gateway or OpenAI-compatible base. A base
-/// pasted with or without `/v1` lands on the same path.
+/// pasted with or without `/v1` lands on the same path, and one that carries
+/// its own version (`…/api/v3`) keeps it.
 fn responses_endpoint(base: &str) -> String {
-    let trimmed = base.trim_end_matches('/');
-    let root = trimmed.strip_suffix("/v1").unwrap_or(trimmed);
-    format!("{root}/v1/responses")
+    crate::endpoint::versioned_url(base, "responses")
 }
 
 fn normalize_openai_base(override_base: &str) -> String {
@@ -689,6 +688,22 @@ impl Default for ProviderRegistry {
 mod tests {
     use super::*;
     use crate::providers;
+
+    #[test]
+    fn responses_endpoint_keeps_a_versioned_base() {
+        assert_eq!(
+            responses_endpoint("https://gateway.example.org"),
+            "https://gateway.example.org/v1/responses"
+        );
+        assert_eq!(
+            responses_endpoint("https://gateway.example.org/v1/"),
+            "https://gateway.example.org/v1/responses"
+        );
+        assert_eq!(
+            responses_endpoint("https://ark.cn-beijing.volces.com/api/v3"),
+            "https://ark.cn-beijing.volces.com/api/v3/responses"
+        );
+    }
 
     #[test]
     fn local_provider_aliases_resolve_to_canonical_registrations() {

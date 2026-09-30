@@ -55,8 +55,9 @@ mod subagent;
 
 pub use background::{BackgroundEntry, BackgroundKind, BackgroundStatus};
 pub use config::{
-    AccessMode, AgentStartOptions, COMPUTER_USE_TOOLS, ComputerUseWiring, MissingApiKey,
-    TurnOptions, WireFormat, split_model,
+    AccessMode, AgentStartOptions, COMPUTER_USE_TOOLS, ComputerUseWiring,
+    ENDPOINT_PLATFORM_PREFIX, MissingApiKey, TurnOptions, UnknownEndpoint, WireFormat,
+    endpoint_id, split_model,
 };
 pub use events::{
     AgentEvent, CompactionPhase, EventSink, PermissionChoice, SubagentEvent, SubagentStatus,
