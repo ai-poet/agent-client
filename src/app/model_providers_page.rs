@@ -78,11 +78,11 @@ pub(super) struct ModelProvidersPageState {
     queued: Vec<QueuedChange>,
 }
 
+/// One change to the provider registry, applied inside a save.
+type RegistryChange = Box<dyn FnOnce(&mut sub2api::providers::ProviderRegistry) + Send>;
+
 /// One registry change waiting for the save in flight, with its toast.
-type QueuedChange = (
-    Option<String>,
-    Box<dyn FnOnce(&mut sub2api::providers::ProviderRegistry) + Send>,
-);
+type QueuedChange = (Option<String>, RegistryChange);
 
 /// How long each candidate gets in a speed test. Short on purpose: this
 /// measures reachability from here, not how fast the model answers.
@@ -1340,10 +1340,21 @@ impl Waku {
         mutate: impl FnOnce(&mut sub2api::providers::ProviderRegistry) + Send + 'static,
         cx: &mut Context<Self>,
     ) {
+        self.commit_registry_change(toast, Box::new(mutate), cx);
+    }
+
+    /// [`Waku::commit_registry`] on a boxed change. Not generic on purpose:
+    /// it calls itself for the changes queued behind a save, and a generic
+    /// version would name a new closure type on every level of that call —
+    /// an instantiation that never ends, which the compiler rejects.
+    fn commit_registry_change(
+        &mut self,
+        toast: Option<String>,
+        mutate: RegistryChange,
+        cx: &mut Context<Self>,
+    ) {
         if self.model_providers.saving {
-            self.model_providers
-                .queued
-                .push((toast, Box::new(mutate)));
+            self.model_providers.queued.push((toast, mutate));
             return;
         }
         self.model_providers.saving = true;
@@ -1393,13 +1404,13 @@ impl Waku {
                 if !queued.is_empty() {
                     let toast = queued.iter().rev().find_map(|(toast, _)| toast.clone());
                     let changes: Vec<_> = queued.into_iter().map(|(_, change)| change).collect();
-                    this.commit_registry(
+                    this.commit_registry_change(
                         toast,
-                        move |registry| {
+                        Box::new(move |registry| {
                             for change in changes {
                                 change(registry);
                             }
-                        },
+                        }),
                         cx,
                     );
                 }
