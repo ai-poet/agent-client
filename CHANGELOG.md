@@ -29,6 +29,20 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.2.8]
+
+- 自己的接口直接出现在模型选择器里：在「设置 → 模型接口」添加接口和模型后，内置 Agent 的模型选择器里会多出以这个接口命名的一栏，不用再去「设置 → Agent」绑定。Anthropic Messages、Responses、Chat Completions 三种格式的接口都算，模型按接口声明的格式发送，不会因为名字被改走别的格式——以前只有绑定到 Chat Completions 的接口才列得出模型。模型接口页的每个模型都有「测试」按钮，页面会显示请求实际发往的地址，以及这个接口是否已出现在选择器里；选择器里这些接口那一栏的末尾有「管理模型…」
+
+  Your own endpoints show up in the model picker: add an endpoint and its models in Settings → Model providers and the built-in agent's picker gains a section named after it — no binding in Settings → Agent needed, whichever of the three API formats it speaks, and each model goes out in the endpoint's format whatever its name. Before, only an endpoint bound to Chat Completions listed its models. Each model on Model providers has a Test button, the page shows the exact URL requests go to and whether the endpoint is in the picker, and the picker's endpoint sections end in "Manage models…"
+
+- 地址末尾自带版本号的接口（如智谱 `…/api/paas/v4`、火山方舟 `…/api/v3`）不再被多拼一个 `/v1` 而返回 404；请求返回 404 时，错误信息会写明模型、接口类型和完整的请求地址，不再只有 "Model not found: unknown"
+
+  Endpoints whose address already ends in a version (Zhipu's `…/api/paas/v4`, Volcengine Ark's `…/api/v3`) no longer get an extra `/v1` and a 404; a 404 now names the model, the API and the full request URL instead of just "Model not found: unknown"
+
+- 新增 Claude Sonnet 5.5 和 GPT-6.1 Sol：Claude Code 和 Codex 的模型列表里都能选到，网关提供 Claude Sonnet 5.5 时内置 Agent 默认使用它
+
+  Added Claude Sonnet 5.5 and GPT-6.1 Sol: both are in the Claude Code and Codex model lists, and the built-in agent starts on Claude Sonnet 5.5 when the gateway serves it
+
 - 内置 Agent 一次派出的多个子智能体现在同时运行——用 GPT、Grok 和国产模型时它们以前是一个接一个跑的；某个子智能体等你批准操作时，其他子智能体也不会再被卡住
 
   Sub-agents the built-in agent starts together now run at the same time — with GPT, Grok and the Chinese models they used to run one after another — and one waiting for your approval no longer holds up the others
