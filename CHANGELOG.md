@@ -29,6 +29,14 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- 内置 Agent 一次派出的多个子智能体现在同时运行——用 GPT、Grok 和国产模型时它们以前是一个接一个跑的；某个子智能体等你批准操作时，其他子智能体也不会再被卡住
+
+  Sub-agents the built-in agent starts together now run at the same time — with GPT, Grok and the Chinese models they used to run one after another — and one waiting for your approval no longer holds up the others
+
+- 设置 → 内置 Agent 里的 MCP 服务器移到了端点下方，不用再翻过长长的工具列表才能找到；以 `/sse` 结尾的服务器地址现在按 SSE 方式连接，以前这类服务器连不上
+
+  Settings → Agent now shows MCP servers right under the endpoints instead of below the long tool list; a server address ending in `/sse` now connects over SSE, where before such servers failed to connect
+
 ## [0.2.7]
 
 - 子智能体看得见了：内置 Agent 和 Claude Code 派出的子智能体在对话里显示为一行摘要（智能体类型、任务，运行中有动画），点击即在右侧面板实时查看它的每一步——写了什么、调用了哪些工具，工具行可展开看参数和输出，运行中可随时停止。内置 Agent 的子智能体现在和主会话用同一个网关、同一套 MCP 工具和设置；后台子智能体只出现在启动它的会话里，也不会再拖住当前这一轮的结束

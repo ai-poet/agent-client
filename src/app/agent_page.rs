@@ -258,7 +258,7 @@ impl Waku {
         } else {
             McpServer {
                 name: name.clone(),
-                transport: "http".into(),
+                transport: McpServer::url_transport(&target).into(),
                 command: None,
                 args: Vec::new(),
                 env: Default::default(),
@@ -365,10 +365,13 @@ impl Waku {
             .gap(px(14.0))
             .child(self.render_agent_header(theme, cx))
             .child(self.render_agent_endpoints(theme, cx))
-            .child(self.render_agent_behaviour(settings, theme, cx))
-            .child(self.render_agent_tools(settings, theme, cx))
+            // MCP right under the endpoints: it sat below the 37-row tool
+            // list, where nobody scrolling the page ever reached it. The tool
+            // list goes last for the same reason.
             .child(self.render_agent_mcp(settings, theme, cx))
+            .child(self.render_agent_behaviour(settings, theme, cx))
             .child(self.render_agent_rules(settings, theme, cx))
+            .child(self.render_agent_tools(settings, theme, cx))
             .into_any_element()
     }
 

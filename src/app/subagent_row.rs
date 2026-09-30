@@ -31,8 +31,13 @@ impl Waku {
             .and_then(|(session_id, source_id)| {
                 self.background_work_for_activity(session_id, source_id)
             });
-        let running = work.map_or(false, |work| work.status.is_live())
-            || (live_turn && super::components::activity_is_running(activity));
+        // Its own entry says when it is done: the call itself is answered
+        // only once every call it was batched with is, so a sub-agent that
+        // finished first would otherwise shimmer on until the slowest did.
+        let running = match work {
+            Some(work) => work.status.is_live(),
+            None => live_turn && super::components::activity_is_running(activity),
+        };
         let failed = activity.failed
             || work.is_some_and(|work| work.status == BackgroundWorkStatus::Failed);
         let stopped = !failed

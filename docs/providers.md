@@ -961,6 +961,16 @@ stops from the panel ends with its own error result and the parent goes on.
 A background child is also registered in the engine's task registry under the
 same id, so `monitor task_id=<id>` works as before.
 
+Several sub-agents asked for in one message run at the same time on every
+route. The Messages route always ran a message's calls as one batch; the
+Responses and Chat Completions routes awaited them one by one, so on GPT,
+Grok and the Chinese models they ran back to back — a recorded engine
+departure now batches each stretch of calls that may overlap (sub-agents and
+read-only tools) there too, while writes and commands still run alone and in
+order. A batch is polled on the parent's one task, so each foreground child
+runs on a task of its own: a child waiting on an approval dialog no longer
+freezes its siblings.
+
 **Commit messages** — `generate_message` asks the engine directly through
 `waku_agent_bridge::one_shot`: the same prompt every CLI gets, run through the
 same loop a session uses with an empty tool set, normalized the same way.
@@ -968,11 +978,15 @@ same loop a session uses with an empty tool set, normalized the same way.
 
 **Settings** — the built-in agent is the one provider whose configuration is
 the app's to edit: Settings → Agent (`src/app/agent_page.rs`, logic in
-`sub2api::agent_settings`) writes the engine's own `settings.json` — standing
-instructions, step cap, compaction, the tool set, MCP servers and the
-persisted approval rules — touching only the keys it owns. A tool switched
-off there is filtered out of the session's tool set before the model ever
-sees it.
+`sub2api::agent_settings`) writes the engine's own `settings.json` — MCP
+servers, standing instructions, compaction, the persisted approval rules and
+the tool set, in that order on the page (MCP right under the endpoints; it
+used to sit below the long tool list, where nobody found it) — touching only
+the keys it owns. A server added by URL is filed as `sse` when its path ends
+`/sse` and as streamable `http` otherwise (`McpServer::url_transport`): the
+engine treats the two as different transports, and an SSE server filed as
+`http` never connects. A tool switched off there is filtered out of the
+session's tool set before the model ever sees it.
 
 **Models and wire formats** — the picker's list is the gateway catalog the
 Model Plaza fetches, every conversational model on every platform

@@ -1311,41 +1311,87 @@ pub async fn run_query_loop(
                     // compatible providers (Ollama, LM Studio, etc.) return
                     // finish_reason "stop" even when tool calls are present.
                     if !tool_use_blocks.is_empty() {
-                        let mut tool_results = Vec::new();
-                        for (tool_id, tool_name, tool_input) in tool_use_blocks {
-                            // Notify TUI that a tool is starting (matches Anthropic path).
-                            if let Some(ref tx) = event_tx {
-                                let _ = tx.send(QueryEvent::ToolStart {
-                                    tool_name: tool_name.clone(),
-                                    tool_id: tool_id.clone(),
-                                    input_json: tool_input.to_string(),
+                        // Waku: these calls ran strictly one after another,
+                        // so sub-agents asked for together ran back to back
+                        // on every Responses and Chat Completions model. Each
+                        // stretch of calls that may overlap (sub-agents and
+                        // read-only calls, `runner::tools::runs_concurrently`)
+                        // now runs as one batch, the way the Messages branch
+                        // runs a message's calls; the rest still run alone,
+                        // in order. Results keep the calls' order either way,
+                        // and a cancel abandons the batch in flight instead
+                        // of waiting for it.
+                        let overlaps: Vec<bool> = tool_use_blocks
+                            .iter()
+                            .map(|(tool_id, tool_name, _)| {
+                                !malformed_tool_calls.contains(tool_id)
+                                    && runner::tools::runs_concurrently(tool_name, tools)
+                            })
+                            .collect();
+                        let mut tool_results = Vec::with_capacity(tool_use_blocks.len());
+                        let mut batch_cancelled = false;
+                        for run in runner::tools::concurrency_runs(&overlaps) {
+                            let calls = &tool_use_blocks[run];
+                            if batch_cancelled {
+                                // Every call still gets its answer, so the
+                                // history stays valid.
+                                for (tool_id, _, _) in calls {
+                                    tool_results.push(ContentBlock::ToolResult {
+                                        tool_use_id: tool_id.clone(),
+                                        content: claurst_core::types::ToolResultContent::Text(
+                                            TOOL_CANCELLED_MSG.to_string(),
+                                        ),
+                                        is_error: Some(true),
+                                    });
+                                }
+                                continue;
+                            }
+                            for (tool_id, tool_name, tool_input) in calls {
+                                // Notify TUI that a tool is starting (matches Anthropic path).
+                                if let Some(ref tx) = event_tx {
+                                    let _ = tx.send(QueryEvent::ToolStart {
+                                        tool_name: tool_name.clone(),
+                                        tool_id: tool_id.clone(),
+                                        input_json: tool_input.to_string(),
+                                    });
+                                }
+                            }
+                            let malformed = &malformed_tool_calls;
+                            let exec_futures: Vec<_> = calls
+                                .iter()
+                                .map(|(tool_id, tool_name, tool_input)| async move {
+                                    if malformed.contains(tool_id) {
+                                        // Never execute a tool whose arguments could not
+                                        // be parsed — return an error the model can see
+                                        // and recover from (issue #215).
+                                        ToolResult::error(format!(
+                                            "Tool call '{}' was not executed: its arguments were malformed or truncated JSON. Retry the tool call with complete, valid JSON arguments.",
+                                            tool_name
+                                        ))
+                                    } else {
+                                        execute_tool(tool_name, tool_input, tools, tool_ctx).await
+                                    }
+                                })
+                                .collect();
+                            let (results, cancelled) =
+                                run_tool_batch(exec_futures, &tool_ctx.cancel_token).await;
+                            batch_cancelled = cancelled;
+                            for ((tool_id, tool_name, _), result) in calls.iter().zip(results) {
+                                if let Some(ref tx) = event_tx {
+                                    let _ = tx.send(QueryEvent::ToolEnd {
+                                        tool_name: tool_name.clone(),
+                                        tool_id: tool_id.clone(),
+                                        result: result.content.clone(),
+                                        is_error: result.is_error,
+                                        metadata: result.metadata.clone(),
+                                    });
+                                }
+                                tool_results.push(ContentBlock::ToolResult {
+                                    tool_use_id: tool_id.clone(),
+                                    content: claurst_core::types::ToolResultContent::Text(result.content),
+                                    is_error: Some(result.is_error),
                                 });
                             }
-                            let result = if malformed_tool_calls.contains(&tool_id) {
-                                // Never execute a tool whose arguments could not
-                                // be parsed — return an error the model can see
-                                // and recover from (issue #215).
-                                ToolResult::error(format!(
-                                    "Tool call '{}' was not executed: its arguments were malformed or truncated JSON. Retry the tool call with complete, valid JSON arguments.",
-                                    tool_name
-                                ))
-                            } else {
-                                execute_tool(&tool_name, &tool_input, tools, tool_ctx).await
-                            };
-                            if let Some(ref tx) = event_tx {
-                                let _ = tx.send(QueryEvent::ToolEnd {
-                                    tool_name: tool_name.clone(),
-                                    tool_id: tool_id.clone(),
-                                    result: result.content.clone(),
-                                    is_error: result.is_error,
-                                    metadata: result.metadata.clone(),
-                                });
-                            }
-                            tool_results.push(ContentBlock::ToolResult {
-                                tool_use_id: tool_id,
-                                content: claurst_core::types::ToolResultContent::Text(result.content),
-                                is_error: Some(result.is_error),
-                            });
                         }
                         messages.push(Message {
                             role: claurst_core::types::Role::User,
@@ -1354,6 +1400,9 @@ pub async fn run_query_loop(
                             cost: None,
                             snapshot_patch: None,
                         });
+                        if batch_cancelled {
+                            return QueryOutcome::Cancelled;
+                        }
                         // Waku: this branch used to go straight round again,
                         // so a Responses or Chat Completions session never
                         // compacted and its meter only moved when the whole

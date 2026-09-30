@@ -487,9 +487,20 @@ impl Tool for SubagentTool {
             host: self.host.clone(),
             parent_id: parent_id.clone(),
             started,
+            cancel,
             armed: true,
         };
-        let outcome = run.run().await;
+        // On a task of its own, as a background child is. The engine polls a
+        // message's calls on the parent's one task, so a child run inline
+        // there froze its siblings whenever it waited on something blocking —
+        // an approval dialog, a tool that reads the disk synchronously — and
+        // sub-agents asked for together did not run together.
+        let outcome = match tokio::spawn(run.run()).await {
+            Ok(outcome) => outcome,
+            Err(error) => QueryOutcome::Error(claurst_core::error::ClaudeError::Other(format!(
+                "the sub-agent stopped unexpectedly: {error}"
+            ))),
+        };
         guard.armed = false;
         let stopped = stopped_by_user.load(Ordering::Acquire);
         finish(&self.host, &parent_id, &outcome, stopped, started);
@@ -606,6 +617,9 @@ struct FinishGuard {
     host: Arc<SubagentHost>,
     parent_id: String,
     started: Instant,
+    /// The child's token: its run is a task of its own, which would
+    /// otherwise outlive the call it answers.
+    cancel: CancellationToken,
     armed: bool,
 }
 
@@ -614,6 +628,7 @@ impl Drop for FinishGuard {
         if !self.armed {
             return;
         }
+        self.cancel.cancel();
         self.host.children.lock().remove(&self.parent_id);
         self.host.emit(
             &self.parent_id,
@@ -961,16 +976,20 @@ mod tests {
     }
 
     /// A foreground child dropped mid-run — its parent's turn was stopped —
-    /// still ends its record.
+    /// still ends its record, and its run, on a task of its own, is told to
+    /// stop rather than left to finish unseen.
     #[test]
     fn a_dropped_run_ends_its_record_as_stopped() {
         let (host, seen) = host();
+        let child = CancellationToken::new();
         drop(FinishGuard {
             host: host.clone(),
             parent_id: "call".into(),
             started: Instant::now(),
+            cancel: child.clone(),
             armed: true,
         });
+        assert!(child.is_cancelled());
         let seen = seen.lock();
         assert!(matches!(
             seen.as_slice(),
@@ -983,12 +1002,15 @@ mod tests {
             }]
         ));
         drop(seen);
+        let finished = CancellationToken::new();
         drop(FinishGuard {
             host,
             parent_id: "done".into(),
             started: Instant::now(),
+            cancel: finished.clone(),
             armed: false,
         });
+        assert!(!finished.is_cancelled());
     }
 
     #[test]

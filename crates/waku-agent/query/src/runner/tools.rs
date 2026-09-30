@@ -160,6 +160,44 @@ where
     }
 }
 
+/// Whether a call may run at the same time as its neighbours in one message.
+///
+/// Fork: the provider routes (Responses, Chat Completions) ran a message's
+/// calls strictly one after another, so three sub-agents asked for at once
+/// ran back to back. A sub-agent and a read-only call change nothing another
+/// call in the batch depends on, so they overlap; anything that writes, runs
+/// a command, or changes the session's state still runs alone and in order —
+/// two edits of one file must not race, and a call that raises an approval
+/// would hold its neighbours anyway. (The same judgement Claude Code makes
+/// with its concurrency-safe tools; the engine has no such flag, so it reads
+/// the permission level.)
+pub(crate) fn runs_concurrently(name: &str, tools: &[Box<dyn Tool>]) -> bool {
+    name == claurst_core::constants::TOOL_NAME_AGENT
+        || tools
+            .iter()
+            .find(|tool| tool.name() == name)
+            .is_some_and(|tool| tool.permission_level() == PermissionLevel::ReadOnly)
+}
+
+/// Fork: split a message's calls into the runs that execute together, in
+/// order — each stretch of consecutive calls that may overlap is one run,
+/// every other call a run of its own.
+pub(crate) fn concurrency_runs(overlaps: &[bool]) -> Vec<std::ops::Range<usize>> {
+    let mut runs = Vec::new();
+    let mut start = 0;
+    while start < overlaps.len() {
+        let mut end = start + 1;
+        if overlaps[start] {
+            while end < overlaps.len() && overlaps[end] {
+                end += 1;
+            }
+        }
+        runs.push(start..end);
+        start = end;
+    }
+    runs
+}
+
 /// Load persisted todos for `session_id` and return a nudge string if any are
 /// incomplete (status != "completed"). Returns empty string otherwise.
 pub(crate) fn build_todo_nudge(session_id: &str) -> String {
@@ -177,6 +215,34 @@ pub(crate) fn build_todo_nudge(session_id: &str) -> String {
             incomplete_count,
             if incomplete_count == 1 { "" } else { "s" }
         )
+    }
+}
+
+#[cfg(test)]
+mod fork_concurrency_tests {
+    use super::*;
+
+    #[test]
+    fn overlapping_calls_run_together_and_the_rest_alone_in_order() {
+        assert_eq!(concurrency_runs(&[]), Vec::<std::ops::Range<usize>>::new());
+        assert_eq!(concurrency_runs(&[true, true, true]), [0..3]);
+        assert_eq!(concurrency_runs(&[false, false]), [0..1, 1..2]);
+        assert_eq!(
+            concurrency_runs(&[true, true, false, true, false, false, true, true]),
+            [0..2, 2..3, 3..4, 4..5, 5..6, 6..8]
+        );
+    }
+
+    #[test]
+    fn sub_agents_and_reads_overlap_and_writes_do_not() {
+        let tools = claurst_tools::all_tools();
+        assert!(runs_concurrently(claurst_core::constants::TOOL_NAME_AGENT, &tools));
+        assert!(runs_concurrently("Read", &tools));
+        assert!(runs_concurrently("Grep", &tools));
+        assert!(!runs_concurrently("Bash", &tools));
+        assert!(!runs_concurrently("Edit", &tools));
+        assert!(!runs_concurrently("TodoWrite", &tools));
+        assert!(!runs_concurrently("NoSuchTool", &tools));
     }
 }
 

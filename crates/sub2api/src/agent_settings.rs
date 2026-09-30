@@ -64,6 +64,28 @@ impl McpServer {
         }
     }
 
+    /// The transport a server reached at `url` speaks.
+    ///
+    /// The engine takes `http` as streamable HTTP and `sse` as the older
+    /// server-sent-events transport, and the two do not interoperate: a
+    /// legacy SSE server filed as `http` never connects. SSE servers
+    /// conventionally serve their stream at a path ending `/sse` — the
+    /// example the form itself shows — so that path decides; anything else
+    /// is streamable HTTP, the current transport.
+    pub fn url_transport(url: &str) -> &'static str {
+        let path = url
+            .trim()
+            .split(['?', '#'])
+            .next()
+            .unwrap_or_default()
+            .trim_end_matches('/');
+        if path.to_ascii_lowercase().ends_with("/sse") {
+            "sse"
+        } else {
+            "http"
+        }
+    }
+
     /// Whether the entry could be launched at all. The page refuses to save
     /// an unusable one rather than letting the engine fail on it at startup.
     pub fn is_usable(&self) -> bool {
@@ -363,6 +385,17 @@ mod tests {
         server.url = Some("https://mcp.example".into());
         assert!(server.is_usable());
         assert_eq!(server.summary(), "https://mcp.example");
+    }
+
+    /// A legacy SSE server filed as streamable HTTP never connects, so the
+    /// URL's `/sse` path decides.
+    #[test]
+    fn an_sse_url_is_filed_as_sse() {
+        assert_eq!(McpServer::url_transport("https://mcp.example.com/sse"), "sse");
+        assert_eq!(McpServer::url_transport(" https://mcp.example.com/SSE/ "), "sse");
+        assert_eq!(McpServer::url_transport("https://mcp.example.com/sse?key=1"), "sse");
+        assert_eq!(McpServer::url_transport("https://mcp.example.com/mcp"), "http");
+        assert_eq!(McpServer::url_transport("https://sse.example.com/mcp"), "http");
     }
 
     #[test]
