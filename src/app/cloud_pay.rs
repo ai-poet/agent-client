@@ -1801,13 +1801,7 @@ impl Waku {
         let busy = self.cloud_account.busy;
         // Filed by lane: a plan for the Chinese models is sold on an `openai`
         // group, and offering it to Codex broke every GPT request.
-        let lane = plan
-            .platform
-            .as_deref()
-            .filter(|platform| !platform.is_empty())
-            .map(|platform| {
-                sub2api::model_routing::group_lane(plan.group_id, platform, &self.model_plaza.items)
-            });
+        let lane = sub2api::model_routing::plan_lane(plan, &self.model_plaza.items);
         // Until the catalog lands such a plan reads as `openai`: no Codex
         // offer before then.
         let catalog_ready = !self.model_plaza.items.is_empty();

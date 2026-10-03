@@ -395,11 +395,18 @@ impl Waku {
 /// Chinese models' lane ([`sub2api::model_routing::group_lane`]) — the live
 /// groups for DeepSeek, GLM and Kimi are `openai` groups, and filed by
 /// platform they sat under Codex, where picking one broke every GPT request.
+/// The group's name and description count too: a "国模…" group the catalog
+/// lists nothing for yet is still theirs.
 pub(super) fn cloud_lane(
     group: &sub2api::client::Group,
     catalog: &[sub2api::client::ModelCatalogItem],
 ) -> String {
-    sub2api::model_routing::group_lane(group.id, &group.platform, catalog)
+    sub2api::model_routing::group_lane(
+        group.id,
+        &group.platform,
+        &[group.name.as_str(), group.description.as_str()],
+        catalog,
+    )
 }
 
 /// The lanes present in `groups`, in a stable, CLI-meaningful order: the two

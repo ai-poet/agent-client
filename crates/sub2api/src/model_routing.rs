@@ -40,6 +40,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::auth::Credentials;
 use crate::client::ModelCatalogItem;
+use crate::pay::SubscriptionPlan;
 
 /// One group serving one model.
 #[derive(Clone, Debug, PartialEq)]
@@ -147,18 +148,41 @@ pub fn is_domestic_model(model: &str) -> bool {
     name.starts_with("qwen") || name.starts_with("qwq")
 }
 
+/// How the administrator names a group of the Chinese models — "国模订阅",
+/// "国模按量付费分组", "国模中级套餐" — so the group says what it is even while
+/// the catalog lists nothing for it.
+const DOMESTIC_NAME_MARKERS: [&str; 2] = ["国模", "国产模型"];
+
+/// A group's (or plan's) own name or description calls it one of the
+/// Chinese models'.
+pub fn named_domestic(text: &str) -> bool {
+    DOMESTIC_NAME_MARKERS
+        .iter()
+        .any(|marker| text.contains(marker))
+}
+
 /// Which lane of the group picker a group belongs to: [`DOMESTIC_LANE`] for
-/// a group of the Chinese models, its platform otherwise.
+/// a group of the Chinese models, its platform otherwise. `names` are the
+/// group's name and description (or a plan's).
 ///
 /// The platform alone does not say: the live pay-as-you-go and subscription
 /// groups for the Chinese models are `openai` groups, and filed by platform
 /// they sat under Codex — where binding one sent every GPT request to a
-/// group that serves none. So a group every catalog entry of which is a
-/// Chinese model is that lane whatever its platform; a group the catalog is
-/// silent about keeps its platform.
-pub fn group_lane(group_id: i64, platform: &str, catalog: &[ModelCatalogItem]) -> String {
+/// group that serves none. So a group named as theirs ([`named_domestic`]),
+/// or every catalog entry of which is a Chinese model, is that lane whatever
+/// its platform. The name matters for a group the catalog is silent about —
+/// a plan the account does not hold yet, or one whose accounts map no
+/// models — which otherwise keeps its platform.
+pub fn group_lane(
+    group_id: i64,
+    platform: &str,
+    names: &[&str],
+    catalog: &[ModelCatalogItem],
+) -> String {
     let platform = platform.trim().to_ascii_lowercase();
-    if matches!(platform.as_str(), "deepseek" | "kimi" | "zhipu" | "minimax") {
+    if matches!(platform.as_str(), "deepseek" | "kimi" | "zhipu" | "minimax")
+        || names.iter().any(|name| named_domestic(name))
+    {
         return DOMESTIC_LANE.to_owned();
     }
     let mut listed = catalog
@@ -169,6 +193,40 @@ pub fn group_lane(group_id: i64, platform: &str, catalog: &[ModelCatalogItem]) -
         return DOMESTIC_LANE.to_owned();
     }
     platform
+}
+
+/// The lane a plan on sale belongs to, [`group_lane`] read from the plan;
+/// `None` for a plan that names no platform.
+///
+/// A plan the account does not hold yet is absent from its catalog, so
+/// besides its names the model its group maps requests to by default speaks
+/// for it there: a Chinese one puts the plan in [`DOMESTIC_LANE`].
+pub fn plan_lane(plan: &SubscriptionPlan, catalog: &[ModelCatalogItem]) -> Option<String> {
+    let platform = plan
+        .platform
+        .as_deref()
+        .map(str::trim)
+        .filter(|platform| !platform.is_empty())?;
+    let names = [
+        plan.name.as_str(),
+        plan.group_name.as_deref().unwrap_or_default(),
+        plan.description.as_deref().unwrap_or_default(),
+        plan.product_name.as_deref().unwrap_or_default(),
+    ];
+    let lane = group_lane(plan.group_id, platform, &names, catalog);
+    let listed = catalog
+        .iter()
+        .any(|item| item.best_group.id == plan.group_id);
+    if lane != DOMESTIC_LANE
+        && !listed
+        && plan
+            .default_mapped_model
+            .as_deref()
+            .is_some_and(is_domestic_model)
+    {
+        return Some(DOMESTIC_LANE.to_owned());
+    }
+    Some(lane)
 }
 
 /// The platform a model belongs to, from its name — the same reading the
@@ -589,16 +647,84 @@ mod tests {
             listed("deepseek-v4.1-flash", 30),
             listed("qwen3-coder", 31),
         ];
-        assert_eq!(group_lane(15, "openai", &catalog), DOMESTIC_LANE);
-        assert_eq!(group_lane(31, "composite", &catalog), DOMESTIC_LANE);
-        assert_eq!(group_lane(2, "openai", &catalog), "openai");
+        assert_eq!(group_lane(15, "openai", &[], &catalog), DOMESTIC_LANE);
+        assert_eq!(group_lane(31, "composite", &[], &catalog), DOMESTIC_LANE);
+        assert_eq!(group_lane(2, "openai", &[], &catalog), "openai");
         // Mixed: still Codex's lane.
-        assert_eq!(group_lane(30, "openai", &catalog), "openai");
+        assert_eq!(group_lane(30, "openai", &[], &catalog), "openai");
         // Silent groups keep their platform, unless the platform says it.
-        assert_eq!(group_lane(99, "OpenAI", &catalog), "openai");
-        assert_eq!(group_lane(98, "deepseek", &catalog), DOMESTIC_LANE);
+        assert_eq!(group_lane(99, "OpenAI", &[], &catalog), "openai");
+        assert_eq!(group_lane(98, "deepseek", &[], &catalog), DOMESTIC_LANE);
         assert!(is_domestic_model("moonshot/kimi-k3"));
         assert!(!is_domestic_model("grok-4.7"));
+    }
+
+    /// A new subscription for the Chinese models (group 18, "国模中级套餐")
+    /// sits on `openai` and is absent from the catalog until it is held or
+    /// its accounts map models: its name files it, not Codex.
+    #[test]
+    fn a_group_named_for_the_chinese_models_needs_no_catalog() {
+        assert_eq!(
+            group_lane(18, "openai", &["国模中级套餐", ""], &[]),
+            DOMESTIC_LANE
+        );
+        assert_eq!(
+            group_lane(19, "openai", &["Pro", "国产模型按量计费"], &[]),
+            DOMESTIC_LANE
+        );
+        assert_eq!(
+            group_lane(2, "openai", &["Codex", "GPT 满血"], &[]),
+            "openai"
+        );
+        assert!(named_domestic("国模订阅"));
+        assert!(!named_domestic("Claude Max"));
+    }
+
+    #[test]
+    fn a_plan_not_yet_in_the_catalog_reads_its_names_and_default_model() {
+        let plan = |name: &str, default_model: Option<&str>| SubscriptionPlan {
+            id: "p".into(),
+            group_id: 18,
+            name: name.into(),
+            platform: Some("openai".into()),
+            default_mapped_model: default_model.map(str::to_owned),
+            ..SubscriptionPlan::default()
+        };
+        assert_eq!(
+            plan_lane(&plan("国模中级套餐", None), &[]).as_deref(),
+            Some(DOMESTIC_LANE)
+        );
+        assert_eq!(
+            plan_lane(&plan("中级套餐", Some("deepseek-v4.1-flash")), &[]).as_deref(),
+            Some(DOMESTIC_LANE)
+        );
+        assert_eq!(
+            plan_lane(&plan("Codex 月卡", Some("gpt-5.6-sol")), &[]).as_deref(),
+            Some("openai")
+        );
+        let group_named = SubscriptionPlan {
+            group_name: Some("国模订阅".into()),
+            ..plan("月卡", None)
+        };
+        assert_eq!(plan_lane(&group_named, &[]).as_deref(), Some(DOMESTIC_LANE));
+        // Once the catalog lists the group, what it serves decides.
+        let listed = ModelCatalogItem {
+            model: "gpt-5.6-sol".into(),
+            best_group: crate::client::GroupRef {
+                id: 18,
+                ..Default::default()
+            },
+            ..ModelCatalogItem::default()
+        };
+        assert_eq!(
+            plan_lane(&plan("中级套餐", Some("deepseek-v4.1-flash")), &[listed]).as_deref(),
+            Some("openai")
+        );
+        let no_platform = SubscriptionPlan {
+            platform: None,
+            ..plan("国模中级套餐", None)
+        };
+        assert_eq!(plan_lane(&no_platform, &[]), None);
     }
 
     /// Same reading of a name as the gateway's composite routing.

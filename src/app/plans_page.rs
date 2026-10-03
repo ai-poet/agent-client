@@ -374,13 +374,7 @@ impl Waku {
             );
         // A plan for the Chinese models is sold on an `openai` group; filed
         // by platform it read as Codex's, and "use for Codex" broke GPT.
-        let lane = plan
-            .platform
-            .as_deref()
-            .filter(|platform| !platform.is_empty())
-            .map(|platform| {
-                sub2api::model_routing::group_lane(plan.group_id, platform, &self.model_plaza.items)
-            });
+        let lane = sub2api::model_routing::plan_lane(plan, &self.model_plaza.items);
         if let Some(platform) = lane.as_deref() {
             header = header.child(
                 div()
