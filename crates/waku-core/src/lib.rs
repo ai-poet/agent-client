@@ -18,6 +18,7 @@ macro_rules! tr {
 }
 
 pub mod acp_session;
+pub mod activity_overview;
 pub mod amp_session;
 pub mod attachments;
 pub mod blob_store;

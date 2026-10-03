@@ -299,6 +299,10 @@ impl Render for Waku {
 
         let theme = Theme::current(cx);
         let empty = should_render_empty_state(self.selected_session());
+        // Fork addition: the welcome screen's overview reads in the background.
+        if empty && !self.main_page_open() {
+            self.maybe_refresh_home_overview(cx);
+        }
         let permission = self.render_permission(window, cx);
         let computer_use = self.render_computer_use_overlay(cx);
         let command_palette = self.render_command_palette(window, cx);

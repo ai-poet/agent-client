@@ -151,6 +151,9 @@ pub enum Command {
         window: UsageWindow,
         project_roots: Vec<PathBuf>,
     },
+    /// Fork addition: the welcome screen's activity overview, read from the
+    /// task store (`crate::activity_overview`).
+    LoadActivityOverview,
     LoadSkills {
         projects: Vec<(String, PathBuf)>,
     },
@@ -406,6 +409,10 @@ pub enum ResponsePayload {
     },
     UsageHistory {
         history: UsageHistory,
+    },
+    /// Fork addition: the answer to `Command::LoadActivityOverview`.
+    ActivityOverview {
+        records: crate::activity_overview::ActivityRecords,
     },
     SkillsCatalog {
         catalog: SkillsCatalog,

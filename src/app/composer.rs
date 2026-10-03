@@ -1110,6 +1110,10 @@ impl Waku {
                     let favorite_model_id = model.id.clone();
                     let favorite_weak = weak.clone();
                     let subtitle = model_picker_subtitle(kind, model.sub_provider.as_deref());
+                    // Fork addition: a line on what the model is for.
+                    let description =
+                        sub2api::model_copy::description_key(&model.id, Some(&model.name))
+                            .map(|key| SharedString::from(tr!(key)));
                     // The built-in agent's rows wear their vendor's mark, so
                     // search results and favorites still say whose model it is.
                     let (row_icon, row_icon_color) = if kind.is_builtin() {
@@ -1127,7 +1131,7 @@ impl Waku {
                                 kind.id(),
                                 model.id
                             )))
-                            .h(px(58.0))
+                            .h(px(if description.is_some() { 72.0 } else { 58.0 }))
                             .px(px(12.0))
                             .rounded(px(9.0))
                             .flex()
@@ -1159,6 +1163,14 @@ impl Waku {
                                             .text_color(theme.text)
                                             .child(SharedString::from(model.name.clone())),
                                     )
+                                    .children(description.map(|description| {
+                                        div()
+                                            .mt(px(3.0))
+                                            .truncate()
+                                            .text_size(sp(12.0))
+                                            .text_color(theme.text_secondary)
+                                            .child(description)
+                                    }))
                                     .child(
                                         div()
                                             .mt(px(4.0))
@@ -1281,7 +1293,9 @@ impl Waku {
                 // list; the same on every tab so switching never resizes it.
                 div()
                     .w(px(560.0))
-                    .h(px(390.0))
+                    // Fork: taller than upstream's 390 so rows carrying a
+                    // description line still show five at a time.
+                    .h(px(440.0))
                     .rounded(px(13.0))
                     .overflow_hidden()
                     .border_1()

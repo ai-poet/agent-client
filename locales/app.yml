@@ -4054,3 +4054,143 @@ cloud.cli_takeover.group_agent_only:
   en: "%{cli} keeps your own sign-in; this group serves only the built-in agent."
 providers.route_own_login:
   en: "Your own sign-in (not configured by the cloud account)"
+model_copy.image:
+  en: "Generates and edits images from a prompt."
+model_copy.deepseek_flash:
+  en: "DeepSeek's fast tier: quick, low-cost everyday coding."
+model_copy.deepseek_pro:
+  en: "DeepSeek's larger tier, for harder reasoning and long tasks."
+model_copy.deepseek:
+  en: "DeepSeek model for chat, coding and agents."
+model_copy.claude_fable:
+  en: "Anthropic's frontier line, for the hardest coding and knowledge work."
+model_copy.claude_opus:
+  en: "Large hybrid-reasoning model for complex coding and agents."
+model_copy.claude_sonnet:
+  en: "Balanced speed and intelligence for everyday agentic coding."
+model_copy.claude_haiku:
+  en: "Fast, low-cost Claude for high-volume tasks."
+model_copy.claude:
+  en: "An Anthropic Claude model."
+model_copy.gpt_codex:
+  en: "GPT tuned for agentic coding in Codex."
+model_copy.gpt_oss:
+  en: "OpenAI's open-weight reasoning model, self-hostable."
+model_copy.gpt_reasoning:
+  en: "Built-in reasoning with adjustable effort, for coding and agents."
+model_copy.gpt:
+  en: "OpenAI GPT with text and image input."
+model_copy.openai_o:
+  en: "OpenAI reasoning model that thinks before it answers."
+model_copy.gemma:
+  en: "Google's open model, small enough to run locally."
+model_copy.gemini_pro:
+  en: "Google's model for complex reasoning and multimodal work."
+model_copy.gemini_flash:
+  en: "Google's fast, low-cost model for high-volume work."
+model_copy.gemini:
+  en: "Google model with native text, image, audio and video input."
+model_copy.glm_flash:
+  en: "Zhipu's fast, low-cost GLM tier."
+model_copy.glm:
+  en: "Zhipu GLM for chat, coding and agents, with a thinking mode."
+model_copy.kimi:
+  en: "Moonshot's Kimi, strong at long context, coding and tool use."
+model_copy.qwen_coder:
+  en: "Qwen tuned for code completion and repository edits."
+model_copy.qwen_max:
+  en: "Qwen's larger tier, for complex tasks."
+model_copy.qwen:
+  en: "Alibaba's Qwen family across text, vision and code."
+model_copy.minimax:
+  en: "MiniMax model for agentic coding and long-context work."
+model_copy.grok_code:
+  en: "xAI's fast Grok tuned for agentic coding."
+model_copy.grok:
+  en: "xAI's Grok for coding, agents and knowledge work."
+model_copy.doubao:
+  en: "ByteDance's Doubao (Seed) family, with multimodal input."
+model_copy.ernie:
+  en: "Baidu's ERNIE, strong in Chinese understanding."
+model_copy.hunyuan:
+  en: "Tencent's Hunyuan for Chinese and agent tasks."
+model_copy.codestral:
+  en: "Mistral's code model for completion and fill-in-the-middle."
+model_copy.mistral:
+  en: "Mistral model, open-weight or hosted."
+model_copy.llama:
+  en: "Meta's open-weight Llama, free to fine-tune and self-host."
+model_copy.tier_fast:
+  en: "Fast and low-cost, for simple or high-frequency tasks."
+model_copy.tier_large:
+  en: "For complex, quality-first work at a higher cost."
+model_copy.tier_moe:
+  en: "Mixture of experts: large, but cheap per token."
+model_copy.tier_small:
+  en: "Small enough to serve cheaply or run locally."
+turn_status.tokens:
+  en: "%{count} tokens"
+turn_status.thinking:
+  en: "Thinking…"
+turn_status.writing:
+  en: "Writing…"
+turn_status.running_tool:
+  en: "Running a tool…"
+turn_status.running_tools:
+  en: "Running %{count} tools…"
+turn_status.waiting_for_model:
+  en: "Waiting for the model…"
+turn_status.waiting_for_you:
+  en: "Waiting for you"
+home_overview.tab_overview:
+  en: "Overview"
+home_overview.tab_models:
+  en: "Models"
+home_overview.range_all:
+  en: "All"
+home_overview.range_30d:
+  en: "30d"
+home_overview.range_7d:
+  en: "7d"
+home_overview.sessions:
+  en: "Sessions"
+home_overview.messages:
+  en: "Messages"
+home_overview.active_days:
+  en: "Active days"
+home_overview.peak_hour:
+  en: "Peak hour"
+home_overview.favorite_model:
+  en: "Favorite model"
+home_overview.longest_streak:
+  en: "Longest streak"
+home_overview.streak_one:
+  en: "1 day"
+home_overview.streak_days:
+  en: "%{count} days"
+home_overview.hour:
+  en: "%{hour12} %{meridiem}"
+home_overview.date:
+  en: "%{month_name} %{day}"
+home_overview.day_tip:
+  en: "%{date} · %{count} messages"
+home_overview.day_tip_one:
+  en: "%{date} · 1 message"
+home_overview.day_tip_none:
+  en: "%{date} · No messages"
+home_overview.heat_caption:
+  en: "%{count} messages in the last 6 months"
+home_overview.less:
+  en: "Less"
+home_overview.more:
+  en: "More"
+home_overview.model_detail:
+  en: "%{messages} messages · %{sessions} sessions"
+home_overview.unnamed_model:
+  en: "Unspecified model"
+home_overview.show_more:
+  en: "Show %{count} more"
+home_overview.show_less:
+  en: "Show less"
+home_overview.no_models:
+  en: "No model data in this range"

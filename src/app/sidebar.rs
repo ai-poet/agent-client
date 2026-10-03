@@ -2461,6 +2461,8 @@ impl Waku {
                             .child(tr_cow!("onboarding.question_mark"))
                     }),
             )
+            // Fork addition: the activity overview (home_overview.rs).
+            .children(self.render_home_overview(cx))
     }
 }
 

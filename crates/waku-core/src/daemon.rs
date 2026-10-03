@@ -274,6 +274,10 @@ impl Backend for WakuBackend {
                 );
                 Ok(ResponsePayload::UsageHistory { history })
             }
+            // Fork addition: the welcome screen's activity overview.
+            Command::LoadActivityOverview => Ok(ResponsePayload::ActivityOverview {
+                records: crate::activity_overview::load(self.task_store.path())?,
+            }),
             Command::LoadSkills { projects } => {
                 let locations = crate::skills::skill_locations(&projects);
                 Ok(ResponsePayload::SkillsCatalog {
@@ -1720,6 +1724,7 @@ fn handle_driver_command(
         | Command::FetchPlanUsage { .. }
         | Command::ProbeComputerPermissions { .. }
         | Command::LoadUsageHistory { .. }
+        | Command::LoadActivityOverview
         | Command::LoadSkills { .. }
         | Command::SetSkillsEnabled { .. }
         | Command::InstallBundledSkill { .. }

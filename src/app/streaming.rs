@@ -587,6 +587,8 @@ impl Waku {
                 }
             }
             DriverEvent::TokenUsageUpdated { last, session } => {
+                // Fork addition: the live turn's starting total (turn_status).
+                self.note_turn_output_baseline(session_id);
                 if let Some(state) = self.state.session_mut(session_id) {
                     let usage = state.context_usage.get_or_insert(ContextUsage::default());
                     usage.last = Some(last);

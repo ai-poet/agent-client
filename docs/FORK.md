@@ -191,6 +191,11 @@ lines below.
 | `src/app.rs`, `src/lib.rs`, `src/app/render.rs` (CLI takeover) | `mod cli_takeover` and its `init_cli_takeover_keys` re-export; the key init beside the confirm dialog's; `render_cli_takeover_prompt` beside the sign-in window in both render branches | 7 |
 | `locales/{app,zh-CN,ja}.yml` (CLI takeover) | `cloud.cli_takeover.*`, `providers.route_own_login`; CLI words added to `settings.cloud_account_keywords` | 22 keys |
 | `src/app.rs`, `src/app/{usage_meter,composer,sessions}.rs` (context ring windows) | `mod model_windows`, the `model_windows` field + initializer, `load_model_windows` in the startup task; the ring and `/context` read `ring_context_usage(session)` instead of `session.context_usage`; `note_model_changed` in `choose_model` and `set_context_window` (drops the previous model's reported window, looks the new one up). Windows come from OpenRouter's public `/api/v1/models` via `sub2api::model_windows`, cached in `~/.cheaprouter/model-windows.json` for a day; a window the agent reports still wins | ~15 |
+| `src/app/composer.rs` (model descriptions) | a description line under each model picker row's name from `sub2api::model_copy` (row 72px tall when it has one), and the panel 440px tall instead of 390 | ~14 |
+| `src/app.rs`, `src/app/{streaming,transcript_view}.rs` (turn status line) | `mod turn_status`, the `turn_output_baselines` field + initializer; `note_turn_output_baseline` before a `TokenUsageUpdated` is applied; the working row appends `live_turn_status_suffix()` ("· 2.3k tokens · Thinking…") after "Working for N" | ~10 |
+| `src/app.rs`, `src/app/{render,sidebar}.rs` (activity overview) | `mod home_overview`, the `home_overview` field + initializer; `maybe_refresh_home_overview` in the window render while the welcome screen shows; `.children(self.render_home_overview(cx))` under the welcome headline | ~10 |
+| `crates/waku-protocol/src/{lib,protocol}.rs`, `crates/waku-core/src/{lib,daemon}.rs` (activity overview) | `pub mod activity_overview` in both crates; additive `Command::LoadActivityOverview` and `ResponsePayload::ActivityOverview { records }`; the daemon's arm (reads the task store) and its entry in the wrong-path list | ~16 |
+| `locales/{app,zh-CN,ja}.yml` (dsh-claude-style ports) | `model_copy.*`, `turn_status.*`, `home_overview.*` | ~70 keys |
 | `AGENTS.md` (DeepSeek Harness reference) | a `## DeepSeek Harness reference` section after "Product reference": when to consult `docs/deepseek-harness.md`, port-never-load, not the DeepSeek provider, porting rules | ~28 |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
@@ -217,6 +222,8 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `src/app/image_studio.rs`, `src/app/image_studio_view.rs`, `assets/icons/image.svg`,
 `src/app/model_status.rs`, `src/app/model_status_view.rs`,
 `crates/waku-client/src/{activity_phase,turn_segments,status_capsule}.rs`,
+`src/app/home_overview.rs`, `src/app/turn_status.rs`,
+`crates/waku-protocol/src/activity_overview.rs`, `crates/waku-core/src/activity_overview.rs`,
 `docs/deepseek-harness.md`, `docs/deepseek-harness.zh.md`,
 `NOTICE.md`, `docs/FORK.md`.
 

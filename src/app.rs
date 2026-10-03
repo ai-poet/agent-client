@@ -1303,6 +1303,9 @@ pub struct Waku {
     /// Sessions whose agent is folding older conversation into a summary
     /// right now, so the working row can say why nothing is streaming.
     compacting_sessions: HashSet<Uuid>,
+    /// Fork addition: per session, the live turn and the agent's output-token
+    /// total when that turn's first usage report arrived (`turn_status`).
+    turn_output_baselines: HashMap<Uuid, (Uuid, u64)>,
     /// Commit-message generation and Git mutation outlive the modal that
     /// started them. Keeping the operation on the app also lets every
     /// Environment surface reflect and gate the same in-flight action.
@@ -1523,6 +1526,8 @@ pub struct Waku {
     image_studio: image_studio::ImageStudioState,
     /// Fork addition: the model status page, opened from the sidebar.
     model_status: model_status::ModelStatusState,
+    /// Fork addition: the welcome screen's activity overview.
+    home_overview: home_overview::HomeOverviewState,
     /// Fork addition: workflow page view state.
     workflow: workflow::WorkflowState,
     /// Fork addition: search field on the Model Plaza page.
@@ -1763,6 +1768,7 @@ mod composer;
 mod drafts;
 mod error_banner;
 mod file_search;
+mod home_overview;
 mod image_preview;
 mod image_studio;
 mod image_studio_view;
@@ -1803,6 +1809,7 @@ mod todo_list;
 mod transcript;
 mod transcript_search;
 mod transcript_view;
+mod turn_status;
 mod turn_undo;
 mod usage_meter;
 mod usage_page;
@@ -3143,6 +3150,7 @@ impl Waku {
                 goal_runtime_starts: HashSet::new(),
                 goal_observed_at: HashMap::new(),
                 compacting_sessions: HashSet::new(),
+                turn_output_baselines: HashMap::new(),
                 commit_operation: None,
                 // Providers × workspaces; both scans are small, the cache
                 // only exists to keep them off the frame path.
@@ -3261,6 +3269,7 @@ impl Waku {
                 model_plaza: model_plaza::ModelPlazaState::default(),
                 image_studio: image_studio::ImageStudioState::default(),
                 model_status: model_status::ModelStatusState::default(),
+                home_overview: home_overview::HomeOverviewState::default(),
                 workflow: workflow::WorkflowState::default(),
                 plaza_search_input,
                 cloud_pay: None,

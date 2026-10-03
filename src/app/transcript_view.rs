@@ -1867,10 +1867,11 @@ impl Waku {
                 .child(div().h(px(1.0)).flex_1().bg(theme.border))
                 .into_any_element();
         }
+        // Fork addition: "· 2.3k tokens · Thinking…" after the time.
         let label = tr!(
             "transcript.working_for",
             duration = format_working_elapsed(elapsed)
-        );
+        ) + &self.live_turn_status_suffix();
         div()
             .h(px(22.0))
             .flex()
