@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sub2api::pay::{OrderKind, OrderStatus, PayClient, PayConfig, PayFlow, PayOrder, SubscriptionPlan};
-use sub2api::promotion::{self, PromoLocale, Promotion};
+use sub2api::promotion;
 
 use crate::ui::ActivationExt as _;
 
@@ -943,15 +943,6 @@ impl Waku {
                 }),
         );
 
-        // The running promotions, as the web page's banner lists them.
-        if state.intent == PayIntent::TopUp && !config.balance_disabled {
-            body = body.children(promotion_banner(
-                &config.promotions,
-                self.promo_locale(),
-                theme,
-            ));
-        }
-
         // A plan: what is being bought stands in for the amount.
         if let Some(plan) = state.intent.plan() {
             let fee_rate = selected_type
@@ -1668,11 +1659,6 @@ impl Waku {
         )
     }
 
-    /// The UI language, for promotion labels.
-    fn promo_locale(&self) -> PromoLocale {
-        PromoLocale::from_locale(self.state.language.locale())
-    }
-
     /// A finished-but-unsettled order: what happened, and the ways back.
     fn render_pay_result(&self, mut body: Div, theme: Theme, cx: &mut Context<Self>) -> Div {
         let Some(state) = self.cloud_pay.as_ref() else {
@@ -2134,128 +2120,6 @@ fn settled_toast(order: Option<&PayOrder>) -> String {
     }
 }
 
-/// When a promotion ends, in `zone`: "10/5 23:59". `None` when the service
-/// sent something that is not a timestamp.
-fn format_promo_deadline<Tz: chrono::TimeZone>(raw: &str, zone: &Tz) -> Option<String>
-where
-    Tz::Offset: std::fmt::Display,
-{
-    let parsed = chrono::DateTime::parse_from_rfc3339(raw.trim()).ok()?;
-    Some(parsed.with_timezone(zone).format("%-m/%-d %H:%M").to_string())
-}
-
-/// The web page's promotion banner: every running promotion on its own
-/// line, the ones this user can no longer join dimmed. `None` when there are
-/// none.
-fn promotion_banner(promotions: &[Promotion], locale: PromoLocale, theme: Theme) -> Option<Div> {
-    if promotions.is_empty() {
-        return None;
-    }
-    let mut rows = div().flex().flex_col().gap(px(7.0));
-    for promotion in promotions {
-        let available = promotion.available;
-        let ends = promotion
-            .ends_at
-            .as_deref()
-            .map(str::trim)
-            .filter(|raw| !raw.is_empty())
-            .map(|raw| {
-                format_promo_deadline(raw, &chrono::Local).unwrap_or_else(|| raw.to_owned())
-            });
-        let description = promotion
-            .description
-            .as_deref()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-            .map(str::to_owned);
-        rows = rows.child(
-            div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap_x(px(8.0))
-                .gap_y(px(3.0))
-                .text_size(sp(12.0))
-                .when(!available, |row| row.opacity(0.6))
-                .child(
-                    div()
-                        .px(px(7.0))
-                        .py(px(1.0))
-                        .rounded(px(6.0))
-                        .text_size(sp(11.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .when(available, |pill| {
-                            pill.bg(theme.success.opacity(0.14)).text_color(theme.success)
-                        })
-                        .when(!available, |pill| {
-                            pill.bg(theme.overlay).text_color(theme.text_secondary)
-                        })
-                        .child(promotion::describe_promotion(promotion, locale)),
-                )
-                .child(
-                    div()
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .child(promotion.name.clone()),
-                )
-                .when_some(description, |row, description| {
-                    row.child(div().text_color(theme.text_secondary).child(description))
-                })
-                .when_some(ends, |row, ends| {
-                    row.child(
-                        div()
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_ghost)
-                            .child(tr!("pay.promo_ends", time = ends)),
-                    )
-                })
-                .when(!available, |row| {
-                    row.child(
-                        div()
-                            .text_size(sp(11.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.warning)
-                            .child(tr!("pay.promo_limit_reached")),
-                    )
-                }),
-        );
-    }
-    Some(
-        div()
-            .px(px(14.0))
-            .py(px(12.0))
-            .rounded(px(11.0))
-            .border_1()
-            .border_color(theme.warning.opacity(0.3))
-            .bg(theme.warning.opacity(0.07))
-            .flex()
-            .flex_col()
-            .gap(px(9.0))
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap(px(7.0))
-                    .child(icon("icons/sparkle.svg", 14.0, theme.warning))
-                    .child(
-                        div()
-                            .text_size(sp(12.5))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme.warning)
-                            .child(tr!("pay.promo_title")),
-                    )
-                    .child(
-                        div()
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_ghost)
-                            .child(tr!("pay.promo_subtitle")),
-                    ),
-            )
-            .child(rows),
-    )
-}
-
 /// Encode `data` into a QR bit matrix. `None` when the payload cannot fit,
 /// which for payment URLs it always can.
 fn qr_matrix(data: &str) -> Option<QrMatrix> {
@@ -2328,20 +2192,6 @@ fn qr_element(matrix: QrMatrix) -> impl IntoElement {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn promotion_deadlines_read_in_the_given_zone() {
-        let beijing = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
-        assert_eq!(
-            format_promo_deadline("2026-10-05T15:59:00.000Z", &beijing).as_deref(),
-            Some("10/5 23:59")
-        );
-        assert_eq!(
-            format_promo_deadline("2026-12-31T23:00:00+08:00", &chrono::Utc).as_deref(),
-            Some("12/31 15:00")
-        );
-        assert_eq!(format_promo_deadline("next week", &beijing), None);
-    }
 
     #[test]
     fn quick_amount_ids_do_not_collide_on_cents() {

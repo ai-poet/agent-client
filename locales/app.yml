@@ -3184,14 +3184,6 @@ pay.status_updated_title:
   en: "Status updated"
 pay.status_updated_message:
   en: "Waiting for the next update"
-pay.promo_title:
-  en: "Top-up promotions"
-pay.promo_subtitle:
-  en: "Bonus is credited to your balance"
-pay.promo_ends:
-  en: "Ends %{time}"
-pay.promo_limit_reached:
-  en: "Limit reached"
 pay.promo_hint:
   en: "Add $%{more} more to reach $%{threshold} and get a $%{bonus} bonus (%{name})"
 pay.promo_bonus_line:
