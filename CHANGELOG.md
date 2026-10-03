@@ -29,6 +29,28 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.2.10]
+
+- 新建任务的欢迎页新增活动概览：会话数、消息数、活跃天数、高峰时段、最常用模型和最长连续天数，可在全部 / 30 天 / 7 天之间切换；下方是近半年每天的消息热力图（悬停显示当天条数），「模型」页按消息占比给模型排行。数据来自本机的任务历史
+
+  The new-task welcome screen gains an activity overview: sessions, messages, active days, peak hour, favorite model and longest streak over All / 30 days / 7 days, a heat map of messages per day for the last six months (hover for a day's count), and a Models tab ranking models by their share of messages. It is counted from this machine's task history
+
+- 任务运行时，「工作中」那一行会说明此刻在做什么：思考中、输出中、运行工具中、等待模型或等待你的操作；使用内置 Agent 时还会显示本轮已输出的 token 数
+
+  While a task runs, the working line says what is happening right now — thinking, writing, running tools, waiting for the model or waiting for you — and, with the built-in agent, how many tokens the turn has produced
+
+- 模型选择器里每个模型下多了一句简短说明，介绍这个模型适合做什么
+
+  Each model in the model picker carries a one-line description of what it is for
+
+- 登录云账号时可以选择哪些 CLI 交给云账号配置：检测到 Claude Code、Codex 等已经在用你自己的账号、API Key 或其他中转时会先询问；保留的 CLI 配置文件保持原样，继续用你自己的登录，内置 Agent 始终使用云账号。之后可在「设置 → CheapRouter 账号」里逐个切换
+
+  At sign-in you choose which CLIs the cloud account configures: when Claude Code, Codex or another CLI already runs on your own account, API key or relay, CheapRouter asks first, and a CLI you keep stays untouched on your own sign-in; the built-in agent always uses the cloud account. Switch each CLI later in Settings → CheapRouter Account
+
+- 输入框下方的上下文用量环在智能体还没上报窗口大小时，也会按公开模型列表里的上下文窗口显示百分比；切换模型后立即按新模型的窗口计算，不再沿用上一个模型的数值
+
+  The context ring below the composer shows a percentage even before the agent reports its window, using the model's context window from a public model list, and switching models re-measures against the new model at once instead of keeping the previous model's figure
+
 ## [0.2.9]
 
 - 侧边栏「画图」下方新增「模型运行状态」页，内容与网页版一致：监测分组、运行正常、响应变慢、异常分组四项统计，每个分组一张卡片，显示状态、指纹检测结果、最近 24 次检测、最近结果、首字延迟和 24 小时 / 7 天可用率；「查看详情」可看历史趋势和最近事件。页面打开时每 30 秒自动刷新
