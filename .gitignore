@@ -10,6 +10,7 @@ codeg-main/
 claurst-main/
 zcode-main/
 deepseek-harness-master/
+dsh-claude-style-master/
 
 .DS_Store
 *.log

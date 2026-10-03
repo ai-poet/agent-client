@@ -97,3 +97,27 @@
 - Validate visible changes in the freshly rebuilt, signed app managed by the
   dev watcher against the exact provider interaction; a successful Rust build
   alone is insufficient.
+
+## DeepSeek Harness reference
+
+- `deepseek-harness-master/` (git-ignored, MIT) is a checkout of DeepSeek
+  Harness, a TypeScript agent harness where every feature is a Cordis plugin.
+  We use it as a source of features to port: how its plugins hook the agent loop
+  (tools, prompt sections, `agent/pre-step` and `tools/*` waterfalls, durable
+  session events) and how their React halves fill its UI slots.
+- Read [docs/deepseek-harness.md](docs/deepseek-harness.md)
+  ([中文](docs/deepseek-harness.zh.md)) before porting a dsh feature or designing
+  an extensible seam. It maps every dsh slot and service to its Waku file and
+  function. Do not consult it for localized fixes.
+- We port, we never load. dsh plugins are in-process Node modules trading live
+  objects; there is no compatibility layer to build. Re-read the dsh source
+  before porting a mechanism, because the project is a preview and changes
+  under us.
+- Do not confuse this with the DeepSeek provider (`ProviderKind::DeepSeek`,
+  `crates/waku-core/src/driver/deepseek.rs`), which runs `dsh web` as a
+  sidecar and already loads the user's own dsh plugins unchanged.
+- A port follows [docs/FORK.md](docs/FORK.md): new files, registered hook
+  points, protocol changes additive only, a dated `NOTICE.md` row, and the MIT
+  notice kept on anything translated closely, prompt text included.
+- State which scope a port lands in: built-in agent only (bridge) or every
+  provider (daemon / app layer).

@@ -191,6 +191,7 @@ lines below.
 | `src/app.rs`, `src/lib.rs`, `src/app/render.rs` (CLI takeover) | `mod cli_takeover` and its `init_cli_takeover_keys` re-export; the key init beside the confirm dialog's; `render_cli_takeover_prompt` beside the sign-in window in both render branches | 7 |
 | `locales/{app,zh-CN,ja}.yml` (CLI takeover) | `cloud.cli_takeover.*`, `providers.route_own_login`; CLI words added to `settings.cloud_account_keywords` | 22 keys |
 | `src/app.rs`, `src/app/{usage_meter,composer,sessions}.rs` (context ring windows) | `mod model_windows`, the `model_windows` field + initializer, `load_model_windows` in the startup task; the ring and `/context` read `ring_context_usage(session)` instead of `session.context_usage`; `note_model_changed` in `choose_model` and `set_context_window` (drops the previous model's reported window, looks the new one up). Windows come from OpenRouter's public `/api/v1/models` via `sub2api::model_windows`, cached in `~/.cheaprouter/model-windows.json` for a day; a window the agent reports still wins | ~15 |
+| `AGENTS.md` (DeepSeek Harness reference) | a `## DeepSeek Harness reference` section after "Product reference": when to consult `docs/deepseek-harness.md`, port-never-load, not the DeepSeek provider, porting rules | ~28 |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `CheapRouter` in `locales/` and the two i18n test expectations.
@@ -216,6 +217,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `src/app/image_studio.rs`, `src/app/image_studio_view.rs`, `assets/icons/image.svg`,
 `src/app/model_status.rs`, `src/app/model_status_view.rs`,
 `crates/waku-client/src/{activity_phase,turn_segments,status_capsule}.rs`,
+`docs/deepseek-harness.md`, `docs/deepseek-harness.zh.md`,
 `NOTICE.md`, `docs/FORK.md`.
 
 ### Conflict triage
