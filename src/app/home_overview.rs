@@ -311,7 +311,7 @@ impl Waku {
             bar = bar.child(
                 div()
                     .h_full()
-                    .w(relative(fraction))
+                    .w(gpui::relative(fraction))
                     .bg(rank_color(theme, rank)),
             );
         }
