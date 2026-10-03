@@ -9,6 +9,7 @@ cc-switch-main/
 codeg-main/
 claurst-main/
 zcode-main/
+deepseek-harness-master/
 
 .DS_Store
 *.log

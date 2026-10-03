@@ -180,7 +180,9 @@ impl Waku {
         }
         let session = self.selected_session()?;
         let provider = session.provider;
-        let context = session.context_usage;
+        // Fork addition: a window from the public model list until the agent
+        // reports its own.
+        let context = self.ring_context_usage(session);
         let theme = Theme::current(cx);
         let plan = self.plan_usage.get(&provider).cloned();
         let error = self.plan_usage_error.get(&provider).cloned();

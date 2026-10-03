@@ -993,6 +993,9 @@ impl Waku {
             } else {
                 self.apply_session_options(session_id, cx);
             }
+            // Fork addition: the context ring's window was the previous
+            // model's; look the new one up.
+            self.note_model_changed(session_id, cx);
             self.save();
             // Fork addition: route a Chinese model as soon as it is picked,
             // so its key is usually in place before the message is typed.
@@ -1205,6 +1208,8 @@ impl Waku {
             self.state.last_context_window = Some(window);
             self.remember_selected_model_traits();
             self.apply_session_options(session_id, cx);
+            // Fork addition: the reported window was the other option's.
+            self.note_model_changed(session_id, cx);
             self.save();
             cx.notify();
         }

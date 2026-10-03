@@ -1499,6 +1499,9 @@ pub struct Waku {
     skills_catalog: Option<Rc<crate::skills::SkillsCatalog>>,
     /// Fork addition: managed cloud account view state.
     cloud_account: cloud_account::CloudAccountState,
+    /// Fork addition: each model's context window from a public list, the
+    /// context ring's fallback.
+    model_windows: model_windows::ModelWindowsState,
     /// Fork addition: agent CLI setup view state.
     cli_setup: cli_setup::CliSetupState,
     /// Fork addition: first-run checklist state.
@@ -1767,6 +1770,7 @@ mod model_plaza;
 mod model_providers_page;
 mod model_status;
 mod model_status_view;
+mod model_windows;
 mod plans_page;
 mod workflow;
 mod agent_page;
@@ -2970,6 +2974,7 @@ impl Waku {
                     .update(cx, |this, cx| {
                         this.refresh_cli_environment(cx);
                         this.load_onboarding_state(cx);
+                        this.load_model_windows(cx);
                         this.load_cloud_account(cx)
                     })
                     .is_err()
@@ -3245,6 +3250,7 @@ impl Waku {
                 settings_page: None,
                 skills_catalog: None,
                 cloud_account: cloud_account::CloudAccountState::default(),
+                model_windows: model_windows::ModelWindowsState::default(),
                 cli_setup: cli_setup::CliSetupState::with_custom_cache(custom_api),
                 onboarding: onboarding::OnboardingViewState::default(),
                 agent_page: agent_page::AgentPageState::default(),

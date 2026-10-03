@@ -43,6 +43,7 @@ pub mod mcp_stdio;
 pub mod migrate;
 pub mod model_routing;
 pub mod model_test;
+pub mod model_windows;
 pub mod node_install;
 pub mod onboarding;
 pub mod group_status;

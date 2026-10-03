@@ -2293,20 +2293,21 @@ impl Waku {
     /// asking how full the context is should not fill it.
     fn execute_usage_report_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
         use crate::composer_complete::UsageReport;
-        let Some((session_id, report)) = self.selected_session().and_then(|session| {
+        let Some((session_id, report, usage)) = self.selected_session().and_then(|session| {
             let report = crate::composer_complete::usage_report_submission(
                 session.provider,
                 prompt,
                 &self.slash_command_index,
             )?;
-            Some((session.id, report))
+            // Fork addition: the same window the context ring measures with.
+            let usage = self.ring_context_usage(session).unwrap_or_default();
+            Some((session.id, report, usage))
         }) else {
             return false;
         };
         let Some(session) = self.state.session_mut(session_id) else {
             return false;
         };
-        let usage = session.context_usage.unwrap_or_default();
         let line = match report {
             UsageReport::Context => super::usage_meter::context_report(&usage),
             UsageReport::Cost => super::usage_meter::cost_report(&usage),

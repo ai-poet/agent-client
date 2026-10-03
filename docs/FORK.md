@@ -190,6 +190,7 @@ lines below.
 | `src/app.rs` (default provider) | `native_agent::adopt_built_in_default` beside `migrate_legacy_pay_as_you_go` at launch, and its flag in the startup save condition — moves a state an earlier build wrote on the untouched Codex default (no model picked, no CLI task started, built-in agent not switched off) onto the built-in agent | 3 |
 | `src/app.rs`, `src/lib.rs`, `src/app/render.rs` (CLI takeover) | `mod cli_takeover` and its `init_cli_takeover_keys` re-export; the key init beside the confirm dialog's; `render_cli_takeover_prompt` beside the sign-in window in both render branches | 7 |
 | `locales/{app,zh-CN,ja}.yml` (CLI takeover) | `cloud.cli_takeover.*`, `providers.route_own_login`; CLI words added to `settings.cloud_account_keywords` | 22 keys |
+| `src/app.rs`, `src/app/{usage_meter,composer,sessions}.rs` (context ring windows) | `mod model_windows`, the `model_windows` field + initializer, `load_model_windows` in the startup task; the ring and `/context` read `ring_context_usage(session)` instead of `session.context_usage`; `note_model_changed` in `choose_model` and `set_context_window` (drops the previous model's reported window, looks the new one up). Windows come from OpenRouter's public `/api/v1/models` via `sub2api::model_windows`, cached in `~/.cheaprouter/model-windows.json` for a day; a window the agent reports still wins | ~15 |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `CheapRouter` in `locales/` and the two i18n test expectations.
@@ -198,7 +199,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 
 `crates/sub2api/**`, `crates/workflow-engine/**`, `src/app/cloud_account.rs`,
 `src/app/{cloud_failover,cloud_groups,cloud_menu,cloud_origins,cloud_sign_in}.rs`, `src/app/cli_setup.rs`,
-`src/app/cli_takeover.rs`,
+`src/app/cli_takeover.rs`, `src/app/model_windows.rs`,
 `src/app/providers_page.rs`, `src/app/confirm_dialog.rs`,
 `src/app/onboarding.rs`, `src/app/message_resend.rs`, `src/app/task_rows.rs`,
 `src/app/runtime_prewarm.rs`, `src/app/update_banner.rs`, `src/app/surface_bar.rs`,
