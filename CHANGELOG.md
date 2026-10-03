@@ -29,6 +29,20 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.2.9]
+
+- 侧边栏「画图」下方新增「模型运行状态」页，内容与网页版一致：监测分组、运行正常、响应变慢、异常分组四项统计，每个分组一张卡片，显示状态、指纹检测结果、最近 24 次检测、最近结果、首字延迟和 24 小时 / 7 天可用率；「查看详情」可看历史趋势和最近事件。页面打开时每 30 秒自动刷新
+
+  A Model status page under Images in the sidebar, matching the web console: four summary figures (monitored, healthy, degraded, down) and a card per group with its status, fingerprint checks, last 24 probes, latest result, first-token latency and 24-hour / 7-day availability; View details shows the history and recent events. The page refreshes every 30 seconds while open
+
+- 充值时与网页同步充值活动：快捷金额里会出现活动门槛并标出赠送金额，输入金额时提示「再充多少可享哪个活动」，付款前显示活动赠送和实际到账；支付中的订单和支付成功提示也会写明赠送了多少。后台配置的帮助文字和图片（如客服二维码，可点开放大）以及每日到账上限也会显示在充值页
+
+  Top-ups follow the web page's promotions: promotion thresholds join the quick amounts with the bonus each earns, a hint says how much more to top up for which promotion, and the bonus and total credited show before paying, on the pending order and in the success message. The administrator's help text and picture (such as a support QR code, which opens full size) and the daily credit cap appear on the top-up sheet too
+
+- 名称里带「国模」的分组和套餐（如新上架的「国模中级套餐」）归到「国模」一栏，不再出现在 Codex 下——以前还没购买或尚未列出模型的这类分组会被当成 Codex 的，选中后 GPT 请求会发错分组
+
+  Groups and plans named for the Chinese models (such as the new 国模中级套餐) are filed under the Chinese models instead of Codex. Before, such a group that was not yet bought or listed no models read as a Codex group, and picking it sent GPT requests to the wrong group
+
 ## [0.2.8]
 
 - 自己的接口直接出现在模型选择器里：在「设置 → 模型接口」添加接口和模型后，内置 Agent 的模型选择器里会多出以这个接口命名的一栏，不用再去「设置 → Agent」绑定。Anthropic Messages、Responses、Chat Completions 三种格式的接口都算，模型按接口声明的格式发送，不会因为名字被改走别的格式——以前只有绑定到 Chat Completions 的接口才列得出模型。模型接口页的每个模型都有「测试」按钮，页面会显示请求实际发往的地址，以及这个接口是否已出现在选择器里；选择器里这些接口那一栏的末尾有「管理模型…」
