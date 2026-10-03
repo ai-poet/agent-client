@@ -154,6 +154,8 @@ enum PaletteAction {
     OpenProject,
     /// Fork addition.
     OpenImageStudio,
+    /// Fork addition.
+    OpenModelStatus,
     FocusComposer,
     CopyIdentifier(PaletteIdentifier),
     ChooseModel,
@@ -730,6 +732,15 @@ impl Waku {
                 None,
                 PaletteAction::OpenImageStudio,
                 "image images picture draw generate edit gpt-image grok imagine 画图 生图",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.open_model_status"),
+                "icons/server.svg",
+                None,
+                PaletteAction::OpenModelStatus,
+                "model status health uptime availability group monitor fingerprint 模型 运行 状态 可用率 监测 指纹",
                 next(),
             ),
         ];
@@ -1604,6 +1615,7 @@ impl Waku {
             PaletteAction::NewTask => self.new_session_action(&NewSession, window, cx),
             PaletteAction::OpenProject => self.new_project_action(&NewProject, window, cx),
             PaletteAction::OpenImageStudio => self.open_image_studio(window, cx),
+            PaletteAction::OpenModelStatus => self.open_model_status(cx),
             PaletteAction::FocusComposer => self.focus_composer_action(&FocusComposer, window, cx),
             PaletteAction::CopyIdentifier(identifier) => {
                 if let Some(value) = identifier.value(self.selected_session()) {

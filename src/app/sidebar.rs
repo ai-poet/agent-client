@@ -351,8 +351,8 @@ fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<us
 
 fn sidebar_row_height(row: SidebarRow) -> Pixels {
     px(match row {
-        // Search, then the image studio beneath it.
-        SidebarRow::Search => 2.0 * SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP,
+        // Search, then the image studio and the model status beneath it.
+        SidebarRow::Search => 3.0 * SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP,
         SidebarRow::Header(_) => {
             SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
         }
@@ -703,7 +703,7 @@ impl Waku {
             .child(add_project)
     }
 
-    fn render_sidebar_action_row(
+    pub(super) fn render_sidebar_action_row(
         &self,
         id: &'static str,
         icon_path: &'static str,
@@ -783,11 +783,12 @@ impl Waku {
         div()
             .w_full()
             .h(px(
-                2.0 * SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP
+                3.0 * SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP
             ))
             .flex_none()
             .child(search)
             .child(self.render_sidebar_image_studio(cx))
+            .child(self.render_sidebar_model_status(cx))
     }
 
     /// Fork addition: the image studio's entry, marked while it is open.
@@ -1829,8 +1830,8 @@ impl Waku {
         else {
             return div().into_any_element();
         };
-        // While the image studio has the main column, no task is showing.
-        let selected = !self.image_studio.open
+        // While a fork page has the main column, no task is showing.
+        let selected = !self.main_page_open()
             && sidebar_session_selected(
                 self.state.selected_session,
                 self.pending_session_activation
@@ -2103,10 +2104,10 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = Theme::current(cx);
-        // Fork addition: the image studio titles the header while it is open.
-        let session = self.selected_session().filter(|_| !self.image_studio.open);
-        let title = if self.image_studio.open {
-            self.image_studio_title()
+        // Fork addition: a fork page titles the header while it is open.
+        let session = self.selected_session().filter(|_| !self.main_page_open());
+        let title = if let Some(title) = self.main_page_title() {
+            title
         } else {
             session
                 .map(localized_session_title)

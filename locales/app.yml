@@ -112,6 +112,8 @@ command_palette.open_project:
   en: Open project…
 command_palette.open_image_studio:
   en: "Draw an image"
+command_palette.open_model_status:
+  en: "Model status"
 command_palette.choose_model:
   en: Choose model…
 command_palette.copy_task_id:
@@ -496,6 +498,8 @@ sidebar.search:
   en: Search
 sidebar.image_studio:
   en: "Images"
+sidebar.model_status:
+  en: "Model status"
 image_studio.title:
   en: "Images"
 image_studio.placeholder:
@@ -612,6 +616,188 @@ image_studio.sign_in_first:
   en: "Sign in to draw"
 image_studio.prompt_copied:
   en: "Prompt copied"
+model_status.title:
+  en: "Model status"
+model_status.description:
+  en: "Check runtime status and recent availability for the groups you can access"
+model_status.auto_refresh:
+  en: "The list refreshes automatically every 30 seconds"
+model_status.last_updated:
+  en: "Last refresh: %{time}"
+model_status.refresh:
+  en: "Refresh"
+model_status.refreshing:
+  en: "Refreshing…"
+model_status.loading:
+  en: "Loading…"
+model_status.signed_out_title:
+  en: "Sign in to see model status"
+model_status.signed_out_body:
+  en: "Model status shows how the groups of your cloud account are running."
+model_status.sign_in:
+  en: "Sign in"
+model_status.feature_disabled_title:
+  en: "Model status is not available"
+model_status.feature_disabled_description:
+  en: "The administrator has not enabled this feature yet."
+model_status.total_groups:
+  en: "Monitored groups"
+model_status.healthy_groups:
+  en: "Healthy"
+model_status.degraded_groups:
+  en: "Degraded"
+model_status.down_groups:
+  en: "Down"
+model_status.load_failed_detail:
+  en: "Failed to load model status: %{error}"
+model_status.load_failed_toast:
+  en: "Failed to load model status: %{error}"
+model_status.empty_title:
+  en: "No visible groups"
+model_status.empty_description:
+  en: "There are currently no monitored groups available to you."
+model_status.waiting:
+  en: "Waiting"
+model_status.waiting_for_probe:
+  en: "No probe has run yet"
+model_status.not_available:
+  en: "N/A"
+model_status.no_description:
+  en: "No group description"
+model_status.uptime_timeline:
+  en: "Last 24 checks"
+model_status.recent_checks_hint:
+  en: "Each block represents one real probe result"
+model_status.latest_result:
+  en: "Latest result"
+model_status.open_details:
+  en: "View details"
+model_status.latest_probe:
+  en: "Latest probe"
+model_status.latest_latency:
+  en: "First-token latency"
+model_status.total_latency:
+  en: "Total time: %{value}"
+model_status.availability_24h:
+  en: "24h availability"
+model_status.availability_7d:
+  en: "7d availability"
+model_status.latency_line:
+  en: "First-token latency: %{value}"
+model_status.http_code:
+  en: "HTTP code: %{code}"
+model_status.sub_status:
+  en: "Sub status: %{value}"
+model_status.bucket_availability:
+  en: "Bucket availability: %{value}"
+model_status.sample_count:
+  en: "Samples: %{count}"
+model_status.avg_latency:
+  en: "Avg first-token latency: %{value}"
+model_status.status_up:
+  en: "Up"
+model_status.status_degraded:
+  en: "Degraded"
+model_status.status_down:
+  en: "Down"
+model_status.status_unknown:
+  en: "Unknown"
+model_status.fingerprint_status_pass:
+  en: "Fingerprint matches"
+model_status.fingerprint_status_mismatch:
+  en: "Fingerprint mismatch"
+model_status.fingerprint_status_suspect:
+  en: "Fingerprint suspicious"
+model_status.fingerprint_status_insufficient:
+  en: "Fingerprint inconclusive"
+model_status.fingerprint_status_unknown:
+  en: "Unknown"
+model_status.fingerprint_other_model:
+  en: "another model"
+model_status.fingerprint_pass:
+  en: "%{model} fingerprint matches"
+model_status.fingerprint_mismatch:
+  en: "%{model} fingerprint mismatch (points to %{winner})"
+model_status.fingerprint_mismatch_no_winner:
+  en: "%{model} fingerprint mismatch"
+model_status.fingerprint_suspect:
+  en: "%{model} fingerprint suspicious (re-checking)"
+model_status.fingerprint_insufficient:
+  en: "%{model} fingerprint inconclusive"
+model_status.fingerprint_pending:
+  en: "%{model} fingerprint pending"
+model_status.fingerprint_event_mismatch:
+  en: "%{model}: points to %{winner}"
+model_status.event_up:
+  en: "Recovered"
+model_status.event_down:
+  en: "Outage"
+model_status.event_astra_mismatch:
+  en: "Fingerprint mismatch"
+model_status.event_astra_recovered:
+  en: "Fingerprint recovered"
+model_status.event_modeltrace_mismatch:
+  en: "Fingerprint mismatch (legacy ModelTrace probe)"
+model_status.event_modeltrace_recovered:
+  en: "Fingerprint recovered (legacy ModelTrace probe)"
+model_status.event_sol_juice_mismatch:
+  en: "Non-Sol suspected (legacy Juice probe)"
+model_status.event_sol_juice_recovered:
+  en: "Sol verified again (legacy Juice probe)"
+model_status.detail_load_failed:
+  en: "Failed to load status details"
+model_status.detail_load_failed_detail:
+  en: "Failed to load status details: %{error}"
+model_status.history_title:
+  en: "History trend"
+model_status.history_description:
+  en: "Availability and latest state aggregated into time buckets."
+model_status.period_24h:
+  en: "24h"
+model_status.period_7d:
+  en: "7d"
+model_status.no_history:
+  en: "No history is available for the selected period"
+model_status.events_title:
+  en: "Recent events"
+model_status.events_description:
+  en: "Only stable state changes are recorded as events."
+model_status.no_events:
+  en: "No recent events"
+model_status.benchmarks_title:
+  en: "Fingerprint benchmarks"
+model_status.benchmarks_description:
+  en: "Groups with a fingerprint badge periodically send test prompts upstream to check that the model actually serving them is the one advertised. Each family uses the benchmarks and open-source projects below."
+model_status.benchmarks_family_gpt:
+  en: "GPT family"
+model_status.benchmarks_family_claude:
+  en: "Claude family"
+model_status.benchmarks_method_meow:
+  en: "meow benchmark"
+model_status.benchmarks_method_modeltrace:
+  en: "ModelTrace number fingerprint"
+model_status.benchmarks_method_sol_juice:
+  en: "Juice reading"
+model_status.benchmarks_source_gpt_meow:
+  en: "meow v3 benchmark (the official GPT package of meow-llm-detector v4.5.4): a batch of fixed short-answer prompts whose answer distribution is compared with every model in the benchmark; a verdict needs evidence that clearly points at one model."
+model_status.benchmarks_source_gpt_modeltrace:
+  en: "ModelTrace number fingerprint: 3–6 challenges asking for first-instinct integers from 1 to 355, attributed among the 16 models in the fingerprint bank. GPT-6.1 Sol is not enrolled yet; its number fingerprint is nearly identical to GPT-6 Astra's, so attribution to GPT-6 Astra counts as a match."
+model_status.benchmarks_source_gpt_juice:
+  en: "Juice reading: reads the model's internal Juice value at high reasoning; GPT-5.6 Sol should answer 40 (GPT-5.6 Terra 32, Luna 48)."
+model_status.benchmarks_source_claude_modeltrace:
+  en: "ModelTrace number fingerprint: the same number challenges, attributed in the same bank (it enrolls 8 Claude models, including Opus 4.6–5.5, Sonnet and Haiku)."
+model_status.benchmarks_source_claude_meow:
+  en: "meow v3 benchmark (the official Claude package of meow-llm-detector v4.5.4): answer distributions of fixed short-answer prompts."
+model_status.benchmarks_repo:
+  en: "Source: %{repo}"
+model_status.benchmarks_site:
+  en: "Web version"
+model_status.benchmarks_license:
+  en: "License: %{license}"
+model_status.benchmarks_self_implemented:
+  en: "Implemented by this site"
+model_status.benchmarks_disclaimer:
+  en: "Checks only decide among the models a benchmark enrolls: a mismatch means the answers clearly resemble another enrolled model. It is a signal, not proof of substitution on its own, and a model outside the benchmark may be attributed to its closest candidate."
 sidebar.options:
   en: Sidebar options
 sidebar.grouping:
@@ -2998,6 +3184,28 @@ pay.status_updated_title:
   en: "Status updated"
 pay.status_updated_message:
   en: "Waiting for the next update"
+pay.promo_title:
+  en: "Top-up promotions"
+pay.promo_subtitle:
+  en: "Bonus is credited to your balance"
+pay.promo_ends:
+  en: "Ends %{time}"
+pay.promo_limit_reached:
+  en: "Limit reached"
+pay.promo_hint:
+  en: "Add $%{more} more to reach $%{threshold} and get a $%{bonus} bonus (%{name})"
+pay.promo_bonus_line:
+  en: "Promotion bonus (%{name}) +%{bonus}"
+pay.promo_total_line:
+  en: "Total credited (USD) %{total}"
+pay.max_daily:
+  en: "Max daily credited balance %{amount}"
+pay.help_title:
+  en: "Support"
+pay.amount_meta_bonus:
+  en: "Pay %{pay} · credits %{credited} (incl. %{bonus} promotion bonus)"
+pay.success_toast_bonus:
+  en: "Payment complete: %{total} credited, including a %{bonus} promotion bonus"
 cli_setup.custom_url_placeholder:
   en: "https://api.example.com — omit /v1"
 cli_setup.custom_key_placeholder:

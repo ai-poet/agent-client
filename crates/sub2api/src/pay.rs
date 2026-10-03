@@ -73,6 +73,14 @@ pub struct PayConfig {
     pub stripe_enabled: bool,
     /// The administrator turned balance top-ups off; only plans can be bought.
     pub balance_disabled: bool,
+    /// The running promotions, unavailable ones included (shown dimmed).
+    pub promotions: Vec<crate::promotion::Promotion>,
+    /// The administrator's help text (a contact, a note), shown line by line.
+    pub help_text: Option<String>,
+    /// A picture beside the help text, typically a contact QR code.
+    pub help_image_url: Option<String>,
+    /// The most a user may have credited per day, in USD; zero is no cap.
+    pub max_daily_amount: f64,
 }
 
 impl PayConfig {
@@ -106,6 +114,17 @@ impl PayConfig {
             .and_then(|limit| limit.fee_rate)
             .filter(|rate| *rate > 0.0)
             .unwrap_or(0.0)
+    }
+
+    /// The help text's non-blank lines, as the web page lays them out.
+    pub fn help_lines(&self) -> Vec<&str> {
+        self.help_text
+            .as_deref()
+            .unwrap_or_default()
+            .split('\n')
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect()
     }
 }
 
@@ -365,6 +384,28 @@ pub struct PayOrder {
     pub expires_at: String,
     #[serde(default)]
     pub status_access_token: String,
+    /// USD the promotion adds on completion, snapshotted when the order was
+    /// created.
+    #[serde(default)]
+    pub bonus_amount: Option<f64>,
+    #[serde(default)]
+    pub promotion_name: Option<String>,
+    #[serde(default)]
+    pub fee_rate: Option<f64>,
+}
+
+impl PayOrder {
+    /// The promotion bonus, zero when the order earned none.
+    pub fn bonus(&self) -> f64 {
+        self.bonus_amount
+            .filter(|bonus| bonus.is_finite() && *bonus > 0.0)
+            .unwrap_or(0.0)
+    }
+
+    /// What reaches the balance: the amount plus any bonus, to the cent.
+    pub fn credited_total(&self) -> f64 {
+        crate::promotion::to_cents(self.amount + self.bonus()) as f64 / 100.0
+    }
 }
 
 /// A status poll's answer.
@@ -579,6 +620,14 @@ impl PayClient {
             })
             .unwrap_or_default();
         let number = |key: &str| config.get(key).and_then(serde_json::Value::as_f64);
+        let text = |key: &str| {
+            config
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(str::to_owned)
+        };
 
         Ok(PayConfig {
             user_display_name,
@@ -601,6 +650,12 @@ impl PayClient {
                 .get("balanceDisabled")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false),
+            promotions: crate::promotion::parse_promotions(config.get("promotions")),
+            help_text: text("helpText"),
+            help_image_url: text("helpImageUrl").map(|url| self.absolute_url(&url)),
+            max_daily_amount: number("maxDailyAmount")
+                .filter(|amount| amount.is_finite() && *amount > 0.0)
+                .unwrap_or(0.0),
         })
     }
 
@@ -722,6 +777,95 @@ impl PayClient {
     }
 }
 
+/// The pay page's help picture (usually a contact QR code), ready to draw.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HelpImage {
+    pub bytes: Vec<u8>,
+    /// `png`, `jpg`, `webp` or `gif`.
+    pub extension: &'static str,
+}
+
+/// Larger than any QR code or contact card; a bigger answer is not one.
+const HELP_IMAGE_MAX_BYTES: u64 = 4 << 20;
+/// The picture rarely changes; a day keeps the sheet from fetching it on
+/// every open.
+const HELP_IMAGE_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+const HELP_IMAGE_TIMEOUT_SECONDS: u32 = 15;
+
+/// The help picture at `url`, from `<data dir>/pay-help/` while fresh, else
+/// downloaded. A `data:` URL decodes in place. Blocking; run off the UI
+/// thread.
+///
+/// GPUI here has no HTTP client to load a remote `img()` itself, and
+/// [`Response::body`] is text, so the bytes go through a file.
+pub fn help_image(url: &str) -> Result<HelpImage> {
+    let url = url.trim();
+    if let Some(data) = url.strip_prefix("data:") {
+        let (_, payload) = data
+            .split_once(";base64,")
+            .ok_or_else(|| anyhow!("the help image is not a base64 data URL"))?;
+        return help_image_from(crate::images::decode_base64(payload)?);
+    }
+    let dir = crate::brand::data_dir()
+        .ok_or_else(|| anyhow!("no home directory for the help image cache"))?
+        .join("pay-help");
+    let cached = dir.join(format!("{}.img", help_image_cache_key(url)));
+    let fresh = std::fs::metadata(&cached)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age < HELP_IMAGE_TTL);
+    if fresh {
+        if let Ok(image) = std::fs::read(&cached)
+            .map_err(anyhow::Error::from)
+            .and_then(help_image_from)
+        {
+            return Ok(image);
+        }
+    }
+
+    std::fs::create_dir_all(&dir)?;
+    let partial = cached.with_extension("part");
+    let downloaded = (|| {
+        let response = Request::new()
+            .timeout_seconds(HELP_IMAGE_TIMEOUT_SECONDS)
+            .download_to(&partial)
+            .send(url)?;
+        if !response.is_success() {
+            return Err(anyhow!(
+                "the help image answered with HTTP {}",
+                response.status
+            ));
+        }
+        if std::fs::metadata(&partial)?.len() > HELP_IMAGE_MAX_BYTES {
+            return Err(anyhow!("the help image is too large"));
+        }
+        help_image_from(std::fs::read(&partial)?)
+    })();
+    let _ = std::fs::remove_file(&partial);
+    let image = downloaded?;
+    let _ = std::fs::write(&cached, &image.bytes);
+    Ok(image)
+}
+
+/// Bytes that are a picture; an HTML error page where the picture should
+/// be is refused.
+fn help_image_from(bytes: Vec<u8>) -> Result<HelpImage> {
+    let extension = crate::images::sniff_extension(&bytes)
+        .ok_or_else(|| anyhow!("the help image is not a PNG, JPEG, WebP or GIF"))?;
+    Ok(HelpImage { bytes, extension })
+}
+
+/// A file name for `url` in the help image cache.
+fn help_image_cache_key(url: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(url.as_bytes())
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 /// Percent-encode everything outside the unreserved set.
 fn percent(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
@@ -749,7 +893,7 @@ pub fn seconds_until(expires_at: &str) -> Option<i64> {
 }
 
 /// Parse `2026-08-27T12:34:56(.789)?(Z|±hh:mm)?` into Unix seconds.
-fn rfc3339_to_epoch(raw: &str) -> Option<i64> {
+pub(crate) fn rfc3339_to_epoch(raw: &str) -> Option<i64> {
     let raw = raw.trim();
     let (date, rest) = raw.split_once(['T', ' '])?;
     let mut date_parts = date.split('-');
@@ -889,6 +1033,56 @@ mod tests {
         }
         .body("tok", "alipay");
         assert_eq!(free["amount"], 0.01);
+    }
+
+    #[test]
+    fn orders_carry_the_promotion_snapshot() {
+        let order: PayOrder = serde_json::from_str(
+            r#"{"orderId":"o1","amount":100,"payAmount":720,"feeRate":0,
+                "bonusAmount":10,"promotionName":"国庆充值","status":"PENDING",
+                "paymentType":"alipay","expiresAt":"","statusAccessToken":"t"}"#,
+        )
+        .expect("parse");
+        assert_eq!(order.bonus(), 10.0);
+        assert_eq!(order.credited_total(), 110.0);
+        assert_eq!(order.promotion_name.as_deref(), Some("国庆充值"));
+
+        // Servers from before promotions send neither field.
+        let plain: PayOrder =
+            serde_json::from_str(r#"{"orderId":"o2","amount":12.3,"bonusAmount":null}"#)
+                .expect("parse");
+        assert_eq!(plain.bonus(), 0.0);
+        assert_eq!(plain.credited_total(), 12.3);
+    }
+
+    #[test]
+    fn help_text_splits_into_lines_like_the_web_page() {
+        let config = PayConfig {
+            help_text: Some("客服微信：abc\r\n\r\n  工作时间 9:00-21:00  \n".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.help_lines(),
+            vec!["客服微信：abc", "工作时间 9:00-21:00"]
+        );
+        assert!(PayConfig::default().help_lines().is_empty());
+    }
+
+    #[test]
+    fn help_image_cache_key_is_stable_and_per_url() {
+        let key = help_image_cache_key("https://cdn.example.org/qr.png");
+        assert_eq!(key.len(), 16);
+        assert_eq!(key, help_image_cache_key("https://cdn.example.org/qr.png"));
+        assert_ne!(key, help_image_cache_key("https://cdn.example.org/qr2.png"));
+    }
+
+    #[test]
+    fn help_image_decodes_data_urls_and_refuses_non_images() {
+        // The PNG signature is all the sniffer needs.
+        let png = help_image("data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==").expect("png");
+        assert_eq!(png.extension, "png");
+        assert!(help_image("data:text/html;base64,PGh0bWw+").is_err());
+        assert!(help_image("data:image/png,raw").is_err());
     }
 
     #[test]

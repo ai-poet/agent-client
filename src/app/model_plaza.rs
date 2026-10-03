@@ -168,7 +168,7 @@ fn status_presentation(status: &str, theme: &Theme) -> (String, Hsla) {
 }
 
 /// Vendor labels and badge colors, matching the service's own catalog.
-fn platform_badge(platform: &str, theme: &Theme) -> (String, Hsla) {
+pub(super) fn platform_badge(platform: &str, theme: &Theme) -> (String, Hsla) {
     match platform.trim().to_lowercase().as_str() {
         "anthropic" => ("Anthropic".to_owned(), gpui::rgb(0xD97757).into()),
         "openai" => ("OpenAI".to_owned(), gpui::rgb(0x10A37F).into()),
@@ -1111,7 +1111,7 @@ fn price_row(
         )
 }
 
-fn plaza_tag(label: String, tint: Hsla, theme: &Theme) -> Div {
+pub(super) fn plaza_tag(label: String, tint: Hsla, theme: &Theme) -> Div {
     div()
         .flex()
         .items_center()

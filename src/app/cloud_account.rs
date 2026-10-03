@@ -685,6 +685,7 @@ impl Waku {
         // The catalog was this account's; the built-in agent drops back to
         // its fallback list until someone signs in again.
         self.clear_model_plaza();
+        self.clear_model_status();
         self.sync_native_models();
         self.apply_cloud_routing();
         // Running built-in sessions still hold the gateway key they started

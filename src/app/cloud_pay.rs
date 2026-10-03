@@ -15,9 +15,13 @@
 //! plumbing that runs it off the UI thread.
 
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sub2api::pay::{OrderKind, OrderStatus, PayClient, PayConfig, PayFlow, PayOrder, SubscriptionPlan};
+use sub2api::promotion::{self, PromoLocale, Promotion};
+
+use crate::ui::ActivationExt as _;
 
 use super::*;
 
@@ -82,6 +86,8 @@ pub(super) struct CloudPayState {
     pub order: Option<PayOrder>,
     pub order_status: Option<OrderStatus>,
     pub qr: Option<QrMatrix>,
+    /// The help picture from the pay config, once downloaded.
+    pub help_image: Option<Arc<gpui::Image>>,
     pub busy: bool,
     /// Bumped on every new order/close so stale poll loops fall silent.
     pub epoch: usize,
@@ -139,6 +145,7 @@ impl Waku {
             order: None,
             order_status: None,
             qr: None,
+            help_image: None,
             busy: false,
             epoch,
         });
@@ -214,8 +221,10 @@ impl Waku {
                 else {
                     return;
                 };
+                let mut help_image_url = None;
                 match loaded {
                     Ok(config) => {
+                        help_image_url = config.help_image_url.clone();
                         // Keep a still-valid pick; otherwise the first method
                         // this purchase can use.
                         let offered = offered_payment_types(&state.intent, &config);
@@ -238,7 +247,51 @@ impl Waku {
                         state.error = Some(format!("{error:#}"));
                     }
                 }
+                if let Some(url) = help_image_url {
+                    this.cloud_pay_load_help_image(url, cx);
+                }
                 cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Fetch the pay config's help picture. It lands on whichever sheet
+    /// still shows that config, whatever stage the sheet has reached; a
+    /// picture that fails to load is simply left out, as on the web page.
+    fn cloud_pay_load_help_image(&mut self, url: String, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let loaded = cx
+                .background_executor()
+                .spawn({
+                    let url = url.clone();
+                    async move { sub2api::pay::help_image(&url) }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                let Some(state) = this.cloud_pay.as_mut().filter(|state| {
+                    state
+                        .config
+                        .as_ref()
+                        .and_then(|config| config.help_image_url.as_deref())
+                        == Some(url.as_str())
+                }) else {
+                    return;
+                };
+                match loaded {
+                    Ok(image) => {
+                        let format = super::image_preview::image_format_for_name(&format!(
+                            "help.{}",
+                            image.extension
+                        ));
+                        if let Some(format) = format {
+                            state.help_image =
+                                Some(Arc::new(gpui::Image::from_bytes(format, image.bytes)));
+                            cx.notify();
+                        }
+                    }
+                    Err(error) => eprintln!("warning: the pay help image did not load: {error:#}"),
+                }
             });
         })
         .detach();
@@ -523,8 +576,13 @@ impl Waku {
             .and_then(|state| state.intent.plan().cloned());
         match plan {
             None => {
+                let toast = settled_toast(
+                    self.cloud_pay
+                        .as_ref()
+                        .and_then(|state| state.order.as_ref()),
+                );
                 self.close_cloud_pay_modal(cx);
-                self.show_toast(tr!("pay.success_toast"));
+                self.show_toast(toast);
                 self.refresh_cloud_account(cx);
             }
             Some(plan) => {
@@ -885,6 +943,15 @@ impl Waku {
                 }),
         );
 
+        // The running promotions, as the web page's banner lists them.
+        if state.intent == PayIntent::TopUp && !config.balance_disabled {
+            body = body.children(promotion_banner(
+                &config.promotions,
+                self.promo_locale(),
+                theme,
+            ));
+        }
+
         // A plan: what is being bought stands in for the amount.
         if let Some(plan) = state.intent.plan() {
             let fee_rate = selected_type
@@ -930,6 +997,7 @@ impl Waku {
         };
         let top_up_blocked = state.intent == PayIntent::TopUp && config.balance_disabled;
         let cta_enabled = !busy && selected_type.is_some() && !top_up_blocked;
+        let help = self.render_pay_help(theme, cx);
         body.child(
             div()
                 .id("pay-continue")
@@ -953,6 +1021,7 @@ impl Waku {
                     }
                 })),
         )
+        .children(help)
     }
 
     /// The top-up amount: quick chips, the field, and the settlement summary.
@@ -976,6 +1045,14 @@ impl Waku {
         };
         let amount_text = state.amount.read(cx).content().trim().to_owned();
         let parsed_amount = parse_amount(&amount_text);
+        // Only promotions this user can still earn feed the previews; the
+        // banner above lists the rest dimmed.
+        let active = promotion::active_promotions(&config.promotions, sub2api::auth::now_unix());
+        let thresholds: Vec<f64> = active.iter().map(|rule| rule.min_amount).collect();
+        let amounts = promotion::merge_quick_amounts(&QUICK_AMOUNTS, &thresholds, min, max);
+        let any_chip_bonus = amounts
+            .iter()
+            .any(|value| promotion::pick_best_promotion(*value, &active).is_some());
 
         let mut amount_section = div().flex().flex_col().gap(px(7.0)).child(
             div()
@@ -984,16 +1061,22 @@ impl Waku {
                 .text_color(theme.text_secondary)
                 .child(tr!("pay.amount")),
         );
-        let mut chips = div().flex().flex_wrap().gap(px(6.0));
-        for value in QUICK_AMOUNTS {
-            if value < min || value > max {
-                continue;
-            }
-            let selected = parsed_amount == Some(value);
+        // Room above the row for the bonus pills that overhang the chips.
+        let mut chips = div()
+            .flex()
+            .flex_wrap()
+            .gap(px(6.0))
+            .when(any_chip_bonus, |row| row.pt(px(7.0)).gap_y(px(11.0)));
+        for value in amounts {
+            let selected = parsed_amount
+                .is_some_and(|amount| promotion::to_cents(amount) == promotion::to_cents(value));
+            let chip_bonus =
+                promotion::pick_best_promotion(value, &active).map(|found| found.bonus);
             chips = chips.child(
                 div()
-                    .id(SharedString::from(format!("pay-amount-{value:.0}")))
+                    .id(SharedString::from(quick_amount_id(value)))
                     .tab_index(0)
+                    .relative()
                     .h(px(26.0))
                     .px(px(12.0))
                     .rounded_full()
@@ -1005,7 +1088,22 @@ impl Waku {
                     .cursor_default()
                     .text_size(sp(12.0))
                     .text_color(if selected { theme.text } else { theme.text_secondary })
-                    .child(format!("${value:.0}"))
+                    .child(format!("${}", promotion::format_amount(value)))
+                    .when_some(chip_bonus, |chip, bonus| {
+                        chip.child(
+                            div()
+                                .absolute()
+                                .top(px(-8.0))
+                                .right(px(-6.0))
+                                .px(px(5.0))
+                                .rounded_full()
+                                .bg(theme.success)
+                                .text_size(sp(9.5))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(gpui::white())
+                                .child(format!("+${}", promotion::format_amount(bonus))),
+                        )
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(state) = this.cloud_pay.as_ref() {
                             state.amount.update(cx, |input, cx| {
@@ -1019,6 +1117,24 @@ impl Waku {
         amount_section = amount_section.child(chips).child(
             TextField::new("pay-amount-field", state.amount.clone()).w_full(),
         );
+
+        // "Top up $Z more to reach $T and get $B", under the field as on the
+        // web page.
+        if let Some(hint) = promotion::next_promotion_hint(parsed_amount.unwrap_or(0.0), &active) {
+            amount_section = amount_section.child(
+                div()
+                    .text_size(sp(11.5))
+                    .line_height(sp(16.0))
+                    .text_color(theme.warning)
+                    .child(tr!(
+                        "pay.promo_hint",
+                        more = promotion::format_amount(hint.need_more),
+                        threshold = promotion::format_amount(hint.threshold),
+                        name = hint.rule.name.clone(),
+                        bonus = promotion::format_amount(hint.bonus)
+                    )),
+            );
+        }
 
         // The credited figure, the CNY rate, the fee, and the estimated
         // charge — each on its own quiet line, as the Electron form.
@@ -1036,6 +1152,41 @@ impl Waku {
                     max = format!("${max:.2}")
                 )),
         );
+        // The bonus this amount earns, and what reaches the balance with it.
+        if let Some(amount) = parsed_amount
+            && let Some(found) = promotion::pick_best_promotion(amount, &active)
+        {
+            let total = promotion::to_cents(amount + found.bonus) as f64 / 100.0;
+            amount_section = amount_section
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.success)
+                        .child(tr!(
+                            "pay.promo_bonus_line",
+                            name = found.rule.name.clone(),
+                            bonus = format!("${:.2}", found.bonus)
+                        )),
+                )
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(tr!("pay.promo_total_line", total = format!("${total:.2}"))),
+                );
+        }
+        if config.max_daily_amount > 0.0 {
+            amount_section = amount_section.child(
+                div()
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_ghost)
+                    .child(tr!(
+                        "pay.max_daily",
+                        amount = format!("${:.2}", config.max_daily_amount)
+                    )),
+            );
+        }
         if let Some(rate) = config.balance_credit_cny_per_usd {
             amount_section = amount_section.child(
                 div()
@@ -1293,14 +1444,26 @@ impl Waku {
                 pay = format_cny(order.pay_amount.unwrap_or(order.amount)),
                 plan = plan.name.clone()
             ),
-            None => tr!(
-                "pay.amount_meta",
-                pay = match order.pay_amount {
+            None => {
+                let pay = match order.pay_amount {
                     Some(pay) => format!("\u{00a5}{pay:.2}"),
                     None => format!("${:.2}", order.amount),
-                },
-                credited = format!("${:.2}", order.amount)
-            ),
+                };
+                if order.bonus() > 0.0 {
+                    tr!(
+                        "pay.amount_meta_bonus",
+                        pay = pay,
+                        credited = format!("${:.2}", order.credited_total()),
+                        bonus = format!("${:.2}", order.bonus())
+                    )
+                } else {
+                    tr!(
+                        "pay.amount_meta",
+                        pay = pay,
+                        credited = format!("${:.2}", order.amount)
+                    )
+                }
+            }
         };
 
         body = body.child(
@@ -1441,7 +1604,73 @@ impl Waku {
                     }
                 })),
         );
-        body
+        // Someone to ask while the payment is under way.
+        body.children(self.render_pay_help(theme, cx))
+    }
+
+    /// The administrator's help section — a picture (usually a contact QR
+    /// code, which opens full size) and a few lines — or nothing when the
+    /// pay config carries neither.
+    fn render_pay_help(&self, theme: Theme, cx: &mut Context<Self>) -> Option<Div> {
+        let state = self.cloud_pay.as_ref()?;
+        let config = state.config.as_ref()?;
+        let lines = config.help_lines();
+        let image = state.help_image.clone();
+        if lines.is_empty() && image.is_none() {
+            return None;
+        }
+        Some(
+            div()
+                .px(px(14.0))
+                .py(px(12.0))
+                .rounded(px(11.0))
+                .bg(theme.raised)
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_ghost)
+                        .child(tr!("pay.help_title")),
+                )
+                .when_some(image, |section, image| {
+                    let preview = image.clone();
+                    section.child(
+                        div()
+                            .id("pay-help-image")
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_1().border_color(theme.accent))
+                            .w_full()
+                            .h(px(160.0))
+                            .p(px(6.0))
+                            .rounded(px(8.0))
+                            .bg(theme.overlay)
+                            .cursor_pointer()
+                            .child(img(image).size_full().object_fit(ObjectFit::Contain))
+                            .on_activation(cx, move |this, window, cx| {
+                                this.open_image_preview(
+                                    preview.clone(),
+                                    tr!("pay.help_title").into(),
+                                    window,
+                                    cx,
+                                );
+                            }),
+                    )
+                })
+                .children(lines.into_iter().map(|line| {
+                    div()
+                        .text_size(sp(12.0))
+                        .line_height(sp(18.0))
+                        .text_color(theme.text_secondary)
+                        .child(line.to_owned())
+                })),
+        )
+    }
+
+    /// The UI language, for promotion labels.
+    fn promo_locale(&self) -> PromoLocale {
+        PromoLocale::from_locale(self.state.language.locale())
     }
 
     /// A finished-but-unsettled order: what happened, and the ways back.
@@ -1893,6 +2122,146 @@ fn format_amount(value: f64) -> String {
     }
 }
 
+/// A quick-amount chip's element id. Keyed by cents: a promotion threshold
+/// such as $99.50 must not collide with the $100 chip.
+fn quick_amount_id(value: f64) -> String {
+    format!("pay-amount-{}", promotion::to_cents(value))
+}
+
+/// The toast a settled top-up leaves, naming the promotion bonus it earned.
+fn settled_toast(order: Option<&PayOrder>) -> String {
+    match order.filter(|order| order.bonus() > 0.0) {
+        Some(order) => tr!(
+            "pay.success_toast_bonus",
+            total = format!("${:.2}", order.credited_total()),
+            bonus = format!("${:.2}", order.bonus())
+        ),
+        None => tr!("pay.success_toast"),
+    }
+}
+
+/// When a promotion ends, in `zone`: "10/5 23:59". `None` when the service
+/// sent something that is not a timestamp.
+fn format_promo_deadline<Tz: chrono::TimeZone>(raw: &str, zone: &Tz) -> Option<String>
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let parsed = chrono::DateTime::parse_from_rfc3339(raw.trim()).ok()?;
+    Some(parsed.with_timezone(zone).format("%-m/%-d %H:%M").to_string())
+}
+
+/// The web page's promotion banner: every running promotion on its own
+/// line, the ones this user can no longer join dimmed. `None` when there are
+/// none.
+fn promotion_banner(promotions: &[Promotion], locale: PromoLocale, theme: Theme) -> Option<Div> {
+    if promotions.is_empty() {
+        return None;
+    }
+    let mut rows = div().flex().flex_col().gap(px(7.0));
+    for promotion in promotions {
+        let available = promotion.available;
+        let ends = promotion
+            .ends_at
+            .as_deref()
+            .map(str::trim)
+            .filter(|raw| !raw.is_empty())
+            .map(|raw| {
+                format_promo_deadline(raw, &chrono::Local).unwrap_or_else(|| raw.to_owned())
+            });
+        let description = promotion
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned);
+        rows = rows.child(
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_x(px(8.0))
+                .gap_y(px(3.0))
+                .text_size(sp(12.0))
+                .when(!available, |row| row.opacity(0.6))
+                .child(
+                    div()
+                        .px(px(7.0))
+                        .py(px(1.0))
+                        .rounded(px(6.0))
+                        .text_size(sp(11.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .when(available, |pill| {
+                            pill.bg(theme.success.opacity(0.14)).text_color(theme.success)
+                        })
+                        .when(!available, |pill| {
+                            pill.bg(theme.overlay).text_color(theme.text_secondary)
+                        })
+                        .child(promotion::describe_promotion(promotion, locale)),
+                )
+                .child(
+                    div()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(promotion.name.clone()),
+                )
+                .when_some(description, |row, description| {
+                    row.child(div().text_color(theme.text_secondary).child(description))
+                })
+                .when_some(ends, |row, ends| {
+                    row.child(
+                        div()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_ghost)
+                            .child(tr!("pay.promo_ends", time = ends)),
+                    )
+                })
+                .when(!available, |row| {
+                    row.child(
+                        div()
+                            .text_size(sp(11.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.warning)
+                            .child(tr!("pay.promo_limit_reached")),
+                    )
+                }),
+        );
+    }
+    Some(
+        div()
+            .px(px(14.0))
+            .py(px(12.0))
+            .rounded(px(11.0))
+            .border_1()
+            .border_color(theme.warning.opacity(0.3))
+            .bg(theme.warning.opacity(0.07))
+            .flex()
+            .flex_col()
+            .gap(px(9.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(7.0))
+                    .child(icon("icons/sparkle.svg", 14.0, theme.warning))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.warning)
+                            .child(tr!("pay.promo_title")),
+                    )
+                    .child(
+                        div()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_ghost)
+                            .child(tr!("pay.promo_subtitle")),
+                    ),
+            )
+            .child(rows),
+    )
+}
+
 /// Encode `data` into a QR bit matrix. `None` when the payload cannot fit,
 /// which for payment URLs it always can.
 fn qr_matrix(data: &str) -> Option<QrMatrix> {
@@ -1965,6 +2334,46 @@ fn qr_element(matrix: QrMatrix) -> impl IntoElement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn promotion_deadlines_read_in_the_given_zone() {
+        let beijing = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+        assert_eq!(
+            format_promo_deadline("2026-10-05T15:59:00.000Z", &beijing).as_deref(),
+            Some("10/5 23:59")
+        );
+        assert_eq!(
+            format_promo_deadline("2026-12-31T23:00:00+08:00", &chrono::Utc).as_deref(),
+            Some("12/31 15:00")
+        );
+        assert_eq!(format_promo_deadline("next week", &beijing), None);
+    }
+
+    #[test]
+    fn quick_amount_ids_do_not_collide_on_cents() {
+        assert_ne!(quick_amount_id(99.5), quick_amount_id(100.0));
+        assert_eq!(quick_amount_id(100.0), "pay-amount-10000");
+    }
+
+    #[test]
+    fn a_settled_top_up_names_its_bonus() {
+        let plain = PayOrder {
+            amount: 20.0,
+            ..Default::default()
+        };
+        assert_eq!(settled_toast(Some(&plain)), tr!("pay.success_toast"));
+        assert_eq!(settled_toast(None), tr!("pay.success_toast"));
+        let with_bonus = PayOrder {
+            amount: 100.0,
+            bonus_amount: Some(10.0),
+            ..Default::default()
+        };
+        assert_eq!(
+            settled_toast(Some(&with_bonus)),
+            tr!("pay.success_toast_bonus", total = "$110.00", bonus = "$10.00")
+        );
+        assert_ne!(settled_toast(Some(&with_bonus)), tr!("pay.success_toast"));
+    }
 
     #[test]
     fn amounts_parse_like_the_electron_pattern() {

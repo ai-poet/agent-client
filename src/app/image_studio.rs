@@ -562,6 +562,7 @@ impl Waku {
 
     pub(super) fn open_image_studio(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.settings_page = None;
+        self.close_model_status();
         self.image_studio.open = true;
         self.ensure_image_studio_loaded(cx);
         self.load_model_plaza_if_needed(false, cx);

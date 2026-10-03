@@ -33,8 +33,9 @@ impl Waku {
         transition: SessionActivationTransition,
         cx: &mut Context<Self>,
     ) {
-        // Fork addition: going to a task leaves the image studio.
-        self.image_studio.open = false;
+        // Fork addition: going to a task leaves the image studio and the
+        // model status page.
+        self.close_main_pages();
         if !self
             .state
             .sessions
@@ -427,7 +428,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.settings_page = None;
-        self.image_studio.open = false;
+        self.close_main_pages();
         let current_project = self
             .selected_project()
             .map(|project| (project.id, project.is_projectless()));
@@ -1007,7 +1008,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_page.is_some() || self.image_studio.open {
+        if self.settings_page.is_some() || self.main_page_open() {
             return;
         }
         if !self

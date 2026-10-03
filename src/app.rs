@@ -1518,6 +1518,8 @@ pub struct Waku {
     model_plaza: model_plaza::ModelPlazaState,
     /// Fork addition: the image studio, opened from the sidebar.
     image_studio: image_studio::ImageStudioState,
+    /// Fork addition: the model status page, opened from the sidebar.
+    model_status: model_status::ModelStatusState,
     /// Fork addition: workflow page view state.
     workflow: workflow::WorkflowState,
     /// Fork addition: search field on the Model Plaza page.
@@ -1762,6 +1764,8 @@ mod image_studio;
 mod image_studio_view;
 mod model_plaza;
 mod model_providers_page;
+mod model_status;
+mod model_status_view;
 mod plans_page;
 mod workflow;
 mod agent_page;
@@ -3248,6 +3252,7 @@ impl Waku {
                 cloud_usage: cloud_usage::CloudUsageState::default(),
                 model_plaza: model_plaza::ModelPlazaState::default(),
                 image_studio: image_studio::ImageStudioState::default(),
+                model_status: model_status::ModelStatusState::default(),
                 workflow: workflow::WorkflowState::default(),
                 plaza_search_input,
                 cloud_pay: None,

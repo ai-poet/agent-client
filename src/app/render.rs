@@ -306,6 +306,7 @@ impl Render for Waku {
         // the account menu.
         let cloud_pay = self.render_cloud_pay_modal(window, cx);
         let cloud_announcements = self.render_announcements_modal(window, cx);
+        let model_status_details = self.render_model_status_details(cx);
         let cloud_sign_in = self.render_cloud_sign_in_modal(window, cx);
         let confirm_dialog = self.render_confirm_dialog(window, cx);
         let toast = self.render_active_toast(cx);
@@ -397,7 +398,10 @@ impl Render for Waku {
                     .when(self.image_studio.open, |element| {
                         element.child(self.render_image_studio(cx))
                     })
-                    .when(!self.image_studio.open, |element| {
+                    .when(self.model_status.open, |element| {
+                        element.child(self.render_model_status(cx))
+                    })
+                    .when(!self.main_page_open(), |element| {
                         element
                             .child(if empty {
                                 self.render_empty_state(cx).into_any_element()
@@ -467,6 +471,7 @@ impl Render for Waku {
             .children(goal_dialog)
             .children(cloud_pay)
             .children(cloud_announcements)
+            .children(model_status_details)
             .children(cloud_sign_in)
             .children(confirm_dialog)
             .children(image_preview)

@@ -39,7 +39,7 @@ pub struct Paginated<T> {
 /// empty collections as explicit `null` (`"allowed_groups":null` on a live
 /// `/auth/me`), which fails a plain `Vec` field. Every container therefore
 /// deserializes through this.
-fn null_to_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+pub(crate) fn null_to_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: Default + serde::Deserialize<'de>,
@@ -433,12 +433,16 @@ fn normalize_group_status(value: &serde_json::Value) -> GroupStatusItem {
             .to_owned()
     };
     let nested = |key: &str| summary.and_then(|summary| summary.get(key));
+    // The live gateway serializes its group without json tags, so the keys
+    // arrive as `ID` / `Name`; the lowercase form is older servers'.
+    let group_field =
+        |keys: [&str; 2]| group.and_then(|group| keys.into_iter().find_map(|key| group.get(key)));
     GroupStatusItem {
         group_id: number([value.get("group_id"), nested("group_id")])
-            .or_else(|| group.and_then(|group| group.get("id")).and_then(serde_json::Value::as_f64))
+            .or_else(|| group_field(["id", "ID"]).and_then(serde_json::Value::as_f64))
             .unwrap_or_default() as i64,
         group_name: {
-            let name = string([value.get("group_name"), group.and_then(|group| group.get("name"))]);
+            let name = string([value.get("group_name"), group_field(["name", "Name"])]);
             if name.is_empty() {
                 string([nested("group_name"), None])
             } else {
@@ -633,9 +637,27 @@ impl Client {
         format!("{}/api/v1/{path}", self.endpoint)
     }
 
-    fn get<T: serde::de::DeserializeOwned>(&self, path: &str, access_token: &str) -> Result<T> {
-        let response = Request::new().bearer(access_token).send(&self.api_url(path))?;
+    pub(crate) fn get<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        access_token: &str,
+    ) -> Result<T> {
+        let response = Request::new()
+            .bearer(access_token)
+            .send(&self.api_url(path))?;
         unwrap_envelope(&response)
+    }
+
+    /// [`Self::get`] for a list the service may send as `null`.
+    pub(crate) fn get_or_default<T: serde::de::DeserializeOwned + Default>(
+        &self,
+        path: &str,
+        access_token: &str,
+    ) -> Result<T> {
+        let response = Request::new()
+            .bearer(access_token)
+            .send(&self.api_url(path))?;
+        unwrap_envelope_or_default(&response)
     }
 
     fn post<T: serde::de::DeserializeOwned>(
@@ -825,6 +847,18 @@ fn percent_encode(value: &str) -> String {
 /// Unwrap an envelope, turning both transport and application errors into one
 /// error type.
 fn unwrap_envelope<T: serde::de::DeserializeOwned>(response: &Response) -> Result<T> {
+    envelope_data(response)?.ok_or_else(|| anyhow!("the service returned an empty payload"))
+}
+
+/// [`unwrap_envelope`] for a list the service may send as `null` (a Go nil
+/// slice): no data is an empty value, not an error.
+fn unwrap_envelope_or_default<T: serde::de::DeserializeOwned + Default>(
+    response: &Response,
+) -> Result<T> {
+    Ok(envelope_data(response)?.unwrap_or_default())
+}
+
+fn envelope_data<T: serde::de::DeserializeOwned>(response: &Response) -> Result<Option<T>> {
     let envelope: Envelope<T> = response.json()?;
     if envelope.code != 0 {
         let message = if envelope.message.is_empty() {
@@ -840,9 +874,7 @@ fn unwrap_envelope<T: serde::de::DeserializeOwned>(response: &Response) -> Resul
         }
         .into());
     }
-    envelope
-        .data
-        .ok_or_else(|| anyhow!("the service returned an empty payload"))
+    Ok(envelope.data)
 }
 
 #[cfg(test)]
@@ -1067,6 +1099,35 @@ mod tests {
         assert_eq!(item.effective_status(), "degraded");
         assert_eq!(item.latency_ms, Some(900.0));
         assert_eq!(item.availability_24h, None);
+
+        // What the live gateway sends: its group has no json tags.
+        let live: serde_json::Value = serde_json::from_str(
+            r#"{"group":{"ID":11,"Name":"Claude Max","Platform":"anthropic","DailyLimitUSD":null},
+                "summary":{"group_id":11,"latest_status":"up","stable_status":"up"},
+                "availability_24h":99.1,"availability_7d":98.0}"#,
+        )
+        .expect("json");
+        let item = normalize_group_status(&live);
+        assert_eq!(item.group_id, 11);
+        assert_eq!(item.group_name, "Claude Max");
+        assert_eq!(item.availability_24h, Some(99.1));
+    }
+
+    #[test]
+    fn a_null_list_reads_as_empty_where_allowed() {
+        let empty: Vec<serde_json::Value> =
+            unwrap_envelope_or_default(&ok(r#"{"code":0,"message":"success","data":null}"#))
+                .expect("null data");
+        assert!(empty.is_empty());
+        assert!(
+            unwrap_envelope::<Vec<serde_json::Value>>(&ok(r#"{"code":0,"data":null}"#)).is_err()
+        );
+        assert!(
+            unwrap_envelope_or_default::<Vec<serde_json::Value>>(&ok(
+                r#"{"code":403,"message":"no","reason":"GROUP_STATUS_FORBIDDEN"}"#
+            ))
+            .is_err()
+        );
     }
 
     #[test]
