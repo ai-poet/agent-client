@@ -98,7 +98,7 @@ settings.providers_keywords: プロバイダー エージェント モデル CLI
 settings.skills: スキル
 settings.skills_keywords: スキル ライブラリ エージェント 無効 有効 削除 claude codex cursor opencode pi amp 共有
 settings.usage_keywords: 使用状況 トークン コスト 支出 キャッシュ 日別 グラフ モデル 内訳 履歴 claude codex
-settings.cloud_account_keywords: cheaprouter クラウド アカウント ログイン サインイン 残高 ゲートウェイ ルーティング クレジット
+settings.cloud_account_keywords: cheaprouter クラウド アカウント ログイン サインイン 残高 ゲートウェイ ルーティング クレジット CLI 設定
 settings.daemon_keywords: デーモン サーバー リモート ウェブ ネットワーク 公開 オリジン トークン ポート websocket
 settings.computer_use_keywords: コンピュータ 操作 画面収録 アクセシビリティ アプリ 制御 codex
 settings.back: 戻る
@@ -2040,3 +2040,25 @@ error_banner.renew_plan: "プランを更新"
 cloud.subscriptions_empty_title: "プランはまだありません"
 cloud.subscriptions_empty_detail: "プランがあると、リクエストは残高ではなくプランの上限で課金されます。"
 cloud.subscription_renew: "更新"
+cloud.cli_takeover.title: "CLI を自動設定"
+cloud.cli_takeover.detail: "サインイン中は、各 CLI の設定ファイルにゲートウェイを書き込みます。オフにした CLI はそのままで、ご自身のログインを使い続けます。内蔵エージェントは常にクラウドアカウントを使用します。"
+cloud.cli_takeover.managed_detail: "クラウドアカウントを使用"
+cloud.cli_takeover.own_detail: "変更しない — ご自身のログインを使用"
+cloud.cli_takeover.routing_off_note: "ゲートウェイ経由の実行がオフのため、オンに戻すまで CLI は設定されません。"
+cloud.cli_takeover.now_own: "%{cli} はご自身のログインを使用し、設定は変更しません。新しく開始するセッションに適用されます"
+cloud.cli_takeover.now_managed: "%{cli} はサインイン中クラウドアカウントを使用します。新しく開始するセッションに適用されます"
+cloud.cli_takeover.prompt_title: "ご自身の CLI ログインが見つかりました"
+cloud.cli_takeover.prompt_detail: "サインインすると、通常これらの CLI の設定にゲートウェイを書き込みます。ご自身のアカウントを使い続けたいものはオフにしてください。設定ファイルはそのまま残ります。"
+cloud.cli_takeover.prompt_footnote: "内蔵エージェントは常にクラウドアカウントを使用します。後から 設定 → CheapRouter アカウント で変更できます。"
+cloud.cli_takeover.found_signed_in_as: "%{account} でログイン済み"
+cloud.cli_takeover.found_signed_in: "独自のアカウントでログイン済み"
+cloud.cli_takeover.found_api_key: "独自の API キーを設定済み"
+cloud.cli_takeover.found_custom_provider: "別のプロバイダーまたは中継先を設定済み"
+cloud.cli_takeover.use_cloud: "クラウド"
+cloud.cli_takeover.keep_own: "自分のものを維持"
+cloud.cli_takeover.keep_all: "すべて維持"
+cloud.cli_takeover.confirm: "続ける"
+cloud.cli_takeover.kept_all: "ご自身のログインを維持しました。設定 → CheapRouter アカウント で変更できます"
+cloud.cli_takeover.kept_some: "オフにした CLI はご自身のログインを維持します。設定 → CheapRouter アカウント で変更できます"
+cloud.cli_takeover.group_agent_only: "%{cli} はご自身のログインを使用中のため、このグループは内蔵エージェントのみに使われます。"
+providers.route_own_login: "ご自身のログイン（クラウドアカウントは設定しません）"

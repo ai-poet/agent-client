@@ -188,6 +188,8 @@ lines below.
 | `crates/waku-agent/query/src/{lib.rs,runner/tools.rs}` | vendored engine, recorded departure: the provider branch (Responses, Chat Completions) runs each stretch of calls that may overlap — sub-agents and read-only tools (`runs_concurrently`, split by `concurrency_runs`) — through `run_tool_batch` instead of one `for` loop awaiting every call; the rest still run alone and in order, results keep the calls' order, a cancel returns `Cancelled` with every call answered | ~80 |
 | `crates/waku-client/src/persistence.rs`, `crates/waku-core/src/persistence.rs` | new state starts on the built-in agent: `default_provider()`, `PersistedState::empty()`'s `last_provider` and `fresh()`'s first session are `ProviderKind::Native` instead of `Codex` | 3 each |
 | `src/app.rs` (default provider) | `native_agent::adopt_built_in_default` beside `migrate_legacy_pay_as_you_go` at launch, and its flag in the startup save condition — moves a state an earlier build wrote on the untouched Codex default (no model picked, no CLI task started, built-in agent not switched off) onto the built-in agent | 3 |
+| `src/app.rs`, `src/lib.rs`, `src/app/render.rs` (CLI takeover) | `mod cli_takeover` and its `init_cli_takeover_keys` re-export; the key init beside the confirm dialog's; `render_cli_takeover_prompt` beside the sign-in window in both render branches | 7 |
+| `locales/{app,zh-CN,ja}.yml` (CLI takeover) | `cloud.cli_takeover.*`, `providers.route_own_login`; CLI words added to `settings.cloud_account_keywords` | 22 keys |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `CheapRouter` in `locales/` and the two i18n test expectations.
@@ -196,6 +198,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 
 `crates/sub2api/**`, `crates/workflow-engine/**`, `src/app/cloud_account.rs`,
 `src/app/{cloud_failover,cloud_groups,cloud_menu,cloud_origins,cloud_sign_in}.rs`, `src/app/cli_setup.rs`,
+`src/app/cli_takeover.rs`,
 `src/app/providers_page.rs`, `src/app/confirm_dialog.rs`,
 `src/app/onboarding.rs`, `src/app/message_resend.rs`, `src/app/task_rows.rs`,
 `src/app/runtime_prewarm.rs`, `src/app/update_banner.rs`, `src/app/surface_bar.rs`,
@@ -278,6 +281,26 @@ What feeds `desired_routes` on each side:
 - **Which group is bound** can move on its own when a platform has automatic
   failover on (`sub2api::failover`, `~/.cheaprouter/failover.json`), through
   the same `select_cloud_group` path a manual pick uses.
+- **Which CLIs the account may configure** (`sub2api::cli_takeover`,
+  `~/.cheaprouter/cli-takeover.json`, one `managed` / `own` per CLI for
+  Claude Code, Codex and Grok; absent means managed). A CLI kept on the
+  user's own sign-in is listed in `GatewayConfig::own_login_clis`, which
+  `desired_routes` uses to drop only the *cloud* target — an endpoint the
+  user bound to that CLI still routes, and the built-in agent is never
+  affected. The desktop fills the set in `providers_page::cloud_config`, the
+  one builder `apply_cloud_routing` and the pages share. At sign-in,
+  `detect_own_setup` looks for an own setup on a CLI that was never asked
+  about: Claude's `oauthAccount` in `~/.claude.json` or
+  `.credentials.json`, an own key / `apiKeyHelper` / relay in
+  `settings.json`; Codex's ChatGPT `tokens` or `OPENAI_API_KEY` in
+  `auth.json`, or a declared custom `model_provider` in `config.toml`. The
+  files the takeover rewrites are read from the takeover backup while one is
+  held. Each one found is recorded as `own` *before* the first reconcile —
+  nothing is written into it even if the app quits with the question open
+  — and the question (`src/app/cli_takeover.rs`) lets the user hand any of
+  them to the account. Settings → CheapRouter Account carries the per-CLI
+  switches. Since the daemon still reads only the global files, a CLI kept
+  on its own sign-in runs on that sign-in inside the app too.
 
 `sub2api::speedtest` measures a set of candidate origins for all three (one
 warm-up request, one timed request, bounded concurrency, results in input

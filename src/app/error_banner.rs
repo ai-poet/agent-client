@@ -213,6 +213,13 @@ impl Waku {
             ProviderKind::Native => &sub2api::custom_api::NATIVE_SLOTS,
             _ => return true,
         };
+        // A CLI kept on the user's own sign-in never reaches the gateway.
+        if slots
+            .iter()
+            .any(|slot| self.cloud_account.cli_takeover.keeps_own(slot))
+        {
+            return true;
+        }
         let config = self.custom_api_snapshot();
         slots.iter().any(|slot| config.routed_endpoint(slot).is_some())
     }

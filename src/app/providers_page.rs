@@ -42,15 +42,23 @@ pub(super) struct SpeedTest {
 
 /// Which route a CLI is on, resolved from memory: the cached endpoints and
 /// the cloud account's credentials. No file is read on a frame.
+///
+/// The one place the account's routing configuration is built, so the
+/// writer and every page agree on which CLIs the user keeps on their own
+/// sign-in.
 pub(super) fn cloud_config(waku: &Waku) -> Option<sub2api::GatewayConfig> {
     let origin = waku.cloud_account.gateway_origin.origin();
-    waku.cloud_account.credentials.as_ref().map(|credentials| {
-        sub2api::gateway_config_with_origin(
-            credentials,
-            waku.cloud_account.routing_enabled,
-            origin.as_deref(),
-        )
-    })
+    waku.cloud_account
+        .credentials
+        .as_ref()
+        .map(|credentials| sub2api::GatewayConfig {
+            own_login_clis: waku.cloud_account.cli_takeover.own_set(),
+            ..sub2api::gateway_config_with_origin(
+                credentials,
+                waku.cloud_account.routing_enabled,
+                origin.as_deref(),
+            )
+        })
 }
 
 pub(super) fn url_error_label(error: &sub2api::custom_api::UrlError) -> String {
@@ -369,10 +377,26 @@ impl Waku {
             )
             .child(self.render_runtime_card(snapshot.as_deref(), theme, cx));
 
-        if let Some(snapshot) = snapshot.as_deref()
-            && !snapshot.conflicts.is_empty()
-        {
-            page = page.child(self.render_env_conflicts_card(&snapshot.conflicts, theme, cx));
+        // A CLI the user keeps on their own sign-in — and has bound no
+        // endpoint to — is not ours to route, so its variables are theirs
+        // too: likely the very setup they kept.
+        let custom = self.custom_api_snapshot();
+        let conflicts: Vec<sub2api::env_conflicts::EnvConflict> = snapshot
+            .as_deref()
+            .map(|snapshot| {
+                snapshot
+                    .conflicts
+                    .iter()
+                    .filter(|conflict| {
+                        !self.cloud_account.cli_takeover.keeps_own(conflict.provider_id)
+                            || custom.routed_endpoint(conflict.provider_id).is_some()
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !conflicts.is_empty() {
+            page = page.child(self.render_env_conflicts_card(&conflicts, theme, cx));
         }
 
         for kind in ProviderKind::ALL {
@@ -1125,6 +1149,15 @@ impl Waku {
             // engine's own settings file.
             RouteKind::CliOwn if kind.is_builtin() => {
                 (tr!("providers.route_engine_default"), theme.text_tertiary)
+            }
+            // The account would cover it, but the user keeps it on their own
+            // sign-in; say that rather than read as "not signed in".
+            RouteKind::CliOwn
+                if cloud.as_ref().is_some_and(|config| {
+                    config.is_usable() && !config.manages_cli(provider_id)
+                }) =>
+            {
+                (tr!("providers.route_own_login"), theme.text_tertiary)
             }
             RouteKind::CliOwn => (tr!("providers.route_cli_own"), theme.text_tertiary),
         };

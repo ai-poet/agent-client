@@ -255,13 +255,16 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
         };
         (!routes.is_empty()).then_some(routes)
     };
+    // A CLI the user keeps on their own sign-in gets nothing from the cloud;
+    // an endpoint they bound to it themselves still applies.
+    let managed = |cli: &str| cloud.filter(|config| config.manages_cli(cli));
     DesiredRoutes {
         native,
-        claude: cloud_target(cloud.and_then(|config| config.key_for("claude")))
+        claude: cloud_target(managed("claude").and_then(|config| config.key_for("claude")))
             .or_else(|| custom_target("claude")),
-        codex: cloud_target(cloud.and_then(|config| config.key_for("codex")))
+        codex: cloud_target(managed("codex").and_then(|config| config.key_for("codex")))
             .or_else(|| custom_target("codex")),
-        grok: cloud_target(cloud.and_then(|config| config.api_key.as_deref()))
+        grok: cloud_target(managed("grok").and_then(|config| config.api_key.as_deref()))
             .or_else(|| custom_target("grok")),
         opencode: custom_target("opencode"),
         pi: custom_target("pi"),
@@ -683,6 +686,7 @@ mod tests {
             codex_model: None,
             model_keys: Default::default(),
             model_windows: Default::default(),
+            own_login_clis: Default::default(),
         };
         let mut custom = CustomApiConfig::default();
         let mut entry = ProviderEntry::new("Mine", ApiFormat::Anthropic);
@@ -862,6 +866,7 @@ mod tests {
             codex_model: None,
             model_keys: Default::default(),
             model_windows: Default::default(),
+            own_login_clis: Default::default(),
         };
         let mut custom = CustomApiConfig::default();
         custom.set(
@@ -929,6 +934,93 @@ mod tests {
         );
     }
 
+    /// A CLI kept on the user's own sign-in drops out of the cloud's routes
+    /// only: its bound endpoint still applies, the other CLIs and the
+    /// built-in agent stay on the gateway.
+    #[test]
+    fn a_cli_kept_on_its_own_login_is_left_to_it() {
+        let cloud = GatewayConfig {
+            own_login_clis: ["claude".to_owned()].into(),
+            ..signed_in()
+        };
+        let custom = CustomApiConfig::default();
+        let desired = desired_routes(Some(&cloud), &custom);
+        assert!(desired.claude.is_none());
+        assert_eq!(desired.codex.as_ref().unwrap().api_key, "sk-general");
+        assert_eq!(desired.grok.as_ref().unwrap().api_key, "sk-general");
+        let native = desired.native.expect("the built-in agent keeps the account");
+        assert_eq!(
+            native.messages.as_ref().map(|route| route.api_key.as_str()),
+            Some("sk-claude")
+        );
+        assert_eq!(native.platform_keys.get("anthropic").map(String::as_str), Some("sk-claude"));
+        assert_eq!(active_route_kind("claude", Some(&cloud), &custom), RouteKind::CliOwn);
+        assert_eq!(active_route_kind("codex", Some(&cloud), &custom), RouteKind::Cloud);
+
+        let mut custom = CustomApiConfig::default();
+        custom.set(
+            "claude",
+            Some(crate::custom_api::CustomEndpoint {
+                base_url: "https://mine.example.org".into(),
+                api_key: "sk-mine".into(),
+                models: Vec::new(),
+            }),
+        );
+        let desired = desired_routes(Some(&cloud), &custom);
+        assert_eq!(desired.claude.as_ref().unwrap().api_key, "sk-mine");
+        assert_eq!(active_route_kind("claude", Some(&cloud), &custom), RouteKind::Custom);
+    }
+
+    /// Choosing "keep my own" while signed in hands the files back exactly
+    /// as they were; choosing the account again takes them over afresh.
+    #[test]
+    fn switching_a_cli_to_its_own_login_restores_its_files() {
+        let paths = temp_paths("own-login");
+        let settings = r#"{"env":{"FOO":"bar"},"model":"opus"}"#;
+        let config = "# mine\nmodel = \"my-model\"\n";
+        std::fs::create_dir_all(&paths.claude_dir).unwrap();
+        std::fs::write(paths.claude_dir.join("settings.json"), settings).unwrap();
+        std::fs::create_dir_all(&paths.codex_dir).unwrap();
+        std::fs::write(paths.codex_dir.join("config.toml"), config).unwrap();
+
+        let managed = desired_routes(Some(&signed_in()), &CustomApiConfig::default());
+        reconcile_at(&paths, &managed).expect("take over");
+        assert!(
+            std::fs::read_to_string(paths.claude_dir.join("settings.json"))
+                .unwrap()
+                .contains("ANTHROPIC_AUTH_TOKEN")
+        );
+
+        let cloud = GatewayConfig {
+            own_login_clis: ["claude".to_owned(), "codex".to_owned()].into(),
+            ..signed_in()
+        };
+        let own = desired_routes(Some(&cloud), &CustomApiConfig::default());
+        let warnings = reconcile_at(&paths, &own).expect("hand back");
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        let restored: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(paths.claude_dir.join("settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(restored, serde_json::from_str::<serde_json::Value>(settings).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(paths.codex_dir.join("config.toml")).unwrap(),
+            config
+        );
+        let state = load_state(&paths);
+        assert!(state.claude.is_none() && state.codex.is_none());
+        assert!(state.native.is_some(), "the built-in agent stays routed");
+
+        reconcile_at(&paths, &managed).expect("take over again");
+        assert!(load_state(&paths).claude.is_some());
+        assert!(
+            std::fs::read_to_string(paths.claude_dir.join("settings.json"))
+                .unwrap()
+                .contains("ANTHROPIC_AUTH_TOKEN")
+        );
+        cleanup(&paths);
+    }
+
     fn target(url: &str, key: &str) -> RouteTarget {
         RouteTarget {
             base_url: url.to_owned(),
@@ -975,6 +1067,7 @@ mod tests {
             codex_model: None,
             model_keys: Default::default(),
             model_windows: Default::default(),
+            own_login_clis: Default::default(),
         };
         let mut custom = CustomApiConfig::default();
         custom.set(

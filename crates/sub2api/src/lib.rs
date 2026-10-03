@@ -28,6 +28,7 @@ pub mod cli_install;
 pub mod cua_install;
 pub mod client;
 pub mod claude_compat;
+pub mod cli_takeover;
 pub mod codex_compat;
 pub mod custom_api;
 pub mod env_conflicts;
@@ -796,6 +797,7 @@ pub fn gateway_config_with_origin(
             })
             .collect(),
         model_windows: credentials.model_windows.clone(),
+        own_login_clis: Default::default(),
     }
 }
 

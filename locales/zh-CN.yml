@@ -94,7 +94,7 @@ settings.providers_keywords: 服务商 智能体 模型 命令行 版本 安装 
 settings.skills: 技能
 settings.skills_keywords: 技能 技能库 智能体 禁用 启用 删除 claude codex cursor opencode pi amp 共享
 settings.usage_keywords: 用量 令牌 费用 支出 缓存 每日 图表 模型 明细 历史 claude codex
-settings.cloud_account_keywords: cheaprouter 云 账号 账户 登录 余额 网关 托管 路由 订阅 额度
+settings.cloud_account_keywords: cheaprouter 云 账号 账户 登录 余额 网关 托管 路由 订阅 额度 CLI 配置 接管 覆盖
 settings.daemon_keywords: 守护进程 服务 远程 网页 网络 暴露 来源 令牌 端口 websocket
 settings.computer_use_keywords: 电脑操作 屏幕录制 辅助功能 应用 控制 codex
 settings.back: 返回
@@ -1988,3 +1988,25 @@ error_banner.renew_plan: "续费套餐"
 cloud.subscriptions_empty_title: "还没有订阅套餐"
 cloud.subscriptions_empty_detail: "订阅套餐后，请求按套餐额度计费，不扣余额。"
 cloud.subscription_renew: "续费"
+cloud.cli_takeover.title: "自动配置 CLI"
+cloud.cli_takeover.detail: "登录云账号后，网关会写入这些 CLI 的配置文件。关掉的 CLI 保持原样，继续使用你自己的登录；内置 Agent 始终使用云账号。"
+cloud.cli_takeover.managed_detail: "使用云账号"
+cloud.cli_takeover.own_detail: "不改动，使用你自己的登录"
+cloud.cli_takeover.routing_off_note: "网关路由已关闭，重新打开前不会配置任何 CLI。"
+cloud.cli_takeover.now_own: "%{cli} 改为使用你自己的登录，配置文件保持原样，对新启动的任务生效"
+cloud.cli_takeover.now_managed: "%{cli} 登录期间改为使用云账号，对新启动的任务生效"
+cloud.cli_takeover.prompt_title: "检测到你已在使用自己的 CLI 登录"
+cloud.cli_takeover.prompt_detail: "登录后，客户端默认会把网关写入下面这些 CLI 的配置。想继续用自己账号的，把开关关掉，它的配置文件将保持原样。"
+cloud.cli_takeover.prompt_footnote: "内置 Agent 始终使用云账号。之后可在 设置 → CheapRouter 账号 中更改。"
+cloud.cli_takeover.found_signed_in_as: "已登录 %{account}"
+cloud.cli_takeover.found_signed_in: "已登录自己的账号"
+cloud.cli_takeover.found_api_key: "已配置你自己的 API Key"
+cloud.cli_takeover.found_custom_provider: "已配置其他服务商或中转"
+cloud.cli_takeover.use_cloud: "使用云账号"
+cloud.cli_takeover.keep_own: "保留我的登录"
+cloud.cli_takeover.keep_all: "全部保留我的登录"
+cloud.cli_takeover.confirm: "确定"
+cloud.cli_takeover.kept_all: "已保留你自己的登录，可在 设置 → CheapRouter 账号 中更改"
+cloud.cli_takeover.kept_some: "关掉的 CLI 保留了你自己的登录，可在 设置 → CheapRouter 账号 中更改"
+cloud.cli_takeover.group_agent_only: "%{cli} 使用你自己的登录，此分组目前只用于内置 Agent。"
+providers.route_own_login: "你自己的登录（云账号不接管）"

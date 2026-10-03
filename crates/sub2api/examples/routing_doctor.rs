@@ -41,8 +41,10 @@ fn main() {
     };
 
     let credentials = sub2api::Credentials::load();
-    let cloud = credentials.as_ref().map(|credentials| {
-        sub2api::gateway_config_from(credentials, !credentials.routing_disabled)
+    let takeover = sub2api::cli_takeover::load();
+    let cloud = credentials.as_ref().map(|credentials| sub2api::GatewayConfig {
+        own_login_clis: takeover.own_set(),
+        ..sub2api::gateway_config_from(credentials, !credentials.routing_disabled)
     });
     match (&credentials, &cloud) {
         (Some(credentials), Some(config)) => println!(
@@ -51,6 +53,29 @@ fn main() {
             if config.is_usable() { "on" } else { "off / no keys" }
         ),
         _ => println!("cloud account: signed out"),
+    }
+    for cli in sub2api::cli_takeover::TAKEOVER_CLIS {
+        println!(
+            "cloud takeover of {cli}: {}",
+            match takeover.mode(cli) {
+                Some(sub2api::cli_takeover::CliMode::Own) => "off (the user's own sign-in)",
+                Some(sub2api::cli_takeover::CliMode::Managed) => "on",
+                None => "on (never asked)",
+            }
+        );
+    }
+    let own_setups = sub2api::cli_takeover::detect_own_setup(&paths);
+    for setup in &own_setups {
+        println!(
+            "own setup found for {}: {:?}{}",
+            setup.cli,
+            setup.reason,
+            setup
+                .account
+                .as_deref()
+                .map(|account| format!(" ({account})"))
+                .unwrap_or_default()
+        );
     }
     let custom = sub2api::custom_api::load();
     println!(

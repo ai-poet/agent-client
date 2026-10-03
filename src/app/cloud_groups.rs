@@ -273,6 +273,26 @@ impl Waku {
                     ));
             }
             rows = rows.child(header);
+            // The CLI itself stays on the user's own sign-in; this lane's
+            // group still serves the built-in agent's models of that family.
+            let cli_kept_own = match platform.as_str() {
+                "anthropic" => Some("claude"),
+                "openai" => Some("codex"),
+                _ => None,
+            }
+            .is_some_and(|cli| self.cloud_account.cli_takeover.keeps_own(cli));
+            if cli_kept_own {
+                rows = rows.child(
+                    div()
+                        .text_size(sp(11.5))
+                        .line_height(sp(16.0))
+                        .text_color(theme.text_ghost)
+                        .child(tr!(
+                            "cloud.cli_takeover.group_agent_only",
+                            cli = platform_display_name(&platform)
+                        )),
+                );
+            }
             if domestic {
                 rows = rows.child(
                     div()

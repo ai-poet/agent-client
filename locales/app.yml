@@ -193,7 +193,7 @@ settings.skills_keywords:
 settings.usage_keywords:
   en: usage tokens cost spend cache daily chart model breakdown history claude codex
 settings.cloud_account_keywords:
-  en: cheaprouter cloud account sign in login balance gateway managed routing subscription credits
+  en: cheaprouter cloud account sign in login balance gateway managed routing subscription credits cli configure overwrite takeover
 settings.daemon_keywords:
   en: daemon server remote web network expose origin token port websocket
 settings.computer_use_keywords:
@@ -4010,3 +4010,47 @@ cloud.subscriptions_empty_detail:
   en: "A plan bills requests against its own limits instead of your balance."
 cloud.subscription_renew:
   en: "Renew"
+cloud.cli_takeover.title:
+  en: "Configure CLIs automatically"
+cloud.cli_takeover.detail:
+  en: "While you are signed in, the gateway is written into each CLI's own configuration. Switch one off to leave its files untouched and keep your own sign-in. The built-in agent always uses the cloud account."
+cloud.cli_takeover.managed_detail:
+  en: "Uses the cloud account"
+cloud.cli_takeover.own_detail:
+  en: "Left alone — uses your own sign-in"
+cloud.cli_takeover.routing_off_note:
+  en: "Gateway routing is off, so no CLI is configured until it is turned back on."
+cloud.cli_takeover.now_own:
+  en: "%{cli} keeps your own sign-in and its configuration is left untouched — applies to newly started sessions"
+cloud.cli_takeover.now_managed:
+  en: "%{cli} uses the cloud account while you are signed in — applies to newly started sessions"
+cloud.cli_takeover.prompt_title:
+  en: "You already use your own CLI sign-in"
+cloud.cli_takeover.prompt_detail:
+  en: "Signing in normally writes the gateway into these CLIs' configuration. Switch off any you want to keep on your own account — its files stay exactly as they are."
+cloud.cli_takeover.prompt_footnote:
+  en: "The built-in agent always uses the cloud account. You can change this later in Settings → CheapRouter Account."
+cloud.cli_takeover.found_signed_in_as:
+  en: "Signed in as %{account}"
+cloud.cli_takeover.found_signed_in:
+  en: "Signed in with its own account"
+cloud.cli_takeover.found_api_key:
+  en: "Uses an API key of your own"
+cloud.cli_takeover.found_custom_provider:
+  en: "Points at another provider or relay"
+cloud.cli_takeover.use_cloud:
+  en: "Cloud account"
+cloud.cli_takeover.keep_own:
+  en: "Keep mine"
+cloud.cli_takeover.keep_all:
+  en: "Keep all mine"
+cloud.cli_takeover.confirm:
+  en: "Continue"
+cloud.cli_takeover.kept_all:
+  en: "Kept your own sign-in. You can change this in Settings → CheapRouter Account."
+cloud.cli_takeover.kept_some:
+  en: "The CLIs you switched off keep your own sign-in. You can change this in Settings → CheapRouter Account."
+cloud.cli_takeover.group_agent_only:
+  en: "%{cli} keeps your own sign-in; this group serves only the built-in agent."
+providers.route_own_login:
+  en: "Your own sign-in (not configured by the cloud account)"
