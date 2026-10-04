@@ -78,8 +78,8 @@ lines below.
 | `crates/waku-agent/core/src/system_prompt.rs` | vendored engine, recorded departure: the agent is named after the product, not after the engine or Anthropic | ~25 |
 | `crates/waku-agent/query/src/runner/provider_options.rs` | vendored engine, recorded departure: Grok counts as a reasoning model, so its effort tier reaches the request; gpt-5 Codex's summary/include fields stay off it | ~14 |
 | `crates/waku-agent/tools/src/{pty_bash,powershell,web_fetch}.rs` | vendored engine, recorded departure: truncate on character boundaries (`floor_char_boundary` / `ceil_char_boundary` in `pty_bash`) — the byte slices panicked on long non-ASCII output | ~30 |
-| `crates/waku-agent/core/src/lib.rs` | vendored engine, recorded departure: the plan-mode arm allows the plan-safe tools and read-only invocations; the two plan switches stay read-level so the model never asks permission to restrict itself | ~30 |
-| `crates/waku-agent/core/src/bash_classifier.rs` | vendored engine, recorded departure: `is_read_only_bash_command` — stricter than the `Safe` tier, splits on every separator and denies on doubt | ~100 |
+| `crates/waku-agent/core/src/lib.rs` | vendored engine, recorded departure: the plan-mode arm allows the plan-safe tools and read-only invocations; the two plan switches stay read-level so the model never asks permission to restrict itself; in plan mode an allow rule no longer opens the shell or an editing tool (`plan_mode_overrides_allow_rule`) | ~45 |
+| `crates/waku-agent/core/src/bash_classifier.rs` | vendored engine, recorded departure: `is_read_only_bash_command` — stricter than the `Safe` tier and denies on doubt; parses quoting and redirections (a descriptor or `/dev/null` is fine, a file is not) and judges each simple command by its own rules (`cd`, `sed -n`, `awk`, `xargs`, git's listing forms, `gh` reads) | ~700 |
 | `crates/waku-agent/api/src/providers/codex.rs` | vendored engine, recorded departure: `decode_tool_arguments` accepts the object form a normalizing gateway returns, not only the specified JSON string | ~35 |
 | `crates/waku-agent/api/src/{prompt_cache,claude_effort}.rs` (new), `crates/waku-agent/api/src/providers/anthropic.rs`, `crates/waku-agent/api/src/lib.rs`, `crates/waku-agent/api/src/codex_adapter.rs` (test), `crates/waku-agent/query/src/lib.rs` | vendored engine, recorded departure: Claude Code's prompt-cache breakpoints (last tool, system prompt, last message, the user message before it) on every Messages request — in `build_request` and on the request the Anthropic route sends from the query loop; current Claude families send adaptive thinking plus `output_config.effort` (new optional `CreateMessageRequest` field) instead of a thinking budget; `claude-sonnet-5-5` has its own row and dotted minor versions (`claude-sonnet-5.5`) read as dashed ones | ~40 + new files |
 | `crates/waku-agent/api/src/endpoint.rs` (new), `crates/waku-agent/api/src/{lib,registry}.rs`, `crates/waku-agent/api/src/providers/openai.rs` | vendored engine, recorded departure: request URLs go through `versioned_url`, which appends `/v1` only when the base does not already end in a version segment — `…/api/paas/v4` and `…/api/v3` no longer become `…/v4/v1/…`; mirrored by `crates/sub2api/src/gateway.rs::versioned_url` for the probes | ~10 + new file |
@@ -89,7 +89,7 @@ lines below.
 | `crates/waku-agent/api/src/{lib,provider_types}.rs` | vendored engine, recorded departure: the two stream accumulators warn instead of silently turning unparseable tool arguments into `{}` (the agent loop already errors — issue #215) | ~20 |
 | `crates/waku-agent/query/src/runner/tools.rs` | vendored engine, recorded departure: `whole_floats_to_integers` at the one `.execute()` call site — repairs `120.0` for `usize` fields, which several non-Claude models emit | ~45 |
 | `crates/waku-agent/tools/src/exit_plan_mode.rs` | vendored engine, recorded departure: `self_gates` and asks through `check_permission` with the plan summary as the description — its declared level is `None`, which the central backstop never gates, so the bridge's "finished planning" dialog was unreachable | ~20 |
-| `crates/waku-agent/tools/src/lib.rs` | vendored engine, recorded departure: refusals name their reason, and the two the fork words itself are exported as markers for the driver to localize | ~40 |
+| `crates/waku-agent/tools/src/lib.rs` | vendored engine, recorded departure: refusals name their reason, and the two the fork words itself are exported as markers for the driver to localize; the plan-mode refusal tells the model not to retry and to make the step part of the plan | ~40 |
 | `crates/waku-agent-bridge/src/computer_use.rs` | fork-owned: writes the bundled skill where the engine's `Skill` tool reads it, and removes it when the toggle is off | ~110 |
 | `crates/waku-agent-bridge/src/{config,permission,session}.rs` | fork-owned: the REPL MCP registration, the consented-tools short-circuit, the plan/computer-use prompt rules | ~200 |
 | `crates/waku-agent-bridge/src/{mcp_tool,events}.rs` | fork-owned: MCP image content onto its own sideband so the model reads text and the transcript gets pixels | ~90 |
@@ -224,11 +224,18 @@ lines below.
 | `src/app/streaming.rs` (agent browser) | `DriverEvent::BrowserRequest` deferred to `handle_browser_request` | 12 |
 | `src/browser.rs` (agent browser) | `#[path] mod automation`; `Webview::call_devtools` on the WebView2 host (`CallDevToolsProtocolMethod`) | ~40 |
 | `packages/waku-client/src/generated/{Command,WorkspaceOperation}.ts` | regenerated (`protocol:generate`) | — |
+| `crates/waku-protocol/src/workspace.rs`, `crates/waku-core/src/workspace.rs` (Files panel previews) | additive `WorkspaceOperation::PreviewFile`, `WorkspaceResult::FilePreview`, the `FilePreview` / `PreviewSheet` / `PreviewKind` types and `preview_kind`; `#[path] mod workspace_preview` and its `execute` arm | ~110 |
+| `crates/waku-core/Cargo.toml` (Files panel previews) | `calamine` (Excel / OpenDocument spreadsheets), plus `quick-xml` and `zip` at the versions calamine already brings, for Word / PowerPoint / OpenDocument text | 6 |
+| `src/app/right_panel.rs`, `src/app.rs` (Files panel previews) | `#[path] mod file_preview`; `render_right_panel_file` returns `render_file_preview_surface` first for a file `preview_kind` recognises; the `file_previews` field + initializer | 10 |
+| `locales/{app,zh-CN,ja}.yml` (Files panel previews) | `file_preview.*` | 12 keys |
+| `packages/waku-client/src/generated/{WorkspaceOperation,WorkspaceResult,FilePreview,PreviewSheet,index}.ts` | regenerated (`protocol:generate`) | — |
 | `crates/waku-agent-bridge/src/session.rs` (AgentTeams) | fork-owned: `#[path] mod team_seam` (`session_team.rs`); `Inner.team`; `Turn.compacting`; `ToolSets::build` / `builtin_tools_with` take the team (captain tools once active); `prompt` hands a Team panel control to `team.intercept`; `run_turn` takes a `PromptOrigin`, runs `augment_prompt` first (the `/agent-teams` directive, parked contexts) and `extend_rules` after the sub-agent query is cloned; both background snapshots add the team's running members; `stop_background_work` tries `stop_member` first; `cancel` releases only the captain's own dialogs; `after_turn` at the end of `run_turn` and `compact_now`; `team.shutdown()` on drop | ~70 |
 | `crates/waku-agent-bridge/src/{permission,subagent,lib}.rs`, `Cargo.toml` (AgentTeams) | fork-owned: `MemberScope` + `GuiPermissionHandler::for_member` (own manager, `team:` request ids via `prompt_as`), `release_where` / `release_member`; `child_event` and `join_prompts` widened to `pub(crate)`; `mod team` and `agent_teams_slash_commands()`; the `agent-teams` dependency | ~90 |
 | `crates/waku-core/src/driver/native.rs`, `composer_complete.rs`, `Cargo.toml` (AgentTeams) | a member's permission title names the member (`team.permission_title`); a member's record keeps one feed across its turns (`member_feeds`); `/agent-teams` and its profile aliases among the built-in commands; the `agent-teams` dependency | ~45 |
 | `src/app/streaming.rs`, `src/app/sessions.rs` (AgentTeams) | a `team:` permission is accepted with no captain turn running and survives `TurnFinished` / Stop; answering one leaves an idle session idle | ~20 |
 | `src/app/right_panel.rs`, `src/app/surface_bar.rs`, `src/app/background_work.rs`, `src/app/agent_page.rs`, `src/app/usage_page.rs`, `src/assets.rs` (AgentTeams) | `RightPanelSurface::Team` arms (label, icon, single instance, render, "+" menu for built-in sessions); `active_right_panel_surface` widened to `pub(super)`; the header's Team button; `ReconcileLive` marks the team stale and `has_background_work`; the Teams section on Settings → Agent and its load hook; `users` icon | ~50 |
+| `src/app.rs`, `src/app/right_panel.rs`, `src/app/surface_bar.rs`, `src/app/streaming.rs`, `src/app/sessions.rs`, `src/app/transcript_view.rs`, `src/assets.rs`, `Cargo.toml` (Plan surface) | the header's Plan button (`render_plan_surface_button`, shown once the session has a plan, a dot while one waits); `RightPanelSurface::Plan` + `mod plan_review` + `plan_review` field (replacing `plan_card_expanded` / `plan_markdown`); its label, icon, single-instance and render arms and the "+" menu entry once the session has a plan; `plan_requested` after a permission is queued; `note_plan_answer` at the top of `respond_permission`; `plan_selected_text` in the copy chain; `chevron-left` icon; the `similar` dependency | ~20 |
+| `crates/waku-core/src/driver/native.rs` (Plan surface) | `PlanDraft`: the turn's latest assistant text becomes the `ExitPlanMode` dialog's body (`localize_exit_plan_detail` takes it) | ~45 |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `CheapRouter` in `locales/` and the two i18n test expectations.
@@ -249,7 +256,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `src/app/{subagent_row,subagent_panel,subagent_transcript}.rs`,
 `src/app/cloud_usage.rs`, `src/app/model_plaza.rs`, `src/app/cloud_pay.rs`,
 `src/app/announcements.rs`, `assets/icons/{bell,circle-x,store,users,wallet}.svg`,
-`src/app/{team_panel,agent_teams_settings}.rs`,
+`src/app/{team_panel,agent_teams_settings,plan_review}.rs`, `assets/icons/chevron-left.svg`,
 `crates/waku-agent-bridge/src/{team/**,session_team.rs}`, `docs/agent-teams.md`,
 `src/app/error_banner.rs`, `src/app/turn_undo.rs`, `src/app/status_capsule.rs`,
 `src/app/permission_card.rs`, `src/app/shortcuts.rs`,
@@ -260,8 +267,8 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `src/app/content_translations.rs`,
 `src/app/{effort_panel,effort_scale,effort_fire,effort_relaunch}.rs`,
 `crates/waku-core/src/driver/acp_effort.rs`,
-`src/app/{file_tree_menu,browser_agent}.rs`, `src/browser_automation.rs`,
-`crates/waku-core/src/workspace_edit.rs`, `crates/waku-agent-bridge/src/browser.rs`,
+`src/app/{file_tree_menu,browser_agent,file_preview}.rs`, `src/browser_automation.rs`,
+`crates/waku-core/src/{workspace_edit,workspace_preview}.rs`, `crates/waku-agent-bridge/src/browser.rs`,
 `crates/waku-protocol/src/activity_overview.rs`, `crates/waku-core/src/activity_overview.rs`,
 `docs/deepseek-harness.md`, `docs/deepseek-harness.zh.md`,
 `NOTICE.md`, `docs/FORK.md`.

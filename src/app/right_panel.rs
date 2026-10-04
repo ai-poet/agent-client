@@ -9,6 +9,9 @@ pub(super) mod file_tree_menu;
 // Fork: the built-in agent drives the in-app browser.
 #[path = "browser_agent.rs"]
 pub(super) mod browser_agent;
+// Fork: previews of pictures, spreadsheets and documents in the Files panel.
+#[path = "file_preview.rs"]
+pub(super) mod file_preview;
 
 const TAB_SCROLL_FADE_WIDTH: f32 = 24.0;
 
@@ -2886,6 +2889,11 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
+        // Fork: a picture, spreadsheet, document or other binary is
+        // previewed, not opened as text (file_preview.rs).
+        if let Some(kind) = waku_protocol::workspace::preview_kind(&relative_path) {
+            return self.render_file_preview_surface(relative_path, kind, panel_width, cx);
+        }
         let theme = Theme::current(cx);
         let file_tree_width = fitted_file_tree_width(panel_width, self.right_panel_file_tree_width);
         let (editor_state, writable, _) =

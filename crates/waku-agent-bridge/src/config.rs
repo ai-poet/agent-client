@@ -1093,24 +1093,44 @@ fn narration_rule(options: &AgentStartOptions) -> Option<String> {
 /// planning" dialog, which is keyed on that tool, never appears. The model
 /// has to be told the tool exists, what its `summary` is for, and that the
 /// user reads the plan before anything runs.
+///
+/// It also says which commands still run while planning. The old rule told
+/// the model not to run commands at all while the read-only ones were
+/// allowed, so models tried whatever they would normally run — `cd` chains,
+/// redirections, builds, tests — and spent turns on refusals. And every
+/// question is asked before the plan is written: the plan is what the user
+/// approves, so a plan that still asks something cannot be approved as is.
 fn plan_mode_rule(options: &AgentStartOptions) -> Option<String> {
     options.plan_mode.then(|| {
         "You are in plan mode: nothing you propose is applied yet. Read, search \
          and reason freely: look for existing patterns and similar features, and \
-         weigh the approaches. If the approach turns on a choice only the user can \
-         make, ask with AskUserQuestion. Then write the plan out for the user. \
-         Open it with why the change is needed, then give only the approach you \
-         recommend: the files to change (for a change repeated across many files, \
-         the pattern and a few examples), the existing functions to reuse with \
-         their paths, and how to verify the result end to end. Keep it short \
-         enough to scan and precise enough to carry out. When the plan \
-         is ready, call ExitPlanMode with a short `summary` of it - that hands \
-         the plan to the user, who will approve it or send you back to keep \
-         planning. Do not call ExitPlanMode before the plan is written, and do \
-         not try to edit files or run commands while planning. If ExitPlanMode \
-         succeeds, the user has approved the plan and plan mode is over: carry \
-         the plan out from there. If it is refused, stay in plan mode and ask \
-         what to change."
+         weigh the approaches. Read with Read, Glob and Grep, and with shell \
+         commands that only read: ls, cat, head, tail, wc, grep, rg, find \
+         (without -exec or -delete), sed -n, awk, git status, log, diff, show, \
+         branch and grep, cd, and pipes between them. Everything that writes or \
+         runs something is refused while planning: editing or creating files, \
+         redirecting output into a file (2>&1 and >/dev/null are fine), $(...) \
+         and $VARIABLES, installing, building and running tests. Do not retry a \
+         refused command; if it matters, make it a step of the plan. Settle every \
+         question before you write the plan: when the approach turns on something \
+         only the user can decide, such as the scope, the behaviour they want, or \
+         a trade-off between two designs, ask with AskUserQuestion and wait for \
+         the answer. The plan itself must not ask anything: no questions, no open \
+         choices, no alternatives for the user to pick from, nothing left to \
+         confirm. If a new question comes up after the plan is written, ask it \
+         with AskUserQuestion, then rewrite the plan. Then write the plan out for \
+         the user. Open it with why the change is needed, then give only the \
+         approach you recommend: the files to change (for a change repeated \
+         across many files, the pattern and a few examples), the existing \
+         functions to reuse with their paths, and how to verify the result end to \
+         end. Keep it short enough to scan and precise enough to carry out. When \
+         the plan is ready, call ExitPlanMode with a short `summary` of it - that \
+         hands the plan to the user, who will approve it or send you back to keep \
+         planning. Do not call ExitPlanMode before the plan is written. If \
+         ExitPlanMode succeeds, the user has approved the plan and plan mode is \
+         over: carry the plan out from there. If it is refused, stay in plan mode: \
+         revise the plan by the user's notes, or ask with AskUserQuestion what to \
+         change when they gave none."
             .to_owned()
     })
 }
@@ -1772,6 +1792,19 @@ mod tests {
         assert!(rule.contains("why the change is needed"), "{rule}");
         assert!(rule.contains("verify the result end to end"), "{rule}");
         assert!(rule.contains("AskUserQuestion"), "{rule}");
+    }
+
+    /// Questions come before the plan, never inside it; and the model is
+    /// told which commands still run, so it does not spend turns on refusals.
+    #[test]
+    fn the_plan_rule_settles_questions_first_and_names_what_still_runs() {
+        let options = AgentStartOptions { plan_mode: true, ..AgentStartOptions::default() };
+        let rule = plan_mode_rule(&options).expect("a rule while planning");
+        assert!(rule.contains("Settle every question before you write the plan"), "{rule}");
+        assert!(rule.contains("The plan itself must not ask anything"), "{rule}");
+        assert!(rule.contains("sed -n"), "{rule}");
+        assert!(rule.contains("Do not retry a refused command"), "{rule}");
+        assert!(!rule.contains("  "), "{rule}");
     }
 
     #[test]

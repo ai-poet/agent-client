@@ -1363,7 +1363,7 @@ impl Waku {
             return;
         };
         // Fork: the Plan surface records how a plan was answered.
-        self.note_plan_answer(session_id, &request_id, &option_id);
+        self.note_plan_answer(session_id, &request_id, &option_id, cx);
         let provider = self
             .state
             .sessions

@@ -323,8 +323,11 @@ pub struct ToolContext {
 /// prose — `waku-core`'s native driver tests for this suffix and swaps in
 /// copy in the user's own language. Change it and that translation stops
 /// firing (silently), so the two move together.
-pub const PLAN_MODE_DENIAL_SUFFIX: &str =
-    ": plan mode is active, so nothing is applied. Switch to Build to run this.";
+///
+/// Worded for the model, which is who reads it: it used to say "Switch to
+/// Build to run this", which the model can't do and so passed on to the
+/// user, after retrying the command in other spellings.
+pub const PLAN_MODE_DENIAL_SUFFIX: &str = ": plan mode is active, so only reading tools and read-only shell commands run. Do not retry this while planning; if it is needed, make it a step of the plan.";
 
 /// The whole refusal when the user declined to leave plan mode. Same
 /// contract as [`PLAN_MODE_DENIAL_SUFFIX`]: matched verbatim by the driver.

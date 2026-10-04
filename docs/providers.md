@@ -1661,6 +1661,48 @@ plan mode is and to hand the plan back through `ExitPlanMode` — without it,
 models not trained on that tool write the plan as prose and the dialog never
 appears.
 
+**The plan-mode rule.** The rule names the commands that still run while
+planning. It tells the model not to retry a refused command and to make
+that command a step of the plan instead. The refusal text the model gets
+(`PLAN_MODE_DENIAL_SUFFIX`) says the same. The rule also says every question
+is asked with `AskUserQuestion` before the plan is written, so the plan
+itself asks nothing.
+
+**What counts as read-only.** The shell commands that run are the ones the
+classifier proves read-only (`is_read_only_bash_command`):
+
+- It parses quoting and redirections.
+- A redirection is fine when it points at a descriptor (`2>&1`) or at
+  `/dev/null`. A redirection into a file is refused.
+- Each simple command is judged by its own rules, so `cd`, `sed -n`, `awk`
+  without `system()` or redirected output, `xargs` over reading commands,
+  and git's listing forms all pass.
+
+**Allow rules.** In plan mode an "always allow" rule no longer opens the
+shell or an editing tool. Allow rules are checked before the mode, so one
+remembered answer used to let every command run while planning.
+
+The summary is optional and usually short, while the plan itself is the
+text the model wrote just before calling `ExitPlanMode`. So `native.rs`
+keeps the turn's latest non-empty assistant text (`PlanDraft`; each tool
+call closes a message's text). The dialog's body is the longer of that
+text and the summary.
+
+**Where the plan is read.** Both drivers raise the plan under
+`plan.ready_title`, and the desktop gives it its own surface:
+
+- **The card.** The card above the composer shrinks to one row: the title,
+  "View plan", and the two answers, which keep their digit keys.
+- **The panel.** The right panel's Plan surface (`src/app/plan_review.rs`)
+  opens with the whole plan, rendered and selectable.
+- **Versions.** It keeps every version the session submitted, with a line
+  diff against the previous one.
+- **Notes.** It takes a multi-line note. "Quote selection" adds the
+  selected plan text to the note as a Markdown quote. Sending it back
+  refuses the request and steers the note into the turn, the same path as
+  the card's "Deny and explain" (`deny_permission_with_note`).
+- **Storage.** The history is in memory, per session.
+
 `/plan`, `/plan off` and `/plan <description>` reach the same switch by
 typing; a project or user command that owns the name keeps it, as with
 `/fast`.

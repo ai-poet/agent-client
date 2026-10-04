@@ -3533,7 +3533,7 @@ commands.plan_exited:
   en: "Build mode — changes will be applied"
 
 native.plan_mode_denied:
-  en: "Not run — plan mode is on, so nothing is applied. Switch to Build below and ask again."
+  en: "Not run: plan mode only runs commands that read. It can run once the plan is approved, or switch to Build below."
 native.keep_planning:
   en: "You chose to keep planning, so the agent will carry on refining the plan."
 native.rewind_past_compaction:
@@ -3719,6 +3719,10 @@ plan.keep_planning_with_notes:
   en: "Keep planning with these notes"
 plan.surface:
   en: "Plan"
+plan.surface_open:
+  en: "Show the plan"
+plan.surface_hide:
+  en: "Hide the plan"
 plan.card_hint:
   en: "Read the whole plan and add notes in the right panel."
 plan.view_in_panel:
@@ -4240,3 +4244,27 @@ team.settings.profile_name_taken:
   en: "A template named %{name} already exists."
 team.settings.profile_invalid_json:
   en: "Not valid JSON: %{error}"
+file_preview.loading:
+  en: "Reading the file…"
+file_preview.failed:
+  en: "Could not preview this file: %{error}"
+file_preview.retry:
+  en: "Try Again"
+file_preview.reload:
+  en: "Reload"
+file_preview.fit:
+  en: "Fit to Panel"
+file_preview.actual_size:
+  en: "Actual Size"
+file_preview.empty_sheet:
+  en: "This spreadsheet has no sheets with data"
+file_preview.rows_shown:
+  en: "Showing the first %{shown} rows of %{rows} × %{columns} columns"
+file_preview.rows_all:
+  en: "%{rows} rows × %{columns} columns"
+file_preview.document_truncated:
+  en: "The document is long; only its beginning is shown."
+file_preview.cannot_read:
+  en: "This file cannot be previewed: %{reason}"
+file_preview.unavailable:
+  en: "This kind of file cannot be previewed in the app."

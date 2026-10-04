@@ -1322,6 +1322,8 @@ pub struct Waku {
     /// Fork addition: the built-in agent's in-app browser requests
     /// (`right_panel/browser_agent.rs`).
     browser_agent: right_panel::browser_agent::BrowserAgentState,
+    /// Fork addition: the Files panel's previews (`right_panel/file_preview.rs`).
+    file_previews: right_panel::file_preview::FilePreviews,
     /// Commit-message generation and Git mutation outlive the modal that
     /// started them. Keeping the operation on the app also lets every
     /// Environment surface reflect and gate the same in-flight action.
@@ -3183,6 +3185,7 @@ impl Waku {
                 effort_launches: HashMap::new(),
                 file_tree: Default::default(),
                 browser_agent: Default::default(),
+                file_previews: Default::default(),
                 commit_operation: None,
                 // Providers × workspaces; both scans are small, the cache
                 // only exists to keep them off the frame path.

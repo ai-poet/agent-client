@@ -282,6 +282,97 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         relative_path: PathBuf,
     },
+    /// Fork addition: a file the Files panel shows as something other than
+    /// text — a picture, a spreadsheet's cells, a document's words. See
+    /// [`preview_kind`]. Answers [`WorkspaceResult::FilePreview`].
+    PreviewFile {
+        #[ts(type = "string")]
+        root: PathBuf,
+        #[ts(type = "string")]
+        relative_path: PathBuf,
+    },
+}
+
+/// Fork addition: how the Files panel shows a file, by its extension.
+/// `None` is text, which the editor shows.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PreviewKind {
+    Image,
+    Table,
+    Document,
+    /// Recognised, but nothing in the app can draw it — a PDF, an archive,
+    /// audio or video. Shown as facts and an "open" button.
+    Binary,
+}
+
+pub fn preview_kind(path: &str) -> Option<PreviewKind> {
+    let extension = std::path::Path::new(path)
+        .extension()?
+        .to_str()?
+        .to_ascii_lowercase();
+    Some(match extension.as_str() {
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "svg" | "tif" | "tiff" => {
+            PreviewKind::Image
+        }
+        "xlsx" | "xlsm" | "xlsb" | "xls" | "xla" | "xlam" | "ods" | "csv" | "tsv" => {
+            PreviewKind::Table
+        }
+        "docx" | "pptx" | "odt" | "odp" => PreviewKind::Document,
+        "pdf" | "doc" | "ppt" | "zip" | "7z" | "rar" | "gz" | "tgz" | "xz" | "bz2" | "tar"
+        | "exe" | "dll" | "so" | "dylib" | "bin" | "msi" | "dmg" | "pkg" | "deb" | "rpm"
+        | "apk" | "jar" | "class" | "wasm" | "o" | "a" | "lib" | "pdb" | "mp3" | "wav"
+        | "flac" | "ogg" | "m4a" | "aac" | "mp4" | "mov" | "avi" | "mkv" | "webm" | "wmv"
+        | "ttf" | "otf" | "woff" | "woff2" | "psd" | "ai" | "sketch" | "fig" | "heic"
+        | "avif" | "sqlite" | "db" | "parquet" | "pyc" => PreviewKind::Binary,
+        _ => return None,
+    })
+}
+
+/// Fork addition: what [`WorkspaceOperation::PreviewFile`] read.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum FilePreview {
+    Image {
+        /// `png`, `jpeg`, `svg`… — the format to decode it as.
+        format: String,
+        /// The file's bytes, base64.
+        data: String,
+        size: u64,
+    },
+    Table {
+        sheets: Vec<PreviewSheet>,
+        size: u64,
+    },
+    Document {
+        text: String,
+        /// Only the first part of a long document is sent.
+        truncated: bool,
+        size: u64,
+    },
+    /// Nothing to draw: too large, a format the app cannot show, or one it
+    /// could not read. `reason` is for the person.
+    Unavailable {
+        size: u64,
+        reason: Option<String>,
+    },
+}
+
+/// One sheet of a spreadsheet, as much of it as a preview shows.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSheet {
+    pub name: String,
+    /// Where `rows` starts in the sheet, zero-based: a spreadsheet's used
+    /// range need not begin at A1.
+    #[serde(default)]
+    pub first_row: usize,
+    #[serde(default)]
+    pub first_column: usize,
+    pub rows: Vec<Vec<String>>,
+    /// How big the sheet really is, when `rows` stops short of it.
+    pub total_rows: usize,
+    pub total_columns: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -347,5 +438,9 @@ pub enum WorkspaceResult {
     },
     TurnUndone {
         restored: Vec<String>,
+    },
+    /// Fork addition: the answer to [`WorkspaceOperation::PreviewFile`].
+    FilePreview {
+        preview: FilePreview,
     },
 }

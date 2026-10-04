@@ -2562,6 +2562,22 @@ pub mod permissions {
         crate::constants::TOOL_NAME_WEB_FETCH,
     ];
 
+    /// Fork: the tools whose allow rules plan mode sets aside — the ones that
+    /// edit files or run commands, which plan mode exists to hold back.
+    pub fn plan_mode_overrides_allow_rule(tool_name: &str) -> bool {
+        matches!(
+            tool_name,
+            crate::constants::TOOL_NAME_BASH
+                | "bash"
+                | "PowerShell"
+                | crate::constants::TOOL_NAME_FILE_EDIT
+                | crate::constants::TOOL_NAME_FILE_WRITE
+                | crate::constants::TOOL_NAME_NOTEBOOK_EDIT
+                | crate::constants::TOOL_NAME_BATCH_EDIT
+                | crate::constants::TOOL_NAME_APPLY_PATCH
+        )
+    }
+
     impl PermissionLevel {
         /// Derive the permission level from a well-known tool name.
         pub fn for_tool(tool_name: &str) -> Self {
@@ -2867,7 +2883,16 @@ pub mod permissions {
                 return PermissionDecision::Deny;
             }
 
-            if allow_matched {
+            // Fork: an allow rule cannot open what plan mode closes. "Always
+            // allow" on the shell or an editing tool is a rule about Build;
+            // honoured here it ran every command and every edit while
+            // planning, the one thing plan mode promises not to do. Those
+            // tools fall through to Step 5, where a command the classifier
+            // proved read-only still runs. Other tools (MCP, the browser)
+            // keep their rules: they are what the user explicitly allowed.
+            if allow_matched
+                && !(self.mode == PermissionMode::Plan && plan_mode_overrides_allow_rule(tool_name))
+            {
                 return PermissionDecision::Allow;
             }
 
@@ -4704,6 +4729,54 @@ mod tests {
         assert_eq!(
             manager.evaluate("Bash", "delete files", None, None, &[], false),
             PermissionDecision::Deny
+        );
+    }
+
+    /// "Always allow" on the shell or an editor used to outrank plan mode:
+    /// allow rules are checked first, so one remembered answer let every
+    /// command and edit through while planning. Plan mode sets those rules
+    /// aside; a read-only command still runs, and other tools keep theirs.
+    #[test]
+    fn plan_mode_sets_aside_allow_rules_for_the_shell_and_editors() {
+        use crate::config::{PermissionMode, Settings};
+        use crate::permissions::{
+            PermissionAction, PermissionDecision, PermissionManager, PermissionRule,
+            PermissionScope,
+        };
+
+        let allow = |tool: &str| PermissionRule {
+            tool_name: Some(tool.to_owned()),
+            path_pattern: None,
+            action: PermissionAction::Allow,
+            scope: PermissionScope::Session,
+        };
+        let settings = Settings::default();
+        let mut manager = PermissionManager::new(PermissionMode::Plan, &settings);
+        for tool in ["Bash", "PowerShell", "Write", "Edit", "mcp__docs__search"] {
+            manager.add_rule(allow(tool));
+        }
+        for tool in ["Bash", "PowerShell", "Write", "Edit"] {
+            assert_eq!(
+                manager.evaluate(tool, "", None, None, &[], false),
+                PermissionDecision::Deny,
+                "{tool}"
+            );
+        }
+        assert_eq!(
+            manager.evaluate("Bash", "git log", None, None, &[], true),
+            PermissionDecision::Allow
+        );
+        assert_eq!(
+            manager.evaluate("mcp__docs__search", "", None, None, &[], false),
+            PermissionDecision::Allow
+        );
+
+        // Outside plan mode the same rules stand.
+        let mut build = PermissionManager::new(PermissionMode::Default, &settings);
+        build.add_rule(allow("Bash"));
+        assert_eq!(
+            build.evaluate("Bash", "cargo build", None, None, &[], false),
+            PermissionDecision::Allow
         );
     }
 

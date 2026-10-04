@@ -31,6 +31,12 @@ waku-agent-bridge = { path = "../waku-agent-bridge" }
 subtle = "2"
 toml = "0.8"
 trash = "5.2.6"
+# Fork: the Files panel's previews (`workspace_preview.rs`) — spreadsheets,
+# and the text of Word and PowerPoint files. `zip` and `quick-xml` are the
+# versions calamine already brings, which also reads deflated archives.
+calamine = { version = "0.36", features = ["dates"] }
+quick-xml = "0.41"
+zip = { version = "8", default-features = false }
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }

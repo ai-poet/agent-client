@@ -97,7 +97,10 @@ impl PlanReviewState {
     /// already recorded (a replayed event).
     fn record(&mut self, session_id: Uuid, request_id: &str, text: String) -> bool {
         let versions = self.versions.entry(session_id).or_default();
-        if versions.iter().any(|version| version.request_id == request_id) {
+        if versions
+            .iter()
+            .any(|version| version.request_id == request_id)
+        {
             return false;
         }
         versions.push(PlanVersion {
@@ -115,11 +118,11 @@ impl PlanReviewState {
     }
 
     fn answer(&mut self, session_id: Uuid, request_id: &str, allow: bool) {
-        if let Some(version) = self
-            .versions
-            .get_mut(&session_id)
-            .and_then(|versions| versions.iter_mut().find(|version| version.request_id == request_id))
-        {
+        if let Some(version) = self.versions.get_mut(&session_id).and_then(|versions| {
+            versions
+                .iter_mut()
+                .find(|version| version.request_id == request_id)
+        }) {
             version.answer = Some(allow);
         }
     }
@@ -229,8 +232,15 @@ impl Waku {
     }
 
     /// Hook (`sessions.rs`): the person answered `request_id`. Must run
-    /// before the answer removes the request from the runtime.
-    pub(super) fn note_plan_answer(&mut self, session_id: Uuid, request_id: &str, option_id: &str) {
+    /// before the answer removes the request from the runtime. Notes written
+    /// for an answered plan are moot, whichever way it was answered.
+    pub(super) fn note_plan_answer(
+        &mut self,
+        session_id: Uuid,
+        request_id: &str,
+        option_id: &str,
+        cx: &mut Context<Self>,
+    ) {
         let Some(allow) = self
             .runtimes
             .get(&session_id)
@@ -241,12 +251,20 @@ impl Waku {
                     .find(|permission| permission.request_id == request_id)
             })
             .filter(|permission| is_plan_approval(permission))
-            .and_then(|permission| permission.options.iter().find(|option| option.id == option_id))
+            .and_then(|permission| {
+                permission
+                    .options
+                    .iter()
+                    .find(|option| option.id == option_id)
+            })
             .map(|option| option.allow)
         else {
             return;
         };
         self.plan_review.answer(session_id, request_id, allow);
+        if let Some(notes) = self.plan_review.notes.clone() {
+            notes.update(cx, |input, cx| input.clear(cx));
+        }
     }
 
     /// Whether the session in view has submitted a plan this run.
@@ -260,14 +278,102 @@ impl Waku {
     /// The plan text selected in the panel, while the panel is in view.
     pub(super) fn plan_selected_text(&self) -> Option<String> {
         let shown = self.right_panel_visible
-            && matches!(self.active_right_panel_surface(), Some(RightPanelSurface::Plan));
+            && matches!(
+                self.active_right_panel_surface(),
+                Some(RightPanelSurface::Plan)
+            );
         shown
-            .then(|| self.plan_review.selection.selection.borrow().selected_text())
+            .then(|| {
+                self.plan_review
+                    .selection
+                    .selection
+                    .borrow()
+                    .selected_text()
+            })
             .flatten()
     }
 
     pub(super) fn open_plan_surface(&mut self, cx: &mut Context<Self>) {
         self.open_right_panel_surface(RightPanelSurface::Plan, cx);
+    }
+
+    /// The header button for the Plan surface, while the session in view has
+    /// submitted a plan: one click shows it, another puts the panel away.
+    /// Without it a closed Plan tab had no way back once the plan was
+    /// answered — the card's "View plan" leaves with the request, and the
+    /// panel's "+" menu is out of reach while the panel is hidden. A dot marks
+    /// a plan still waiting for an answer.
+    pub(super) fn render_plan_surface_button(
+        &self,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
+        if !self.selected_session_has_plan() {
+            return None;
+        }
+        let shown = self.right_panel_visible
+            && matches!(
+                self.active_right_panel_surface(),
+                Some(RightPanelSurface::Plan)
+            );
+        let waiting = self
+            .state
+            .selected_session
+            .is_some_and(|session_id| self.pending_plan(session_id).is_some());
+        let tooltip: SharedString = if shown {
+            tr!("plan.surface_hide")
+        } else {
+            tr!("plan.surface_open")
+        }
+        .into();
+        Some(
+            div()
+                .id("surface-bar-plan")
+                .tab_index(0)
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .relative()
+                .w(px(26.0))
+                .h(px(26.0))
+                .flex_none()
+                .rounded(px(6.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_default()
+                .when(shown, |element| element.bg(theme.overlay))
+                .hover(|element| element.bg(theme.overlay))
+                .child(icon(
+                    "icons/list.svg",
+                    14.0,
+                    if shown || waiting {
+                        theme.accent
+                    } else {
+                        theme.text_tertiary
+                    },
+                ))
+                .when(waiting && !shown, |element| {
+                    element.child(
+                        div()
+                            .absolute()
+                            .top(px(4.0))
+                            .right(px(4.0))
+                            .size(px(6.0))
+                            .rounded_full()
+                            .bg(theme.accent),
+                    )
+                })
+                .tooltip(Tooltip::text(tooltip))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation();
+                })
+                .on_activation(cx, move |this, _, cx| {
+                    if shown {
+                        this.set_right_panel_visible(false, cx);
+                    } else {
+                        this.open_plan_surface(cx);
+                    }
+                }),
+        )
     }
 
     /// The plan approval the session is waiting on, if any.
@@ -291,11 +397,14 @@ impl Waku {
                 .auto_height()
                 .placeholder(tr!("plan.notes_placeholder"))
         });
-        cx.subscribe(&notes, |this: &mut Self, _, event: &InputEvent, cx| match event {
-            InputEvent::Submit(_) => this.send_plan_back(cx),
-            InputEvent::Edited => cx.notify(),
-            _ => {}
-        })
+        cx.subscribe(
+            &notes,
+            |this: &mut Self, _, event: &InputEvent, cx| match event {
+                InputEvent::Submit(_) => this.send_plan_back(cx),
+                InputEvent::Edited => cx.notify(),
+                _ => {}
+            },
+        )
         .detach();
         self.plan_review.notes = Some(notes.clone());
         notes
@@ -396,7 +505,9 @@ impl Waku {
         let is_pending = pending
             .as_ref()
             .is_some_and(|pending| pending.request_id == version.request_id);
-        let previous = index.checked_sub(1).map(|index| versions[index].text.clone());
+        let previous = index
+            .checked_sub(1)
+            .map(|index| versions[index].text.clone());
         let comparing = self.plan_review.compare && previous.is_some();
 
         let header = self.render_plan_header(
@@ -413,9 +524,10 @@ impl Waku {
 
         let body = if comparing {
             let lines = plan_diff_lines(previous.as_deref().unwrap_or_default(), &version.text);
-            if lines.iter().all(|line| {
-                matches!(line.kind, crate::review_diff::LineKind::Context)
-            }) {
+            if lines
+                .iter()
+                .all(|line| matches!(line.kind, crate::review_diff::LineKind::Context))
+            {
                 div()
                     .px(px(16.0))
                     .py(px(14.0))
@@ -529,9 +641,21 @@ impl Waku {
     ) -> Div {
         let (status_icon, status_label, status_color) = match version.status(is_pending) {
             PlanStatus::Pending => ("icons/list.svg", tr!("plan.status.pending"), theme.accent),
-            PlanStatus::Approved => ("icons/check.svg", tr!("plan.status.approved"), theme.success),
-            PlanStatus::SentBack => ("icons/pencil.svg", tr!("plan.status.sent_back"), theme.warning),
-            PlanStatus::Closed => ("icons/x.svg", tr!("plan.status.closed"), theme.text_tertiary),
+            PlanStatus::Approved => (
+                "icons/check.svg",
+                tr!("plan.status.approved"),
+                theme.success,
+            ),
+            PlanStatus::SentBack => (
+                "icons/pencil.svg",
+                tr!("plan.status.sent_back"),
+                theme.warning,
+            ),
+            PlanStatus::Closed => (
+                "icons/x.svg",
+                tr!("plan.status.closed"),
+                theme.text_tertiary,
+            ),
         };
         let mut header = div()
             .flex_none()
@@ -731,7 +855,9 @@ fn stepper_button(
     match target {
         Some(index) => button
             .hover(|style| style.bg(theme.overlay))
-            .on_activation(cx, move |this, _, cx| this.view_plan_version(session_id, index, cx)),
+            .on_activation(cx, move |this, _, cx| {
+                this.view_plan_version(session_id, index, cx)
+            }),
         None => button,
     }
 }
@@ -776,15 +902,24 @@ mod tests {
     #[test]
     fn the_plan_is_read_from_under_the_lead_in() {
         let lead = tr!("plan.summary_lead");
-        assert_eq!(plan_body(&format!("{lead}\n\n## Plan\n\n1. Do it.")), "## Plan\n\n1. Do it.");
+        assert_eq!(
+            plan_body(&format!("{lead}\n\n## Plan\n\n1. Do it.")),
+            "## Plan\n\n1. Do it."
+        );
         assert_eq!(plan_body(&tr!("plan.ready_detail")), "");
         assert_eq!(plan_body("  just the plan  "), "just the plan");
     }
 
     #[test]
     fn a_quote_lands_under_the_notes_with_room_for_the_comment() {
-        assert_eq!(quote_into("", "Step 2\n\nStep 3"), "> Step 2\n>\n> Step 3\n\n");
-        assert_eq!(quote_into("Overall fine.", "Step 2"), "Overall fine.\n\n> Step 2\n\n");
+        assert_eq!(
+            quote_into("", "Step 2\n\nStep 3"),
+            "> Step 2\n>\n> Step 3\n\n"
+        );
+        assert_eq!(
+            quote_into("Overall fine.", "Step 2"),
+            "Overall fine.\n\n> Step 2\n\n"
+        );
         assert_eq!(quote_into("Fine.\n", "Step 2"), "Fine.\n\n> Step 2\n\n");
         assert_eq!(quote_into("> A\n\nwhy?\n\n", "B"), "> A\n\nwhy?\n\n> B\n\n");
         assert_eq!(quote_into("   ", " B "), "> B\n\n");
@@ -792,7 +927,7 @@ mod tests {
 
     #[test]
     fn a_revision_diffs_line_by_line_against_the_previous_plan() {
-        let lines = plan_diff_lines("1. Read.\n2. Write.\n", "1. Read.\n2. Test.\n3. Write.\n");
+        let lines = plan_diff_lines("- Read.\n- Write.\n", "- Read.\n- Test.\n- Write.\n");
         let kinds: Vec<_> = lines
             .iter()
             .map(|line| match line.kind {
@@ -803,7 +938,7 @@ mod tests {
             })
             .collect();
         assert_eq!(kinds, vec![' ', '+', ' ']);
-        assert_eq!(lines[1].content, "2. Test.");
+        assert_eq!(lines[1].content, "- Test.");
         assert_eq!(lines[1].new_line, Some(2));
         assert_eq!(lines[2].old_line, Some(2));
         assert_eq!(lines[2].new_line, Some(3));
@@ -817,7 +952,10 @@ mod tests {
         assert!(!state.record(session, "r1", "one".into()));
         state.viewing.insert(session, 0);
         assert!(state.record(session, "r2", "two".into()));
-        assert!(!state.viewing.contains_key(&session), "a new plan shows the latest");
+        assert!(
+            !state.viewing.contains_key(&session),
+            "a new plan shows the latest"
+        );
         state.answer(session, "r1", false);
         let versions = &state.versions[&session];
         assert_eq!(versions[0].status(false), PlanStatus::SentBack);

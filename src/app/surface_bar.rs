@@ -246,6 +246,8 @@ impl Waku {
             )
             // AgentTeams: the Team surface, while the session leads a team.
             .children(self.render_team_surface_button(theme, cx))
+            // The Plan surface, once the session has submitted a plan.
+            .children(self.render_plan_surface_button(theme, cx))
     }
 
     fn render_surface_button(

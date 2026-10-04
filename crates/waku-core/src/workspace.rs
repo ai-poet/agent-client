@@ -20,6 +20,10 @@ pub use waku_protocol::workspace::{
 // Fork addition: the Files panel's create / rename / recycle-bin edits.
 #[path = "workspace_edit.rs"]
 mod workspace_edit;
+// Fork addition: the Files panel's previews of pictures, spreadsheets and
+// documents.
+#[path = "workspace_preview.rs"]
+mod workspace_preview;
 
 pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult> {
     Ok(match operation {
@@ -271,6 +275,12 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             workspace_edit::trash_path(&root, &relative_path)?;
             WorkspaceResult::Ack
         }
+        WorkspaceOperation::PreviewFile {
+            root,
+            relative_path,
+        } => WorkspaceResult::FilePreview {
+            preview: workspace_preview::preview_file(&root, &relative_path)?,
+        },
     })
 }
 
