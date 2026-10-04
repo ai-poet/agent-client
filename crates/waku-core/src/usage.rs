@@ -596,7 +596,20 @@ fn parse_credentials(payload: &str) -> anyhow::Result<OauthCredentials> {
 /// table. Shared with the usage-history rate-table fetch.
 pub fn http_get(url: &str, headers: &[String]) -> anyhow::Result<(u16, String)> {
     let mut child = crate::command_env::plain_command(CURL_PATH)
-        .args(["-sS", "--max-time", "15", "-D", "-", "-K", "-", url])
+        // Behind an HTTP proxy `-D -` would otherwise print the proxy's
+        // `200 Connection established` reply ahead of the real headers, and
+        // `split_status_and_body` reads only the first block.
+        .args([
+            "-sS",
+            "--max-time",
+            "15",
+            "--suppress-connect-headers",
+            "-D",
+            "-",
+            "-K",
+            "-",
+            url,
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

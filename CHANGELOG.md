@@ -29,6 +29,10 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- 修复在 HTTP 代理后面（例如设置了 `HTTPS_PROXY` 环境变量）使用时，云账号登录、登录码兑换及其它服务请求失败并提示「could not parse response body: HTTP/1.1 200 OK …」的问题：代理对 CONNECT 的应答曾被当成真正的响应头
+
+  Fix cloud sign-in, login-code exchange and every other service request failing with "could not parse response body: HTTP/1.1 200 OK …" behind an HTTP proxy (for example with `HTTPS_PROXY` set): the proxy's reply to CONNECT was taken for the real response headers
+
 ## [0.2.10]
 
 - 新建任务的欢迎页新增活动概览：会话数、消息数、活跃天数、高峰时段、最常用模型和最长连续天数，可在全部 / 30 天 / 7 天之间切换；下方是近半年每天的消息热力图（悬停显示当天条数），「模型」页按消息占比给模型排行。数据来自本机的任务历史

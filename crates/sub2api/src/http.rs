@@ -285,7 +285,7 @@ impl Request {
             .to_string();
         let mut command = Command::new(CURL_PATH);
         command
-            .args(["-sS", "--max-time", &timeout, "-D", "-", "-K", "-", url])
+            .args(curl_arguments(&timeout, url))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -327,6 +327,31 @@ impl Request {
     }
 }
 
+/// curl's argument vector. Everything request-specific travels in the config
+/// on stdin; these only shape how curl runs and reports.
+///
+/// `--suppress-connect-headers` matters behind an HTTP proxy (`HTTPS_PROXY`,
+/// a `_curlrc`): curl tunnels through it with CONNECT, and `-D -` would
+/// otherwise print the proxy's own `HTTP/1.1 200 Connection established`
+/// block ahead of the real response headers. [`parse`] then took that block
+/// for the response and handed the real headers plus the JSON back as the
+/// body, so sign-in failed with "could not parse response body: HTTP/1.1 200
+/// OK …" for every user behind such a proxy. Every curl this client can meet
+/// knows the option (7.54.0, 2017).
+fn curl_arguments<'a>(timeout: &'a str, url: &'a str) -> [&'a str; 9] {
+    [
+        "-sS",
+        "--max-time",
+        timeout,
+        "--suppress-connect-headers",
+        "-D",
+        "-",
+        "-K",
+        "-",
+        url,
+    ]
+}
+
 /// Quote a value for a curl config line.
 ///
 /// curl's parser understands `\\`, `\"`, `\t`, `\n`, `\r` and `\v` inside a
@@ -352,17 +377,20 @@ fn quote(value: &str) -> String {
 
 /// `-D -` prefixes the body with the response headers: the status code sits on
 /// the first line and the body follows the blank separator line. An interim
-/// `1xx` block, or a redirect curl followed, comes first with its own
-/// headers; the status is the last block's.
+/// `1xx` block, a redirect curl followed, or an HTTP proxy's reply to the
+/// CONNECT that opened the tunnel comes first with its own headers; the
+/// status is the last block's.
 fn parse(raw: &str) -> Result<Response> {
     let mut rest = raw;
     let mut status = None;
     loop {
-        let Some(code) = rest
-            .lines()
-            .next()
-            .filter(|line| line.starts_with("HTTP/"))
-            .and_then(|line| line.split_whitespace().nth(1))
+        let Some(status_line) = rest.lines().next().filter(|line| line.starts_with("HTTP/"))
+        else {
+            break;
+        };
+        let Some(code) = status_line
+            .split_whitespace()
+            .nth(1)
             .and_then(|code| code.parse::<u16>().ok())
         else {
             break;
@@ -373,7 +401,9 @@ fn parse(raw: &str) -> Result<Response> {
             .map(|index| &rest[index + 4..])
             .or_else(|| rest.find("\n\n").map(|index| &rest[index + 2..]))
             .unwrap_or("");
-        let interim = (100..200).contains(&code) || (300..400).contains(&code);
+        let interim = (100..200).contains(&code)
+            || (300..400).contains(&code)
+            || is_proxy_connect_reply(status_line);
         if !(interim && rest.starts_with("HTTP/")) {
             break;
         }
@@ -383,6 +413,18 @@ fn parse(raw: &str) -> Result<Response> {
         status,
         body: rest.to_owned(),
     })
+}
+
+/// The block an HTTP proxy answers a CONNECT with. curl is asked not to print
+/// it ([`curl_arguments`]); this keeps the parse right should one reach the
+/// output anyway. Its reason phrase gives it away, in either capitalization.
+fn is_proxy_connect_reply(status_line: &str) -> bool {
+    let reason: Vec<String> = status_line
+        .split_whitespace()
+        .skip(2)
+        .map(str::to_ascii_lowercase)
+        .collect();
+    reason == ["connection", "established"]
 }
 
 /// Pull a human-readable message out of an error body, falling back to the
@@ -480,6 +522,40 @@ mod tests {
         let response = parse(raw).expect("parse");
         assert_eq!(response.status, 200);
         assert_eq!(response.body, "HTTP/1.1 500 no");
+    }
+
+    #[test]
+    fn a_proxy_connect_reply_gives_way_to_the_real_response() {
+        // What `-D -` prints through an HTTP proxy when curl is not told to
+        // suppress the CONNECT reply: the proxy's block, then the server's.
+        let raw = "HTTP/1.1 200 Connection established\r\n\r\n\
+                   HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"ok\":true}";
+        let response = parse(raw).expect("parse");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, "{\"ok\":true}");
+
+        // Fiddler's capitalization, an HTTP/1.0 proxy and a proxy that adds
+        // headers of its own are the same block; the real status still wins.
+        let raw = "HTTP/1.0 200 Connection Established\r\nProxy-Agent: x\r\n\r\n\
+                   HTTP/1.1 401 Unauthorized\r\n\r\n{}";
+        let response = parse(raw).expect("parse");
+        assert_eq!(response.status, 401);
+        assert_eq!(response.body, "{}");
+
+        // A response that merely says so, with nothing following, is final.
+        let raw = "HTTP/1.1 200 Connection established\r\n\r\nplain";
+        assert_eq!(parse(raw).expect("parse").body, "plain");
+        assert!(!is_proxy_connect_reply("HTTP/1.1 200 OK"));
+        assert!(!is_proxy_connect_reply("HTTP/1.1 200 Connection established now"));
+    }
+
+    #[test]
+    fn curl_is_told_to_drop_proxy_connect_headers() {
+        let arguments = curl_arguments("20", "https://example.com/x");
+        assert!(arguments.contains(&"--suppress-connect-headers"));
+        assert_eq!(arguments[0], "-sS");
+        assert_eq!(&arguments[1..3], ["--max-time", "20"]);
+        assert_eq!(arguments[arguments.len() - 1], "https://example.com/x");
     }
 
     #[test]
