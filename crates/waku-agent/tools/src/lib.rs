@@ -70,7 +70,7 @@ pub use brief::BriefTool;
 pub use config_tool::ConfigTool;
 pub use cron::{CronCreateTool, CronDeleteTool, CronListTool};
 pub use enter_plan_mode::EnterPlanModeTool;
-pub use exit_plan_mode::ExitPlanModeTool;
+pub use exit_plan_mode::{ExitPlanModeTool, MISSING_PLAN_ERROR};
 pub use apply_patch::ApplyPatchTool;
 pub use batch_edit::BatchEditTool;
 pub use file_edit::FileEditTool;

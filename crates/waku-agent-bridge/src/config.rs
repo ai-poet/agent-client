@@ -1091,8 +1091,8 @@ fn narration_rule(options: &AgentStartOptions) -> Option<String> {
 /// that has not been trained to call `ExitPlanMode` (most of the non-Claude
 /// ones) writes its plan as prose and ends the turn - and the "finished
 /// planning" dialog, which is keyed on that tool, never appears. The model
-/// has to be told the tool exists, what its `summary` is for, and that the
-/// user reads the plan before anything runs.
+/// has to be told the tool exists, that the whole plan goes in its `plan`,
+/// and that the user reads the plan before anything runs.
 ///
 /// It also says which commands still run while planning. The old rule told
 /// the model not to run commands at all while the read-only ones were
@@ -1118,15 +1118,17 @@ fn plan_mode_rule(options: &AgentStartOptions) -> Option<String> {
          the answer. The plan itself must not ask anything: no questions, no open \
          choices, no alternatives for the user to pick from, nothing left to \
          confirm. If a new question comes up after the plan is written, ask it \
-         with AskUserQuestion, then rewrite the plan. Then write the plan out for \
-         the user. Open it with why the change is needed, then give only the \
+         with AskUserQuestion, then rewrite the plan. Hand the plan over by \
+         calling ExitPlanMode with the whole plan in its `plan` parameter, in \
+         Markdown: that is exactly what the user reads and approves, so put the \
+         complete plan there, not a summary of it and not a pointer to your \
+         reply. Open it with why the change is needed, then give only the \
          approach you recommend: the files to change (for a change repeated \
          across many files, the pattern and a few examples), the existing \
          functions to reuse with their paths, and how to verify the result end to \
-         end. Keep it short enough to scan and precise enough to carry out. When \
-         the plan is ready, call ExitPlanMode with a short `summary` of it - that \
-         hands the plan to the user, who will approve it or send you back to keep \
-         planning. Do not call ExitPlanMode before the plan is written. If \
+         end. Keep it short enough to scan and precise enough to carry out. Do \
+         not ask in text whether the plan is okay: ExitPlanMode is that question, \
+         and the user will approve the plan or send you back to keep planning. If \
          ExitPlanMode succeeds, the user has approved the plan and plan mode is \
          over: carry the plan out from there. If it is refused, stay in plan mode: \
          revise the plan by the user's notes, or ask with AskUserQuestion what to \
@@ -1610,7 +1612,7 @@ mod tests {
         let planning = AgentStartOptions { plan_mode: true, ..AgentStartOptions::default() };
         let rule = session_rules(&planning, None, None).expect("a rule while planning");
         assert!(rule.contains("ExitPlanMode"), "{rule}");
-        assert!(rule.contains("summary"), "{rule}");
+        assert!(rule.contains("the whole plan in its `plan` parameter"), "{rule}");
 
         let building = AgentStartOptions { plan_mode: false, ..AgentStartOptions::default() };
         assert_eq!(session_rules(&building, None, None), None);

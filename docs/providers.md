@@ -1647,9 +1647,9 @@ user, and three things had to line up before it was actually asked. The tool
 declares `PermissionLevel::None` — honest, it changes nothing on disk — but
 the central backstop only gates *gated* levels, so nothing ever consulted the
 permission handler; `ExitPlanModeTool` now `self_gates` and calls
-`check_permission` itself, passing its `summary` as the description. That
+`check_permission` itself, passing the plan as the description. That
 reaches `GuiPermissionHandler`, which asks even under "never ask", shows the
-summary when there is one (the plan is what the user is here to read), and
+plan (the plan is what the user is here to read), and
 offers only once-scoped answers so nobody can accidentally retire plan mode
 for good — labelled as the plan decision they are (`plan.approve` /
 `plan.keep_planning`, shared with the Claude Code driver's dialog) rather
@@ -1682,11 +1682,19 @@ classifier proves read-only (`is_read_only_bash_command`):
 shell or an editing tool. Allow rules are checked before the mode, so one
 remembered answer used to let every command run while planning.
 
-The summary is optional and usually short, while the plan itself is the
-text the model wrote just before calling `ExitPlanMode`. So `native.rs`
-keeps the turn's latest non-empty assistant text (`PlanDraft`; each tool
-call closes a message's text). The dialog's body is the longer of that
-text and the summary.
+**The plan is the tool's parameter.** `ExitPlanMode` takes the whole plan, in
+Markdown, in a required `plan`, the way Claude Code's and ZCode's do. The
+dialog shows exactly that. The tool used to take only an optional
+`summary`, which left the plan nowhere to go. A guess at it from the
+model's last reply then showed "Let me present the plan." as the plan to
+approve. Two kinds of call are refused before the user is asked:
+
+- A call without a plan gets `MISSING_PLAN_ERROR`, telling the model to
+  call again with the whole plan.
+- A plan over 20,000 characters is refused as too long.
+
+The transcript row of the call reads "Handed over the plan" and does not
+carry the plan as JSON.
 
 **Where the plan is read.** Both drivers raise the plan under
 `plan.ready_title`, and the desktop gives it its own surface:

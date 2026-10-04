@@ -3532,6 +3532,8 @@ commands.plan_entered:
 commands.plan_exited:
   en: "Build mode — changes will be applied"
 
+native.plan_missing:
+  en: "The agent handed over no plan, so it was asked to send the whole plan."
 native.plan_mode_denied:
   en: "Not run: plan mode only runs commands that read. It can run once the plan is approved, or switch to Build below."
 native.keep_planning:
@@ -3719,6 +3721,8 @@ plan.keep_planning_with_notes:
   en: "Keep planning with these notes"
 plan.surface:
   en: "Plan"
+plan.handed_over:
+  en: "Handed over the plan"
 plan.surface_open:
   en: "Show the plan"
 plan.surface_hide:

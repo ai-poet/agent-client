@@ -362,15 +362,16 @@ impl GuiPermissionHandler {
         // plan mode" would retire plan mode permanently, which is not a
         // preference anyone means to express.
         if request.tool_name == claurst_core::constants::TOOL_NAME_EXIT_PLAN_MODE {
-            // The tool passes its plan summary as the request's description.
-            // Show it when there is one - reading the plan is the point of
-            // this dialog - and fall back to the generic line otherwise. The
-            // driver tells the two apart by comparing against the constant.
-            let summary = request.description.trim();
-            let detail = if summary.is_empty() {
+            // The tool passes the plan itself (its required `plan`) as the
+            // request's description, and refuses a call without one before
+            // asking. The generic line stays as the fallback for an empty
+            // description; the driver tells the two apart by comparing
+            // against the constant.
+            let plan = request.description.trim();
+            let detail = if plan.is_empty() {
                 EXIT_PLAN_MODE_DETAIL.to_owned()
             } else {
-                summary.to_owned()
+                plan.to_owned()
             };
             let choice = self.bridge.prompt(
                 request,
