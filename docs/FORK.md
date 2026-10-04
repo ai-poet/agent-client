@@ -198,6 +198,10 @@ lines below.
 | `crates/waku-protocol/src/{lib,protocol}.rs`, `crates/waku-core/src/{lib,daemon}.rs` (activity overview) | `pub mod activity_overview` in both crates; additive `Command::LoadActivityOverview` and `ResponsePayload::ActivityOverview { records }`; the daemon's arm (reads the task store) and its entry in the wrong-path list | ~16 |
 | `locales/{app,zh-CN,ja}.yml` (dsh-claude-style ports) | `model_copy.*`, `turn_status.*`, `home_overview.*` | ~70 keys |
 | `AGENTS.md` (DeepSeek Harness reference) | a `## DeepSeek Harness reference` section after "Product reference": when to consult `docs/deepseek-harness.md`, port-never-load, not the DeepSeek provider, porting rules | ~28 |
+| `src/app.rs` (content translations) | `mod content_translations`, the `content_translations` field + initializer, `reset_content_translations` in the startup task; `WakuPane::render` calls `flush_content_translations` after the pane's content (a pane renders after the root, so text it queues would otherwise wait for the next root frame); `announcement_markdown` is keyed by the rendered text as well as the id, so a translation landing re-parses | ~14 |
+| `src/app/render.rs` (content translations) | `flush_content_translations` before `render_window_frame` in both branches | 4 |
+| `src/app/settings.rs` (content translations) | `reset_content_translations` in `set_language`, ahead of `sync_native_models` (the picker's route notes name groups) | 3 |
+| `src/app/{cloud_groups,cloud_menu,cloud_failover,cloud_usage,cloud_subscriptions,model_plaza,image_studio_view,model_status_view,announcements,plans_page,cloud_pay}.rs` (content translations, fork-owned) | display sites wrapped in `self.tx(..)`: group names and descriptions, announcement titles and bodies, plan names / descriptions / features, promotion names, the pay help text (translated whole, then split into lines). Free helpers take the shown string from the caller (`subscription_menu_line`, `subscription_card`, `usage_log_card`, `plan_summary`). **Display only** — `cloud_lane`, `model_routing::{group_lane, plan_lane, named_domestic}`, failover and every stored struct keep the originals; never write a `tx` result back | ~45 |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `CheapRouter` in `locales/` and the two i18n test expectations.
@@ -224,6 +228,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `src/app/model_status.rs`, `src/app/model_status_view.rs`,
 `crates/waku-client/src/{activity_phase,turn_segments,status_capsule}.rs`,
 `src/app/home_overview.rs`, `src/app/turn_status.rs`,
+`src/app/content_translations.rs`,
 `crates/waku-protocol/src/activity_overview.rs`, `crates/waku-core/src/activity_overview.rs`,
 `docs/deepseek-harness.md`, `docs/deepseek-harness.zh.md`,
 `NOTICE.md`, `docs/FORK.md`.

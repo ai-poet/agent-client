@@ -948,7 +948,7 @@ impl Waku {
             let fee_rate = selected_type
                 .as_deref()
                 .map_or(0.0, |payment_type| config.fee_rate(payment_type));
-            body = body.child(plan_summary(plan, fee_rate, theme));
+            body = body.child(plan_summary(plan, self.tx(&plan.name), fee_rate, theme));
         } else {
             body = body.child(self.render_top_up_amount(config, selected_type.as_deref(), theme, cx));
         }
@@ -1121,7 +1121,7 @@ impl Waku {
                         "pay.promo_hint",
                         more = promotion::format_amount(hint.need_more),
                         threshold = promotion::format_amount(hint.threshold),
-                        name = hint.rule.name.clone(),
+                        name = self.tx(&hint.rule.name),
                         bonus = promotion::format_amount(hint.bonus)
                     )),
             );
@@ -1155,7 +1155,7 @@ impl Waku {
                         .text_color(theme.success)
                         .child(tr!(
                             "pay.promo_bonus_line",
-                            name = found.rule.name.clone(),
+                            name = self.tx(&found.rule.name),
                             bonus = format!("${:.2}", found.bonus)
                         )),
                 )
@@ -1433,7 +1433,7 @@ impl Waku {
             Some(plan) => tr!(
                 "pay.plan_order_meta",
                 pay = format_cny(order.pay_amount.unwrap_or(order.amount)),
-                plan = plan.name.clone()
+                plan = self.tx(&plan.name)
             ),
             None => {
                 let pay = match order.pay_amount {
@@ -1605,7 +1605,14 @@ impl Waku {
     fn render_pay_help(&self, theme: Theme, cx: &mut Context<Self>) -> Option<Div> {
         let state = self.cloud_pay.as_ref()?;
         let config = state.config.as_ref()?;
-        let lines = config.help_lines();
+        // The pay service registers the help text whole for translation, so
+        // it is translated whole and then split as `help_lines` splits it.
+        let help = self.tx(config.help_text.as_deref().unwrap_or_default());
+        let lines: Vec<&str> = help
+            .split('\n')
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect();
         let image = state.help_image.clone();
         if lines.is_empty() && image.is_none() {
             return None;
@@ -1772,7 +1779,7 @@ impl Waku {
                                 .text_size(sp(13.5))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(theme.success)
-                                .child(tr!("plans.activated_title", plan = plan.name.clone())),
+                                .child(tr!("plans.activated_title", plan = self.tx(&plan.name))),
                         ),
                 )
                 .child(
@@ -1996,8 +2003,9 @@ pub(super) fn format_cny(value: f64) -> String {
 
 /// The plan being bought, in place of the top-up amount: name, price (and
 /// the discount, in words as well as struck through), validity, and what the
-/// chosen method's surcharge makes of the price.
-fn plan_summary(plan: &SubscriptionPlan, fee_rate: f64, theme: Theme) -> Div {
+/// chosen method's surcharge makes of the price. `name` is the plan's name as
+/// shown (translated for display).
+fn plan_summary(plan: &SubscriptionPlan, name: String, fee_rate: f64, theme: Theme) -> Div {
     let mut price_line = div()
         .flex()
         .items_baseline()
@@ -2037,7 +2045,7 @@ fn plan_summary(plan: &SubscriptionPlan, fee_rate: f64, theme: Theme) -> Div {
                 .text_size(sp(13.5))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(theme.text)
-                .child(plan.name.clone()),
+                .child(name),
         )
         .child(price_line);
     let limits = super::plans_page::limits_line(plan);

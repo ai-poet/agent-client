@@ -2668,11 +2668,12 @@ impl Waku {
         for probe in &mut self.probes {
             probe.models = crate::model_catalog::fallback_models(probe.provider);
         }
+        // Fork addition: administrator text is re-read in the new language
+        // (before the relabel below, whose route notes name groups).
+        self.reset_content_translations(cx);
         // The built-in agent's list is the catalog, relabelled in the new
         // language rather than reset to the fallback.
         self.sync_native_models();
-        // Fork addition: administrator text is re-read in the new language.
-        self.reset_content_translations(cx);
         self.refresh_provider_detection(None);
         self.invalidate_composer_sources(cx);
 

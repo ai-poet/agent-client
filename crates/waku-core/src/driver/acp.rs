@@ -32,6 +32,9 @@ use serde_json::{Map, Value, json};
 use super::activity;
 // Fork addition: an empty turn's cause, read from the agent's own trace.
 use super::turn_diagnosis::{ProviderStderr, empty_turn_failure};
+// Fork addition: an effort-only change reaches a running agent.
+#[path = "acp_effort.rs"]
+mod acp_effort;
 use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
@@ -681,11 +684,14 @@ async fn run_sdk_connection(
                             let _ = pending.responder.respond(response);
                         }
                     }
-                    CommandMessage::Options(options) => {
-                        if options.model != current_model
-                            || (provider == ProviderKind::Grok
-                                && options.reasoning_effort != current_effort)
-                        {
+                    CommandMessage::Options(options) => match acp_effort::reapply(
+                        provider,
+                        options.model != current_model,
+                        options.reasoning_effort != current_effort,
+                        options.reasoning_effort.is_some(),
+                    ) {
+                        acp_effort::Reapply::Nothing => {}
+                        acp_effort::Reapply::Model => {
                             current_model = options.model;
                             current_effort = options.reasoning_effort;
                             apply_model(
@@ -699,7 +705,15 @@ async fn run_sdk_connection(
                             )
                             .await;
                         }
-                    }
+                        acp_effort::Reapply::Effort => {
+                            if let Some(effort) = options.reasoning_effort.as_deref()
+                                && acp_effort::apply_effort(&connection, provider, &session_id, effort)
+                                    .await
+                            {
+                                current_effort = options.reasoning_effort;
+                            }
+                        }
+                    },
                     CommandMessage::Shutdown => break,
                 }
             }

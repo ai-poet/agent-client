@@ -1029,10 +1029,7 @@ pub fn build_query_config(config: &Config, options: &AgentStartOptions) -> Query
     if let Some(model) = &options.model {
         query.model = model.clone();
     }
-    query.effort_level = options
-        .reasoning_effort
-        .as_deref()
-        .and_then(EffortLevel::from_str);
+    query.effort_level = options.reasoning_effort.as_deref().and_then(effort_level);
     // Let the effort level own the thinking budget. `from_config` may have
     // copied a fixed budget out of the user's settings, and leaving both set
     // would make the effort picker look connected while changing nothing.
@@ -1040,6 +1037,21 @@ pub fn build_query_config(config: &Config, options: &AgentStartOptions) -> Query
         query.thinking_budget = None;
     }
     query
+}
+
+/// A Waku effort id as the engine's level.
+///
+/// The engine has no `off`. An endpoint that declares `off` (or `disabled`)
+/// means its lowest rung, the engine's `None` — left unparsed it read as
+/// "no effort chosen", which the DeepSeek and GLM routes treat as thinking
+/// on at high (`query/src/runner/provider_options.rs`), the opposite of what
+/// was picked.
+fn effort_level(id: &str) -> Option<EffortLevel> {
+    let id = id.trim();
+    if id.eq_ignore_ascii_case("off") || id.eq_ignore_ascii_case("disabled") {
+        return Some(EffortLevel::None);
+    }
+    EffortLevel::from_str(id)
 }
 
 /// The appended system prompt: the language rule this product adds, then
@@ -2267,6 +2279,26 @@ mod tests {
     fn a_message_has_no_step_cap() {
         let query = build_query_config(&Config::default(), &AgentStartOptions::default());
         assert_eq!(query.max_turns, u32::MAX);
+    }
+
+    /// An endpoint's declared `off` reaches the engine as its lowest rung.
+    /// Unparsed it meant "nothing chosen", and the DeepSeek and GLM routes
+    /// turn thinking on at high for that.
+    #[test]
+    fn off_turns_thinking_off_instead_of_leaving_it_unset() {
+        for id in ["off", "OFF", " disabled "] {
+            let query = build_query_config(
+                &Config::default(),
+                &AgentStartOptions {
+                    reasoning_effort: Some(id.to_owned()),
+                    ..AgentStartOptions::default()
+                },
+            );
+            assert_eq!(query.effort_level, Some(EffortLevel::None), "{id}");
+            assert_eq!(query.thinking_budget, None, "{id}");
+        }
+        assert_eq!(effort_level("high"), Some(EffortLevel::High));
+        assert_eq!(effort_level("ultra"), None);
     }
 
     /// Compaction runs as the settings page shows it: on at 80 % until the

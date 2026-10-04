@@ -60,6 +60,9 @@ impl ContentTranslationsState {
     /// asked about this session.
     fn translate(&self, text: &str) -> Option<String> {
         let lang = self.lang?;
+        // Sources are registered trimmed (the pay service trims every one),
+        // so the lookup key is too.
+        let text = text.trim();
         if let Some(answer) = self.map.get(text) {
             return answer.clone();
         }
@@ -93,6 +96,8 @@ impl Waku {
             generation,
             ..ContentTranslationsState::default()
         };
+        // The next frame queues what is on screen for the new language.
+        cx.notify();
         let Some(lang) = lang else {
             return;
         };
@@ -107,6 +112,7 @@ impl Waku {
                     return;
                 }
                 state.cached = cached;
+                this.relabel_translated_text();
                 cx.notify();
             });
         })
@@ -207,6 +213,7 @@ impl Waku {
             }
         }
         if !answers.is_empty() {
+            self.relabel_translated_text();
             cx.background_executor()
                 .spawn(async move {
                     if let Err(error) = translations::store(lang, &answers) {
@@ -219,6 +226,12 @@ impl Waku {
         // Text queued while this lookup was out goes next.
         self.flush_content_translations(cx);
         cx.notify();
+    }
+
+    /// Text built once rather than per frame: the built-in agent's picker
+    /// rows carry route notes naming groups (`native_routing`).
+    fn relabel_translated_text(&mut self) {
+        self.sync_native_models();
     }
 
     fn schedule_content_translation_retry(&mut self, cx: &mut Context<Self>) {
@@ -242,5 +255,64 @@ impl Waku {
             });
         })
         .detach();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(lang: &'static str) -> ContentTranslationsState {
+        ContentTranslationsState {
+            lang: Some(lang),
+            ..ContentTranslationsState::default()
+        }
+    }
+
+    fn pending(state: &ContentTranslationsState) -> Vec<String> {
+        state.pending.borrow().iter().cloned().collect()
+    }
+
+    #[test]
+    fn unseen_text_is_queued_once_and_shown_as_is() {
+        let state = state("en");
+        assert_eq!(state.translate("国模分组"), None);
+        assert_eq!(state.translate("  国模分组 "), None);
+        // Already English, blank, or no language yet: nothing to ask.
+        assert_eq!(state.translate("Claude Max"), None);
+        assert_eq!(state.translate("   "), None);
+        assert_eq!(pending(&state), vec!["国模分组".to_owned()]);
+        assert_eq!(ContentTranslationsState::default().translate("国模分组"), None);
+    }
+
+    #[test]
+    fn answers_win_over_the_disk_cache_and_stop_queueing() {
+        let mut state = state("en");
+        state.cached.insert("公告".into(), "Notice (cached)".into());
+        state.cached.insert("旧文案".into(), "Old copy".into());
+        // Cached but not yet revalidated: shown, and asked again.
+        assert_eq!(state.translate("公告").as_deref(), Some("Notice (cached)"));
+        assert_eq!(pending(&state), vec!["公告".to_owned()]);
+
+        state.pending.borrow_mut().clear();
+        state.map.insert("公告".into(), Some("Notice".into()));
+        state.map.insert("旧文案".into(), None);
+        assert_eq!(state.translate("公告").as_deref(), Some("Notice"));
+        // The server said there is none: the original, not the stale copy.
+        assert_eq!(state.translate("旧文案"), None);
+        assert!(pending(&state).is_empty());
+    }
+
+    #[test]
+    fn held_text_is_not_queued_again() {
+        let mut state = state("ja");
+        state.held.insert("月度套餐".into());
+        state.cached.insert("月度套餐".into(), "月額プラン".into());
+        assert_eq!(state.translate("月度套餐").as_deref(), Some("月額プラン"));
+        assert!(pending(&state).is_empty());
+        // A Japanese UI still asks about Han-only text, but not about kana.
+        assert_eq!(state.translate("国模分组"), None);
+        assert_eq!(state.translate("サブスク"), None);
+        assert_eq!(pending(&state), vec!["国模分组".to_owned()]);
     }
 }
