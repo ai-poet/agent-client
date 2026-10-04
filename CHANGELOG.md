@@ -29,9 +29,19 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
-- 修复在 HTTP 代理后面（例如设置了 `HTTPS_PROXY` 环境变量）使用时，云账号登录、登录码兑换及其它服务请求失败并提示「could not parse response body: HTTP/1.1 200 OK …」的问题：代理对 CONNECT 的应答曾被当成真正的响应头
+## [0.2.11]
 
-  Fix cloud sign-in, login-code exchange and every other service request failing with "could not parse response body: HTTP/1.1 200 OK …" behind an HTTP proxy (for example with `HTTPS_PROXY` set): the proxy's reply to CONNECT was taken for the real response headers
+- 内置 Agent 新增智能体团队，取代原来的「设置 → 工作流」：在任务里发送 `/agent-teams <目标>`（或用 `/agent-teams-<模板名> <目标>` 从团队模板开始），当前会话就成为队长，拟定成员（每人可以用不同的模型和推理强度）和带依赖关系的任务；右侧「团队」面板显示草案，可以确认启动、返回对话修改或放弃。启动后成员自动领取可以开始的任务、相互发消息协作，每个任务完成前都要通过检查，不合格时会自动安排修复和复审；成员需要权限时在队长的任务里弹出确认。面板显示进度、成员和任务关系图，点成员可以查看它的实时记录，停止团队需要再点一次确认；应用重启后再打开这个任务，团队会从停下的地方接着做。成员上限、默认模型、执行提示词和团队模板在「设置 → Agent → 团队」里调整
+
+  The built-in agent can now run a team, replacing Settings → Workflow: send `/agent-teams <goal>` in a task (or `/agent-teams-<template> <goal>` to start from a team template) and the task becomes the captain, drafting members — each on its own model and reasoning effort — and tasks with their dependencies. The Team panel on the right shows the draft to approve, take back to the chat for changes, or discard. Once started, members pick up tasks as they become ready and message each other; every task passes a check before it counts as done, with a fix and a second review arranged when it falls short, and a member's permission request appears in the captain's task. The panel shows progress, members and the task graph, opens a member's live record on click, and stops the team on a second click; after a restart, opening the task again picks the team up where it left off. Member limit, default model, working instructions and team templates live in Settings → Agent → Teams
+
+- 计划模式下 Agent 规划完成后，计划会在右侧「计划」面板完整显示，输入框上方只留一行「批准并执行 / 继续规划」：可以选中计划里的文字引用到意见里再退回，也可以翻看每一版计划，与上一版逐行对比；顶部栏的「计划」按钮随时打开或收起面板，有计划等你审批时会亮起提示。内置 Agent 会把完整计划交给你审批，不再只给一句摘要，并且在写计划之前就把问题问清楚，交上来的计划里不再夹带要你确认的问题
+
+  In plan mode, a finished plan opens in full in a Plan panel on the right, and the card above the composer keeps one row with Approve and Keep planning: select part of the plan to quote it in your notes and send it back, or step through every version and compare each with the one before, line by line. The Plan button in the header shows or hides the panel at any time and lights up while a plan waits for you. The built-in agent hands over its whole plan for approval instead of a one-line summary, and settles its questions before writing the plan, so the plan no longer asks you anything
+
+- 内置 Agent 在计划模式下不再频繁拒绝查看类命令：带引号的搜索、`2>&1` 和 `>/dev/null`、`cd 目录 && …`、`sed -n`、`awk`、`git branch`、`git -C` 等只读命令都能直接运行；写文件、安装、构建和运行测试仍要等计划批准后再做。同时修复在权限确认里对命令选过「总是允许」后，计划模式会放行所有命令和文件修改的问题
+
+  Plan mode on the built-in agent stops refusing commands that only read: quoted searches, `2>&1` and `>/dev/null`, `cd dir && …`, `sed -n`, `awk`, `git branch`, `git -C` and the like now run, while writing files, installing, building and running tests still wait until the plan is approved. Also fixes plan mode letting every command and file edit through once commands had been set to "Always allow" in a permission prompt
 
 - 输入框的推理强度改为 Claude Code 风格的 Effort 滑杆卡片：拖动后松手吸附到最近的档位，也可以用方向键、Home、End 调节；档位名按强度着色，档位越高轨道上的火焰越旺，系统开启「减少动态效果」时火焰静止；服务等级 / 接口格式和上下文窗口仍在同一张卡片里。同时修复换了档却不生效的几种情况：Claude Code 会在你发下一条消息时以新强度接着原会话继续，不打断正在进行的回合；Kimi 只改强度也会立即应用；自定义接口声明的 off 档真正关闭思考，不再在 DeepSeek、GLM 上开启高强度思考
 
@@ -48,6 +58,18 @@ the original feature bullet instead of adding separate entries for them.
 - 内置 Agent 可以操控应用内置浏览器（Windows）：打开网页、读取页面、点击、输入、选择、按键、执行脚本、等待内容出现、查看控制台和截图，适合对本地开发服务或测试站点做自动化测试。浏览器会在当前任务的右侧面板中打开；点击、输入等操作和执行命令一样按权限设置询问
 
   The built-in agent can drive the app's in-app browser (Windows): open pages, read them, click, type, choose options, press keys, run scripts, wait for content, read the console and take screenshots — for automated testing of a local dev server or a staging site. The browser opens in the current task's right panel; clicking, typing and the like ask for permission the way running a command does
+
+- 管理员在后台填写的内容会按界面语言显示：分组名称和说明、公告、充值页的套餐、活动与帮助文字有翻译时显示译文；翻译保存在本机，下次启动直接可用。只影响显示，路由和分组的判断仍按原文
+
+  Text written by the site's administrators — group names and descriptions, announcements, and the plans, promotions and help text on the top-up page — shows in the interface language when a translation exists, and translations are kept on this machine for the next launch. Display only: routing and group choice still go by the original text
+
+- 内置 Agent 使用 GPT、Grok、DeepSeek 等模型时，工具用得更规范：读文件、搜索和编辑用专门的工具而不是 `cat`、`grep`，编辑时不再因为带上行号而失败；提交代码时不会用 `git add -A` 把 `.env` 之类的文件一起提交，提交钩子失败后也不会去改写上一次提交；只在值得并行或独立处理时才启动子 Agent，子 Agent 结束后的汇报也更完整
+
+  With GPT, Grok, DeepSeek and other models, the built-in agent uses its tools the way Claude Code does: it reads, searches and edits with the dedicated tools rather than `cat` and `grep`, no longer fails edits by copying line numbers into them, never sweeps files such as `.env` into a commit with `git add -A` or rewrites the previous commit after a failed hook, and starts sub-agents only for work worth running in parallel or on its own, with fuller reports when they finish
+
+- 修复在 HTTP 代理后面（例如设置了 `HTTPS_PROXY` 环境变量）使用时，云账号登录、登录码兑换及其它服务请求失败并提示「could not parse response body: HTTP/1.1 200 OK …」的问题：代理对 CONNECT 的应答曾被当成真正的响应头
+
+  Fix cloud sign-in, login-code exchange and every other service request failing with "could not parse response body: HTTP/1.1 200 OK …" behind an HTTP proxy (for example with `HTTPS_PROXY` set): the proxy's reply to CONNECT was taken for the real response headers
 
 ## [0.2.10]
 
