@@ -167,7 +167,7 @@ fn native_builtin_commands() -> Vec<SlashCommand> {
         template: Some(template.to_owned()),
         ..builtin(name, description, Some("commands.extra_instructions_hint"))
     };
-    vec![
+    let mut commands = vec![
         builtin("goal", "commands.goal_description", None),
         builtin(
             "compact",
@@ -182,7 +182,28 @@ fn native_builtin_commands() -> Vec<SlashCommand> {
             "commands.review_description",
             NATIVE_REVIEW_PROMPT,
         ),
-    ]
+    ];
+    // Fork: AgentTeams' command and its profile aliases, while switched on.
+    commands.extend(agent_teams_commands());
+    commands
+}
+
+/// `/agent-teams <goal>` and `/agent-teams-<profile> <goal>`: passed to the
+/// model as written; the bridge recognises them (`waku_agent_bridge::team`).
+fn agent_teams_commands() -> Vec<SlashCommand> {
+    waku_agent_bridge::agent_teams_slash_commands()
+        .into_iter()
+        .map(|(name, profile)| SlashCommand {
+            name,
+            description: match profile {
+                Some(profile) => tr!("team.command.profile_description", profile = profile),
+                None => crate::i18n::translate("team.command.description"),
+            },
+            scope: CommandScope::Builtin,
+            argument_hint: Some(crate::i18n::translate("team.command.hint")),
+            template: None,
+        })
+        .collect()
 }
 
 /// `/init` for the built-in agent.

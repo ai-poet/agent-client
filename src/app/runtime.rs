@@ -1370,10 +1370,8 @@ impl Waku {
         if result.is_some() && self.cloud_account.credentials.is_some() {
             self.cloud_balance_stale = true;
         }
-        // Fork addition: a settled turn may belong to a workflow stage.
-        if let Some((turn_id, _)) = result {
-            self.workflow.pending_settles.push((session_id, turn_id, status));
-        }
+        // Fork addition: a settled turn may have changed the session's team.
+        self.mark_team_stale(session_id);
         result
     }
 
@@ -2698,7 +2696,7 @@ impl Waku {
                 .retain(|event| matches!(event, DriverEvent::BackgroundWork(_)));
             runtime.stream_remeasure_pending = false;
             runtime.stream_phase = None;
-            runtime.pending_permissions.clear();
+            runtime.pending_permissions.retain(|permission| agent_teams::requests::is_member_request(&permission.request_id));
             runtime.pending_user_input = None;
             runtime.pending_computer_approval = None;
         }
@@ -3664,7 +3662,7 @@ impl Waku {
             runtime.pending_steers.clear();
             runtime.stream_remeasure_pending = false;
             runtime.stream_phase = None;
-            runtime.pending_permissions.clear();
+            runtime.pending_permissions.retain(|permission| agent_teams::requests::is_member_request(&permission.request_id));
             runtime.pending_user_input = None;
             runtime.pending_computer_approval = None;
             runtime.last_active_at = Instant::now();
@@ -3750,7 +3748,7 @@ impl Waku {
         if std::mem::take(&mut self.cloud_balance_stale) {
             self.refresh_cloud_account(cx);
         }
-        self.drain_workflow_settles(cx);
+        self.drain_team_panel(cx);
         if std::mem::take(&mut self.composer_sources_stale) {
             self.refresh_composer_sources(cx);
         }

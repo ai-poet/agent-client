@@ -244,6 +244,8 @@ impl Waku {
                     .into_iter()
                     .map(|kind| self.render_surface_button(kind, theme, cx)),
             )
+            // AgentTeams: the Team surface, while the session leads a team.
+            .children(self.render_team_surface_button(theme, cx))
     }
 
     fn render_surface_button(

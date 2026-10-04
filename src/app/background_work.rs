@@ -595,10 +595,22 @@ impl Waku {
         session_id: Uuid,
         event: BackgroundWorkEvent,
     ) {
+        // Fork (AgentTeams): the built-in agent republishes its background
+        // work whenever its team changes; that is the Team panel's cue.
+        if matches!(event, BackgroundWorkEvent::ReconcileLive { .. }) {
+            self.mark_team_stale(session_id);
+        }
         self.background_work
             .entry(session_id)
             .or_default()
             .apply(event);
+    }
+
+    /// Fork (AgentTeams): whether a piece of work has a record to open.
+    pub(super) fn has_background_work(&self, session_id: Uuid, key: &BackgroundWorkKey) -> bool {
+        self.background_work
+            .get(&session_id)
+            .is_some_and(|registry| registry.items.contains_key(key))
     }
 
     pub(super) fn mark_background_work_lost(&mut self, session_id: Uuid) {

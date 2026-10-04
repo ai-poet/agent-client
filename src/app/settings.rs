@@ -19,7 +19,7 @@ const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 14] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 13] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -85,12 +85,6 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 14] = [
         "settings.cloud_usage",
         "icons/chart-column.svg",
         "settings.cloud_usage_keywords",
-    ),
-    (
-        SettingsPage::Workflow,
-        "settings.workflow",
-        "icons/fork.svg",
-        "settings.workflow_keywords",
     ),
     (
         SettingsPage::Daemon,
@@ -373,12 +367,11 @@ impl Waku {
         // The Monthly and Projects list views own their own scrolling, so
         // their pages fill the viewport instead of riding the shared scroll
         // container.
-        let fills_viewport = (page == SettingsPage::Usage
+        let fills_viewport = page == SettingsPage::Usage
             && matches!(
                 self.usage_view,
                 UsageViewMode::Monthly | UsageViewMode::Projects
-            ))
-            || (page == SettingsPage::Workflow && self.workflow.fills_viewport());
+            );
         // The titlebar strip is transparent; once content slides under it, a
         // hairline marks the boundary so the clip edge reads as a header
         // rather than a glitch.
@@ -388,7 +381,6 @@ impl Waku {
             .w_full()
             .max_w(px(match page {
                 SettingsPage::Usage => SETTINGS_USAGE_MAX_WIDTH,
-                SettingsPage::Workflow => SETTINGS_USAGE_MAX_WIDTH,
                 _ => SETTINGS_CONTENT_MAX_WIDTH,
             }))
             .mx_auto()
@@ -415,7 +407,6 @@ impl Waku {
                         SettingsPage::Plans => tr!("settings.plans"),
                         SettingsPage::ModelPlaza => tr!("settings.model_plaza"),
                         SettingsPage::CloudUsage => tr!("settings.cloud_usage"),
-                        SettingsPage::Workflow => tr!("settings.workflow"),
                         SettingsPage::Agent => tr!("settings.agent"),
                     }),
             )
@@ -434,7 +425,6 @@ impl Waku {
                 SettingsPage::Plans => self.render_plans_settings(window, cx),
                 SettingsPage::ModelPlaza => self.render_model_plaza_settings(window, cx),
                 SettingsPage::CloudUsage => self.render_cloud_usage_settings(cx),
-                SettingsPage::Workflow => self.render_workflow_settings(window, cx),
                 SettingsPage::Agent => self.render_agent_settings(cx),
             });
 

@@ -392,7 +392,10 @@ Mechanism notes for the features most worth porting:
   jobs; continuable children report back via `parent.inject()` / `steer()` /
   `followup()`. Team: the lead's log is the only source of truth; roster
   `team/member`, mailbox `team/message/queued|delivered` with resend-on-recovery,
-  tasks as a compare-and-set DAG `team/task`.
+  tasks as a compare-and-set DAG `team/task`. **Ported**, though from the
+  standalone dsh-agent-teams package (MIT) rather than this experimental
+  plugin, and for the built-in agent only. See `docs/agent-teams.md`. It
+  replaced the fork's former Settings → Workflow.
 - **Auto-review** (`packages/experimental/auto-review/src/index.ts`): an `auto`
   permission preset (full-access sandbox + `ask` policy) plus a prepended
   `tools/pre-execute` listener that asks the current model for strict JSON

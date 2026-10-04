@@ -1310,7 +1310,7 @@ impl Waku {
         self.settle_foreground_work(session_id, BackgroundWorkStatus::Stopped);
         if let Some(runtime) = runtime.as_mut() {
             runtime.stream_phase = None;
-            runtime.pending_permissions.clear();
+            runtime.pending_permissions.retain(|permission| agent_teams::requests::is_member_request(&permission.request_id));
             runtime.pending_user_input = None;
             runtime.pending_computer_approval = None;
             runtime.computer_use_previews.clear();
@@ -1402,7 +1402,11 @@ impl Waku {
                 });
         }
         // Another request still waits: the turn stays paused on the person.
-        if !still_waiting && let Some(session) = self.selected_session_mut() {
+        // (A team member's dialog can come with no turn running at all.)
+        if !still_waiting
+            && let Some(session) = self.selected_session_mut()
+            && session.active_turn_id().is_some()
+        {
             session.status = SessionStatus::Working;
             session.resume_active_turn(unix_time());
         }

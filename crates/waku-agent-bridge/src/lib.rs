@@ -54,6 +54,8 @@ mod project_context;
 mod runtime;
 mod session;
 mod subagent;
+// Fork addition: AgentTeams for the built-in agent.
+mod team;
 mod tool_guidance;
 
 pub use background::{BackgroundEntry, BackgroundKind, BackgroundStatus};
@@ -73,6 +75,12 @@ pub use claurst_tools::{KEEP_PLANNING_DENIAL, PLAN_MODE_DENIAL_SUFFIX};
 pub use permission::EXIT_PLAN_MODE_DETAIL;
 pub use oneshot::one_shot;
 pub use session::AgentSession;
+
+/// Fork (AgentTeams): `/agent-teams` and its profile aliases for the
+/// composer, each with the profile it starts. Empty while switched off.
+pub fn agent_teams_slash_commands() -> Vec<(String, Option<String>)> {
+    team::slash_commands()
+}
 
 /// Names of the built-in tools a session loads and a person can switch off.
 ///

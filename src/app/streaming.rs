@@ -422,7 +422,18 @@ impl Waku {
                 detail,
                 options,
             } => {
-                if self.accepts_turn_output(session_id) {
+                // Fork (AgentTeams): a team member's dialog comes whether or
+                // not the captain has a turn running.
+                let member_request = agent_teams::requests::is_member_request(&request_id);
+                if member_request && !self.accepts_turn_output(session_id) {
+                    runtime.pending_permissions.push_back(PendingPermission {
+                        request_id,
+                        title,
+                        detail,
+                        options,
+                    });
+                    self.notify_waiting(session_id, tr!("notification.waiting_permission"), cx);
+                } else if self.accepts_turn_output(session_id) {
                     runtime.pending_permissions.push_back(PendingPermission {
                         request_id,
                         title,
@@ -732,7 +743,7 @@ impl Waku {
                         crate::analytics::TurnOutcome::Failed
                     },
                 );
-                runtime.pending_permissions.clear();
+                runtime.pending_permissions.retain(|permission| agent_teams::requests::is_member_request(&permission.request_id));
                 runtime.pending_user_input = None;
                 runtime.pending_computer_approval = None;
                 runtime.driver.cancel_computer_use();

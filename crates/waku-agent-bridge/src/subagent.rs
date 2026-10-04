@@ -623,7 +623,7 @@ async fn forward_child(
 /// tools it called. Its usage is already in the session's totals (the cost
 /// tracker is shared) and must not move the parent's context meter; its
 /// errors end up in `Finished`.
-fn child_event(event: AgentEvent) -> Option<SubagentEvent> {
+pub(crate) fn child_event(event: AgentEvent) -> Option<SubagentEvent> {
     match event {
         AgentEvent::Text(text) => Some(SubagentEvent::Text(text)),
         AgentEvent::ToolStarted { id, name, input } => {
@@ -803,7 +803,7 @@ pub(crate) fn child_tool_set(ctx: &ToolContext, allowed: Option<&[String]>) -> V
     tools
 }
 
-fn join_prompts(first: Option<String>, second: Option<String>) -> Option<String> {
+pub(crate) fn join_prompts(first: Option<String>, second: Option<String>) -> Option<String> {
     match (first.filter(|text| !text.trim().is_empty()), second) {
         (Some(first), Some(second)) => Some(format!("{first}\n\n{second}")),
         (first, second) => first.or(second),

@@ -54,6 +54,8 @@ pub(super) struct AgentPageState {
     /// Messages leads because it is the route Claude models take, which is
     /// what a signed-in session uses by default.
     pub selected_endpoint: NativeEndpoint,
+    /// The Teams section (AgentTeams), which saves to its own file.
+    pub teams: super::agent_teams_settings::AgentTeamsPageState,
 }
 
 /// One of the built-in agent's three routes.
@@ -148,6 +150,8 @@ impl Waku {
         self.agent_page.settings = None;
         self.agent_page.error = None;
         self.ensure_agent_settings_loaded(cx);
+        self.agent_page.teams.config = None;
+        self.ensure_agent_teams_loaded(cx);
     }
 
     /// Apply a change to the loaded settings and write them.
@@ -370,6 +374,7 @@ impl Waku {
             // list, where nobody scrolling the page ever reached it. The tool
             // list goes last for the same reason.
             .child(self.render_agent_mcp(settings, theme, cx))
+            .child(self.render_agent_teams_section(theme, cx))
             .child(self.render_agent_behaviour(settings, theme, cx))
             .child(self.render_agent_rules(settings, theme, cx))
             .child(self.render_agent_tools(settings, theme, cx))
@@ -1201,7 +1206,7 @@ impl Waku {
 
 // ---- small layout helpers, local to this page ------------------------------
 
-fn section_card(theme: Theme) -> Div {
+pub(super) fn section_card(theme: Theme) -> Div {
     div()
         .w_full()
         .px(px(20.0))
@@ -1212,7 +1217,7 @@ fn section_card(theme: Theme) -> Div {
         .flex_col()
 }
 
-fn section_title(theme: Theme, title: String) -> Div {
+pub(super) fn section_title(theme: Theme, title: String) -> Div {
     div()
         .text_size(sp(13.5))
         .font_weight(FontWeight::MEDIUM)
@@ -1220,7 +1225,7 @@ fn section_title(theme: Theme, title: String) -> Div {
         .child(title)
 }
 
-fn section_description(theme: Theme, text: String) -> Div {
+pub(super) fn section_description(theme: Theme, text: String) -> Div {
     div()
         .mt(px(4.0))
         .text_size(sp(12.5))
@@ -1231,7 +1236,7 @@ fn section_description(theme: Theme, text: String) -> Div {
 
 /// A labelled setting: name and explanation on the left, the control on the
 /// right — or below, for controls that need the width.
-fn setting_row(theme: Theme, label: String, description: String, control: AnyElement) -> Div {
+pub(super) fn setting_row(theme: Theme, label: String, description: String, control: AnyElement) -> Div {
     div()
         .mt(px(14.0))
         .flex()
@@ -1260,7 +1265,7 @@ fn setting_row(theme: Theme, label: String, description: String, control: AnyEle
 }
 
 /// A small selectable chip, for a choice among a handful of presets.
-fn preset_button(
+pub(super) fn preset_button(
     theme: Theme,
     id: impl Into<SharedString>,
     label: String,

@@ -120,6 +120,8 @@ This fork remains licensed under GPL-3.0-only.
 | 2026-10-04 | Files panel: a context menu on every row and on the tree's background (open, open with the default app, reveal in the file manager, mention in the composer, copy the path or the relative path, new file / new folder, rename in place, move to the recycle bin, refresh), keyboard operation (arrows, Home/End, Enter, F2, Delete, Shift+F10), and header buttons; creating, renaming and trashing run on the daemon host as new `WorkspaceOperation`s (`src/app/file_tree_menu.rs`, `crates/waku-core/src/workspace_edit.rs`). |
 | 2026-10-04 | Pictures drawn by the built-in agent: `generate_image` is offered with Computer Use off too (an image-only REPL, `WAKU_REPL_TOOLS`); the agent is asked to show what it drew as a Markdown image, and a Markdown image naming a file on disk now loads; a relative output directory resolves against the session; tool failures reach the model as tool errors rather than nested protocol errors; a drawing's row is named by its prompt, and the agent's JavaScript calls show their code. |
 | 2026-10-04 | The built-in agent drives the in-app browser (Windows): `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_select`, `browser_press_key`, `browser_evaluate`, `browser_wait_for`, `browser_screenshot`, `browser_console`, `browser_navigate_back`, `browser_reload` and `browser_tabs`, requested over the daemon protocol (`DriverEvent::BrowserRequest` / `Command::BrowserResult`) and carried out by the desktop in the task's browser tab through the Chrome DevTools Protocol (`crates/waku-agent-bridge/src/browser.rs`, `src/app/browser_agent.rs`, `src/browser_automation.rs`). |
+| 2026-10-04 | Removed Settings → Workflow and `crates/workflow-engine` (the hand-drawn stage graph that opened one sidebar session per stage); AgentTeams below supersedes it. `submit_submission_for_session` stays `pub(super)` for `cloud_subscriptions.rs`. |
+| 2026-10-04 | Ported AgentTeams from dsh-agent-teams (`@nanmicoder/dsh-agent-teams` 0.1.22, MIT; notice below) to the built-in agent only: the session becomes a captain that drafts members and a task DAG, waits for approval, then lets a scheduler hand ready tasks to persistent member sub-agents on their own model routes, with mailboxes between them and the full quality gates (task kinds, contracts, completion checks, automatic repair and re-review, escalation). A session loads the team tools and the captain protocol only after a message starting with `/agent-teams` or when an unarchived team it leads is on disk. State lives in `<workspace>/.agent-teams/`; configuration and team profiles in `agent-teams.json` beside the engine's settings, edited on Settings → Agent → Teams; a Team surface in the right panel shows the draft (approve / revise / discard) and the running team (progress, members, DAG, inbox, two-step stop). A member's permission request is asked in the captain's session under a `team:` request id. No wire protocol change (`crates/agent-teams`, `crates/waku-agent-bridge/src/{team/**,session_team.rs}`, `src/app/{team_panel,agent_teams_settings}.rs`, `docs/agent-teams.md`). |
 
 ## Upstream attribution
 
@@ -173,4 +175,34 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+AgentTeams (`crates/agent-teams`, `crates/waku-agent-bridge/src/team/`,
+`crates/waku-agent-bridge/src/session_team.rs`, `src/app/team_panel.rs`,
+`src/app/agent_teams_settings.rs`) is translated from dsh-agent-teams
+(<https://github.com/NanmiCoder/dsh-agent-teams>, npm
+`@nanmicoder/dsh-agent-teams` 0.1.22). It is used under the following licence:
+
+```text
+MIT License
+
+Copyright (c) 2026 程序员阿江(Relakkes)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```

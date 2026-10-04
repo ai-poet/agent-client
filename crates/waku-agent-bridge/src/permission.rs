@@ -121,21 +121,44 @@ impl PermissionBridge {
         }
     }
 
-    /// Release every waiter with a rejection. Called on cancel and on
-    /// shutdown, so no tool is left blocked on a dialog that is gone.
+    /// Release every waiter with a rejection. Called on shutdown, so no
+    /// tool is left blocked on a dialog that is gone.
     pub fn release_all(&self) {
-        let pending: Vec<_> = self.pending.lock().drain().map(|(_, tx)| tx).collect();
+        self.release_where(|_| true);
+    }
+
+    /// Fork (AgentTeams): release the waiters whose request id matches.
+    /// Stopping the captain's turn releases its own dialogs and leaves the
+    /// ones its team members raised, which belong to work still running.
+    pub fn release_where(&self, matches: impl Fn(&str) -> bool) {
+        let pending: Vec<_> = {
+            let mut pending = self.pending.lock();
+            let ids: Vec<String> = pending
+                .keys()
+                .filter(|id| matches(id))
+                .cloned()
+                .collect();
+            ids.into_iter()
+                .filter_map(|id| pending.remove(&id))
+                .collect()
+        };
         for sender in pending {
             let _ = sender.send(PermissionChoice::RejectOnce);
         }
     }
 
+    /// Fork (AgentTeams): release one member's dialogs, before it is
+    /// stopped — a blocked dialog does not observe a cancel.
+    pub fn release_member(&self, member: &str) {
+        self.release_where(|id| agent_teams::requests::requesting_member(id) == Some(member));
+    }
+
     /// Ask the user, or apply the standing answer.
-    fn ask(&self, request: &PermissionRequest, reason: &str) -> PermissionChoice {
+    fn ask(&self, request: &PermissionRequest, reason: &str, member: Option<&str>) -> PermissionChoice {
         if let Some(auto) = *self.auto.lock() {
             return auto;
         }
-        self.prompt(
+        self.prompt_as(
             request,
             title_for(request),
             detail_for(request, reason),
@@ -145,6 +168,7 @@ impl PermissionBridge {
                 PermissionChoice::RejectOnce,
                 PermissionChoice::RejectAlways,
             ],
+            member,
         )
     }
 
@@ -163,7 +187,23 @@ impl PermissionBridge {
         detail: String,
         options: Vec<PermissionChoice>,
     ) -> PermissionChoice {
-        let request_id = uuid::Uuid::new_v4().to_string();
+        self.prompt_as(request, title, detail, options, None)
+    }
+
+    /// [`Self::prompt`], on behalf of a team member when `member` is set:
+    /// its id then says so (`agent_teams::requests`).
+    fn prompt_as(
+        &self,
+        request: &PermissionRequest,
+        title: String,
+        detail: String,
+        options: Vec<PermissionChoice>,
+        member: Option<&str>,
+    ) -> PermissionChoice {
+        let request_id = match member {
+            Some(member) => agent_teams::requests::permission_request_id(member),
+            None => uuid::Uuid::new_v4().to_string(),
+        };
         let (tx, rx): (Sender<PermissionChoice>, Receiver<PermissionChoice>) = bounded(1);
         self.pending.lock().insert(request_id.clone(), tx);
 
@@ -272,6 +312,16 @@ fn detail_for(request: &PermissionRequest, reason: &str) -> String {
 /// The handler installed on the engine's `ToolContext`.
 pub struct GuiPermissionHandler {
     bridge: Arc<PermissionBridge>,
+    /// Fork (AgentTeams): set for a team member's tools.
+    member: Option<MemberScope>,
+}
+
+/// A team member's side of the captain's dialogs: its own manager (members
+/// never run in plan mode, whatever the captain is in) and its name on the
+/// dialogs it raises.
+pub(crate) struct MemberScope {
+    pub name: String,
+    pub manager: Arc<std::sync::Mutex<PermissionManager>>,
 }
 
 /// Fallback copy for the "planning is done" dialog.
@@ -286,7 +336,18 @@ pub const EXIT_PLAN_MODE_DETAIL: &str =
 
 impl GuiPermissionHandler {
     pub fn new(bridge: Arc<PermissionBridge>) -> Self {
-        Self { bridge }
+        Self {
+            bridge,
+            member: None,
+        }
+    }
+
+    /// Fork (AgentTeams): the handler a team member's tools run with.
+    pub(crate) fn for_member(bridge: Arc<PermissionBridge>, scope: MemberScope) -> Self {
+        Self {
+            bridge,
+            member: Some(scope),
+        }
     }
 
     fn decide(&self, request: &PermissionRequest) -> PermissionDecision {
@@ -324,8 +385,12 @@ impl GuiPermissionHandler {
             };
         }
 
+        let manager = self
+            .member
+            .as_ref()
+            .map_or(&self.bridge.manager, |member| &member.manager);
         let evaluated = {
-            let Ok(manager) = self.bridge.manager.lock() else {
+            let Ok(manager) = manager.lock() else {
                 // A poisoned manager means another thread panicked while
                 // holding it. Denying is the only safe reading.
                 return PermissionDecision::Deny;
@@ -357,19 +422,40 @@ impl GuiPermissionHandler {
             PermissionDecision::Ask { reason } => reason,
         };
 
-        match self.bridge.ask(request, &reason) {
+        let member = self.member.as_ref().map(|member| member.name.as_str());
+        match self.bridge.ask(request, &reason, member) {
             PermissionChoice::AllowOnce => PermissionDecision::Allow,
             PermissionChoice::AllowAlways => {
                 self.bridge
                     .remember(&request.tool_name, PermissionAction::Allow);
+                self.remember_for_member(&request.tool_name, PermissionAction::Allow);
                 PermissionDecision::Allow
             }
             PermissionChoice::RejectOnce => PermissionDecision::Deny,
             PermissionChoice::RejectAlways => {
                 self.bridge
                     .remember(&request.tool_name, PermissionAction::Deny);
+                self.remember_for_member(&request.tool_name, PermissionAction::Deny);
                 PermissionDecision::Deny
             }
+        }
+    }
+}
+
+impl GuiPermissionHandler {
+    /// A member's manager is its own: a rule the user just made "always"
+    /// applies to its next call too, not only from its next turn.
+    fn remember_for_member(&self, tool_name: &str, action: PermissionAction) {
+        let Some(member) = &self.member else {
+            return;
+        };
+        if let Ok(mut manager) = member.manager.lock() {
+            manager.add_rule(PermissionRule {
+                tool_name: Some(tool_name.to_string()),
+                path_pattern: None,
+                action,
+                scope: PermissionScope::Persistent,
+            });
         }
     }
 }
@@ -717,7 +803,7 @@ mod tests {
     fn an_auto_answer_short_circuits_an_undecided_request() {
         let bridge = bridge_with(Some(PermissionChoice::AllowAlways), PermissionMode::Default);
         assert_eq!(
-            bridge.ask(&request(), "why"),
+            bridge.ask(&request(), "why", None),
             PermissionChoice::AllowAlways
         );
     }

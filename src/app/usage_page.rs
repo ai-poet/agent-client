@@ -41,6 +41,7 @@ impl Waku {
     pub(super) fn open_settings_page(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
         if page == SettingsPage::Agent {
             self.ensure_agent_settings_loaded(cx);
+            self.ensure_agent_teams_loaded(cx);
         }
         // Secrets are revealed only for the current visit to the page. This
         // also masks the token again when the Daemon row is reselected.

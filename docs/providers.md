@@ -971,6 +971,23 @@ order. A batch is polled on the parent's one task, so each foreground child
 runs on a task of its own: a child waiting on an approval dialog no longer
 freezes its siblings.
 
+**Teams** — AgentTeams (ported from dsh-agent-teams; design in
+`docs/agent-teams.md`) makes the session a team's captain. Members are
+persistent sub-agents that live past the call that started them. Each one
+keeps its own conversation (`<workspace>/.agent-teams/<team>/sessions/`) and
+runs on its own route, under its own permission scope. A member reaches the
+desktop through the same `Subagent` record as an `Agent` child, with two
+differences: the record is keyed by the member's id, and its feed is kept
+across the member's turns (`member_feeds` in `native.rs`). Neither the
+captain tools nor the protocol are sent until the first `/agent-teams`
+message, or until a team the session already leads is found on disk. A
+member's permission dialog appears in the captain's session under a
+`team:<uuid>:<member>` request id. The app keeps that dialog open with no
+captain turn running and across `TurnFinished`. No wire change: the Team
+panel reads the state files through the daemon's workspace operations, and
+its buttons send a `<waku:agent-teams>` control the bridge intercepts
+before a turn opens.
+
 **Commit messages** — `generate_message` asks the engine directly through
 `waku_agent_bridge::one_shot`: the same prompt every CLI gets, run through the
 same loop a session uses with an empty tool set, normalized the same way.

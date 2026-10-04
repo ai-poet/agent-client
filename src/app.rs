@@ -228,8 +228,6 @@ enum SettingsPage {
     ModelPlaza,
     /// Fork addition: the managed account's request history.
     CloudUsage,
-    /// Fork addition: staged multi-agent workflows.
-    Workflow,
     /// Fork addition: the built-in agent's behaviour, tools, MCP servers and
     /// permission rules — the engine's own settings file, editable in the app.
     Agent,
@@ -568,6 +566,8 @@ enum RightPanelSurface {
     Files,
     Diff,
     File(String),
+    /// Fork addition: the team the session leads (AgentTeams).
+    Team,
 }
 
 /// A turn whose checkpoint still has to be captured.
@@ -1546,8 +1546,8 @@ pub struct Waku {
     model_status: model_status::ModelStatusState,
     /// Fork addition: the welcome screen's activity overview.
     home_overview: home_overview::HomeOverviewState,
-    /// Fork addition: workflow page view state.
-    workflow: workflow::WorkflowState,
+    /// Fork addition: the right panel's Team surface (AgentTeams).
+    team_panel: team_panel::TeamPanelState,
     /// Fork addition: search field on the Model Plaza page.
     plaza_search_input: Entity<TextInput>,
     /// Fork addition: the native top-up modal, present while open.
@@ -1804,8 +1804,8 @@ mod model_status;
 mod model_status_view;
 mod model_windows;
 mod plans_page;
-mod workflow;
 mod agent_page;
+mod agent_teams_settings;
 mod native_agent;
 mod onboarding;
 mod permission_card;
@@ -1814,6 +1814,7 @@ mod task_rows;
 mod update_banner;
 mod daemon_banner;
 mod surface_bar;
+mod team_panel;
 mod providers_page;
 mod render;
 mod right_panel;
@@ -3302,7 +3303,7 @@ impl Waku {
                 image_studio: image_studio::ImageStudioState::default(),
                 model_status: model_status::ModelStatusState::default(),
                 home_overview: home_overview::HomeOverviewState::default(),
-                workflow: workflow::WorkflowState::default(),
+                team_panel: team_panel::TeamPanelState::default(),
                 plaza_search_input,
                 cloud_pay: None,
                 cloud_pay_request: None,

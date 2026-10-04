@@ -316,6 +316,8 @@ window.__ModuleLoader__.load({ id: '@local/my-decoration', factory(require) {
   启动前检查能力标志；工具随其 provider 的出现和消失而注册、注销；后台一次性运行变成 job；
   可续接的子 agent 通过 `parent.inject()` / `steer()` / `followup()` 回报。团队：lead 的日志是唯一事实来源；
   名册 `team/member`，邮箱 `team/message/queued|delivered` 并在恢复时重发，任务是比较并交换的 DAG `team/task`。
+  **已移植**：移植来源是独立的 dsh-agent-teams 包（MIT），不是这个实验插件，而且只接入内置 Agent。
+  它替换了 fork 原来的 Settings → Workflow，设计见 `docs/agent-teams.md`。
 - **自动审查**（`packages/experimental/auto-review/src/index.ts`）：一个 `auto` 权限预设（完全访问沙箱 + `ask` 策略）
   加一个 prepend 的 `tools/pre-execute` 监听器，让当前模型返回严格 JSON `{risk, decision, reason?}`。
   拒绝会落到 `ask`，由人来决定；进程内子 agent 固定为 `never`。参数从不被改写。

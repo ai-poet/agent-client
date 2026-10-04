@@ -608,6 +608,10 @@ struct EventTranslator {
     /// Kept apart from `tools`: a background one outlives the turn, and
     /// `tools` is cleared at every turn's start.
     subagents: Mutex<std::collections::HashMap<String, RunningSubagent>>,
+    /// Fork (AgentTeams): a team member's record between its turns. A member
+    /// runs many turns under one key; a fresh feed would restart the entry
+    /// ids and overwrite its earlier rows.
+    member_feeds: Mutex<std::collections::HashMap<String, SubagentFeed>>,
 }
 
 /// What a tool call looked like when it started, so its completion can be
@@ -673,6 +677,7 @@ impl EventTranslator {
             store,
             tools: Mutex::new(std::collections::HashMap::new()),
             subagents: Mutex::new(std::collections::HashMap::new()),
+            member_feeds: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -821,6 +826,11 @@ impl EventTranslator {
                         allow: choice.is_allow(),
                     })
                     .collect();
+                // Fork (AgentTeams): a member's dialog names the member asking.
+                let title = match agent_teams::requests::requesting_member(&request_id) {
+                    Some(member) => tr!("team.permission_title", member = member, title = title),
+                    None => title,
+                };
                 self.send(DriverEvent::Permission {
                     request_id,
                     title,
@@ -935,7 +945,11 @@ impl EventTranslator {
                 item.can_stop = true;
                 item.control_id = Some(parent_tool_id.clone());
                 item.started_at_ms = started_at_ms;
-                let feed = SubagentFeed::new(item.key.clone());
+                let feed = self
+                    .member_feeds
+                    .lock()
+                    .remove(&parent_tool_id)
+                    .unwrap_or_else(|| SubagentFeed::new(item.key.clone()));
                 self.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
                     item.clone(),
                 )));
@@ -1002,9 +1016,13 @@ impl EventTranslator {
                 result,
                 duration_ms,
             } => {
-                let Some(RunningSubagent { mut item, .. }) = running.remove(&parent_tool_id) else {
+                let Some(RunningSubagent { mut item, mut feed }) = running.remove(&parent_tool_id) else {
                     return;
                 };
+                if parent_tool_id.contains("::team:") {
+                    feed.close_text();
+                    self.member_feeds.lock().insert(parent_tool_id.clone(), feed);
+                }
                 item.status = match status {
                     SubagentStatus::Completed => BackgroundWorkStatus::Completed,
                     SubagentStatus::Failed => BackgroundWorkStatus::Failed,

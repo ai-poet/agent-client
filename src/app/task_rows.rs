@@ -58,11 +58,7 @@ impl Waku {
         session: &AgentSession,
         cx: &mut Context<Self>,
     ) -> Vec<Stateful<Div>> {
-        // A stage of a workflow carries its role beside the failure mark.
         let mut marks = Vec::new();
-        if let Some(chip) = self.render_workflow_task_chip(session, cx) {
-            marks.push(chip);
-        }
         if session.status != SessionStatus::Failed {
             return marks;
         }

@@ -904,6 +904,7 @@ impl RightPanelSurface {
             }
             Self::Files => tr!("right_panel.files"),
             Self::Diff => tr!("right_panel.diff"),
+            Self::Team => tr!("team.surface"),
             // Fork fix: Windows relative paths use backslashes.
             Self::File(path) => path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned(),
         }
@@ -916,6 +917,7 @@ impl RightPanelSurface {
             Self::BackgroundWork { key, .. } => work_kind_icon(key.kind),
             Self::Files => "icons/folder.svg",
             Self::Diff => "icons/file-diff.svg",
+            Self::Team => "icons/users.svg",
             Self::File(path) => file_icon_for_path(path),
         }
     }
@@ -955,9 +957,10 @@ fn reusable_surface_index(
         RightPanelSurface::BackgroundWork { key, .. } => surfaces.iter().position(|surface| {
             matches!(surface, RightPanelSurface::BackgroundWork { key: candidate, .. } if candidate == key)
         }),
-        RightPanelSurface::Files | RightPanelSurface::Diff | RightPanelSurface::File(_) => {
-            surfaces.iter().position(|surface| surface == requested)
-        }
+        RightPanelSurface::Files
+        | RightPanelSurface::Diff
+        | RightPanelSurface::File(_)
+        | RightPanelSurface::Team => surfaces.iter().position(|surface| surface == requested),
     }
 }
 
@@ -1901,7 +1904,7 @@ impl Waku {
         self.right_panel_tabs_scroll_handle.scroll_to_item(index);
     }
 
-    fn active_right_panel_surface(&self) -> Option<&RightPanelSurface> {
+    pub(super) fn active_right_panel_surface(&self) -> Option<&RightPanelSurface> {
         self.right_panel_active_surface
             .and_then(|index| self.right_panel_surfaces.get(index))
     }
@@ -2187,6 +2190,7 @@ impl Waku {
             Some(RightPanelSurface::Diff) => self
                 .render_right_panel_diff(width, window, cx)
                 .into_any_element(),
+            Some(RightPanelSurface::Team) => self.render_team_surface(window, cx),
             Some(RightPanelSurface::Terminal(terminal_id)) => self
                 .right_panel_terminals
                 .get(&terminal_id)
@@ -2534,12 +2538,19 @@ impl Waku {
         if !self.right_panel_surfaces.is_empty() {
             let weak = cx.entity().downgrade();
             let existing_surfaces = self.right_panel_surfaces.clone();
-            let options = [
+            let mut options = vec![
                 RightPanelSurface::new_browser(),
                 RightPanelSurface::new_terminal(),
                 RightPanelSurface::Files,
                 RightPanelSurface::Diff,
             ];
+            // Fork: the Team surface, for the built-in agent's sessions.
+            if self
+                .selected_session()
+                .is_some_and(|session| session.provider == ProviderKind::Native)
+            {
+                options.push(RightPanelSurface::Team);
+            }
             let handle = self.menu_handle("add-right-panel-surface", cx);
             header = header.child(
                 div()

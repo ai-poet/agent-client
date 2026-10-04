@@ -43,6 +43,10 @@ use crate::permission::{GuiPermissionHandler, PermissionBridge};
 use crate::runtime;
 use crate::subagent::{SubagentHost, SubagentTool, TurnScope};
 
+// Fork addition: AgentTeams' hooks into this session.
+#[path = "session_team.rs"]
+mod team_seam;
+
 /// How often the steer watcher checks whether the queue was drained. The
 /// engine drains between turns, so this only decides how promptly the composer
 /// learns the message landed — not when it lands.
@@ -88,10 +92,11 @@ impl ToolSets {
         mcp: Option<&Arc<claurst_mcp::McpManager>>,
         subagents: &Arc<SubagentHost>,
         browser: Option<&Arc<crate::browser::BrowserHost>>,
+        team: Option<&Arc<crate::team::TeamHost>>,
     ) -> Self {
         Self {
-            plain: builtin_tools_with(disallowed, mcp, false, subagents, browser),
-            goal: builtin_tools_with(disallowed, mcp, true, subagents, browser),
+            plain: builtin_tools_with(disallowed, mcp, false, subagents, browser, team),
+            goal: builtin_tools_with(disallowed, mcp, true, subagents, browser, team),
         }
     }
 }
@@ -132,6 +137,8 @@ struct Inner {
     /// Fork addition: the in-app browser's requests in flight, when the
     /// desktop offers it.
     browser: Option<Arc<crate::browser::BrowserHost>>,
+    /// Fork addition: the session's AgentTeams team, when it leads one.
+    team: Arc<crate::team::TeamHost>,
 }
 
 /// The parts of a running turn that outside callers need to reach.
@@ -143,6 +150,9 @@ struct Turn {
     /// Set once a watcher is running, so a second steer does not start a
     /// second one.
     watching: bool,
+    /// Fork (AgentTeams): a `/compact` holds the slot. Its queue is never
+    /// drained, so team mail waits instead of joining it.
+    compacting: bool,
 }
 
 impl AgentSession {
@@ -203,13 +213,21 @@ impl AgentSession {
         let browser = options
             .browser_tools
             .then(|| crate::browser::BrowserHost::new(events.clone()));
-        let tools = ToolSets::build(&config.disallowed_tools, None, &subagents, browser.as_ref());
+        let id = options
+            .session_id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let team = crate::team::TeamHost::new(&options, &id, events.clone());
+        let tools = ToolSets::build(
+            &config.disallowed_tools,
+            None,
+            &subagents,
+            browser.as_ref(),
+            Some(&team),
+        );
         let inner = Arc::new(Inner {
             events,
-            id: options
-                .session_id
-                .clone()
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            id,
             cwd: options.cwd.clone(),
             client: Mutex::new(client),
             tools: Mutex::new(tools),
@@ -230,8 +248,12 @@ impl AgentSession {
             questions: Mutex::new(HashMap::new()),
             subagents,
             browser,
+            team,
         });
 
+        inner
+            .team
+            .attach(Box::new(team_seam::Port(Arc::downgrade(&inner))));
         connect_mcp_in_background(&inner);
         Ok(Self { inner })
     }
@@ -244,6 +266,10 @@ impl AgentSession {
     /// Start a turn. While one is running this is delivered as steering
     /// instead, which is what the composer means by sending during a turn.
     pub fn prompt(&self, text: String) {
+        // Fork: a Team panel control is handled, not sent to the model.
+        if self.inner.team.intercept(&text) {
+            return;
+        }
         let inner = self.inner.clone();
         let Ok(rt) = runtime::shared() else {
             inner
@@ -268,12 +294,13 @@ impl AgentSession {
                 queue: queue.clone(),
                 steers: Arc::new(Mutex::new(Vec::new())),
                 watching: false,
+                compacting: false,
             });
             (cancel, queue)
         };
 
         rt.spawn(async move {
-            run_turn(inner, text, cancel, queue).await;
+            run_turn(inner, text, team_seam::PromptOrigin::User, cancel, queue).await;
         });
     }
 
@@ -304,7 +331,11 @@ impl AgentSession {
         if let Some(cancel) = cancel {
             cancel.cancel();
         }
-        self.inner.bridge.release_all();
+        // Fork (AgentTeams): the members' dialogs belong to their work,
+        // which goes on.
+        self.inner
+            .bridge
+            .release_where(|id| !agent_teams::requests::is_member_request(id));
         if let Some(browser) = &self.inner.browser {
             browser.release_all();
         }
@@ -374,6 +405,7 @@ impl AgentSession {
                 queue: CommandQueue::new(),
                 steers: Arc::new(Mutex::new(Vec::new())),
                 watching: false,
+                compacting: true,
             });
             cancel
         };
@@ -409,9 +441,9 @@ impl AgentSession {
 
     /// Publish the current state of every piece of background work.
     pub fn refresh_background_work(&self) {
-        self.inner.events.emit(AgentEvent::BackgroundWork(
-            background::snapshot_owned(&self.inner.subagents.owned_background()),
-        ));
+        self.inner
+            .events
+            .emit(AgentEvent::BackgroundWork(team_seam::snapshot(&self.inner)));
     }
 
     /// Stop one piece of background work by the id the snapshot reported —
@@ -419,7 +451,7 @@ impl AgentSession {
     /// it. The refreshed snapshot follows either way, so the panel shows the
     /// entry's real state rather than an optimistic one.
     pub fn stop_background_work(&self, id: &str) -> Result<(), String> {
-        let outcome = if self.inner.subagents.stop(id) {
+        let outcome = if self.inner.team.stop_member(id) || self.inner.subagents.stop(id) {
             Ok(())
         } else {
             background::stop(id)
@@ -557,6 +589,7 @@ impl Drop for Inner {
         self.bridge.release_all();
         self.questions.lock().clear();
         self.subagents.cancel_all();
+        self.team.shutdown();
     }
 }
 
@@ -608,7 +641,7 @@ fn builtin_tools(
     with_goal: bool,
     subagents: &Arc<SubagentHost>,
 ) -> ToolSet {
-    builtin_tools_with(disallowed, mcp, with_goal, subagents, None)
+    builtin_tools_with(disallowed, mcp, with_goal, subagents, None, None)
 }
 
 /// The session's tools; with `browser`, the in-app browser's too (fork
@@ -620,6 +653,7 @@ fn builtin_tools_with(
     with_goal: bool,
     subagents: &Arc<SubagentHost>,
     browser: Option<&Arc<crate::browser::BrowserHost>>,
+    team: Option<&Arc<crate::team::TeamHost>>,
 ) -> ToolSet {
     let mut tools = engine_builtins(disallowed);
     if let Some(host) = browser {
@@ -632,6 +666,10 @@ fn builtin_tools_with(
     // Ours, not the engine's `claurst_query::AgentTool`: see `crate::subagent`.
     if !disallowed.iter().any(|name| name == crate::subagent::AGENT_TOOL_NAME) {
         tools.push(Box::new(SubagentTool::new(subagents.clone())));
+    }
+    // Fork: the team tools, once the session leads a team (`crate::team`).
+    if let Some(team) = team {
+        tools.extend(team.captain_tools());
     }
     if !with_goal {
         tools.retain(|tool| tool.name() != GOAL_COMPLETE_TOOL);
@@ -698,6 +736,7 @@ fn connect_mcp_in_background(inner: &Arc<Inner>) {
             Some(&manager),
             &inner.subagents,
             inner.browser.as_ref(),
+            Some(&inner.team),
         );
         *inner.mcp.lock() = Some(manager);
     });
@@ -760,9 +799,16 @@ async fn forward_questions(inner: Arc<Inner>, mut rx: mpsc::UnboundedReceiver<Us
 async fn run_turn(
     inner: Arc<Inner>,
     prompt: String,
+    origin: team_seam::PromptOrigin,
     cancel: CancellationToken,
     queue: CommandQueue,
 ) {
+    // Fork (AgentTeams): `/agent-teams` activates the team and carries its
+    // directive; before anything below reads the tool set.
+    let prompt = match origin {
+        team_seam::PromptOrigin::User => inner.team.augment_prompt(prompt),
+        team_seam::PromptOrigin::Team => prompt,
+    };
     // Work on a copy. The engine mutates it — appending the assistant turn,
     // tool calls, tool results, and synthetic results for anything abandoned
     // by a cancel — and the result is what gets written back.
@@ -788,6 +834,8 @@ async fn run_turn(
     // What a sub-agent started this turn runs with: this turn's config, taken
     // before the steering queue — the parent's alone — is attached.
     let subagent_query = query.clone();
+    // Fork: the captain protocol, once active; sub-agents never get it.
+    inner.team.extend_rules(&mut query);
     query.command_queue = Some(queue.clone());
     // A session with an active goal keeps going after each answer until the
     // model closes it with `GoalComplete` — the one tool set that has it.
@@ -940,9 +988,9 @@ async fn run_turn(
     )));
     // A turn is the only thing that creates background work, so this is the
     // moment the panel needs a fresh level signal.
-    inner.events.emit(AgentEvent::BackgroundWork(background::snapshot_owned(
-        &inner.subagents.owned_background(),
-    )));
+    inner
+        .events
+        .emit(AgentEvent::BackgroundWork(team_seam::snapshot(&inner)));
     let goal_follow_up = settle_goal(&inner, goal_mode, had_goal, tokens_before, cancelled);
 
     // Steering messages the watcher had not yet accounted for. The queue
@@ -961,6 +1009,12 @@ async fn run_turn(
             }
         });
     }
+
+    // Fork (AgentTeams): team mail the turn never took goes again, and the
+    // captain's idle edge returns its takeovers to the pool.
+    inner
+        .team
+        .after_turn(team_seam::queued_texts(&queue), goal_follow_up.is_some());
 
     // Last, so the next turn starts after this one has fully reported.
     if let Some(prompt) = goal_follow_up {
@@ -1065,6 +1119,8 @@ async fn compact_now(inner: Arc<Inner>, instructions: Option<String>, cancel: Ca
             reason: "the conversation was being compacted".to_string(),
         });
     }
+    // Fork (AgentTeams): team mail that waited for the compaction.
+    inner.team.after_turn(Vec::new(), false);
 }
 
 /// The provider adapter a summary goes through on a route that is not the
