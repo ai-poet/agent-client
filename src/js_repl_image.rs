@@ -209,19 +209,37 @@ pub(crate) fn generate(
         .map_err(|error| anyhow!(describe_failure(&error)))?;
     let output_dir = request
         .output_dir
-        .clone()
+        .as_deref()
+        .map(resolve_output_directory)
         .unwrap_or_else(default_output_directory);
     save_images(&outputs, &output_dir)
+}
+
+/// The session's working directory. The built-in agent's MCP manager spawns
+/// this process from wherever the daemon runs, so its own current directory
+/// is not the session's.
+fn session_directory() -> PathBuf {
+    std::env::var_os("WAKU_SESSION_CWD")
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// Where pictures land when the caller names no directory: beside the work,
 /// so the model can refer to them by path and the user can find them.
 fn default_output_directory() -> PathBuf {
-    std::env::var_os("WAKU_SESSION_CWD")
-        .map(PathBuf::from)
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("generated-images")
+    session_directory().join("generated-images")
+}
+
+/// Fork fix: a relative directory the model names is relative to the
+/// session, as everything else it says is — not to the daemon's directory,
+/// where it used to land, unreported and possibly unwritable.
+fn resolve_output_directory(directory: &Path) -> PathBuf {
+    if directory.is_absolute() {
+        directory.to_path_buf()
+    } else {
+        session_directory().join(directory)
+    }
 }
 
 #[cfg(test)]

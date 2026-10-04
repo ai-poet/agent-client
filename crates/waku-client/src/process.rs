@@ -176,6 +176,13 @@ impl DaemonProcess {
         for origin in &settings.allowed_origins {
             command.arg("--allow-origin").arg(origin);
         }
+        // Fork addition: this daemon's desktop can drive its in-app browser
+        // for the built-in agent (Windows only for now), so the agent is
+        // offered browser tools. A daemon nobody spawned — a remote one —
+        // never sees it.
+        if cfg!(target_os = "windows") {
+            command.env("WAKU_IN_APP_BROWSER", "1");
+        }
         let mut child = command
             .env(DAEMON_TOKEN_ENV, &token)
             .env(APP_EXECUTABLE_ENV, app_executable)

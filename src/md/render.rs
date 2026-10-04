@@ -1438,7 +1438,13 @@ fn render_image(url: &str, alt: &str, ctx: &Ctx) -> AnyElement {
     let id = SharedString::from(format!("image-{}-{}", key.row, key.index));
     let image = match decode_data_url(url) {
         Some(decoded) => img(decoded).id(id),
-        None => img(url.to_owned()).id(id),
+        // Fork fix: a picture on disk — what an agent writes after drawing
+        // one. gpui reads any non-URI string as a bundled asset, and
+        // `C:\…` parses as a URI with scheme `c`, so neither loaded.
+        None => match local_image_path(url) {
+            Some(path) => img(path.as_path()).id(id),
+            None => img(url.to_owned()).id(id),
+        },
     };
     div()
         .w_full()
@@ -1503,6 +1509,22 @@ fn show_code_copied(feedback: CodeCopyFeedback, ordinal: usize, cx: &mut gpui::A
 }
 
 /// Decode a `data:` image URL. Shared with the transcript's tool-output images.
+/// Fork addition: an image source that names a file on disk — an absolute
+/// path, or a `file:` URL — as that path.
+fn local_image_path(url: &str) -> Option<std::path::PathBuf> {
+    let url = url.trim();
+    if let Some(rest) = url.strip_prefix("file://") {
+        // `file:///C:/x.png` keeps a leading slash before the drive.
+        let rest = rest.strip_prefix('/').filter(|rest| {
+            rest.as_bytes().get(1) == Some(&b':')
+        }).unwrap_or(rest);
+        let path = std::path::PathBuf::from(rest.replace("%20", " "));
+        return path.is_absolute().then_some(path);
+    }
+    let path = std::path::Path::new(url);
+    path.is_absolute().then(|| path.to_path_buf())
+}
+
 pub fn decode_data_url(url: &str) -> Option<std::sync::Arc<gpui::Image>> {
     use base64::Engine as _;
 
@@ -1861,6 +1883,34 @@ mod tests {
     use super::*;
     use crate::md::parser;
     use gpui::TestAppContext;
+
+    #[test]
+    fn pictures_on_disk_load_by_path() {
+        assert_eq!(local_image_path("https://example.com/a.png"), None);
+        assert_eq!(local_image_path("generated-images/a.png"), None);
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                local_image_path(r"C:\work\generated-images\a.png"),
+                Some(std::path::PathBuf::from(r"C:\work\generated-images\a.png"))
+            );
+            assert_eq!(
+                local_image_path("file:///C:/work/a%20b.png"),
+                Some(std::path::PathBuf::from("C:/work/a b.png"))
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            assert_eq!(
+                local_image_path("/work/a.png"),
+                Some(std::path::PathBuf::from("/work/a.png"))
+            );
+            assert_eq!(
+                local_image_path("file:///work/a.png"),
+                Some(std::path::PathBuf::from("/work/a.png"))
+            );
+        }
+    }
 
     fn palette() -> Palette {
         Palette::from_theme(&Theme::dark())

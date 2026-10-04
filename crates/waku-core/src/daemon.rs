@@ -1675,6 +1675,10 @@ fn handle_driver_command(
             request_id,
             answers,
         } => driver.respond_user_input(request_id, answers),
+        // Fork addition: the desktop's answer to an in-app browser request.
+        Command::BrowserResult { request_id, result } => {
+            driver.browser_result(request_id, result);
+        }
         Command::Goal { operation } => driver.goal(operation),
         Command::RunComputerTool { request } => {
             driver.run_computer_tool(crate::computer_use::ComputerToolRequest {
@@ -1842,6 +1846,14 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
                 "questions": questions,
             }),
         ),
+        // Fork addition: the built-in agent's in-app browser requests.
+        DriverEvent::BrowserRequest {
+            request_id,
+            operation,
+        } => (
+            "browserRequest",
+            json!({ "requestId": request_id, "operation": operation }),
+        ),
         DriverEvent::ComputerUseUpdated(state) => (
             "computerUseUpdated",
             serde_json::to_value(ComputerUseWire {
@@ -1936,6 +1948,13 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 questions: request.questions,
             }
         }
+        "browserRequest" => {
+            let request: BrowserRequestWire = serde_json::from_value(payload)?;
+            DriverEvent::BrowserRequest {
+                request_id: request.request_id,
+                operation: request.operation,
+            }
+        }
         "computerUseUpdated" => {
             let state: ComputerUseWire = serde_json::from_value(payload)?;
             DriverEvent::ComputerUseUpdated(ComputerUseState {
@@ -2004,6 +2023,14 @@ struct PermissionWire {
 struct UserInputWire {
     request_id: String,
     questions: Vec<crate::model::UserInputQuestion>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserRequestWire {
+    request_id: String,
+    #[serde(default)]
+    operation: Value,
 }
 
 #[derive(Deserialize, Serialize)]

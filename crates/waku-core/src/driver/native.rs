@@ -80,7 +80,15 @@ fn computer_use_wiring(config: &super::computer_use::ComputerUseConfig) -> Compu
                 ));
             })
             .ok(),
+        image_only: false,
     }
+}
+
+/// Fork addition: whether the desktop that spawned this daemon can drive its
+/// in-app browser for the agent. It says so with `WAKU_IN_APP_BROWSER` when
+/// it starts the daemon; a daemon nobody spawned has no browser to offer.
+fn in_app_browser_offered() -> bool {
+    std::env::var("WAKU_IN_APP_BROWSER").is_ok_and(|value| value == "1")
 }
 
 /// What a session gets of Computer Use.
@@ -100,7 +108,17 @@ fn session_computer_use(
     Option<ComputerUseWiring>,
 ) {
     if !enabled {
-        return (None, None);
+        // Fork: drawing a picture needs no desktop access, so with the
+        // switch off the REPL still comes, offering `generate_image` alone.
+        // The helper is not even looked up.
+        let wiring = repl_server().ok().map(|repl_server| ComputerUseWiring {
+            repl_server,
+            native_helper: None,
+            process_directory: None,
+            skill_markdown: None,
+            image_only: true,
+        });
+        return (None, wiring);
     }
     match super::support::optional_computer_use(start()) {
         Some(runtime) => {
@@ -113,6 +131,7 @@ fn session_computer_use(
                 native_helper: None,
                 process_directory: None,
                 skill_markdown: None,
+                image_only: false,
             });
             (None, wiring)
         }
@@ -159,6 +178,7 @@ impl NativeDriver {
             history,
             computer_use: wiring,
             session_id: Some(session_id.to_string()),
+            browser_tools: in_app_browser_offered(),
         };
 
         let sink = EventTranslator::new(events.clone(), store.clone());
@@ -234,6 +254,10 @@ impl DriverControl for NativeDriver {
 
     fn respond(&self, request_id: String, option_id: String) {
         self.session.respond(&request_id, &option_id);
+    }
+
+    fn browser_result(&self, request_id: String, result: Value) {
+        self.session.browser_result(&request_id, result);
     }
 
     /// One question per request, so the first answer is the whole answer.
@@ -827,6 +851,14 @@ impl EventTranslator {
                     }],
                 });
             }
+            // Fork addition: a browser tool's request, for the desktop.
+            AgentEvent::BrowserRequest {
+                request_id,
+                operation,
+            } => self.send(DriverEvent::BrowserRequest {
+                request_id,
+                operation,
+            }),
             AgentEvent::BackgroundWork(entries) => {
                 let items = entries.into_iter().map(background_item).collect();
                 self.send(DriverEvent::BackgroundWork(
@@ -1055,7 +1087,9 @@ fn tool_title(name: &str, input: &Value) -> String {
     if let Some(call) = SubagentCall::from_tool(name, Some(input)) {
         return call.description;
     }
-    for key in ["command", "query", "pattern", "file_path", "path", "url"] {
+    // Fork: `prompt` last — a picture is named by what was asked for, not by
+    // the tool's prefixed name ("Waku js repl generate image").
+    for key in ["command", "query", "pattern", "file_path", "path", "url", "prompt"] {
         if let Some(value) = input.get(key).and_then(Value::as_str) {
             let value = value.trim();
             if !value.is_empty() {
@@ -1120,13 +1154,25 @@ mod tests {
         assert!(runtime.is_none() && wiring.is_none());
     }
 
-    /// With the switch off, nothing is looked up, let alone launched.
+    /// With the switch off the helper is not looked up, let alone launched;
+    /// the REPL still comes, to draw pictures and nothing else.
     #[test]
-    fn computer_use_off_is_not_attempted() {
+    fn computer_use_off_keeps_only_image_generation() {
         let (runtime, wiring) = super::session_computer_use(
             false,
             || panic!("the helper must not be resolved when Computer Use is off"),
-            || panic!("the REPL must not be resolved when Computer Use is off"),
+            || Ok("/opt/waku_js_repl".into()),
+        );
+        assert!(runtime.is_none());
+        let wiring = wiring.expect("the REPL is wired for image generation");
+        assert!(wiring.image_only);
+        assert_eq!(wiring.native_helper, None);
+        assert_eq!(wiring.skill_markdown, None);
+
+        let (runtime, wiring) = super::session_computer_use(
+            false,
+            || panic!("the helper must not be resolved when Computer Use is off"),
+            || Err(anyhow::anyhow!("Waku JavaScript REPL is missing from this Waku build")),
         );
         assert!(runtime.is_none() && wiring.is_none());
     }

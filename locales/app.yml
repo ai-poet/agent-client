@@ -4200,3 +4200,31 @@ effort_panel.slider_label:
   en: "Reasoning effort"
 effort_panel.waits_for_background:
   en: "The new reasoning effort applies once the background tasks finish"
+file_tree.open:
+  en: "Open"
+file_tree.expand:
+  en: "Expand"
+file_tree.collapse:
+  en: "Collapse"
+file_tree.open_external:
+  en: "Open with Default App"
+file_tree.mention:
+  en: "Mention in Message"
+file_tree.copy_path:
+  en: "Copy Path"
+file_tree.copy_relative_path:
+  en: "Copy Relative Path"
+file_tree.new_file:
+  en: "New File"
+file_tree.new_folder:
+  en: "New Folder"
+file_tree.trash:
+  en: "Move to Trash"
+file_tree.trash_title:
+  en: "Move \"%{name}\" to the trash?"
+file_tree.trash_detail:
+  en: "You can restore it from the system trash."
+file_tree.invalid_name:
+  en: "That name cannot be used here"
+file_tree.failed:
+  en: "File operation failed: %{error}"

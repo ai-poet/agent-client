@@ -1316,6 +1316,12 @@ pub struct Waku {
     /// with (`effort_relaunch`).
     effort_card: Option<Entity<effort_panel::EffortCard>>,
     effort_launches: HashMap<Uuid, effort_relaunch::LaunchedEffort>,
+    /// Fork addition: the Files panel's context menu, cursor and in-place
+    /// edits (`right_panel/file_tree_menu.rs`).
+    file_tree: right_panel::file_tree_menu::FileTreeUi,
+    /// Fork addition: the built-in agent's in-app browser requests
+    /// (`right_panel/browser_agent.rs`).
+    browser_agent: right_panel::browser_agent::BrowserAgentState,
     /// Commit-message generation and Git mutation outlive the modal that
     /// started them. Keeping the operation on the app also lets every
     /// Environment surface reflect and gate the same in-flight action.
@@ -3174,6 +3180,8 @@ impl Waku {
                 turn_output_baselines: HashMap::new(),
                 effort_card: None,
                 effort_launches: HashMap::new(),
+                file_tree: Default::default(),
+                browser_agent: Default::default(),
                 commit_operation: None,
                 // Providers × workspaces; both scans are small, the cache
                 // only exists to keep them off the frame path.

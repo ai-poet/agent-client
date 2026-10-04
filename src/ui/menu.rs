@@ -300,6 +300,12 @@ impl ContextMenuHandle {
         open_menu(self, position, SurfaceFocus::Card, false, window, cx);
     }
 
+    /// Fork addition: [`Self::open_context_menu`] at a given point, for a
+    /// list whose keyboard cursor is one row inside a larger trigger.
+    pub fn open_context_menu_at(&self, position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+        open_menu(self, position, SurfaceFocus::Card, false, window, cx);
+    }
+
     pub fn close(&self, window: &mut Window, cx: &mut App) {
         let was_open = {
             let mut state = self.state.borrow_mut();

@@ -278,6 +278,9 @@ pub struct AgentStartOptions {
     /// per-session state by it — the todo list, the goal, shell state — so a
     /// resumed session finds its own again. `None` for a throwaway session.
     pub session_id: Option<String>,
+    /// Fork addition: the desktop that owns this session can drive its
+    /// in-app browser, so the `browser_*` tools are offered (`crate::browser`).
+    pub browser_tools: bool,
 }
 
 /// What the session needs to reach the Computer Use REPL.
@@ -300,7 +303,14 @@ pub struct ComputerUseWiring {
     /// find it. `None` when the helper is missing — a skill describing
     /// tools that are absent is worse than no skill.
     pub skill_markdown: Option<String>,
+    /// Fork addition: Computer Use is off, and the REPL is here only to draw
+    /// pictures. It offers `generate_image` alone (`WAKU_REPL_TOOLS`), and
+    /// only that tool is consented to.
+    pub image_only: bool,
 }
+
+/// The one tool an image-only REPL offers.
+pub const IMAGE_TOOL: &str = "waku_js_repl_generate_image";
 
 /// The MCP server name, which prefixes every tool it advertises.
 pub const COMPUTER_USE_SERVER: &str = "waku_js_repl";
@@ -329,6 +339,7 @@ impl Default for AgentStartOptions {
             history: Vec::new(),
             computer_use: None,
             session_id: None,
+            browser_tools: false,
         }
     }
 }
@@ -501,6 +512,9 @@ fn install_repl_server(config: &mut Config, wiring: &ComputerUseWiring, cwd: &Pa
             "WAKU_COMPUTER_USE_SERVER".to_owned(),
             helper.display().to_string(),
         );
+    }
+    if wiring.image_only {
+        env.insert("WAKU_REPL_TOOLS".to_owned(), "generate_image".to_owned());
     }
 
     config.mcp_servers.push(McpServerConfig {
@@ -1114,7 +1128,19 @@ fn plan_mode_rule(options: &AgentStartOptions) -> Option<String> {
 /// fail, and try again. It is also what lets the model answer a request to
 /// operate the desktop with where to turn it on, rather than with an error.
 fn computer_use_rule(options: &AgentStartOptions) -> Option<String> {
+    // Fork: the picture guidance. The tool is listed only when a gateway can
+    // be reached, so the rule says "when it is available" rather than
+    // sending the model after a tool it does not have; and a picture shown
+    // in the reply is one the person sees, where the tool call's own row is
+    // folded away once the turn ends.
+    const PICTURES: &str = "To make a picture, call waku_js_repl_generate_image when it \
+         is available rather than looking for an external service. It saves the \
+         pictures and returns their paths; show each one in your reply as a Markdown \
+         image with its absolute path, like ![description](path).";
     options.computer_use.as_ref().map(|wiring| {
+        if wiring.image_only {
+            return String::from(PICTURES);
+        }
         let mut rule = if wiring.native_helper.is_some() {
             String::from(
                 "This computer can be driven directly. Before operating a desktop \
@@ -1130,10 +1156,8 @@ fn computer_use_rule(options: &AgentStartOptions) -> Option<String> {
                  set up.",
             )
         };
-        rule.push_str(
-            " To make a picture, call waku_js_repl_generate_image rather than \
-             looking for an external service.",
-        );
+        rule.push(' ');
+        rule.push_str(PICTURES);
         rule
     })
 }
@@ -1262,6 +1286,24 @@ out of code, logs and commits. If you notice you wrote something insecure, fix i
 Help with defensive and authorized security work; do not build malware or attacks on systems \
 the user does not control.";
 
+/// Fork addition: what the in-app browser tools are for, and the one caution
+/// they need — the browser is the person's own, signed-in sessions and all.
+fn browser_rule(options: &AgentStartOptions) -> Option<String> {
+    options.browser_tools.then(|| {
+        String::from(
+            "The app's in-app browser can be driven with the browser_* tools — use them \
+             to open and test web pages, such as a local dev server or a staging site: \
+             browser_navigate to open a page, browser_snapshot to read it and get element \
+             refs, browser_click / browser_type / browser_select / browser_press_key to act \
+             with those refs, browser_wait_for after actions that load something, \
+             browser_console to check for errors, and browser_screenshot to show the user \
+             what the page looks like. Take a new snapshot after every change before using \
+             refs again. The browser is the user's own and may hold their signed-in \
+             sessions, so act only on the sites the task is about.",
+        )
+    })
+}
+
 /// Everything appended to the system prompt for this session, in order:
 /// plan mode, the narration language, then whatever the user wrote on the
 /// Agent settings page. The user's text comes last so it can overrule the
@@ -1274,6 +1316,7 @@ fn session_rules(
     let parts: Vec<String> = [
         plan_mode_rule(options),
         computer_use_rule(options),
+        browser_rule(options),
         narration_rule(options),
         project.map(str::trim).filter(|r| !r.is_empty()).map(str::to_owned),
         house_rules.map(str::trim).filter(|r| !r.is_empty()).map(str::to_owned),
@@ -1451,6 +1494,7 @@ mod tests {
                 native_helper: helper.then(|| PathBuf::from("/opt/helper")),
                 process_directory: helper.then(|| PathBuf::from("/tmp/cu")),
                 skill_markdown: Some("# skill".into()),
+                image_only: false,
             }),
             cwd: PathBuf::from("/work"),
             ..AgentStartOptions::default()
@@ -1618,10 +1662,51 @@ mod tests {
                 native_helper: None,
                 process_directory: None,
                 skill_markdown: None,
+                image_only: false,
             }),
             ..AgentStartOptions::default()
         };
         let rule = computer_use_rule(&options).expect("a rule when wired");
+        assert!(!rule.contains("  "), "{rule}");
+    }
+
+    /// With Computer Use off the REPL is still wired, to draw pictures: it
+    /// is told to offer that tool alone, and the rule speaks of pictures
+    /// only — nothing about desktop control the person never switched on.
+    #[test]
+    fn an_image_only_repl_offers_pictures_and_nothing_else() {
+        let options = AgentStartOptions {
+            computer_use: Some(ComputerUseWiring {
+                repl_server: "/tmp/waku_js_repl".into(),
+                native_helper: None,
+                process_directory: None,
+                skill_markdown: None,
+                image_only: true,
+            }),
+            cwd: PathBuf::from("/work"),
+            ..AgentStartOptions::default()
+        };
+        let mut config = Config::default();
+        install_repl_server(
+            &mut config,
+            options.computer_use.as_ref().unwrap(),
+            &options.cwd,
+        );
+        let server = config
+            .mcp_servers
+            .iter()
+            .find(|server| server.name == COMPUTER_USE_SERVER)
+            .expect("the REPL is registered");
+        assert_eq!(
+            server.env.get("WAKU_REPL_TOOLS").map(String::as_str),
+            Some("generate_image")
+        );
+        assert!(!server.env.contains_key("WAKU_COMPUTER_USE_SERVER"));
+
+        let rule = computer_use_rule(&options).expect("a rule when wired");
+        assert!(rule.contains("waku_js_repl_generate_image"), "{rule}");
+        assert!(rule.contains("Markdown image"), "{rule}");
+        assert!(!rule.contains("Desktop control"), "{rule}");
         assert!(!rule.contains("  "), "{rule}");
     }
 

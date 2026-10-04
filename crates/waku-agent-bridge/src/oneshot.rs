@@ -56,6 +56,7 @@ pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result
         // draw with.
         computer_use: None,
         session_id: None,
+        browser_tools: false,
     };
     let config = build_config(&options)?;
     let mut query = build_query_config(&config, &options);

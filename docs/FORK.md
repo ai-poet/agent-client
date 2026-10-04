@@ -210,6 +210,21 @@ lines below.
 | `crates/waku-agent-bridge/src/config.rs` | fork-owned: `effort_level` reads `off` / `disabled` as the engine's `None` rung; unparsed it meant "unset", which the DeepSeek and GLM routes treat as thinking on at high | ~15 |
 | `locales/{app,zh-CN,ja}.yml` (Effort slider card) | `effort_panel.*` | 3 keys |
 | `scripts/bundle-windows.ts`, `scripts/bundle-linux.sh`, `scripts/bundle.sh` | `NOTICE.md` copied beside `LICENSE` (macOS: into `Resources/`), carrying the BSD-3 notice binary redistributions must include | 3 each |
+| `crates/waku-protocol/src/workspace.rs`, `crates/waku-core/src/workspace.rs` (Files panel edits) | additive `WorkspaceOperation::{CreateFile, CreateDirectory, RenamePath, TrashPath}`; `#[path] mod workspace_edit` and the four `execute` arms calling it | ~45 |
+| `src/app/right_panel.rs` (Files panel menu, agent browser) | `#[path]` mods `file_tree_menu` and `browser_agent`; in `render_right_panel_working_tree`: `FileTarget::of` per entry, `decorate_file_tree_row`, `file_tree_create_row` before the first row and after each, `file_tree_header_actions` in the header, the scroll area wrapped by `file_tree_area`; `RightPanelSurface::File` labels split on `\` too (Windows tabs showed the whole path) | ~15 |
+| `src/ui/menu.rs` | `ContextMenuHandle::open_context_menu_at`, for a keyboard-opened menu anchored at one row of a larger trigger | 5 |
+| `src/app.rs` (Files panel menu, agent browser) | the `file_tree` and `browser_agent` fields + initializers | 6 |
+| `locales/{app,zh-CN,ja}.yml` (Files panel menu) | `file_tree.*` | 14 keys |
+| `src/js_repl.rs`, `src/js_repl_image.rs` (pictures) | `WAKU_REPL_TOOLS` narrows the offered tools (`tool_offered`); a tool that ran and failed answers an `isError` result instead of a JSON-RPC error; a relative `output_dir` resolves against `WAKU_SESSION_CWD` | ~40 |
+| `crates/waku-agent-bridge/src/{config,session}.rs` (pictures, agent browser) | fork-owned: `ComputerUseWiring::image_only` (`WAKU_REPL_TOOLS=generate_image`, only that tool consented, the picture rule asking for the result as a Markdown image); `AgentStartOptions::browser_tools`, `browser_rule`, the browser tools added in `builtin_tools_with`, `browser_result`, released on cancel | ~120 |
+| `crates/waku-core/src/driver/native.rs` (pictures, agent browser) | fork-owned: with Computer Use off the REPL still comes image-only; `prompt` names a tool row; `AgentEvent::BrowserRequest` → `DriverEvent::BrowserRequest`; `browser_result`; `in_app_browser_offered` reads `WAKU_IN_APP_BROWSER` | ~45 |
+| `crates/waku-protocol/src/model.rs` | command rows read `code` (the built-in agent's REPL / JavaScript calls showed no source) and a `title` / `code` summary; additive `DriverEvent::BrowserRequest` | ~15 |
+| `src/md/render.rs` | `local_image_path`: an absolute path or `file:` URL in a Markdown image loads from disk (it was read as a bundled asset) | ~20 |
+| `crates/waku-protocol/src/{protocol,driver_wire}.rs`, `crates/waku-core/src/{daemon,server}.rs`, `crates/waku-core/src/driver/mod.rs`, `crates/waku-client/src/driver.rs`, `src/driver/mod.rs` (agent browser) | additive `Command::BrowserResult`; the `browserRequest` event encoded and decoded in both copies; `DriverControl::browser_result` (default no-op) and its `DriverHandle` passthrough on both sides; the command routed to the runtime | ~70 |
+| `crates/waku-client/src/process.rs` (agent browser) | a Windows desktop starts its daemon with `WAKU_IN_APP_BROWSER=1`, which is what offers the built-in agent the browser tools | 6 |
+| `src/app/streaming.rs` (agent browser) | `DriverEvent::BrowserRequest` deferred to `handle_browser_request` | 12 |
+| `src/browser.rs` (agent browser) | `#[path] mod automation`; `Webview::call_devtools` on the WebView2 host (`CallDevToolsProtocolMethod`) | ~40 |
+| `packages/waku-client/src/generated/{Command,WorkspaceOperation}.ts` | regenerated (`protocol:generate`) | — |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `CheapRouter` in `locales/` and the two i18n test expectations.
@@ -239,6 +254,8 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `src/app/content_translations.rs`,
 `src/app/{effort_panel,effort_scale,effort_fire,effort_relaunch}.rs`,
 `crates/waku-core/src/driver/acp_effort.rs`,
+`src/app/{file_tree_menu,browser_agent}.rs`, `src/browser_automation.rs`,
+`crates/waku-core/src/workspace_edit.rs`, `crates/waku-agent-bridge/src/browser.rs`,
 `crates/waku-protocol/src/activity_overview.rs`, `crates/waku-core/src/activity_overview.rs`,
 `docs/deepseek-harness.md`, `docs/deepseek-harness.zh.md`,
 `NOTICE.md`, `docs/FORK.md`.

@@ -82,6 +82,14 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
                 "questions": questions,
             }),
         ),
+        // Fork addition: the built-in agent's in-app browser requests.
+        DriverEvent::BrowserRequest {
+            request_id,
+            operation,
+        } => (
+            "browserRequest",
+            json!({ "requestId": request_id, "operation": operation }),
+        ),
         DriverEvent::ComputerUseUpdated(state) => (
             "computerUseUpdated",
             serde_json::to_value(ComputerUseWire {
@@ -179,6 +187,13 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 questions: request.questions,
             }
         }
+        "browserRequest" => {
+            let request: BrowserRequestWire = serde_json::from_value(payload)?;
+            DriverEvent::BrowserRequest {
+                request_id: request.request_id,
+                operation: request.operation,
+            }
+        }
         "computerUseUpdated" => {
             let state: ComputerUseWire = serde_json::from_value(payload)?;
             DriverEvent::ComputerUseUpdated(ComputerUseState {
@@ -237,6 +252,14 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
         "processExited" => DriverEvent::ProcessExited,
         kind => bail!("daemon sent an unsupported driver event {kind:?}"),
     })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BrowserRequestWire {
+    pub(crate) request_id: String,
+    #[serde(default)]
+    pub(crate) operation: Value,
 }
 
 #[derive(Deserialize)]

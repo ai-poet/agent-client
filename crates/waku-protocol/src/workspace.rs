@@ -252,6 +252,36 @@ pub enum WorkspaceOperation {
         edited_paths: Vec<String>,
         expected_safe: Vec<String>,
     },
+    /// Fork addition: the Files panel's edits. Paths are relative to `root`
+    /// on the daemon host; each answers `Ack` and fails rather than replace
+    /// anything that is already there.
+    CreateFile {
+        #[ts(type = "string")]
+        root: PathBuf,
+        #[ts(type = "string")]
+        relative_path: PathBuf,
+    },
+    CreateDirectory {
+        #[ts(type = "string")]
+        root: PathBuf,
+        #[ts(type = "string")]
+        relative_path: PathBuf,
+    },
+    RenamePath {
+        #[ts(type = "string")]
+        root: PathBuf,
+        #[ts(type = "string")]
+        from: PathBuf,
+        #[ts(type = "string")]
+        to: PathBuf,
+    },
+    /// Moves a file or directory to the daemon host's recycle bin.
+    TrashPath {
+        #[ts(type = "string")]
+        root: PathBuf,
+        #[ts(type = "string")]
+        relative_path: PathBuf,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]

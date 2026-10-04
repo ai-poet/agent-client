@@ -3,6 +3,13 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 
+// Fork: the Files panel's context menu, keyboard and edits.
+#[path = "file_tree_menu.rs"]
+pub(super) mod file_tree_menu;
+// Fork: the built-in agent drives the in-app browser.
+#[path = "browser_agent.rs"]
+pub(super) mod browser_agent;
+
 const TAB_SCROLL_FADE_WIDTH: f32 = 24.0;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -897,7 +904,8 @@ impl RightPanelSurface {
             }
             Self::Files => tr!("right_panel.files"),
             Self::Diff => tr!("right_panel.diff"),
-            Self::File(path) => path.rsplit('/').next().unwrap_or(path).to_owned(),
+            // Fork fix: Windows relative paths use backslashes.
+            Self::File(path) => path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned(),
         }
     }
 
@@ -2734,11 +2742,13 @@ impl Waku {
         let entries = self.right_panel_working_tree.clone();
 
         let mut list = div().flex().flex_col().py(px(6.0));
+        list = list.children(self.file_tree_create_row(None, cx)); // Fork: new item at the root
         for entry in entries {
             let relative_path = entry.relative_path.clone();
             let absolute_path = entry.absolute_path.clone();
             let is_dir = entry.is_dir;
             let selected = selected_path == Some(relative_path.as_str());
+            let file_target = file_tree_menu::FileTarget::of(&entry); // Fork: file tree menu
             let row = div()
                 .id(SharedString::from(format!(
                     "right-panel-file-{relative_path}"
@@ -2780,6 +2790,7 @@ impl Waku {
                         .text_color(theme.text_secondary)
                         .child(entry.name),
                 );
+            let row = self.decorate_file_tree_row(row, file_target.clone(), cx); // Fork
             list = if is_dir {
                 list.child(row.on_click(cx.listener(move |this, _, _, cx| {
                     if !this.right_panel_expanded_paths.remove(&absolute_path) {
@@ -2794,6 +2805,7 @@ impl Waku {
                     this.open_right_panel_file(relative_path.clone(), cx);
                 })))
             };
+            list = list.children(self.file_tree_create_row(Some(&file_target), cx)); // Fork
         }
 
         div()
@@ -2821,25 +2833,30 @@ impl Waku {
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.text_secondary)
                             .child(project_name),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .relative()
-                    .child(
-                        div()
-                            .id("right-panel-files-scroll")
-                            .size_full()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.right_panel_files_scroll_handle)
-                            .child(list),
                     )
-                    .child(scrollbar::vertical(
-                        &self.right_panel_files_scroll_handle,
-                        &self.right_panel_files_scrollbar,
-                    )),
+                    .child(self.file_tree_header_actions(cx)), // Fork: new file / folder, refresh
+            )
+            // Fork: the tree takes focus and opens its context menu.
+            .child(
+                self.file_tree_area(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .relative()
+                        .child(
+                            div()
+                                .id("right-panel-files-scroll")
+                                .size_full()
+                                .overflow_y_scroll()
+                                .track_scroll(&self.right_panel_files_scroll_handle)
+                                .child(list),
+                        )
+                        .child(scrollbar::vertical(
+                            &self.right_panel_files_scroll_handle,
+                            &self.right_panel_files_scrollbar,
+                        )),
+                    cx,
+                ),
             )
     }
 

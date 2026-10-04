@@ -17,6 +17,10 @@ pub use waku_protocol::workspace::{
     ReviewDiffData, ReviewDiffSource, WorkingTreeEntry, WorkspaceOperation, WorkspaceResult,
 };
 
+// Fork addition: the Files panel's create / rename / recycle-bin edits.
+#[path = "workspace_edit.rs"]
+mod workspace_edit;
+
 pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult> {
     Ok(match operation {
         WorkspaceOperation::ListTree {
@@ -241,6 +245,32 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
                 &expected_safe,
             )?,
         },
+        // Fork addition: Files panel edits (workspace_edit.rs).
+        WorkspaceOperation::CreateFile {
+            root,
+            relative_path,
+        } => {
+            workspace_edit::create_file(&root, &relative_path)?;
+            WorkspaceResult::Ack
+        }
+        WorkspaceOperation::CreateDirectory {
+            root,
+            relative_path,
+        } => {
+            workspace_edit::create_directory(&root, &relative_path)?;
+            WorkspaceResult::Ack
+        }
+        WorkspaceOperation::RenamePath { root, from, to } => {
+            workspace_edit::rename_path(&root, &from, &to)?;
+            WorkspaceResult::Ack
+        }
+        WorkspaceOperation::TrashPath {
+            root,
+            relative_path,
+        } => {
+            workspace_edit::trash_path(&root, &relative_path)?;
+            WorkspaceResult::Ack
+        }
     })
 }
 

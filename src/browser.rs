@@ -414,6 +414,7 @@ mod host {
     };
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
     use webview2_com::{
+        CallDevToolsProtocolMethodCompletedHandler,
         CreateCoreWebView2CompositionControllerCompletedHandler,
         CreateCoreWebView2EnvironmentCompletedHandler, CursorChangedEventHandler,
         DocumentTitleChangedEventHandler, FocusChangedEventHandler, MoveFocusRequestedEventHandler,
@@ -587,6 +588,41 @@ mod host {
         /// window is the user's from here on.
         pub fn open_devtools(&self) -> windows::core::Result<()> {
             unsafe { self.0.OpenDevToolsWindow() }
+        }
+
+        /// Fork addition: one Chrome DevTools Protocol call, for the agent's
+        /// browser tools (`browser_automation.rs`). `done` receives the
+        /// method's JSON answer — exactly once, also when the call could not
+        /// be sent. It runs on the UI thread from a posted message, so it
+        /// must not assume the app is un-borrowed.
+        pub fn call_devtools(
+            &self,
+            method: &str,
+            params: &str,
+            done: Box<dyn FnOnce(Result<String, String>)>,
+        ) {
+            let done = Rc::new(RefCell::new(Some(done)));
+            let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new({
+                let done = done.clone();
+                move |result, json| {
+                    if let Some(done) = done.borrow_mut().take() {
+                        done(result.map(|()| json).map_err(|error| error.to_string()));
+                    }
+                    Ok(())
+                }
+            }));
+            let sent = unsafe {
+                self.0.CallDevToolsProtocolMethod(
+                    &HSTRING::from(method),
+                    &HSTRING::from(params),
+                    &handler,
+                )
+            };
+            if let Err(error) = sent
+                && let Some(done) = done.borrow_mut().take()
+            {
+                done(Err(error.to_string()));
+            }
         }
     }
 
@@ -1149,6 +1185,10 @@ impl Deferred {
             .detach();
     }
 }
+
+// Fork addition: what the built-in agent's browser tools do to the page.
+#[path = "browser_automation.rs"]
+pub mod automation;
 
 pub struct BrowserView {
     focus_handle: FocusHandle,

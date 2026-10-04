@@ -299,6 +299,11 @@ impl DriverControl for RemoteDriverControl {
         });
     }
 
+    // Fork addition: the in-app browser's answer to the built-in agent.
+    fn browser_result(&self, request_id: String, result: serde_json::Value) {
+        self.notify(waku_client::Command::BrowserResult { request_id, result });
+    }
+
     fn goal(&self, operation: waku_protocol::model::GoalOperation) {
         self.notify(waku_client::Command::Goal { operation });
     }

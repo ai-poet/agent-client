@@ -39,6 +39,8 @@
 //! Depending on `waku-core` from here would close that cycle.
 
 pub mod background;
+// Fork: the in-app browser tools.
+mod browser;
 mod computer_use;
 mod config;
 mod events;

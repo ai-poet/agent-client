@@ -456,6 +456,21 @@ impl Waku {
                     }
                 }
             }
+            // Fork addition: the built-in agent drives the in-app browser
+            // (`right_panel/browser_agent.rs`). Deferred: the runtime is out
+            // of `self.runtimes` while its events are applied, and the
+            // answer goes back through it.
+            DriverEvent::BrowserRequest {
+                request_id,
+                operation,
+            } => {
+                let waku = cx.entity().downgrade();
+                cx.defer(move |cx| {
+                    let _ = waku.update(cx, |waku, cx| {
+                        waku.handle_browser_request(session_id, request_id, operation, cx);
+                    });
+                });
+            }
             DriverEvent::ComputerUseUpdated(state) => {
                 if self.accepts_turn_output(session_id) {
                     Self::upsert_computer_use_preview(runtime, state);

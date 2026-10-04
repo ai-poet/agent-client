@@ -87,10 +87,11 @@ impl ToolSets {
         disallowed: &[String],
         mcp: Option<&Arc<claurst_mcp::McpManager>>,
         subagents: &Arc<SubagentHost>,
+        browser: Option<&Arc<crate::browser::BrowserHost>>,
     ) -> Self {
         Self {
-            plain: builtin_tools(disallowed, mcp, false, subagents),
-            goal: builtin_tools(disallowed, mcp, true, subagents),
+            plain: builtin_tools_with(disallowed, mcp, false, subagents, browser),
+            goal: builtin_tools_with(disallowed, mcp, true, subagents, browser),
         }
     }
 }
@@ -128,6 +129,9 @@ struct Inner {
     questions: Mutex<HashMap<String, oneshot::Sender<String>>>,
     /// The sub-agents this session starts, through its `Agent` tool.
     subagents: Arc<SubagentHost>,
+    /// Fork addition: the in-app browser's requests in flight, when the
+    /// desktop offers it.
+    browser: Option<Arc<crate::browser::BrowserHost>>,
 }
 
 /// The parts of a running turn that outside callers need to reach.
@@ -178,17 +182,28 @@ impl AgentSession {
                         })
                         .ok()
                 });
-                let tools = crate::config::COMPUTER_USE_TOOLS
-                    .iter()
-                    .map(|tool| (*tool).to_owned())
-                    .collect();
+                // Fork: an image-only REPL (Computer Use off) consents to
+                // drawing alone, and a desktop skill left from an earlier
+                // session must not describe tools this one lacks.
+                let tools = if wiring.image_only {
+                    crate::computer_use::remove_skill();
+                    vec![crate::config::IMAGE_TOOL.to_owned()]
+                } else {
+                    crate::config::COMPUTER_USE_TOOLS
+                        .iter()
+                        .map(|tool| (*tool).to_owned())
+                        .collect()
+                };
                 bridge.set_consented(tools, skill);
             }
             None => crate::computer_use::remove_skill(),
         }
 
         let subagents = SubagentHost::new(events.clone());
-        let tools = ToolSets::build(&config.disallowed_tools, None, &subagents);
+        let browser = options
+            .browser_tools
+            .then(|| crate::browser::BrowserHost::new(events.clone()));
+        let tools = ToolSets::build(&config.disallowed_tools, None, &subagents, browser.as_ref());
         let inner = Arc::new(Inner {
             events,
             id: options
@@ -214,6 +229,7 @@ impl AgentSession {
             turn_counter: Arc::new(AtomicUsize::new(0)),
             questions: Mutex::new(HashMap::new()),
             subagents,
+            browser,
         });
 
         connect_mcp_in_background(&inner);
@@ -289,6 +305,9 @@ impl AgentSession {
             cancel.cancel();
         }
         self.inner.bridge.release_all();
+        if let Some(browser) = &self.inner.browser {
+            browser.release_all();
+        }
         // Dropping the reply senders makes each waiting `AskUserQuestion`
         // return an error to the model, which the cancelled loop discards.
         self.inner.questions.lock().clear();
@@ -361,6 +380,13 @@ impl AgentSession {
         rt.spawn(async move {
             compact_now(inner, instructions, cancel).await;
         });
+    }
+
+    /// Fork addition: the desktop's answer to an [`AgentEvent::BrowserRequest`].
+    pub fn browser_result(&self, request_id: &str, result: serde_json::Value) {
+        if let Some(browser) = &self.inner.browser {
+            browser.resolve(request_id, result);
+        }
     }
 
     /// Answer a [`AgentEvent::Permission`].
@@ -575,13 +601,34 @@ pub(crate) fn build_clients(
 /// Filtering here rather than in the prompt is what makes the Tools page
 /// reliable: a tool that is not in this list is not sent to the model at all,
 /// so there is nothing for it to be talked into.
+#[cfg(test)]
 fn builtin_tools(
     disallowed: &[String],
     mcp: Option<&Arc<claurst_mcp::McpManager>>,
     with_goal: bool,
     subagents: &Arc<SubagentHost>,
 ) -> ToolSet {
+    builtin_tools_with(disallowed, mcp, with_goal, subagents, None)
+}
+
+/// The session's tools; with `browser`, the in-app browser's too (fork
+/// addition, `crate::browser`). Sub-agents never get those: two loops
+/// driving one page would trip over each other.
+fn builtin_tools_with(
+    disallowed: &[String],
+    mcp: Option<&Arc<claurst_mcp::McpManager>>,
+    with_goal: bool,
+    subagents: &Arc<SubagentHost>,
+    browser: Option<&Arc<crate::browser::BrowserHost>>,
+) -> ToolSet {
     let mut tools = engine_builtins(disallowed);
+    if let Some(host) = browser {
+        tools.extend(
+            crate::browser::tools(host)
+                .into_iter()
+                .filter(|tool| !disallowed.iter().any(|name| name == tool.name())),
+        );
+    }
     // Ours, not the engine's `claurst_query::AgentTool`: see `crate::subagent`.
     if !disallowed.iter().any(|name| name == crate::subagent::AGENT_TOOL_NAME) {
         tools.push(Box::new(SubagentTool::new(subagents.clone())));
@@ -646,7 +693,12 @@ fn connect_mcp_in_background(inner: &Arc<Inner>) {
             tracing::warn!(%server, %error, "agent: MCP server did not connect");
         }
         let disallowed = inner.config.lock().disallowed_tools.clone();
-        *inner.tools.lock() = ToolSets::build(&disallowed, Some(&manager), &inner.subagents);
+        *inner.tools.lock() = ToolSets::build(
+            &disallowed,
+            Some(&manager),
+            &inner.subagents,
+            inner.browser.as_ref(),
+        );
         *inner.mcp.lock() = Some(manager);
     });
 }

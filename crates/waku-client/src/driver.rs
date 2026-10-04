@@ -77,6 +77,11 @@ impl DriverHandle {
         self.inner.respond_user_input(request_id, answers);
     }
 
+    /// Fork addition: answer an in-app browser request.
+    pub fn browser_result(&self, request_id: String, result: serde_json::Value) {
+        self.inner.browser_result(request_id, result);
+    }
+
     /// Read or mutate the provider-persisted thread goal. Outcomes arrive
     /// asynchronously as `DriverEvent::GoalUpdated` or `DriverEvent::Error`.
     pub fn goal(&self, operation: GoalOperation) {
@@ -120,6 +125,7 @@ pub trait DriverControl: Send + Sync {
     fn stop_background_work(&self, _key: BackgroundWorkKey, _control_id: String) {}
     fn respond(&self, request_id: String, option_id: String);
     fn respond_user_input(&self, _request_id: String, _answers: Vec<UserInputAnswer>) {}
+    fn browser_result(&self, _request_id: String, _result: serde_json::Value) {}
     fn goal(&self, _operation: GoalOperation) {}
     fn run_computer_tool(&self, _request: ComputerToolRequest) {}
     fn reject_computer_tool(&self, _request: ComputerToolRequest, _reason: String) {}

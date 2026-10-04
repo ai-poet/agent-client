@@ -37,6 +37,18 @@ the original feature bullet instead of adding separate entries for them.
 
   The composer's reasoning control is now a Claude Code–style Effort slider card: drag it and it snaps to the nearest level on release, or use the arrow keys, Home and End; the level's name is colored by intensity and the flame along the track grows with it, holding still when the system asks for reduced motion; service tier / API and context window stay in the same card. Also fixes efforts that were picked but never applied: Claude Code picks up a new effort with your next message and carries on the same conversation without interrupting a running turn, changing only Kimi's effort now applies it, and an `off` level declared on your own endpoint really turns thinking off instead of turning high thinking on for DeepSeek and GLM
 
+- 文件面板支持右键菜单：打开、用默认应用打开、在文件管理器中显示、在消息中引用、复制路径或相对路径、新建文件或文件夹、就地重命名、移到回收站、刷新；也可以用键盘操作（方向键、Home/End、回车、F2 重命名、Delete 删除、Shift+F10 打开菜单），面板顶部新增新建与刷新按钮。远程工作区同样可以新建、重命名和删除
+
+  The Files panel has a context menu: open, open with the default app, reveal in the file manager, mention in a message, copy the path or the relative path, new file or folder, rename in place, move to the trash and refresh; rows also work from the keyboard (arrows, Home/End, Enter, F2 to rename, Delete, Shift+F10 for the menu), and the panel header gains new-file, new-folder and refresh buttons. Creating, renaming and deleting work on remote workspaces too
+
+- 内置 Agent 画图更好用：不开启电脑操控也能画图；Agent 会把画好的图片直接显示在回复里，回复里引用本机图片路径的图片现在能正常显示；画图失败时的提示更直接；画图那一行显示画的内容，JavaScript 调用的那一行会显示执行的代码
+
+  Drawing with the built-in agent works better: it can draw without Computer Use switched on, shows the pictures it made right in its reply, and images in a reply that point at a file on this computer now load; a failed drawing says plainly why, a drawing's row shows what was asked for, and JavaScript calls show their code
+
+- 内置 Agent 可以操控应用内置浏览器（Windows）：打开网页、读取页面、点击、输入、选择、按键、执行脚本、等待内容出现、查看控制台和截图，适合对本地开发服务或测试站点做自动化测试。浏览器会在当前任务的右侧面板中打开；点击、输入等操作和执行命令一样按权限设置询问
+
+  The built-in agent can drive the app's in-app browser (Windows): open pages, read them, click, type, choose options, press keys, run scripts, wait for content, read the console and take screenshots — for automated testing of a local dev server or a staging site. The browser opens in the current task's right panel; clicking, typing and the like ask for permission the way running a command does
+
 ## [0.2.10]
 
 - 新建任务的欢迎页新增活动概览：会话数、消息数、活跃天数、高峰时段、最常用模型和最长连续天数，可在全部 / 30 天 / 7 天之间切换；下方是近半年每天的消息热力图（悬停显示当天条数），「模型」页按消息占比给模型排行。数据来自本机的任务历史

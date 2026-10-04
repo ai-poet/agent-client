@@ -181,7 +181,14 @@ fn serve<R: BufRead, W: Write>(mut input: R, mut output: W) -> anyhow::Result<()
             "tools/list" => json_rpc_result(id, json!({"tools": tool_definitions()})),
             "tools/call" => match call_tool(&mut repl, &params) {
                 Ok(result) => json_rpc_result(id, result),
-                Err(error) => json_rpc_error(id, -32602, &error.to_string()),
+                // Fork fix: a tool that ran and failed answers with an error
+                // *result*, as MCP specifies, so the agent reads the reason
+                // itself — a JSON-RPC error reached the model and the person
+                // wrapped in three layers of "call failed".
+                Err(error) => json_rpc_result(
+                    id,
+                    tool_result(&format!("{error:#}"), true, Vec::new(), Map::new()),
+                ),
             },
             "shutdown" => json_rpc_result(id, JsonValue::Null),
             _ => json_rpc_error(id, -32601, &format!("unsupported MCP method: {method}")),
@@ -255,7 +262,23 @@ fn tool_definitions() -> Vec<JsonValue> {
     if crate::js_repl_image::resolve_gateway().is_some() {
         tools.push(image_tool_definition());
     }
+    tools.retain(|tool| tool_offered(tool["name"].as_str().unwrap_or_default()));
     tools
+}
+
+/// Fork addition: `WAKU_REPL_TOOLS` — a comma-separated list — narrows what
+/// this server offers. The built-in agent sets it to `generate_image` when
+/// Computer Use is off, so pictures can still be drawn without handing the
+/// model a JavaScript kernel nobody switched on. Unset offers everything.
+fn tool_offered(name: &str) -> bool {
+    tool_offered_by(std::env::var("WAKU_REPL_TOOLS").ok().as_deref(), name)
+}
+
+fn tool_offered_by(allowed: Option<&str>, name: &str) -> bool {
+    match allowed.map(str::trim).filter(|allowed| !allowed.is_empty()) {
+        None => true,
+        Some(allowed) => allowed.split(',').any(|tool| tool.trim() == name),
+    }
 }
 
 fn image_tool_definition() -> JsonValue {
@@ -392,6 +415,9 @@ fn call_tool(repl: &mut JavaScriptRepl, params: &JsonValue) -> anyhow::Result<Js
     let arguments = arguments
         .as_object()
         .ok_or_else(|| anyhow!("tool arguments must be an object"))?;
+    if !tool_offered(name) {
+        bail!("{name} is not available in this session");
+    }
     match name {
         "js" => {
             let code = arguments
@@ -1083,6 +1109,16 @@ mod tests {
 
     fn call(repl: &mut JavaScriptRepl, code: &str) -> JsonValue {
         repl.execute(code, Duration::from_secs(1), json!({}))
+    }
+
+    #[test]
+    fn the_offered_tools_follow_the_session_list() {
+        assert!(tool_offered_by(None, "js"));
+        assert!(tool_offered_by(Some(""), "js"));
+        assert!(tool_offered_by(Some("generate_image"), "generate_image"));
+        assert!(!tool_offered_by(Some("generate_image"), "js"));
+        assert!(!tool_offered_by(Some("generate_image"), "js_reset"));
+        assert!(tool_offered_by(Some("js, generate_image"), "generate_image"));
     }
 
     #[test]

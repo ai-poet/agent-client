@@ -107,6 +107,12 @@ pub enum Command {
         request_id: String,
         answers: Vec<UserInputAnswer>,
     },
+    /// Fork addition: the answer to a `browserRequest` driver event —
+    /// `{"ok": true, "value": …}` or `{"ok": false, "error": "…"}`.
+    BrowserResult {
+        request_id: String,
+        result: Value,
+    },
     /// Ask the live provider runtime to read or mutate its persisted thread
     /// goal. Fire-and-forget: the outcome arrives as a `goalUpdated` driver
     /// event, or an `error` event when the provider refuses.

@@ -1971,6 +1971,14 @@ pub enum DriverEvent {
         request_id: String,
         questions: Vec<UserInputQuestion>,
     },
+    /// Fork addition: the built-in agent wants something done in the
+    /// session's in-app browser — navigate, read, click, type, run a script,
+    /// take a screenshot. `operation` is `{"op": …, …}`. The desktop that
+    /// owns the browser answers with `Command::BrowserResult`.
+    BrowserRequest {
+        request_id: String,
+        operation: serde_json::Value,
+    },
     ComputerUseUpdated(crate::computer_use::ComputerUseState),
     /// The provider accepted a steering message into the running turn.
     SteerAccepted {
@@ -2590,8 +2598,11 @@ fn normalize_command_activity_command(source: String) -> Option<String> {
                     .join(" "),
             )
         }
+        // Fork fix: `code` too — the built-in agent's REPL and JavaScript
+        // calls (`{code, language}`, `{code, title, timeout_ms}`) are command
+        // rows, and dropping their source left the row with output only.
         serde_json::Value::Object(_) => {
-            find_activity_string(&value, &["command", "cmd", "script"], 0)
+            find_activity_string(&value, &["command", "cmd", "script", "code"], 0)
                 .and_then(|command| non_empty_activity_text(&command))
         }
         _ => Some(source.to_owned()),
@@ -2806,7 +2817,8 @@ fn extract_activity_display_target(
     source: &serde_json::Value,
 ) -> Option<String> {
     let keys: &[&str] = match kind {
-        ActivityKind::Command => &["command", "cmd"],
+        // Fork: a JavaScript call's own one-line `title`, else its code.
+        ActivityKind::Command => &["command", "cmd", "title", "code"],
         ActivityKind::FileRead => &[
             "filePath",
             "file_path",
@@ -3675,6 +3687,27 @@ pub fn compact_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The built-in agent's JavaScript calls are command rows: their code
+    /// is the command, and their title the row's summary.
+    #[test]
+    fn javascript_calls_show_their_code_and_title() {
+        let input = r#"{"code":"await sky.click(1)","title":"Click Save","timeout_ms":5000}"#;
+        assert_eq!(
+            normalize_command_activity_command(input.to_owned()).as_deref(),
+            Some("await sky.click(1)")
+        );
+        let source: serde_json::Value = serde_json::from_str(input).unwrap();
+        assert_eq!(
+            extract_activity_display_target(ActivityKind::Command, &source).as_deref(),
+            Some("Click Save")
+        );
+        let shell: serde_json::Value = serde_json::json!({"command": "ls -la", "title": "x"});
+        assert_eq!(
+            extract_activity_display_target(ActivityKind::Command, &shell).as_deref(),
+            Some("ls -la")
+        );
+    }
 
     #[test]
     fn background_work_snapshots_have_serializable_named_items() {

@@ -84,6 +84,13 @@ pub enum AgentEvent {
         /// always acceptable too.
         options: Vec<String>,
     },
+    /// Fork addition: a browser tool wants the desktop's in-app browser to
+    /// do `operation` (`{"op": …}`). Answered with
+    /// [`crate::AgentSession::browser_result`]. See [`crate::browser`].
+    BrowserRequest {
+        request_id: String,
+        operation: Value,
+    },
     /// Something a sub-agent did, for the record of the `Agent` call
     /// `parent_tool_id` that started it. See [`crate::subagent`].
     Subagent {
