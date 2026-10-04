@@ -202,6 +202,14 @@ lines below.
 | `src/app/render.rs` (content translations) | `flush_content_translations` before `render_window_frame` in both branches | 4 |
 | `src/app/settings.rs` (content translations) | `reset_content_translations` in `set_language`, ahead of `sync_native_models` (the picker's route notes name groups) | 3 |
 | `src/app/{cloud_groups,cloud_menu,cloud_failover,cloud_usage,cloud_subscriptions,model_plaza,image_studio_view,model_status_view,announcements,plans_page,cloud_pay}.rs` (content translations, fork-owned) | display sites wrapped in `self.tx(..)`: group names and descriptions, announcement titles and bodies, plan names / descriptions / features, promotion names, the pay help text (translated whole, then split into lines). Free helpers take the shown string from the caller (`subscription_menu_line`, `subscription_card`, `usage_log_card`, `plan_summary`). **Display only** — `cloud_lane`, `model_routing::{group_lane, plan_lane, named_domestic}`, failover and every stored struct keep the originals; never write a `tx` result back | ~45 |
+| `src/app.rs` (Effort slider card) | `mod effort_{fire,panel,relaunch,scale}` under a fork comment; the `effort_card` and `effort_launches` fields + initializers | ~14 |
+| `src/app/composer.rs` (Effort slider card) | the control row calls `render_effort_card_control` instead of `render_model_traits_control`, which stays with `#[allow(dead_code)]` so upstream edits to it keep merging | 5 |
+| `src/app/runtime.rs` (Claude effort relaunch) | `self.relaunch_for_effort(session_id)` in `submit_submission_for_session`, after the native route hold — Claude Code takes its effort only as a launch flag, so an idle runtime with a stale effort is relaunched with `--resume` there | 2 |
+| `crates/waku-core/src/driver/acp.rs` (effort-only change) | `#[path = "acp_effort.rs"] mod acp_effort;` and the `Options` arm dispatching on `acp_effort::reapply` — Kimi gets an effort-only change as its `thinking` option, Grok and Cursor re-select the model as before | ~25 |
+| `crates/waku-core/src/driver/claude.rs` (tests only) | `an_effort_change_never_asks_for_a_restart`: an effort change must never make `apply_options` refuse, which would cancel a running turn — the app-side relaunch relies on it | 12 |
+| `crates/waku-agent-bridge/src/config.rs` | fork-owned: `effort_level` reads `off` / `disabled` as the engine's `None` rung; unparsed it meant "unset", which the DeepSeek and GLM routes treat as thinking on at high | ~15 |
+| `locales/{app,zh-CN,ja}.yml` (Effort slider card) | `effort_panel.*` | 3 keys |
+| `scripts/bundle-windows.ts`, `scripts/bundle-linux.sh`, `scripts/bundle.sh` | `NOTICE.md` copied beside `LICENSE` (macOS: into `Resources/`), carrying the BSD-3 notice binary redistributions must include | 3 each |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `CheapRouter` in `locales/` and the two i18n test expectations.
@@ -229,6 +237,8 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `crates/waku-client/src/{activity_phase,turn_segments,status_capsule}.rs`,
 `src/app/home_overview.rs`, `src/app/turn_status.rs`,
 `src/app/content_translations.rs`,
+`src/app/{effort_panel,effort_scale,effort_fire,effort_relaunch}.rs`,
+`crates/waku-core/src/driver/acp_effort.rs`,
 `crates/waku-protocol/src/activity_overview.rs`, `crates/waku-core/src/activity_overview.rs`,
 `docs/deepseek-harness.md`, `docs/deepseek-harness.zh.md`,
 `NOTICE.md`, `docs/FORK.md`.

@@ -33,6 +33,10 @@ the original feature bullet instead of adding separate entries for them.
 
   Fix cloud sign-in, login-code exchange and every other service request failing with "could not parse response body: HTTP/1.1 200 OK …" behind an HTTP proxy (for example with `HTTPS_PROXY` set): the proxy's reply to CONNECT was taken for the real response headers
 
+- 输入框的推理强度改为 Claude Code 风格的 Effort 滑杆卡片：拖动后松手吸附到最近的档位，也可以用方向键、Home、End 调节；档位名按强度着色，档位越高轨道上的火焰越旺，系统开启「减少动态效果」时火焰静止；服务等级 / 接口格式和上下文窗口仍在同一张卡片里。同时修复换了档却不生效的几种情况：Claude Code 会在你发下一条消息时以新强度接着原会话继续，不打断正在进行的回合；Kimi 只改强度也会立即应用；自定义接口声明的 off 档真正关闭思考，不再在 DeepSeek、GLM 上开启高强度思考
+
+  The composer's reasoning control is now a Claude Code–style Effort slider card: drag it and it snaps to the nearest level on release, or use the arrow keys, Home and End; the level's name is colored by intensity and the flame along the track grows with it, holding still when the system asks for reduced motion; service tier / API and context window stay in the same card. Also fixes efforts that were picked but never applied: Claude Code picks up a new effort with your next message and carries on the same conversation without interrupting a running turn, changing only Kimi's effort now applies it, and an `off` level declared on your own endpoint really turns thinking off instead of turning high thinking on for DeepSeek and GLM
+
 ## [0.2.10]
 
 - 新建任务的欢迎页新增活动概览：会话数、消息数、活跃天数、高峰时段、最常用模型和最长连续天数，可在全部 / 30 天 / 7 天之间切换；下方是近半年每天的消息热力图（悬停显示当天条数），「模型」页按消息占比给模型排行。数据来自本机的任务历史

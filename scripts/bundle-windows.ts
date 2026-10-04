@@ -138,6 +138,9 @@ try {
     await copyFile(join(releaseDirectory, file), join(packageDirectory, file));
   }
   await copyFile(join(projectRoot, "LICENSE"), join(packageDirectory, "LICENSE"));
+  // Fork addition: the modification and third-party notices (BSD-3 asks
+  // binary redistributions to carry them).
+  await copyFile(join(projectRoot, "NOTICE.md"), join(packageDirectory, "NOTICE.md"));
 
   // Computer Use resources, at the flat paths waku-core's resolvers expect
   // beside the executable (the macOS bundle keeps them under Resources/).

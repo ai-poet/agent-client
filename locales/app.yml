@@ -4194,3 +4194,9 @@ home_overview.show_less:
   en: "Show less"
 home_overview.no_models:
   en: "No model data in this range"
+effort_panel.title:
+  en: "Effort"
+effort_panel.slider_label:
+  en: "Reasoning effort"
+effort_panel.waits_for_background:
+  en: "The new reasoning effort applies once the background tasks finish"

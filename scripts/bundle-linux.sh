@@ -27,6 +27,8 @@ install -Dm644 resources/linux/sh.waku.desktop \
 install -Dm644 resources/linux/icons/256x256.png \
   "$package_dir/share/icons/hicolor/256x256/apps/sh.waku.png"
 install -Dm644 LICENSE "$package_dir/share/licenses/waku/LICENSE"
+# Fork addition: modification and third-party notices beside the license.
+install -Dm644 NOTICE.md "$package_dir/share/licenses/waku/NOTICE.md"
 
 mkdir -p "$(dirname "$archive")"
 tar -C "$staging" -czf "$archive" "$package"

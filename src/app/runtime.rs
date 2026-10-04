@@ -3381,6 +3381,8 @@ impl Waku {
             self.hold_for_route(session_id, submission, cx);
             return;
         }
+        // Fork addition: a new effort reaches Claude Code by relaunching it here.
+        self.relaunch_for_effort(session_id);
         let selected = self.state.selected_session == Some(session_id);
         let Some(session) = self
             .state

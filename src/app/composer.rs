@@ -1500,6 +1500,9 @@ impl Waku {
         self.choose_model(kind, model_id, cx);
     }
 
+    // Fork: superseded by `render_effort_card_control` (effort_panel.rs); the
+    // body stays so upstream edits to it keep merging.
+    #[allow(dead_code)]
     pub(super) fn render_model_traits_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let theme = Theme::current(cx);
         let session = self.selected_session()?;
@@ -2982,7 +2985,8 @@ impl Waku {
                         .text_size(sp(12.5))
                         .line_height(sp(14.0))
                         .child(self.render_provider_model_control(cx))
-                        .children(self.render_model_traits_control(cx))
+                        // Fork: the traits chip opens the Effort slider card (effort_panel.rs).
+                        .children(self.render_effort_card_control(cx))
                         .children(self.render_agent_preset_control(cx))
                         .child(self.render_access_control(cx))
                         .child(self.render_interaction_mode_control(cx))

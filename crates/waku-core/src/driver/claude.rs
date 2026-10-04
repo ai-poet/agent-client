@@ -2729,6 +2729,19 @@ mod tests {
         assert!(!driver.apply_options(options(RuntimeMode::FullAccess, InteractionMode::Build)));
     }
 
+    /// Fork addition. The desktop relaunches the CLI for a new effort at the
+    /// next submission, while the session is idle (`effort_relaunch.rs`).
+    /// That relies on an effort change never being refused here: a refusal
+    /// tears the runtime down at once, cancelling a turn that is running.
+    #[test]
+    fn an_effort_change_never_asks_for_a_restart() {
+        let (driver, commands) = plan_driver(RuntimeMode::Ask, false);
+        let mut changed = options(RuntimeMode::Ask, InteractionMode::Build);
+        changed.reasoning_effort = Some("max".to_owned());
+        assert!(driver.apply_options(changed));
+        assert!(matches!(commands.try_recv(), Ok(CommandMessage::Options(_))));
+    }
+
     /// After an approved plan the CLI is already building. The composer
     /// follows it, and a later unrelated change must not read the stale
     /// launch mode as a request to switch — which used to cost a restart.

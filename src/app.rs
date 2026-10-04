@@ -1311,6 +1311,11 @@ pub struct Waku {
     /// Fork addition: per session, the live turn and the agent's output-token
     /// total when that turn's first usage report arrived (`turn_status`).
     turn_output_baselines: HashMap<Uuid, (Uuid, u64)>,
+    /// Fork addition: the Effort slider card, created on its first open
+    /// (`effort_panel`), and the effort each live Claude runtime was launched
+    /// with (`effort_relaunch`).
+    effort_card: Option<Entity<effort_panel::EffortCard>>,
+    effort_launches: HashMap<Uuid, effort_relaunch::LaunchedEffort>,
     /// Commit-message generation and Git mutation outlive the modal that
     /// started them. Keeping the operation on the app also lets every
     /// Environment surface reflect and gate the same in-flight action.
@@ -1775,6 +1780,12 @@ mod goal_dialog;
 mod components;
 mod composer;
 mod drafts;
+// Fork: the Effort slider card (a dsh-effort-slider port) and Claude Code's
+// relaunch for a new effort.
+mod effort_fire;
+mod effort_panel;
+mod effort_relaunch;
+mod effort_scale;
 mod error_banner;
 mod file_search;
 mod home_overview;
@@ -3161,6 +3172,8 @@ impl Waku {
                 goal_observed_at: HashMap::new(),
                 compacting_sessions: HashSet::new(),
                 turn_output_baselines: HashMap::new(),
+                effort_card: None,
+                effort_launches: HashMap::new(),
                 commit_operation: None,
                 // Providers × workspaces; both scans are small, the cache
                 // only exists to keep them off the frame path.

@@ -116,6 +116,7 @@ This fork remains licensed under GPL-3.0-only.
 | 2026-10-04 | Added `docs/deepseek-harness.md` and `docs/deepseek-harness.zh.md` (English and Chinese reference to the DeepSeek Harness plugin system: how its plugins hook the agent loop and fill its UI slots, its feature-plugin catalog, and where each seam lives in this client, for porting features) and a "DeepSeek Harness reference" section in `AGENTS.md`. Nothing from DeepSeek Harness is loaded or copied. |
 | 2026-10-04 | Ported three features from dsh-claude-style (MIT, © Nwflower; behaviour and lookup rules only — copy, code and colours are our own): a one-line description per model picker row (`crates/sub2api/src/model_copy.rs`, family → tier rules, `model_copy.*` keys); the live working row now reads "Working for N · output tokens · current action" (`src/app/turn_status.rs`; tokens from the agent’s own usage reports only); and an activity overview on the welcome screen — sessions, messages, active days, peak hour, favourite model, longest streak over All / 30 / 7 days, a 26-week heat grid and a model ranking, all counted from local message history (`src/app/home_overview.rs`, `crates/waku-{protocol,core}/src/activity_overview.rs`, additive `Command::LoadActivityOverview`). |
 | 2026-10-04 | Administrator-written text — group names and descriptions, announcements, the pay service's plans, promotions and help text — is shown in the interface language when the gateway has a translation: render sites ask through `Waku::tx`, which answers from memory and queues the rest; one background request per batch reads the gateway's public translation cache (`POST /api/v1/content-translations/lookup`, never a model call), asks again after 10 s while the server says some text is still being translated (three times at most), and keeps a copy in `~/.cheaprouter/content-translations.json` for the next launch (`crates/sub2api/src/content_translations.rs`, `src/app/content_translations.rs`). Display only: routing and the Chinese models' lane still read the original names. |
+| 2026-10-04 | Ported the Effort slider card of dsh-effort-slider (BSD-3-Clause; notice below): the composer's traits chip opens one card with the Effort slider on top — continuous drag that snaps to a level on release, arrow keys, the level's name colored by intensity, and the plugin's fire redrawn with gpui primitives (its per-cell shader math evaluated on the CPU, blur passes as blurred shadows) — and the service tier / wire format and context window choices below it (`src/app/effort_{panel,scale,fire}.rs`). Levels are colored by what they are rather than by position, tick labels are the real level names, and two plugin colors were raised to a 4.5:1 contrast. Effort changes that used to look applied and change nothing now take effect: Claude Code is relaunched with `--resume` and the new `--effort` at the next message while idle, never mid-turn (`src/app/effort_relaunch.rs`); a running Kimi session receives an effort-only change (`crates/waku-core/src/driver/acp_effort.rs`); and an `off` level declared on an endpoint reaches the built-in agent as its lowest rung instead of "unset", which DeepSeek and GLM routes read as thinking on (`crates/waku-agent-bridge/src/config.rs`). `NOTICE.md` now ships in the Windows, Linux and macOS packages. |
 
 ## Upstream attribution
 
@@ -129,3 +130,44 @@ The agent engine vendored under `crates/waku-agent` is Claurst by
 kuberwastaken and contributors, licensed GPL-3.0:
 <https://github.com/kuberwastaken/claurst>. Its licence text is preserved
 alongside the vendored sources; the modifications listed above are this fork's.
+
+## Third-party notices
+
+The Effort slider card (`src/app/effort_panel.rs`, `src/app/effort_scale.rs`,
+`src/app/effort_fire.rs`) is derived from dsh-effort-slider
+(<https://github.com/2768651338/dsh-effort-slider>), whose interface follows the
+aurora skin of dsh-ui-web (<https://github.com/CAPTAIN1275/dsh-ui-web>). It is
+used under the following licence:
+
+```text
+BSD 3-Clause License
+
+Copyright (c) 2026, dsh-web-ui-custom contributors
+Copyright (c) 2026, dsh-effort-slider contributors (standalone extraction)
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```

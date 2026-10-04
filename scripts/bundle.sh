@@ -167,6 +167,9 @@ if [ "$profile" = "release" ]; then
 fi
 cp resources/Info.plist "$contents/Info.plist"
 cp "resources/$icon_file" "$contents/Resources/AppIcon.icns"
+# Fork addition: modification and third-party notices (BSD-3 asks binary
+# redistributions to carry them).
+cp NOTICE.md "$contents/Resources/NOTICE.md"
 cp resources/computer-use/pi-extension.ts "$contents/Resources/computer-use/pi-extension.ts"
 cp resources/computer-use/SKILL.md "$contents/Resources/skills/waku-computer-use/SKILL.md"
 frameworks_directory="$contents/Frameworks"

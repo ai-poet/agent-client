@@ -87,6 +87,12 @@ impl Waku {
         if self.composer.read(cx).content(cx).trim().is_empty() {
             return;
         }
+        // A Claude runtime started with another effort is closed while the
+        // person types, so the warm start below boots the CLI with the new
+        // one and the message does not wait for it (`effort_relaunch`).
+        if let Some(session_id) = self.selected_session().map(|session| session.id) {
+            self.relaunch_for_effort(session_id);
+        }
         let Some(session) = self.selected_session() else {
             return;
         };
