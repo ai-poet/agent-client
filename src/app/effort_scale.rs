@@ -27,10 +27,24 @@ pub(super) const TRACK_H: f32 = 32.0;
 /// The dark panel's surface, which the panel colors are measured against.
 #[cfg(test)]
 pub(super) const PANEL_SURFACE: u32 = 0x100b18;
-/// Inactive tick labels; the plugin's `#6a6080` read at about 3.3:1.
-pub(super) const TICK_INACTIVE: u32 = 0x8a80a4;
-pub(super) const TICK_ACTIVE: u32 = 0xc084fc;
-pub(super) const TITLE: u32 = 0x8880a0;
+/// Inactive tick labels; the plugin's `#6a6080` read at about 3.3:1, and
+/// even the first raise was hard to find on the purple panel.
+pub(super) const TICK_INACTIVE: u32 = 0xb4adc8;
+pub(super) const TITLE: u32 = 0xa49cbc;
+
+/// The track: a neutral near-black rather than the plugin's purple, so the
+/// stops and the thumb stand out from it and from the fire.
+pub(super) const TRACK_TOP: u32 = 0x16151c;
+pub(super) const TRACK_BOTTOM: u32 = 0x0c0b10;
+/// A stop's notch, at a level up to the chosen one and beyond it. Painted
+/// over the fire with a dark outline so it reads on both.
+pub(super) const NOTCH_REACHED: u32 = 0xf4f0ff;
+pub(super) const NOTCH_AHEAD: u32 = 0x8d879e;
+pub(super) const NOTCH_OUTLINE: u32 = 0x05040a;
+/// The line down the thumb's middle that marks exactly where it sits.
+pub(super) const THUMB_MARK: u32 = 0x2c1f45;
+/// The thumb's light face.
+pub(super) const THUMB_FACE: u32 = 0xe8e0f0;
 
 /// What a level is, whatever its id or position in the ladder.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -474,10 +488,29 @@ mod tests {
             let ratio = contrast(panel_color(tone).0, surface);
             assert!(ratio >= 4.5, "{tone:?}: {ratio}");
         }
-        for color in [TICK_INACTIVE, TICK_ACTIVE, TITLE] {
+        for color in [TICK_INACTIVE, TITLE] {
             let ratio = contrast(rgb(color).into(), surface);
             assert!(ratio >= 4.5, "{color:06x}: {ratio}");
         }
+    }
+
+    /// The stops are what say where the slider is: each notch stands out
+    /// from the track at the 3:1 a control part needs, the notches up to
+    /// the chosen level stand out from the ones beyond it, and the thumb's
+    /// middle mark stands out from its face.
+    #[test]
+    fn the_stops_and_the_thumb_mark_stand_out() {
+        let track: Hsla = rgb(TRACK_TOP).into();
+        for notch in [NOTCH_REACHED, NOTCH_AHEAD] {
+            let ratio = contrast(rgb(notch).into(), track);
+            assert!(ratio >= 3.0, "{notch:06x}: {ratio}");
+        }
+        let apart = contrast(rgb(NOTCH_REACHED).into(), rgb(NOTCH_AHEAD).into());
+        assert!(apart >= 2.5, "reached vs ahead: {apart}");
+        let outline = contrast(rgb(NOTCH_REACHED).into(), rgb(NOTCH_OUTLINE).into());
+        assert!(outline >= 7.0, "{outline}");
+        let mark = contrast(rgb(THUMB_MARK).into(), rgb(THUMB_FACE).into());
+        assert!(mark >= 7.0, "{mark}");
     }
 
     #[test]

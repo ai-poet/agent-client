@@ -32,9 +32,10 @@ use gpui::{
 
 use super::effort_fire::{FireFrame, paint_fire};
 use super::effort_scale::{
-    self as scale, PANEL_PAD_X, PANEL_W, THUMB, TICK_ACTIVE, TICK_INACTIVE, TITLE, TRACK_H,
-    TRACK_W, fire_front, nearest_stop, ratio_at, resolve_traits, spring_step, stop_center_x,
-    stop_ratio, thumb_center_x, visible_ticks,
+    self as scale, NOTCH_AHEAD, NOTCH_OUTLINE, NOTCH_REACHED, PANEL_PAD_X, PANEL_W, THUMB,
+    THUMB_FACE, THUMB_MARK, TICK_INACTIVE, TITLE, TRACK_BOTTOM, TRACK_H, TRACK_TOP, TRACK_W,
+    fire_front, nearest_stop, ratio_at, resolve_traits, spring_step, stop_center_x, stop_ratio,
+    thumb_center_x, visible_ticks,
 };
 use super::*;
 
@@ -434,15 +435,18 @@ impl EffortCard {
                     ),
             );
 
+        // The chosen level's label sits on a pill in its own color, so the
+        // eye finds it before reading any of the others.
         let tick_row = div()
             .relative()
             .w(px(TRACK_W))
-            .h(px(15.0))
-            .mb(px(4.0))
+            .h(px(17.0))
+            .mb(px(5.0))
             .children(ticks.into_iter().map(|tick| {
-                let width = scale::tick_width(&labels[tick]) + 8.0;
+                let width = scale::tick_width(&labels[tick]) + 12.0;
                 let left = (stop_center_x(TRACK_W, tick, count) - width / 2.0)
                     .clamp(-(PANEL_PAD_X - 4.0), TRACK_W + PANEL_PAD_X - 4.0 - width);
+                let active = tick == index;
                 div()
                     .absolute()
                     .top_0()
@@ -450,16 +454,24 @@ impl EffortCard {
                     .w(px(width))
                     .flex()
                     .justify_center()
-                    .whitespace_nowrap()
-                    .text_size(px(10.0))
-                    .line_height(px(15.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(if tick == index {
-                        TICK_ACTIVE
-                    } else {
-                        TICK_INACTIVE
-                    }))
-                    .child(labels[tick].clone())
+                    .child(
+                        div()
+                            .px(px(5.0))
+                            .rounded(px(4.0))
+                            .whitespace_nowrap()
+                            .text_size(px(10.0))
+                            .line_height(px(17.0))
+                            .font_weight(FontWeight::BOLD)
+                            .when(active, |label| {
+                                label
+                                    .bg(color.opacity(0.3))
+                                    .border_1()
+                                    .border_color(color.opacity(0.75))
+                                    .text_color(gpui::white())
+                            })
+                            .when(!active, |label| label.text_color(rgb(TICK_INACTIVE)))
+                            .child(labels[tick].clone()),
+                    )
             }));
 
         let frame = if reduce_motion {
@@ -731,39 +743,55 @@ fn paint_track(window: &mut Window, bounds: Bounds<Pixels>, paint: &TrackPaint) 
     let height = f32::from(bounds.size.height);
     let middle = bounds.origin.y + px(height / 2.0);
     window.with_content_mask(Some(ContentMask { bounds }), |window| {
+        // A neutral near-black track, so the stops, the thumb and the fire
+        // all read against it.
         window.paint_quad(
             fill(
                 bounds,
                 linear_gradient(
-                    135.0,
-                    linear_color_stop(rgb(0x0c0518), 0.0),
-                    linear_color_stop(rgb(0x06030c), 1.0),
+                    180.0,
+                    linear_color_stop(rgb(TRACK_TOP), 0.0),
+                    linear_color_stop(rgb(TRACK_BOTTOM), 1.0),
                 ),
             )
             .corner_radii(px(8.0))
             .border_widths(px(1.0))
-            .border_color(scale::purple(0.08)),
+            .border_color(rgba(0xffffff26)),
         );
 
+        paint_fire(window, bounds, paint.frame);
+
+        // The stops, over the fire: a notch at each, bright up to the
+        // chosen level and dim past it, outlined in near-black so a notch
+        // reads on the flame as well as on the bare track.
         for stop in 0..paint.count {
             let center = bounds.origin.x + px(stop_center_x(width, stop, paint.count));
-            let dot = Bounds {
-                origin: point(center - px(2.0), middle - px(2.0)),
-                size: size(px(4.0), px(4.0)),
-            };
-            if stop == paint.active {
-                window.paint_drop_shadows(
-                    dot,
-                    px(2.0).into(),
-                    &[BoxShadow::new(px(0.0), px(0.0), scale::purple(0.9)).blur_radius(px(8.0))],
-                );
-                window.paint_quad(fill(dot, rgb(TICK_ACTIVE)).corner_radii(px(2.0)));
-            } else {
-                window.paint_quad(fill(dot, scale::purple(0.25)).corner_radii(px(2.0)));
-            }
+            let reached = stop <= paint.active;
+            let (notch_w, notch_h) = if reached { (3.0, 14.0) } else { (2.0, 10.0) };
+            window.paint_quad(
+                fill(
+                    Bounds {
+                        origin: point(
+                            center - px(notch_w / 2.0 + 1.0),
+                            middle - px(notch_h / 2.0 + 1.0),
+                        ),
+                        size: size(px(notch_w + 2.0), px(notch_h + 2.0)),
+                    },
+                    rgba(NOTCH_OUTLINE << 8 | 0xb3),
+                )
+                .corner_radii(px(2.0)),
+            );
+            window.paint_quad(
+                fill(
+                    Bounds {
+                        origin: point(center - px(notch_w / 2.0), middle - px(notch_h / 2.0)),
+                        size: size(px(notch_w), px(notch_h)),
+                    },
+                    rgb(if reached { NOTCH_REACHED } else { NOTCH_AHEAD }),
+                )
+                .corner_radii(px(1.0)),
+            );
         }
-
-        paint_fire(window, bounds, paint.frame);
 
         let thumb_center = bounds.origin.x + px(thumb_center_x(width, paint.ratio));
         if paint.dragging {
@@ -783,16 +811,11 @@ fn paint_track(window: &mut Window, bounds: Bounds<Pixels>, paint: &TrackPaint) 
             size: size(px(THUMB), px(THUMB)),
         };
         let mut shadows = vec![
-            BoxShadow::new(px(0.0), px(2.0), rgba(0x00000066).into()).blur_radius(px(8.0)),
-            BoxShadow::new(px(0.0), px(0.0), scale::purple(if paint.dragging { 0.3 } else { 0.15 }))
-                .spread_radius(px(1.0)),
+            BoxShadow::new(px(0.0), px(2.0), rgba(0x00000080).into()).blur_radius(px(8.0)),
         ];
         if paint.dragging {
             shadows.push(
                 BoxShadow::new(px(0.0), px(0.0), scale::purple(0.35)).blur_radius(px(20.0)),
-            );
-            shadows.push(
-                BoxShadow::new(px(0.0), px(0.0), scale::purple(0.15)).blur_radius(px(40.0)),
             );
         }
         if let Some(ring) = paint.focus_ring {
@@ -803,23 +826,26 @@ fn paint_track(window: &mut Window, bounds: Bounds<Pixels>, paint: &TrackPaint) 
             fill(
                 thumb,
                 linear_gradient(
-                    145.0,
-                    linear_color_stop(rgb(0xe8e0f0), 0.0),
-                    linear_color_stop(rgb(0xb8a8d8), 1.0),
+                    180.0,
+                    linear_color_stop(rgb(THUMB_FACE), 0.0),
+                    linear_color_stop(rgb(0xc4b8dc), 1.0),
                 ),
             )
-            .corner_radii(px(8.0)),
+            .corner_radii(px(8.0))
+            .border_widths(px(1.0))
+            .border_color(rgba(0x0000008c)),
         );
-        // The thumb's top highlight.
+        // A dark line down the thumb's middle: exactly where it sits, which
+        // the stop it covers can no longer say.
         window.paint_quad(
             fill(
                 Bounds {
-                    origin: point(thumb.origin.x + px(6.0), thumb.origin.y + px(1.0)),
-                    size: size(px(THUMB - 12.0), px(1.0)),
+                    origin: point(thumb_center - px(1.0), middle - px(8.0)),
+                    size: size(px(2.0), px(16.0)),
                 },
-                rgba(0xffffff80),
+                rgb(THUMB_MARK),
             )
-            .corner_radii(px(0.5)),
+            .corner_radii(px(1.0)),
         );
     });
 }

@@ -29,6 +29,9 @@ const CELL_FILL: f32 = 0.65;
 /// The plugin's CSS mask: the fire shows up to the slider and fades over
 /// this share of the track on either side of it.
 const REVEAL_FADE: f32 = 0.015;
+/// The fire is held below full strength so the stops painted over it, and
+/// the thumb, stay the clearest things on the track.
+const FIRE_OPACITY: f32 = 0.72;
 
 const EMBER: [f32; 3] = [0.28, 0.10, 0.58];
 const PURPLE: [f32; 3] = [0.62, 0.32, 1.0];
@@ -226,7 +229,7 @@ pub(super) fn paint_fire(window: &mut Window, track: Bounds<Pixels>, frame: Fire
                     size: size(px(body_width), px(height * 0.4)),
                 },
                 px(4.0).into(),
-                &[BoxShadow::new(px(0.0), px(0.0), color(PURPLE, 0.25 * intensity * es))
+                &[BoxShadow::new(px(0.0), px(0.0), color(PURPLE, 0.25 * intensity * es * FIRE_OPACITY))
                     .blur_radius(px(6.0))],
             );
         }
@@ -244,7 +247,7 @@ pub(super) fn paint_fire(window: &mut Window, track: Bounds<Pixels>, frame: Fire
                         ),
                         size: size(px(quad_width), px(quad_height)),
                     },
-                    color(cell.color, cell.alpha),
+                    color(cell.color, cell.alpha * FIRE_OPACITY),
                 )
                 .corner_radii(px(1.0)),
             );
@@ -265,7 +268,7 @@ pub(super) fn paint_fire(window: &mut Window, track: Bounds<Pixels>, frame: Fire
                 &[BoxShadow::new(
                     px(0.0),
                     px(0.0),
-                    color(WHITE, (0.55 * pulse * intensity * es).min(1.0)),
+                    color(WHITE, (0.55 * pulse * intensity * es * FIRE_OPACITY).min(1.0)),
                 )
                 .blur_radius(px(8.0))],
             );
