@@ -84,9 +84,19 @@ impl Waku {
             .subscriptions
             .iter()
             .flatten()
-            .map(super::cloud_subscriptions::subscription_menu_line)
+            .map(|subscription| {
+                super::cloud_subscriptions::subscription_menu_line(
+                    subscription,
+                    &self.tx(&subscription.group_name()),
+                )
+            })
             .collect();
         let groups = self.cloud_account.groups.clone();
+        // Names as shown (translated for display); lanes read the originals.
+        let display_names: std::collections::HashMap<i64, String> = groups
+            .iter()
+            .map(|group| (group.id, self.tx(&group.name)))
+            .collect();
         let statuses = self.cloud_account.group_status.clone();
         let lanes: std::collections::HashMap<i64, String> = groups
             .iter()
@@ -161,12 +171,16 @@ impl Waku {
                                 .iter()
                                 .find(|status| status.group_id == group.id);
                             let suffix = group_status_suffix(group, status);
+                            let name = display_names
+                                .get(&group.id)
+                                .cloned()
+                                .unwrap_or_else(|| group.name.clone());
                             let label = if suffix.is_empty() {
-                                group.name.clone()
+                                name.clone()
                             } else {
-                                format!("{}   {suffix}", group.name)
+                                format!("{name}   {suffix}")
                             };
-                            (group.id, group.name.clone(), label)
+                            (group.id, name, label)
                         })
                         .collect();
                     if platform_groups.is_empty() {

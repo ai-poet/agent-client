@@ -30,6 +30,7 @@ pub mod client;
 pub mod claude_compat;
 pub mod cli_takeover;
 pub mod codex_compat;
+pub mod content_translations;
 pub mod custom_api;
 pub mod env_conflicts;
 pub mod env_fix;

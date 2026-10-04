@@ -77,8 +77,45 @@ const CLAIM_TIMEOUT: Duration = Duration::from_secs(3);
 /// rules.
 const SUBAGENT_RULE: &str = "You are a sub-agent: another agent handed you the task below and \
 is waiting for your answer. Work on it on your own with the tools you have; you cannot ask the \
-user anything. When you are done, reply with a complete, self-contained report of what you \
-found or did — that reply is all the other agent will see of your work.";
+user anything. If a step would need the user's approval - something destructive, or something \
+others would see - do not take it: stop there and say so in your report. Do the task fully, \
+neither gold-plated nor half-done, and do it yourself rather than handing it on.\n\
+\n\
+When you are done, reply with a complete, self-contained report of what you found or did — \
+that reply is all the other agent will see of your work. Lead with the result. Give absolute \
+paths for the files that matter, and include code only when its exact text matters, such as a \
+bug you found or a signature you were asked for. Say what you verified and what you did not. \
+The reply is the report: do not write it to a file.";
+
+/// What the model reads about the `Agent` tool.
+const AGENT_TOOL_DESCRIPTION: &str = "Launch a sub-agent to handle a task on its own. It runs \
+its own loop with the same tools you have (except this one and the ones that talk to the user \
+or change the session's mode) and returns its final report.\n\
+\n\
+When to use it:\n\
+- For independent work that can run in parallel (call it several times in one message), for a \
+wide investigation across many files whose conclusion is all you need, or for a self-contained \
+side task that should not hold up yours.\n\
+- Not for a few file reads, one search or a short edit: do those yourself. A sub-agent \
+rebuilds its context from nothing and you then read its report, which costs more than a \
+handful of tool calls. Do not split one modest job across several agents, and do not spawn one \
+to re-check work you can verify yourself. When in doubt, do not spawn.\n\
+\n\
+Writing the prompt:\n\
+- It sees nothing of this conversation. Brief it like a capable colleague who just walked in: \
+what you are trying to achieve and why, what you have learned or ruled out, and which files are \
+worth reading.\n\
+- Say whether it should change code or only research, and how long a report you want.\n\
+- Never delegate understanding. Not \"based on your findings, fix the bug\", but the file, the \
+line and the change. For a lookup, hand it the exact command; for an investigation, hand it \
+the question rather than steps that assume the answer.\n\
+\n\
+After it reports:\n\
+- The user sees the call as a single line, not the report; tell them what matters in it.\n\
+- A report says what the agent meant to do, not necessarily what it did. When it changed code, \
+look at the change before you report the work as done.\n\
+- Once you have delegated something, do not also do it yourself or re-derive what it found. A \
+background agent's result is unknown until it finishes: never guess it.";
 
 /// Added while the session is in plan mode. The permission layer refuses
 /// changes anyway; saying so up front saves the child from trying.
@@ -302,13 +339,11 @@ impl Tool for SubagentTool {
         AGENT_TOOL_NAME
     }
 
+    /// When to delegate and how to brief, after Claude Code's own guidance:
+    /// models not trained on it spawn an agent for a single file read, hand
+    /// it a one-line prompt, and pass its report on to the user unchecked.
     fn description(&self) -> &str {
-        "Launch a sub-agent to handle a complex, multi-step task on its own. It runs its own \
-         loop with the same tools you have (except this one and the ones that talk to the user \
-         or change the session's mode) and returns its final report. Use it to delegate \
-         research or self-contained work, or to run several independent tasks in parallel by \
-         calling it more than once in one message. Give it a complete prompt: it sees nothing \
-         of this conversation."
+        AGENT_TOOL_DESCRIPTION
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -1029,6 +1064,26 @@ mod tests {
         assert!(rules.contains("You are a sub-agent"));
         assert!(rules.contains("plan mode: research and report only"));
         assert!(!rules.contains("call ExitPlanMode"));
+    }
+
+    /// The child cannot ask, so the session's "ask first" rule would leave
+    /// it guessing; its own rule says what to do instead, and that the
+    /// reply, not a file, is the report.
+    #[test]
+    fn the_child_is_told_what_to_do_with_a_step_that_needs_approval() {
+        assert!(SUBAGENT_RULE.contains("need the user's approval"), "{SUBAGENT_RULE}");
+        assert!(SUBAGENT_RULE.contains("do not write it to a file"), "{SUBAGENT_RULE}");
+    }
+
+    /// Lost line continuations would leave runs of spaces in text the model
+    /// reads on every request.
+    #[test]
+    fn the_agent_texts_read_as_prose() {
+        for text in [SUBAGENT_RULE, SUBAGENT_PLAN_RULE, AGENT_TOOL_DESCRIPTION] {
+            assert!(!text.contains("  "), "{text}");
+        }
+        assert!(AGENT_TOOL_DESCRIPTION.contains("Never delegate understanding"));
+        assert!(AGENT_TOOL_DESCRIPTION.contains("When in doubt, do not spawn"));
     }
 
     #[test]

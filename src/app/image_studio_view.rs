@@ -452,7 +452,7 @@ impl Waku {
         } else if as_task {
             tr!("image_studio.running_task")
         } else if !job.group_name.is_empty() {
-            job.group_name.clone()
+            self.tx(&job.group_name)
         } else {
             tr!("image_studio.running_direct")
         };
@@ -720,7 +720,7 @@ impl Waku {
                 .iter()
                 .find(|group| group.group_id == id)
                 .filter(|group| !group.name.is_empty())
-                .map(|group| group.name.clone())
+                .map(|group| self.tx(&group.name))
                 .unwrap_or_else(|| tr!("image_studio.group_number", id = id)),
         };
         let group_entries: Vec<(i64, String)> = candidates
@@ -729,7 +729,7 @@ impl Waku {
                 let mut label = if group.name.is_empty() {
                     tr!("image_studio.group_number", id = group.group_id)
                 } else {
-                    group.name.clone()
+                    self.tx(&group.name)
                 };
                 if group.rate_multiplier > 0.0 {
                     label.push_str(&format!(" · ×{}", group.rate_multiplier));

@@ -352,7 +352,8 @@ impl Waku {
                     ),
             );
             for log in &self.cloud_usage.logs {
-                page = page.child(usage_log_card(theme, log));
+                let group_name = log.group.as_ref().map(|group| self.tx(&group.name));
+                page = page.child(usage_log_card(theme, log, group_name));
             }
             page = page.child(self.render_usage_pagination(theme, cx));
         } else if !self.cloud_usage.loading && self.cloud_usage.stats.is_some() {
@@ -437,7 +438,7 @@ impl Waku {
             .cloud_account
             .groups
             .iter()
-            .map(|group| (group.id, group.name.clone()))
+            .map(|group| (group.id, self.tx(&group.name)))
             .collect();
         let current = self
             .cloud_usage
@@ -564,14 +565,17 @@ fn usage_filter_trigger(id: &'static str, label: String, theme: Theme) -> Statef
 }
 
 /// One request, in the old client's card layout: model and time up top,
-/// badges, then a metrics grid.
-fn usage_log_card(theme: Theme, log: &sub2api::client::UsageLog) -> Div {
+/// badges, then a metrics grid. `group_name` is the log's group name as shown
+/// (translated for display).
+fn usage_log_card(
+    theme: Theme,
+    log: &sub2api::client::UsageLog,
+    group_name: Option<String>,
+) -> Div {
     let cache_tokens = log.cache_creation_tokens + log.cache_read_tokens;
     let mut badges = div().flex().flex_wrap().items_center().gap(px(6.0));
-    if let Some(group) = &log.group
-        && !group.name.is_empty()
-    {
-        badges = badges.child(usage_badge(theme, group.name.clone(), true));
+    if let Some(group_name) = group_name.filter(|name| !name.is_empty()) {
+        badges = badges.child(usage_badge(theme, group_name, true));
     }
     if let Some(request_type) = log.request_type.as_deref().filter(|value| !value.is_empty()) {
         badges = badges.child(usage_badge(theme, request_type.to_owned(), false));

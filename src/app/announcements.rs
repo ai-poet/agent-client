@@ -453,7 +453,7 @@ impl Waku {
                                     } else {
                                         theme.text_secondary
                                     })
-                                    .child(SharedString::from(item.title.clone())),
+                                    .child(SharedString::from(self.tx(&item.title))),
                             )
                             .children(item.created_date().map(|date| {
                                 div()
@@ -478,15 +478,20 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Div {
         // The transcript's own markdown engine renders the body; the parse is
-        // cached per announcement id.
+        // cached per announcement id and per text shown, so a translation
+        // landing (or a language change) parses afresh.
         let palette = MarkdownPalette::from_theme(&theme);
+        let content = self.tx(&item.content);
         let document = {
             let mut cache = self.announcement_markdown.borrow_mut();
-            if !matches!(cache.as_ref(), Some((cached, _)) if *cached == item.id) {
-                *cache = Some((item.id, MarkdownView::new()));
+            if !matches!(
+                cache.as_ref(),
+                Some((cached, text, _)) if *cached == item.id && *text == content
+            ) {
+                *cache = Some((item.id, content.clone(), MarkdownView::new()));
             }
-            let (_, view) = cache.as_mut().expect("entry ensured above");
-            view.set_text(&item.content, false);
+            let (_, _, view) = cache.as_mut().expect("entry ensured above");
+            view.set_text(&content, false);
             let ctx = MarkdownCtx::new(
                 format!("announcement-md-{}", item.id),
                 &palette,
@@ -525,7 +530,7 @@ impl Waku {
                     .text_size(sp(15.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
-                    .child(SharedString::from(item.title.clone())),
+                    .child(SharedString::from(self.tx(&item.title))),
             )
             .children(item.created_date().map(|date| {
                 div()

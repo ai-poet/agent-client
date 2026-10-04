@@ -372,13 +372,15 @@ impl Waku {
             .subscriptions
             .iter()
             .flatten()
-            .map(|subscription| (subscription.group_id(), subscription.group_name()))
+            .map(|subscription| (subscription.group_id(), self.tx(&subscription.group_name())))
             .collect();
+        // Names only label the picker's rows (`route_note`), so they are
+        // shown translated; routing above reads ids.
         let group_names = self
             .cloud_account
             .groups
             .iter()
-            .map(|group| (group.id, group.name.clone()))
+            .map(|group| (group.id, self.tx(&group.name)))
             .collect();
         super::native_agent::NativeRouting {
             routes,
@@ -415,7 +417,12 @@ impl Waku {
             &tr!("cloud.subscriptions_detail"),
         ));
         for subscription in subscriptions {
-            let mut card = subscription_card(theme, subscription, &routes);
+            let mut card = subscription_card(
+                theme,
+                subscription,
+                self.tx(&subscription.group_name()),
+                &routes,
+            );
             let group_id = subscription.group_id();
             if !self.plans_for_group(group_id).is_empty() {
                 // About to lapse: the one card worth acting on, so its button
@@ -489,12 +496,13 @@ impl Waku {
 }
 
 /// `订阅 Pro · 12 天后到期 · 今日 $1.20 / $10.00` — one line for the account
-/// menu, with the tightest window's spend when there is one.
-pub(super) fn subscription_menu_line(subscription: &sub2api::client::SubscriptionProgress) -> String {
-    let mut parts = vec![tr!(
-        "cloud.subscription_menu",
-        group = subscription.group_name()
-    )];
+/// menu, with the tightest window's spend when there is one. `group_name` is
+/// the name as shown (translated for display).
+pub(super) fn subscription_menu_line(
+    subscription: &sub2api::client::SubscriptionProgress,
+    group_name: &str,
+) -> String {
+    let mut parts = vec![tr!("cloud.subscription_menu", group = group_name)];
     if let Some(days) = subscription.progress.as_ref().map(|progress| progress.expires_in_days) {
         parts.push(expiry_label(days));
     }
@@ -558,6 +566,7 @@ pub(super) fn subscription_windows(
 fn subscription_card(
     theme: Theme,
     subscription: &sub2api::client::SubscriptionProgress,
+    group_name: String,
     routes: &BTreeMap<String, i64>,
 ) -> Div {
     let days = subscription
@@ -577,7 +586,7 @@ fn subscription_card(
                 .text_size(sp(13.0))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(theme.text)
-                .child(subscription.group_name()),
+                .child(group_name),
         );
     if !platform.is_empty() {
         title = title.child(

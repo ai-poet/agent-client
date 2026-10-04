@@ -542,7 +542,7 @@ impl Waku {
         for item in &self.model_plaza.items {
             match counts.iter_mut().find(|(id, ..)| *id == item.best_group.id) {
                 Some((_, _, count)) => *count += 1,
-                None => counts.push((item.best_group.id, item.best_group.name.clone(), 1)),
+                None => counts.push((item.best_group.id, self.tx(&item.best_group.name), 1)),
             }
         }
         counts.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
@@ -662,7 +662,7 @@ impl Waku {
                     &theme,
                 ))
                 .child(plaza_tag(
-                    item.best_group.name.clone(),
+                    self.tx(&item.best_group.name),
                     theme.accent,
                     &theme,
                 )),
@@ -1037,7 +1037,8 @@ impl Waku {
                                     .text_color(theme.text)
                                     .child(format!(
                                         "{} \u{00b7} \u{00d7}{:.2}",
-                                        companion.group.name, companion.group.rate_multiplier
+                                        self.tx(&companion.group.name),
+                                        companion.group.rate_multiplier
                                     )),
                             )
                             .child(

@@ -201,7 +201,7 @@ impl Waku {
 
     /// A plan order settled: pick the subscription up everywhere it shows.
     pub(super) fn activate_purchased_plan(&mut self, plan: &SubscriptionPlan, cx: &mut Context<Self>) {
-        self.show_toast(tr!("plans.activated_toast", plan = plan.name.clone()));
+        self.show_toast(tr!("plans.activated_toast", plan = self.tx(&plan.name)));
         self.pick_up_new_subscription(cx);
     }
 
@@ -370,7 +370,7 @@ impl Waku {
                     .text_size(sp(14.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
-                    .child(plan.name.clone()),
+                    .child(self.tx(&plan.name)),
             );
         // A plan for the Chinese models is sold on an `openai` group; filed
         // by platform it read as Codex's, and "use for Codex" broke GPT.
@@ -436,7 +436,7 @@ impl Waku {
                     .text_size(sp(12.0))
                     .line_height(sp(17.0))
                     .text_color(theme.text_secondary)
-                    .child(blurb.to_owned()),
+                    .child(self.tx(blurb)),
             );
         }
 
@@ -538,7 +538,7 @@ impl Waku {
                         .line_height(sp(17.0))
                         .text_color(theme.text_secondary)
                         .child(div().flex_none().text_color(theme.text_ghost).child("\u{2022}"))
-                        .child(div().flex_1().min_w_0().child(feature.clone())),
+                        .child(div().flex_1().min_w_0().child(self.tx(feature))),
                 );
             }
             card = card.child(features);

@@ -667,7 +667,7 @@ impl Waku {
         let status = entry.status();
         let color = status_color(status, &theme);
         let (platform_label, platform_tint) = platform_badge(&entry.group.platform, &theme);
-        let description = entry.group.description.trim().to_owned();
+        let description = self.tx(entry.group.description.trim());
         let summary = &entry.summary;
         let observed = summary
             .observed_at
@@ -758,7 +758,7 @@ impl Waku {
                             .text_size(sp(15.0))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme.text)
-                            .child(entry.display_name()),
+                            .child(self.tx(&entry.display_name())),
                     )
                     .child(
                         div()
@@ -1245,7 +1245,7 @@ impl Waku {
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
                     .child(icon("icons/server.svg", 15.0, theme.text))
-                    .child(div().min_w_0().truncate().child(entry.display_name())),
+                    .child(div().min_w_0().truncate().child(self.tx(&entry.display_name()))),
             )
             .child(
                 div()

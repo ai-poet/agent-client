@@ -177,7 +177,7 @@ impl Waku {
                                     .groups
                                     .iter()
                                     .find(|group| group.id == id)
-                                    .map(|group| group.name.clone())
+                                    .map(|group| this.tx(&group.name))
                             })
                             .unwrap_or_else(|| tr!("cloud.group_default"));
                         // A CLI reads its config at process start, so running
@@ -320,7 +320,7 @@ impl Waku {
                         .groups
                         .iter()
                         .find(|group| group.id == *from)
-                        .map(|group| group.name.clone())
+                        .map(|group| self.tx(&group.name))
                 });
             for group in self
                 .cloud_account
@@ -330,7 +330,7 @@ impl Waku {
                 .cloned()
             {
                 let id = Some(group.id);
-                let name = group.name.clone();
+                let name = self.tx(&group.name);
                 let detail = group_status_suffix(
                     &group,
                     self.cloud_account

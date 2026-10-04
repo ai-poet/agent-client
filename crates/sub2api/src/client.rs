@@ -858,7 +858,9 @@ fn unwrap_envelope_or_default<T: serde::de::DeserializeOwned + Default>(
     Ok(envelope_data(response)?.unwrap_or_default())
 }
 
-fn envelope_data<T: serde::de::DeserializeOwned>(response: &Response) -> Result<Option<T>> {
+pub(crate) fn envelope_data<T: serde::de::DeserializeOwned>(
+    response: &Response,
+) -> Result<Option<T>> {
     let envelope: Envelope<T> = response.json()?;
     if envelope.code != 0 {
         let message = if envelope.message.is_empty() {

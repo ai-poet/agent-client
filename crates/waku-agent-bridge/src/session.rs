@@ -609,6 +609,8 @@ pub(crate) fn engine_tools(
     tools
 }
 
+/// The engine's built-ins the user left on, with the usage guidance the
+/// engine's own descriptions lack (`crate::tool_guidance`).
 fn engine_builtins(disallowed: &[String]) -> Vec<Box<dyn Tool>> {
     let mut tools: Vec<Box<dyn Tool>> = claurst_tools::all_tools();
     tools.retain(|tool| !disallowed.iter().any(|name| name == tool.name()));
@@ -619,7 +621,7 @@ fn engine_builtins(disallowed: &[String]) -> Vec<Box<dyn Tool>> {
     if !cfg!(windows) {
         tools.retain(|tool| tool.name() != "PowerShell");
     }
-    tools
+    crate::tool_guidance::with_guidance(tools)
 }
 
 /// Connect the configured MCP servers without holding up session start, and

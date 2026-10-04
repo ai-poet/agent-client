@@ -747,7 +747,12 @@ impl Render for WakuPane {
             return gpui::div().into_any_element();
         };
         let content = self.content;
-        waku.update(cx, |waku, cx| content(waku, window, cx))
+        waku.update(cx, |waku, cx| {
+            let element = content(waku, window, cx);
+            // Fork addition: send the text this pane queued for translation.
+            waku.flush_content_translations(cx);
+            element
+        })
     }
 }
 
@@ -1522,6 +1527,8 @@ pub struct Waku {
     cloud_usage: cloud_usage::CloudUsageState,
     /// Fork addition: model plaza view state.
     model_plaza: model_plaza::ModelPlazaState,
+    /// Fork addition: display translations of administrator-written text.
+    content_translations: content_translations::ContentTranslationsState,
     /// Fork addition: the image studio, opened from the sidebar.
     image_studio: image_studio::ImageStudioState,
     /// Fork addition: the model status page, opened from the sidebar.
@@ -1548,8 +1555,9 @@ pub struct Waku {
     cloud_balance_stale: bool,
     /// Fork addition: service announcements (header bell + modal).
     cloud_announcements: announcements::AnnouncementsState,
-    /// Markdown parse cache for the open announcement detail.
-    announcement_markdown: RefCell<Option<(i64, MarkdownView)>>,
+    /// Markdown parse cache for the open announcement detail, keyed by the
+    /// announcement and the text rendered (its translation, when shown).
+    announcement_markdown: RefCell<Option<(i64, String, MarkdownView)>>,
     announcement_selection: TranscriptSelection,
     /// Fork addition: redeem-code field on the Cloud Account page.
     cloud_redeem_input: Entity<TextInput>,
@@ -1762,6 +1770,7 @@ mod cloud_usage;
 mod command_palette;
 mod commit_dialog;
 mod confirm_dialog;
+mod content_translations;
 mod goal_dialog;
 mod components;
 mod composer;
@@ -2982,6 +2991,7 @@ impl Waku {
                         this.refresh_cli_environment(cx);
                         this.load_onboarding_state(cx);
                         this.load_model_windows(cx);
+                        this.reset_content_translations(cx);
                         this.load_cloud_account(cx)
                     })
                     .is_err()
@@ -3267,6 +3277,7 @@ impl Waku {
                 model_picker_vendor: "anthropic".to_owned(),
                 cloud_usage: cloud_usage::CloudUsageState::default(),
                 model_plaza: model_plaza::ModelPlazaState::default(),
+                content_translations: content_translations::ContentTranslationsState::default(),
                 image_studio: image_studio::ImageStudioState::default(),
                 model_status: model_status::ModelStatusState::default(),
                 home_overview: home_overview::HomeOverviewState::default(),

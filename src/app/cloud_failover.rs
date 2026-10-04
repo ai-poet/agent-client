@@ -144,21 +144,23 @@ impl Waku {
                     .groups
                     .iter()
                     .find(|group| group.id == id)
-                    .map(|group| group.name.clone())
+                    .map(|group| self.tx(&group.name))
                     .unwrap_or_else(|| id.to_string())
             };
             let message = match decision {
                 Decision::FailOver { from, to } => {
-                    self.cloud_account.failed_over.insert(platform.clone(), from);
-                    tr!(
+                    let message = tr!(
                         "cloud.failover_switched",
                         from = name(from),
                         to = name(to)
-                    )
+                    );
+                    self.cloud_account.failed_over.insert(platform.clone(), from);
+                    message
                 }
                 Decision::FailBack { to, .. } => {
+                    let message = tr!("cloud.failover_restored", group = name(to));
                     self.cloud_account.failed_over.remove(&platform);
-                    tr!("cloud.failover_restored", group = name(to))
+                    message
                 }
             };
             self.select_cloud_group_with_origin(

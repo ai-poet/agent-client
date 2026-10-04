@@ -291,6 +291,8 @@ impl Render for Waku {
                 .children(image_preview)
                 .children(task_switcher)
                 .into_any_element();
+            // Fork addition: send the text this frame queued for translation.
+            self.flush_content_translations(cx);
             return self.render_window_frame(content, window, cx);
         }
         // Re-armed every frame this window shows time labels; parks while
@@ -486,6 +488,8 @@ impl Render for Waku {
             .children(task_switcher)
             .into_any_element();
 
+        // Fork addition: send the text this frame queued for translation.
+        self.flush_content_translations(cx);
         self.render_window_frame(content, window, cx)
     }
 }

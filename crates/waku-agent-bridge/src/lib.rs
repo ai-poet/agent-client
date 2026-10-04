@@ -52,6 +52,7 @@ mod project_context;
 mod runtime;
 mod session;
 mod subagent;
+mod tool_guidance;
 
 pub use background::{BackgroundEntry, BackgroundKind, BackgroundStatus};
 pub use config::{
