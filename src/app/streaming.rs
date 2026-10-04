@@ -447,6 +447,10 @@ impl Waku {
                         session.pause_active_turn(unix_time());
                         self.state.mark_session_dirty(session_id);
                     }
+                    // Fork: a plan to approve opens in the right panel.
+                    if let Some(permission) = runtime.pending_permissions.back().cloned() {
+                        self.plan_requested(session_id, &permission, cx);
+                    }
                 }
             }
             DriverEvent::UserInputRequested {

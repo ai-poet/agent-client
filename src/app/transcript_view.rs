@@ -439,6 +439,8 @@ impl Waku {
                     })
                     .flatten()
             })
+            // Fork: the right panel's Plan surface.
+            .or_else(|| self.plan_selected_text())
             .or_else(|| self.toast_selection.selection.borrow().selected_text())
             .or_else(|| self.skills_selection.selection.borrow().selected_text())
             .or_else(|| self.transcript_selection.selection.borrow().selected_text());

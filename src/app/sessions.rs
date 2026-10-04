@@ -1362,6 +1362,8 @@ impl Waku {
         let Some(session_id) = self.state.selected_session else {
             return;
         };
+        // Fork: the Plan surface records how a plan was answered.
+        self.note_plan_answer(session_id, &request_id, &option_id);
         let provider = self
             .state
             .sessions

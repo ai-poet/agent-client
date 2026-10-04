@@ -5,8 +5,9 @@
 //! answer, Enter the first that allows, and Escape does nothing — it used to
 //! fall through and stop the whole turn. "Deny and explain" sends the refusal
 //! and then the explanation as a steering message, so the agent learns why
-//! whichever provider runs it. A plan to approve reads as rendered markdown,
-//! capped until opened in full, with the same way to send it back with notes.
+//! whichever provider runs it. A plan to approve keeps the card to one row —
+//! its answers and a way to the right panel's Plan surface, where the plan is
+//! read in full and sent back with notes (`plan_review`).
 
 use gpui::{KeyBinding, actions};
 
@@ -115,9 +116,14 @@ impl Waku {
             );
         }
 
-        let body = if plan {
-            self.render_plan_body(permission, &theme, cx)
+        // A plan's answers sit in the card's one row; anything else's below
+        // what it asks.
+        let (row_buttons, card_buttons) = if plan {
+            (Some(buttons.flex_none()), None)
         } else {
+            (None, Some(buttons))
+        };
+        let body = (!plan).then(|| {
             div()
                 .id("permission-detail")
                 .max_h(px(92.0))
@@ -131,8 +137,7 @@ impl Waku {
                 .text_color(theme.text_secondary)
                 .whitespace_normal()
                 .child(SharedString::from(permission.detail.clone()))
-                .into_any_element()
-        };
+        });
 
         let feedback_request = request_id.clone();
         let feedback = div()
@@ -170,11 +175,7 @@ impl Waku {
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text_secondary)
                     .hover(|element| element.bg(theme.overlay).text_color(theme.text))
-                    .child(if plan {
-                        tr!("plan.keep_planning_with_notes")
-                    } else {
-                        tr!("permission.deny_with_feedback")
-                    })
+                    .child(tr!("permission.deny_with_feedback"))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.deny_permission_with_feedback(feedback_request.clone(), cx);
                     })),
@@ -236,7 +237,7 @@ impl Waku {
                         ))
                         .child(
                             div()
-                                .flex_1()
+                                .when(!plan, |title| title.flex_1())
                                 .min_w_0()
                                 .truncate()
                                 .text_size(sp(12.5))
@@ -244,6 +245,46 @@ impl Waku {
                                 .text_color(theme.text)
                                 .child(SharedString::from(permission.title.clone())),
                         )
+                        // Fork: a plan is read in the right panel; the card
+                        // keeps one row — a way there and the two answers.
+                        .when(plan, |header| {
+                            header
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_size(sp(12.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(tr!("plan.card_hint")),
+                                )
+                                .child(
+                                    div()
+                                        .id("permission-plan-open")
+                                        .h(px(28.0))
+                                        .px(px(10.0))
+                                        .rounded(px(7.0))
+                                        .border_1()
+                                        .border_color(theme.border_strong)
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(6.0))
+                                        .flex_none()
+                                        .cursor_default()
+                                        .text_size(sp(12.5))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text_secondary)
+                                        .hover(|element| {
+                                            element.bg(theme.overlay).text_color(theme.text)
+                                        })
+                                        .child(icon("icons/list.svg", 12.0, theme.text_secondary))
+                                        .child(tr!("plan.view_in_panel"))
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.open_plan_surface(cx);
+                                        })),
+                                )
+                                .children(row_buttons)
+                        })
                         .when(queued > 1, |header| {
                             header.child(
                                 div()
@@ -254,73 +295,10 @@ impl Waku {
                             )
                         }),
                 )
-                .child(body)
-                .child(buttons)
-                .child(feedback),
+                .when_some(body, |card, body| card.child(body))
+                .children(card_buttons)
+                .when(!plan, |card| card.child(feedback)),
         )
-    }
-
-    /// The plan as rendered markdown, capped until the person opens it in
-    /// full.
-    fn render_plan_body(
-        &self,
-        permission: &PendingPermission,
-        theme: &Theme,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let expanded = self.plan_card_expanded.borrow().as_deref() == Some(&*permission.request_id);
-        let palette = MarkdownPalette::from_theme(theme);
-        let ctx = self.markdown_ctx(
-            format!("plan-{}", permission.request_id),
-            &palette,
-            self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
-            false,
-        );
-        let mut view = self.plan_markdown.borrow_mut();
-        view.set_text(&permission.detail, false);
-        let markdown = md::render::markdown(&view, &ctx);
-        let request_id = permission.request_id.clone();
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .child(
-                div()
-                    .id("permission-plan")
-                    .max_h(px(if expanded { 480.0 } else { 240.0 }))
-                    .overflow_y_scroll()
-                    .px(px(10.0))
-                    .py(px(6.0))
-                    .rounded(px(7.0))
-                    .bg(theme.inset)
-                    .children(markdown),
-            )
-            .child(
-                div()
-                    .id("permission-plan-expand")
-                    .self_start()
-                    .h(px(22.0))
-                    .px(px(6.0))
-                    .rounded(px(6.0))
-                    .flex()
-                    .items_center()
-                    .cursor_default()
-                    .text_size(sp(12.0))
-                    .text_color(theme.text_tertiary)
-                    .hover(|element| element.bg(theme.overlay).text_color(theme.text_secondary))
-                    .child(if expanded {
-                        tr!("plan.collapse")
-                    } else {
-                        tr!("plan.expand_full")
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        let mut open = this.plan_card_expanded.borrow_mut();
-                        *open = (!expanded).then(|| request_id.clone());
-                        drop(open);
-                        cx.notify();
-                    })),
-            )
-            .into_any_element()
     }
 
     /// Take the keyboard for a request the first time it shows — unless the
@@ -365,14 +343,33 @@ impl Waku {
         true
     }
 
-    /// Refuse the request, then tell the agent why: the note goes into the
-    /// running turn as a steering message (or queues, where the provider
-    /// cannot be steered).
+    /// Refuse the request with the card's note.
     pub(super) fn deny_permission_with_feedback(
         &mut self,
         request_id: String,
         cx: &mut Context<Self>,
     ) {
+        let note = self
+            .permission_feedback
+            .read(cx)
+            .content()
+            .trim()
+            .to_owned();
+        if self.deny_permission_with_note(request_id, note, cx) {
+            self.permission_feedback
+                .update(cx, |input, cx| input.clear(cx));
+        }
+    }
+
+    /// Refuse the request, then tell the agent why: the note goes into the
+    /// running turn as a steering message (or queues, where the provider
+    /// cannot be steered). Returns whether the request was refused.
+    pub(super) fn deny_permission_with_note(
+        &mut self,
+        request_id: String,
+        note: String,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(option_id) = self
             .selected_runtime()
             .and_then(|runtime| {
@@ -384,20 +381,13 @@ impl Waku {
             .and_then(|permission| permission.options.iter().find(|option| !option.allow))
             .map(|option| option.id.clone())
         else {
-            return;
+            return false;
         };
-        let note = self
-            .permission_feedback
-            .read(cx)
-            .content()
-            .trim()
-            .to_owned();
-        self.permission_feedback
-            .update(cx, |input, cx| input.clear(cx));
         self.respond_permission(request_id, option_id, cx);
         if !note.is_empty() {
             self.steer_composer_submission(ComposerSubmission::plain(note), cx);
         }
+        true
     }
 }
 

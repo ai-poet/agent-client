@@ -3717,10 +3717,44 @@ plan.keep_planning:
   en: "Keep planning"
 plan.keep_planning_with_notes:
   en: "Keep planning with these notes"
-plan.expand_full:
-  en: "Show the whole plan"
-plan.collapse:
-  en: "Show less"
+plan.surface:
+  en: "Plan"
+plan.card_hint:
+  en: "Read the whole plan and add notes in the right panel."
+plan.view_in_panel:
+  en: "View plan"
+plan.notes_placeholder:
+  en: "What should change? Enter sends the plan back, Shift+Enter starts a new line."
+plan.status.pending:
+  en: "Waiting for your approval"
+plan.status.approved:
+  en: "Approved"
+plan.status.sent_back:
+  en: "Sent back to keep planning"
+plan.status.closed:
+  en: "Not answered: the turn ended"
+plan.panel.version:
+  en: "Version %{index} of %{total}"
+plan.panel.older:
+  en: "Previous version"
+plan.panel.newer:
+  en: "Next version"
+plan.panel.compare:
+  en: "Compare with previous"
+plan.panel.show_plan:
+  en: "Show plan"
+plan.panel.no_changes:
+  en: "Same as the previous version."
+plan.panel.no_body:
+  en: "The agent did not attach the plan itself. Read it in the conversation."
+plan.panel.quote:
+  en: "Quote selection"
+plan.panel.quote_hint:
+  en: "Select part of the plan, quote it, then write what to change below."
+plan.panel.empty:
+  en: "When the agent finishes planning, its plan shows here to approve or send back with notes."
+plan.panel.no_session:
+  en: "Open a task to see its plan."
 settings.plans:
   en: "Plans"
 settings.plans_keywords:

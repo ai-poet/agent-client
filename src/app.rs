@@ -568,6 +568,8 @@ enum RightPanelSurface {
     File(String),
     /// Fork addition: the team the session leads (AgentTeams).
     Team,
+    /// Fork addition: the plan the session's agent asks to have approved.
+    Plan,
 }
 
 /// A turn whose checkpoint still has to be captured.
@@ -1108,10 +1110,8 @@ pub struct Waku {
     permission_focus: FocusHandle,
     /// The request the card last took the keyboard for.
     permission_focused_request: RefCell<Option<String>>,
-    /// The plan request shown in full rather than capped.
-    plan_card_expanded: RefCell<Option<String>>,
-    /// The plan awaiting approval, parsed for the card.
-    plan_markdown: RefCell<MarkdownView>,
+    /// Fork: the right panel's Plan surface — plans to approve, per session.
+    plan_review: plan_review::PlanReviewState,
     /// Drafts are independent of transcript persistence: started tasks key by
     /// session id, while blank New Task pages key by project id.
     composer_drafts: ComposerDrafts,
@@ -1815,6 +1815,7 @@ mod update_banner;
 mod daemon_banner;
 mod surface_bar;
 mod team_panel;
+mod plan_review;
 mod providers_page;
 mod render;
 mod right_panel;
@@ -3071,8 +3072,7 @@ impl Waku {
                 permission_feedback,
                 permission_focus: cx.focus_handle(),
                 permission_focused_request: RefCell::new(None),
-                plan_card_expanded: RefCell::new(None),
-                plan_markdown: RefCell::new(MarkdownView::default()),
+                plan_review: plan_review::PlanReviewState::default(),
                 composer_drafts,
                 composer_draft_store,
                 composer_draft_save_generation: 0,

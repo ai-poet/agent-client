@@ -905,6 +905,7 @@ impl RightPanelSurface {
             Self::Files => tr!("right_panel.files"),
             Self::Diff => tr!("right_panel.diff"),
             Self::Team => tr!("team.surface"),
+            Self::Plan => tr!("plan.surface"),
             // Fork fix: Windows relative paths use backslashes.
             Self::File(path) => path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned(),
         }
@@ -918,6 +919,7 @@ impl RightPanelSurface {
             Self::Files => "icons/folder.svg",
             Self::Diff => "icons/file-diff.svg",
             Self::Team => "icons/users.svg",
+            Self::Plan => "icons/list.svg",
             Self::File(path) => file_icon_for_path(path),
         }
     }
@@ -960,7 +962,8 @@ fn reusable_surface_index(
         RightPanelSurface::Files
         | RightPanelSurface::Diff
         | RightPanelSurface::File(_)
-        | RightPanelSurface::Team => surfaces.iter().position(|surface| surface == requested),
+        | RightPanelSurface::Team
+        | RightPanelSurface::Plan => surfaces.iter().position(|surface| surface == requested),
     }
 }
 
@@ -2191,6 +2194,7 @@ impl Waku {
                 .render_right_panel_diff(width, window, cx)
                 .into_any_element(),
             Some(RightPanelSurface::Team) => self.render_team_surface(window, cx),
+            Some(RightPanelSurface::Plan) => self.render_plan_surface(window, cx),
             Some(RightPanelSurface::Terminal(terminal_id)) => self
                 .right_panel_terminals
                 .get(&terminal_id)
@@ -2550,6 +2554,10 @@ impl Waku {
                 .is_some_and(|session| session.provider == ProviderKind::Native)
             {
                 options.push(RightPanelSurface::Team);
+            }
+            // Fork: the Plan surface, once the session has submitted a plan.
+            if self.selected_session_has_plan() {
+                options.push(RightPanelSurface::Plan);
             }
             let handle = self.menu_handle("add-right-panel-surface", cx);
             header = header.child(

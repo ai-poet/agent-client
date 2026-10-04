@@ -612,6 +612,44 @@ struct EventTranslator {
     /// runs many turns under one key; a fresh feed would restart the entry
     /// ids and overwrite its earlier rows.
     member_feeds: Mutex<std::collections::HashMap<String, SubagentFeed>>,
+    /// Fork: what the model last wrote this turn, so the "finished planning"
+    /// dialog shows the plan itself — the engine's `ExitPlanMode` carries
+    /// only an optional summary.
+    plan_draft: Mutex<PlanDraft>,
+}
+
+/// The assistant's latest words in a turn, as the plan to approve.
+///
+/// A plan is the text the model wrote before it asked to leave plan mode:
+/// the text of the message that calls `ExitPlanMode`, or — when that
+/// message is only the call — the last message that said anything. Each
+/// tool call closes a message's text; an empty one leaves the previous
+/// text standing.
+#[derive(Default)]
+struct PlanDraft {
+    current: String,
+    last: String,
+}
+
+impl PlanDraft {
+    fn push(&mut self, text: &str) {
+        self.current.push_str(text);
+    }
+
+    fn close_message(&mut self) {
+        if self.current.trim().is_empty() {
+            self.current.clear();
+        } else {
+            self.last = std::mem::take(&mut self.current);
+        }
+    }
+
+    fn plan(&self) -> Option<&str> {
+        [self.current.as_str(), self.last.as_str()]
+            .into_iter()
+            .map(str::trim)
+            .find(|text| !text.is_empty())
+    }
 }
 
 /// What a tool call looked like when it started, so its completion can be
@@ -656,18 +694,29 @@ fn localize_refusal(output: &Value) -> Option<Value> {
 /// The "finished planning" dialog's body, in the user's language.
 ///
 /// The bridge sends either its generic line or the plan summary the model
-/// wrote. The former is translated outright; the latter is kept under a
-/// translated lead-in, since the plan is what the user is here to read. The
-/// two are told apart by comparing against the bridge's exported constant
-/// rather than by guessing at the content.
-fn localize_exit_plan_detail(detail: String) -> String {
-    if detail == waku_agent_bridge::EXIT_PLAN_MODE_DETAIL {
-        tr!("plan.ready_detail")
-    } else {
-        format!("{}
-
-{detail}", tr!("plan.summary_lead"))
-    }
+/// wrote; `written` is what the model last wrote in the turn. The longer of
+/// the summary and the written text is the plan — a model that put its whole
+/// plan in the summary and only "Done planning." in the message is read the
+/// same as one that did the opposite — and it is kept under a translated
+/// lead-in, since the plan is what the user is here to read. With neither,
+/// the generic line is translated outright. The bridge's generic line is
+/// told apart by comparing against its exported constant rather than by
+/// guessing at the content.
+fn localize_exit_plan_detail(detail: String, written: Option<&str>) -> String {
+    let summary = Some(detail.trim())
+        .filter(|summary| !summary.is_empty() && *summary != waku_agent_bridge::EXIT_PLAN_MODE_DETAIL);
+    let plan = match (summary, written) {
+        (Some(summary), Some(written)) => {
+            if written.chars().count() >= summary.chars().count() {
+                written
+            } else {
+                summary
+            }
+        }
+        (Some(plan), None) | (None, Some(plan)) => plan,
+        (None, None) => return tr!("plan.ready_detail"),
+    };
+    format!("{}\n\n{plan}", tr!("plan.summary_lead"))
 }
 
 impl EventTranslator {
@@ -678,6 +727,7 @@ impl EventTranslator {
             tools: Mutex::new(std::collections::HashMap::new()),
             subagents: Mutex::new(std::collections::HashMap::new()),
             member_feeds: Mutex::new(std::collections::HashMap::new()),
+            plan_draft: Mutex::new(PlanDraft::default()),
         }
     }
 
@@ -690,9 +740,13 @@ impl EventTranslator {
         match event {
             AgentEvent::TurnStarted => {
                 self.tools.lock().clear();
+                *self.plan_draft.lock() = PlanDraft::default();
                 self.send(DriverEvent::TurnStarted);
             }
-            AgentEvent::Text(text) => self.send(DriverEvent::TextDelta(text)),
+            AgentEvent::Text(text) => {
+                self.plan_draft.lock().push(&text);
+                self.send(DriverEvent::TextDelta(text));
+            }
             AgentEvent::Reasoning(text) => self.send(DriverEvent::ReasoningDelta(text)),
             AgentEvent::PlanModeChanged(plan) => {
                 self.send(DriverEvent::InteractionModeUpdated(if plan {
@@ -702,6 +756,7 @@ impl EventTranslator {
                 }));
             }
             AgentEvent::ToolStarted { id, name, input } => {
+                self.plan_draft.lock().close_message();
                 let kind = activity_kind(&name);
                 let title = tool_title(&name, &input);
                 self.send(DriverEvent::RichActivity(
@@ -807,7 +862,11 @@ impl EventTranslator {
                 // decide on.
                 let plan = tool_name == "ExitPlanMode";
                 let (title, detail) = if plan {
-                    (tr!("plan.ready_title"), localize_exit_plan_detail(detail))
+                    let written = self.plan_draft.lock().plan().map(str::to_owned);
+                    (
+                        tr!("plan.ready_title"),
+                        localize_exit_plan_detail(detail, written.as_deref()),
+                    )
                 } else {
                     (title, detail)
                 };
@@ -1384,17 +1443,49 @@ mod tests {
     /// that only the summary gets a lead-in prepended.
     #[test]
     fn the_plan_summary_survives_localization_and_the_generic_line_does_not() {
-        let generic = localize_exit_plan_detail(waku_agent_bridge::EXIT_PLAN_MODE_DETAIL.to_owned());
+        let generic =
+            localize_exit_plan_detail(waku_agent_bridge::EXIT_PLAN_MODE_DETAIL.to_owned(), None);
         assert!(!generic.contains("
 
 "), "generic line must not get a lead-in: {generic}");
 
         let summary = "1. Add the field. 2. Wire the picker.";
-        let kept = localize_exit_plan_detail(summary.to_owned());
+        let kept = localize_exit_plan_detail(summary.to_owned(), None);
         assert!(kept.contains("
 
 "), "summary must sit under a lead-in: {kept}");
         assert!(kept.ends_with(summary), "the plan itself must be intact: {kept}");
+    }
+
+    /// The plan the dialog shows is what the model wrote before asking — the
+    /// text of the calling message, else the last message that said
+    /// anything — and the longer of that and the summary wins.
+    #[test]
+    fn the_plan_to_approve_is_the_text_the_model_last_wrote() {
+        let mut draft = PlanDraft::default();
+        assert_eq!(draft.plan(), None);
+        draft.push("Let me read the config first.");
+        draft.close_message(); // Read
+        draft.push("## Plan\n\n1. Add the field.\n2. Wire the picker.");
+        draft.close_message(); // TodoWrite
+        draft.close_message(); // ExitPlanMode, in a message with no text
+        assert_eq!(
+            draft.plan(),
+            Some("## Plan\n\n1. Add the field.\n2. Wire the picker.")
+        );
+        draft.push("  Revised plan.  ");
+        assert_eq!(draft.plan(), Some("Revised plan."));
+
+        let written = "## Plan\n\n1. Add the field.\n2. Wire the picker.";
+        let detail = localize_exit_plan_detail("Add a field.".to_owned(), Some(written));
+        assert!(detail.ends_with(written), "the written plan wins: {detail}");
+        let detail = localize_exit_plan_detail(written.to_owned(), Some("Done planning."));
+        assert!(detail.ends_with(written), "the longer summary wins: {detail}");
+        let detail = localize_exit_plan_detail(
+            waku_agent_bridge::EXIT_PLAN_MODE_DETAIL.to_owned(),
+            Some(written),
+        );
+        assert!(detail.ends_with(written), "no summary, the written plan: {detail}");
     }
 
     /// The two refusals the fork owns the wording of are recognised by their

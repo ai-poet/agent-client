@@ -148,6 +148,8 @@ pulldown-cmark = "0.13"
 regex = "1"
 rust-i18n = "4"
 rust-umami = "0.1.1"
+# Fork: the Plan surface's diff between plan versions.
+similar = { workspace = true }
 smol = "2"
 ropey = "=2.0.0-beta.1"
 futures-lite = "2"

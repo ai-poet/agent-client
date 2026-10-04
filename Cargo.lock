@@ -9216,6 +9216,7 @@ dependencies = [
  "rust-umami",
  "serde",
  "serde_json",
+ "similar 2.7.0",
  "smol",
  "sub2api",
  "tokio",
