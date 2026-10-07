@@ -28,6 +28,8 @@ claurst-query = { workspace = true }
 claurst-tools = { workspace = true }
 crossbeam-channel = "0.5"
 parking_lot = "0.12"
+# Fork: `WebSearch` through the gateway's search endpoint (`src/gateway_search.rs`).
+reqwest = { workspace = true }
 serde_json = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 tokio-util = { version = "0.7" }

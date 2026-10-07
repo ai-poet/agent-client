@@ -725,6 +725,15 @@ fn engine_builtins(disallowed: &[String]) -> Vec<Box<dyn Tool>> {
     if !cfg!(windows) {
         tools.retain(|tool| tool.name() != "PowerShell");
     }
+    // Fork: the engine's search asks DuckDuckGo unless the environment names
+    // another backend; ours searches through the gateway, under the same name
+    // and in the same place, so the user's off switch still applies.
+    if let Some(index) = tools
+        .iter()
+        .position(|tool| tool.name() == claurst_core::constants::TOOL_NAME_WEB_SEARCH)
+    {
+        tools[index] = Box::new(crate::gateway_search::GatewaySearchTool);
+    }
     crate::tool_guidance::with_guidance(tools)
 }
 
@@ -1597,5 +1606,20 @@ mod tests {
         assert!(!tools.iter().any(|tool| tool.name() == "WebSearch"));
         assert!(!tools.iter().any(|tool| tool.name() == "Agent"));
         assert!(tools.iter().any(|tool| tool.name() == "Read"));
+    }
+
+    #[test]
+    fn web_search_is_the_gateways_and_offered_once() {
+        let tools = builtin_tools(&[], None, false, &host());
+        let searches = tools
+            .iter()
+            .filter(|tool| tool.name() == "WebSearch")
+            .collect::<Vec<_>>();
+        assert_eq!(searches.len(), 1);
+        // The gateway tool's own description, then the bridge's guidance.
+        assert!(searches[0]
+            .description()
+            .starts_with("Search the web for current information."));
+        assert!(searches[0].input_schema()["properties"]["domains"].is_object());
     }
 }

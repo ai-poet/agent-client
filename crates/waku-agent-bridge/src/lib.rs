@@ -44,6 +44,8 @@ mod browser;
 mod computer_use;
 mod config;
 mod events;
+// Fork: `WebSearch` through the gateway's Codex search endpoint.
+mod gateway_search;
 mod goal;
 pub mod history;
 mod images;
