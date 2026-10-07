@@ -182,6 +182,16 @@ shim on `PATH`. If the shell finds it but Waku does not, set the binary path in
 **Git-backed features do nothing.** Waku shells out to `git`. Install Git for
 Windows and make sure `git --version` works in a new terminal.
 
+**Installing the Computer Use driver says the download "reported success but
+nothing was at" the archive.** curl finished, but the file was gone before
+Waku could check it. It has been seen once and did not recur, and Defender's
+protection history was empty. Downloads therefore land in a staging folder of
+their own under the app's `toolchains\.staging` rather than `%TEMP%`, and a
+vanished file is fetched up to three times before this is reported. If it
+still happens, the message carries what curl saw (HTTP status, bytes, the file
+it wrote) and what was left in the folder. Install again, and file an issue
+with that message if it repeats.
+
 **The update never arrives.** Waku reaches the feed with the `curl.exe` in
 System32; a proxy or filter that blocks `releases.waku.sh` blocks updates too.
 **Check for Updates…** reports the reason, where the once-per-launch check

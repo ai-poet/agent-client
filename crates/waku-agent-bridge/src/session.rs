@@ -93,10 +93,11 @@ impl ToolSets {
         subagents: &Arc<SubagentHost>,
         browser: Option<&Arc<crate::browser::BrowserHost>>,
         team: Option<&Arc<crate::team::TeamHost>>,
+        memory: Option<&Arc<crate::memory::MemoryHost>>,
     ) -> Self {
         Self {
-            plain: builtin_tools_with(disallowed, mcp, false, subagents, browser, team),
-            goal: builtin_tools_with(disallowed, mcp, true, subagents, browser, team),
+            plain: builtin_tools_with(disallowed, mcp, false, subagents, browser, team, memory),
+            goal: builtin_tools_with(disallowed, mcp, true, subagents, browser, team, memory),
         }
     }
 }
@@ -139,6 +140,9 @@ struct Inner {
     browser: Option<Arc<crate::browser::BrowserHost>>,
     /// Fork addition: the session's AgentTeams team, when it leads one.
     team: Arc<crate::team::TeamHost>,
+    /// Fork addition: auto-memory — the memory tools, the index section and
+    /// consolidation (`crate::memory`).
+    memory: Arc<crate::memory::MemoryHost>,
 }
 
 /// The parts of a running turn that outside callers need to reach.
@@ -218,12 +222,14 @@ impl AgentSession {
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let team = crate::team::TeamHost::new(&options, &id, events.clone());
+        let memory = crate::memory::MemoryHost::new(&options.cwd, &id);
         let tools = ToolSets::build(
             &config.disallowed_tools,
             None,
             &subagents,
             browser.as_ref(),
             Some(&team),
+            Some(&memory),
         );
         let inner = Arc::new(Inner {
             events,
@@ -249,6 +255,7 @@ impl AgentSession {
             subagents,
             browser,
             team,
+            memory,
         });
 
         inner
@@ -590,6 +597,13 @@ impl Drop for Inner {
         self.questions.lock().clear();
         self.subagents.cancel_all();
         self.team.shutdown();
+        // Fork (auto-memory): what was said since the last pass gets one.
+        self.memory
+            .on_session_end(|| crate::memory::ConsolidationRoute {
+                client: self.client.lock().clone(),
+                query: self.query.lock().clone(),
+                config: self.config.lock().clone(),
+            });
     }
 }
 
@@ -641,7 +655,7 @@ fn builtin_tools(
     with_goal: bool,
     subagents: &Arc<SubagentHost>,
 ) -> ToolSet {
-    builtin_tools_with(disallowed, mcp, with_goal, subagents, None, None)
+    builtin_tools_with(disallowed, mcp, with_goal, subagents, None, None, None)
 }
 
 /// The session's tools; with `browser`, the in-app browser's too (fork
@@ -654,6 +668,7 @@ fn builtin_tools_with(
     subagents: &Arc<SubagentHost>,
     browser: Option<&Arc<crate::browser::BrowserHost>>,
     team: Option<&Arc<crate::team::TeamHost>>,
+    memory: Option<&Arc<crate::memory::MemoryHost>>,
 ) -> ToolSet {
     let mut tools = engine_builtins(disallowed);
     if let Some(host) = browser {
@@ -670,6 +685,10 @@ fn builtin_tools_with(
     // Fork: the team tools, once the session leads a team (`crate::team`).
     if let Some(team) = team {
         tools.extend(team.captain_tools());
+    }
+    // Fork: the memory tools, unless memory is off (`crate::memory`).
+    if let Some(memory) = memory {
+        tools.extend(memory.tools(disallowed));
     }
     if !with_goal {
         tools.retain(|tool| tool.name() != GOAL_COMPLETE_TOOL);
@@ -737,6 +756,7 @@ fn connect_mcp_in_background(inner: &Arc<Inner>) {
             &inner.subagents,
             inner.browser.as_ref(),
             Some(&inner.team),
+            Some(&inner.memory),
         );
         *inner.mcp.lock() = Some(manager);
     });
@@ -806,7 +826,11 @@ async fn run_turn(
     // Fork (AgentTeams): `/agent-teams` activates the team and carries its
     // directive; before anything below reads the tool set.
     let prompt = match origin {
-        team_seam::PromptOrigin::User => inner.team.augment_prompt(prompt),
+        team_seam::PromptOrigin::User => {
+            // Fork (auto-memory): what the person asked, for consolidation.
+            inner.memory.note_user_prompt(&prompt);
+            inner.team.augment_prompt(prompt)
+        }
         team_seam::PromptOrigin::Team => prompt,
     };
     // Work on a copy. The engine mutates it — appending the assistant turn,
@@ -836,6 +860,8 @@ async fn run_turn(
     let subagent_query = query.clone();
     // Fork: the captain protocol, once active; sub-agents never get it.
     inner.team.extend_rules(&mut query);
+    // Fork: the memory index, root session only (`crate::memory`).
+    inner.memory.extend_rules(&mut query);
     query.command_queue = Some(queue.clone());
     // A session with an active goal keeps going after each answer until the
     // model closes it with `GoalComplete` — the one tool set that has it.
@@ -938,6 +964,8 @@ async fn run_turn(
         Some(index) => history::produced_visible_output(&messages, index + 1),
         None => true,
     };
+    // Fork (auto-memory): what the agent answered, for consolidation.
+    inner.memory.note_turn_output(&messages, &turn_mark);
     *inner.history.lock() = messages;
 
     // Now let the next prompt in. Whatever steering was still queued is
@@ -1015,6 +1043,15 @@ async fn run_turn(
     inner
         .team
         .after_turn(team_seam::queued_texts(&queue), goal_follow_up.is_some());
+    // Fork (auto-memory): every few turns, a consolidation pass on this
+    // session's own route.
+    inner
+        .memory
+        .after_turn(|| crate::memory::ConsolidationRoute {
+            client: client.clone(),
+            query: query.clone(),
+            config: inner.config.lock().clone(),
+        });
 
     // Last, so the next turn starts after this one has fully reported.
     if let Some(prompt) = goal_follow_up {

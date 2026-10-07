@@ -236,6 +236,14 @@ pub fn install_driver(mut report: impl FnMut(CuaStage)) -> InstallOutcome {
 
     report(CuaStage::Verifying);
     let expected = install_dir.join(CUA_DRIVER_EXECUTABLE);
+    if !expected.is_file() {
+        failures.push(format!(
+            "the driver was copied to {}, but {} was gone afterwards; something removed it (a cleanup tool or security software) — install again",
+            install_dir.display(),
+            expected.display()
+        ));
+        return failed(failures);
+    }
     match detect_driver() {
         Some(detection) if detection.path == expected && detection.is_pinned_version() => {
             InstallOutcome {
@@ -274,15 +282,14 @@ fn install_archive(
     install_dir: &Path,
     asset: &DriverAsset,
 ) -> Result<()> {
-    // The gap between the download landing and this running is where an
-    // antivirus scanner takes it: the archive carries an unsigned executable
-    // that injects input and captures the screen, which is what a remote
-    // access trojan looks like from a heuristic's point of view. Saying so
-    // here is the difference between an actionable message and a PowerShell
-    // stack trace about a path that does not exist.
+    // The archive has been seen to vanish between landing and being
+    // unpacked. What takes it is not known (Defender's history was empty on
+    // the machine where it happened), so this names the symptom rather than
+    // guessing a culprit — still better than a PowerShell stack trace about
+    // a path that does not exist.
     if !archive.is_file() {
         return Err(anyhow!(
-            "the downloaded archive is no longer at {} — an antivirus scanner most likely removed it; allow the file or install the driver manually",
+            "the downloaded archive disappeared from {} before it could be unpacked; something removed it (a cleanup tool or security software) — install again",
             archive.display()
         ));
     }
@@ -403,10 +410,9 @@ mod tests {
         assert!(!unknown.is_pinned_version());
     }
 
-    /// The archive going missing between the download and the extract is
-    /// what an antivirus scanner does to this file, and it used to surface as
-    /// a PowerShell error about a path that does not exist. It is reported
-    /// before PowerShell is ever started.
+    /// The archive going missing between the download and the extract used
+    /// to surface as a PowerShell error about a path that does not exist. It
+    /// is reported before PowerShell is ever started.
     #[test]
     fn a_vanished_archive_is_named_rather_than_handed_to_powershell() {
         let staging = std::env::temp_dir().join(format!("cua-install-test-{}", std::process::id()));
@@ -414,8 +420,9 @@ mod tests {
         let error = install_archive(&missing, &staging, &staging.join("out"), &windows_asset())
             .expect_err("a missing archive cannot be installed");
         let text = format!("{error:#}");
-        assert!(text.contains("no longer at"), "{text}");
-        assert!(text.contains("antivirus"), "{text}");
+        assert!(text.contains("disappeared from"), "{text}");
+        assert!(text.contains(&missing.display().to_string()), "{text}");
+        assert!(text.contains("install again"), "{text}");
     }
 
     #[test]

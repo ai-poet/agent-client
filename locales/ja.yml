@@ -406,9 +406,29 @@ model_status.benchmarks_license: "ライセンス：%{license}"
 model_status.benchmarks_self_implemented: "本サイト独自の実装"
 model_status.benchmarks_disclaimer: "検査はベンチマークに登録されたモデルの間でのみ判定します。「指紋不一致」は回答が別の登録モデルに明らかに似ていることを示す参考情報であり、それだけでモデルが置き換えられた証拠にはなりません。未登録のモデルが最も近い候補に帰属されることもあります。"
 sidebar.options: サイドバーオプション
-sidebar.grouping: グループ化
-sidebar.grouping_project: プロジェクト
-sidebar.grouping_updated: 更新日
+sidebar.view_by_project: プロジェクト別
+sidebar.view_timeline: タイムライン
+sidebar.expand_all: すべて展開
+sidebar.collapse_all: すべて折りたたむ
+sidebar.archived: アーカイブ
+sidebar.archived_tasks: アーカイブ済みタスク
+sidebar.pinned: ピン留め
+sidebar.projects: プロジェクト
+sidebar.no_projects: 開いているプロジェクトはありません
+sidebar.no_tasks: タスクはまだありません
+sidebar.no_archived: アーカイブ済みのタスクはありません
+sidebar.pin: ピン留め
+sidebar.unpin: ピン留めを解除
+sidebar.archive: アーカイブ
+sidebar.unarchive: アーカイブを解除
+sidebar.archive_running: 実行中のタスクはアーカイブできません
+sidebar.mark_unread: 未読にする
+sidebar.unread: 未読
+sidebar.group_unread: 未読のタスクがあります
+sidebar.group_running: 実行中のタスクがあります
+sidebar.awaiting_approval: 確認待ち
+sidebar.delete: 削除
+sidebar.delete_confirm_title: このタスクを完全に削除しますか？
 sidebar.ordering: 並び順
 sidebar.ordering_newest: 新しい順
 sidebar.ordering_oldest: 古い順
@@ -2181,3 +2201,62 @@ file_preview.rows_all: "%{rows} 行 × %{columns} 列"
 file_preview.document_truncated: "長い文書のため、先頭部分のみ表示しています。"
 file_preview.cannot_read: "このファイルはプレビューできません：%{reason}"
 file_preview.unavailable: "この種類のファイルはアプリ内でプレビューできません。"
+memory.tool.write: "記憶：%{name}"
+memory.tool.read: "参照：%{name}"
+memory.tool.list: "記憶の一覧"
+memory.tool.delete: "記憶を削除：%{name}"
+memory.tool.prune: "%{days} 日以上更新のない記憶を整理"
+memory.tool.delete_all: "すべての記憶を削除"
+memory.approval.prune_title: "古い記憶を削除しますか？"
+memory.approval.delete_all_title: "すべての記憶を削除しますか？"
+memory.settings.title: "記憶"
+memory.settings.description: "組み込みエージェントがセッションをまたいで覚えておく事実——あなたについて、作業の進め方の好み、プロジェクトの状況など。記憶は 1 件ずつ Markdown ファイルとして保存され、その索引がバイト予算内で毎回のリクエストに含まれます。エージェントは記憶ツールで読み書き・削除します。"
+memory.settings.enabled: "記憶を使う"
+memory.settings.enabled_description: "新しいセッションに記憶ツールと索引が渡されます。実行中のセッションは開始時の設定のままです。"
+memory.settings.user_scope: "グローバル記憶"
+memory.settings.user_scope_description: "ワークスペースごとの記憶に加えて、好みなどすべてのプロジェクトに共通する記憶も保存します。"
+memory.settings.auto_summarize: "自動で要約"
+memory.settings.auto_summarize_description: "メッセージ %{turns} 件ごと、およびセッション終了時に、エージェントが会話を振り返って新しい記憶を最大 %{count} 件保存します。そのたびにリクエストが 1 回追加されます。"
+memory.settings.mirror: "Claude Code に同期"
+memory.settings.mirror_description: "各ワークスペースの記憶を Claude Code のプロジェクト記憶（~/.claude/projects/…/memory）にコピーし、同じフォルダーの Claude Code からも見えるようにします。変更・削除するのはここでコピーしたファイルだけで、Claude Code 自身の記憶には触れません。グローバル記憶はコピーされません。"
+memory.settings.budget: "索引の予算"
+memory.settings.budget_description: "記憶の索引と説明が毎回のリクエストで使える上限です。超えると行単位で切り詰められ、ピン留めした記憶が先頭に来ます。"
+memory.settings.stale: "古い記憶を隠す"
+memory.settings.stale_description: "この期間、更新も参照もされていない記憶を索引から外します。ファイルは残り、一度参照すると索引に戻ります。"
+memory.settings.stale_off: "オフ"
+memory.settings.stale_days: "%{days} 日"
+memory.settings.memories: "保存された記憶"
+memory.settings.memories_description: "グローバル記憶が先頭、その後にワークスペースごとに並びます。記憶をクリックすると表示・編集・ピン留め・削除ができます。"
+memory.settings.empty: "まだ記憶はありません。エージェントに何かを覚えるよう頼むか、会話を要約させてください。"
+memory.settings.group_user: "グローバル"
+memory.settings.count: "%{count} 件"
+memory.settings.index_usage: "索引 %{used} / %{budget}"
+memory.settings.over_budget: "予算超過、末尾は切り詰められます"
+memory.settings.hidden: "%{count} 件が古いため非表示"
+memory.settings.clear: "すべて削除"
+memory.settings.clear_title: "%{scope} の記憶をすべて削除しますか？"
+memory.settings.clear_detail: "ここにある %{count} 件の記憶がすべて削除されます。元に戻せません。"
+memory.settings.clear_detail_project: "ここにある %{count} 件の記憶と、Claude Code の記憶にあるそのコピーが削除されます。元に戻せません。"
+memory.settings.delete: "削除"
+memory.settings.delete_title: "記憶「%{name}」を削除しますか？"
+memory.settings.delete_detail: "元に戻せません。"
+memory.settings.delete_detail_project: "Claude Code の記憶にあるコピーも削除されます。元に戻せません。"
+memory.settings.gone: "記憶「%{name}」はもう存在しません。"
+memory.settings.type_user: "あなたについて"
+memory.settings.type_feedback: "フィードバック"
+memory.settings.type_project: "プロジェクト"
+memory.settings.type_reference: "参照情報"
+memory.settings.pinned: "ピン留め"
+memory.settings.stale_chip: "古い"
+memory.settings.reads: "%{count} 回参照"
+memory.settings.no_body: "本文はありません。"
+memory.settings.pin: "ピン留め"
+memory.settings.unpin: "ピン留めを外す"
+memory.settings.edit_title: "タイトル"
+memory.settings.edit_title_placeholder: "省略可。空欄なら名前を表示"
+memory.settings.edit_description: "概要"
+memory.settings.edit_description_placeholder: "1 行。索引に表示されます"
+memory.settings.edit_type: "種類"
+memory.settings.edit_body: "本文"
+memory.settings.edit_body_placeholder: "覚えておく内容とその理由"
+memory.settings.description_required: "概要は空にできません。"

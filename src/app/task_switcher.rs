@@ -308,6 +308,7 @@ impl Waku {
             .sessions
             .iter()
             .filter(|session| session.has_started())
+            .filter(|session| !self.task_marks.is_archived(session.id)) // fork: task_marks.rs
             .map(|session| session.id)
             .collect::<Vec<_>>();
         let ordered = ordered_task_ids(

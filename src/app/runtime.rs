@@ -1102,6 +1102,7 @@ impl Waku {
             self.remove_right_panel_session_state(*session_id);
             self.task_switcher.remove(*session_id);
         }
+        self.forget_task_marks_many(&removed, cx); // fork: task_marks.rs
         self.state.projects = snapshot.projects;
 
         let attach = self
@@ -3381,6 +3382,8 @@ impl Waku {
         }
         // Fork addition: a new effort reaches Claude Code by relaunching it here.
         self.relaunch_for_effort(session_id);
+        // Fork addition: writing to an archived task brings it back (task_marks.rs).
+        self.unarchive_on_submit(session_id, cx);
         let selected = self.state.selected_session == Some(session_id);
         let Some(session) = self
             .state

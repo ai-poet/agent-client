@@ -1,0 +1,25 @@
+[package]
+name = "auto-memory"
+version = "0.1.0"
+edition = "2024"
+description = "Auto-memory for the built-in agent: typed memory files, MEMORY.md indexes, the prompt section, consolidation and the Claude Code mirror"
+license = "GPL-3.0-only"
+
+# Pure logic: no async runtime, no GPUI, no upstream crate. The bridge drives
+# it (`crates/waku-agent-bridge/src/memory/`), the app manages it
+# (`src/app/agent_memory_settings.rs`). Translated from `dsh-auto-memory`
+# (MIT); see NOTICE.md.
+[dependencies]
+anyhow = "1.0"
+chrono = "0.4"
+dirs = "6.0"
+parking_lot = "0.12"
+regex = "1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tracing = "0.1"
+uuid = { version = "1.18", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

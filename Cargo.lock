@@ -687,6 +687,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "auto-memory"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dirs 6.0.0",
+ "parking_lot",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8043,6 +8060,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "toml_edit 0.23.10+spec-1.0.0",
+ "uuid",
  "windows-sys 0.61.2",
 ]
 
@@ -9241,6 +9259,7 @@ dependencies = [
  "agent-teams",
  "alacritty_terminal",
  "anyhow",
+ "auto-memory",
  "base64",
  "block2 0.6.2",
  "chrono",
@@ -9296,6 +9315,7 @@ dependencies = [
  "agent-teams",
  "anyhow",
  "async-trait",
+ "auto-memory",
  "base64",
  "claurst-api",
  "claurst-core",

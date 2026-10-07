@@ -1976,7 +1976,10 @@ fn worked_duration_uses_readable_units() {
 
 #[test]
 fn sidebar_time_labels_prefer_the_live_turn_over_the_last_reply() {
-    use super::sidebar::{format_time_ago, session_time_label};
+    use super::sidebar::format_time_ago;
+    // The task row's trailing time (task_rows.rs); the spinner beside the
+    // title already says it is working, so a live turn shows only its count.
+    use super::task_rows::compact_task_time as session_time_label;
 
     assert_eq!(format_time_ago(0), "just now");
     assert_eq!(format_time_ago(59), "just now");
@@ -1993,10 +1996,7 @@ fn sidebar_time_labels_prefer_the_live_turn_over_the_last_reply() {
     session.begin_turn("go");
     session.status = SessionStatus::Working;
     session.turns[0].started_at = 100;
-    assert_eq!(
-        session_time_label(&session, 109).as_deref(),
-        Some("Working for 9s")
-    );
+    assert_eq!(session_time_label(&session, 109).as_deref(), Some("9s"));
 
     // Settled again: back to how long ago the agent last replied.
     session.finish_active_turn(TurnStatus::Completed);

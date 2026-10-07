@@ -42,6 +42,7 @@ impl Waku {
         if page == SettingsPage::Agent {
             self.ensure_agent_settings_loaded(cx);
             self.ensure_agent_teams_loaded(cx);
+            self.ensure_agent_memory_loaded(cx);
         }
         // Secrets are revealed only for the current visit to the page. This
         // also masks the token again when the Daemon row is reselected.

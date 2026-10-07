@@ -110,6 +110,7 @@ impl CaptainPort for Port {
             &inner.subagents,
             inner.browser.as_ref(),
             Some(&inner.team),
+            Some(&inner.memory),
         );
     }
 

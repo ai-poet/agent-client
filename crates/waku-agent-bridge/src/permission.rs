@@ -386,6 +386,33 @@ impl GuiPermissionHandler {
             };
         }
 
+        // Fork (auto-memory): a bulk delete of memories is asked whatever the
+        // access mode, once-scoped — "always allow forgetting everything" is
+        // not a standing answer anyone means, and the model must never be
+        // able to approve it for itself. Members have no memory tools.
+        if crate::memory::needs_human_approval(&request.tool_name) {
+            if self.member.is_some() {
+                return PermissionDecision::Deny;
+            }
+            let detail = match request.details.as_deref().map(str::trim) {
+                Some(details) if !details.is_empty() => {
+                    format!("{}\n\n{details}", request.description)
+                }
+                _ => request.description.clone(),
+            };
+            let choice = self.bridge.prompt(
+                request,
+                request.description.clone(),
+                detail,
+                vec![PermissionChoice::AllowOnce, PermissionChoice::RejectOnce],
+            );
+            return if choice.is_allow() {
+                PermissionDecision::Allow
+            } else {
+                PermissionDecision::Deny
+            };
+        }
+
         let manager = self
             .member
             .as_ref()
@@ -663,6 +690,52 @@ mod tests {
             PermissionDecision::Allow
         );
         assert!(seen.lock().is_empty(), "bypass must not raise a dialog");
+    }
+
+    /// Fork (auto-memory): forgetting every memory is asked even when the
+    /// access mode would allow anything, with once-only answers.
+    #[test]
+    fn a_memory_bulk_delete_is_asked_even_in_full_access() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let settings = Settings::default();
+        let manager = Arc::new(std::sync::Mutex::new(PermissionManager::new(
+            PermissionMode::BypassPermissions,
+            &settings,
+        )));
+        let sink = {
+            let seen = seen.clone();
+            EventSink::new(move |event: AgentEvent| seen.lock().push(event))
+        };
+        let bridge = PermissionBridge::new(
+            sink,
+            manager,
+            Arc::new(Mutex::new(settings)),
+            Some(PermissionChoice::AllowOnce),
+        );
+        let handler = GuiPermissionHandler::new(bridge.clone());
+        let request = PermissionRequest {
+            tool_name: crate::memory::DELETE_ALL_TOOL.into(),
+            description: "Delete every memory in project".into(),
+            details: Some("project (2): a, b".into()),
+            context_description: None,
+            ..request()
+        };
+
+        let answering = answer_one_dialog(bridge.clone(), PermissionChoice::RejectOnce);
+        assert_eq!(handler.request_permission(&request), PermissionDecision::Deny);
+        answering.join().unwrap();
+        let events = seen.lock();
+        assert_eq!(events.len(), 1, "exactly one dialog");
+        match &events[0] {
+            AgentEvent::Permission { options, detail, .. } => {
+                assert_eq!(
+                    options,
+                    &vec![PermissionChoice::AllowOnce, PermissionChoice::RejectOnce]
+                );
+                assert!(detail.contains("a, b"), "{detail}");
+            }
+            other => panic!("expected a dialog, got {other:?}"),
+        }
     }
 
     /// The plan is what the user is here to read. The tool passes its

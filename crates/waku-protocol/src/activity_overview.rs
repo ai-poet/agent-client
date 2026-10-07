@@ -13,8 +13,13 @@
 //! the heat grid — is a cheap pure fold over those records ([`summarize`],
 //! [`heat_grid`]), so switching a range never goes back to the daemon.
 //!
-//! A message is attributed to its session's *current* model: the history
-//! keeps no per-message model, and a session's model rarely changes.
+//! The history is a ledger the daemon keeps beside the tasks, so deleting a
+//! task or rewinding a conversation never takes activity away, and the
+//! messages a fork copies over are not counted a second time.
+//!
+//! A message is attributed to its session's *current* model — the last one
+//! known, once the session is deleted: the history keeps no per-message
+//! model, and a session's model rarely changes.
 
 use chrono::{Datelike, Days, NaiveDate};
 use serde::{Deserialize, Serialize};

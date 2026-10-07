@@ -29,9 +29,25 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- 内置 Agent 新增长期记忆：它会把值得长期保留的信息（你的身份和偏好、你希望的工作方式、项目进展、资料在哪里）各存成一条记忆，按工作区和全局分开保存，下次会话自动带上，不用每次重新交代。你也可以直接说「记住……」或「忘掉……」。默认每聊 12 条消息以及会话结束时自动提炼新记忆；项目记忆会同步到 Claude Code 的项目记忆里，同一目录下的 Claude Code 也能看到，Claude Code 自己写的记忆不会被改动。批量删除记忆一定会先问你，完全访问模式下也一样。在「设置 → Agent → 记忆」里可以开关这些功能、调整占用的上下文大小，并查看、编辑、置顶或删除每一条记忆
+
+  The built-in agent now has long-term memory. It saves what is worth keeping — who you are and what you prefer, how you want the work done, where a project stands, where things live — as one memory each, per workspace and globally, and brings them into later sessions so you do not have to repeat yourself. You can also just say "remember…" or "forget…". By default it summarizes new memories every 12 messages and when a session ends, and project memories are synced into Claude Code's project memory so Claude Code in the same folder sees them too, without touching the memories Claude Code wrote itself. Deleting memories in bulk always asks you first, even in full access. Settings → Agent → Memory turns each of these on or off, sets how much context the memories may take, and lets you read, edit, pin or delete every memory
+
+- 左侧任务栏改版：顶部可以切换「按项目 / 时间线」，并一键展开或收起全部分组；按项目查看时每个项目先显示 5 个任务，没有项目的任务单独列在「任务」里。任务改为单行显示，失败、未读、运行中的状态显示在标题左侧，等待你确认时右侧显示「等待确认」，悬停可以直接置顶或归档，项目和分支移到标题的悬停提示里；运行中的任务排在最前，收起的分组里有任务在运行或有未读回复时也会提示。新增跨项目的「已置顶」分区；删除任务改为归档，可以在归档视图里取消归档或永久删除；在别的任务上完成的回复会显示未读圆点，也可以右键「标记为未读」
+
+  The task sidebar is redesigned: switch between By project and Timeline at the top, and expand or collapse every group at once. By project shows five tasks per project at a time, with tasks that belong to no project listed under Tasks. Tasks are single-line rows: failed, unread and running states sit left of the title, a "Needs approval" tag shows on the right while a task waits on you, hovering offers pin and archive, and the project and branch move into the title's tooltip. Running tasks sort first, and a folded group still shows when a task inside is running or has an unread reply. A Pinned section gathers tasks across projects; removing a task now archives it, and the archive view can restore or permanently delete it. A reply that finishes in another task shows an unread dot, and any task can be marked unread from its menu
+
+- 修复 Windows 上安装电脑操作驱动时偶尔报"下载成功但文件不在"的问题：下载改放在应用自己的目录里，每次安装单独一个文件夹，文件下载后消失会自动重新下载，最多三次；仍然失败时，报错会写明下载收到了什么、文件夹里还剩什么
+
+  Fixes installing the Computer Use driver on Windows occasionally failing with "reported success but nothing was there": downloads now land in a folder of their own inside the app's directory, and a file that vanishes after downloading is fetched again, up to three times. If it still fails, the message says what the download received and what was left in the folder
+
 - 修复内置 Agent 使用 GPT 等模型时，两行工具或思考状态之间偶尔出现一大段空白、本该归在一起的操作被拆成两组的问题
 
   Fixes a large blank gap that sometimes appeared between two tool or thinking rows when the built-in agent ran GPT and other models, splitting work that belongs together into separate groups
+
+- 修复删除任务或回退对话后，新建任务欢迎页的活动概览跟着减少的问题：活动记录现在单独保存，只增不减；分叉出的任务也不再把原任务的消息重复计入。修复前已经删除的任务无法找回
+
+  The activity overview on the new-task welcome screen no longer shrinks when a task is deleted or a conversation is rewound: activity is now kept on its own record that only grows, and a forked task no longer counts the messages it copied from the original a second time. Tasks deleted before this fix cannot be recovered
 
 ## [0.2.11]
 

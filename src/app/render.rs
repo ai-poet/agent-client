@@ -238,6 +238,8 @@ impl Render for Waku {
         // whether each native browser webview belongs on screen this frame —
         // it floats above everything GPUI paints.
         self.sync_browser_webviews(cx);
+        // Fork: the task coming on screen has been read (task_marks.rs).
+        self.note_task_on_screen(cx);
         if self.fps_counter_visible {
             self.tick_fps(window);
         }

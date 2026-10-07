@@ -281,12 +281,37 @@ fn darwin_tarball_suffix() -> &'static str {
 
 // --- the platform installers --------------------------------------------
 
-/// Fresh staging directory under the system temp dir.
+/// A fresh staging directory of its own for one install.
+///
+/// It lives under the app's own `toolchains/.staging` rather than the system
+/// temp dir, and every call gets a new one. A file that curl had just
+/// written once vanished from a per-process `%TEMP%` folder before it could
+/// be checked: temp cleaners sweep `%TEMP%` and nothing else, and a folder
+/// shared by every install in the process let one install's cleanup take
+/// another's download with it.
 pub(crate) fn staging_dir() -> Result<PathBuf> {
-    let dir = std::env::temp_dir().join(format!("toolchain-install-{}", std::process::id()));
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let name = format!(
+        "{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
+    let root = brand::data_dir()
+        .map(|data| data.join("toolchains").join(".staging"))
+        .unwrap_or_else(|| std::env::temp_dir().join("toolchain-install"));
+    let dir = root.join(name);
+    // A previous process with the same id may have died mid-install.
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
     Ok(dir)
 }
+
+/// How many times a download whose file is gone afterwards is fetched again.
+const DOWNLOAD_ATTEMPTS: u32 = 3;
+
+/// Prefix of the line curl's `-w` prints, so it can be found among errors.
+const WRITE_OUT_PREFIX: &str = "download-result: ";
 
 pub(crate) fn download(
     url: &str,
@@ -294,38 +319,169 @@ pub(crate) fn download(
     report: &mut impl FnMut(NodeStage),
 ) -> Result<()> {
     report(NodeStage::Downloading);
-    let outcome = cli_install::run_program(
-        http::CURL_PATH,
-        &[
-            "-fSL",
-            "--connect-timeout",
-            "20",
-            "--retry",
-            "2",
-            "--retry-delay",
-            "1",
-            "-o",
-            &destination.to_string_lossy(),
-            url,
-        ],
-    );
-    if !outcome.success {
-        return Err(anyhow!("download failed: {}", outcome.output));
-    }
-    // A zero exit is not proof the bytes landed: a proxy can answer 200 with
-    // an empty body, and an antivirus scanner can remove an executable
-    // archive as it is written. Checking here is what lets the next mirror be
-    // tried, and what turns "the file is not there" into a sentence naming
-    // the download rather than a missing-path error two steps later.
-    match std::fs::metadata(destination) {
-        Ok(metadata) if metadata.len() > 0 => Ok(()),
-        Ok(_) => Err(anyhow!("{url} answered with an empty file")),
-        Err(error) => Err(anyhow!(
-            "{url} reported success but nothing landed at {}: {error}",
-            destination.display()
-        )),
+    let write_out = format!("{WRITE_OUT_PREFIX}%{{http_code}} %{{size_download}} %{{filename_effective}}\\n");
+    download_with(url, destination, std::time::Duration::from_secs(1), || {
+        cli_install::run_program(
+            http::CURL_PATH,
+            &[
+                "-fsSL",
+                "--connect-timeout",
+                "20",
+                "--retry",
+                "2",
+                "--retry-delay",
+                "1",
+                "-w",
+                &write_out,
+                "-o",
+                &destination.to_string_lossy(),
+                url,
+            ],
+        )
+    })
+}
+
+/// [`download`] with the fetch injected, so the landing check and its retry
+/// can be tested without a network.
+fn download_with(
+    url: &str,
+    destination: &Path,
+    pause: std::time::Duration,
+    mut fetch: impl FnMut() -> InstallOutcome,
+) -> Result<()> {
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        let outcome = fetch();
+        if !outcome.success {
+            // curl's own `--retry` has already covered the network.
+            return Err(anyhow!("download failed: {}", outcome.output));
+        }
+        // A zero exit is not proof the bytes are still there: curl creates
+        // the file even for an empty body, yet the archive has been seen to
+        // be gone a moment after curl exited. Checking here turns that into
+        // another attempt, and finally into a sentence naming the download
+        // rather than a missing-path error two steps later.
+        match std::fs::metadata(destination) {
+            Ok(metadata) if metadata.len() > 0 => return Ok(()),
+            Ok(_) => return Err(anyhow!("{url} answered with an empty file")),
+            Err(_) if attempts < DOWNLOAD_ATTEMPTS => {
+                std::thread::sleep(pause);
+                // The whole folder may have gone with it, and curl does not
+                // create directories.
+                if let Some(parent) = destination.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+            }
+            Err(error) => {
+                return Err(VanishedDownload {
+                    url: url.to_owned(),
+                    path: destination.to_path_buf(),
+                    attempts,
+                    error,
+                    write_out: parse_write_out(&outcome.output),
+                    folder: FolderState::read(destination.parent()),
+                }
+                .into());
+            }
+        }
     }
 }
+
+/// What curl's `-w` line reported about the transfer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WriteOut {
+    status: u16,
+    bytes: u64,
+    filename: String,
+}
+
+/// Find and parse the `-w` line among curl's captured output.
+fn parse_write_out(output: &str) -> Option<WriteOut> {
+    let line = output
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(WRITE_OUT_PREFIX))?;
+    let mut parts = line.splitn(3, ' ');
+    let status = parts.next()?.parse().ok()?;
+    let bytes = parts.next()?.parse().ok()?;
+    let filename = parts.next().unwrap_or("").trim().to_owned();
+    Some(WriteOut {
+        status,
+        bytes,
+        filename,
+    })
+}
+
+/// What was left in the download's folder once the file was found missing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum FolderState {
+    Gone,
+    Holds(Vec<String>),
+}
+
+impl FolderState {
+    const LISTED: usize = 10;
+
+    fn read(folder: Option<&Path>) -> Self {
+        let Some(entries) = folder.and_then(|folder| std::fs::read_dir(folder).ok()) else {
+            return Self::Gone;
+        };
+        let mut names: Vec<String> = entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        Self::Holds(names)
+    }
+}
+
+/// curl exited 0, yet the file was not there afterwards, on every attempt.
+#[derive(Debug)]
+struct VanishedDownload {
+    url: String,
+    path: PathBuf,
+    attempts: u32,
+    error: std::io::Error,
+    write_out: Option<WriteOut>,
+    folder: FolderState,
+}
+
+impl std::fmt::Display for VanishedDownload {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{} reported success", self.url)?;
+        if let Some(write_out) = &self.write_out {
+            write!(
+                formatter,
+                " (HTTP {}, {} bytes written to {})",
+                write_out.status, write_out.bytes, write_out.filename
+            )?;
+        }
+        write!(
+            formatter,
+            " but nothing was at {} afterwards ({}), {} attempt{}; ",
+            self.path.display(),
+            self.error,
+            self.attempts,
+            if self.attempts == 1 { "" } else { "s" }
+        )?;
+        match &self.folder {
+            FolderState::Gone => write!(formatter, "the folder itself is gone"),
+            FolderState::Holds(names) if names.is_empty() => {
+                write!(formatter, "the folder is empty")
+            }
+            FolderState::Holds(names) => {
+                let shown = &names[..names.len().min(FolderState::LISTED)];
+                write!(formatter, "the folder holds: {}", shown.join(", "))?;
+                if names.len() > shown.len() {
+                    write!(formatter, " and {} more", names.len() - shown.len())?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for VanishedDownload {}
 
 #[cfg(target_os = "macos")]
 fn install_macos(entries: &[MirrorEntry], report: &mut impl FnMut(NodeStage)) -> Result<String> {
@@ -490,6 +646,8 @@ pub(crate) fn persist_windows_user_path(directory: &Path) {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     fn entry(name: &str) -> MirrorEntry {
@@ -584,6 +742,138 @@ mod tests {
     fn ps_quoting_doubles_single_quotes() {
         assert_eq!(ps_quote("C:\\a b"), "'C:\\a b'");
         assert_eq!(ps_quote("it's"), "'it''s'");
+    }
+
+    fn succeeded(output: &str) -> InstallOutcome {
+        InstallOutcome {
+            success: true,
+            output: output.to_owned(),
+        }
+    }
+
+    #[test]
+    fn every_install_gets_its_own_staging_folder() {
+        let first = staging_dir().expect("first");
+        let second = staging_dir().expect("second");
+        assert_ne!(first, second);
+        assert!(first.is_dir() && second.is_dir());
+        if let Some(data) = brand::data_dir() {
+            let root = data.join("toolchains").join(".staging");
+            assert!(first.starts_with(&root), "{}", first.display());
+        }
+        let _ = std::fs::remove_dir_all(&first);
+        let _ = std::fs::remove_dir_all(&second);
+    }
+
+    /// The archive was once gone a moment after curl exited 0. One more
+    /// fetch is what gets the install through when it happens again.
+    #[test]
+    fn a_download_that_vanishes_is_fetched_again() {
+        let staging = staging_dir().expect("staging");
+        let archive = staging.join("driver.zip");
+        let mut calls = 0;
+        download_with("https://example/driver.zip", &archive, Duration::ZERO, || {
+            calls += 1;
+            if calls == 2 {
+                std::fs::write(&archive, b"zip").unwrap();
+            }
+            succeeded("")
+        })
+        .expect("the second attempt lands");
+        assert_eq!(calls, 2);
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+
+    #[test]
+    fn a_download_that_keeps_vanishing_says_what_curl_saw_and_what_is_left() {
+        let staging = staging_dir().expect("staging");
+        let archive = staging.join("driver.zip");
+        std::fs::write(staging.join("leftover.txt"), b"x").unwrap();
+        let mut calls = 0;
+        let error = download_with("https://example/driver.zip", &archive, Duration::ZERO, || {
+            calls += 1;
+            succeeded("download-result: 200 27636131 C:\\a b\\driver.zip\n")
+        })
+        .expect_err("nothing ever lands");
+        assert_eq!(calls, DOWNLOAD_ATTEMPTS);
+        let vanished = error.downcast_ref::<VanishedDownload>().expect("typed");
+        assert_eq!(vanished.attempts, DOWNLOAD_ATTEMPTS);
+        let text = error.to_string();
+        assert!(text.contains("HTTP 200, 27636131 bytes written to C:\\a b\\driver.zip"), "{text}");
+        assert!(text.contains("3 attempts"), "{text}");
+        assert!(text.contains("the folder holds: leftover.txt"), "{text}");
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+
+    #[test]
+    fn a_folder_that_went_with_the_download_is_recreated_and_reported() {
+        let staging = staging_dir().expect("staging");
+        let archive = staging.join("driver.zip");
+        let mut calls = 0;
+        let error = download_with("https://example/driver.zip", &archive, Duration::ZERO, || {
+            calls += 1;
+            // Every later attempt finds the folder back in place.
+            if calls > 1 {
+                assert!(staging.is_dir(), "attempt {calls} has no folder to write into");
+            }
+            let _ = std::fs::remove_dir_all(&staging);
+            succeeded("")
+        })
+        .expect_err("nothing ever lands");
+        assert_eq!(calls, DOWNLOAD_ATTEMPTS);
+        assert!(error.to_string().contains("the folder itself is gone"), "{error}");
+    }
+
+    #[test]
+    fn empty_files_and_failed_fetches_are_not_retried() {
+        let staging = staging_dir().expect("staging");
+        let archive = staging.join("driver.zip");
+        let mut calls = 0;
+        let error = download_with("https://example/driver.zip", &archive, Duration::ZERO, || {
+            calls += 1;
+            std::fs::write(&archive, b"").unwrap();
+            succeeded("")
+        })
+        .expect_err("empty");
+        assert_eq!(calls, 1);
+        assert!(error.to_string().contains("empty file"), "{error}");
+
+        calls = 0;
+        let error = download_with("https://example/driver.zip", &archive, Duration::ZERO, || {
+            calls += 1;
+            InstallOutcome {
+                success: false,
+                output: "curl: (22) The requested URL returned error: 404".to_owned(),
+            }
+        })
+        .expect_err("failed");
+        assert_eq!(calls, 1);
+        assert!(error.to_string().starts_with("download failed: curl: (22)"), "{error}");
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+
+    #[test]
+    fn parses_the_write_out_line() {
+        assert_eq!(
+            parse_write_out("download-result: 200 27636131 C:\\Users\\a b\\x.zip\n"),
+            Some(WriteOut {
+                status: 200,
+                bytes: 27636131,
+                filename: "C:\\Users\\a b\\x.zip".to_owned(),
+            })
+        );
+        // Found among curl's error lines, and tolerant of CRLF.
+        assert_eq!(
+            parse_write_out("curl: (22) nope\r\ndownload-result: 404 0 \r\n"),
+            Some(WriteOut {
+                status: 404,
+                bytes: 0,
+                filename: String::new(),
+            })
+        );
+        assert_eq!(parse_write_out("download-result: 200"), None);
+        assert_eq!(parse_write_out("download-result: x y z"), None);
+        assert_eq!(parse_write_out("nonsense"), None);
     }
 
     #[test]

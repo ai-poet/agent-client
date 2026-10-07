@@ -16,6 +16,8 @@ license = "GPL-3.0-only"
 [dependencies]
 # Fork: AgentTeams' durable state, rules and prompts (`src/team/`).
 agent-teams = { path = "../agent-teams" }
+# Fork: auto-memory's store, index and prompts (`src/memory/`).
+auto-memory = { path = "../auto-memory" }
 anyhow = "1.0"
 async-trait = { workspace = true }
 base64 = { workspace = true }

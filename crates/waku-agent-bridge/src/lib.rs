@@ -48,6 +48,8 @@ mod goal;
 pub mod history;
 mod images;
 mod mcp_tool;
+// Fork: auto-memory (`auto_memory`, translated from dsh-auto-memory).
+mod memory;
 mod oneshot;
 mod permission;
 mod project_context;

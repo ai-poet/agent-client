@@ -351,6 +351,7 @@ impl Waku {
         }
         self.session_navigation.remove(session_id);
         self.task_switcher.remove(session_id);
+        self.forget_task_marks(session_id, cx); // fork: task_marks.rs
         let project_still_used = self
             .state
             .sessions
@@ -398,6 +399,7 @@ impl Waku {
                 .sessions
                 .iter()
                 .filter(|session| session.project_id == project_id)
+                .filter(|session| !self.task_marks.is_archived(session.id)) // fork: task_marks.rs
                 .max_by_key(|session| session.updated_at)
                 .map(|session| session.id);
             if let Some(session_id) = next_session {

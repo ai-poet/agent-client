@@ -800,12 +800,52 @@ model_status.benchmarks_disclaimer:
   en: "Checks only decide among the models a benchmark enrolls: a mismatch means the answers clearly resemble another enrolled model. It is a signal, not proof of substitution on its own, and a model outside the benchmark may be attributed to its closest candidate."
 sidebar.options:
   en: Sidebar options
-sidebar.grouping:
-  en: Grouping
-sidebar.grouping_project:
-  en: Project
-sidebar.grouping_updated:
-  en: Updated
+sidebar.view_by_project:
+  en: By project
+sidebar.view_timeline:
+  en: Timeline
+sidebar.expand_all:
+  en: Expand all
+sidebar.collapse_all:
+  en: Collapse all
+sidebar.archived:
+  en: Archived
+sidebar.archived_tasks:
+  en: Archived tasks
+sidebar.pinned:
+  en: Pinned
+sidebar.projects:
+  en: Projects
+sidebar.no_projects:
+  en: No open projects
+sidebar.no_tasks:
+  en: No tasks yet
+sidebar.no_archived:
+  en: No archived tasks
+sidebar.pin:
+  en: Pin
+sidebar.unpin:
+  en: Unpin
+sidebar.archive:
+  en: Archive
+sidebar.unarchive:
+  en: Unarchive
+sidebar.archive_running:
+  en: A running task can't be archived
+sidebar.mark_unread:
+  en: Mark as unread
+sidebar.unread:
+  en: Unread
+sidebar.group_unread:
+  en: Has unread tasks
+sidebar.group_running:
+  en: Tasks running
+sidebar.awaiting_approval:
+  en: Needs approval
+sidebar.delete:
+  en: Delete
+sidebar.delete_confirm_title:
+  en: Delete this task permanently?
 sidebar.ordering:
   en: Ordering
 sidebar.ordering_newest:
@@ -4292,3 +4332,121 @@ file_preview.cannot_read:
   en: "This file cannot be previewed: %{reason}"
 file_preview.unavailable:
   en: "This kind of file cannot be previewed in the app."
+memory.tool.write:
+  en: "Remember: %{name}"
+memory.tool.read:
+  en: "Recall: %{name}"
+memory.tool.list:
+  en: "List memories"
+memory.tool.delete:
+  en: "Forget: %{name}"
+memory.tool.prune:
+  en: "Prune memories older than %{days} days"
+memory.tool.delete_all:
+  en: "Forget all memories"
+memory.approval.prune_title:
+  en: "Delete old memories?"
+memory.approval.delete_all_title:
+  en: "Delete all memories?"
+memory.settings.title:
+  en: "Memory"
+memory.settings.description:
+  en: "Facts the built-in agent keeps across sessions — who you are, how you like the work done, where a project stands. Each memory is a Markdown file; their index goes into every request within a byte budget, and the agent reads, writes and forgets them with its memory tools."
+memory.settings.enabled:
+  en: "Use memory"
+memory.settings.enabled_description:
+  en: "New sessions get the memory tools and the index. Sessions already running keep what they started with."
+memory.settings.user_scope:
+  en: "Global memories"
+memory.settings.user_scope_description:
+  en: "Besides each workspace's own memories, keep memories that apply to every project, such as your preferences."
+memory.settings.auto_summarize:
+  en: "Summarize automatically"
+memory.settings.auto_summarize_description:
+  en: "Every %{turns} of your messages, and when a session closes, the agent reviews the conversation and saves up to %{count} new memories by itself. Each pass is one extra request."
+memory.settings.mirror:
+  en: "Sync to Claude Code"
+memory.settings.mirror_description:
+  en: "Copy each workspace's memories into Claude Code's own project memory (~/.claude/projects/…/memory), so Claude Code in the same folder sees them too. Only copies made here are ever changed or deleted; Claude Code's own memories are left alone. Global memories are not copied."
+memory.settings.budget:
+  en: "Index budget"
+memory.settings.budget_description:
+  en: "How much of every request the memory index and its instructions may take. Past it, the index is cut at a whole line; pinned memories come first."
+memory.settings.stale:
+  en: "Hide stale memories"
+memory.settings.stale_description:
+  en: "Leave memories out of the index once they have gone this long without an update or a read. They stay on disk; reading one brings it back."
+memory.settings.stale_off:
+  en: "Off"
+memory.settings.stale_days:
+  en: "%{days} days"
+memory.settings.memories:
+  en: "Saved memories"
+memory.settings.memories_description:
+  en: "Global memories first, then each workspace. Click a memory to read, edit, pin or delete it."
+memory.settings.empty:
+  en: "No memories yet. Ask the agent to remember something, or let it summarize a conversation."
+memory.settings.group_user:
+  en: "Global"
+memory.settings.count:
+  en: "%{count} memories"
+memory.settings.index_usage:
+  en: "Index %{used} of %{budget}"
+memory.settings.over_budget:
+  en: "over budget, the end is cut"
+memory.settings.hidden:
+  en: "%{count} stale, hidden"
+memory.settings.clear:
+  en: "Clear"
+memory.settings.clear_title:
+  en: "Clear the memories in %{scope}?"
+memory.settings.clear_detail:
+  en: "All %{count} memories here will be deleted. This cannot be undone."
+memory.settings.clear_detail_project:
+  en: "All %{count} memories here will be deleted, along with their copies in Claude Code's memory. This cannot be undone."
+memory.settings.delete:
+  en: "Delete"
+memory.settings.delete_title:
+  en: "Delete the memory “%{name}”?"
+memory.settings.delete_detail:
+  en: "This cannot be undone."
+memory.settings.delete_detail_project:
+  en: "Its copy in Claude Code's memory is deleted too. This cannot be undone."
+memory.settings.gone:
+  en: "The memory “%{name}” no longer exists."
+memory.settings.type_user:
+  en: "About you"
+memory.settings.type_feedback:
+  en: "Feedback"
+memory.settings.type_project:
+  en: "Project"
+memory.settings.type_reference:
+  en: "Reference"
+memory.settings.pinned:
+  en: "Pinned"
+memory.settings.stale_chip:
+  en: "Stale"
+memory.settings.reads:
+  en: "read %{count} times"
+memory.settings.no_body:
+  en: "No details."
+memory.settings.pin:
+  en: "Pin"
+memory.settings.unpin:
+  en: "Unpin"
+memory.settings.edit_title:
+  en: "Title"
+memory.settings.edit_title_placeholder:
+  en: "Optional; the name is shown without one"
+memory.settings.edit_description:
+  en: "Summary"
+memory.settings.edit_description_placeholder:
+  en: "One line, shown in the index"
+memory.settings.edit_type:
+  en: "Type"
+memory.settings.edit_body:
+  en: "Details"
+memory.settings.edit_body_placeholder:
+  en: "What to remember, and why"
+memory.settings.description_required:
+  en: "The summary cannot be empty."

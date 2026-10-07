@@ -125,6 +125,9 @@ This fork remains licensed under GPL-3.0-only.
 | 2026-10-04 | Ported AgentTeams from dsh-agent-teams (`@nanmicoder/dsh-agent-teams` 0.1.22, MIT; notice below) to the built-in agent only: the session becomes a captain that drafts members and a task DAG, waits for approval, then lets a scheduler hand ready tasks to persistent member sub-agents on their own model routes, with mailboxes between them and the full quality gates (task kinds, contracts, completion checks, automatic repair and re-review, escalation). A session loads the team tools and the captain protocol only after a message starting with `/agent-teams` or when an unarchived team it leads is on disk. State lives in `<workspace>/.agent-teams/`; configuration and team profiles in `agent-teams.json` beside the engine's settings, edited on Settings → Agent → Teams; a Team surface in the right panel shows the draft (approve / revise / discard) and the running team (progress, members, DAG, inbox, two-step stop). A member's permission request is asked in the captain's session under a `team:` request id. No wire protocol change (`crates/agent-teams`, `crates/waku-agent-bridge/src/{team/**,session_team.rs}`, `src/app/{team_panel,agent_teams_settings}.rs`, `docs/agent-teams.md`). |
 | 2026-10-04 | A finished plan opens in a Plan surface of the right panel instead of a capped box on the permission card, for Claude Code and the built-in agent. The surface shows the whole plan, rendered and selectable; every version the session submitted, with a line diff against the previous one; and a multi-line note into which "Quote selection" drops the selected text as a Markdown quote. Sending the plan back refuses it and steers the note into the turn. The card keeps one row: the answers and "View plan". The built-in agent's `ExitPlanMode` takes the whole plan in a required `plan` parameter (it took only an optional `summary`), as Claude Code's and ZCode's do. The dialog shows exactly that plan, and a call without one is sent back to the model (`src/app/plan_review.rs`, `crates/waku-agent/tools/src/exit_plan_mode.rs`). |
 | 2026-10-04 | Plan mode refuses far less of what a model reads with. The built-in agent's read-only check now parses the command instead of splitting it on every `|`, `;` and `&&`. It honours quoting, accepts `2>&1` and `>/dev/null` (a redirection into a file is still refused), and judges each command by its own rules: `cd`, `sed -n`, `awk`, `xargs` over readers, git's listing forms (`branch`, `tag`, `remote -v`, `stash list`, `config` reads, `grep`, `-C`) and `gh` reads are allowed. In plan mode an "always allow" rule no longer opens the shell or the editing tools; it used to let every command and edit through while planning. The plan-mode rule tells the model which commands still run, not to retry a refused one, and to settle every question with AskUserQuestion before writing the plan, which itself asks nothing (`crates/waku-agent/core/src/{bash_classifier,lib}.rs`, `crates/waku-agent/tools/src/lib.rs`, `plan_mode_rule` in `crates/waku-agent-bridge/src/config.rs`). |
+| 2026-10-07 | The welcome screen's activity overview no longer shrinks when a task is deleted or a conversation rewound: it reads a ledger of its own, the `fork_activity_messages` / `fork_activity_sessions` tables in `app.db`, filled by SQLite triggers on `messages` and `sessions` inside the transaction that writes each message, so the store's save is untouched (`crates/waku-core/src/activity_overview.rs::ensure_ledger`, called from `StateStore::open`; backfilled once from the history still on disk). A message counts once by id; one older than its session — a copy a fork carried over — is not counted again. The tables are not drizzle migrations, which stay upstream's. |
+| 2026-10-07 | The task sidebar follows ZCode's task list (design only; no ZCode code is used). A toolbar switches between a project view (「项目」 with five tasks per project and more on demand, then 「任务」 for tasks with no project) and a timeline, folds or unfolds every group, and opens an archive. Tasks are single-line rows with a status slot (failure, unread, running, pinned), a "Needs approval" tag while waiting, and pin / archive actions on hover; running tasks sort first and a folded group keeps a running or unread mark. Pinned tasks gather in a section across projects; removing a task archives it, and the archive restores or permanently deletes. Pins, archives and unread replies are kept in `~/.cheaprouter/task-marks.json` (`task-marks-debug.json` for debug builds), not in the transcript store (`crates/sub2api/src/task_marks.rs`, `src/app/{sidebar_rows,sidebar_sections,sidebar_toolbar,task_marks,task_rows}.rs`). The five new icons are Lucide's (ISC; notice below). |
+| 2026-10-07 | Ported dsh-auto-memory (0.3.0, MIT; notice below) to the built-in agent only, as Claude Code-style persistent memory. Each memory is one Markdown file with YAML frontmatter and one of four types (user / feedback / project / reference). There is a project scope per workspace and a global user scope, both under `<engine config dir>/auto-memory/`. Each scope keeps a derived `MEMORY.md` index, which goes into the root session's system prompt with the plugin's writing policy, within a 2 / 4 / 8 KB budget. Six tools are added (`memory_write / read / list / delete / prune / delete_all`). The two bulk deletes always ask a person, even in full access, and are refused to team members. Also ported: optional stale eviction, pinning, `[[name]]` link expansion on read, and a consolidation pass, on by default, every 12 user messages and when a session closes. Project memories are mirrored one way into Claude Code's own project memory (`~/.claude/projects/<slug>/memory/`), on by default; only files marked `metadata.origin: cheaprouter` are ever changed or deleted there. Settings and management live on Settings → Agent → Memory, with configuration in `auto-memory.json` beside the engine's settings. Files: `crates/auto-memory`, `crates/waku-agent-bridge/src/memory/`, `crates/waku-core/src/driver/memory_titles.rs`, `src/app/agent_memory_settings.rs`, `docs/auto-memory.md`. `oneshot::ask_once` is split out of `one_shot` for the consolidation call. |
 
 ## Upstream attribution
 
@@ -208,4 +211,57 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+
+Auto-memory (`crates/auto-memory`, `crates/waku-agent-bridge/src/memory/`,
+`src/app/agent_memory_settings.rs`) is translated from dsh-auto-memory
+(<https://github.com/AskTheWay/dsh-auto-memory>, version 0.3.0); its
+memory-writing policy and consolidation prompt are used verbatim. It is used
+under the following licence:
+
+```text
+MIT License
+
+Copyright (c) 2026 AskTheWay
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+The icons `assets/icons/{archive,archive-restore,chevrons-down-up,pin,pin-off}.svg`
+are from Lucide (<https://lucide.dev>), used under the following licence:
+
+```text
+ISC License
+
+Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of
+Feather (MIT). All other copyright (c) for Lucide are held by Lucide
+Contributors 2022.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```

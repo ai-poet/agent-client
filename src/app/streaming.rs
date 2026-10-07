@@ -751,6 +751,7 @@ impl Waku {
                         crate::analytics::TurnOutcome::Failed
                     },
                 );
+                self.note_task_turn_finished(session_id, cx); // fork: task_marks.rs
                 runtime.pending_permissions.retain(|permission| agent_teams::requests::is_member_request(&permission.request_id));
                 runtime.pending_user_input = None;
                 runtime.pending_computer_approval = None;

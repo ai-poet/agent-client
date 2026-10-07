@@ -929,6 +929,7 @@ impl Waku {
             .sessions
             .iter()
             .filter(|session| session.has_started())
+            .filter(|session| !self.task_marks.is_archived(session.id)) // fork: task_marks.rs
             .enumerate()
             .map(|(order, session)| {
                 let (project, project_path) = projects

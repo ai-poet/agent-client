@@ -33,6 +33,10 @@ use waku_agent_bridge::{
 
 use super::activity;
 use super::subagent::{ChildCall, SubagentFeed};
+
+// Fork: the memory tools' titles (auto-memory).
+#[path = "memory_titles.rs"]
+mod memory_titles;
 use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
@@ -824,6 +828,8 @@ impl EventTranslator {
                 } else {
                     (title, detail)
                 };
+                // Fork (auto-memory): a bulk delete says so in the title.
+                let title = memory_titles::approval_title(&tool_name).unwrap_or(title);
                 let options = options
                     .into_iter()
                     .map(|choice| PermissionOption {
@@ -1111,6 +1117,10 @@ fn background_item(entry: BackgroundEntry) -> BackgroundWorkItem {
 /// normalizer would show anyway, and falls back to a de-camel-cased tool name —
 /// the same precedence every other provider's rows follow.
 fn tool_title(name: &str, input: &Value) -> String {
+    // Fork: memory tools first — `memory_write`'s `title` is the memory's.
+    if let Some(title) = memory_titles::tool_title(name, input) {
+        return title;
+    }
     if let Some(title) = activity::input_title(Some(input)) {
         return title;
     }

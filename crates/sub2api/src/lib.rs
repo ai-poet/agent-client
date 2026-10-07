@@ -54,6 +54,7 @@ pub mod paywall;
 pub mod promotion;
 pub mod providers;
 pub mod speedtest;
+pub mod task_marks;
 #[cfg(windows)]
 pub mod win_process;
 

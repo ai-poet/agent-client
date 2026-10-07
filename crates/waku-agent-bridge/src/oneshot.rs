@@ -12,9 +12,11 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 
+use claurst_api::AnthropicClient;
+use claurst_core::config::Config;
 use claurst_core::types::{ContentBlock, Message, MessageContent};
 use claurst_core::{AutoPermissionHandler, CostTracker, PermissionMode};
-use claurst_query::QueryOutcome;
+use claurst_query::{QueryConfig, QueryOutcome};
 use claurst_tools::{Tool, ToolContext};
 use tokio_util::sync::CancellationToken;
 
@@ -66,6 +68,30 @@ pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result
     let (client, registry) = build_clients(&config, options.platform.as_deref())?;
     query.provider_registry = Some(registry);
 
+    rt.block_on(ask_once(
+        client.as_ref(),
+        &query,
+        config,
+        cwd,
+        format!("one-shot-{}", uuid::Uuid::new_v4()),
+        prompt,
+        CancellationToken::new(),
+    ))
+}
+
+/// Ask once on a route already built: no tools, nothing persisted. Fork
+/// addition: auto-memory consolidation (`crate::memory`) sends its request
+/// through this with the session's own client, from inside the runtime,
+/// where [`one_shot`]'s `block_on` cannot run.
+pub(crate) async fn ask_once(
+    client: &AnthropicClient,
+    query: &QueryConfig,
+    config: Config,
+    cwd: &Path,
+    session_id: String,
+    prompt: &str,
+    cancel: CancellationToken,
+) -> anyhow::Result<String> {
     let cost_tracker = CostTracker::new();
     let tool_ctx = ToolContext {
         working_dir: cwd.to_path_buf(),
@@ -74,7 +100,7 @@ pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result
             mode: PermissionMode::Plan,
         }),
         cost_tracker: cost_tracker.clone(),
-        session_id: format!("one-shot-{}", uuid::Uuid::new_v4()),
+        session_id,
         file_history: Arc::new(parking_lot::Mutex::new(
             claurst_core::file_history::FileHistory::new(),
         )),
@@ -87,22 +113,23 @@ pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result
         pending_permissions: None,
         permission_manager: None,
         user_question_tx: None,
-        cancel_token: CancellationToken::new(),
+        cancel_token: cancel.clone(),
     };
 
     let tools: Vec<Box<dyn Tool>> = Vec::new();
     let mut messages = vec![Message::user(prompt)];
-    let outcome = rt.block_on(claurst_query::run_query_loop(
-        client.as_ref(),
+    let outcome = claurst_query::run_query_loop(
+        client,
         &mut messages,
         &tools,
         &tool_ctx,
-        &query,
+        query,
         cost_tracker,
         None,
-        CancellationToken::new(),
+        cancel,
         None,
-    ));
+    )
+    .await;
 
     let message = match outcome {
         QueryOutcome::EndTurn { message, .. } | QueryOutcome::MaxTokens {

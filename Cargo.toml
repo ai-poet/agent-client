@@ -9,6 +9,7 @@ license = "GPL-3.0-only"
 members = [
     "crates/sub2api",
     "crates/agent-teams",
+    "crates/auto-memory",
     "crates/waku-agent-bridge",
     "crates/waku-agent/api",
     "crates/waku-agent/core",
@@ -29,6 +30,7 @@ default-members = [
     ".",
     "crates/sub2api",
     "crates/agent-teams",
+    "crates/auto-memory",
     "crates/waku-agent-bridge",
     "crates/waku-client",
     "crates/waku-core",
@@ -139,6 +141,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sub2api = { path = "crates/sub2api" }
 agent-teams = { path = "crates/agent-teams" }
+auto-memory = { path = "crates/auto-memory" }
 unicode-segmentation = "1.12"
 url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }

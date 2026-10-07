@@ -960,6 +960,10 @@ impl StateStore {
             .execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")
             .map_err(to_io_error)?;
         apply_migrations(&connection)?;
+        // Fork: the activity overview's ledger outlives deleted tasks (activity_overview.rs).
+        if let Err(error) = crate::activity_overview::ensure_ledger(&connection) {
+            eprintln!("warning: activity ledger: {error}");
+        }
         Ok(connection)
     }
 
@@ -2246,9 +2250,10 @@ mod tests {
             .unwrap()
             .push_message(MessageRole::Assistant, "one more");
         store.save(&mut state).unwrap();
+        // Fork: plus the activity ledger's row for it (activity_overview.rs).
         assert_eq!(
             rows_written(&store) - before,
-            floor + 1,
+            floor + 2,
             "a new message costs one row, not the whole transcript"
         );
 

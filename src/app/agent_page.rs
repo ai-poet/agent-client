@@ -56,6 +56,8 @@ pub(super) struct AgentPageState {
     pub selected_endpoint: NativeEndpoint,
     /// The Teams section (AgentTeams), which saves to its own file.
     pub teams: super::agent_teams_settings::AgentTeamsPageState,
+    /// The Memory section (auto-memory), which saves to its own file.
+    pub memory: super::agent_memory_settings::AgentMemoryPageState,
 }
 
 /// One of the built-in agent's three routes.
@@ -152,6 +154,7 @@ impl Waku {
         self.ensure_agent_settings_loaded(cx);
         self.agent_page.teams.config = None;
         self.ensure_agent_teams_loaded(cx);
+        self.reload_agent_memory(cx);
     }
 
     /// Apply a change to the loaded settings and write them.
@@ -375,6 +378,7 @@ impl Waku {
             // list goes last for the same reason.
             .child(self.render_agent_mcp(settings, theme, cx))
             .child(self.render_agent_teams_section(theme, cx))
+            .child(self.render_agent_memory_section(theme, cx))
             .child(self.render_agent_behaviour(settings, theme, cx))
             .child(self.render_agent_rules(settings, theme, cx))
             .child(self.render_agent_tools(settings, theme, cx))

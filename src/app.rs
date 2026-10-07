@@ -1423,9 +1423,14 @@ pub struct Waku {
     /// Groups the user has folded in either sidebar view. This is
     /// intentionally runtime-only, like transcript disclosure state.
     sidebar_collapsed_groups: HashSet<SidebarGroup>,
-    /// Number of older sessions revealed inside each project section. This is
-    /// runtime-only so every launch starts with the recent three-day view.
+    /// Tasks revealed past each paginated group's first page. This is
+    /// runtime-only so every launch starts on the first pages.
     sidebar_project_reveal_counts: HashMap<SidebarGroup, usize>,
+    /// Fork: pinned, archived and unread tasks (task_marks.rs).
+    task_marks: task_marks::TaskMarksState,
+    /// Fork: the sidebar toolbar's state — the archive view and what
+    /// expand/collapse-all offers (sidebar_toolbar.rs).
+    sidebar_toolbar: sidebar_toolbar::SidebarToolbarState,
     /// Stable keyboard focus for each virtualized sidebar group header and
     /// its hover-revealed New Task control.
     sidebar_group_header_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
@@ -1808,10 +1813,16 @@ mod model_windows;
 mod plans_page;
 mod agent_page;
 mod agent_teams_settings;
+mod agent_memory_settings;
 mod native_agent;
 mod onboarding;
 mod permission_card;
 mod message_resend;
+// Fork: the ZCode-style task sidebar (rows, sections, toolbar, task marks).
+mod sidebar_rows;
+mod sidebar_sections;
+mod sidebar_toolbar;
+mod task_marks;
 mod task_rows;
 mod update_banner;
 mod daemon_banner;
@@ -3230,6 +3241,8 @@ impl Waku {
                 session_rename_input,
                 sidebar_collapsed_groups: HashSet::new(),
                 sidebar_project_reveal_counts: HashMap::new(),
+                task_marks: task_marks::TaskMarksState::load(),
+                sidebar_toolbar: sidebar_toolbar::SidebarToolbarState::new(cx),
                 sidebar_group_header_focuses: RefCell::new(HashMap::new()),
                 sidebar_group_compose_focuses: RefCell::new(HashMap::new()),
                 sidebar_show_more_focuses: RefCell::new(HashMap::new()),
