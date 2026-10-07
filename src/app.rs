@@ -2197,6 +2197,10 @@ impl Waku {
         );
         // Fork addition: nobody who never chose starts on a CLI.
         let adopted_built_in = native_agent::adopt_built_in_default(&mut state);
+        // Fork addition: the task sidebar's marks, read before the first frame;
+        // the sidebar opens on the project view once (task_marks.rs).
+        let mut task_marks = task_marks::TaskMarksState::load();
+        let adopted_project_view = task_marks.adopt_project_view(&mut state);
         let home_directory = crate::projectless::home_directory();
         state.apply_daemon_settings(daemon.settings());
         if let Err(error) = daemon.update_settings(state.daemon_settings()) {
@@ -2322,7 +2326,8 @@ impl Waku {
         let projectless_save_error = (projectless_migrated
             || migrated_payg_rows
             || migrated_endpoint_ids
-            || adopted_built_in)
+            || adopted_built_in
+            || adopted_project_view)
             .then(|| store.save(&mut state).err())
             .flatten();
         let startup_toast = projectless_migration_error
@@ -3241,7 +3246,7 @@ impl Waku {
                 session_rename_input,
                 sidebar_collapsed_groups: HashSet::new(),
                 sidebar_project_reveal_counts: HashMap::new(),
-                task_marks: task_marks::TaskMarksState::load(),
+                task_marks,
                 sidebar_toolbar: sidebar_toolbar::SidebarToolbarState::new(cx),
                 sidebar_group_header_focuses: RefCell::new(HashMap::new()),
                 sidebar_group_compose_focuses: RefCell::new(HashMap::new()),

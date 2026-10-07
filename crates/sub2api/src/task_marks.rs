@@ -41,6 +41,11 @@ pub struct TaskMarks {
     /// Tasks with a reply the person has not seen yet.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub unread: BTreeSet<Uuid>,
+    /// The sidebar has been switched to its project view once. Builds before
+    /// the redesign saved the timeline for everyone, chosen or not, so the
+    /// switch happens a single time and whatever is picked afterwards sticks.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub project_view_adopted: bool,
 }
 
 impl TaskMarks {

@@ -62,7 +62,7 @@ impl Waku {
             SidebarGroup::Projectless => {
                 Some(self.render_group_compose(group, group_name.clone(), cx))
             }
-            SidebarGroup::Projects => Some(self.render_add_project(group_name.clone(), cx)),
+            SidebarGroup::Projects => Some(self.render_add_project(cx)),
             _ => None,
         };
 
@@ -353,7 +353,9 @@ impl Waku {
     }
 
     /// Adding a project, on the section that lists them.
-    fn render_add_project(&self, group_name: SharedString, cx: &mut Context<Self>) -> Div {
+    /// Always shown, unlike the per-group new-task buttons: it is the way in
+    /// for a project that is not listed yet, so it must not wait for a hover.
+    fn render_add_project(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let focus = self
             .sidebar_group_compose_focuses
@@ -361,12 +363,23 @@ impl Waku {
             .entry(SidebarGroup::Projects)
             .or_insert_with(|| cx.focus_handle())
             .clone();
-        hover_action(
-            div().id("sidebar-add-project").track_focus(&focus),
-            group_name,
-            &theme,
-        )
-        .tooltip(Tooltip::text(tr!("project.new_project")))
+        div()
+            .id("sidebar-add-project")
+            .track_focus(&focus)
+            .tab_index(0)
+            .tab_stop(true)
+            .w(px(20.0))
+            .h(px(22.0))
+            .rounded(px(4.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .hover(|style| style.bg(theme.overlay))
+            .active(|style| style.bg(theme.overlay_strong))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .tooltip(Tooltip::text(tr!("project.new_project")))
         .child(icon("icons/folder-new.svg", 14.0, theme.text_secondary))
         .on_click(cx.listener(|this, _, _, cx| {
             cx.stop_propagation();

@@ -39,6 +39,33 @@ impl TaskMarksState {
     pub(super) fn is_archived(&self, session_id: Uuid) -> bool {
         self.marks.is_archived(session_id)
     }
+
+    /// At launch: open the sidebar on its project view, once (see
+    /// [`switch_to_project_view_once`]). The marks are written right here,
+    /// before the window draws, so the switch is never repeated. Returns
+    /// whether the app state changed and needs saving.
+    pub(super) fn adopt_project_view(&mut self, state: &mut PersistedState) -> bool {
+        let (state_changed, marks_changed) =
+            switch_to_project_view_once(&mut state.sidebar_grouping, &mut self.marks);
+        if marks_changed && let Err(error) = task_marks::save(&self.marks) {
+            eprintln!("could not save the task marks: {error:#}");
+        }
+        state_changed
+    }
+}
+
+/// The project view is the sidebar's default, but builds before the redesign
+/// saved the timeline for everyone whether they chose it or not. Switch once,
+/// and leave whatever is picked afterwards alone. Returns whether the grouping
+/// and whether the marks changed.
+fn switch_to_project_view_once(grouping: &mut SidebarGrouping, marks: &mut TaskMarks) -> (bool, bool) {
+    if marks.project_view_adopted {
+        return (false, false);
+    }
+    marks.project_view_adopted = true;
+    let changed = *grouping != SidebarGrouping::Project;
+    *grouping = SidebarGrouping::Project;
+    (changed, true)
 }
 
 /// The task to select after archiving one that was showing: the most recent
@@ -325,6 +352,34 @@ mod tests {
         assert_eq!(
             archive_successor(&sessions, project, archived, &marks),
             None
+        );
+    }
+
+    #[test]
+    fn the_project_view_is_switched_to_once_then_left_to_the_person() {
+        let mut marks = TaskMarks::default();
+        let mut grouping = SidebarGrouping::Updated;
+        assert_eq!(
+            switch_to_project_view_once(&mut grouping, &mut marks),
+            (true, true)
+        );
+        assert_eq!(grouping, SidebarGrouping::Project);
+        assert!(marks.project_view_adopted);
+
+        // Picked the timeline afterwards: it stays.
+        grouping = SidebarGrouping::Updated;
+        assert_eq!(
+            switch_to_project_view_once(&mut grouping, &mut marks),
+            (false, false)
+        );
+        assert_eq!(grouping, SidebarGrouping::Updated);
+
+        // Already on the project view: only the flag is recorded.
+        let mut fresh = TaskMarks::default();
+        let mut grouping = SidebarGrouping::Project;
+        assert_eq!(
+            switch_to_project_view_once(&mut grouping, &mut fresh),
+            (false, true)
         );
     }
 }
