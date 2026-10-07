@@ -89,6 +89,9 @@ pub(super) struct CloudPayState {
     /// The help picture from the pay config, once downloaded.
     pub help_image: Option<Arc<gpui::Image>>,
     pub busy: bool,
+    /// The form asked to pay with USDT / USDC: the sheet shows how to pay so
+    /// the transfer credits by itself, and orders only once that is confirmed.
+    pub stablecoin_notice: bool,
     /// Bumped on every new order/close so stale poll loops fall silent.
     pub epoch: usize,
 }
@@ -147,6 +150,7 @@ impl Waku {
             qr: None,
             help_image: None,
             busy: false,
+            stablecoin_notice: false,
             epoch,
         });
         self.cloud_pay_load_config(cx);
@@ -298,7 +302,9 @@ impl Waku {
     }
 
     /// The form's main action: validate, create the order, start the flow.
-    fn cloud_pay_create_order(&mut self, cx: &mut Context<Self>) {
+    /// A USDT / USDC order waits for `stablecoin_confirmed`: the first call
+    /// shows the notice, its "continue" calls again with `true`.
+    fn cloud_pay_create_order(&mut self, stablecoin_confirmed: bool, cx: &mut Context<Self>) {
         let Some((client, credentials)) = self.pay_session() else {
             return;
         };
@@ -308,6 +314,8 @@ impl Waku {
         if state.busy {
             return;
         }
+        // Back to the form, so a refusal below shows where it can be read.
+        state.stablecoin_notice = false;
         let Some(config) = state.config.clone() else {
             return;
         };
@@ -370,6 +378,12 @@ impl Waku {
             }
         };
 
+        if sub2api::pay::stablecoin_token(&payment_type).is_some() && !stablecoin_confirmed {
+            state.stablecoin_notice = true;
+            state.error = None;
+            cx.notify();
+            return;
+        }
         state.busy = true;
         state.error = None;
         let epoch = state.epoch;
@@ -738,6 +752,9 @@ impl Waku {
                         |this, cx| this.cloud_pay_open_full_center(cx),
                     ));
             }
+            PayStage::Form if state.stablecoin_notice => {
+                body = self.render_stablecoin_notice(body, theme, cx);
+            }
             PayStage::Form => {
                 body = self.render_pay_form(body, theme, chinese, cx);
             }
@@ -1008,11 +1025,137 @@ impl Waku {
                 .child(cta_label)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if cta_enabled {
-                        this.cloud_pay_create_order(cx);
+                        this.cloud_pay_create_order(false, cx);
                     }
                 })),
         )
         .children(help)
+    }
+
+    /// USDT / USDC: before the order exists, how to pay so it credits by
+    /// itself — a direct transfer, on the method's own network. "Back"
+    /// returns to the form untouched; "continue" places the order.
+    fn render_stablecoin_notice(&self, body: Div, theme: Theme, cx: &mut Context<Self>) -> Div {
+        let Some(payment_type) = self
+            .cloud_pay
+            .as_ref()
+            .and_then(|state| state.selected_type.clone())
+        else {
+            return body;
+        };
+        let token = sub2api::pay::stablecoin_token(&payment_type).unwrap_or("USDT");
+        let network_text = match sub2api::pay::stablecoin_network(&payment_type) {
+            Some(network) => tr!("pay.stablecoin_network", network = network),
+            None => tr!("pay.stablecoin_network_unknown"),
+        };
+        let points = [
+            (tr!("pay.stablecoin_direct_label"), tr!("pay.stablecoin_direct", token = token)),
+            (tr!("pay.stablecoin_network_label"), network_text),
+        ];
+
+        let mut list = div().flex().flex_col().gap(px(8.0));
+        for (index, (label, text)) in points.into_iter().enumerate() {
+            list = list.child(
+                div()
+                    .px(px(14.0))
+                    .py(px(11.0))
+                    .rounded(px(11.0))
+                    .bg(theme.raised)
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.0))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(format!("{}. {label}", index + 1)),
+                    )
+                    .child(
+                        div()
+                            .text_size(sp(12.0))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(text),
+                    ),
+            );
+        }
+
+        let back = div()
+            .id("pay-stablecoin-back")
+            .tab_index(0)
+            .focus_visible(|style| style.border_color(theme.accent))
+            .flex_1()
+            .h(px(34.0))
+            .rounded_full()
+            .border_1()
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .hover(|style| style.bg(theme.overlay))
+            .child(tr!("pay.stablecoin_back"))
+            .on_activation(cx, |this, _, cx| {
+                if let Some(state) = this.cloud_pay.as_mut() {
+                    state.stablecoin_notice = false;
+                }
+                cx.notify();
+            });
+        let confirm = div()
+            .id("pay-stablecoin-confirm")
+            .tab_index(0)
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .flex_1()
+            .h(px(34.0))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .bg(theme.inverse)
+            .text_color(theme.on_inverse)
+            .text_size(sp(12.5))
+            .font_weight(FontWeight::MEDIUM)
+            .child(tr!("pay.stablecoin_confirm"))
+            .on_activation(cx, |this, _, cx| this.cloud_pay_create_order(true, cx));
+
+        body.child(
+            div()
+                .text_size(sp(14.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text)
+                .child(tr!("pay.stablecoin_title", token = token)),
+        )
+        .child(
+            div()
+                .text_size(sp(12.0))
+                .text_color(theme.text_secondary)
+                .child(tr!("pay.stablecoin_intro")),
+        )
+        .child(list)
+        .child(
+            div()
+                .px(px(14.0))
+                .py(px(10.0))
+                .rounded(px(11.0))
+                .border_1()
+                .border_color(theme.warning)
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(icon("icons/alert.svg", 14.0, theme.warning))
+                .child(
+                    div()
+                        .text_size(sp(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.warning)
+                        .child(tr!("pay.stablecoin_warning")),
+                ),
+        )
+        .child(div().flex().gap(px(8.0)).child(back).child(confirm))
     }
 
     /// The top-up amount: quick chips, the field, and the settlement summary.

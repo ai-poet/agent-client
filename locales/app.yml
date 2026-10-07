@@ -3114,6 +3114,26 @@ pay.method_unavailable:
   en: "This method is unavailable right now"
 pay.stripe_hint:
   en: "Stripe checkout opens in your browser"
+pay.stablecoin_title:
+  en: "Before you pay with %{token}"
+pay.stablecoin_intro:
+  en: "Please make sure you pay as follows:"
+pay.stablecoin_direct_label:
+  en: "Direct transfer"
+pay.stablecoin_direct:
+  en: "Send %{token} to the payment address with a regular transfer (Regular Transfer / withdrawal) from your wallet or exchange. Do not use exchange internal transfers, payment features such as Binance Pay, contract calls or cross-chain bridges."
+pay.stablecoin_network_label:
+  en: "Correct network"
+pay.stablecoin_network:
+  en: "Send on the %{network} network only. A transfer on any other network will not be detected."
+pay.stablecoin_network_unknown:
+  en: "Send on the network shown on the payment page only. A transfer on any other network will not be detected."
+pay.stablecoin_warning:
+  en: "Otherwise your payment may not be credited automatically."
+pay.stablecoin_back:
+  en: "Back"
+pay.stablecoin_confirm:
+  en: "I understand, continue"
 pay.select_method:
   en: "Choose a payment method"
 pay.too_many_pending:

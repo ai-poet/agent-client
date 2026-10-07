@@ -501,16 +501,50 @@ pub fn payment_label(payment_type: &str, chinese: bool) -> String {
     if normalized.starts_with("wxpay") {
         return if chinese { "微信支付" } else { "WeChat Pay" }.to_owned();
     }
-    if normalized.starts_with("usdt") {
-        return "USDT".to_owned();
-    }
-    if normalized.starts_with("usdc") {
-        return "USDC".to_owned();
+    if let Some(token) = stablecoin_token(payment_type) {
+        // Two USDT methods differ only by chain, so the chain is part of the
+        // name — the same `USDT（Plasma）` the web pay page shows.
+        return match stablecoin_network(payment_type) {
+            Some(network) if chinese => format!("{token}（{network}）"),
+            Some(network) => format!("{token} ({network})"),
+            None => token.to_owned(),
+        };
     }
     if normalized.starts_with("stripe") {
         return "Stripe".to_owned();
     }
     payment_type.to_owned()
+}
+
+/// `USDT` / `USDC` for a stablecoin method, `None` for every other. These
+/// settle on chain: only a direct transfer on the method's own network is
+/// credited automatically, which the sheet confirms before ordering.
+pub fn stablecoin_token(payment_type: &str) -> Option<&'static str> {
+    let normalized = payment_type.trim().to_lowercase();
+    if normalized.starts_with("usdt") {
+        Some("USDT")
+    } else if normalized.starts_with("usdc") {
+        Some("USDC")
+    } else {
+        None
+    }
+}
+
+/// The chain of a stablecoin method, from the pay service's
+/// `<token>.<network>` ids: `usdt.plasma` → `Plasma`.
+pub fn stablecoin_network(payment_type: &str) -> Option<String> {
+    stablecoin_token(payment_type)?;
+    let (_, network) = payment_type.trim().split_once('.')?;
+    let network = network.trim().to_lowercase();
+    let name = match network.as_str() {
+        "" => return None,
+        "plasma" => "Plasma",
+        "polygon" => "Polygon",
+        "solana" => "Solana",
+        // Standards such as TRC20 / ERC20 read in capitals.
+        other => return Some(other.to_uppercase()),
+    };
+    Some(name.to_owned())
 }
 
 pub fn is_stripe(payment_type: &str) -> bool {
@@ -1172,10 +1206,29 @@ mod tests {
         assert_eq!(payment_label("alipay_f2f", false), "Alipay");
         assert_eq!(payment_label("wxpay_native", true), "微信支付");
         assert_eq!(payment_label("usdt_trc20", true), "USDT");
+        assert_eq!(payment_label("usdt.plasma", true), "USDT（Plasma）");
+        assert_eq!(payment_label("usdt.polygon", false), "USDT (Polygon)");
+        assert_eq!(payment_label("usdc.solana", false), "USDC (Solana)");
         assert_eq!(payment_label("stripe", true), "Stripe");
         assert_eq!(payment_label("mystery", true), "mystery");
         assert!(is_stripe("STRIPE_card"));
         assert!(!is_stripe("alipay"));
+    }
+
+    #[test]
+    fn stablecoin_methods_name_token_and_network() {
+        assert_eq!(stablecoin_token("usdt.plasma"), Some("USDT"));
+        assert_eq!(stablecoin_token("USDC.solana"), Some("USDC"));
+        assert_eq!(stablecoin_token("alipay"), None);
+        assert_eq!(stablecoin_token("stripe"), None);
+
+        assert_eq!(stablecoin_network("usdt.plasma").as_deref(), Some("Plasma"));
+        assert_eq!(stablecoin_network("usdt.polygon").as_deref(), Some("Polygon"));
+        assert_eq!(stablecoin_network("usdc.solana").as_deref(), Some("Solana"));
+        assert_eq!(stablecoin_network("usdt.trc20").as_deref(), Some("TRC20"));
+        assert_eq!(stablecoin_network("usdt_trc20"), None);
+        assert_eq!(stablecoin_network("usdt."), None);
+        assert_eq!(stablecoin_network("alipay.f2f"), None);
     }
 
     #[test]
