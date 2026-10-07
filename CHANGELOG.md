@@ -29,6 +29,8 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.2.12]
+
 - 内置 Agent 新增长期记忆：它会把值得长期保留的信息（你的身份和偏好、你希望的工作方式、项目进展、资料在哪里）各存成一条记忆，按工作区和全局分开保存，下次会话自动带上，不用每次重新交代。你也可以直接说「记住……」或「忘掉……」。默认每聊 12 条消息以及会话结束时自动提炼新记忆；项目记忆会同步到 Claude Code 的项目记忆里，同一目录下的 Claude Code 也能看到，Claude Code 自己写的记忆不会被改动。批量删除记忆一定会先问你，完全访问模式下也一样。在「设置 → Agent → 记忆」里可以开关这些功能、调整占用的上下文大小，并查看、编辑、置顶或删除每一条记忆
 
   The built-in agent now has long-term memory. It saves what is worth keeping — who you are and what you prefer, how you want the work done, where a project stands, where things live — as one memory each, per workspace and globally, and brings them into later sessions so you do not have to repeat yourself. You can also just say "remember…" or "forget…". By default it summarizes new memories every 12 messages and when a session ends, and project memories are synced into Claude Code's project memory so Claude Code in the same folder sees them too, without touching the memories Claude Code wrote itself. Deleting memories in bulk always asks you first, even in full access. Settings → Agent → Memory turns each of these on or off, sets how much context the memories may take, and lets you read, edit, pin or delete every memory
