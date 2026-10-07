@@ -1029,12 +1029,24 @@ pub(super) fn folded_transcript_row_kinds(
         }
     }
 
+    // A blank assistant part has nothing to show, yet as a row it is an empty
+    // padded gap between two blocks of work. Sessions saved before streaming
+    // stopped opening such parts still hold them. This reads only the role
+    // and the blank flag, both of which the fingerprint already folds in.
+    let blank_answer_part = |row: &TranscriptRowKind| {
+        let TranscriptRowKind::Message(message_index) = *row else {
+            return false;
+        };
+        session.messages.get(message_index).is_some_and(|message| {
+            message.role == MessageRole::Assistant && message.content.trim().is_empty()
+        })
+    };
     let mut rows = Vec::with_capacity(raw_rows.len() + fold_anchors.len() + 1);
     for row in raw_rows {
         if let Some((turn_id, segment)) = fold_anchors.get(&row).copied() {
             rows.push(TranscriptRowKind::TurnFold(turn_id, segment));
         }
-        if !hidden_rows.contains(&row) {
+        if !hidden_rows.contains(&row) && !blank_answer_part(&row) {
             rows.push(row);
         }
     }

@@ -149,6 +149,9 @@ impl Waku {
             let metrics = self.scaled_markdown_metrics(MarkdownMetrics::COMPACT);
             for row in record.rows() {
                 match row {
+                    // A step that wrote only whitespace has nothing to show
+                    // but its padding.
+                    SubagentRow::Text { text, .. } if text.trim().is_empty() => {}
                     SubagentRow::Text { id, view, .. } => {
                         let ctx = MarkdownCtx::new(
                             format!("subagent-md-{}-{id}", item.key.provider_id),

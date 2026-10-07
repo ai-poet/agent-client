@@ -29,6 +29,10 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- 修复内置 Agent 使用 GPT 等模型时，两行工具或思考状态之间偶尔出现一大段空白、本该归在一起的操作被拆成两组的问题
+
+  Fixes a large blank gap that sometimes appeared between two tool or thinking rows when the built-in agent ran GPT and other models, splitting work that belongs together into separate groups
+
 ## [0.2.11]
 
 - 内置 Agent 新增智能体团队，取代原来的「设置 → 工作流」：在任务里发送 `/agent-teams <目标>`（或用 `/agent-teams-<模板名> <目标>` 从团队模板开始），当前会话就成为队长，拟定成员（每人可以用不同的模型和推理强度）和带依赖关系的任务；右侧「团队」面板显示草案，可以确认启动、返回对话修改或放弃。启动后成员自动领取可以开始的任务、相互发消息协作，每个任务完成前都要通过检查，不合格时会自动安排修复和复审；成员需要权限时在队长的任务里弹出确认。面板显示进度、成员和任务关系图，点成员可以查看它的实时记录，停止团队需要再点一次确认；应用重启后再打开这个任务，团队会从停下的地方接着做。成员上限、默认模型、执行提示词和团队模板在「设置 → Agent → 团队」里调整

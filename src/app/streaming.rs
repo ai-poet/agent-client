@@ -18,11 +18,15 @@ impl Waku {
         delta: String,
     ) {
         let previous_phase = runtime.stream_phase;
+        let continuing = previous_phase == Some(StreamPhase::Text);
+        // A blank delta opened no part, so the work it fell between stays
+        // the phase: the next call joins the block before it.
+        if !append_text_delta_to_session(&mut self.state.sessions, session_id, continuing, delta) {
+            return;
+        }
         if previous_phase == Some(StreamPhase::Reasoning) {
             self.complete_reasoning_activity(session_id);
         }
-        let continuing = previous_phase == Some(StreamPhase::Text);
-        append_text_delta_to_session(&mut self.state.sessions, session_id, continuing, delta);
         self.state.mark_session_dirty(session_id);
         runtime.stream_phase = Some(StreamPhase::Text);
     }
@@ -1081,14 +1085,21 @@ fn compaction_notice(
     }
 }
 
+/// Appends to the streaming answer part, or opens a new one. `false` when the
+/// delta was blank and would have opened a part: GPT on the Responses route
+/// can say nothing but "\n" between two calls, and that part rendered as an
+/// empty padded row that also split the work around it into two blocks.
 pub(super) fn append_text_delta_to_session(
     sessions: &mut [AgentSession],
     session_id: Uuid,
     continuing: bool,
     delta: String,
-) {
+) -> bool {
+    if !continuing && delta.trim().is_empty() {
+        return false;
+    }
     let Some(session) = sessions.iter_mut().find(|session| session.id == session_id) else {
-        return;
+        return false;
     };
     if !continuing {
         for message in &mut session.messages {
@@ -1115,4 +1126,5 @@ pub(super) fn append_text_delta_to_session(
         session.messages.push(message);
     }
     session.updated_at = unix_time();
+    true
 }

@@ -1242,6 +1242,89 @@ fn a_failed_turn_keeps_its_work_open() {
     );
 }
 
+/// GPT can say nothing but "\n" between two calls. That opens no answer part:
+/// the next call joins the block before it instead of starting a second one
+/// below an empty row.
+#[test]
+fn a_blank_text_delta_between_calls_opens_no_answer_part() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Native);
+    let session_id = session.id;
+    session.begin_turn("Build it");
+    let work = |label: &str| ActivityItem::new(None, ActivityKind::Command, label, None, true);
+    push_transcript_activity(&mut session, work("first"), false);
+
+    let opened = append_text_delta_to_session(
+        std::slice::from_mut(&mut session),
+        session_id,
+        false,
+        "\n\n".to_owned(),
+    );
+    assert!(!opened);
+    assert_eq!(session.messages.len(), 1);
+
+    // The phase stayed on the work, so the next call continues its block.
+    push_transcript_activity(&mut session, work("second"), true);
+    assert_eq!(session.transcript_blocks.len(), 1);
+    assert_eq!(session.transcript_blocks[0].activities.len(), 2);
+
+    // Text with something to say still opens a part, and once it is open,
+    // whitespace extends it.
+    assert!(append_text_delta_to_session(
+        std::slice::from_mut(&mut session),
+        session_id,
+        false,
+        "Done".to_owned(),
+    ));
+    assert!(append_text_delta_to_session(
+        std::slice::from_mut(&mut session),
+        session_id,
+        true,
+        "\n\n".to_owned(),
+    ));
+    assert_eq!(session.messages.len(), 2);
+    assert_eq!(session.messages[1].content, "Done\n\n");
+}
+
+/// A session saved before that still holds blank answer parts between its
+/// blocks. They render no row, so no empty gap opens between the two blocks.
+#[test]
+fn a_blank_assistant_part_renders_no_row() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Native);
+    let turn_id = session.begin_turn("Build it");
+    let work = |label: &str| ActivityItem::new(None, ActivityKind::Command, label, None, true);
+    session.transcript_blocks.push(TranscriptBlock {
+        after_message: 1,
+        turn_id: Some(turn_id),
+        activities: vec![work("first")],
+    });
+    session.push_message(MessageRole::Assistant, "\n");
+    session.transcript_blocks.push(TranscriptBlock {
+        after_message: 2,
+        turn_id: Some(turn_id),
+        activities: vec![work("second")],
+    });
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::new()),
+        vec![Message(0), TurnBlock(0), TurnBlock(1)]
+    );
+
+    // A failed turn keeps its work open; the blank part stays out of it and
+    // the footer still follows the answer.
+    session.push_message(MessageRole::Assistant, "Done.");
+    session.finish_active_turn(TurnStatus::Failed);
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::new()),
+        vec![
+            Message(0),
+            TurnFold(turn_id, 0),
+            TurnBlock(0),
+            TurnBlock(1),
+            Message(2),
+            ResponseFooter(turn_id, 2),
+        ]
+    );
+}
+
 #[test]
 fn changed_files_attach_to_the_response_footer() {
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
@@ -1331,14 +1414,14 @@ fn changed_files_remain_visible_when_an_interrupted_turn_has_no_answer() {
         }],
     );
 
-    // A stopped turn keeps its work in view until the person folds it.
+    // A stopped turn keeps its work in view until the person folds it. The
+    // empty answer part has nothing to show, so it takes no row.
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new()),
         vec![
             Message(0),
             TurnFold(turn_id, 0),
             TurnBlock(0),
-            Message(1),
             ChangedFiles(turn_id),
         ]
     );
@@ -1667,9 +1750,10 @@ fn a_turn_without_an_answer_folds_completely() {
         folded_transcript_row_kinds(&session, &closed(turn_id)),
         vec![Message(0), TurnFold(turn_id, 0)]
     );
+    // Open, the work shows; the empty answer part still takes no row.
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new()),
-        vec![Message(0), TurnFold(turn_id, 0), TurnBlock(0), Message(1)]
+        vec![Message(0), TurnFold(turn_id, 0), TurnBlock(0)]
     );
 }
 
