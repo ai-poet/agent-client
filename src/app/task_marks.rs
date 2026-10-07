@@ -58,7 +58,10 @@ impl TaskMarksState {
 /// saved the timeline for everyone whether they chose it or not. Switch once,
 /// and leave whatever is picked afterwards alone. Returns whether the grouping
 /// and whether the marks changed.
-fn switch_to_project_view_once(grouping: &mut SidebarGrouping, marks: &mut TaskMarks) -> (bool, bool) {
+fn switch_to_project_view_once(
+    grouping: &mut SidebarGrouping,
+    marks: &mut TaskMarks,
+) -> (bool, bool) {
     if marks.project_view_adopted {
         return (false, false);
     }

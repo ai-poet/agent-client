@@ -9,9 +9,11 @@
 
 use super::sidebar::SidebarGroup;
 use super::sidebar_rows::{
-    GroupBadge, SIDEBAR_EMPTY_ROW_HEIGHT, SIDEBAR_HEADER_BOTTOM_GAP, SIDEBAR_LEADING_GAP,
-    SIDEBAR_LEADING_SLOT, SIDEBAR_PROJECT_HEADER_HEIGHT, SIDEBAR_ROW_INSET,
-    SIDEBAR_SECTION_HEADER_HEIGHT, SIDEBAR_SHOW_MORE_ROW_HEIGHT, SIDEBAR_TITLE_INSET, SidebarEmpty,
+    GroupBadge, SIDEBAR_CHEVRON_GAP, SIDEBAR_CHEVRON_SLOT, SIDEBAR_EMPTY_ROW_HEIGHT,
+    SIDEBAR_HEADER_BOTTOM_GAP, SIDEBAR_LEADING_GAP, SIDEBAR_LEADING_SLOT,
+    SIDEBAR_NESTED_TITLE_INSET, SIDEBAR_PROJECT_HEADER_HEIGHT, SIDEBAR_PROJECT_INSET,
+    SIDEBAR_ROW_INSET, SIDEBAR_SECTION_HEADER_HEIGHT, SIDEBAR_SHOW_MORE_ROW_HEIGHT,
+    SIDEBAR_TITLE_INSET, SidebarEmpty,
 };
 use super::*;
 
@@ -135,10 +137,10 @@ impl Waku {
             SidebarGroup::Project(project_id) => self.sidebar_project_name(project_id),
             _ => tr!("project.no_project_name"),
         };
-        let folder = if collapsed {
-            "icons/folder.svg"
+        let (chevron, folder) = if collapsed {
+            ("icons/chevron-right.svg", "icons/folder.svg")
         } else {
-            "icons/folder-open.svg"
+            ("icons/chevron-down.svg", "icons/folder-open.svg")
         };
 
         let header = div()
@@ -150,7 +152,7 @@ impl Waku {
             .group(group_name.clone())
             .w_full()
             .h(px(SIDEBAR_PROJECT_HEADER_HEIGHT))
-            .pl(px(SIDEBAR_ROW_INSET))
+            .pl(px(SIDEBAR_PROJECT_INSET))
             .pr(px(4.0))
             .rounded(px(7.0))
             .flex()
@@ -160,13 +162,30 @@ impl Waku {
             .focus_visible(|style| style.border_1().border_color(theme.accent))
             .hover(|style| style.bg(theme.sidebar_item_background))
             .active(|style| style.bg(theme.overlay_strong))
+            // The chevron says the project folds before anyone tries; the
+            // folder beneath it lines up with the status slot of its tasks.
             .child(
                 div()
                     .flex_none()
-                    .w(px(SIDEBAR_LEADING_SLOT))
                     .flex()
-                    .justify_center()
-                    .child(icon(folder, 14.0, theme.text_tertiary)),
+                    .items_center()
+                    .gap(px(SIDEBAR_CHEVRON_GAP))
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(SIDEBAR_CHEVRON_SLOT))
+                            .flex()
+                            .justify_center()
+                            .child(icon(chevron, 12.0, theme.text_tertiary)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(SIDEBAR_LEADING_SLOT))
+                            .flex()
+                            .justify_center()
+                            .child(icon(folder, 14.0, theme.text_tertiary)),
+                    ),
             )
             .child(
                 div()
@@ -230,7 +249,12 @@ impl Waku {
         div()
             .w_full()
             .h(px(SIDEBAR_SHOW_MORE_ROW_HEIGHT))
-            .pl(px(SIDEBAR_TITLE_INSET))
+            // Under the titles of the tasks it reveals.
+            .pl(px(if matches!(group, SidebarGroup::Project(_)) {
+                SIDEBAR_NESTED_TITLE_INSET
+            } else {
+                SIDEBAR_TITLE_INSET
+            }))
             .flex()
             .items_center()
             .child(button)
@@ -380,18 +404,18 @@ impl Waku {
             .active(|style| style.bg(theme.overlay_strong))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .tooltip(Tooltip::text(tr!("project.new_project")))
-        .child(icon("icons/folder-new.svg", 14.0, theme.text_secondary))
-        .on_click(cx.listener(|this, _, _, cx| {
-            cx.stop_propagation();
-            this.add_project(cx);
-        }))
-        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                this.add_project(cx);
+            .child(icon("icons/folder-new.svg", 14.0, theme.text_secondary))
+            .on_click(cx.listener(|this, _, _, cx| {
                 cx.stop_propagation();
-            }
-        }))
-        .into_wrapper()
+                this.add_project(cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.add_project(cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .into_wrapper()
     }
 }
 

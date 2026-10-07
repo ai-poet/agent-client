@@ -22,8 +22,8 @@ use super::sidebar::{
     persisted_sidebar_branch_label, sidebar_session_selected,
 };
 use super::sidebar_rows::{
-    SIDEBAR_LEADING_GAP, SIDEBAR_LEADING_SLOT, SIDEBAR_ROW_INSET, SIDEBAR_TASK_ROW_GAP,
-    SIDEBAR_TASK_ROW_HEIGHT,
+    SIDEBAR_LEADING_GAP, SIDEBAR_LEADING_SLOT, SIDEBAR_NESTED_ROW_INSET, SIDEBAR_ROW_INSET,
+    SIDEBAR_TASK_ROW_GAP, SIDEBAR_TASK_ROW_HEIGHT,
 };
 use super::sidebar_sections::{UNREAD_DOT_SIZE, unread_dot_color};
 use super::transcript::format_working_elapsed;
@@ -104,7 +104,14 @@ fn approval_tag_colors(theme: &Theme) -> (Hsla, Hsla) {
 }
 
 impl Waku {
-    pub(super) fn render_task_row(&self, session_id: Uuid, cx: &mut Context<Self>) -> AnyElement {
+    /// `nested`: inside a project group, indented to line up under the
+    /// project's folder.
+    pub(super) fn render_task_row(
+        &self,
+        session_id: Uuid,
+        nested: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let Some(session) = self
             .state
@@ -226,7 +233,11 @@ impl Waku {
             .w_full()
             .min_w_0()
             .h(px(SIDEBAR_TASK_ROW_HEIGHT))
-            .pl(px(SIDEBAR_ROW_INSET))
+            .pl(px(if nested {
+                SIDEBAR_NESTED_ROW_INSET
+            } else {
+                SIDEBAR_ROW_INSET
+            }))
             .pr(px(4.0))
             .rounded(px(7.0))
             .flex()

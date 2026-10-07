@@ -860,6 +860,14 @@ impl Waku {
 
         let rows = self.sidebar_rows_cached(Local::now().date_naive());
         self.sync_sidebar_rows(&rows);
+        // Fork: a task that started opened its folded group in these rows;
+        // record that once this frame is done (sidebar_toolbar.rs).
+        if self.sidebar_toolbar.has_unfolded() {
+            let entity = cx.entity().downgrade();
+            cx.defer(move |cx| {
+                let _ = entity.update(cx, |this, cx| this.apply_sidebar_unfolds(cx));
+            });
+        }
         // Restored selection exists before ListState knows the viewport size.
         // Retry after the first layout so nearest-edge alignment has a height.
         if self.sidebar_list_state.viewport_bounds().size.height <= Pixels::ZERO
@@ -1084,6 +1092,14 @@ impl Waku {
         if self.state.sidebar_ordering == SidebarOrdering::Oldest {
             date_order.reverse();
         }
+        // Running is in the fingerprint, so every start is seen here.
+        let just_started = self.sidebar_toolbar.take_just_started(
+            entries
+                .iter()
+                .filter(|entry| entry.running)
+                .map(|entry| entry.id)
+                .collect(),
+        );
         let layout = build_sidebar_rows(&SidebarRowInputs {
             view: self.sidebar_view(),
             ordering: self.state.sidebar_ordering,
@@ -1095,9 +1111,10 @@ impl Waku {
             collapsed: &self.sidebar_collapsed_groups,
             reveal: &self.sidebar_project_reveal_counts,
             keep_visible: self.sidebar_keep_visible(),
+            just_started: &just_started,
         });
         self.sidebar_toolbar
-            .remember_layout(layout.toggle_all, layout.toggle_targets);
+            .remember_layout(layout.toggle_all, layout.toggle_targets, layout.unfolded);
         layout.rows
     }
 
@@ -1139,7 +1156,16 @@ impl Waku {
             SidebarRow::Header(group, badge) => self
                 .render_sidebar_section_header(group, badge, cx)
                 .into_any_element(),
-            SidebarRow::Session(session_id) => self.render_task_row(session_id, cx),
+            SidebarRow::Session(session_id) => {
+                // Inside a project group when the header above it is one.
+                let nested = rows[..index].iter().rev().find_map(|row| match row {
+                    SidebarRow::Header(group, _) => {
+                        Some(matches!(group, SidebarGroup::Project(_)))
+                    }
+                    _ => None,
+                });
+                self.render_task_row(session_id, nested == Some(true), cx)
+            }
             SidebarRow::ShowMore(group) => {
                 self.render_sidebar_show_more(group, cx).into_any_element()
             }

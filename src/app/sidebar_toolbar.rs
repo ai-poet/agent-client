@@ -27,6 +27,11 @@ pub(super) struct SidebarToolbarState {
     /// The pill is one tab stop with arrow keys inside, and its row is
     /// virtualized, so its focus has to outlive the row.
     view_focus: FocusHandle,
+    /// The tasks that were running when the rows were last built, so a task
+    /// that starts can be told from one that was already running.
+    running: RefCell<HashSet<Uuid>>,
+    /// Folded groups a starting task opened, to drop from the folded set.
+    unfolded: RefCell<Vec<SidebarGroup>>,
 }
 
 impl SidebarToolbarState {
@@ -36,13 +41,33 @@ impl SidebarToolbarState {
             toggle_all: Cell::new(ToggleAll::Hidden),
             toggle_targets: RefCell::new(Vec::new()),
             view_focus: cx.focus_handle(),
+            running: RefCell::new(HashSet::new()),
+            unfolded: RefCell::new(Vec::new()),
         }
     }
 
+    /// The tasks running now that were not when the rows were last built.
+    pub(super) fn take_just_started(&self, running: HashSet<Uuid>) -> HashSet<Uuid> {
+        let mut previous = self.running.borrow_mut();
+        let started = running.difference(&previous).copied().collect();
+        *previous = running;
+        started
+    }
+
     /// Called whenever the rows are rebuilt.
-    pub(super) fn remember_layout(&self, toggle_all: ToggleAll, targets: Vec<SidebarGroup>) {
+    pub(super) fn remember_layout(
+        &self,
+        toggle_all: ToggleAll,
+        targets: Vec<SidebarGroup>,
+        unfolded: Vec<SidebarGroup>,
+    ) {
         self.toggle_all.set(toggle_all);
         *self.toggle_targets.borrow_mut() = targets;
+        self.unfolded.borrow_mut().extend(unfolded);
+    }
+
+    pub(super) fn has_unfolded(&self) -> bool {
+        !self.unfolded.borrow().is_empty()
     }
 }
 
@@ -83,6 +108,19 @@ impl Waku {
             item_ix: 0,
             offset_in_item: Pixels::ZERO,
         });
+    }
+
+    /// Drop the groups a starting task opened from the folded set. The rows
+    /// already show them open; this keeps them so until they are folded again.
+    pub(super) fn apply_sidebar_unfolds(&mut self, cx: &mut Context<Self>) {
+        let unfolded = std::mem::take(&mut *self.sidebar_toolbar.unfolded.borrow_mut());
+        let mut changed = false;
+        for group in unfolded {
+            changed |= self.sidebar_collapsed_groups.remove(&group);
+        }
+        if changed {
+            cx.notify();
+        }
     }
 
     /// Fold every project (or every date group), or unfold everything,

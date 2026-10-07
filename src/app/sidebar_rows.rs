@@ -40,15 +40,25 @@ pub(super) const SIDEBAR_TASK_ROW_GAP: f32 = 2.0;
 pub(super) const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
 pub(super) const SIDEBAR_EMPTY_ROW_HEIGHT: f32 = 32.0;
 pub(super) const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 10.0;
-/// Left padding of a task or project row.
+/// Left padding of a task row outside a project group.
 pub(super) const SIDEBAR_ROW_INSET: f32 = 10.0;
 /// The status slot before a task title, and the folder before a project name.
 pub(super) const SIDEBAR_LEADING_SLOT: f32 = 16.0;
 pub(super) const SIDEBAR_LEADING_GAP: f32 = 6.0;
-/// Where task titles and project names start, so the rows that stand in for
-/// a title (show more, empty) line up with them.
+/// Where task titles start outside project groups, so the rows that stand in
+/// for a title (show more, empty) line up with them.
 pub(super) const SIDEBAR_TITLE_INSET: f32 =
     SIDEBAR_ROW_INSET + SIDEBAR_LEADING_SLOT + SIDEBAR_LEADING_GAP;
+/// A project header starts with its fold chevron, then the folder.
+pub(super) const SIDEBAR_PROJECT_INSET: f32 = 4.0;
+pub(super) const SIDEBAR_CHEVRON_SLOT: f32 = 14.0;
+pub(super) const SIDEBAR_CHEVRON_GAP: f32 = 2.0;
+/// Left padding of a task inside a project group: its status slot sits under
+/// the project's folder, so its title starts where the project name does.
+pub(super) const SIDEBAR_NESTED_ROW_INSET: f32 =
+    SIDEBAR_PROJECT_INSET + SIDEBAR_CHEVRON_SLOT + SIDEBAR_CHEVRON_GAP;
+pub(super) const SIDEBAR_NESTED_TITLE_INSET: f32 =
+    SIDEBAR_NESTED_ROW_INSET + SIDEBAR_LEADING_SLOT + SIDEBAR_LEADING_GAP;
 
 /// Tasks a project lists before "show more", and how many each reveal adds.
 const PROJECT_PAGE: usize = 5;
@@ -131,6 +141,9 @@ pub(super) struct SidebarRowInputs<'a> {
     /// The task on screen, listed even past its group's page so selecting it
     /// from elsewhere can scroll it into view.
     pub keep_visible: Option<Uuid>,
+    /// Tasks that started running since the rows were last built. Each opens
+    /// the folded groups it is in.
+    pub just_started: &'a HashSet<Uuid>,
 }
 
 pub(super) struct SidebarLayout {
@@ -138,6 +151,39 @@ pub(super) struct SidebarLayout {
     pub toggle_all: ToggleAll,
     /// The groups collapse-all folds: the projects, or the date groups.
     pub toggle_targets: Vec<SidebarGroup>,
+    /// Folded groups a task starting to run opened. The app drops them from
+    /// its folded set, so they stay open — until folded again.
+    pub unfolded: Vec<SidebarGroup>,
+}
+
+/// Which groups are folded, after the tasks that just started opened theirs.
+struct Folds<'a> {
+    collapsed: &'a HashSet<SidebarGroup>,
+    just_started: &'a HashSet<Uuid>,
+    unfolded: Vec<SidebarGroup>,
+}
+
+impl Folds<'_> {
+    /// Whether `group`, holding `tasks`, stays folded. A task that just
+    /// started opens it: once, at the start, so it can be folded again while
+    /// the task runs.
+    fn folded(&mut self, group: SidebarGroup, tasks: &[&TaskEntry]) -> bool {
+        if !self.collapsed.contains(&group) {
+            return false;
+        }
+        if tasks
+            .iter()
+            .any(|entry| self.just_started.contains(&entry.id))
+        {
+            self.unfolded.push(group);
+            return false;
+        }
+        true
+    }
+
+    fn is_folded(&self, group: &SidebarGroup) -> bool {
+        self.collapsed.contains(group) && !self.unfolded.contains(group)
+    }
 }
 
 pub(super) fn build_sidebar_rows(inputs: &SidebarRowInputs) -> SidebarLayout {
@@ -176,9 +222,15 @@ pub(super) fn build_sidebar_rows(inputs: &SidebarRowInputs) -> SidebarLayout {
             rows,
             toggle_all: ToggleAll::Hidden,
             toggle_targets: Vec::new(),
+            unfolded: Vec::new(),
         };
     }
 
+    let mut folds = Folds {
+        collapsed: inputs.collapsed,
+        just_started: inputs.just_started,
+        unfolded: Vec::new(),
+    };
     let (mut pinned, others): (Vec<&TaskEntry>, Vec<&TaskEntry>) = inputs
         .entries
         .iter()
@@ -194,6 +246,7 @@ pub(super) fn build_sidebar_rows(inputs: &SidebarRowInputs) -> SidebarLayout {
             FLAT_PAGE,
             None,
             inputs,
+            &mut folds,
         );
         sections.push(SidebarGroup::Pinned);
     }
@@ -213,7 +266,7 @@ pub(super) fn build_sidebar_rows(inputs: &SidebarRowInputs) -> SidebarLayout {
                 sort_tasks(&mut bucket, inputs.ordering);
                 let group = SidebarGroup::Updated(date_group);
                 targets.push(group);
-                let collapsed = inputs.collapsed.contains(&group);
+                let collapsed = folds.folded(group, &bucket);
                 rows.push(SidebarRow::Header(group, badge(collapsed, &bucket, marks)));
                 if !collapsed {
                     rows.extend(bucket.iter().map(|entry| SidebarRow::Session(entry.id)));
@@ -263,7 +316,7 @@ pub(super) fn build_sidebar_rows(inputs: &SidebarRowInputs) -> SidebarLayout {
             });
             targets.extend(projects.iter().map(|(id, _)| SidebarGroup::Project(*id)));
 
-            let projects_collapsed = inputs.collapsed.contains(&SidebarGroup::Projects);
+            let projects_collapsed = folds.folded(SidebarGroup::Projects, &in_projects);
             rows.push(SidebarRow::Header(
                 SidebarGroup::Projects,
                 badge(projects_collapsed, &in_projects, marks),
@@ -281,7 +334,7 @@ pub(super) fn build_sidebar_rows(inputs: &SidebarRowInputs) -> SidebarLayout {
                         .collect::<Vec<_>>();
                     sort_tasks(&mut tasks, inputs.ordering);
                     let group = SidebarGroup::Project(*project_id);
-                    let collapsed = inputs.collapsed.contains(&group);
+                    let collapsed = folds.folded(group, &tasks);
                     rows.push(SidebarRow::Header(group, badge(collapsed, &tasks, marks)));
                     if !collapsed {
                         push_page(&mut rows, group, &tasks, PROJECT_PAGE, inputs);
@@ -299,6 +352,7 @@ pub(super) fn build_sidebar_rows(inputs: &SidebarRowInputs) -> SidebarLayout {
                 FLAT_PAGE,
                 Some(SidebarEmpty::NoTasks),
                 inputs,
+                &mut folds,
             );
             sections.push(SidebarGroup::Projectless);
         }
@@ -308,7 +362,7 @@ pub(super) fn build_sidebar_rows(inputs: &SidebarRowInputs) -> SidebarLayout {
     let any_collapsed = targets
         .iter()
         .chain(&sections)
-        .any(|group| inputs.collapsed.contains(group));
+        .any(|group| folds.is_folded(group));
     let toggle_all = if any_collapsed {
         ToggleAll::ExpandAll
     } else if targets.is_empty() {
@@ -320,6 +374,7 @@ pub(super) fn build_sidebar_rows(inputs: &SidebarRowInputs) -> SidebarLayout {
         rows,
         toggle_all,
         toggle_targets: targets,
+        unfolded: folds.unfolded,
     }
 }
 
@@ -354,8 +409,9 @@ fn push_section(
     page: usize,
     empty: Option<SidebarEmpty>,
     inputs: &SidebarRowInputs,
+    folds: &mut Folds,
 ) {
-    let collapsed = inputs.collapsed.contains(&group);
+    let collapsed = folds.folded(group, tasks);
     rows.push(SidebarRow::Header(
         group,
         badge(collapsed, tasks, inputs.marks),
@@ -465,6 +521,7 @@ mod tests {
         reveal: HashMap<SidebarGroup, usize>,
         selected_project: Option<Uuid>,
         keep_visible: Option<Uuid>,
+        just_started: HashSet<Uuid>,
         ordering: SidebarOrdering,
     }
 
@@ -487,6 +544,7 @@ mod tests {
                 reveal: HashMap::new(),
                 selected_project: None,
                 keep_visible: None,
+                just_started: HashSet::new(),
                 ordering: SidebarOrdering::Newest,
             }
         }
@@ -514,6 +572,7 @@ mod tests {
                 collapsed: &self.collapsed,
                 reveal: &self.reveal,
                 keep_visible: self.keep_visible,
+                just_started: &self.just_started,
             })
         }
 
@@ -771,6 +830,34 @@ mod tests {
             fixture.build(SidebarView::Timeline).toggle_all,
             ToggleAll::Hidden
         );
+    }
+
+    #[test]
+    fn a_task_starting_to_run_opens_the_folded_groups_it_is_in() {
+        let mut fixture = Fixture::new(vec![
+            task(1, PROJECT_A, 10),
+            running(task(2, PROJECT_A, 20)),
+            task(3, PROJECT_B, 30),
+        ]);
+        let project = SidebarGroup::Project(id(PROJECT_A));
+        let other = SidebarGroup::Project(id(PROJECT_B));
+        fixture
+            .collapsed
+            .extend([SidebarGroup::Projects, project, other]);
+
+        // Already running when last built: the folds stay.
+        let layout = fixture.build(SidebarView::ByProject);
+        assert!(sessions(&layout.rows).is_empty());
+        assert!(layout.unfolded.is_empty());
+
+        // Just started: its project and the section around it open; the
+        // other project stays folded.
+        fixture.just_started.insert(id(2));
+        let layout = fixture.build(SidebarView::ByProject);
+        assert_eq!(sessions(&layout.rows), vec![id(2), id(1)]);
+        assert_eq!(layout.unfolded, vec![SidebarGroup::Projects, project]);
+        assert!(layout.rows.contains(&Header(other, PLAIN)));
+        assert_eq!(layout.toggle_all, ToggleAll::ExpandAll);
     }
 
     #[test]
