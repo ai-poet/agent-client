@@ -41,6 +41,10 @@ the original feature bullet instead of adding separate entries for them.
 
   Fixes the image studio's model list sometimes showing only gpt-image-2: while the model catalog loads the picker says so, a failed load shows why with a retry and is retried automatically within seconds, instead of passing the default model off as the whole list; drawing waits for the list, so a picture is never drawn with a model you did not pick
 
+- 修复内置 Agent 使用 GPT 模型时，读取、搜索等工具调用报「Invalid input: missing field」而全部执行失败的问题：工具参数一次性整段返回时也能正确读到了
+
+  Fixes the built-in agent's tool calls on GPT models all failing with "Invalid input: missing field": a call whose arguments arrive in one piece rather than streamed is now read correctly
+
 ## [0.2.12]
 
 - 内置 Agent 新增长期记忆：它会把值得长期保留的信息（你的身份和偏好、你希望的工作方式、项目进展、资料在哪里）各存成一条记忆，按工作区和全局分开保存，下次会话自动带上，不用每次重新交代。你也可以直接说「记住……」或「忘掉……」。默认每聊 12 条消息以及会话结束时自动提炼新记忆；项目记忆会同步到 Claude Code 的项目记忆里，同一目录下的 Claude Code 也能看到，Claude Code 自己写的记忆不会被改动。批量删除记忆一定会先问你，完全访问模式下也一样。在「设置 → Agent → 记忆」里可以开关这些功能、调整占用的上下文大小，并查看、编辑、置顶或删除每一条记忆
