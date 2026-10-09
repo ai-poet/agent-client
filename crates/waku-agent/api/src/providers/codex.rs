@@ -66,6 +66,25 @@ pub struct CodexProvider {
 /// (the agent loop's `parse_tool_args` does, and surfaces a tool error
 /// instead — issue #215). What changed is that it is no longer silent: a
 /// truncated stream now leaves a trail.
+/// Fork (Waku): the part of a call's complete `arguments` that its deltas did
+/// not already deliver — all of it when none came. `None` when nothing is
+/// left, or when what streamed is not a prefix of the whole: appending cannot
+/// mend that, so it is logged and the streamed text stands.
+fn arguments_remainder(streamed: &str, complete: &str) -> Option<String> {
+    match complete.strip_prefix(streamed) {
+        Some("") => None,
+        Some(rest) => Some(rest.to_owned()),
+        None => {
+            warn!(
+                streamed_len = streamed.len(),
+                complete_len = complete.len(),
+                "Responses stream: streamed tool arguments disagree with the completed call"
+            );
+            None
+        }
+    }
+}
+
 fn decode_tool_arguments(arguments: Option<&Value>, tool: &str) -> Value {
     match arguments {
         Some(Value::String(encoded)) => {
@@ -671,6 +690,11 @@ impl LlmProvider for CodexProvider {
             let mut model_name = String::from(DEFAULT_CODEX_MODEL);
             let mut saw_tool_call = false;
             let mut open_blocks: std::collections::HashSet<usize> = std::collections::HashSet::new();
+            // Fork (Waku): each call's arguments as streamed so far, so the
+            // complete string a `.done` event carries can fill in what the
+            // deltas did not deliver (`arguments_remainder`).
+            let mut streamed_arguments: std::collections::HashMap<usize, String> =
+                std::collections::HashMap::new();
 
             while let Some(chunk_result) = byte_stream.next().await {
                 let chunk = match chunk_result {
@@ -922,9 +946,41 @@ impl LlmProvider for CodexProvider {
                                     .and_then(|value| value.as_str())
                                     .unwrap_or("");
                                 if !delta.is_empty() {
+                                    streamed_arguments
+                                        .entry(output_index)
+                                        .or_default()
+                                        .push_str(delta);
                                     yield Ok(StreamEvent::InputJsonDelta {
                                         index: output_index,
                                         partial_json: delta.to_string(),
+                                    });
+                                }
+                            }
+                            // Fork (Waku): the complete arguments. Some models
+                            // (gpt-6.1-sol) stream no deltas at all and send
+                            // the whole string only here and in
+                            // `output_item.done`; read from deltas alone, every
+                            // call they made ran with `{}`.
+                            "response.function_call_arguments.done" => {
+                                let output_index = json_val
+                                    .get("output_index")
+                                    .and_then(|value| value.as_u64())
+                                    .unwrap_or(0) as usize;
+                                let rest = json_val
+                                    .get("arguments")
+                                    .and_then(|value| value.as_str())
+                                    .and_then(|complete| {
+                                        let streamed = streamed_arguments.entry(output_index).or_default();
+                                        let rest = arguments_remainder(streamed, complete);
+                                        if let Some(rest) = &rest {
+                                            streamed.push_str(rest);
+                                        }
+                                        rest
+                                    });
+                                if let Some(rest) = rest {
+                                    yield Ok(StreamEvent::InputJsonDelta {
+                                        index: output_index,
+                                        partial_json: rest,
                                     });
                                 }
                             }
@@ -933,6 +989,29 @@ impl LlmProvider for CodexProvider {
                                     .get("output_index")
                                     .and_then(|value| value.as_u64())
                                     .unwrap_or(0) as usize;
+                                // Fork (Waku): the same fill-in from the finished
+                                // item, for a stream with no `.done` event either.
+                                let rest = json_val
+                                    .get("item")
+                                    .filter(|item| {
+                                        item.get("type").and_then(|value| value.as_str())
+                                            == Some("function_call")
+                                    })
+                                    .and_then(|item| item.get("arguments"))
+                                    .and_then(|value| value.as_str())
+                                    .and_then(|complete| {
+                                        let streamed =
+                                            streamed_arguments.remove(&output_index).unwrap_or_default();
+                                        arguments_remainder(&streamed, complete)
+                                    });
+                                if let Some(rest) = rest {
+                                    if open_blocks.contains(&output_index) {
+                                        yield Ok(StreamEvent::InputJsonDelta {
+                                            index: output_index,
+                                            partial_json: rest,
+                                        });
+                                    }
+                                }
                                 if open_blocks.remove(&output_index) {
                                     yield Ok(StreamEvent::ContentBlockStop { index: output_index });
                                 }
@@ -1125,6 +1204,30 @@ mod fork_argument_decoding_tests {
     fn a_truncated_argument_string_does_not_crash() {
         let decoded = decode_tool_arguments(Some(&json!(r#"{"limit": 12"#)), "Read");
         assert_eq!(decoded, json!({}));
+    }
+
+    /// gpt-6.1-sol streams no argument deltas: the whole string arrives with
+    /// `.done`, and has to be sent on in full.
+    #[test]
+    fn arguments_that_never_streamed_are_sent_whole() {
+        assert_eq!(
+            arguments_remainder("", r#"{"file_path": "src/main.rs"}"#).as_deref(),
+            Some(r#"{"file_path": "src/main.rs"}"#)
+        );
+    }
+
+    /// A model that streamed them: only what is missing, never twice.
+    #[test]
+    fn streamed_arguments_are_not_sent_twice() {
+        let complete = r#"{"pattern": "TODO"}"#;
+        assert_eq!(arguments_remainder(complete, complete), None);
+        assert_eq!(
+            arguments_remainder(r#"{"pattern": "#, complete).as_deref(),
+            Some(r#""TODO"}"#)
+        );
+        assert_eq!(arguments_remainder("", ""), None);
+        // Disagreeing text cannot be mended by appending.
+        assert_eq!(arguments_remainder(r#"{"x"#, complete), None);
     }
 
     /// The system prompt rides in `instructions` alone, as Codex sends it,
