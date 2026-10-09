@@ -6,6 +6,7 @@
 use sub2api::images::{self, ImageErrorKind};
 
 use super::image_studio::{JobStatus, StudioJob, Thumb};
+use super::model_plaza::CatalogStatus;
 use super::providers_page::card_button;
 use super::*;
 
@@ -93,6 +94,13 @@ impl Waku {
     pub(super) fn render_image_studio(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let drop_wash = theme.surface.blend(theme.overlay);
+        // The model list is the catalog's; while the page is open, one that
+        // is missing keeps being asked for (paced by the catalog's backoff).
+        if self.cloud_account.credentials.is_some()
+            && self.model_plaza.status() != CatalogStatus::Ready
+        {
+            self.schedule_model_plaza_load(cx);
+        }
         div()
             .id("image-studio")
             .flex_1()
@@ -680,35 +688,86 @@ impl Waku {
 
         let weak = cx.entity().downgrade();
 
-        // Model.
-        let models = self.image_studio_models();
-        let model_handle = self.menu_handle("image-studio-model-menu", cx);
-        let model_menu = dropdown_menu(
-            chip(theme, "image-studio-model", model.clone()),
-            "image-studio-model-menu",
-            &model_handle,
-            MenuAlign::AboveLeft,
-            {
-                let weak = weak.clone();
-                let current = model.clone();
-                move |_| {
-                    models
-                        .iter()
-                        .map(|name| {
-                            let weak = weak.clone();
-                            let selected = *name == current;
-                            let name = name.clone();
-                            MenuItem::new(name.clone(), move |_, cx| {
-                                let _ = weak.update(cx, |this, cx| {
-                                    this.set_image_studio_model(name.clone(), cx)
-                                });
-                            })
-                            .selected(selected)
-                        })
-                        .collect()
-                }
-            },
-        );
+        // Model. Until the catalog answers there is no list to offer: say
+        // so, rather than offer the default alone as if it were the
+        // account's whole list.
+        let model_menu = match self.model_plaza.status() {
+            CatalogStatus::Ready => {
+                let models = self.image_studio_models();
+                let model_handle = self.menu_handle("image-studio-model-menu", cx);
+                dropdown_menu(
+                    chip(theme, "image-studio-model", model.clone()),
+                    "image-studio-model-menu",
+                    &model_handle,
+                    MenuAlign::AboveLeft,
+                    {
+                        let weak = weak.clone();
+                        let current = model.clone();
+                        move |_| {
+                            models
+                                .iter()
+                                .map(|name| {
+                                    let weak = weak.clone();
+                                    let selected = *name == current;
+                                    let name = name.clone();
+                                    MenuItem::new(name.clone(), move |_, cx| {
+                                        let _ = weak.update(cx, |this, cx| {
+                                            this.set_image_studio_model(name.clone(), cx)
+                                        });
+                                    })
+                                    .selected(selected)
+                                })
+                                .collect()
+                        }
+                    },
+                )
+                .into_any_element()
+            }
+            CatalogStatus::Loading => div()
+                .h(px(26.0))
+                .px(px(8.0))
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(5.0))
+                .text_size(sp(12.0))
+                .text_color(theme.text_tertiary)
+                .child(motion::spin_slow(icon(
+                    "icons/loader-circle.svg",
+                    11.0,
+                    theme.text_tertiary,
+                )))
+                .child(tr!("image_studio.models_loading"))
+                .into_any_element(),
+            CatalogStatus::Failed(error) => div()
+                .id("image-studio-models-retry")
+                .tab_index(0)
+                .h(px(26.0))
+                .px(px(8.0))
+                .rounded(px(7.0))
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(5.0))
+                .cursor_default()
+                .text_size(sp(12.0))
+                .text_color(theme.danger)
+                .hover(|style| style.bg(theme.overlay))
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .child(icon("icons/rotate-cw.svg", 11.0, theme.danger))
+                .child(tr!("image_studio.models_failed_retry"))
+                .tooltip(Tooltip::text(error))
+                .on_click(cx.listener(|this, _, _, cx| this.retry_image_studio_models(cx)))
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        this.retry_image_studio_models(cx);
+                        cx.stop_propagation();
+                    }
+                }))
+                .into_any_element(),
+        };
 
         // Group.
         let now = Utc::now().timestamp();

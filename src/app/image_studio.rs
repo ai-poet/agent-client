@@ -21,6 +21,7 @@ use sub2api::images::{
     self, ImageError, ImageErrorKind, ImageGroup, ImageOutput, ImageRoute, ImageSpec, TaskState,
 };
 
+use super::model_plaza::CatalogStatus;
 use super::*;
 
 /// Jobs drawing at once; the gateway limits image concurrency per user too.
@@ -565,7 +566,10 @@ impl Waku {
         self.close_model_status();
         self.image_studio.open = true;
         self.ensure_image_studio_loaded(cx);
-        self.load_model_plaza_if_needed(false, cx);
+        // Opening the page is a person asking: a failed catalog goes again
+        // now rather than after its pause.
+        let failed = matches!(self.model_plaza.status(), CatalogStatus::Failed(_));
+        self.load_model_plaza_if_needed(failed, cx);
         if self.cloud_account.credentials.is_some() {
             self.refresh_cloud_account(cx);
         }
@@ -674,6 +678,9 @@ impl Waku {
 
     /// The image models the catalog lists, or the gateway's default when it
     /// lists none (an account whose groups map no models lists nothing).
+    /// Only meaningful once the catalog is `Ready`: before that the list
+    /// would be the default alone, which is not what the account offers —
+    /// the picker shows the catalog's state instead.
     pub(super) fn image_studio_models(&self) -> Vec<String> {
         let mut models: Vec<String> = self
             .model_plaza
@@ -691,8 +698,18 @@ impl Waku {
     }
 
     pub(super) fn image_studio_model(&self) -> String {
-        let models = self.image_studio_models();
         let prefs = &self.image_studio.store.prefs;
+        // Until the catalog answers, the person's own pick stands. Checked
+        // against the fallback list it would become the default for a
+        // moment, and sizes, prices and limits would follow a model nobody
+        // chose.
+        if self.model_plaza.status() != CatalogStatus::Ready {
+            return prefs
+                .model
+                .clone()
+                .unwrap_or_else(|| images::DEFAULT_MODEL.to_owned());
+        }
+        let models = self.image_studio_models();
         prefs
             .model
             .as_ref()
@@ -975,8 +992,14 @@ impl Waku {
 
     // ── Jobs ─────────────────────────────────────────────────────────────
 
+    /// The catalog again, at once — the picker's retry.
+    pub(super) fn retry_image_studio_models(&mut self, cx: &mut Context<Self>) {
+        self.load_model_plaza_if_needed(true, cx);
+    }
+
     pub(super) fn image_studio_can_submit(&self, cx: &App) -> bool {
         self.cloud_account.credentials.is_some()
+            && self.model_plaza.status() == CatalogStatus::Ready
             && self
                 .image_studio
                 .input
@@ -996,6 +1019,22 @@ impl Waku {
         let prompt = input.read(cx).content().trim().to_owned();
         if prompt.is_empty() {
             return;
+        }
+        // Enter reaches here with the button disabled. Without the catalog
+        // the model is a guess, so the prompt stays in the field.
+        match self.model_plaza.status() {
+            CatalogStatus::Ready => {}
+            CatalogStatus::Loading => {
+                self.show_toast(tr!("image_studio.models_loading"));
+                cx.notify();
+                return;
+            }
+            CatalogStatus::Failed(_) => {
+                self.show_toast(tr!("image_studio.models_failed"));
+                self.retry_image_studio_models(cx);
+                cx.notify();
+                return;
+            }
         }
         let model = self.image_studio_model();
         let size = self.image_studio_size(&model);

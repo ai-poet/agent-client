@@ -48,6 +48,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::AgentStartOptions;
 use crate::events::{AgentEvent, EventSink, StreamDecoder, SubagentEvent, SubagentStatus};
+use crate::subagent_progress::{Progress, with_progress};
 
 /// The tool's name, the engine's own: prompts and permission rules written
 /// for the engine's tool keep applying.
@@ -158,6 +159,14 @@ pub(crate) struct SubagentHost {
     /// ones whose entries in the engine's process-wide registry are this
     /// session's to show.
     background: Mutex<HashSet<String>>,
+    /// What each running child has done so far, from its own events
+    /// (`crate::subagent_progress`). Opened by `Started`, taken when the run
+    /// ends.
+    progress: Mutex<HashMap<String, Progress>>,
+    /// This turn's foreground calls and what each answered — or would have,
+    /// had the turn not been stopped first — with whether it is an error.
+    /// See [`SubagentHost::restore_answers`].
+    answers: Mutex<HashMap<String, (String, bool)>>,
 }
 
 impl SubagentHost {
@@ -169,6 +178,8 @@ impl SubagentHost {
             scope: Mutex::new(None),
             children: Mutex::new(HashMap::new()),
             background: Mutex::new(HashSet::new()),
+            progress: Mutex::new(HashMap::new()),
+            answers: Mutex::new(HashMap::new()),
         })
     }
 
@@ -181,6 +192,65 @@ impl SubagentHost {
     pub fn end_turn(&self) {
         *self.scope.lock() = None;
         self.pending.lock().clear();
+        self.answers.lock().clear();
+    }
+
+    /// Put back the answers a stop threw away.
+    ///
+    /// A stopped turn abandons the batch of calls it was waiting on and the
+    /// engine answers every call in it with "cancelled" — a sub-agent that
+    /// had already finished included, its report lost, and one still running
+    /// with nothing to show for its work. Asked to carry on, the parent then
+    /// sent them all again. Each such answer, an error the call did not give,
+    /// is replaced by the one it did give or by its progress.
+    pub fn restore_answers(&self, messages: &mut [Message]) {
+        use claurst_core::types::{ContentBlock, MessageContent, ToolResultContent};
+        let answers = std::mem::take(&mut *self.answers.lock());
+        if answers.is_empty() {
+            return;
+        }
+        let mut left = answers.len();
+        for message in messages.iter_mut().rev() {
+            let MessageContent::Blocks(blocks) = &mut message.content else {
+                continue;
+            };
+            for block in blocks.iter_mut() {
+                let ContentBlock::ToolResult {
+                    tool_use_id,
+                    content,
+                    is_error,
+                } = block
+                else {
+                    continue;
+                };
+                let Some((answer, answer_is_error)) = answers.get(tool_use_id.as_str()) else {
+                    continue;
+                };
+                left = left.saturating_sub(1);
+                let given = match content {
+                    ToolResultContent::Text(text) => Some(text.as_str()),
+                    ToolResultContent::Blocks(_) => None,
+                };
+                if *is_error == Some(true) && given != Some(answer.as_str()) {
+                    *content = ToolResultContent::Text(answer.clone());
+                    *is_error = Some(*answer_is_error);
+                }
+            }
+            if left == 0 {
+                break;
+            }
+        }
+    }
+
+    fn remember_answer(&self, parent_id: &str, result: &ToolResult) {
+        self.answers.lock().insert(
+            parent_id.to_owned(),
+            (result.content.clone(), result.is_error),
+        );
+    }
+
+    fn take_progress(&self, parent_id: &str) -> Option<Progress> {
+        self.progress.lock().remove(parent_id)
     }
 
     /// The engine is about to run `Agent` call `tool_id` with `input`.
@@ -266,6 +336,24 @@ impl SubagentHost {
     }
 
     fn emit(&self, parent_tool_id: &str, event: SubagentEvent) {
+        {
+            let mut progress = self.progress.lock();
+            match &event {
+                SubagentEvent::Started { .. } => {
+                    progress.insert(parent_tool_id.to_owned(), Progress::default());
+                }
+                SubagentEvent::Finished { .. } => {
+                    progress.remove(parent_tool_id);
+                }
+                // Only into a record `Started` opened: an abandoned child's
+                // last events can arrive after its `Finished`.
+                other => {
+                    if let Some(record) = progress.get_mut(parent_tool_id) {
+                        record.record(other);
+                    }
+                }
+            }
+        }
         self.events.emit(AgentEvent::Subagent {
             parent_tool_id: parent_tool_id.to_owned(),
             event,
@@ -487,9 +575,17 @@ impl Tool for SubagentTool {
             tokio::spawn(async move {
                 let outcome = run.run().await;
                 let stopped = stopped_by_user.load(Ordering::Acquire);
+                let progress = host.take_progress(&id);
                 let registry = claurst_core::tasks::global_registry();
                 let text = format_outcome(&outcome);
-                registry.append_output(&id, &text);
+                // What `monitor` reads back: with the progress when the run
+                // did not finish, as a foreground call's answer has it.
+                let output = if ran_to_an_end(&outcome) {
+                    text.clone()
+                } else {
+                    with_progress(text.clone(), progress.as_ref())
+                };
+                registry.append_output(&id, &output);
                 let cancelled = matches!(
                     registry.get(&id).map(|task| task.status),
                     Some(claurst_core::tasks::TaskStatus::Cancelled)
@@ -538,8 +634,13 @@ impl Tool for SubagentTool {
         };
         guard.armed = false;
         let stopped = stopped_by_user.load(Ordering::Acquire);
+        let progress = self.host.take_progress(&parent_id);
         finish(&self.host, &parent_id, &outcome, stopped, started);
-        tool_result(outcome, stopped)
+        let result = tool_result(outcome, stopped, progress.as_ref());
+        // Kept until the turn ends: a stop while a sibling still runs throws
+        // this answer away (`SubagentHost::restore_answers`).
+        self.host.remember_answer(&parent_id, &result);
+        result
     }
 }
 
@@ -665,6 +766,16 @@ impl Drop for FinishGuard {
         }
         self.cancel.cancel();
         self.host.children.lock().remove(&self.parent_id);
+        // The engine answers this call "cancelled" and knows nothing of what
+        // the child did; this is the answer the turn's end puts in its place.
+        let progress = self.host.take_progress(&self.parent_id);
+        self.host.remember_answer(
+            &self.parent_id,
+            &ToolResult::error(with_progress(
+                "Sub-agent was stopped, unfinished, when the turn was stopped".to_owned(),
+                progress.as_ref(),
+            )),
+        );
         self.host.emit(
             &self.parent_id,
             SubagentEvent::Finished {
@@ -716,9 +827,25 @@ fn status_of(outcome: &QueryOutcome, stopped_by_user: bool) -> SubagentStatus {
     }
 }
 
+/// Whether the child reached an answer of its own (and needs no progress
+/// report beside it).
+fn ran_to_an_end(outcome: &QueryOutcome) -> bool {
+    matches!(
+        outcome,
+        QueryOutcome::EndTurn { .. } | QueryOutcome::MaxTokens { .. }
+    )
+}
+
 /// What the parent model reads back from a foreground child, worded as the
-/// engine's own tool words it.
-fn tool_result(outcome: QueryOutcome, stopped_by_user: bool) -> ToolResult {
+/// engine's own tool words it. A run that did not finish carries what it got
+/// done (`crate::subagent_progress`), so the parent can continue it rather
+/// than start it over.
+fn tool_result(
+    outcome: QueryOutcome,
+    stopped_by_user: bool,
+    progress: Option<&Progress>,
+) -> ToolResult {
+    let unfinished = |text: String| ToolResult::error(with_progress(text, progress));
     match outcome {
         QueryOutcome::EndTurn { message, .. } => ToolResult::success(message.get_all_text()),
         QueryOutcome::MaxTokens {
@@ -728,14 +855,14 @@ fn tool_result(outcome: QueryOutcome, stopped_by_user: bool) -> ToolResult {
             partial_message.get_all_text()
         )),
         QueryOutcome::Cancelled if stopped_by_user => {
-            ToolResult::error("Sub-agent was stopped by the user")
+            unfinished("Sub-agent was stopped by the user".to_owned())
         }
-        QueryOutcome::Cancelled => ToolResult::error("Sub-agent was cancelled"),
-        QueryOutcome::Error(error) => ToolResult::error(format!("Sub-agent error: {error}")),
+        QueryOutcome::Cancelled => unfinished("Sub-agent was cancelled".to_owned()),
+        QueryOutcome::Error(error) => unfinished(format!("Sub-agent error: {error}")),
         QueryOutcome::BudgetExceeded {
             cost_usd,
             limit_usd,
-        } => ToolResult::error(format!(
+        } => unfinished(format!(
             "Sub-agent stopped: budget ${cost_usd:.4} exceeded (limit ${limit_usd:.4})"
         )),
     }
@@ -953,11 +1080,11 @@ mod tests {
     fn outcomes_read_back_as_the_engines_own_tool_words_them() {
         let text = |result: ToolResult| (result.content, result.is_error);
         assert_eq!(
-            text(tool_result(QueryOutcome::Cancelled, false)),
+            text(tool_result(QueryOutcome::Cancelled, false, None)),
             ("Sub-agent was cancelled".to_owned(), true)
         );
         assert_eq!(
-            text(tool_result(QueryOutcome::Cancelled, true)).1,
+            text(tool_result(QueryOutcome::Cancelled, true, None)).1,
             true
         );
         assert_eq!(
@@ -966,7 +1093,8 @@ mod tests {
                     cost_usd: 1.0,
                     limit_usd: 0.5
                 },
-                false
+                false,
+                None
             )),
             (
                 "Sub-agent stopped: budget $1.0000 exceeded (limit $0.5000)".to_owned(),
@@ -1046,6 +1174,202 @@ mod tests {
             armed: false,
         });
         assert!(!finished.is_cancelled());
+    }
+
+    fn tool_started(id: &str, name: &str, input: Value) -> SubagentEvent {
+        SubagentEvent::ToolStarted {
+            id: id.into(),
+            name: name.into(),
+            input,
+        }
+    }
+
+    fn tool_finished(id: &str, failed: bool, output: &str) -> SubagentEvent {
+        SubagentEvent::ToolFinished {
+            id: id.into(),
+            name: String::new(),
+            output: Value::String(output.into()),
+            failed,
+            image_source: None,
+        }
+    }
+
+    fn started_event() -> SubagentEvent {
+        SubagentEvent::Started {
+            description: "d".into(),
+            prompt: "p".into(),
+            model: "m".into(),
+            background: false,
+            started_at_ms: 0,
+        }
+    }
+
+    /// A child that failed half-way tells its parent what it had done, so
+    /// "continue" picks it up rather than sending a new child to redo it.
+    #[test]
+    fn an_unfinished_child_reports_its_progress_and_a_finished_one_does_not() {
+        let mut progress = Progress::default();
+        progress.record(&tool_started(
+            "1",
+            "Edit",
+            json!({"file_path": "src/lib.rs"}),
+        ));
+        progress.record(&tool_finished("1", false, "ok"));
+        progress.record(&tool_started("2", "Bash", json!({"command": "cargo test"})));
+        progress.record(&tool_finished("2", true, "Command exited with code 101"));
+
+        let error = claurst_core::error::ClaudeError::Other("upstream 502".into());
+        let (content, is_error) = {
+            let result = tool_result(QueryOutcome::Error(error), false, Some(&progress));
+            (result.content, result.is_error)
+        };
+        assert!(is_error);
+        assert!(
+            content.starts_with("Sub-agent error: upstream 502\n\n"),
+            "{content}"
+        );
+        assert!(
+            content.contains("Files it changed: src/lib.rs"),
+            "{content}"
+        );
+        assert!(
+            content.contains("- Bash command=cargo test → FAILED: Command exited with code 101")
+        );
+
+        let stopped = tool_result(QueryOutcome::Cancelled, true, Some(&progress)).content;
+        assert!(
+            stopped.starts_with("Sub-agent was stopped by the user\n\n"),
+            "{stopped}"
+        );
+
+        let done = tool_result(
+            QueryOutcome::EndTurn {
+                message: Message::assistant("All done."),
+                usage: Default::default(),
+            },
+            false,
+            Some(&progress),
+        );
+        assert_eq!(done.content, "All done.");
+        assert!(!ran_to_an_end(&QueryOutcome::Cancelled));
+    }
+
+    /// The host keeps a record per running child from the events it relays,
+    /// and drops it when the run ends — including events that straggle in
+    /// after an abandoned child's `Finished`.
+    #[test]
+    fn the_host_records_each_childs_events_between_start_and_finish() {
+        let (host, _seen) = host();
+        host.emit(
+            "call",
+            tool_started("x", "Read", json!({"file_path": "early"})),
+        );
+        assert!(
+            host.progress.lock().get("call").is_none(),
+            "no record before Started"
+        );
+
+        host.emit("call", started_event());
+        host.emit(
+            "call",
+            tool_started("1", "Read", json!({"file_path": "a.rs"})),
+        );
+        host.emit("call", tool_finished("1", false, "x"));
+        let digest = host
+            .take_progress("call")
+            .and_then(|progress| progress.render())
+            .expect("digest");
+        assert!(digest.contains("- Read file_path=a.rs → ok"), "{digest}");
+        assert!(!digest.contains("early"));
+
+        host.emit("other", started_event());
+        host.emit(
+            "other",
+            SubagentEvent::Finished {
+                status: SubagentStatus::Stopped,
+                summary: None,
+                result: None,
+                duration_ms: 0,
+            },
+        );
+        host.emit("other", tool_started("2", "Read", json!({})));
+        assert!(host.progress.lock().is_empty());
+    }
+
+    /// A stop answers every call of the abandoned batch "cancelled". The
+    /// child that had finished gets its report back, the one still running
+    /// gets its progress, and a call that really was answered keeps it.
+    #[test]
+    fn a_stop_gives_back_the_answers_it_threw_away() {
+        use claurst_core::types::{ContentBlock, ToolResultContent};
+        let (host, _seen) = host();
+        host.emit("running", started_event());
+        host.emit(
+            "running",
+            tool_started("1", "Write", json!({"file_path": "notes.md"})),
+        );
+        host.emit("running", tool_finished("1", false, "ok"));
+        host.remember_answer("finished", &ToolResult::success("Found it in a.rs"));
+        drop(FinishGuard {
+            host: host.clone(),
+            parent_id: "running".into(),
+            started: Instant::now(),
+            cancel: CancellationToken::new(),
+            armed: true,
+        });
+        host.remember_answer("delivered", &ToolResult::error("Sub-agent error: x"));
+
+        let cancelled = |id: &str| ContentBlock::ToolResult {
+            tool_use_id: id.into(),
+            content: ToolResultContent::Text("Tool execution was cancelled.".into()),
+            is_error: Some(true),
+        };
+        let mut messages = vec![
+            Message::user("go"),
+            Message::user_blocks(vec![ContentBlock::ToolResult {
+                tool_use_id: "delivered".into(),
+                content: ToolResultContent::Text("Sub-agent error: x".into()),
+                is_error: Some(true),
+            }]),
+            Message::user_blocks(vec![
+                cancelled("finished"),
+                cancelled("running"),
+                cancelled("unrelated"),
+            ]),
+        ];
+        host.restore_answers(&mut messages);
+
+        let results = |message: &Message| match &message.content {
+            claurst_core::types::MessageContent::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|block| match block {
+                    ContentBlock::ToolResult {
+                        content: ToolResultContent::Text(text),
+                        is_error,
+                        ..
+                    } => Some((text.clone(), *is_error)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        let last = results(&messages[2]);
+        assert_eq!(last[0], ("Found it in a.rs".to_owned(), Some(false)));
+        assert!(
+            last[1].0.starts_with("Sub-agent was stopped, unfinished"),
+            "{}",
+            last[1].0
+        );
+        assert!(
+            last[1].0.contains("Files it changed: notes.md"),
+            "{}",
+            last[1].0
+        );
+        assert_eq!(last[1].1, Some(true));
+        assert_eq!(last[2].0, "Tool execution was cancelled.");
+        assert_eq!(results(&messages[1])[0].0, "Sub-agent error: x");
+        // Spent: a second pass, or the next turn, changes nothing.
+        assert!(host.answers.lock().is_empty());
     }
 
     #[test]

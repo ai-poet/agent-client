@@ -263,6 +263,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `crates/waku-core/src/driver/turn_diagnosis.rs`,
 `crates/waku-core/src/driver/{subagent,claude_subagent}.rs`,
 `crates/waku-agent-bridge/src/subagent.rs`, `crates/waku-agent-bridge/src/gateway_search.rs`,
+`crates/waku-agent-bridge/src/subagent_progress.rs`,
 `src/app/{subagent_row,subagent_panel,subagent_transcript}.rs`,
 `src/app/cloud_usage.rs`, `src/app/model_plaza.rs`, `src/app/cloud_pay.rs`,
 `src/app/announcements.rs`, `assets/icons/{bell,circle-x,store,users,wallet}.svg`,

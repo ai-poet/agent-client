@@ -960,6 +960,11 @@ async fn run_turn(
     drop(tool_ctx);
     let _ = forwarder.await;
     let _ = questions.await;
+    // A stop answered every sub-agent the abandoned batch was waiting on
+    // "cancelled", finished ones included; give back what each one did.
+    if matches!(outcome, QueryOutcome::Cancelled) {
+        inner.subagents.restore_answers(&mut messages);
+    }
     inner.subagents.end_turn();
 
     // Write the transcript back *before* the turn is taken down. `prompt`

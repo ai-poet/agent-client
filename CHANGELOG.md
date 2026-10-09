@@ -33,6 +33,14 @@ the original feature bullet instead of adding separate entries for them.
 
   Fixes the built-in agent's prompt cache often missing on GPT models, which made long tasks cost more: every request of a task now carries the conversation's identity, so the task stays on one upstream account and reuses its cache, and long-term memory is read once per task, so a memory saved mid-task no longer throws the cache away — the next task picks the new memory up
 
+- 修复内置 Agent 的子 Agent 出错或被停止后，说「继续」会把它做过的事从头再做一遍的问题：子 Agent 没做完时，主 Agent 现在能看到它已经做了什么——改过哪些文件、调用过哪些工具、哪一步失败了、最后写到哪里——并从中断处接着做；按停止时已经完成的子 Agent，它的结果也不会再丢失
+
+  Fixes "continue" redoing everything a built-in agent's sub-agent had done after it failed or was stopped: when a sub-agent does not finish, the main agent now sees what it got done — the files it changed, the tools it called, the step that failed and the last thing it wrote — and carries on from there; a sub-agent that had already finished when you pressed Stop no longer loses its report either
+
+- 修复画图页的模型列表有时只剩 gpt-image-2 的问题：模型目录还在加载时会显示「正在加载模型」，加载失败时显示原因并可点击重试，失败后也会很快自动重试，不再把默认模型当作全部可用模型；列表没加载好之前不能提交，避免用错模型
+
+  Fixes the image studio's model list sometimes showing only gpt-image-2: while the model catalog loads the picker says so, a failed load shows why with a retry and is retried automatically within seconds, instead of passing the default model off as the whole list; drawing waits for the list, so a picture is never drawn with a model you did not pick
+
 ## [0.2.12]
 
 - 内置 Agent 新增长期记忆：它会把值得长期保留的信息（你的身份和偏好、你希望的工作方式、项目进展、资料在哪里）各存成一条记忆，按工作区和全局分开保存，下次会话自动带上，不用每次重新交代。你也可以直接说「记住……」或「忘掉……」。默认每聊 12 条消息以及会话结束时自动提炼新记忆；项目记忆会同步到 Claude Code 的项目记忆里，同一目录下的 Claude Code 也能看到，Claude Code 自己写的记忆不会被改动。批量删除记忆一定会先问你，完全访问模式下也一样。在「设置 → Agent → 记忆」里可以开关这些功能、调整占用的上下文大小，并查看、编辑、置顶或删除每一条记忆

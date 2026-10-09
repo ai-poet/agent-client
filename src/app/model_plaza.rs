@@ -43,9 +43,51 @@ pub(super) struct ModelPlazaState {
     pub statuses: Vec<GroupStatusItem>,
     pub loading: bool,
     pub error: Option<String>,
+    /// When the last *successful* fetch landed. A failure leaves it alone:
+    /// it used to be stamped too, which held an empty catalog for a full
+    /// minute after one failed request.
     loaded_at: Option<Instant>,
+    /// Failed fetches in a row, and when the next automatic one may go out.
+    failures: u32,
+    retry_at: Option<Instant>,
     /// Render schedules loads; this keeps it from scheduling twice per frame.
     load_scheduled: std::cell::Cell<bool>,
+}
+
+/// Whether the account's catalog can be read yet. A list already fetched
+/// stays `Ready` while a refresh runs or after one fails: a failed refresh
+/// never shrinks what is shown.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum CatalogStatus {
+    Loading,
+    Failed(String),
+    Ready,
+}
+
+impl ModelPlazaState {
+    /// See [`CatalogStatus`]. A catalog that loaded and lists nothing is
+    /// `Ready`; only one never fetched is `Loading` (or `Failed`, between
+    /// attempts).
+    pub(super) fn status(&self) -> CatalogStatus {
+        if !self.items.is_empty() || self.loaded_at.is_some() {
+            return CatalogStatus::Ready;
+        }
+        match &self.error {
+            Some(error) if !self.loading => CatalogStatus::Failed(error.clone()),
+            _ => CatalogStatus::Loading,
+        }
+    }
+}
+
+/// How long after the `failures`-th failure in a row the next automatic
+/// fetch may go out.
+fn retry_delay(failures: u32) -> Duration {
+    match failures {
+        0 | 1 => Duration::from_secs(5),
+        2 => Duration::from_secs(15),
+        3 => Duration::from_secs(30),
+        _ => PLAZA_TTL,
+    }
 }
 
 /// The web catalog's search: every whitespace-separated keyword must appear
@@ -205,10 +247,25 @@ impl Waku {
         self.model_plaza.statuses.clear();
         self.model_plaza.error = None;
         self.model_plaza.loaded_at = None;
+        self.model_plaza.failures = 0;
+        self.model_plaza.retry_at = None;
         // A load in flight belonged to that account and will be dropped on
         // arrival; the next account's load must not wait for it.
         self.model_plaza.loading = false;
         self.model_plaza.load_scheduled.set(false);
+    }
+
+    /// From a render: fetch the catalog if it is due, at most once a frame.
+    pub(super) fn schedule_model_plaza_load(&self, cx: &mut Context<Self>) {
+        if self.model_plaza.load_scheduled.replace(true) {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            let _ = this.update(cx, |this, cx| {
+                this.load_model_plaza_if_needed(false, cx);
+            });
+        })
+        .detach();
     }
 
     /// Fetch the catalog and group health when stale.
@@ -218,10 +275,14 @@ impl Waku {
             return;
         }
         if !force
-            && self
+            && (self
                 .model_plaza
-                .loaded_at
-                .is_some_and(|at| at.elapsed() < PLAZA_TTL)
+                .retry_at
+                .is_some_and(|at| Instant::now() < at)
+                || self
+                    .model_plaza
+                    .loaded_at
+                    .is_some_and(|at| at.elapsed() < PLAZA_TTL))
         {
             return;
         }
@@ -251,9 +312,11 @@ impl Waku {
                     return;
                 }
                 this.model_plaza.loading = false;
-                this.model_plaza.loaded_at = Some(Instant::now());
                 match fetched {
                     Ok((credentials, catalog, statuses)) => {
+                        this.model_plaza.loaded_at = Some(Instant::now());
+                        this.model_plaza.failures = 0;
+                        this.model_plaza.retry_at = None;
                         this.adopt_cloud_tokens(credentials);
                         this.model_plaza.items = catalog.items;
                         this.model_plaza.summary = catalog.summary;
@@ -267,7 +330,20 @@ impl Waku {
                         this.ensure_cloud_group_bindings(cx);
                         this.refresh_model_routes(cx);
                     }
-                    Err(error) => this.model_plaza.error = Some(format!("{error:#}")),
+                    Err(error) => {
+                        this.model_plaza.error = Some(format!("{error:#}"));
+                        this.model_plaza.failures = this.model_plaza.failures.saturating_add(1);
+                        let delay = retry_delay(this.model_plaza.failures);
+                        this.model_plaza.retry_at = Some(Instant::now() + delay);
+                        // The pages that read the catalog ask again from
+                        // their next render; this is that render, once the
+                        // pause is over.
+                        cx.spawn(async move |this, cx| {
+                            cx.background_executor().timer(delay).await;
+                            let _ = this.update(cx, |_, cx| cx.notify());
+                        })
+                        .detach();
+                    }
                 }
                 cx.notify();
             });
@@ -299,16 +375,8 @@ impl Waku {
                 .into_any_element();
         }
 
-        // Render triggers the fetch; the flag stops it from re-scheduling on
-        // every frame while the previous spawn is still in flight.
-        if !self.model_plaza.load_scheduled.replace(true) {
-            cx.spawn(async move |this, cx| {
-                let _ = this.update(cx, |this, cx| {
-                    this.load_model_plaza_if_needed(false, cx);
-                });
-            })
-            .detach();
-        }
+        // Render triggers the fetch.
+        self.schedule_model_plaza_load(cx);
 
         let mut page = div().mt(px(15.0)).w_full().flex().flex_col().gap(px(12.0));
 
@@ -1155,6 +1223,49 @@ mod tests {
             },
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_failed_first_fetch_is_failed_not_an_empty_catalog() {
+        let mut plaza = ModelPlazaState::default();
+        assert_eq!(plaza.status(), CatalogStatus::Loading);
+
+        plaza.error = Some("timed out".to_owned());
+        assert_eq!(
+            plaza.status(),
+            CatalogStatus::Failed("timed out".to_owned())
+        );
+        // Retrying: loading again, not failed.
+        plaza.loading = true;
+        assert_eq!(plaza.status(), CatalogStatus::Loading);
+
+        // A catalog that loaded and lists nothing is an answer.
+        let mut empty = ModelPlazaState {
+            loaded_at: Some(Instant::now()),
+            ..Default::default()
+        };
+        assert_eq!(empty.status(), CatalogStatus::Ready);
+        empty.loading = true;
+        assert_eq!(empty.status(), CatalogStatus::Ready);
+    }
+
+    #[test]
+    fn a_refresh_that_fails_keeps_the_list_it_had() {
+        let plaza = ModelPlazaState {
+            items: vec![item("gpt-image-2", "openai", "image", None)],
+            error: Some("502".to_owned()),
+            ..Default::default()
+        };
+        assert_eq!(plaza.status(), CatalogStatus::Ready);
+    }
+
+    #[test]
+    fn failed_fetches_back_off_up_to_the_freshness_window() {
+        assert_eq!(retry_delay(1), Duration::from_secs(5));
+        assert_eq!(retry_delay(2), Duration::from_secs(15));
+        assert_eq!(retry_delay(3), Duration::from_secs(30));
+        assert_eq!(retry_delay(4), PLAZA_TTL);
+        assert_eq!(retry_delay(40), PLAZA_TTL);
     }
 
     #[test]

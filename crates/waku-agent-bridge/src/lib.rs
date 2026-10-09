@@ -58,6 +58,8 @@ mod project_context;
 mod runtime;
 mod session;
 mod subagent;
+// Fork addition: what an unfinished sub-agent got done, for its parent.
+mod subagent_progress;
 // Fork addition: AgentTeams for the built-in agent.
 mod team;
 mod tool_guidance;

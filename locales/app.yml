@@ -550,6 +550,12 @@ image_studio.count_label:
   en: "×%{count}"
 image_studio.retry:
   en: "Retry"
+image_studio.models_loading:
+  en: "Loading models…"
+image_studio.models_failed:
+  en: "Couldn't load the model list. Trying again"
+image_studio.models_failed_retry:
+  en: "Couldn't load models — retry"
 image_studio.top_up:
   en: "Top up"
 image_studio.group_auto:
