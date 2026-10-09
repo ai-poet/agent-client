@@ -14,8 +14,8 @@ mod consolidate;
 mod tools;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use auto_memory::consolidate::{CaptureBuffer, Speaker};
 use auto_memory::{MemoryConfig, MemoryStore, ScopeDir};
@@ -80,6 +80,9 @@ pub(crate) struct MemoryHost {
     session_id: String,
     capture: Mutex<Capture>,
     consolidating: Arc<AtomicBool>,
+    /// The memory section as the session's first turn read it; empty for
+    /// none (`extend_rules`).
+    section: OnceLock<String>,
 }
 
 impl MemoryHost {
@@ -96,6 +99,7 @@ impl MemoryHost {
             session_id: session_id.to_owned(),
             capture: Mutex::new(Capture::default()),
             consolidating: Arc::new(AtomicBool::new(false)),
+            section: OnceLock::new(),
         });
         // Eviction is decided when an index is rebuilt; a store nobody
         // writes to would never evict, so each session refreshes once.
@@ -148,25 +152,36 @@ impl MemoryHost {
             .collect()
     }
 
-    /// Append this turn's memory section. Read once per turn: a memory
-    /// written mid-turn reaches the next one, and a turn that changed
-    /// nothing renders the same bytes, so the prompt cache holds.
+    /// Append the memory section. It is read once, on the session's first
+    /// turn, and the same bytes go out on every turn after it — as Claude Code
+    /// loads its memory once per session. The section sits in the system
+    /// prompt, ahead of the whole conversation: re-reading it each turn let
+    /// every memory written mid-session (by the agent, or by a consolidation
+    /// pass) change the prompt, and a changed prompt misses the prompt cache
+    /// from its first token — and on the gateway, whose sticky routing for a
+    /// client without a session id hashes the system prompt, can move the
+    /// session to another upstream account. A memory written mid-session is
+    /// already in the conversation; the next session reads the new index.
     pub(crate) fn extend_rules(&self, query: &mut QueryConfig) {
         if !self.enabled() {
             return;
         }
-        let user = self.user_dir().and_then(|dir| self.store.read_index(&dir));
-        let project = self.store.read_index(&self.project_dir());
-        let section = auto_memory::prompt::render_section(
-            user.as_deref(),
-            project.as_deref(),
-            self.config.max_bytes(),
-        );
+        let section = self.section.get_or_init(|| {
+            let user = self.user_dir().and_then(|dir| self.store.read_index(&dir));
+            let project = self.store.read_index(&self.project_dir());
+            auto_memory::prompt::render_section(
+                user.as_deref(),
+                project.as_deref(),
+                self.config.max_bytes(),
+            )
+        });
         if section.is_empty() {
             return;
         }
-        query.append_system_prompt =
-            crate::subagent::join_prompts(query.append_system_prompt.take(), Some(section));
+        query.append_system_prompt = crate::subagent::join_prompts(
+            query.append_system_prompt.take(),
+            Some(section.clone()),
+        );
     }
 
     fn consolidates(&self) -> bool {
@@ -272,41 +287,59 @@ mod tests {
         }
     }
 
+    fn draft(name: &str, description: &str) -> auto_memory::MemoryDraft {
+        auto_memory::MemoryDraft {
+            name: name.into(),
+            title: None,
+            description: description.into(),
+            kind: auto_memory::MemoryType::Project,
+            body: "b".into(),
+            pinned: None,
+        }
+    }
+
+    fn turn(host: &MemoryHost) -> Option<String> {
+        let mut query = QueryConfig {
+            append_system_prompt: Some("rules".into()),
+            ..QueryConfig::default()
+        };
+        host.extend_rules(&mut query);
+        query.append_system_prompt
+    }
+
     #[test]
-    fn the_section_appears_with_memories_and_is_stable() {
+    fn a_session_with_no_memories_gets_no_section() {
         let tmp = tempfile::tempdir().unwrap();
         let host = host(tmp.path(), quiet());
         let mut query = QueryConfig::default();
         host.extend_rules(&mut query);
-        assert_eq!(query.append_system_prompt, None, "no memories, no section");
+        assert_eq!(query.append_system_prompt, None);
+    }
 
-        host.store
-            .write(
-                &host.project_dir(),
-                auto_memory::MemoryDraft {
-                    name: "use-pnpm".into(),
-                    title: None,
-                    description: "The project uses pnpm".into(),
-                    kind: auto_memory::MemoryType::Project,
-                    body: "b".into(),
-                    pinned: None,
-                },
-            )
+    #[test]
+    fn the_section_is_read_once_per_session_so_the_prompt_cache_holds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session = host(tmp.path(), quiet());
+        session
+            .store
+            .write(&session.project_dir(), draft("use-pnpm", "The project uses pnpm"))
             .unwrap();
-        let mut first = QueryConfig {
-            append_system_prompt: Some("rules".into()),
-            ..QueryConfig::default()
-        };
-        host.extend_rules(&mut first);
-        let text = first.append_system_prompt.clone().unwrap();
-        assert!(text.starts_with("rules\n\n# Persistent memory index"));
-        assert!(text.contains("[use-pnpm](use-pnpm.md)"));
-        let mut second = QueryConfig {
-            append_system_prompt: Some("rules".into()),
-            ..QueryConfig::default()
-        };
-        host.extend_rules(&mut second);
-        assert_eq!(first.append_system_prompt, second.append_system_prompt);
+        let first = turn(&session).unwrap();
+        assert!(first.starts_with("rules\n\n# Persistent memory index"));
+        assert!(first.contains("[use-pnpm](use-pnpm.md)"));
+
+        // A memory written mid-session leaves this session's prompt as it was.
+        session
+            .store
+            .write(&session.project_dir(), draft("node-22", "Node 22 is required"))
+            .unwrap();
+        assert_eq!(turn(&session).as_deref(), Some(first.as_str()));
+
+        // The next session reads the index as it is now.
+        let next = host(tmp.path(), quiet());
+        let fresh = turn(&next).unwrap();
+        assert!(fresh.contains("[node-22](node-22.md)"));
+        assert!(fresh.contains("[use-pnpm](use-pnpm.md)"));
     }
 
     #[test]

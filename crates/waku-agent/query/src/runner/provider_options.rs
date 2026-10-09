@@ -3,6 +3,30 @@
 
 use crate::*;
 
+/// Fork departure: a request on the Responses route carries its conversation
+/// as `prompt_cache_key`, the way Codex sends its conversation id.
+///
+/// OpenAI keeps prompt caches per account and routes a cache by this key; a
+/// gateway pins a conversation to one upstream account by it. Without it the
+/// gateway can only hash the request's model, tools, instructions and first
+/// user message, so any change to the system prompt mid-session moved the
+/// conversation to another account and every later turn missed the cache —
+/// and the ChatGPT backend caches little at all for a request with no key.
+/// The Responses adapter copies unrecognised provider options into the
+/// request body, so the key travels as the top-level field the API defines.
+/// A key the options already carry is left as it is.
+pub(crate) fn with_prompt_cache_key(mut options: Value, provider_id: &str, session_id: &str) -> Value {
+    let session_id = session_id.trim();
+    if session_id.is_empty() || !matches!(provider_id, "codex" | "openai-codex") {
+        return options;
+    }
+    if let Some(map) = options.as_object_mut() {
+        map.entry("prompt_cache_key")
+            .or_insert_with(|| Value::String(session_id.to_owned()));
+    }
+    options
+}
+
 pub(crate) fn reasoning_effort_for_level(
     effort_level: claurst_core::effort::EffortLevel,
 ) -> &'static str {

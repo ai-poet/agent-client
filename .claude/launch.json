@@ -6,6 +6,16 @@
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "--cwd", "website", "dev"],
       "port": 3000
+    },
+    {
+      "name": "sub2api-frontend",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-Command",
+        "Set-Location 'C:\\Projects\\sub2api\\frontend'; $env:Path = 'C:\\Users\\Administrator\\AppData\\Local\\Author Software\\nvm\\installs\\v22.23.3;' + $env:Path; & '.\\node_modules\\.bin\\vite.cmd' --port 3005"
+      ],
+      "port": 3005
     }
   ]
 }

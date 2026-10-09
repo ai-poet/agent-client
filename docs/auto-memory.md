@@ -58,7 +58,7 @@ The frontmatter parser is a hand-written YAML subset (BOM, CRLF, plain and quote
 
 Every write, delete and clear rebuilds the scope's `MEMORY.md` under the scope lock: one line per memory, `- [title](name.md)[ 📌] — description`, pinned first, then by name. Stale memories are left out.
 
-At the start of each turn the root session reads both indexes and appends one section to its system prompt:
+On its first turn the root session reads both indexes and appends one section to its system prompt; every later turn of the session sends the same section:
 
 ```
 # Persistent memory index
@@ -73,7 +73,7 @@ At the start of each turn the root session reads both indexes and appends one se
 
 - No memories in either scope: no section at all.
 - The budget is `maxBytes` (2 / 4 / 8 KB) for the whole section, policy included. The indexes get `maxBytes − policy − 96` bytes (`prompt::index_budget`) and are cut at a whole line, with a truncation marker. Pinned memories come first, so they survive a cut.
-- Read once per turn. A turn that changed nothing renders the same bytes, so the prompt cache holds; a memory written mid-turn reaches the next turn.
+- Read once per session (`MemoryHost::extend_rules`). The section sits in the system prompt, ahead of the whole conversation, so it must not change mid-session: re-reading it each turn let every memory the agent or a consolidation pass wrote change the prompt, which missed the prompt cache from the first token — and on the gateway, whose sticky routing for GPT hashes the system prompt, could move the session to another upstream account. A memory written mid-session is already in the conversation as the tool call; the next session reads the new index.
 
 ## Tools
 

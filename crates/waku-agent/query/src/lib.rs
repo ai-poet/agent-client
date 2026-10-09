@@ -1057,11 +1057,17 @@ pub async fn run_query_loop(
                         } else {
                             None
                         },
-                        provider_options: build_provider_options(
+                        // Fork departure: the Responses route names the
+                        // conversation for the prompt cache, as Codex does.
+                        provider_options: with_prompt_cache_key(
+                            build_provider_options(
+                                &provider_id_str,
+                                &model_id_str,
+                                effective_effort_level,
+                                effective_thinking_budget,
+                            ),
                             &provider_id_str,
-                            &model_id_str,
-                            effective_effort_level,
-                            effective_thinking_budget,
+                            &tool_ctx.session_id,
                         ),
                     };
 
@@ -2799,6 +2805,40 @@ mod tests {
             None,
         );
         assert!(options.get("reasoningEffort").is_none());
+    }
+
+    /// Fork: the Responses route names the conversation for the prompt cache
+    /// (and the gateway's sticky routing); other routes are left alone.
+    #[test]
+    fn test_responses_requests_carry_the_session_as_prompt_cache_key() {
+        let options = with_prompt_cache_key(
+            build_provider_options(
+                "codex",
+                "gpt-6-sol",
+                Some(claurst_core::effort::EffortLevel::High),
+                None,
+            ),
+            "codex",
+            "session-1",
+        );
+        assert_eq!(options["prompt_cache_key"], serde_json::json!("session-1"));
+        assert_eq!(options["reasoningEffort"], serde_json::json!("high"));
+
+        // Its own key, when an option already set one, stays.
+        let preset = with_prompt_cache_key(
+            serde_json::json!({"prompt_cache_key": "kept"}),
+            "codex",
+            "session-1",
+        );
+        assert_eq!(preset["prompt_cache_key"], serde_json::json!("kept"));
+
+        for provider in ["anthropic", "openai", "github-copilot"] {
+            let options =
+                with_prompt_cache_key(serde_json::json!({}), provider, "session-1");
+            assert!(options.get("prompt_cache_key").is_none(), "{provider}");
+        }
+        let no_session = with_prompt_cache_key(serde_json::json!({}), "codex", " ");
+        assert!(no_session.get("prompt_cache_key").is_none());
     }
 
     #[test]

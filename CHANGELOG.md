@@ -29,6 +29,10 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- 修复内置 Agent 使用 GPT 模型时提示词缓存经常失效、费用偏高的问题：同一个任务的请求现在都会带上会话标识，始终交给同一个上游账号处理并复用缓存；长期记忆在一个任务里只读取一次，任务进行中新写入的记忆不会再让之前的缓存全部作废，下一个任务会读到最新的记忆
+
+  Fixes the built-in agent's prompt cache often missing on GPT models, which made long tasks cost more: every request of a task now carries the conversation's identity, so the task stays on one upstream account and reuses its cache, and long-term memory is read once per task, so a memory saved mid-task no longer throws the cache away — the next task picks the new memory up
+
 ## [0.2.12]
 
 - 内置 Agent 新增长期记忆：它会把值得长期保留的信息（你的身份和偏好、你希望的工作方式、项目进展、资料在哪里）各存成一条记忆，按工作区和全局分开保存，下次会话自动带上，不用每次重新交代。你也可以直接说「记住……」或「忘掉……」。默认每聊 12 条消息以及会话结束时自动提炼新记忆；项目记忆会同步到 Claude Code 的项目记忆里，同一目录下的 Claude Code 也能看到，Claude Code 自己写的记忆不会被改动。批量删除记忆一定会先问你，完全访问模式下也一样。在「设置 → Agent → 记忆」里可以开关这些功能、调整占用的上下文大小，并查看、编辑、置顶或删除每一条记忆
