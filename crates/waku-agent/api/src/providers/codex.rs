@@ -332,8 +332,21 @@ impl CodexProvider {
     /// Build the Responses-API request body for Codex.
     fn build_responses_body(request: &ProviderRequest) -> Value {
         // Re-use the same message translation that the Copilot provider uses.
-        let input = CopilotProvider::to_responses_input_pub(request);
+        let mut input = CopilotProvider::to_responses_input_pub(request);
         let instructions = Self::system_prompt_to_text(request);
+        // Fork departure (Waku): the system prompt goes out once, as
+        // `instructions`, the way Codex sends it. The shared translation also
+        // opens `input` with it as a `system` item, so every request carried
+        // it twice — about 2k tokens of a fresh session's 9k — and a gateway
+        // in front of a ChatGPT account folds that item into `instructions`
+        // as well, making it three copies.
+        if !instructions.is_empty()
+            && input
+                .first()
+                .is_some_and(|item| item.get("role").and_then(Value::as_str) == Some("system"))
+        {
+            input.remove(0);
+        }
 
         let tools: Vec<Value> = request
             .tools
@@ -1112,5 +1125,32 @@ mod fork_argument_decoding_tests {
     fn a_truncated_argument_string_does_not_crash() {
         let decoded = decode_tool_arguments(Some(&json!(r#"{"limit": 12"#)), "Read");
         assert_eq!(decoded, json!({}));
+    }
+
+    /// The system prompt rides in `instructions` alone, as Codex sends it,
+    /// not again as the first `input` item.
+    #[test]
+    fn the_system_prompt_goes_out_once() {
+        let request = ProviderRequest {
+            model: "gpt-5.6-sol".into(),
+            messages: vec![claurst_core::types::Message::user("hi")],
+            system_prompt: Some(crate::provider_types::SystemPrompt::Text(
+                "Be brief.".into(),
+            )),
+            tools: vec![],
+            max_tokens: 1024,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: vec![],
+            thinking: None,
+            provider_options: json!({}),
+        };
+        let body = CodexProvider::build_responses_body(&request);
+        assert_eq!(body["instructions"], "Be brief.");
+        let input = body["input"].as_array().unwrap();
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["role"], "user");
+        assert!(!body.to_string().contains(r#""role":"system""#));
     }
 }

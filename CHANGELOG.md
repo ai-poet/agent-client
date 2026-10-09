@@ -29,9 +29,9 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
-- 修复内置 Agent 使用 GPT 模型时提示词缓存经常失效、费用偏高的问题：同一个任务的请求现在都会带上会话标识，始终交给同一个上游账号处理并复用缓存；长期记忆在一个任务里只读取一次，任务进行中新写入的记忆不会再让之前的缓存全部作废，下一个任务会读到最新的记忆
+- 修复内置 Agent 使用 GPT 模型时提示词缓存经常失效、费用偏高的问题：同一个任务的请求现在都会带上会话标识，始终交给同一个上游账号处理并复用缓存；长期记忆在一个任务里只读取一次，任务进行中新写入的记忆不会再让之前的缓存全部作废，下一个任务会读到最新的记忆；待办清单的进度提醒和目标模式的进度不再写进系统提示词，每完成一项待办不会再让整段对话的缓存失效（Claude 和国产模型同样受益）；GPT 的系统提示词也不再重复发送，每次请求少约 2000 个 token
 
-  Fixes the built-in agent's prompt cache often missing on GPT models, which made long tasks cost more: every request of a task now carries the conversation's identity, so the task stays on one upstream account and reuses its cache, and long-term memory is read once per task, so a memory saved mid-task no longer throws the cache away — the next task picks the new memory up
+  Fixes the built-in agent's prompt cache often missing on GPT models, which made long tasks cost more: every request of a task now carries the conversation's identity, so the task stays on one upstream account and reuses its cache; long-term memory is read once per task, so a memory saved mid-task no longer throws the cache away — the next task picks the new memory up; the to-do reminder and goal progress no longer live in the system prompt, so finishing a to-do no longer invalidates the cache for the whole conversation (on Claude and the Chinese models too); and GPT no longer receives the system prompt twice, saving about 2,000 tokens per request
 
 - 修复内置 Agent 的子 Agent 出错或被停止后，说「继续」会把它做过的事从头再做一遍的问题：子 Agent 没做完时，主 Agent 现在能看到它已经做了什么——改过哪些文件、调用过哪些工具、哪一步失败了、最后写到哪里——并从中断处接着做；按停止时已经完成的子 Agent，它的结果也不会再丢失
 

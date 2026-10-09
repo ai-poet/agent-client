@@ -6,6 +6,9 @@ pub(crate) mod tool_budget;
 pub(crate) use tool_budget::*;
 pub(crate) mod tools;
 pub(crate) use tools::*;
+// Fork addition (Waku): step-to-step reminders off the system prompt.
+pub(crate) mod step_reminder;
+pub(crate) use step_reminder::*;
 pub(crate) mod prompt;
 pub(crate) use prompt::*;
 pub(crate) mod stream;

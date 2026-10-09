@@ -664,8 +664,22 @@ pub async fn run_query_loop(
         // sanitize_history is idempotent, so a well-formed history is untouched.
         *messages = sanitize::sanitize_history(std::mem::take(messages));
 
+        // Fork departure (Waku): what changes from one step to the next — the
+        // todo nudge (its count moves with every finished item, and it starts
+        // only at step 3) and the goal's progress — rides on this request's
+        // last message instead of the system prompt. The system prompt opens
+        // every request, so each change to it made the whole conversation
+        // after it a cache miss, on every route. The reminder is never written
+        // to `messages`: the next request's prefix is the conversation as it
+        // was, and only the message that carried it is read again.
+        let reminder = step_reminder(turn, config, tool_ctx);
+        let reminded = reminder
+            .as_deref()
+            .map(|text| with_step_reminder(messages, text));
+        let request_messages: &[Message] = reminded.as_deref().unwrap_or(messages.as_slice());
+
         // Build API request
-        let api_messages: Vec<ApiMessage> = messages.iter().map(ApiMessage::from).collect();
+        let api_messages: Vec<ApiMessage> = request_messages.iter().map(ApiMessage::from).collect();
         // Max-steps degradation: the final summary turn is dispatched with NO
         // tool definitions so the model can only produce text (issue #230).
         let api_tools: Vec<ApiToolDefinition> = if degradation_turn {
@@ -724,35 +738,10 @@ pub async fn run_query_loop(
                 }
             }
 
-            // Apply todo nudge on turns > 2.
-            if turn > 2 {
-                let nudge = build_todo_nudge(&tool_ctx.session_id);
-                if !nudge.is_empty() {
-                    patched.append_system_prompt = Some(match &config.append_system_prompt {
-                        Some(existing) => format!("{}\n\n{}", existing, nudge),
-                        None => nudge,
-                    });
-                }
-            }
-
-            // Goal system-prompt addendum (issue #230 / MI-3). Applied fresh
-            // each turn (goal state — turns used, elapsed — changes over the
-            // run) whenever goal continuation mode is active and a live goal
-            // exists for this session. This relocates the addendum injection
-            // from the CLI into the loop so continuation turns get it too.
-            // GoalStore access here is fully synchronous (no lock held across
-            // an `.await`).
-            if matches!(config.continuation, crate::continuation::ContinuationMode::Goal) {
-                if let Some(goal) = claurst_core::GoalStore::open_default()
-                    .and_then(|s| s.get_active_goal(&tool_ctx.session_id))
-                {
-                    let addendum = claurst_core::goal_system_prompt_addendum(&goal);
-                    patched.append_system_prompt = Some(match patched.append_system_prompt.take() {
-                        Some(existing) => format!("{}\n{}", existing, addendum),
-                        None => addendum,
-                    });
-                }
-            }
+            // Fork departure (Waku): the todo nudge and the goal addendum used
+            // to be appended here; they now ride on the request's last message
+            // (`step_reminder`, above), so the system prompt stays the same
+            // from step to step.
 
             // Ultracode effort. When the effective effort for this turn is
             // Ultracode (set by the `ultracode` keyword or an explicit /effort
@@ -1012,7 +1001,7 @@ pub async fn run_query_loop(
                     } else {
                         Vec::new()
                     };
-                    let provider_messages: Vec<claurst_core::types::Message> = messages
+                    let provider_messages: Vec<claurst_core::types::Message> = request_messages
                         .iter()
                         .map(|msg| {
                             let mut msg = msg.clone();
