@@ -30,6 +30,15 @@ pub const MANAGED_SERVICE_URL: &str = match option_env!("SUB2API_MANAGED_SERVICE
     None => "https://cheaprouter.cc",
 };
 
+/// The service's CDN-accelerated origin, offered as a labelled node in
+/// Settings → Cloud Account. It serves the same gateway through a CDN that
+/// is usually faster from mainland China and the rest of Asia-Pacific.
+/// Empty disables it.
+pub const MANAGED_SERVICE_CDN_URL: &str = match option_env!("SUB2API_MANAGED_SERVICE_CDN_URL") {
+    Some(url) => url,
+    None => "https://cdn.cheaprouter.cc",
+};
+
 /// Alternate origins serving the same managed API, comma separated.
 ///
 /// The service is reachable on more than one domain; which one is fastest,
@@ -40,9 +49,14 @@ pub const MANAGED_SERVICE_ALT_URLS: &str = match option_env!("SUB2API_MANAGED_SE
     None => "",
 };
 
-/// Every origin this build knows the managed service by, primary first.
+/// Every origin this build knows the managed service by: primary, then the
+/// CDN node, then any unlabelled alternates.
 pub fn managed_service_endpoints() -> Vec<String> {
     let mut endpoints = vec![MANAGED_SERVICE_URL.to_owned()];
+    let cdn = MANAGED_SERVICE_CDN_URL.trim();
+    if !cdn.is_empty() && !endpoints.iter().any(|known| known == cdn) {
+        endpoints.push(cdn.to_owned());
+    }
     for alternate in MANAGED_SERVICE_ALT_URLS.split(',') {
         let alternate = alternate.trim();
         if !alternate.is_empty() && !endpoints.iter().any(|known| known == alternate) {
@@ -117,8 +131,24 @@ mod tests {
         // `api_url` joins with "/api/v1/...", so a trailing slash would produce
         // a double slash and a 404 on some reverse proxies.
         assert!(!MANAGED_SERVICE_URL.ends_with('/'));
+        assert!(!MANAGED_SERVICE_CDN_URL.ends_with('/'));
         assert!(!RELEASES_BASE_URL.ends_with('/'));
         assert!(!WEBSITE_URL.ends_with('/'));
+    }
+
+    #[test]
+    fn managed_endpoints_list_the_primary_first_then_the_cdn() {
+        let endpoints = managed_service_endpoints();
+        assert_eq!(
+            endpoints.first().map(String::as_str),
+            Some(MANAGED_SERVICE_URL)
+        );
+        if !MANAGED_SERVICE_CDN_URL.is_empty() && MANAGED_SERVICE_CDN_URL != MANAGED_SERVICE_URL {
+            assert_eq!(
+                endpoints.get(1).map(String::as_str),
+                Some(MANAGED_SERVICE_CDN_URL)
+            );
+        }
     }
 
     #[test]

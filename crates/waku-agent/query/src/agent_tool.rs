@@ -348,6 +348,8 @@ impl Tool for AgentTool {
             };
 
         let query_config = QueryConfig {
+            // Fork (Waku): the field the retry policy added.
+            retry_budget: claurst_api::retry_policy::RetryBudget::Default,
             model,
             max_tokens: claurst_core::constants::DEFAULT_MAX_TOKENS,
             max_turns: resolved_max_turns,

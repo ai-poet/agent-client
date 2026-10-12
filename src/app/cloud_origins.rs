@@ -1,8 +1,11 @@
-//! Settings → Cloud Account: which of the service's domains the CLIs are
-//! pointed at, with a latency test to choose one.
+//! Settings → Cloud Account: which of the service's nodes (domains) the
+//! CLIs, the built-in agent and image generation are pointed at, with a
+//! latency test to choose one.
 //!
 //! Fork addition. The session stays on the domain it signed in on; only the
-//! endpoint handed to the CLIs moves (`sub2api::gateway_origin`).
+//! endpoint handed to the CLIs moves (`sub2api::gateway_origin`). The nodes
+//! are the build's own (primary + CDN) plus the ones the service lists
+//! publicly, cached so they survive the primary being unreachable.
 
 use super::cloud_account::section_title;
 use super::providers_page::card_button;
@@ -62,6 +65,11 @@ impl Waku {
             self.show_toast(format!("{error:#}"));
         }
         self.apply_cloud_routing();
+        // Open built-in agent sessions read the route only when their
+        // options are applied; without this they kept the old node until
+        // something else re-applied them. A turn in flight finishes where it
+        // started.
+        self.reapply_built_in_session_options(cx);
         // The model list is served by the domain that was just swapped.
         self.refresh_provider_detection(None);
         self.refresh_native_catalog(false, cx);
@@ -116,6 +124,14 @@ impl Waku {
 
     pub(super) fn select_gateway_origin(&mut self, origin: String, cx: &mut Context<Self>) {
         if self.cloud_account.gateway_origin.origin().as_deref() == Some(origin.as_str()) {
+            // Re-picking the node in use still cancels a pending return
+            // from a fallback: the user has now chosen it.
+            if self.cloud_account.gateway_origin.fallback_from.take().is_some()
+                && let Err(error) =
+                    sub2api::gateway_origin::save(&self.cloud_account.gateway_origin)
+            {
+                self.show_toast(format!("{error:#}"));
+            }
             return;
         }
         if let Err(error) = self.cloud_account.gateway_origin.select(&origin) {
@@ -123,6 +139,85 @@ impl Waku {
             return;
         }
         self.persist_gateway_origin(cx);
+    }
+
+    /// Move off a node that stopped answering, remembering it so the route
+    /// returns once it answers again.
+    fn fall_back_gateway_origin(&mut self, origin: String, cx: &mut Context<Self>) {
+        if let Err(error) = self.cloud_account.gateway_origin.fall_back(&origin) {
+            self.show_toast(format!("{error:#}"));
+            return;
+        }
+        self.persist_gateway_origin(cx);
+    }
+
+    /// Read the service's public node list when the cached one is due, then
+    /// run the once-per-launch check of the chosen node.
+    ///
+    /// Asks the sign-in domain first and, when that cannot be reached, the
+    /// node in use — the case a CDN node exists for.
+    pub(super) fn refresh_gateway_nodes(&mut self, cx: &mut Context<Self>) {
+        let now = chrono::Utc::now().timestamp();
+        let Some(credentials) = self.cloud_account.credentials.as_ref() else {
+            return;
+        };
+        if self.cloud_account.nodes_refreshing
+            || !self.cloud_account.gateway_origin.server_nodes_due(now)
+        {
+            self.verify_gateway_origin(cx);
+            return;
+        }
+        self.cloud_account.nodes_refreshing = true;
+        let mut origins = vec![credentials.endpoint.clone()];
+        if let Some(routed) = self.cloud_account.gateway_origin.origin()
+            && !origins.contains(&routed)
+        {
+            origins.push(routed);
+        }
+        let session = credentials.session_id.clone();
+        cx.spawn(async move |this, cx| {
+            let listed = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut last_error = None;
+                    for origin in origins {
+                        match sub2api::Client::new(origin).public_custom_endpoints() {
+                            Ok(listed) => return Ok(listed),
+                            Err(error) => last_error = Some(error),
+                        }
+                    }
+                    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no origin to ask")))
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.cloud_account.nodes_refreshing = false;
+                if !this.cloud_session_is(&session) {
+                    return;
+                }
+                match listed {
+                    Ok(listed) => {
+                        let routed = this.cloud_account.gateway_origin.origin();
+                        let now = chrono::Utc::now().timestamp();
+                        this.cloud_account
+                            .gateway_origin
+                            .adopt_server_nodes(&listed, now);
+                        if this.cloud_account.gateway_origin.origin() != routed {
+                            // The node in use is no longer listed.
+                            this.persist_gateway_origin(cx);
+                        } else if let Err(error) =
+                            sub2api::gateway_origin::save(&this.cloud_account.gateway_origin)
+                        {
+                            this.show_toast(format!("{error:#}"));
+                        }
+                    }
+                    // The cached list stays; it is asked again next refresh.
+                    Err(_) => {}
+                }
+                this.verify_gateway_origin(cx);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub(super) fn set_gateway_origin_auto_select(&mut self, on: bool, cx: &mut Context<Self>) {
@@ -202,19 +297,30 @@ impl Waku {
 
                 let fastest = sub2api::speedtest::fastest_ok(&results)
                     .map(|index| results[index].url.clone());
-                let routed_ok = routed.as_ref().is_some_and(|current| {
+                let answers = |url: &str| {
                     results
                         .iter()
-                        .any(|candidate| candidate.url == *current && candidate.is_ok())
-                });
+                        .any(|candidate| candidate.url == url && candidate.is_ok())
+                };
+                let routed_ok = routed.as_deref().is_some_and(answers);
                 // A domain that no longer answers is left in place only when
                 // there is nothing better to move to.
                 if !routed_ok
                     && let Some(fallback) = fastest.clone()
                     && routed.as_deref() != Some(fallback.as_str())
                 {
-                    this.select_gateway_origin(fallback.clone(), cx);
+                    this.fall_back_gateway_origin(fallback.clone(), cx);
                     this.show_toast(tr!("cloud.origin_fallback", url = fallback));
+                    return;
+                }
+                // The node a fallback left answers again: go back to it,
+                // unless automatic selection owns the choice.
+                if !auto_select
+                    && let Some(home) = this.cloud_account.gateway_origin.restore_target()
+                    && answers(&home)
+                {
+                    this.select_gateway_origin(home.clone(), cx);
+                    this.show_toast(tr!("cloud.origin_restored", url = home));
                     return;
                 }
                 if !auto_select {
@@ -235,6 +341,29 @@ impl Waku {
             });
         })
         .detach();
+    }
+
+    /// The name and description a node row shows above and below its URL.
+    /// The service's wording is admin-written, so it goes through content
+    /// translation (display only).
+    fn gateway_node_label(&self, origin: &str) -> (Option<String>, Option<String>) {
+        use sub2api::gateway_origin::NodeLabel;
+        let non_empty = |text: String| (!text.trim().is_empty()).then_some(text);
+        match self.cloud_account.gateway_origin.node_label(origin) {
+            NodeLabel::Primary => (Some(tr!("cloud.node_primary")), None),
+            NodeLabel::Server { name, description } => (
+                non_empty(name).map(|name| self.tx(&name)),
+                non_empty(description).map(|description| self.tx(&description)),
+            ),
+            NodeLabel::BuiltInCdn => (
+                Some(tr!("cloud.node_cdn")),
+                Some(tr!("cloud.node_cdn_detail")),
+            ),
+            NodeLabel::Other if self.cloud_account.gateway_origin.is_removable(origin) => {
+                (Some(tr!("cloud.node_custom")), None)
+            }
+            NodeLabel::Other => (None, None),
+        }
     }
 
     /// The service domains this build knows, their measured latency, and
@@ -312,6 +441,34 @@ impl Waku {
                 None => (String::new(), theme.text_ghost),
             };
 
+            let (label, detail) = self.gateway_node_label(url);
+            let mut identity = div().flex_1().min_w_0().flex().flex_col().gap(px(2.0));
+            if let Some(label) = label {
+                identity = identity.child(
+                    div()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text)
+                        .child(label),
+                );
+            }
+            identity = identity.child(
+                div()
+                    .truncate()
+                    .font_family(crate::md::render::MONO_FAMILY)
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_secondary)
+                    .child(url.clone()),
+            );
+            if let Some(detail) = detail {
+                identity = identity.child(
+                    div()
+                        .truncate()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_ghost)
+                        .child(detail),
+                );
+            }
             let mut row = div()
                 .w_full()
                 .px(px(16.0))
@@ -323,16 +480,7 @@ impl Waku {
                 .flex()
                 .items_center()
                 .gap(px(10.0))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .font_family(crate::md::render::MONO_FAMILY)
-                        .text_size(sp(12.0))
-                        .text_color(theme.text)
-                        .child(url.clone()),
-                );
+                .child(identity);
             if !status_text.is_empty() {
                 row = row.child(
                     div()

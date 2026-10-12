@@ -80,6 +80,16 @@ pub enum ProviderError {
         partial_response: Option<String>,
     },
 
+    /// Fork departure (Waku): a failure `retry_policy` already classified —
+    /// the status, the server's own message (the gateway's bilingual text
+    /// included) and whether and when to try again. The Responses and Chat
+    /// Completions adapters report their HTTP and stream failures this way,
+    /// so nothing the query loop needs to decide on is lost on the way.
+    Classified {
+        provider: ProviderId,
+        failure: crate::retry_policy::ModelFailure,
+    },
+
     /// A catch-all variant for errors that do not fit any of the above.
     Other {
         provider: ProviderId,
@@ -102,6 +112,7 @@ impl ProviderError {
             ProviderError::RateLimited { .. } => true,
             ProviderError::ServerError { is_retryable, .. } => *is_retryable,
             ProviderError::StreamError { .. } => true,
+            ProviderError::Classified { failure, .. } => failure.is_retryable(),
             _ => false,
         }
     }
@@ -118,6 +129,7 @@ impl ProviderError {
             ProviderError::InvalidRequest { provider, .. } => provider,
             ProviderError::ContentFiltered { provider, .. } => provider,
             ProviderError::StreamError { provider, .. } => provider,
+            ProviderError::Classified { provider, .. } => provider,
             ProviderError::Other { provider, .. } => provider,
         }
     }
@@ -172,6 +184,10 @@ impl fmt::Display for ProviderError {
             ProviderError::StreamError { provider, message, .. } => {
                 write!(f, "[{}] Stream error: {}", provider, message)
             }
+            ProviderError::Classified { provider, failure } => match failure.status {
+                Some(s) => write!(f, "[{}] Error {}: {}", provider, s, failure.message),
+                None => write!(f, "[{}] {}", provider, failure.message),
+            },
             ProviderError::Other { provider, message, status, .. } => {
                 match status {
                     Some(s) => write!(f, "[{}] Error {}: {}", provider, s, message),
@@ -194,6 +210,9 @@ impl std::error::Error for ProviderError {}
 
 impl From<ProviderError> for ClaudeError {
     fn from(err: ProviderError) -> Self {
+        if let ProviderError::Classified { failure, .. } = err {
+            return failure.into_claude_error();
+        }
         match &err {
             ProviderError::ContextOverflow { .. } => ClaudeError::ContextWindowExceeded,
             ProviderError::RateLimited { .. } => ClaudeError::RateLimit,

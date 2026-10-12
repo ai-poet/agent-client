@@ -71,6 +71,9 @@ impl Pass {
         query.managed_agents = None;
         query.enabled_tools = None;
         query.continuation = claurst_query::continuation::ContinuationMode::Default;
+        // A pass that fails is simply made again later; retrying it would
+        // only hold the session's route longer.
+        query.retry_budget = claurst_api::retry_policy::RetryBudget::SingleAttempt;
 
         let answer = tokio::time::timeout(
             TIMEOUT,

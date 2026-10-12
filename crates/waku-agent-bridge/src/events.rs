@@ -138,6 +138,25 @@ pub enum AgentEvent {
         /// The engine's own error text.
         detail: String,
     },
+    /// Fork addition: a model request failed and is about to be sent
+    /// again — or, with `between_turns`, a goal will resume on its own
+    /// after a failed turn.
+    Retry {
+        /// This request's retry number (or the goal's resume number), 1-based.
+        attempt: u32,
+        /// `None` when there is no limit.
+        max_attempts: Option<u32>,
+        /// How long until the next attempt.
+        delay_ms: u64,
+        /// `claurst_api::retry_policy::RetryReason::as_str`, or `turn_failed`.
+        reason: String,
+        /// What had streamed of the failed answer was thrown away; the client
+        /// takes it back.
+        discarded_output: bool,
+        /// The failure, in the server's words where it gave any.
+        detail: String,
+        between_turns: bool,
+    },
     /// Something went wrong. A turn may still settle afterwards.
     Error(String),
     /// The turn is over. `success` is false for cancellation, an unrecoverable
@@ -467,6 +486,15 @@ impl StreamDecoder {
                 Vec::new()
             }
             Q::Error(message) => vec![AgentEvent::Error(message)],
+            Q::Retry(notice) => vec![AgentEvent::Retry {
+                attempt: notice.attempt,
+                max_attempts: notice.max_attempts,
+                delay_ms: notice.delay_ms,
+                reason: notice.reason.as_str().to_string(),
+                discarded_output: notice.discarded_output,
+                detail: notice.detail,
+                between_turns: false,
+            }],
         }
     }
 }

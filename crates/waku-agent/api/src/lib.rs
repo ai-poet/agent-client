@@ -71,6 +71,9 @@ pub mod claude_effort;
 // version path (`…/api/paas/v4`).
 pub mod endpoint;
 
+// Fork departure (Waku): one retry policy for every model route.
+pub mod retry_policy;
+
 // ---------------------------------------------------------------------------
 // Public re-exports
 // ---------------------------------------------------------------------------
@@ -584,6 +587,17 @@ pub mod client {
         }
     }
 
+    /// What [`AnthropicClient::send_attempt`] sends, built once per request.
+    struct PreparedSend {
+        url: String,
+        body: String,
+        anthropic_beta: String,
+        use_oauth: bool,
+        session_id: String,
+        stainless_os: &'static str,
+        stainless_arch: &'static str,
+    }
+
     /// The main Anthropic API client.
     pub struct AnthropicClient {
         http: reqwest::Client,
@@ -710,7 +724,7 @@ pub mod client {
         /// fork builds a plain `reqwest` client rather than the
         /// fingerprint-matched one upstream uses.
         pub fn new(config: ClientConfig) -> anyhow::Result<Self> {
-            let http = crate::bun_tls::build_anthropic_client(config.request_timeout)?;
+            let http = crate::bun_tls::build_anthropic_client()?;
             Ok(Self {
                 http,
                 config,
@@ -904,13 +918,47 @@ pub mod client {
             let body = serde_json::to_value(&request).map_err(ClaudeError::Json)?;
 
             let resp = self.send_with_retry(&body).await?;
-            let status = resp.status();
+            Ok(Self::spawn_sse_reader(resp, handler))
+        }
 
-            if !status.is_success() {
-                let text = resp.text().await.map_err(|e| ClaudeError::Api(format!("HTTP error: {e}")))?;
-                return Err(self.parse_api_error(status.as_u16(), &text));
+        /// Fork departure (Waku): one attempt at a streaming
+        /// `POST /v1/messages`, its failure classified. The query loop calls
+        /// this and does the retrying itself — with backoff it can cancel, a
+        /// budget per request, and a notice to the user — instead of the
+        /// silent 429 / 529-only loop [`Self::create_message_stream`] keeps
+        /// for its other callers.
+        pub async fn create_message_stream_once(
+            &self,
+            mut request: CreateMessageRequest,
+            handler: Arc<dyn StreamHandler>,
+            attempt: u32,
+        ) -> Result<mpsc::Receiver<streaming::AnthropicStreamEvent>, crate::retry_policy::ModelFailure> {
+            use crate::retry_policy::ModelFailure;
+            if self.config.api_key.is_empty() || self.config.provider == Provider::Codex {
+                // The full checks, and their hints, live on the retrying path.
+                return match self.create_message_stream(request, handler).await {
+                    Ok(rx) => Ok(rx),
+                    Err(error) => Err(ModelFailure::fatal(None, error.to_string())),
+                };
             }
+            request.stream = true;
+            self.apply_oauth_stealth(&mut request);
+            let body = serde_json::to_value(&request)
+                .map_err(|error| ModelFailure::fatal(None, error.to_string()))?;
+            let prepared = self
+                .prepare_send(&body)
+                .await
+                .map_err(|error| ModelFailure::fatal(None, error.to_string()))?;
+            let resp = self.send_attempt(&prepared, attempt).await?;
+            Ok(Self::spawn_sse_reader(resp, handler))
+        }
 
+        /// Read a successful streaming response on a task of its own,
+        /// handing each event to `handler` and to the returned channel.
+        fn spawn_sse_reader(
+            resp: reqwest::Response,
+            handler: Arc<dyn StreamHandler>,
+        ) -> mpsc::Receiver<streaming::AnthropicStreamEvent> {
             let (tx, rx) = mpsc::channel(256);
 
             // Spawn a task that reads the SSE byte stream and emits events.
@@ -925,7 +973,7 @@ pub mod client {
                 }
             });
 
-            Ok(rx)
+            rx
         }
 
         // ---- Models list ------------------------------------------------
@@ -978,15 +1026,49 @@ pub mod client {
 
         // ---- Internal helpers --------------------------------------------
 
-        /// Build the common request and execute with retry logic.
+        /// Execute with retry logic.
+        ///
+        /// Fork departure (Waku): every transient failure is retried — 5xx,
+        /// 408, connection and read errors, not only 429 / 529 — on the
+        /// shared policy's light budget, with jitter and the server's
+        /// `Retry-After` in any of its forms. Used by compaction and the
+        /// other side requests; the query loop sends its own attempts
+        /// ([`Self::create_message_stream_once`]).
         async fn send_with_retry(
             &self,
             body: &Value,
         ) -> Result<reqwest::Response, ClaudeError> {
+            use crate::retry_policy::{backoff_delay, RetryBudget};
+            let prepared = self.prepare_send(body).await?;
+            let budget = RetryBudget::Light;
+            let mut retries = 0u32;
+            loop {
+                match self.send_attempt(&prepared, retries + 1).await {
+                    Ok(resp) => return Ok(resp),
+                    Err(failure)
+                        if failure.is_retryable()
+                            && budget.retries_per_request().is_none_or(|max| retries < max) =>
+                    {
+                        retries += 1;
+                        let wait = backoff_delay(budget, retries, failure.retry_after);
+                        warn!(
+                            status = ?failure.status,
+                            reason = failure.reason.as_str(),
+                            attempt = retries,
+                            wait_ms = wait.as_millis() as u64,
+                            "Retryable API error, backing off"
+                        );
+                        tokio::time::sleep(wait).await;
+                    }
+                    Err(failure) => return Err(failure.into_claude_error()),
+                }
+            }
+        }
+
+        /// Everything about a request that stays the same across attempts.
+        async fn prepare_send(&self, body: &Value) -> Result<PreparedSend, ClaudeError> {
             // Fork (Waku): a base with its own version path keeps it.
             let url = crate::endpoint::versioned_url(&self.config.api_base, "messages");
-            let mut attempts = 0u32;
-            let mut delay = self.config.initial_retry_delay;
 
             let use_oauth = self.config.use_bearer_auth;
             let session_id = self.session_id.clone();
@@ -1080,14 +1162,40 @@ pub mod client {
                 other => other,
             };
 
-            loop {
-                attempts += 1;
+            Ok(PreparedSend {
+                url,
+                body: body_str,
+                anthropic_beta,
+                use_oauth,
+                session_id,
+                stainless_os,
+                stainless_arch,
+            })
+        }
 
+        /// One attempt: send, and classify anything but a 2xx.
+        async fn send_attempt(
+            &self,
+            prepared: &PreparedSend,
+            attempt: u32,
+        ) -> Result<reqwest::Response, crate::retry_policy::ModelFailure> {
+            let PreparedSend {
+                url,
+                body: body_str,
+                anthropic_beta,
+                use_oauth,
+                session_id,
+                stainless_os,
+                stainless_arch,
+            } = prepared;
+            let use_oauth = *use_oauth;
+            let attempts = attempt.max(1);
+            {
                 let mut req = self
                     .http
-                    .post(&url)
+                    .post(url)
                     .header("anthropic-version", &self.config.api_version)
-                    .header("anthropic-beta", &anthropic_beta)
+                    .header("anthropic-beta", anthropic_beta.as_str())
                     .header("content-type", "application/json")
                     .header("accept", "text/event-stream");
 
@@ -1104,8 +1212,8 @@ pub mod client {
                         .header("anthropic-dangerous-direct-browser-access", "true")
                         .header("x-stainless-lang", "js")
                         .header("x-stainless-runtime", "node")
-                        .header("x-stainless-os", stainless_os)
-                        .header("x-stainless-arch", stainless_arch)
+                        .header("x-stainless-os", *stainless_os)
+                        .header("x-stainless-arch", *stainless_arch)
                         .header("x-stainless-runtime-version", "v22.0.0")
                         .header("x-stainless-package-version", "0.94.0")
                         .header("x-stainless-retry-count", (attempts - 1).to_string())
@@ -1113,7 +1221,7 @@ pub mod client {
                             "x-stainless-timeout",
                             self.config.request_timeout.as_secs().to_string(),
                         )
-                        .header("x-claude-code-session-id", &session_id)
+                        .header("x-claude-code-session-id", session_id.as_str())
                         .header("x-client-request-id", uuid::Uuid::new_v4().to_string())
                         .header("Authorization", format!("Bearer {}", self.config.api_key));
                 } else {
@@ -1125,7 +1233,10 @@ pub mod client {
 
                 let req = req.body(body_str.clone());
 
-                let resp = req.send().await.map_err(|e| ClaudeError::Api(format!("HTTP error: {e}")))?;
+                let resp = req
+                    .send()
+                    .await
+                    .map_err(|e| crate::retry_policy::classify_transport(&e))?;
                 let status = resp.status().as_u16();
 
                 // 200-299: success
@@ -1133,36 +1244,20 @@ pub mod client {
                     return Ok(resp);
                 }
 
-                // 429 (rate limit) or 529 (overloaded): retry
-                if (status == 429 || status == 529) && attempts <= self.config.max_retries {
-                    // Honour Retry-After header if present
-                    let retry_after = resp
-                        .headers()
-                        .get("retry-after")
-                        .and_then(|v| v.to_str().ok())
-                        .and_then(|v| v.parse::<u64>().ok())
-                        .map(Duration::from_secs);
-
-                    let wait = retry_after.unwrap_or(delay);
-                    warn!(
-                        status,
-                        attempt = attempts,
-                        wait_secs = wait.as_secs(),
-                        "Retryable API error, backing off"
-                    );
-                    tokio::time::sleep(wait).await;
-                    delay = (delay * 2).min(self.config.max_retry_delay);
-                    continue;
-                }
-
-                // Non-retryable error – return immediately
+                let headers = resp.headers().clone();
                 let text = resp.text().await.unwrap_or_default();
-                return Err(self.parse_api_error(status, &text));
+                let mut failure = crate::retry_policy::classify_http(status, &headers, &text);
+                // The typed error the Messages path always produced, in the
+                // message the rest of the product reads.
+                if let ClaudeError::ApiStatus { message, .. } = self.parse_api_error(status, &text) {
+                    failure.message = message;
+                }
+                Err(failure)
             }
         }
 
         /// Parse an API error body into a typed `ClaudeError`.
-        fn parse_api_error(&self, status: u16, body: &str) -> ClaudeError {
+        pub(crate) fn parse_api_error(&self, status: u16, body: &str) -> ClaudeError {
             if let Ok(err) = serde_json::from_str::<ApiErrorResponse>(body) {
                 match status {
                     401 => ClaudeError::Auth(err.error.message),

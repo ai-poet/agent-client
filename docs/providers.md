@@ -1412,7 +1412,51 @@ did). The bridge checks whether the turn added any assistant text at all and
 reports a clean-but-empty turn as a failure. And `AgentEvent::ProducedNothing`
 carries the provider, model and endpoint so the driver can say it in the
 user's language (`native.empty_turn`) rather than shipping an English
-sentence.
+sentence. Since the retry policy below, an `error` event is a failed request
+like any other — retried or ended on its classification — and an answer
+that is still empty after one silent retry stays empty (the engine no longer
+writes "(no response — …)" into it), so this path reports it.
+
+**When a request fails** — one policy for all three routes
+(`claurst_api::retry_policy`, after ZCode's design; the adapters make single
+attempts and report a classified `ModelFailure`, the query loop retries).
+Transient failures — connect and read errors, the read timeout, 408 / 409 /
+425 / 429 / 5xx / 520–529, in-stream `overloaded_error` / `api_error` /
+`response.failed`, a stream that ends without `message_stop`,
+`response.completed` or `[DONE]` / a finish reason — wait 2 s doubling to
+60 s, jittered to 50–100 %, or the server's `Retry-After` (`retry-after-ms`,
+seconds or an HTTP date) when it is at most 300 s; a longer one, or
+`x-should-retry: false`, fails at once. 400 / 401 / 402 / 403 / 404 / 422 fail
+at once, and the gateway's own wording overrides the status where it says
+more (`waku-agent-bridge/src/retry_rules.rs`: balance, quota, subscription
+and content-policy rejections never retry; its RPM and "temporarily
+unavailable" answers do). A context overflow (400 / 413 / 422 naming the
+window) compacts once and sends again. Budgets: an interactive session gets
+ten retries per request (counted again for every request) and ten
+recoveries of a half-streamed answer per prompt; an AgentTeams member
+retries transient failures until they clear or it is stopped (with a cap of
+thirty server errors in a row); one-shot prompts and compaction summaries
+get a light budget; memory consolidation tries once. Every wait races the
+turn's cancel token. Model clients have no total deadline (the old 600 s
+one cut long answers off) but a connect timeout and a read timeout every
+byte resets, SSE keep-alive comments included (`options.network` on the
+anthropic entry, 15 s / 300 s by default); the loop's own stall timer is a
+20-minute backstop.
+
+Each retry reaches the desktop as `DriverEvent::ModelRetry { attempt,
+max_attempts, delay_ms, reason, discarded_output, detail, between_turns }`.
+The working row says "Reconnecting (2/10, 8 s)". `discarded_output` means
+part of the failed answer had streamed: the engine threw it away (it never
+reached the conversation) and the desktop takes back the text and reasoning
+shown since the last settled point — the turn's start, a finished request
+(`UsageUpdated`), a tool row, a compaction — and leaves a one-line notice
+(`src/app/model_retry.rs`). A retry resends the same bytes, so the prompt
+cache and the gateway's sticky routing are unaffected. A failed turn that got
+work done offers "Continue" beside Retry: a new turn with a fixed English
+instruction to pick up where it stopped, keeping the conversation Retry would
+rewind. A goal that failed on something transient resumes on its own after
+30 / 60 / 120 / 240 / 300 s (`between_turns`, at most five in a row; a
+message, Stop or a goal change cancels it — `session_goal_resume.rs`).
 
 **Reasoning effort** — every family the picker offers has a working ladder:
 Claude over Messages turns it into adaptive thinking plus

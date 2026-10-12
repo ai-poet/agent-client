@@ -705,10 +705,14 @@ pub(crate) struct RouteFingerprint {
     provider: Option<String>,
     api_key: Option<String>,
     bases_and_keys: Vec<(Option<String>, Option<String>)>,
+    /// Fork: clients are built with the timeouts, so a change rebuilds them.
+    network: (u64, u64),
 }
 
 pub(crate) fn route_fingerprint(config: &Config) -> RouteFingerprint {
+    let (connect, idle) = network_timeouts(config);
     RouteFingerprint {
+        network: (connect.as_secs(), idle.as_secs()),
         provider: config.provider.clone(),
         api_key: config.api_key.clone(),
         bases_and_keys: MANAGED_ENGINE_PROVIDERS
@@ -765,6 +769,36 @@ const TOOL_RESULT_BUDGET: usize = 600_000;
 /// `sub2api::global_config::native::GATEWAY_KEYS_OPTION`, which this crate
 /// cannot import.
 pub const GATEWAY_KEYS_OPTION: &str = "gateway_keys";
+
+/// Fork: where the routing writer files the model requests' network
+/// timeouts, beside the key table on the anthropic entry:
+/// `{"connect_timeout_secs", "idle_timeout_secs"}`. Kept in step with
+/// `sub2api::global_config::native::NETWORK_OPTION`.
+pub const NETWORK_OPTION: &str = "network";
+
+/// The connect and idle timeouts the settings name, zero where they do
+/// not (the engine's defaults).
+pub(crate) fn network_timeouts(config: &Config) -> (std::time::Duration, std::time::Duration) {
+    let section = config
+        .provider_configs
+        .get("anthropic")
+        .and_then(|entry| entry.options.get(NETWORK_OPTION));
+    let seconds = |key: &str| {
+        section
+            .and_then(|section| section.get(key))
+            .and_then(serde_json::Value::as_u64)
+            .map(std::time::Duration::from_secs)
+            .unwrap_or_default()
+    };
+    (seconds("connect_timeout_secs"), seconds("idle_timeout_secs"))
+}
+
+/// Hand the settings' network timeouts to the engine, for the clients built
+/// next. A setting that is absent restores the default.
+pub(crate) fn apply_network_timeouts(config: &Config) {
+    let (connect, idle) = network_timeouts(config);
+    claurst_api::retry_policy::set_network_timeouts(connect, idle);
+}
 
 /// The member of that table holding one key per model. Kept in step with
 /// `sub2api::global_config::native::MODEL_KEYS_MEMBER`.

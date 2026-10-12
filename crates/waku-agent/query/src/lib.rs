@@ -168,6 +168,9 @@ pub struct QueryConfig {
     /// goal's guards allow, injecting the goal continuation message as the next
     /// user turn — instead of the CLI REPL re-dispatching a fresh turn.
     pub continuation: crate::continuation::ContinuationMode,
+    /// Fork departure (Waku): how persistent this run is about transient
+    /// request failures (`claurst_api::retry_policy::RetryBudget`).
+    pub retry_budget: claurst_api::retry_policy::RetryBudget,
 }
 
 impl Default for QueryConfig {
@@ -196,6 +199,7 @@ impl Default for QueryConfig {
             managed_agents: None,
             enabled_tools: None,
             continuation: crate::continuation::ContinuationMode::Default,
+            retry_budget: claurst_api::retry_policy::RetryBudget::Default,
         }
     }
 }
@@ -270,6 +274,26 @@ pub enum QueryEvent {
         /// Estimated, once `phase` is `Finished`.
         tokens_after: Option<u64>,
     },
+    /// Waku: a model request failed and is about to be sent again.
+    Retry(RetryNotice),
+}
+
+/// Waku: what a client needs to say about a retry.
+#[derive(Debug, Clone)]
+pub struct RetryNotice {
+    /// This request's retry number, 1-based.
+    pub attempt: u32,
+    /// `None` when the run retries without a limit.
+    pub max_attempts: Option<u32>,
+    /// How long the loop waits before sending again.
+    pub delay_ms: u64,
+    pub reason: claurst_api::retry_policy::RetryReason,
+    /// The answer had started streaming and what arrived of it was thrown
+    /// away — never added to the conversation. A client that showed it
+    /// should take it back.
+    pub discarded_output: bool,
+    /// The failure, in the server's words where it gave any.
+    pub detail: String,
 }
 
 /// Waku: where a compaction is.
@@ -308,6 +332,33 @@ const MAX_STEPS_DEGRADATION_MSG: &str =
      disabled — do not attempt to call any tools. In plain text, briefly \
      summarize what you accomplished, what remains unfinished, and exactly where \
      you stopped, so the work can be resumed later.";
+
+/// Fork departure (Waku): how long a response stream may go without an
+/// event before the loop gives up on it. A backstop only — the HTTP client's
+/// read timeout (`claurst_api::retry_policy::idle_timeout`), which every
+/// byte resets, notices a dead connection long before this.
+const STREAM_STALL_BACKSTOP: std::time::Duration = std::time::Duration::from_secs(20 * 60);
+
+/// Fork (Waku): whether a provider stream event puts something on the
+/// user's screen — text or reasoning. Tool calls do not: their rows appear
+/// only once the answer is complete and they run.
+fn is_visible_stream_event(event: &claurst_api::StreamEvent) -> bool {
+    match event {
+        claurst_api::StreamEvent::TextDelta { text, .. } => !text.is_empty(),
+        claurst_api::StreamEvent::ThinkingDelta { thinking, .. } => !thinking.is_empty(),
+        claurst_api::StreamEvent::ReasoningDelta { reasoning, .. } => !reasoning.is_empty(),
+        _ => false,
+    }
+}
+
+/// Fork (Waku): [`is_visible_stream_event`] for the Messages branch.
+fn is_visible_delta(delta: &claurst_api::streaming::ContentDelta) -> bool {
+    match delta {
+        claurst_api::streaming::ContentDelta::TextDelta { text } => !text.is_empty(),
+        claurst_api::streaming::ContentDelta::ThinkingDelta { thinking } => !thinking.is_empty(),
+        _ => false,
+    }
+}
 
 /// Content stored in the synthetic `tool_result` for a tool that was abandoned
 /// mid-flight because the query loop was cancelled (issue #218). Every
@@ -458,8 +509,14 @@ pub async fn run_query_loop(
     }
 
     let mut used_fallback = false;
-    // How many automatic retries remain when a stream stalls (no data for 45s).
-    let mut retries_left: u32 = 2;
+    // Fork departure (Waku): this prompt's retry bookkeeping
+    // (`runner::retry_loop`). It replaces two stall retries shared by every
+    // request of the prompt, which a long task used up on its first blips.
+    let mut retry = runner::retry_loop::RetryState::new(config.retry_budget);
+    // Fork departure (Waku): the provider branch's adapter, built once per
+    // run so its connection pool is reused rather than a new connection
+    // (and TLS handshake) opened for every request.
+    let mut provider_cache: Option<(String, Arc<dyn claurst_api::LlmProvider>)> = None;
     // Max-steps graceful degradation (issue #230 / MI-3): set once the final
     // tool-less summary turn has been dispatched so it can never re-trigger
     // (anti-recursion guard).
@@ -580,7 +637,7 @@ pub async fn run_query_loop(
                         // one-loop-per-goal-turn design.
                         turn = 0;
                         max_tokens_recovery_count = 0;
-                        retries_left = 2;
+                        retry = runner::retry_loop::RetryState::new(config.retry_budget);
                         goal_turn_start = std::time::Instant::now();
                         continue;
                     }
@@ -594,6 +651,63 @@ pub async fn run_query_loop(
                             message: $assistant_msg,
                             usage: $usage,
                         };
+                    }
+                }
+            }};
+        }
+
+        // Fork departure (Waku): act on a failed request — wait and send it
+        // again, compact first, or end the turn with the failure. A retry
+        // re-enters the loop at the same turn, so the request is rebuilt from
+        // the conversation as it was (nothing of a failed answer is ever
+        // added to it), picks up any steering that arrived meanwhile, and
+        // carries the same step reminder — the same bytes, so the prompt
+        // cache and the gateway's sticky routing still apply. Only used
+        // outside the stream-reading loops, where `continue` means the next
+        // request.
+        macro_rules! retry_or_return {
+            ($failure:expr, $visible:expr, $compact:expr) => {{
+                let failure: claurst_api::retry_policy::ModelFailure = $failure;
+                let visible: bool = $visible;
+                match retry.on_failure(&failure, visible) {
+                    runner::retry_loop::RetryDecision::Retry { attempt, max, delay } => {
+                        warn!(
+                            reason = failure.reason.as_str(),
+                            attempt,
+                            ?max,
+                            delay_ms = delay.as_millis() as u64,
+                            discarded_output = visible,
+                            error = %failure,
+                            "Model request failed — retrying"
+                        );
+                        if let Some(ref tx) = event_tx {
+                            let _ = tx.send(QueryEvent::Retry(RetryNotice {
+                                attempt,
+                                max_attempts: max,
+                                delay_ms: u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
+                                reason: failure.reason,
+                                discarded_output: visible,
+                                detail: failure.to_string(),
+                            }));
+                        }
+                        if runner::retry_loop::sleep_or_cancel(delay, &cancel_token).await {
+                            return QueryOutcome::Cancelled;
+                        }
+                        turn -= 1;
+                        continue;
+                    }
+                    runner::retry_loop::RetryDecision::Compact => {
+                        warn!(error = %failure, "Context window exceeded — compacting before sending again");
+                        if $compact.await {
+                            turn -= 1;
+                            continue;
+                        }
+                        error!(error = %failure, "Context window exceeded and compaction did not help");
+                        return QueryOutcome::Error(failure.into_claude_error());
+                    }
+                    runner::retry_loop::RetryDecision::GiveUp => {
+                        error!(error = %failure, "Model request failed");
+                        return QueryOutcome::Error(failure.into_claude_error());
                     }
                 }
             }};
@@ -937,36 +1051,48 @@ pub async fn run_query_loop(
             if use_provider_dispatch {
                 let pid = claurst_core::provider_id::ProviderId::new(&provider_id_str);
 
-                // Always prefer a fresh provider built from the auth_store so
-                // that keys added at runtime via /connect are picked up
-                // immediately — even when the provider was pre-registered at
-                // startup with a stale or missing key.
-                let runtime_provider =
-                    claurst_api::registry::runtime_provider_for(&provider_id_str);
-
-                let registry_provider = if runtime_provider.is_some() {
-                    // Fresh auth_store key available — use it instead of the
-                    // (possibly stale) registry entry.
-                    None
+                let cached = provider_cache
+                    .as_ref()
+                    .filter(|(id, _)| *id == provider_id_str)
+                    .map(|(_, provider)| provider.clone());
+                let provider = if cached.is_some() {
+                    cached
                 } else {
-                    registry.get(&pid).cloned()
-                };
+                    // Always prefer a fresh provider built from the auth_store so
+                    // that keys added at runtime via /connect are picked up
+                    // immediately — even when the provider was pre-registered at
+                    // startup with a stale or missing key.
+                    let runtime_provider =
+                        claurst_api::registry::runtime_provider_for(&provider_id_str);
 
-                let mut provider = runtime_provider.or(registry_provider);
+                    let registry_provider = if runtime_provider.is_some() {
+                        // Fresh auth_store key available — use it instead of the
+                        // (possibly stale) registry entry.
+                        None
+                    } else {
+                        registry.get(&pid).cloned()
+                    };
 
-                // Rebuild providers using the unified base resolver so overrides
-                // from settings/env/defaults are applied consistently.
-                if claurst_api::registry::resolve_provider_api_base(
-                    &tool_ctx.config,
-                    &provider_id_str,
-                ).is_some() {
-                    if let Some(overridden) = claurst_api::registry::provider_from_config(
+                    let mut provider = runtime_provider.or(registry_provider);
+
+                    // Rebuild providers using the unified base resolver so overrides
+                    // from settings/env/defaults are applied consistently.
+                    if claurst_api::registry::resolve_provider_api_base(
                         &tool_ctx.config,
                         &provider_id_str,
-                    ) {
-                        provider = Some(overridden);
+                    ).is_some() {
+                        if let Some(overridden) = claurst_api::registry::provider_from_config(
+                            &tool_ctx.config,
+                            &provider_id_str,
+                        ) {
+                            provider = Some(overridden);
+                        }
                     }
-                }
+                    if let Some(provider) = &provider {
+                        provider_cache = Some((provider_id_str.clone(), provider.clone()));
+                    }
+                    provider
+                };
                 if let Some(provider) = provider {
                     debug!(provider = %provider_id_str, model = %model_id_str, "Dispatching to non-Anthropic provider");
 
@@ -1062,12 +1188,33 @@ pub async fn run_query_loop(
 
                     // Use create_message_stream so the TUI receives real-time
                     // text deltas instead of waiting for the full response.
-                    let mut stream = match provider.create_message_stream(provider_request).await {
+                    //
+                    // Fork departure (Waku): raced against a cancel, and a
+                    // failure goes through the retry policy with its type
+                    // intact — it used to end the turn on the spot, as a
+                    // string.
+                    let opened = tokio::select! {
+                        _ = cancel_token.cancelled() => return QueryOutcome::Cancelled,
+                        opened = provider.create_message_stream(provider_request) => opened,
+                    };
+                    let mut stream = match opened {
                         Ok(s) => s,
                         Err(e) => {
-                            error!(provider = %provider_id_str, error = %e, "Provider stream failed");
-                            return QueryOutcome::Error(
-                                claurst_core::error::ClaudeError::Api(e.to_string())
+                            retry_or_return!(
+                                claurst_api::retry_policy::from_provider_error(&e),
+                                false,
+                                compact_for_overflow(
+                                    messages,
+                                    Summariser::Provider {
+                                        provider: provider.as_ref(),
+                                        model: &model_id_str,
+                                        max_tokens: config.max_tokens,
+                                    },
+                                    &tool_ctx.config,
+                                    &mut compact_state,
+                                    event_tx.as_ref(),
+                                    &cancel_token,
+                                )
                             );
                         }
                     };
@@ -1088,14 +1235,22 @@ pub async fn run_query_loop(
                     let mut msg_id = uuid::Uuid::new_v4().to_string();
 
                     use futures::StreamExt as ProviderStreamExt;
-                    let provider_stall_timeout = std::time::Duration::from_secs(45);
+                    // Fork departure (Waku): a backstop only. A dead
+                    // connection is noticed by the client's read timeout,
+                    // which every byte resets — the gateway's `:` keep-alive
+                    // comments included. This used to be 45 s of no *parsed*
+                    // event, which a reasoning model thinking quietly behind
+                    // those comments exceeded routinely.
+                    let provider_stall_timeout = STREAM_STALL_BACKSTOP;
                     let provider_stall = tokio::time::sleep(provider_stall_timeout);
                     tokio::pin!(provider_stall);
-                    let mut provider_stream_stalled = false;
-                    // Set when the stream yields a mid-stream `Err`. The
+                    // Set when the stream fails, stalls or ends early. The
                     // accumulated text/tool-calls are then incomplete and MUST
                     // NOT be assembled into a "completed" turn (issue #215).
-                    let mut provider_stream_error: Option<String> = None;
+                    let mut provider_stream_failure: Option<claurst_api::retry_policy::ModelFailure> = None;
+                    // Whether the user has seen part of this answer.
+                    let mut visible_output = false;
+                    let mut saw_message_stop = false;
 
                     loop {
                         tokio::select! {
@@ -1103,7 +1258,10 @@ pub async fn run_query_loop(
                                 return QueryOutcome::Cancelled;
                             }
                             _ = &mut provider_stall => {
-                                provider_stream_stalled = true;
+                                provider_stream_failure = Some(claurst_api::retry_policy::ModelFailure::retryable(
+                                    claurst_api::retry_policy::RetryReason::Timeout,
+                                    format!("no data from the model for {} s", provider_stall_timeout.as_secs()),
+                                ));
                                 break;
                             }
                             event = stream.next() => {
@@ -1111,11 +1269,19 @@ pub async fn run_query_loop(
                                 match event {
                                     None => break,
                                     Some(Err(e)) => {
-                                        error!(provider = %provider_id_str, error = %e, "Provider stream error");
-                                        provider_stream_error = Some(e.to_string());
+                                        warn!(provider = %provider_id_str, error = %e, "Provider stream error");
+                                        provider_stream_failure = Some(claurst_api::retry_policy::from_provider_error(&e));
+                                        break;
+                                    }
+                                    Some(Ok(claurst_api::StreamEvent::Error { error_type, message })) => {
+                                        warn!(provider = %provider_id_str, %error_type, %message, "Provider stream reported an error");
+                                        provider_stream_failure = Some(claurst_api::retry_policy::classify_stream_error(&error_type, &message));
                                         break;
                                     }
                                     Some(Ok(evt)) => {
+                                        if is_visible_stream_event(&evt) {
+                                            visible_output = true;
+                                        }
                                         // Forward to TUI via AnthropicStreamEvent mapping.
                                         if let Some(ref tx) = event_tx {
                                             if let Some(ae) = map_to_anthropic_event(&evt) {
@@ -1163,7 +1329,10 @@ pub async fn run_query_loop(
                                                     merge_provider_stream_usage(&mut usage, u);
                                                 }
                                             }
-                                            claurst_api::StreamEvent::MessageStop => break,
+                                            claurst_api::StreamEvent::MessageStop => {
+                                                saw_message_stop = true;
+                                                break;
+                                            }
                                             _ => {}
                                         }
                                     }
@@ -1172,57 +1341,68 @@ pub async fn run_query_loop(
                         }
                     }
 
-                    // If the stream stalled (no data for 45s), retry.
-                    if provider_stream_stalled && retries_left > 0 {
-                        retries_left -= 1;
-                        warn!(provider = %provider_id_str, model = %model_id_str, retries_left, "Provider stream stalled — retrying");
-                        if let Some(ref tx) = event_tx {
-                            let _ = tx.send(QueryEvent::Status(format!(
-                                "No response for 45s — retrying ({} left)…",
-                                retries_left + 1
-                            )));
-                        }
-                        turn -= 1;
-                        continue;
+                    // A stream that ended without its terminal event broke
+                    // off, whatever it delivered before.
+                    if provider_stream_failure.is_none() && !saw_message_stop {
+                        provider_stream_failure =
+                            Some(claurst_api::retry_policy::ModelFailure::truncated("the response stream"));
                     }
 
-                    // A mid-stream error means the accumulated text and
-                    // tool-call JSON are incomplete/untrustworthy. Do NOT fall
-                    // through to assemble and execute tools from a truncated
-                    // stream (issue #215 — an Edit/Write could otherwise run
-                    // with empty `{}` args). Mirror the Anthropic branch's
-                    // retry semantics: retry the turn if retries remain,
-                    // otherwise surface the failure as a QueryOutcome::Error.
-                    if let Some(err) = provider_stream_error {
-                        if retries_left > 0 {
-                            retries_left -= 1;
-                            warn!(
-                                provider = %provider_id_str,
-                                model = %model_id_str,
-                                retries_left,
-                                error = %err,
-                                "Provider stream error — retrying turn"
-                            );
+                    // A failed, stalled or truncated stream means the
+                    // accumulated text and tool-call JSON are incomplete.
+                    // Do NOT fall through to assemble and execute tools from
+                    // it (issue #215 — an Edit/Write could otherwise run with
+                    // empty `{}` args): send the request again, or end the
+                    // turn with the failure.
+                    if let Some(failure) = provider_stream_failure {
+                        retry_or_return!(
+                            failure,
+                            visible_output,
+                            compact_for_overflow(
+                                messages,
+                                Summariser::Provider {
+                                    provider: provider.as_ref(),
+                                    model: &model_id_str,
+                                    max_tokens: config.max_tokens,
+                                },
+                                &tool_ctx.config,
+                                &mut compact_state,
+                                event_tx.as_ref(),
+                                &cancel_token,
+                            )
+                        );
+                    }
+
+                    // Fork departure (Waku): an answer with nothing in it —
+                    // no text, no reasoning, no tool call — gets one silent
+                    // retry before the turn is reported as having said
+                    // nothing.
+                    if text_chunks.iter().all(|chunk| chunk.is_empty())
+                        && thinking_chunks.iter().all(|chunk| chunk.is_empty())
+                        && tool_call_blocks.is_empty()
+                        && stop_str != "max_tokens"
+                    {
+                        if let Some(delay) = retry.on_empty() {
+                            warn!(provider = %provider_id_str, model = %model_id_str, "Empty completion — retrying once");
                             if let Some(ref tx) = event_tx {
-                                let _ = tx.send(QueryEvent::Status(format!(
-                                    "Stream error — retrying ({} left)…",
-                                    retries_left + 1
-                                )));
+                                let failure = claurst_api::retry_policy::ModelFailure::empty_response();
+                                let _ = tx.send(QueryEvent::Retry(RetryNotice {
+                                    attempt: 1,
+                                    max_attempts: Some(1),
+                                    delay_ms: u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
+                                    reason: failure.reason,
+                                    discarded_output: false,
+                                    detail: failure.to_string(),
+                                }));
+                            }
+                            if runner::retry_loop::sleep_or_cancel(delay, &cancel_token).await {
+                                return QueryOutcome::Cancelled;
                             }
                             turn -= 1;
                             continue;
                         }
-                        error!(
-                            provider = %provider_id_str,
-                            model = %model_id_str,
-                            error = %err,
-                            "Provider stream error — retries exhausted; aborting turn"
-                        );
-                        return QueryOutcome::Error(ClaudeError::Api(format!(
-                            "Provider '{}' stream error (model '{}'): {}",
-                            provider_id_str, model_id_str, err
-                        )));
                     }
+                    retry.on_success();
 
                     // Build the content blocks from accumulated stream data.
                     let mut content_blocks: Vec<ContentBlock> = Vec::new();
@@ -1398,6 +1578,9 @@ pub async fn run_query_loop(
                         if batch_cancelled {
                             return QueryOutcome::Cancelled;
                         }
+                        // A finished tool round is a recovery boundary, as on
+                        // the Messages branch.
+                        max_tokens_recovery_count = 0;
                         // Waku: this branch used to go straight round again,
                         // so a Responses or Chat Completions session never
                         // compacted and its meter only moved when the whole
@@ -1420,40 +1603,57 @@ pub async fn run_query_loop(
                             &tool_ctx.config,
                             &mut compact_state,
                             event_tx.as_ref(),
+                            &cancel_token,
                         )
                         .await;
                         continue; // loop for next turn
                     }
 
-                    // End turn — notify TUI and return.
-                    // Issue #149 follow-up: providers occasionally end the
-                    // turn after a tool round without emitting any text or
-                    // tool calls, which left the user staring at a blank
-                    // screen ("agent randomly stops"). Surface a placeholder
-                    // so the user always sees *some* assistant output and
-                    // knows the turn really ended.
-                    if combined_text.is_empty() && combined_thinking.is_empty() {
-                        let placeholder = format!(
-                            "(no response — model ended the turn with stop_reason \"{}\")",
-                            stop_str
+                    // Fork departure (Waku): an output-limit cut continues,
+                    // as on the Messages branch — up to three times, with
+                    // the same nudge, kept in the conversation (taking it
+                    // out later would change everything after it, and miss
+                    // the prompt cache from there on).
+                    if stop_str == "max_tokens" && max_tokens_recovery_count < MAX_TOKENS_RECOVERY_LIMIT {
+                        max_tokens_recovery_count += 1;
+                        warn!(
+                            attempt = max_tokens_recovery_count,
+                            limit = MAX_TOKENS_RECOVERY_LIMIT,
+                            "max_tokens hit — injecting continuation message"
                         );
                         if let Some(ref tx) = event_tx {
-                            let _ = tx.send(QueryEvent::Stream(
-                                AnthropicStreamEvent::ContentBlockDelta {
-                                    index: 0,
-                                    delta: claurst_api::streaming::ContentDelta::TextDelta { text: placeholder.clone() },
-                                },
-                            ));
+                            let _ = tx.send(QueryEvent::TurnComplete {
+                                turn,
+                                stop_reason: stop_str.clone(),
+                                usage: Some(usage.clone()),
+                            });
                         }
-                        if let claurst_core::types::MessageContent::Blocks(ref mut blocks) =
-                            assistant_msg.content
-                        {
-                            blocks.push(ContentBlock::Text { text: placeholder.clone() });
-                        }
-                        if let Some(last) = messages.last_mut() {
-                            *last = assistant_msg.clone();
-                        }
+                        messages.push(Message::user(MAX_TOKENS_RECOVERY_MSG));
+                        manage_provider_context(
+                            messages,
+                            provider.as_ref(),
+                            &provider_id_str,
+                            &model_id_str,
+                            &usage,
+                            config,
+                            &tool_ctx.config,
+                            &mut compact_state,
+                            event_tx.as_ref(),
+                            &cancel_token,
+                        )
+                        .await;
+                        continue;
                     }
+
+                    // End turn — notify TUI and return.
+                    //
+                    // Fork departure (Waku): an answer that is still empty
+                    // after its retry is left empty. The engine used to
+                    // write "(no response — …)" into it, which the client
+                    // then counted as an answer; now the turn is reported as
+                    // one that said nothing, with the route it tried. The
+                    // empty message never reaches a request: the next
+                    // request's history pass drops it.
 
                     if let Some(ref tx) = event_tx {
                         let _ = tx.send(QueryEvent::TurnComplete {
@@ -1483,6 +1683,7 @@ pub async fn run_query_loop(
                         &tool_ctx.config,
                         &mut compact_state,
                         event_tx.as_ref(),
+                        &cancel_token,
                     )
                     .await;
 
@@ -1521,14 +1722,25 @@ pub async fn run_query_loop(
         }
 
         // Send to API
+        //
+        // Fork departure (Waku): one attempt, raced against a cancel; the
+        // loop retries it through the shared policy.
         debug!(turn, model = %effective_model, "Sending API request");
-        let mut stream_rx = match client.create_message_stream(request, handler).await {
+        let opened = tokio::select! {
+            _ = cancel_token.cancelled() => return QueryOutcome::Cancelled,
+            opened = client.create_message_stream_once(request, handler, retry.next_attempt()) => opened,
+        };
+        let mut stream_rx = match opened {
             Ok(rx) => rx,
-            Err(e) => {
+            Err(failure) => {
                 // On overloaded/rate-limit errors, attempt one switch to the fallback model.
-                let err_str = e.to_string().to_lowercase();
                 if !used_fallback
-                    && (err_str.contains("overloaded") || err_str.contains("529") || err_str.contains("rate_limit"))
+                    && matches!(
+                        failure.reason,
+                        claurst_api::retry_policy::RetryReason::Overloaded
+                            | claurst_api::retry_policy::RetryReason::RateLimited
+                    )
+                    && failure.is_retryable()
                 {
                     if let Some(ref fb) = config.fallback_model {
                         warn!(
@@ -1548,80 +1760,118 @@ pub async fn run_query_loop(
                         continue;
                     }
                 }
-                error!(error = %e, "API request failed");
-                return QueryOutcome::Error(e);
+                retry_or_return!(
+                    failure,
+                    false,
+                    compact_for_overflow(
+                        messages,
+                        Summariser::Messages {
+                            client,
+                            model: &config.model,
+                        },
+                        &tool_ctx.config,
+                        &mut compact_state,
+                        event_tx.as_ref(),
+                        &cancel_token,
+                    )
+                );
             }
         };
 
         // Accumulate the streamed response.
-        // A stall timeout auto-retries the request if no data arrives for 45s
-        // (some providers are slow; we don't want to give up too early).
-        const STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+        //
+        // Fork departure (Waku): the stall timer is a backstop (see the
+        // provider branch). A stream that breaks off, carries an `error`
+        // event, or ends without `message_stop` is a failed request: the
+        // partial answer is never added to the conversation, and the request
+        // is sent again or the turn ends with the failure. An `error` event
+        // after partial content used to be kept as a finished turn.
         let mut accumulator = StreamAccumulator::new();
-        let stall_deadline = tokio::time::sleep(STALL_TIMEOUT);
+        let stall_deadline = tokio::time::sleep(STREAM_STALL_BACKSTOP);
         tokio::pin!(stall_deadline);
+        let mut visible_output = false;
 
-        let stream_stalled = loop {
+        let stream_failure: Option<claurst_api::retry_policy::ModelFailure> = loop {
             tokio::select! {
                 _ = cancel_token.cancelled() => {
                     return QueryOutcome::Cancelled;
                 }
                 _ = &mut stall_deadline => {
-                    // No data for 45s — stall detected
-                    break true;
+                    break Some(claurst_api::retry_policy::ModelFailure::retryable(
+                        claurst_api::retry_policy::RetryReason::Timeout,
+                        format!("no data from the model for {} s", STREAM_STALL_BACKSTOP.as_secs()),
+                    ));
                 }
                 event = stream_rx.recv() => {
                     // Reset stall timer on every received event.
-                    stall_deadline.as_mut().reset(tokio::time::Instant::now() + STALL_TIMEOUT);
+                    stall_deadline.as_mut().reset(tokio::time::Instant::now() + STREAM_STALL_BACKSTOP);
                     match event {
                         Some(evt) => {
                             accumulator.on_event(&evt);
                             match &evt {
                                 AnthropicStreamEvent::Error { error_type, message } => {
-                                    if error_type == "overloaded_error" {
-                                        warn!(model = %effective_model, "API overloaded");
-                                    }
-                                    error!(error_type, message, "Stream error");
+                                    warn!(model = %effective_model, %error_type, %message, "Stream error");
+                                    break Some(claurst_api::retry_policy::classify_stream_error(error_type, message));
                                 }
-                                AnthropicStreamEvent::MessageStop => break false,
+                                AnthropicStreamEvent::ContentBlockDelta { delta, .. }
+                                    if is_visible_delta(delta) =>
+                                {
+                                    visible_output = true;
+                                }
+                                AnthropicStreamEvent::MessageStop => break None,
                                 _ => {}
                             }
                         }
-                        None => break false, // Stream ended
+                        None => break Some(claurst_api::retry_policy::ModelFailure::truncated("the response stream")),
                     }
                 }
             }
         };
 
-        if stream_stalled && retries_left > 0 {
-            retries_left -= 1;
-            warn!(model = %effective_model, retries_left, "Stream stalled — retrying request");
-            if let Some(ref tx) = event_tx {
-                let _ = tx.send(QueryEvent::Status(format!(
-                    "No response for 45s — retrying ({} left)…",
-                    retries_left + 1
-                )));
-            }
-            turn -= 1; // don't count this stalled attempt
-            continue;
+        if let Some(failure) = stream_failure {
+            retry_or_return!(
+                failure,
+                visible_output,
+                compact_for_overflow(
+                    messages,
+                    Summariser::Messages {
+                        client,
+                        model: &config.model,
+                    },
+                    &tool_ctx.config,
+                    &mut compact_state,
+                    event_tx.as_ref(),
+                    &cancel_token,
+                )
+            );
         }
 
-        // Fork departure (Waku): an `error` event mid-stream ends the turn as
-        // an error. It used to be logged and dropped, so an upstream failure
-        // behind a 200 became an empty assistant message and a turn that
-        // claimed to have ended normally. The non-Anthropic branch above has
-        // had its own guard against exactly this since "agent randomly stops".
-        if let Some((error_type, message)) = accumulator.take_stream_error() {
-            if accumulator.has_content() {
-                // Content did arrive before the error; keep it and let the
-                // normal path finish the turn rather than discarding an answer
-                // the user can see is there.
-                warn!(%error_type, %message, "Stream error after partial content");
-            } else {
-                error!(%error_type, %message, "Stream error ended the turn");
-                return QueryOutcome::Error(ClaudeError::Api(format!("{error_type}: {message}")));
+        // Fork departure (Waku): one silent retry for an answer with nothing
+        // in it, as on the provider branch.
+        if !accumulator.has_content()
+            && accumulator.stop_reason().is_none_or(|stop| stop == "end_turn")
+        {
+            if let Some(delay) = retry.on_empty() {
+                warn!(model = %effective_model, "Empty completion — retrying once");
+                if let Some(ref tx) = event_tx {
+                    let failure = claurst_api::retry_policy::ModelFailure::empty_response();
+                    let _ = tx.send(QueryEvent::Retry(RetryNotice {
+                        attempt: 1,
+                        max_attempts: Some(1),
+                        delay_ms: u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
+                        reason: failure.reason,
+                        discarded_output: false,
+                        detail: failure.to_string(),
+                    }));
+                }
+                if runner::retry_loop::sleep_or_cancel(delay, &cancel_token).await {
+                    return QueryOutcome::Cancelled;
+                }
+                turn -= 1;
+                continue;
             }
         }
+        retry.on_success();
 
         let (mut assistant_msg, usage, stop_reason) = accumulator.finish();
 
@@ -1816,6 +2066,7 @@ pub async fn run_query_loop(
                 &tool_ctx.config,
                 &mut compact_state,
                 event_tx.as_ref(),
+                &cancel_token,
             )
             .await;
         }
@@ -2284,6 +2535,7 @@ async fn auto_compact_on_route(
     settings: &Config,
     state: &mut compact::AutoCompactState,
     event_tx: Option<&mpsc::UnboundedSender<QueryEvent>>,
+    cancel: &tokio_util::sync::CancellationToken,
 ) {
     if !settings.auto_compact
         || !compact::should_auto_compact_at(
@@ -2295,6 +2547,21 @@ async fn auto_compact_on_route(
     {
         return;
     }
+    info!(context_tokens, context_window, "Auto-compact triggered");
+    run_compaction(messages, summariser, context_tokens, state, event_tx, cancel).await;
+}
+
+/// Waku: fold the older conversation into a summary now, reporting it as a
+/// `Compaction`. Returns whether the conversation shrank. `messages` is only
+/// replaced on success — a failed or cancelled summary leaves it whole.
+async fn run_compaction(
+    messages: &mut Vec<Message>,
+    summariser: Summariser<'_>,
+    context_tokens: u64,
+    state: &mut compact::AutoCompactState,
+    event_tx: Option<&mpsc::UnboundedSender<QueryEvent>>,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> bool {
     let send = |phase, tokens_after| {
         if let Some(tx) = event_tx {
             let _ = tx.send(QueryEvent::Compaction {
@@ -2306,19 +2573,26 @@ async fn auto_compact_on_route(
         }
     };
     send(CompactionPhase::Started, None);
-    info!(context_tokens, context_window, "Auto-compact triggered");
-    let result = match summariser {
-        Summariser::Messages { client, model } => {
-            compact::compact_conversation_with(client, messages, model, None).await
+    let summary = async {
+        match summariser {
+            Summariser::Messages { client, model } => {
+                compact::compact_conversation_with(client, messages, model, None).await
+            }
+            Summariser::Provider {
+                provider,
+                model,
+                max_tokens,
+            } => {
+                compact::compact_conversation_via_provider(provider, model, messages, max_tokens, None)
+                    .await
+            }
         }
-        Summariser::Provider {
-            provider,
-            model,
-            max_tokens,
-        } => {
-            compact::compact_conversation_via_provider(provider, model, messages, max_tokens, None)
-                .await
-        }
+    };
+    // Fork departure (Waku): a stop no longer waits for the summary to come
+    // back.
+    let result = tokio::select! {
+        _ = cancel.cancelled() => Err(ClaudeError::Cancelled),
+        result = summary => result,
     };
     match result {
         // Nothing old enough to fold away: the context is full of what the
@@ -2327,19 +2601,42 @@ async fn auto_compact_on_route(
         Ok(compacted) if compacted.len() >= messages.len() => {
             state.on_failure();
             send(CompactionPhase::Failed, None);
+            false
         }
         Ok(compacted) => {
             *messages = compacted;
             state.on_success();
             let after = compact::estimate_context_tokens(messages, None);
             send(CompactionPhase::Finished, Some(after));
+            true
         }
         Err(error) => {
-            warn!(error = %error, "Auto-compact failed; conversation preserved");
+            warn!(error = %error, "Compaction failed; conversation preserved");
             state.on_failure();
             send(CompactionPhase::Failed, None);
+            false
         }
     }
+}
+
+/// Fork departure (Waku): the server said the conversation no longer fits
+/// the model's window. Compact now, whatever the threshold and the breaker
+/// say — sending it unchanged cannot succeed — unless the Agent settings
+/// switched compaction off. Returns whether the request may go again.
+async fn compact_for_overflow(
+    messages: &mut Vec<Message>,
+    summariser: Summariser<'_>,
+    settings: &Config,
+    state: &mut compact::AutoCompactState,
+    event_tx: Option<&mpsc::UnboundedSender<QueryEvent>>,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> bool {
+    if !settings.auto_compact {
+        return false;
+    }
+    let context_tokens = compact::estimate_context_tokens(messages, None);
+    info!(context_tokens, "Context window exceeded — compacting");
+    run_compaction(messages, summariser, context_tokens, state, event_tx, cancel).await
 }
 
 /// Waku: the provider branch's context check. Sized from what the provider
@@ -2355,6 +2652,7 @@ async fn manage_provider_context(
     settings: &Config,
     state: &mut compact::AutoCompactState,
     event_tx: Option<&mpsc::UnboundedSender<QueryEvent>>,
+    cancel: &tokio_util::sync::CancellationToken,
 ) {
     let context_window =
         compact::resolve_context_window(config.model_registry.as_deref(), provider_id, model_id);
@@ -2372,6 +2670,7 @@ async fn manage_provider_context(
         settings,
         state,
         event_tx,
+        cancel,
     )
     .await;
 }
@@ -2559,6 +2858,7 @@ mod tests {
             managed_agents: None,
             enabled_tools: None,
             continuation: crate::continuation::ContinuationMode::Default,
+            retry_budget: claurst_api::retry_policy::RetryBudget::Default,
         }
     }
 
@@ -3745,4 +4045,373 @@ mod tests {
         let (_style, prompt) = effective_output_style_for_turn(&cfg, &msgs);
         assert!(prompt.unwrap().contains("Project Hail Mary"));
     }
+    // ---- Fork (Waku): request retries through the shared policy ------------
+
+    /// One scripted request: refused when it opens, or a stream of events.
+    enum Step {
+        Refuse(claurst_api::ProviderError),
+        Stream(Vec<Result<claurst_api::StreamEvent, claurst_api::ProviderError>>),
+    }
+
+    /// A provider double that answers each request with the next step of a
+    /// script, and counts the requests.
+    struct ScriptedProvider {
+        id: claurst_core::provider_id::ProviderId,
+        script: StdMutex<std::collections::VecDeque<Step>>,
+        requests: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl claurst_api::LlmProvider for ScriptedProvider {
+        fn id(&self) -> &claurst_core::provider_id::ProviderId {
+            &self.id
+        }
+        fn name(&self) -> &str {
+            "scripted-mock"
+        }
+        async fn create_message(
+            &self,
+            _request: claurst_api::ProviderRequest,
+        ) -> Result<claurst_api::ProviderResponse, claurst_api::ProviderError> {
+            unimplemented!("these tests only use create_message_stream")
+        }
+        async fn create_message_stream(
+            &self,
+            _request: claurst_api::ProviderRequest,
+        ) -> Result<
+            std::pin::Pin<
+                Box<
+                    dyn futures::Stream<
+                            Item = Result<claurst_api::StreamEvent, claurst_api::ProviderError>,
+                        > + Send,
+                >,
+            >,
+            claurst_api::ProviderError,
+        > {
+            self.requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let step = self
+                .script
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("the loop sent more requests than the script has");
+            match step {
+                Step::Refuse(error) => Err(error),
+                Step::Stream(events) => Ok(Box::pin(futures::stream::iter(events))),
+            }
+        }
+        async fn health_check(
+            &self,
+        ) -> Result<claurst_api::ProviderStatus, claurst_api::ProviderError> {
+            Ok(claurst_api::ProviderStatus::Healthy)
+        }
+        fn capabilities(&self) -> claurst_api::ProviderCapabilities {
+            claurst_api::ProviderCapabilities {
+                streaming: true,
+                tool_calling: true,
+                thinking: false,
+                image_input: false,
+                pdf_input: false,
+                audio_input: false,
+                video_input: false,
+                caching: false,
+                structured_output: false,
+                system_prompt_style: claurst_api::SystemPromptStyle::TopLevel,
+            }
+        }
+    }
+
+    /// A transient failure the policy retries after a millisecond.
+    fn quick_failure(reason: claurst_api::retry_policy::RetryReason) -> claurst_api::ProviderError {
+        claurst_api::ProviderError::Classified {
+            provider: claurst_core::provider_id::ProviderId::new("scripted"),
+            failure: claurst_api::retry_policy::ModelFailure {
+                retry_after: Some(std::time::Duration::from_millis(1)),
+                ..claurst_api::retry_policy::ModelFailure::retryable(reason, "connection reset")
+            },
+        }
+    }
+
+    fn text_answer(
+        text: &str,
+        stop: claurst_api::provider_types::StopReason,
+    ) -> Vec<Result<claurst_api::StreamEvent, claurst_api::ProviderError>> {
+        vec![
+            Ok(claurst_api::StreamEvent::MessageStart {
+                id: uuid::Uuid::new_v4().to_string(),
+                model: "mock-model".to_string(),
+                usage: UsageInfo::default(),
+            }),
+            Ok(claurst_api::StreamEvent::TextDelta {
+                index: 0,
+                text: text.to_string(),
+            }),
+            Ok(claurst_api::StreamEvent::MessageDelta {
+                stop_reason: Some(stop),
+                usage: Some(UsageInfo::default()),
+            }),
+            Ok(claurst_api::StreamEvent::MessageStop),
+        ]
+    }
+
+    /// Drive the loop through a script. Returns the outcome, the number of
+    /// requests, the retry notices, and the final history.
+    async fn drive_script(
+        script: Vec<Step>,
+        cancel_after: Option<std::time::Duration>,
+    ) -> (QueryOutcome, usize, Vec<RetryNotice>, Vec<Message>) {
+        let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let provider = Arc::new(ScriptedProvider {
+            id: claurst_core::provider_id::ProviderId::new("scripted"),
+            script: StdMutex::new(script.into()),
+            requests: requests.clone(),
+        });
+        let mut registry = claurst_api::ProviderRegistry::new();
+        registry.register(provider);
+        let client = claurst_api::AnthropicClient::new(claurst_api::client::ClientConfig {
+            api_key: "test-key".to_string(),
+            ..Default::default()
+        })
+        .expect("build test client");
+        let mut ctx = deny_all_context();
+        ctx.session_id = "retry-test".to_string();
+        ctx.config.provider = Some("scripted".to_string());
+        let mut config = make_config(None, None);
+        config.model = "mock-model".to_string();
+        config.max_turns = 5;
+        config.provider_registry = Some(Arc::new(registry));
+
+        let cancel = tokio_util::sync::CancellationToken::new();
+        if let Some(after) = cancel_after {
+            let cancel = cancel.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(after).await;
+                cancel.cancel();
+            });
+        }
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut messages = vec![Message::user("start")];
+        let tools = noop_tools();
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            run_query_loop(
+                &client,
+                &mut messages,
+                &tools,
+                &ctx,
+                &config,
+                claurst_core::cost::CostTracker::new(),
+                Some(tx),
+                cancel,
+                None,
+            ),
+        )
+        .await
+        .expect("loop must not hang");
+        let mut notices = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            if let QueryEvent::Retry(notice) = event {
+                notices.push(notice);
+            }
+        }
+        (
+            outcome,
+            requests.load(std::sync::atomic::Ordering::SeqCst),
+            notices,
+            messages,
+        )
+    }
+
+    fn assistant_texts(messages: &[Message]) -> Vec<String> {
+        messages
+            .iter()
+            .filter(|message| message.role == Role::Assistant)
+            .map(Message::get_all_text)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_request_refused_on_opening_is_sent_again() {
+        use claurst_api::provider_types::StopReason;
+        use claurst_api::retry_policy::RetryReason;
+        let (outcome, requests, notices, messages) = drive_script(
+            vec![
+                Step::Refuse(quick_failure(RetryReason::Overloaded)),
+                Step::Stream(text_answer("Done.", StopReason::EndTurn)),
+            ],
+            None,
+        )
+        .await;
+        assert!(matches!(outcome, QueryOutcome::EndTurn { .. }), "{outcome:?}");
+        assert_eq!(requests, 2);
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0].attempt, 1);
+        assert_eq!(notices[0].max_attempts, Some(10));
+        assert!(!notices[0].discarded_output);
+        assert_eq!(assistant_texts(&messages), vec!["Done.".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_stream_broken_after_visible_text_is_taken_back_and_retried() {
+        use claurst_api::provider_types::StopReason;
+        use claurst_api::retry_policy::RetryReason;
+        let broken = vec![
+            Ok(claurst_api::StreamEvent::MessageStart {
+                id: "m1".to_string(),
+                model: "mock-model".to_string(),
+                usage: UsageInfo::default(),
+            }),
+            Ok(claurst_api::StreamEvent::TextDelta {
+                index: 0,
+                text: "Half an ans".to_string(),
+            }),
+            Err(quick_failure(RetryReason::StreamInterrupted)),
+        ];
+        let (outcome, requests, notices, messages) = drive_script(
+            vec![
+                Step::Stream(broken),
+                Step::Stream(text_answer("The whole answer.", StopReason::EndTurn)),
+            ],
+            None,
+        )
+        .await;
+        assert!(matches!(outcome, QueryOutcome::EndTurn { .. }), "{outcome:?}");
+        assert_eq!(requests, 2);
+        assert_eq!(notices.len(), 1);
+        assert!(notices[0].discarded_output, "the client must take the half answer back");
+        // The broken half never reached the conversation.
+        assert_eq!(assistant_texts(&messages), vec!["The whole answer.".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_stream_that_ends_without_its_terminal_event_is_retried() {
+        use claurst_api::provider_types::StopReason;
+        use claurst_api::retry_policy::RetryReason;
+        let truncated = vec![
+            Ok(claurst_api::StreamEvent::MessageStart {
+                id: "m1".to_string(),
+                model: "mock-model".to_string(),
+                usage: UsageInfo::default(),
+            }),
+            Ok(claurst_api::StreamEvent::TextDelta {
+                index: 0,
+                text: "Cut".to_string(),
+            }),
+        ];
+        let (outcome, requests, notices, messages) = drive_script(
+            vec![
+                Step::Stream(truncated),
+                Step::Stream(text_answer("Complete.", StopReason::EndTurn)),
+            ],
+            None,
+        )
+        .await;
+        assert!(matches!(outcome, QueryOutcome::EndTurn { .. }), "{outcome:?}");
+        assert_eq!(requests, 2);
+        assert_eq!(notices[0].reason, RetryReason::Truncated);
+        assert_eq!(assistant_texts(&messages), vec!["Complete.".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_fatal_refusal_ends_the_turn_without_retrying() {
+        let refusal = claurst_api::ProviderError::Classified {
+            provider: claurst_core::provider_id::ProviderId::new("scripted"),
+            failure: claurst_api::retry_policy::ModelFailure::fatal(
+                Some(403),
+                "余额不足 / Insufficient account balance",
+            ),
+        };
+        let (outcome, requests, notices, _) = drive_script(vec![Step::Refuse(refusal)], None).await;
+        match outcome {
+            QueryOutcome::Error(error) => {
+                assert!(error.to_string().contains("Insufficient account balance"), "{error}");
+            }
+            other => panic!("expected an error, got {other:?}"),
+        }
+        assert_eq!(requests, 1);
+        assert!(notices.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_stop_during_the_wait_ends_the_run_at_once() {
+        let slow = claurst_api::ProviderError::Classified {
+            provider: claurst_core::provider_id::ProviderId::new("scripted"),
+            failure: claurst_api::retry_policy::ModelFailure {
+                retry_after: Some(std::time::Duration::from_secs(200)),
+                ..claurst_api::retry_policy::ModelFailure::retryable(
+                    claurst_api::retry_policy::RetryReason::RateLimited,
+                    "slow down",
+                )
+            },
+        };
+        let started = std::time::Instant::now();
+        let (outcome, requests, notices, _) = drive_script(
+            vec![Step::Refuse(slow)],
+            Some(std::time::Duration::from_millis(100)),
+        )
+        .await;
+        assert!(matches!(outcome, QueryOutcome::Cancelled), "{outcome:?}");
+        assert_eq!(requests, 1);
+        assert_eq!(notices[0].delay_ms, 200_000);
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    }
+
+    #[tokio::test]
+    async fn an_empty_answer_is_asked_again_once() {
+        use claurst_api::provider_types::StopReason;
+        let empty = vec![
+            Ok(claurst_api::StreamEvent::MessageStart {
+                id: "m1".to_string(),
+                model: "mock-model".to_string(),
+                usage: UsageInfo::default(),
+            }),
+            Ok(claurst_api::StreamEvent::MessageDelta {
+                stop_reason: Some(StopReason::EndTurn),
+                usage: Some(UsageInfo::default()),
+            }),
+            Ok(claurst_api::StreamEvent::MessageStop),
+        ];
+        let (outcome, requests, notices, messages) = drive_script(
+            vec![
+                Step::Stream(empty),
+                Step::Stream(text_answer("Here it is.", StopReason::EndTurn)),
+            ],
+            None,
+        )
+        .await;
+        assert!(matches!(outcome, QueryOutcome::EndTurn { .. }), "{outcome:?}");
+        assert_eq!(requests, 2);
+        assert_eq!(
+            notices[0].reason,
+            claurst_api::retry_policy::RetryReason::EmptyResponse
+        );
+        assert_eq!(assistant_texts(&messages), vec!["Here it is.".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn an_output_limit_cut_continues_on_the_provider_route() {
+        use claurst_api::provider_types::StopReason;
+        let (outcome, requests, _, messages) = drive_script(
+            vec![
+                Step::Stream(text_answer("First part, ", StopReason::MaxTokens)),
+                Step::Stream(text_answer("second part.", StopReason::EndTurn)),
+            ],
+            None,
+        )
+        .await;
+        assert!(matches!(outcome, QueryOutcome::EndTurn { .. }), "{outcome:?}");
+        assert_eq!(requests, 2);
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.role == Role::User
+                    && message.get_all_text() == MAX_TOKENS_RECOVERY_MSG),
+            "the continuation nudge must be in the conversation"
+        );
+        assert_eq!(
+            assistant_texts(&messages),
+            vec!["First part, ".to_string(), "second part.".to_string()]
+        );
+    }
 }
+

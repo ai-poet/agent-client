@@ -87,6 +87,12 @@ lines below.
 | `crates/sub2api/src/{providers,global_config/mod,global_config/native,model_test}.rs` | fork-owned: `agent_model_id` / `parse_agent_model_id`, `ProviderEntry::offers_models_to_agent`, the `endpoints` table the routing writer files for every such provider, and the one-token per-model test | ~400 |
 | `src/app/{native_agent,composer,sessions,runtime,cloud_subscriptions,model_providers_page,agent_page}.rs` | fork-owned: every endpoint of the user's own is a vendor-column entry of its own in the built-in agent's picker, its declared format never overruled by a name rule; a bound line hides the gateway rows it shadows; "Manage models…" at the end of those sections; per-model Test, request URL and picker status on Model providers; picker sources on Settings → Agent; `migrate_bare_endpoint_ids` at launch | ~600 |
 | `crates/waku-agent/api/src/{lib,provider_types}.rs` | vendored engine, recorded departure: the two stream accumulators warn instead of silently turning unparseable tool arguments into `{}` (the agent loop already errors — issue #215) | ~20 |
+| `crates/waku-agent/api/src/retry_policy.rs` (new), `crates/waku-agent/api/src/{lib,bun_tls,provider_error}.rs`, `crates/waku-agent/api/src/providers/{codex,openai}.rs` | vendored engine, recorded departure: one retry policy for every route — failures classified (`ModelFailure`, `ProviderError::Classified`, headers read for `Retry-After` / `x-should-retry`), backoff with jitter, budgets, product override hook; the Messages client's `send_with_retry` retries every transient failure on the light budget and gains `create_message_stream_once`; model clients get connect + read timeouts instead of the 600 s total deadline; `response.incomplete` ends a Responses stream as `response.completed` does; a Chat stream without `[DONE]` or a finish reason, a Responses stream without `response.completed`, and an in-band `{"error"}` chunk are failures, not completions | ~550 + new file |
+| `crates/waku-agent/query/src/runner/retry_loop.rs` (new), `crates/waku-agent/query/src/{lib,compact,agent_tool}.rs`, `crates/waku-agent/query/src/runner/mod.rs` | vendored engine, recorded departure: the loop retries through the policy — per-request budget (`RetryState`) instead of two stall retries per prompt, cancellable waits, `QueryEvent::Retry(RetryNotice)`, a half-streamed answer discarded and asked again, context overflow compacted once (`compact_for_overflow`), empty answers retried once with no placeholder written, output-limit continuation on the provider branch, opening a stream and compaction raced against cancel, the 45 s parsed-event stall timer replaced by a 20-minute backstop, the provider adapter built once per run; a compaction summary is only accepted from a finished stream; `QueryConfig.retry_budget` | ~600 + new file |
+| `crates/waku-agent-bridge/src/{retry_rules,session_goal_resume}.rs` (new), `crates/waku-agent-bridge/src/{lib,events,session,config,oneshot}.rs`, `crates/waku-agent-bridge/src/{team/member,memory/consolidate}.rs` | fork-owned: the gateway's verdicts for the retry policy, installed in `build_clients` with the network timeouts (`options.network`, in `route_fingerprint`); `AgentEvent::Retry`; budgets per caller (members unbounded, one-shot light, consolidation single); a goal's automatic resume after a transient failure | ~400 |
+| `crates/waku-protocol/src/{model,driver_wire}.rs`, `crates/waku-core/src/{daemon,driver/native}.rs` | fork: `DriverEvent::ModelRetry(ModelRetry)` and its `modelRetry` wire kind (both codecs), mapped from `AgentEvent::Retry` | ~60 |
+| `src/app/model_retry.rs` (new), `src/app.rs`, `src/app/{runtime,streaming,turn_status,sessions,error_banner}.rs` | fork: `SessionRuntime.{output_boundary,model_retry}`; boundaries noted at turn start, `UsageUpdated`, tool rows and compaction; `ModelRetry` takes back a discarded answer and drives the working row's "Reconnecting" label; the error banner's "Continue" and goal-resume note | ~380 |
+| `crates/sub2api/src/global_config/native.rs` | fork-owned: `options.network` written on the anthropic entry when `gateway-origin.json` sets non-default timeouts | ~60 |
 | `crates/waku-agent/query/src/runner/tools.rs` | vendored engine, recorded departure: `whole_floats_to_integers` at the one `.execute()` call site — repairs `120.0` for `usize` fields, which several non-Claude models emit | ~45 |
 | `crates/waku-agent/tools/src/exit_plan_mode.rs` | vendored engine, recorded departure: `self_gates` and asks through `check_permission` with the plan as the description — its declared level is `None`, which the central backstop never gates, so the bridge's "finished planning" dialog was unreachable; the plan is a required `plan` parameter (was an optional `summary`), a call without one gets `MISSING_PLAN_ERROR` and never reaches the user, at most `MAX_PLAN_CHARS` | ~60 |
 | `crates/waku-agent/tools/src/lib.rs` | vendored engine, recorded departure: refusals name their reason, and the two the fork words itself are exported as markers for the driver to localize; the plan-mode refusal tells the model not to retry and to make the step part of the plan | ~40 |
@@ -130,7 +136,7 @@ lines below.
 | `scripts/release.ts` | `appName`/`executableName` from the brand | 6 |
 | `scripts/appcast.ts` | default download prefix points at our release host | 3 |
 | `scripts/delete-debug-app.ts` | branded debug data dirs added to the cleanup candidates | 4 |
-| `locales/{app,ja,zh-CN}.yml` | our new `cloud.*`/`cli_setup.*`/`surface_bar.*`/`team.*` keys, plus a de-brand sweep: every user-visible "Waku" replaced (neutral wording, or `CheapRouter` where a name is load-bearing — consent prompts, hero copy, composer placeholder) | ~300 lines |
+| `locales/{app,ja,zh-CN}.yml` | our new `cloud.*`/`cli_setup.*`/`surface_bar.*`/`team.*` keys (with `cloud.node_*`, `turn_status.reconnecting*`, `session.stream_discarded*`, `error_banner.{continue,continue_message,goal_auto_resume}` for the node picker and request retries), plus a de-brand sweep: every user-visible "Waku" replaced (neutral wording, or `CheapRouter` where a name is load-bearing — consent prompts, hero copy, composer placeholder) | ~300 lines |
 | `crates/waku-protocol/src/identity.rs` | `APP_NAME` reads `SUB2API_BRAND_NAME`; `DATA_DIR_NAME` (".cheaprouter") reads `SUB2API_DATA_DIR_NAME`; `DATA_DIRECTORY_NAME` is "CheapRouter"/"CheapRouter Debug" (defaults mirror `brand.rs` — keep in sync); `APP_ID` stays upstream | ~15 |
 | `crates/waku-protocol/src/settings.rs`, `crates/waku-protocol/src/projectless.rs`, `crates/waku-protocol/src/model.rs` (test) | `.waku` literal → `identity::DATA_DIR_NAME` | 3 sites |
 | `crates/waku-core/src/{persistence,projectless,worktree,computer_use,daemon}.rs` | `.waku`/"Waku" literals → `identity::DATA_DIR_NAME`/`DATA_DIRECTORY_NAME` (incl. one test and one error string) | 6 sites |
@@ -277,7 +283,8 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `src/app/error_banner.rs`, `src/app/turn_undo.rs`, `src/app/status_capsule.rs`,
 `src/app/permission_card.rs`, `src/app/shortcuts.rs`,
 `src/app/image_studio.rs`, `src/app/image_studio_view.rs`, `assets/icons/image.svg`,
-`src/app/model_status.rs`, `src/app/model_status_view.rs`,
+`src/app/model_status.rs`, `src/app/model_status_view.rs`, `src/app/model_retry.rs`,
+`crates/waku-agent-bridge/src/{retry_rules,session_goal_resume}.rs`,
 `crates/waku-client/src/{activity_phase,turn_segments,status_capsule}.rs`,
 `src/app/home_overview.rs`, `src/app/turn_status.rs`,
 `src/app/content_translations.rs`,
@@ -351,7 +358,22 @@ What feeds `desired_routes` on each side:
   `~/.cheaprouter/gateway-origin.json`) chooses which of the service's
   origins goes into the CLI configs, via `gateway_config_with_origin`.
   `Credentials.endpoint` is deliberately *not* rewritten: sign-in, refresh
-  and `/auth/me` stay on the origin the browser flow used.
+  and `/auth/me` stay on the origin the browser flow used. Settings → Cloud
+  Account calls them "Cloud API nodes" (「云端 API 节点」): the build's
+  primary, its CDN node (`brand::MANAGED_SERVICE_CDN_URL`, build env
+  `SUB2API_MANAGED_SERVICE_CDN_URL`, default `https://cdn.cheaprouter.cc`,
+  empty disables it), the bare HTTPS origins among the service's public
+  `custom_endpoints` (`Client::public_custom_endpoints`, read through
+  `refresh_gateway_nodes` with a 6 h TTL and cached in the same file as
+  `server_nodes` so they survive the primary being unreachable), then the
+  user's own. Rows are labelled by `GatewayOriginConfig::node_label` (the
+  service's wording through `Waku::tx`); only user-added nodes can be
+  removed. An automatic fallback records `fallback_from` and the next check
+  returns to it once it answers, so the default stays the primary. Switching
+  calls `reapply_built_in_session_options`, so open built-in agent sessions
+  take the new node from their next turn. The file also carries
+  `network` (connect / idle timeouts for the built-in agent's model
+  requests).
 - **Which group is bound** can move on its own when a platform has automatic
   failover on (`sub2api::failover`, `~/.cheaprouter/failover.json`), through
   the same `select_cloud_group` path a manual pick uses.

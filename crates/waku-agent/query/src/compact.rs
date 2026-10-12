@@ -1177,12 +1177,31 @@ async fn summarise_head(
     let handler: Arc<dyn StreamHandler> = Arc::new(claurst_api::streaming::NullStreamHandler);
     let mut rx = client.create_message_stream(request, handler).await?;
     let mut acc = StreamAccumulator::new();
+    // Fork departure (Waku): only a summary whose stream finished replaces
+    // the history. A stream that broke off, or carried an `error` event, used
+    // to be accepted as it stood, folding the conversation into half a
+    // summary.
+    let mut finished = false;
 
     while let Some(evt) = rx.recv().await {
         acc.on_event(&evt);
-        if matches!(evt, AnthropicStreamEvent::MessageStop) {
-            break;
+        match &evt {
+            AnthropicStreamEvent::MessageStop => {
+                finished = true;
+                break;
+            }
+            AnthropicStreamEvent::Error { error_type, message } => {
+                return Err(ClaudeError::Api(format!(
+                    "the compaction summary failed: {error_type}: {message}"
+                )));
+            }
+            _ => {}
         }
+    }
+    if !finished {
+        return Err(ClaudeError::Api(
+            "the compaction summary ended before it was complete".to_string(),
+        ));
     }
 
     let (summary_msg, _usage, _stop) = acc.finish();
@@ -1207,8 +1226,6 @@ async fn summarise_head_via_provider(
     max_summary_tokens: u32,
     instructions: Option<&str>,
 ) -> Result<Vec<Message>, ClaudeError> {
-    use futures::StreamExt as _;
-
     if split_at == 0 {
         return Ok(messages.to_vec());
     }
@@ -1228,21 +1245,26 @@ async fn summarise_head_via_provider(
         provider_options: Value::Object(serde_json::Map::new()),
     };
 
-    let mut stream = provider
-        .create_message_stream(request)
-        .await
-        .map_err(|error| ClaudeError::Api(error.to_string()))?;
-    let mut raw_summary = String::new();
-    while let Some(event) = stream.next().await {
-        match event.map_err(|error| ClaudeError::Api(error.to_string()))? {
-            claurst_api::StreamEvent::TextDelta { text, .. } => raw_summary.push_str(&text),
-            claurst_api::StreamEvent::Error { message, .. } => {
-                return Err(ClaudeError::Api(message));
+    // Fork departure (Waku): the summary request gets the light retry
+    // budget for transient failures, and only a summary whose stream
+    // finished replaces the history (see `summarise_head`).
+    let budget = claurst_api::retry_policy::RetryBudget::Light;
+    let mut retries = 0u32;
+    let raw_summary = loop {
+        match summary_attempt(provider, request.clone()).await {
+            Ok(summary) => break summary,
+            Err(failure)
+                if failure.is_retryable()
+                    && budget.retries_per_request().is_none_or(|max| retries < max) =>
+            {
+                retries += 1;
+                let wait = claurst_api::retry_policy::backoff_delay(budget, retries, failure.retry_after);
+                tracing::warn!(error = %failure, attempt = retries, "Compaction summary failed — retrying");
+                tokio::time::sleep(wait).await;
             }
-            claurst_api::StreamEvent::MessageStop => break,
-            _ => {}
+            Err(failure) => return Err(failure.into_claude_error()),
         }
-    }
+    };
 
     compacted_history(
         messages,
@@ -1250,6 +1272,33 @@ async fn summarise_head_via_provider(
         &raw_summary,
         prompt.previous_summary.as_deref(),
     )
+}
+
+/// Fork (Waku): one attempt at a compaction summary over a provider
+/// adapter: the text, once its stream finished.
+async fn summary_attempt(
+    provider: &dyn claurst_api::LlmProvider,
+    request: claurst_api::ProviderRequest,
+) -> Result<String, claurst_api::retry_policy::ModelFailure> {
+    use claurst_api::retry_policy::{classify_stream_error, from_provider_error, ModelFailure};
+    use futures::StreamExt as _;
+
+    let mut stream = provider
+        .create_message_stream(request)
+        .await
+        .map_err(|error| from_provider_error(&error))?;
+    let mut raw_summary = String::new();
+    while let Some(event) = stream.next().await {
+        match event.map_err(|error| from_provider_error(&error))? {
+            claurst_api::StreamEvent::TextDelta { text, .. } => raw_summary.push_str(&text),
+            claurst_api::StreamEvent::Error { error_type, message } => {
+                return Err(classify_stream_error(&error_type, &message));
+            }
+            claurst_api::StreamEvent::MessageStop => return Ok(raw_summary),
+            _ => {}
+        }
+    }
+    Err(ModelFailure::truncated("the compaction summary"))
 }
 
 /// Does this message carry any `tool_result` blocks?

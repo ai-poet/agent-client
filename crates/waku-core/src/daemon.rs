@@ -1902,6 +1902,8 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             "turnFinished",
             json!({ "success": success, "summary": summary }),
         ),
+        // Fork addition: a built-in agent request being retried.
+        DriverEvent::ModelRetry(retry) => ("modelRetry", serde_json::to_value(retry)?),
         DriverEvent::Error(error) => ("error", Value::String(error)),
         DriverEvent::ProcessExited => ("processExited", Value::Null),
     };
@@ -1993,6 +1995,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 summary: finished.summary,
             }
         }
+        "modelRetry" => DriverEvent::ModelRetry(serde_json::from_value(payload)?),
         "error" => DriverEvent::Error(serde_json::from_value(payload)?),
         "processExited" => DriverEvent::ProcessExited,
         kind => bail!("daemon sent an unsupported driver event {kind:?}"),

@@ -371,14 +371,20 @@ impl Waku {
                         self.state.mark_session_dirty(session_id);
                     }
                 }
+                // Fork (model_retry): a goal's resume, if it was waiting, has
+                // started; and nothing of this turn has streamed yet.
+                runtime.model_retry = None;
+                self.note_output_boundary(session_id, runtime);
             }
             DriverEvent::TextDelta(delta) => {
                 if self.accepts_turn_output(session_id) {
+                    runtime.model_retry = None;
                     self.append_text_delta(session_id, runtime, delta);
                 }
             }
             DriverEvent::ReasoningDelta(delta) => {
                 if self.accepts_turn_output(session_id) {
+                    runtime.model_retry = None;
                     self.append_reasoning_delta(session_id, runtime, delta);
                 }
             }
@@ -395,6 +401,8 @@ impl Waku {
                     let item = ActivityItem::new(id, kind, title, detail, complete);
                     self.observe_foreground_command_activity(session_id, &item);
                     self.update_activity(session_id, runtime, item);
+                    runtime.model_retry = None;
+                    self.note_output_boundary(session_id, runtime);
                     if refresh_branch {
                         self.refresh_selected_branch_snapshot(cx);
                     }
@@ -408,6 +416,8 @@ impl Waku {
                     self.observe_foreground_command_activity(session_id, &item);
                     let source_id = item.source_id.clone();
                     self.update_activity(session_id, runtime, item);
+                    runtime.model_retry = None;
+                    self.note_output_boundary(session_id, runtime);
                     self.adopt_settled_todos(session_id, source_id.as_deref());
                     if refresh_branch {
                         self.refresh_selected_branch_snapshot(cx);
@@ -619,6 +629,9 @@ impl Waku {
                     }
                     self.state.mark_session_dirty(session_id);
                 }
+                // Fork (model_retry): sent as each model request settles —
+                // what the turn shows now is the engine's, not a draft.
+                self.note_output_boundary(session_id, runtime);
             }
             DriverEvent::TokenUsageUpdated { last, session } => {
                 // Fork addition: the live turn's starting total (turn_status).
@@ -655,9 +668,12 @@ impl Waku {
                         self.state.mark_session_dirty(session_id);
                     }
                 }
+                self.note_output_boundary(session_id, runtime);
             }
             DriverEvent::TurnFinished { success, summary } => {
                 self.compacting_sessions.remove(&session_id);
+                runtime.model_retry = None;
+                runtime.output_boundary = None;
                 self.settle_foreground_work(
                     session_id,
                     if success {
@@ -782,6 +798,8 @@ impl Waku {
                     );
                 }
             }
+            // Fork: a built-in agent request being retried (`model_retry.rs`).
+            DriverEvent::ModelRetry(retry) => self.handle_model_retry(session_id, runtime, retry),
             DriverEvent::Error(error) => {
                 let error = compact_driver_error(&error);
                 runtime.last_driver_error = Some(error.clone());

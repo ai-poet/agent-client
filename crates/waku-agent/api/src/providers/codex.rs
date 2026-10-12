@@ -132,8 +132,9 @@ fn responses_usage(usage: Option<&Value>) -> UsageInfo {
 
 impl CodexProvider {
     pub fn new(tokens: CodexTokens) -> Self {
-        let http_client = reqwest::Client::builder()
-            .timeout(crate::request_timeout())
+        // Fork departure (Waku): connect and read timeouts instead of a
+        // total deadline that cut long answers off mid-stream.
+        let http_client = crate::retry_policy::model_client_builder()
             .build()
             .expect("failed to build reqwest client");
 
@@ -402,6 +403,15 @@ impl CodexProvider {
         body
     }
 
+    /// The error's type or code, wherever the event carries it.
+    fn extract_stream_error_code(json_val: &Value) -> String {
+        ["/error/code", "/response/error/code", "/code", "/error/type"]
+            .iter()
+            .find_map(|path| json_val.pointer(path).and_then(|value| value.as_str()))
+            .unwrap_or_default()
+            .to_string()
+    }
+
     fn extract_stream_error_message(json_val: &Value) -> String {
         json_val
             .pointer("/error/message")
@@ -490,26 +500,25 @@ impl CodexProvider {
             .header("Accept", "text/event-stream");
         let builder = self.codex_headers(builder, &token, account_id.as_deref());
 
+        // Fork departure (Waku): failures leave classified, headers read —
+        // `Retry-After` and the gateway's own message used to be dropped here.
         let resp = builder
             .json(&body)
             .send()
             .await
-            .map_err(|e| ProviderError::Other {
+            .map_err(|e| ProviderError::Classified {
                 provider: self.id.clone(),
-                message: format!("HTTP request failed: {}", e),
-                status: None,
-                body: None,
+                failure: crate::retry_policy::classify_transport(&e),
             })?;
 
         let status = resp.status().as_u16();
         if !(200..300).contains(&(status as usize)) {
-            let text = resp.text().await.map_err(|e| ProviderError::Other {
+            let headers = resp.headers().clone();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(ProviderError::Classified {
                 provider: self.id.clone(),
-                message: format!("Failed to read response body: {}", e),
-                status: Some(status),
-                body: None,
-            })?;
-            return Err(parse_error_response(status, &text, &self.id));
+                failure: crate::retry_policy::classify_http(status, &headers, &text),
+            });
         }
 
         Ok(resp)
@@ -700,10 +709,9 @@ impl LlmProvider for CodexProvider {
                 let chunk = match chunk_result {
                     Ok(chunk) => chunk,
                     Err(e) => {
-                        yield Err(ProviderError::StreamError {
+                        yield Err(ProviderError::Classified {
                             provider: provider_id.clone(),
-                            message: format!("Stream read error: {}", e),
-                            partial_response: None,
+                            failure: crate::retry_policy::classify_transport(&e),
                         });
                         return;
                     }
@@ -1016,7 +1024,13 @@ impl LlmProvider for CodexProvider {
                                     yield Ok(StreamEvent::ContentBlockStop { index: output_index });
                                 }
                             }
-                            "response.completed" => {
+                            // Fork (Waku): `response.incomplete` ends the
+                            // stream the same way, its reason in
+                            // `incomplete_details` (an output-limit cut is a
+                            // max_tokens stop the loop continues from). It
+                            // used to fall through and read as a stream that
+                            // broke off.
+                            "response.completed" | "response.incomplete" => {
                                 if let Some(response) = json_val.get("response") {
                                     if let Some(id) = response.get("id").and_then(|value| value.as_str()) {
                                         message_id = id.to_string();
@@ -1068,10 +1082,11 @@ impl LlmProvider for CodexProvider {
                                 }
                             }
                             "response.failed" | "response.error" | "error" => {
-                                yield Err(ProviderError::StreamError {
+                                let kind = Self::extract_stream_error_code(&json_val);
+                                let message = Self::extract_stream_error_message(&json_val);
+                                yield Err(ProviderError::Classified {
                                     provider: provider_id.clone(),
-                                    message: Self::extract_stream_error_message(&json_val),
-                                    partial_response: Some(trimmed.to_string()),
+                                    failure: crate::retry_policy::classify_stream_error(&kind, &message),
                                 });
                                 return;
                             }
@@ -1093,10 +1108,9 @@ impl LlmProvider for CodexProvider {
                 }
             }
 
-            yield Err(ProviderError::StreamError {
+            yield Err(ProviderError::Classified {
                 provider: provider_id,
-                message: "Codex stream ended before response.completed".to_string(),
-                partial_response: None,
+                failure: crate::retry_policy::ModelFailure::truncated("the Responses stream"),
             });
         };
 

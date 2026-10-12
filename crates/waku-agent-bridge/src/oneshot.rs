@@ -64,6 +64,8 @@ pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result
     let mut query = build_query_config(&config, &options);
     // One reply is the whole job.
     query.max_turns = 1;
+    // A title or a commit message is not worth a minute of retries.
+    query.retry_budget = claurst_api::retry_policy::RetryBudget::Light;
 
     let (client, registry) = build_clients(&config, options.platform.as_deref())?;
     query.provider_registry = Some(registry);

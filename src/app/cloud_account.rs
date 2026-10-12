@@ -96,6 +96,8 @@ pub(super) struct CloudAccountState {
     pub origin_generation: u64,
     /// The once-per-run check of the chosen domain has been made.
     pub origin_checked: bool,
+    /// The service's public node list is being read.
+    pub nodes_refreshing: bool,
     /// Field for adding a domain, built on first use — creating a
     /// `TextInput` needs a `Window`, which render does not have.
     pub origin_input: Option<Entity<TextInput>>,
@@ -271,7 +273,7 @@ impl Waku {
         // those endpoints.
         self.refresh_cloud_announcements(false, cx);
         self.refresh_cloud_group_status(cx);
-        self.verify_gateway_origin(cx);
+        self.refresh_gateway_nodes(cx);
         let Some(credentials) = self.cloud_account.credentials.clone() else {
             return;
         };
@@ -687,6 +689,7 @@ impl Waku {
         account.origin_generation += 1;
         account.origin_test = None;
         account.origin_checked = false;
+        account.nodes_refreshing = false;
 
         self.cloud_usage = Default::default();
         self.cloud_announcements = Default::default();

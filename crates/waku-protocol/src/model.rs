@@ -2027,8 +2027,40 @@ pub enum DriverEvent {
         success: bool,
         summary: Option<String>,
     },
+    /// Fork addition: a model request failed and is about to be sent again
+    /// — or, with `between_turns`, an autonomous goal will resume after a
+    /// failed turn. Built-in agent only.
+    ModelRetry(ModelRetry),
     Error(String),
     ProcessExited,
+}
+
+/// Fork addition: what the client shows while a model request is retried.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelRetry {
+    /// This request's retry number, 1-based.
+    pub attempt: u32,
+    /// `None` when the run retries without a limit.
+    #[serde(default)]
+    pub max_attempts: Option<u32>,
+    /// How long until the next attempt.
+    pub delay_ms: u64,
+    /// `network`, `timeout`, `rate_limited`, `overloaded`, `server_error`,
+    /// `stream_interrupted`, `truncated`, `empty_response`, or `turn_failed`
+    /// between turns.
+    pub reason: String,
+    /// The answer had started streaming and what arrived of it was thrown
+    /// away: the client takes back what it showed since the last tool call.
+    #[serde(default)]
+    pub discarded_output: bool,
+    /// The failure, in the server's words where it gave any.
+    #[serde(default)]
+    pub detail: String,
+    /// A goal's automatic resume after a failed turn, not a retry within
+    /// one.
+    #[serde(default)]
+    pub between_turns: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]

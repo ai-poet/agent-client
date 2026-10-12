@@ -50,8 +50,9 @@ pub struct OpenAiProvider {
 
 impl OpenAiProvider {
     pub fn new(api_key: String) -> Self {
-        let http_client = reqwest::Client::builder()
-            .timeout(crate::request_timeout())
+        // Fork departure (Waku): connect and read timeouts instead of a
+        // total deadline that cut long answers off mid-stream.
+        let http_client = crate::retry_policy::model_client_builder()
             .build()
             .expect("failed to build reqwest client");
 
@@ -616,17 +617,21 @@ impl OpenAiProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ProviderError::Other {
+            .map_err(|e| ProviderError::Classified {
                 provider: self.id.clone(),
-                message: format!("HTTP request failed: {}", e),
-                status: None,
-                body: None,
+                failure: crate::retry_policy::classify_transport(&e),
             })?;
 
+        // Fork departure (Waku): classified with its headers, so the loop
+        // sees `Retry-After` and the gateway's message.
         let status = resp.status().as_u16();
         if !(200..300).contains(&(status as usize)) {
+            let headers = resp.headers().clone();
             let text = resp.text().await.unwrap_or_default();
-            return Err(self.map_http_error(status, &text));
+            return Err(ProviderError::Classified {
+                provider: self.id.clone(),
+                failure: crate::retry_policy::classify_http(status, &headers, &text),
+            });
         }
 
         Ok(resp)
@@ -818,6 +823,10 @@ impl LlmProvider for OpenAiProvider {
                 usize,
                 (String, String, String),
             > = std::collections::HashMap::new();
+            // Fork (Waku): whether a choice finished. A stream that ends
+            // without `[DONE]` or a finish reason broke off; it used to be
+            // closed with an invented `MessageStop` and read as complete.
+            let mut saw_finish = false;
 
             // Bound infinite mid-stream stalls (issue #185): wrap each chunk
             // read in a generous idle timeout so a provider that pauses
@@ -850,10 +859,9 @@ impl LlmProvider for OpenAiProvider {
                 let chunk = match chunk_result {
                     Ok(c) => c,
                     Err(e) => {
-                        yield Err(ProviderError::StreamError {
+                        yield Err(ProviderError::Classified {
                             provider: provider_id.clone(),
-                            message: format!("Stream read error: {}", e),
-                            partial_response: None,
+                            failure: crate::retry_policy::classify_transport(&e),
                         });
                         return;
                     }
@@ -921,6 +929,27 @@ impl LlmProvider for OpenAiProvider {
                             content_block: ContentBlock::Text { text: String::new() },
                         });
                         message_started = true;
+                    }
+
+                    // Fork (Waku): an error reported inside the stream —
+                    // `{"error": {…}}` in place of a chunk — ends it. It
+                    // used to read as a usage-only chunk and vanish.
+                    if let Some(error) = chunk_json.get("error").filter(|error| !error.is_null()) {
+                        let kind = ["code", "type"]
+                            .iter()
+                            .find_map(|key| error.get(*key).and_then(|v| v.as_str()))
+                            .unwrap_or_default()
+                            .to_string();
+                        let message = error
+                            .get("message")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string)
+                            .unwrap_or_else(|| error.to_string());
+                        yield Err(ProviderError::Classified {
+                            provider: provider_id.clone(),
+                            failure: crate::retry_policy::classify_stream_error(&kind, &message),
+                        });
+                        return;
                     }
 
                     let choices = match chunk_json.get("choices").and_then(|c| c.as_array()) {
@@ -1042,6 +1071,7 @@ impl LlmProvider for OpenAiProvider {
                         choice.get("finish_reason").and_then(|v| v.as_str())
                     {
                         if !finish_reason.is_empty() && finish_reason != "null" {
+                            saw_finish = true;
                             // Close the text content block.
                             yield Ok(StreamEvent::ContentBlockStop { index: 0 });
                             // Close any open tool call blocks.
@@ -1068,9 +1098,16 @@ impl LlmProvider for OpenAiProvider {
                 }
             }
 
-            // If we consumed all bytes without seeing [DONE], emit stop.
-            if message_started {
+            // Without [DONE], a finished choice still ends the message —
+            // some servers close the stream right after it. Without either,
+            // the stream broke off.
+            if saw_finish {
                 yield Ok(StreamEvent::MessageStop);
+            } else {
+                yield Err(ProviderError::Classified {
+                    provider: provider_id.clone(),
+                    failure: crate::retry_policy::ModelFailure::truncated("the Chat Completions stream"),
+                });
             }
         };
 

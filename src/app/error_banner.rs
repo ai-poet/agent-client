@@ -31,6 +31,10 @@ impl Waku {
         let details_open = self.error_details_open == Some(turn_id);
         let copy_text = message.clone();
         let paywall = self.turn_paywall(session.provider, &message);
+        // Fork (model_retry): a turn that got work done can be continued
+        // without rewinding it; a goal may be about to resume on its own.
+        let continuable = paywall.is_none() && super::model_retry::turn_did_work(session, turn_id);
+        let goal_resume = self.pending_goal_resume(session);
 
         let button = |id: &str, label: String, primary: bool| {
             div()
@@ -79,13 +83,23 @@ impl Waku {
                 },
             )));
         }
+        if continuable {
+            actions = actions.child(button("continue", tr!("error_banner.continue"), true).on_click(
+                cx.listener(move |this, _, _, cx| {
+                    this.continue_failed_turn(session_id, cx);
+                }),
+            ));
+        }
         actions = actions
             .child(
-                button("retry", tr!("error_banner.retry"), paywall.is_none()).on_click(
-                    cx.listener(move |this, _, _, cx| {
-                        this.retry_failed_turn(session_id, cx);
-                    }),
-                ),
+                button(
+                    "retry",
+                    tr!("error_banner.retry"),
+                    paywall.is_none() && !continuable,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.retry_failed_turn(session_id, cx);
+                })),
             )
             .child(
                 button("copy", tr!("common.copy"), false).on_click(cx.listener(
@@ -158,6 +172,13 @@ impl Waku {
             })
             .when(!details_open, |body| body.line_clamp(2))
             .child(message);
+        let goal_note = goal_resume.map(|note| {
+            div()
+                .mt(px(6.0))
+                .text_size(sp(12.0))
+                .text_color(theme.text_tertiary)
+                .child(note)
+        });
 
         Some(
             div().px(px(20.0)).pb(px(8.0)).child(
@@ -173,6 +194,7 @@ impl Waku {
                     .shadow_md()
                     .child(header)
                     .child(body)
+                    .children(goal_note)
                     .child(actions),
             ),
         )

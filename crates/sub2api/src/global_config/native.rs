@@ -78,6 +78,61 @@ pub const MODEL_KEYS_MEMBER: &str = "models";
 /// most of the models the gateway serves.
 pub const CONTEXT_WINDOWS_OPTION: &str = "context_windows";
 
+/// Fork: where the model requests' network timeouts are filed, on the
+/// anthropic entry: `{"connect_timeout_secs", "idle_timeout_secs"}`. Only
+/// written when the user set values other than the engine's defaults (in
+/// `gateway-origin.json`), so an untouched file stays as it was. Kept in step
+/// with `waku_agent_bridge`'s `NETWORK_OPTION`.
+pub const NETWORK_OPTION: &str = "network";
+
+/// The option value for `network`, or `None` for the defaults.
+fn network_option(network: crate::gateway_origin::NetworkTimeouts) -> Option<Value> {
+    (network != crate::gateway_origin::NetworkTimeouts::default()).then(|| {
+        json!({
+            "connect_timeout_secs": network.connect_secs,
+            "idle_timeout_secs": network.idle_secs,
+        })
+    })
+}
+
+/// File the network timeouts on the anthropic entry, or put back what the
+/// backup had there when they are the defaults.
+fn write_network(
+    providers: &mut Map<String, Value>,
+    network: Option<Value>,
+    previous_providers: &Map<String, Value>,
+) {
+    let Some(entry) = providers.get_mut("anthropic").and_then(Value::as_object_mut) else {
+        return;
+    };
+    match network {
+        Some(value) => {
+            if let Some(options) = entry
+                .entry("options")
+                .or_insert_with(|| Value::Object(Map::new()))
+                .as_object_mut()
+            {
+                options.insert(NETWORK_OPTION.to_owned(), value);
+            }
+        }
+        None => {
+            let previous_options = previous_providers
+                .get("anthropic")
+                .and_then(Value::as_object)
+                .and_then(|entry| entry.get("options"))
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            if let Some(options) = entry.get_mut("options").and_then(Value::as_object_mut) {
+                restore_key(options, NETWORK_OPTION, &previous_options);
+                if options.is_empty() {
+                    entry.remove("options");
+                }
+            }
+        }
+    }
+}
+
 /// The table as written: platform keys, plus the per-model ones when there
 /// are any.
 fn gateway_keys_value(routes: &NativeRoutes) -> Value {
@@ -232,6 +287,11 @@ pub fn take_over(
     write_endpoints(providers, routes, &previous_providers).map_err(|_| {
         anyhow!("the anthropic provider entry in {} is not an object", path.display())
     })?;
+    write_network(
+        providers,
+        network_option(crate::gateway_origin::load().network),
+        &previous_providers,
+    );
     if providers.is_empty() {
         config.remove("provider_configs");
     }
@@ -377,6 +437,7 @@ fn restore_provider_entry(
         restore_key(options, GATEWAY_KEYS_OPTION, &previous_options);
         restore_key(options, CONTEXT_WINDOWS_OPTION, &previous_options);
         restore_key(options, ENDPOINTS_OPTION, &previous_options);
+        restore_key(options, NETWORK_OPTION, &previous_options);
         if options.is_empty() {
             entry.remove("options");
         }
@@ -929,5 +990,27 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+    #[test]
+    fn network_timeouts_are_written_only_when_set() {
+        use crate::gateway_origin::NetworkTimeouts;
+        assert_eq!(network_option(NetworkTimeouts::default()), None);
+        let custom = NetworkTimeouts {
+            connect_secs: 5,
+            idle_secs: 90,
+        };
+        let value = network_option(custom).expect("custom timeouts");
+        assert_eq!(value, json!({"connect_timeout_secs": 5, "idle_timeout_secs": 90}));
+
+        let mut providers = Map::new();
+        providers.insert("anthropic".to_owned(), json!({"api_key": "sk"}));
+        write_network(&mut providers, Some(value), &Map::new());
+        assert_eq!(
+            providers["anthropic"]["options"][NETWORK_OPTION],
+            json!({"connect_timeout_secs": 5, "idle_timeout_secs": 90})
+        );
+        // Back to the defaults: the option goes, and with it the empty map.
+        write_network(&mut providers, None, &Map::new());
+        assert_eq!(providers["anthropic"], json!({"api_key": "sk"}));
     }
 }

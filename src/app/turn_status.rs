@@ -148,7 +148,15 @@ impl Waku {
             ));
         }
         suffix.push_str(" · ");
-        suffix.push_str(&action.label());
+        // Fork (model_retry): a request waiting to be sent again says so,
+        // with its countdown, rather than "waiting for the model".
+        match runtime
+            .and_then(|runtime| runtime.model_retry.as_ref())
+            .filter(|retry| !retry.between_turns && !waiting_on_user)
+        {
+            Some(retry) => suffix.push_str(&retry.working_label()),
+            None => suffix.push_str(&action.label()),
+        }
         suffix
     }
 }

@@ -925,6 +925,11 @@ struct SessionRuntime {
     /// Background-process snapshots are provider IPC. Keep the polling clock
     /// on the runtime so switching tasks never creates duplicate probes.
     last_background_refresh_at: Instant,
+    /// Fork: where the active turn's settled output ended, for taking back an
+    /// answer the built-in agent retries (`model_retry.rs`).
+    output_boundary: Option<model_retry::OutputBoundary>,
+    /// Fork: the retry the built-in agent is waiting on.
+    model_retry: Option<model_retry::RetryStatus>,
 }
 
 #[derive(Clone)]
@@ -1818,6 +1823,8 @@ mod native_agent;
 mod onboarding;
 mod permission_card;
 mod message_resend;
+// Fork addition: a built-in agent request being retried.
+mod model_retry;
 // Fork: the ZCode-style task sidebar (rows, sections, toolbar, task marks).
 mod sidebar_rows;
 mod sidebar_sections;

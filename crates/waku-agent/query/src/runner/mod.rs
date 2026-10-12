@@ -9,6 +9,8 @@ pub(crate) use tools::*;
 // Fork addition (Waku): step-to-step reminders off the system prompt.
 pub(crate) mod step_reminder;
 pub(crate) use step_reminder::*;
+// Fork addition (Waku): the loop's retry bookkeeping.
+pub(crate) mod retry_loop;
 pub(crate) mod prompt;
 pub(crate) use prompt::*;
 pub(crate) mod stream;

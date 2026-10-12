@@ -927,6 +927,24 @@ impl EventTranslator {
                 detail = detail
             ))),
             AgentEvent::Error(message) => self.send(DriverEvent::Error(message)),
+            // Fork: a request being retried, or a goal about to resume.
+            AgentEvent::Retry {
+                attempt,
+                max_attempts,
+                delay_ms,
+                reason,
+                discarded_output,
+                detail,
+                between_turns,
+            } => self.send(DriverEvent::ModelRetry(waku_protocol::model::ModelRetry {
+                attempt,
+                max_attempts,
+                delay_ms,
+                reason,
+                discarded_output,
+                detail,
+                between_turns,
+            })),
             AgentEvent::TurnFinished { success, summary } => {
                 self.tools.lock().clear();
                 self.send(DriverEvent::TurnFinished { success, summary });

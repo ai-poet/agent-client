@@ -614,6 +614,17 @@ pub struct DesktopSession {
     pub codex_api_key: Option<String>,
 }
 
+/// One entry of the service's public custom-endpoint list.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+pub struct PublicEndpoint {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub endpoint: String,
+    #[serde(default)]
+    pub description: String,
+}
+
 /// Blocking client. Callers run it off the UI thread.
 #[derive(Clone, Debug)]
 pub struct Client {
@@ -672,6 +683,18 @@ impl Client {
         }
         let response = request.send(&self.api_url(path))?;
         unwrap_envelope(&response)
+    }
+
+    /// The extra API addresses the admin lists in Settings → Site ("custom
+    /// endpoints") — the same list the web panel's API Keys page shows.
+    /// Public and unauthenticated; the client offers the bare origins among
+    /// them as gateway nodes
+    /// (`gateway_origin::GatewayOriginConfig::adopt_server_nodes`).
+    pub fn public_custom_endpoints(&self) -> Result<Vec<PublicEndpoint>> {
+        let response = Request::new()
+            .timeout_seconds(10)
+            .send(&self.api_url("/settings/public"))?;
+        parse_public_custom_endpoints(&response)
     }
 
     /// The signed-in user, including the balance shown in the status bar.
@@ -844,6 +867,18 @@ fn percent_encode(value: &str) -> String {
     encoded
 }
 
+/// The `custom_endpoints` list out of the public settings, which the service
+/// may send as `null`; every other setting is ignored.
+fn parse_public_custom_endpoints(response: &Response) -> Result<Vec<PublicEndpoint>> {
+    #[derive(Default, Deserialize)]
+    struct PublicSettings {
+        #[serde(default)]
+        custom_endpoints: Option<Vec<PublicEndpoint>>,
+    }
+    let settings: PublicSettings = unwrap_envelope_or_default(response)?;
+    Ok(settings.custom_endpoints.unwrap_or_default())
+}
+
 /// Unwrap an envelope, turning both transport and application errors into one
 /// error type.
 fn unwrap_envelope<T: serde::de::DeserializeOwned>(response: &Response) -> Result<T> {
@@ -913,6 +948,37 @@ mod tests {
             status: 200,
             body: body.to_owned(),
         }
+    }
+
+    #[test]
+    fn public_custom_endpoints_tolerate_null_and_missing_fields() {
+        let listed = parse_public_custom_endpoints(&ok(
+            r#"{"code":0,"data":{"site_name":"x","custom_endpoints":[
+                {"name":"CDN","endpoint":"https://cdn.example.org","description":"Asia"},
+                {"endpoint":"https://other.example.org"}]}}"#,
+        ))
+        .expect("parse");
+        assert_eq!(
+            listed,
+            vec![
+                PublicEndpoint {
+                    name: "CDN".to_owned(),
+                    endpoint: "https://cdn.example.org".to_owned(),
+                    description: "Asia".to_owned(),
+                },
+                PublicEndpoint {
+                    endpoint: "https://other.example.org".to_owned(),
+                    ..PublicEndpoint::default()
+                },
+            ]
+        );
+        let none =
+            parse_public_custom_endpoints(&ok(r#"{"code":0,"data":{"custom_endpoints":null}}"#))
+                .expect("parse null");
+        assert!(none.is_empty());
+        let absent =
+            parse_public_custom_endpoints(&ok(r#"{"code":0,"data":{}}"#)).expect("parse absent");
+        assert!(absent.is_empty());
     }
 
     #[test]

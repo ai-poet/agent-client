@@ -46,6 +46,9 @@ use crate::subagent::{SubagentHost, SubagentTool, TurnScope};
 // Fork addition: AgentTeams' hooks into this session.
 #[path = "session_team.rs"]
 mod team_seam;
+// Fork addition: a goal resumes on its own after a transient failure.
+#[path = "session_goal_resume.rs"]
+mod goal_resume;
 
 /// How often the steer watcher checks whether the queue was drained. The
 /// engine drains between turns, so this only decides how promptly the composer
@@ -143,6 +146,8 @@ struct Inner {
     /// Fork addition: auto-memory — the memory tools, the index section and
     /// consolidation (`crate::memory`).
     memory: Arc<crate::memory::MemoryHost>,
+    /// Fork addition: the goal's automatic resume after a failed turn.
+    goal_resume: goal_resume::GoalResume,
 }
 
 /// The parts of a running turn that outside callers need to reach.
@@ -256,6 +261,7 @@ impl AgentSession {
             browser,
             team,
             memory,
+            goal_resume: goal_resume::GoalResume::default(),
         });
 
         inner
@@ -277,6 +283,8 @@ impl AgentSession {
         if self.inner.team.intercept(&text) {
             return;
         }
+        // Fork: whatever starts a turn supersedes a goal resume waiting to.
+        self.inner.goal_resume.cancel(false);
         let inner = self.inner.clone();
         let Ok(rt) = runtime::shared() else {
             inner
@@ -338,6 +346,8 @@ impl AgentSession {
         if let Some(cancel) = cancel {
             cancel.cancel();
         }
+        // Fork: Stop also stops a goal waiting to resume.
+        self.inner.goal_resume.cancel(true);
         // Fork (AgentTeams): the members' dialogs belong to their work,
         // which goes on.
         self.inner
@@ -365,6 +375,8 @@ impl AgentSession {
         match crate::goal::apply(&store, &self.inner.id, op) {
             Err(error) => self.inner.events.emit(AgentEvent::Error(error)),
             Ok(effect) => {
+                // Fork: a changed goal supersedes a resume of the old one.
+                self.inner.goal_resume.cancel(true);
                 self.inner.events.emit(AgentEvent::GoalUpdated(crate::goal::snapshot(
                     &store,
                     &self.inner.id,
@@ -593,6 +605,7 @@ impl Drop for Inner {
         if let Some(turn) = self.turn.lock().as_ref() {
             turn.cancel.cancel();
         }
+        self.goal_resume.cancel(true);
         self.bridge.release_all();
         self.questions.lock().clear();
         self.subagents.cancel_all();
@@ -617,6 +630,10 @@ pub(crate) fn build_clients(
     config: &Config,
     platform: Option<&str>,
 ) -> anyhow::Result<(Arc<AnthropicClient>, Arc<claurst_api::ProviderRegistry>)> {
+    // Fork: the gateway's verdicts on failed requests, and the network
+    // timeouts every model client is built with — set before any is.
+    crate::retry_rules::install();
+    crate::config::apply_network_timeouts(config);
     let rt = runtime::shared()?;
     let (api_key, use_bearer_auth) = rt
         .block_on(config.resolve_anthropic_auth_async())
@@ -998,6 +1015,14 @@ async fn run_turn(
     // anything" to someone who just pressed stop would be a lie.
     let ended_empty = !produced_output && matches!(outcome, QueryOutcome::EndTurn { .. });
     let cancelled = matches!(outcome, QueryOutcome::Cancelled);
+    // Fork: whether a later attempt could get past this failure, for the
+    // goal's automatic resume.
+    let transient_failure = matches!(
+        &outcome,
+        QueryOutcome::Error(error)
+            if claurst_api::retry_policy::classify_claude_error(error)
+                == claurst_api::retry_policy::FailureClass::Retryable
+    );
     let not_found = match &outcome {
         QueryOutcome::Error(error) if is_not_found(error) => Some(error.to_string()),
         _ => None,
@@ -1034,6 +1059,7 @@ async fn run_turn(
         .events
         .emit(AgentEvent::BackgroundWork(team_seam::snapshot(&inner)));
     let goal_follow_up = settle_goal(&inner, goal_mode, had_goal, tokens_before, cancelled);
+    goal_resume::after_turn(&inner, goal_mode, success, transient_failure, cancelled);
 
     // Steering messages the watcher had not yet accounted for. The queue
     // itself is the authority, not the watcher's 120ms poll: `drain` empties

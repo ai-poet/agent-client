@@ -1742,6 +1742,12 @@ error_banner.title:
   en: "This run failed"
 error_banner.retry:
   en: "Retry"
+error_banner.continue:
+  en: "Continue"
+error_banner.continue_message:
+  en: "Continue from where it stopped"
+error_banner.goal_auto_resume:
+  en: "The goal resumes on its own in %{seconds} s (%{attempt}/%{max})."
 error_banner.show_details:
   en: "Show details"
 error_banner.hide_details:
@@ -2389,6 +2395,10 @@ session.context_compacted_manual:
   en: "Context compacted · %{before} → %{after}"
 session.context_compacted:
   en: "Context compacted"
+session.stream_discarded:
+  en: "The connection dropped mid-reply — the unfinished reply was discarded and is being requested again (%{attempt}/%{max})"
+session.stream_discarded_unbounded:
+  en: "The connection dropped mid-reply — the unfinished reply was discarded and is being requested again (attempt %{attempt})"
 session.context_compaction_failed:
   en: "Could not compact the context; the conversation is unchanged"
 transcript.thinking:
@@ -3419,9 +3429,9 @@ cloud.failover_restored:
 cloud.failover_active:
   en: "Active · moved from %{group}"
 cloud.origin_title:
-  en: "Service domains"
+  en: "Cloud API nodes"
 cloud.origin_detail:
-  en: "The domains this service answers on. Measure them and route the agent CLIs through whichever answers fastest; signing in always stays on the domain you signed in with."
+  en: "The agents, the CLIs and image generation reach the service through the node you pick. Measure them to find the fastest; signing in, your account and payments always use the main site."
 cloud.origin_placeholder:
   en: "https://mirror.example.com"
 cloud.origin_duplicate:
@@ -3434,6 +3444,16 @@ cloud.origin_auto_selected:
   en: "Agents now reach the service at %{url}"
 cloud.origin_fallback:
   en: "The domain in use stopped answering; agents moved to %{url}"
+cloud.origin_restored:
+  en: "%{url} answers again; agents moved back to it"
+cloud.node_primary:
+  en: "Main site (default)"
+cloud.node_cdn:
+  en: "CDN node"
+cloud.node_cdn_detail:
+  en: "Accelerated through a CDN — worth trying from mainland China and the rest of Asia-Pacific"
+cloud.node_custom:
+  en: "Added by you"
 
 settings.agent:
   en: "Agent"
@@ -4055,6 +4075,10 @@ turn_status.running_tools:
   en: "Running %{count} tools…"
 turn_status.waiting_for_model:
   en: "Waiting for the model…"
+turn_status.reconnecting:
+  en: "Reconnecting (%{attempt}/%{max}, %{seconds} s)…"
+turn_status.reconnecting_unbounded:
+  en: "Reconnecting (attempt %{attempt}, %{seconds} s)…"
 turn_status.waiting_for_you:
   en: "Waiting for you"
 home_overview.tab_overview:

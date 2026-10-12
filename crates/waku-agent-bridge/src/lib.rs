@@ -55,6 +55,8 @@ mod memory;
 mod oneshot;
 mod permission;
 mod project_context;
+// Fork addition: the gateway's verdicts for the engine's retry policy.
+mod retry_rules;
 mod runtime;
 mod session;
 mod subagent;

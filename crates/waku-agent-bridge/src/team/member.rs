@@ -69,6 +69,10 @@ pub(crate) fn build_engine(
     options.session_id = member_id.map(str::to_owned);
     let config = build_config(&options)?;
     let mut query = build_query_config(&config, &options);
+    // Fork: nobody is watching a member's request, and a transient failure
+    // is not a reason to fail its task — it is retried until it clears or
+    // the team is stopped.
+    query.retry_budget = claurst_api::retry_policy::RetryBudget::Unbounded;
     let (client, registry) = crate::session::build_clients(&config, options.platform.as_deref())?;
     query.provider_registry = Some(registry);
     Ok(MemberEngine {

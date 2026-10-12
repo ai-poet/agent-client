@@ -1312,6 +1312,7 @@ impl Waku {
         self.settle_foreground_work(session_id, BackgroundWorkStatus::Stopped);
         if let Some(runtime) = runtime.as_mut() {
             runtime.stream_phase = None;
+            runtime.model_retry = None;
             runtime.pending_permissions.retain(|permission| agent_teams::requests::is_member_request(&permission.request_id));
             runtime.pending_user_input = None;
             runtime.pending_computer_approval = None;
