@@ -29,6 +29,20 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.2.15]
+
+- 新增「云端 API 节点」：登录后可在主站和 CDN 加速节点（中国及亚太地区可尝试）之间切换，后台配置的其他节点也会自动出现；聊天输入框上方的节点标签和侧边栏账户菜单都能一键切换，并显示测速延迟。只有模型请求走所选节点，登录、账户和支付始终使用主站；所选节点暂时连不上时会自动切到可用节点，恢复后再切回来
+
+  Adds cloud API nodes: once signed in you can switch between the main site and a CDN node (worth trying from mainland China and the rest of Asia-Pacific), and any other node the service lists appears on its own; the node chip above the composer and the sidebar account menu switch in one click and show the measured latency. Only model requests use the chosen node — signing in, your account and payments always use the main site — and when the chosen node stops answering the app moves to one that works, then back once it recovers
+
+- 内置 Agent 长任务更稳定：网络中断、限流、服务繁忙或回复中途断开时会自动等待后重试（工作行显示「重新连接中」和倒计时），断开前已显示的半截回复会被撤回再重新生成，不再出现重复内容；超过 10 分钟的长回复不再被掐断；对话超出上下文窗口时会先自动压缩再继续；余额不足、额度用完等无法靠重试解决的错误会立即提示，不再白白等待
+
+  Makes long built-in agent tasks far more reliable: network drops, rate limits, busy servers and replies cut off mid-stream are now retried automatically after a short wait (the working row shows "Reconnecting" with a countdown), the half reply shown before a drop is taken back before it is generated again, so nothing appears twice; replies longer than ten minutes are no longer cut off; a conversation that outgrows the context window is compacted and carries on; and errors no retry can fix, such as an empty balance or a spent quota, are reported at once instead of after a wait
+
+- 内置 Agent 的任务失败后，如果已经完成过一些步骤，错误提示旁会多一个「继续」按钮，保留已完成的工作从中断处接着做；目标模式遇到网络等临时故障会在稍后自动继续，团队成员遇到临时故障也会一直重试直到恢复
+
+  When a built-in agent task fails after getting some work done, the error banner now offers "Continue", which picks up where it stopped and keeps the finished work; goal mode resumes on its own after a temporary failure such as a network outage, and team members keep retrying until the failure clears
+
 ## [0.2.13]
 
 - 修复内置 Agent 使用 GPT 模型时提示词缓存经常失效、费用偏高的问题：同一个任务的请求现在都会带上会话标识，始终交给同一个上游账号处理并复用缓存；长期记忆在一个任务里只读取一次，任务进行中新写入的记忆不会再让之前的缓存全部作废，下一个任务会读到最新的记忆；待办清单的进度提醒和目标模式的进度不再写进系统提示词，每完成一项待办不会再让整段对话的缓存失效（Claude 和国产模型同样受益）；GPT 的系统提示词也不再重复发送，每次请求少约 2000 个 token
