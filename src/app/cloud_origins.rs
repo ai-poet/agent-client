@@ -11,6 +11,51 @@ use super::cloud_account::section_title;
 use super::providers_page::card_button;
 use super::*;
 
+/// The nodes as the quick menus list them, taken once per render.
+#[derive(Clone)]
+pub(super) struct NodeMenu {
+    /// (origin, label with the last measured latency).
+    nodes: Vec<(String, String)>,
+    routed: Option<String>,
+    /// What the node in use is called, for a chip or a submenu value.
+    pub(super) routed_label: String,
+}
+
+impl NodeMenu {
+    /// Whether there is a choice to offer.
+    pub(super) fn has_choice(&self) -> bool {
+        self.nodes.len() > 1
+    }
+
+    /// One entry per node, the one in use checked, then "Test all".
+    pub(super) fn items(&self, weak: &WeakEntity<Waku>) -> Vec<MenuItem> {
+        let mut items = Vec::new();
+        for (url, shown) in &self.nodes {
+            let pick = url.clone();
+            let entry_weak = weak.clone();
+            items.push(
+                MenuItem::new(shown.clone(), move |_, cx| {
+                    let pick = pick.clone();
+                    let _ = entry_weak.update(cx, |this, cx| this.select_gateway_origin(pick, cx));
+                })
+                .selected(self.routed.as_deref() == Some(url.as_str())),
+            );
+        }
+        items.push(MenuItem::Separator);
+        let test_weak = weak.clone();
+        items.push(MenuItem::new(tr!("cli_setup.speed_test_all"), move |_, cx| {
+            let _ = test_weak.update(cx, |this, cx| this.run_gateway_origin_test(false, cx));
+        }));
+        let manage_weak = weak.clone();
+        items.push(MenuItem::new(tr!("cloud.node_manage"), move |_, cx| {
+            let _ = manage_weak.update(cx, |this, cx| {
+                this.open_settings_page(SettingsPage::CloudAccount, cx);
+            });
+        }));
+        items
+    }
+}
+
 /// A gateway-domain measurement. Which run it belongs to is tracked by
 /// `origin_generation` on the state, so a superseded result is discarded.
 #[derive(Default)]
@@ -343,10 +388,84 @@ impl Waku {
         .detach();
     }
 
+    /// The nodes for the quick menus — the account menu's submenu and the
+    /// chip above the composer — with the last measured latency beside each.
+    pub(super) fn gateway_node_menu(&self) -> NodeMenu {
+        let results = self
+            .cloud_account
+            .origin_test
+            .as_ref()
+            .map(|test| test.results.as_slice())
+            .unwrap_or_default();
+        let short = |url: &str| -> String {
+            self.gateway_node_label(url).0.unwrap_or_else(|| {
+                url.split_once("://").map_or(url, |(_, host)| host).to_owned()
+            })
+        };
+        let nodes = self
+            .cloud_account
+            .gateway_origin
+            .effective_candidates()
+            .into_iter()
+            .map(|url| {
+                let mut shown = match self.gateway_node_label(&url).0 {
+                    Some(label) => format!("{label}   {url}"),
+                    None => url.clone(),
+                };
+                if let Some(result) = results.iter().find(|candidate| candidate.url == url) {
+                    let status = match result.latency_ms() {
+                        Some(ms) => tr!("cli_setup.candidate_latency", ms = ms),
+                        None => tr!("cli_setup.candidate_unreachable"),
+                    };
+                    shown.push_str("   · ");
+                    shown.push_str(&status);
+                }
+                (url, shown)
+            })
+            .collect();
+        let routed = self.cloud_account.gateway_origin.origin();
+        let routed_label = routed.as_deref().map(short).unwrap_or_default();
+        NodeMenu {
+            nodes,
+            routed,
+            routed_label,
+        }
+    }
+
+    /// The node in use, above the composer beside the balance: one click to
+    /// switch, for whoever's network decides which is faster today. Only
+    /// while the agents are routed through the service and it has more than
+    /// one node.
+    pub(super) fn render_gateway_node_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.cloud_account.routing_enabled || self.cloud_account.credentials.is_none() {
+            return None;
+        }
+        let menu = self.gateway_node_menu();
+        if !menu.has_choice() {
+            return None;
+        }
+        let theme = Theme::current(cx);
+        let handle = self.menu_handle("gateway-node-menu", cx);
+        let trigger = MenuChip::new("gateway-node-chip")
+            .icon("icons/globe.svg", theme.text_tertiary)
+            .label(menu.routed_label.clone())
+            .caret(false)
+            .selected(handle.is_open())
+            .max_w(px(170.0));
+        let weak = cx.entity().downgrade();
+        Some(dropdown_menu(
+            trigger,
+            "gateway-node-menu",
+            &handle,
+            MenuAlign::AboveRight,
+            move |_| menu.items(&weak),
+        ))
+    }
+
     /// The name and description a node row shows above and below its URL.
     /// The service's wording is admin-written, so it goes through content
     /// translation (display only).
-    fn gateway_node_label(&self, origin: &str) -> (Option<String>, Option<String>) {
+    pub(super) fn gateway_node_label(&self, origin: &str) -> (Option<String>, Option<String>) {
         use sub2api::gateway_origin::NodeLabel;
         let non_empty = |text: String| (!text.trim().is_empty()).then_some(text);
         match self.cloud_account.gateway_origin.node_label(origin) {

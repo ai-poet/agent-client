@@ -122,7 +122,7 @@ lines below.
 | `src/assets.rs` | `bell`/`circle-x`/`store`/`wallet` icon entries; embedded `images/logo.png` brand mark | ~12 |
 | `src/app/runtime.rs` | `cloud_balance_stale` set at the turn-settlement seam, drained in the event pump; AgentTeams: `mark_team_stale` at the same seam and `drain_team_panel` beside that drain; the two `pending_permissions` clears (rewind, submission install) keep a team member's dialogs; `submit_submission_for_session` widened to `pub(super)` (used by `cloud_subscriptions.rs`) | 11 |
 | `src/app/sidebar.rs` | both empty states' icon (no project / project open) swapped for the brand mark; announcements bell in the window header; onboarding checklist + footer chip rows in the empty state; task rows are drawn wholly by `task_rows::render_task_row` (see the task sidebar row); `localized_session_title` is `pub(super)`; the surface bar (`render_surface_bar`) in the window header where the panel toggle used to be (the toggle's `.child` line removed, fps counter kept) | 13 |
-| `src/app/composer.rs` | balance chip in the status strip | 3 |
+| `src/app/composer.rs` | balance chip and cloud API node chip (`render_gateway_node_chip`) in the status strip | 5 |
 | `resources/AppIcon*.icns`, `resources/windows/AppIcon.ico`, `resources/linux/` | brand artwork and desktop entry name | assets |
 | `scripts/bundle-linux.sh` | installs the brand icon | 5 |
 | `src/app/settings.rs` | nav entries, title arms, dispatch arms, `SETTINGS_PAGES` length (7 upstream → 13); the Providers arm dispatches to the fork's `render_providers_page` (upstream's `render_providers_settings` kept under `#[allow(dead_code)]`); `render_provider_expanded_settings`, `toggle_provider_expanded`, `set_provider_enabled`, `detection_checked_label`, `abbreviate_home_path` widened to `pub(super)`; General page appends `render_update_check_card` after the automatic-updates toggle, outside the `updater_available` guard so the row shows in every build; `open_surface_action` registered beside `toggle_right_panel_action` | ~32 |
@@ -371,7 +371,10 @@ What feeds `desired_routes` on each side:
   removed. An automatic fallback records `fallback_from` and the next check
   returns to it once it answers, so the default stays the primary. Switching
   calls `reapply_built_in_session_options`, so open built-in agent sessions
-  take the new node from their next turn. The file also carries
+  take the new node from their next turn. The node can also be switched from
+  a chip in the status strip above the composer and from a submenu of the
+  sidebar account menu (both `NodeMenu`, with the last measured latency per
+  node, "Test all" and "Manage nodes…"). The file also carries
   `network` (connect / idle timeouts for the built-in agent's model
   requests).
 - **Which group is bound** can move on its own when a platform has automatic

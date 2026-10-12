@@ -116,6 +116,10 @@ impl Waku {
             })
             .collect();
 
+        // Fork: the cloud API nodes, switchable from here as well as from
+        // the chip above the composer and Settings → Cloud Account.
+        let node_menu = self.gateway_node_menu();
+
         dropdown_menu(
             trigger,
             "cloud-account-menu",
@@ -224,7 +228,16 @@ impl Waku {
                         },
                     ));
                 }
-                if !bindings.is_empty() {
+                if node_menu.has_choice() {
+                    let node_weak = weak.clone();
+                    let submenu = node_menu.clone();
+                    items.push(MenuItem::submenu_with_value(
+                        tr!("cloud.origin_title"),
+                        node_menu.routed_label.clone(),
+                        move |_| submenu.items(&node_weak),
+                    ));
+                }
+                if !bindings.is_empty() || node_menu.has_choice() {
                     items.push(MenuItem::Separator);
                 }
 

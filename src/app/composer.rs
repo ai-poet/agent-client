@@ -3700,8 +3700,10 @@ impl Waku {
         let branch_selector = self.render_branch_selector(cx);
 
         let usage_meter = self.render_usage_meter(cx);
-        // Fork addition: managed cloud balance, beside the plan usage meter.
+        // Fork addition: managed cloud balance, beside the plan usage meter,
+        // and the cloud API node in use (`cloud_origins.rs`).
         let cloud_balance = self.render_cloud_balance_badge(cx);
+        let gateway_node = self.render_gateway_node_chip(cx);
         div()
             .flex_none()
             .px(px(20.0))
@@ -3729,6 +3731,7 @@ impl Waku {
                     .child(worktree_selector)
                     .children(branch_selector)
                     .child(div().flex_1())
+                    .children(gateway_node)
                     .children(cloud_balance)
                     .children(usage_meter),
             )

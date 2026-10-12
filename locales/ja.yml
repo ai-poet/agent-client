@@ -1751,6 +1751,7 @@ cloud.node_primary: "メインサイト（既定）"
 cloud.node_cdn: "CDN 高速化ノード"
 cloud.node_cdn_detail: "中国本土およびアジア太平洋地域からお試しください"
 cloud.node_custom: "自分で追加"
+cloud.node_manage: "ノードを管理…"
 
 settings.agent: "内蔵エージェント"
 settings.agent_keywords: "agent 内蔵 mcp ツール 権限 ルール システムプロンプト 圧縮 チーム team"

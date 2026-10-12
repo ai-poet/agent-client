@@ -1699,6 +1699,7 @@ cloud.node_primary: "主站（默认）"
 cloud.node_cdn: "CDN 加速节点"
 cloud.node_cdn_detail: "中国及亚太地区可尝试"
 cloud.node_custom: "自行添加"
+cloud.node_manage: "管理节点…"
 
 settings.agent: "内置 Agent"
 settings.agent_keywords: "agent 内置 mcp 工具 权限 规则 系统提示 压缩 团队 多智能体 team"

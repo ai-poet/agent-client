@@ -3454,6 +3454,8 @@ cloud.node_cdn_detail:
   en: "Accelerated through a CDN — worth trying from mainland China and the rest of Asia-Pacific"
 cloud.node_custom:
   en: "Added by you"
+cloud.node_manage:
+  en: "Manage nodes…"
 
 settings.agent:
   en: "Agent"
