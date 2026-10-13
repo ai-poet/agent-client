@@ -1047,7 +1047,7 @@ fn summary_prompt(
                     }
                     ContentBlock::ToolResult { tool_use_id, content, is_error } => {
                         let result_text = match content {
-                            claurst_core::types::ToolResultContent::Text(t) => t.as_str().to_string(),
+                            claurst_core::types::ToolResultContent::Text(t) => prune_for_summary(t),
                             claurst_core::types::ToolResultContent::Blocks(_) => "[complex content]".to_string(),
                         };
                         let error_flag = if is_error.unwrap_or(false) { " [ERROR]" } else { "" };
@@ -1095,6 +1095,30 @@ fn summary_prompt(
         user_content,
         previous_summary,
     }
+}
+
+/// Fork departure (Waku): a long tool result reaches the summariser as its
+/// two ends. The summary request re-reads the whole head at full price on
+/// every compaction, and a summary keeps what a result led to, not its every
+/// line — the way DeepSeek Harness prunes before summarising.
+const SUMMARY_RESULT_MAX_CHARS: usize = 8_192;
+const SUMMARY_RESULT_HEAD_CHARS: usize = 4_096;
+const SUMMARY_RESULT_TAIL_CHARS: usize = 1_024;
+
+fn prune_for_summary(text: &str) -> String {
+    let total = text.chars().count();
+    if total <= SUMMARY_RESULT_MAX_CHARS {
+        return text.to_string();
+    }
+    let at = |n: usize| text.char_indices().nth(n).map_or(text.len(), |(index, _)| index);
+    let head_end = at(SUMMARY_RESULT_HEAD_CHARS);
+    let tail_start = at(total - SUMMARY_RESULT_TAIL_CHARS);
+    format!(
+        "{}\n[… {} characters pruned for the summary …]\n{}",
+        &text[..head_end],
+        total - SUMMARY_RESULT_HEAD_CHARS - SUMMARY_RESULT_TAIL_CHARS,
+        &text[tail_start..]
+    )
 }
 
 /// Waku: the answer half of a summary — the new conversation built from the
@@ -1943,6 +1967,19 @@ pub fn collapse_search_results(messages: Vec<claurst_core::types::Message>) -> V
 
 #[cfg(test)]
 mod tests {
+
+    /// Fork (Waku): a long tool result reaches the summariser as its two
+    /// ends, cut on characters; a short one as it is.
+    #[test]
+    fn long_results_are_pruned_for_the_summary() {
+        assert_eq!(prune_for_summary("short"), "short");
+        let long = format!("{}{}", "头".repeat(9_000), "尾".repeat(2_000));
+        let pruned = prune_for_summary(&long);
+        assert!(pruned.starts_with(&"头".repeat(SUMMARY_RESULT_HEAD_CHARS)));
+        assert!(pruned.ends_with(&"尾".repeat(SUMMARY_RESULT_TAIL_CHARS)));
+        assert!(pruned.contains("characters pruned for the summary"));
+        assert!(pruned.chars().count() < 6_000);
+    }
     use super::*;
     use claurst_core::types::{Message, ToolResultContent};
 

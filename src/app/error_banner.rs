@@ -8,6 +8,7 @@
 use sub2api::paywall::{Paywall, PaywallState};
 
 use super::*;
+use crate::ui::ActivationExt as _;
 
 /// Past this the message is clipped to two lines until its details open.
 const COLLAPSED_CHARS: usize = 160;
@@ -36,9 +37,14 @@ impl Waku {
         let continuable = paywall.is_none() && super::model_retry::turn_did_work(session, turn_id);
         let goal_resume = self.pending_goal_resume(session);
 
+        // Fork: every action is keyboard-operable — focusable, with a visible
+        // ring, and Enter/Space activate it (`ActivationExt`). This banner is
+        // the way out of a failed turn and was reachable by mouse only.
         let button = |id: &str, label: String, primary: bool| {
             div()
                 .id(SharedString::from(format!("error-banner-{id}-{turn_id}")))
+                .tab_index(0)
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
                 .h(px(26.0))
                 .px(px(10.0))
                 .rounded(px(7.0))
@@ -74,21 +80,25 @@ impl Waku {
                 Paywall::PlanLimit => tr!("error_banner.upgrade_plan"),
                 Paywall::PlanInactive => tr!("error_banner.renew_plan"),
             };
-            actions = actions.child(button("paywall", label, true).on_click(cx.listener(
-                move |this, _, _, cx| match paywall {
+            actions = actions.child(button("paywall", label, true).on_activation(
+                cx,
+                move |this, _, cx| match paywall {
                     Paywall::Balance => this.open_cloud_pay_modal(cx),
                     Paywall::PlanLimit | Paywall::PlanInactive => {
                         this.open_settings_page(SettingsPage::Plans, cx);
                     }
                 },
-            )));
+            ));
         }
         if continuable {
-            actions = actions.child(button("continue", tr!("error_banner.continue"), true).on_click(
-                cx.listener(move |this, _, _, cx| {
-                    this.continue_failed_turn(session_id, cx);
-                }),
-            ));
+            actions = actions.child(
+                button("continue", tr!("error_banner.continue"), true).on_activation(
+                    cx,
+                    move |this, _, cx| {
+                        this.continue_failed_turn(session_id, cx);
+                    },
+                ),
+            );
         }
         actions = actions
             .child(
@@ -97,18 +107,19 @@ impl Waku {
                     tr!("error_banner.retry"),
                     paywall.is_none() && !continuable,
                 )
-                .on_click(cx.listener(move |this, _, _, cx| {
+                .on_activation(cx, move |this, _, cx| {
                     this.retry_failed_turn(session_id, cx);
-                })),
+                }),
             )
             .child(
-                button("copy", tr!("common.copy"), false).on_click(cx.listener(
-                    move |this, _, _, cx| {
+                button("copy", tr!("common.copy"), false).on_activation(
+                    cx,
+                    move |this, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
                         this.show_toast(tr!("common.copied"));
                         cx.notify();
                     },
-                )),
+                ),
             );
         if long {
             let label = if details_open {
@@ -116,12 +127,13 @@ impl Waku {
             } else {
                 tr!("error_banner.show_details")
             };
-            actions = actions.child(button("details", label, false).on_click(cx.listener(
-                move |this, _, _, cx| {
+            actions = actions.child(button("details", label, false).on_activation(
+                cx,
+                move |this, _, cx| {
                     this.error_details_open = (!details_open).then_some(turn_id);
                     cx.notify();
                 },
-            )));
+            ));
         }
 
         let header = div()
@@ -143,6 +155,8 @@ impl Waku {
                     .id(SharedString::from(format!(
                         "error-banner-dismiss-{turn_id}"
                     )))
+                    .tab_index(0)
+                    .focus_visible(|style| style.bg(theme.overlay_strong))
                     .size(px(22.0))
                     .rounded(px(6.0))
                     .flex()
@@ -152,9 +166,9 @@ impl Waku {
                     .hover(|button| button.bg(theme.overlay_strong))
                     .child(icon("icons/x.svg", 12.0, theme.text_tertiary))
                     .tooltip(Tooltip::text(tr!("error_banner.dismiss")))
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_activation(cx, move |this, _, cx| {
                         this.dismiss_turn_error(session_id, turn_id, cx);
-                    })),
+                    }),
             );
         let body = div()
             .id(SharedString::from(format!(

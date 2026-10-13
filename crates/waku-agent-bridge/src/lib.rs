@@ -73,8 +73,8 @@ pub use config::{
     endpoint_id, split_model,
 };
 pub use events::{
-    AgentEvent, CompactionPhase, EventSink, PermissionChoice, SubagentEvent, SubagentStatus,
-    TokenCounts,
+    AgentEvent, CompactionPhase, EventSink, FailureKind, PermissionChoice, SubagentEvent,
+    SubagentStatus, TokenCounts,
 };
 pub use goal::{GoalOp, GoalSnapshot, GoalState};
 // The refusals whose wording is the fork's rather than the engine's, so the

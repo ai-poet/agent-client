@@ -12,6 +12,7 @@
 use gpui::{KeyBinding, actions};
 
 use super::*;
+use crate::ui::ActivationExt as _;
 
 actions!(waku_permission_card, [SwallowPermissionEscape]);
 
@@ -67,6 +68,10 @@ impl Waku {
                         "permission-{}-{}",
                         permission.request_id, option.id
                     )))
+                    // Fork: reachable by Tab once the person has typed in the
+                    // composer and the card no longer takes focus itself.
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
                     .h(px(28.0))
                     .pl(px(6.0))
                     .pr(px(12.0))
@@ -110,9 +115,9 @@ impl Waku {
                         )
                     })
                     .child(SharedString::from(option.label.clone()))
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_activation(cx, move |this, _, cx| {
                         this.respond_permission(request_id.clone(), option_id.clone(), cx);
-                    })),
+                    }),
             );
         }
 

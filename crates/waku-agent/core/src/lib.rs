@@ -4535,6 +4535,9 @@ pub mod tasks {
         }
     }
 
+    /// Fork (Waku): how many lines of output a background task keeps.
+    pub const MAX_TASK_OUTPUT_LINES: usize = 10_000;
+
     /// A single background task tracked by the registry.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct BackgroundTask {
@@ -4550,6 +4553,10 @@ pub mod tasks {
         pub completed_at: Option<DateTime<Utc>>,
         /// Lines of output produced by the task.
         pub output: Vec<String>,
+        /// Fork (Waku): lines dropped from the front of `output` to keep it
+        /// within [`MAX_TASK_OUTPUT_LINES`].
+        #[serde(default)]
+        pub dropped_output_lines: u64,
         /// OS process ID, if applicable.
         pub pid: Option<u32>,
         /// Cancellation token for the task's in-process work loop. Signalling it
@@ -4569,6 +4576,7 @@ pub mod tasks {
                 started_at: Utc::now(),
                 completed_at: None,
                 output: Vec::new(),
+                dropped_output_lines: 0,
                 pid: None,
                 cancel_token: None,
             }
@@ -4612,9 +4620,19 @@ pub mod tasks {
         }
 
         /// Append a line of output to an existing task.  No-op if unknown.
+        ///
+        /// Fork (Waku): bounded. A dev server or watcher started in the
+        /// background runs for hours, and its output used to grow without
+        /// limit in the daemon's memory; past [`MAX_TASK_OUTPUT_LINES`] the
+        /// oldest lines go, a tenth at a time, and are counted.
         pub fn append_output(&self, id: &str, line: &str) {
             if let Some(mut entry) = self.tasks.get_mut(id) {
                 entry.output.push(line.to_string());
+                if entry.output.len() > MAX_TASK_OUTPUT_LINES + MAX_TASK_OUTPUT_LINES / 10 {
+                    let excess = entry.output.len() - MAX_TASK_OUTPUT_LINES;
+                    entry.output.drain(..excess);
+                    entry.dropped_output_lines += excess as u64;
+                }
             }
         }
 

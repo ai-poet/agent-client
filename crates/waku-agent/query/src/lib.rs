@@ -28,6 +28,9 @@ pub mod session_memory;
 pub mod skill_prefetch;
 
 mod runner;
+// Fork addition (Waku): the loop end to end, every tool real.
+#[cfg(test)]
+mod e2e_tests;
 pub use runner::*;
 pub use agent_tool::{AgentTool, init_team_swarm_runner};
 pub use command_queue::{CommandPriority, CommandQueue, QueuedCommand, drain_command_queue};
@@ -171,6 +174,10 @@ pub struct QueryConfig {
     /// Fork departure (Waku): how persistent this run is about transient
     /// request failures (`claurst_api::retry_policy::RetryBudget`).
     pub retry_budget: claurst_api::retry_policy::RetryBudget,
+    /// Fork departure (Waku): send `QueryEvent::Checkpoint` at each step
+    /// boundary. Off by default — each one is a copy of the whole history,
+    /// worth it only to a caller that persists the conversation.
+    pub checkpoint_history: bool,
 }
 
 impl Default for QueryConfig {
@@ -200,6 +207,7 @@ impl Default for QueryConfig {
             enabled_tools: None,
             continuation: crate::continuation::ContinuationMode::Default,
             retry_budget: claurst_api::retry_policy::RetryBudget::Default,
+            checkpoint_history: false,
         }
     }
 }
@@ -276,6 +284,12 @@ pub enum QueryEvent {
     },
     /// Waku: a model request failed and is about to be sent again.
     Retry(RetryNotice),
+    /// Fork departure (Waku): the conversation at a step boundary — the
+    /// model's tool calls just before they run, then with their results —
+    /// sent only when `QueryConfig::checkpoint_history` asks for it. The
+    /// caller writes it down, so a crash mid-turn loses at most the step in
+    /// flight instead of the whole turn.
+    Checkpoint(Vec<Message>),
 }
 
 /// Waku: what a client needs to say about a retry.
@@ -459,6 +473,21 @@ fn effective_output_style_for_turn(
     (config.output_style, config.output_style_prompt.clone())
 }
 
+/// Fork departure (Waku): send the conversation at a step boundary, when the
+/// caller asked for it (`QueryConfig::checkpoint_history`).
+fn send_checkpoint(
+    config: &QueryConfig,
+    event_tx: &Option<mpsc::UnboundedSender<QueryEvent>>,
+    messages: &[Message],
+) {
+    if !config.checkpoint_history {
+        return;
+    }
+    if let Some(tx) = event_tx {
+        let _ = tx.send(QueryEvent::Checkpoint(messages.to_vec()));
+    }
+}
+
 /// Run the agentic query loop.
 ///
 /// This sends the conversation to the API, handles tool calls in a loop, and
@@ -493,6 +522,9 @@ pub async fn run_query_loop(
     // Tracks how many consecutive max_tokens recoveries we've attempted so
     // we don't loop forever on a model that can't finish within any budget.
     let mut max_tokens_recovery_count: u32 = 0;
+    // Fork (Waku): consecutive identical calls, for a reminder to change
+    // course (`runner::repeat_guard`). One per prompt from the person.
+    let mut repeat_guard = runner::repeat_guard::RepeatGuard::default();
     // Active model — may switch to fallback on overloaded errors.
     // Agent model override takes priority over the session model when set.
     let mut effective_model = if let Some(ref agent) = config.agent_definition {
@@ -1486,6 +1518,9 @@ pub async fn run_query_loop(
                     // compatible providers (Ollama, LM Studio, etc.) return
                     // finish_reason "stop" even when tool calls are present.
                     if !tool_use_blocks.is_empty() {
+                        // Fork (Waku): the calls are on record before they
+                        // run (`QueryEvent::Checkpoint`).
+                        send_checkpoint(config, &event_tx, messages);
                         // Waku: these calls ran strictly one after another,
                         // so sub-agents asked for together ran back to back
                         // on every Responses and Chat Completions model. Each
@@ -1551,7 +1586,7 @@ pub async fn run_query_loop(
                             let (results, cancelled) =
                                 run_tool_batch(exec_futures, &tool_ctx.cancel_token).await;
                             batch_cancelled = cancelled;
-                            for ((tool_id, tool_name, _), result) in calls.iter().zip(results) {
+                            for ((tool_id, tool_name, tool_input), result) in calls.iter().zip(results) {
                                 if let Some(ref tx) = event_tx {
                                     let _ = tx.send(QueryEvent::ToolEnd {
                                         tool_name: tool_name.clone(),
@@ -1561,9 +1596,17 @@ pub async fn run_query_loop(
                                         metadata: result.metadata.clone(),
                                     });
                                 }
+                                // Fork (Waku): the model's copy carries the
+                                // repeat reminder; the transcript's does not.
+                                let content = runner::repeat_guard::with_repeat_note(
+                                    &mut repeat_guard,
+                                    tool_name,
+                                    tool_input,
+                                    result.content,
+                                );
                                 tool_results.push(ContentBlock::ToolResult {
                                     tool_use_id: tool_id.clone(),
-                                    content: claurst_core::types::ToolResultContent::Text(result.content),
+                                    content: claurst_core::types::ToolResultContent::Text(content),
                                     is_error: Some(result.is_error),
                                 });
                             }
@@ -1575,6 +1618,7 @@ pub async fn run_query_loop(
                             cost: None,
                             snapshot_patch: None,
                         });
+                        send_checkpoint(config, &event_tx, messages);
                         if batch_cancelled {
                             return QueryOutcome::Cancelled;
                         }
@@ -2287,6 +2331,10 @@ pub async fn run_query_loop(
                     blocked_result: Option<ToolResult>,
                 }
 
+                // Fork (Waku): the calls are on record before they run
+                // (`QueryEvent::Checkpoint`).
+                send_checkpoint(config, &event_tx, messages);
+
                 // Phase 1: sequential pre-hook pass.
                 let mut prepared: Vec<PreparedTool> = Vec::with_capacity(tool_blocks.len());
                 for block in tool_blocks {
@@ -2452,9 +2500,17 @@ pub async fn run_query_loop(
                         });
                     }
 
+                    // Fork (Waku): the model's copy carries the repeat
+                    // reminder; the transcript's does not.
+                    let content = runner::repeat_guard::with_repeat_note(
+                        &mut repeat_guard,
+                        &p.name,
+                        &p.input,
+                        result.content,
+                    );
                     result_blocks.push(ContentBlock::ToolResult {
                         tool_use_id: p.id.clone(),
-                        content: ToolResultContent::Text(result.content),
+                        content: ToolResultContent::Text(content),
                         is_error: if result.is_error { Some(true) } else { None },
                     });
                 }
@@ -2462,6 +2518,7 @@ pub async fn run_query_loop(
                 // Append tool results as a user message so the history remains
                 // valid (every tool_use is answered) even on cancellation.
                 messages.push(Message::user_blocks(result_blocks));
+                send_checkpoint(config, &event_tx, messages);
 
                 // If the batch was abandoned due to cancellation, stop the loop
                 // now rather than sending the (cancelled) results back to the model.
@@ -2888,6 +2945,7 @@ mod tests {
             enabled_tools: None,
             continuation: crate::continuation::ContinuationMode::Default,
             retry_budget: claurst_api::retry_policy::RetryBudget::Default,
+            checkpoint_history: false,
         }
     }
 

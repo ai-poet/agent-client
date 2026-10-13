@@ -127,6 +127,9 @@ impl Tool for FileReadTool {
             }
         };
 
+        // Fork (Waku): the model has now seen this file (`read_state`).
+        crate::read_state::record(&ctx.session_id, &path, content.as_bytes());
+
         if content.is_empty() {
             return ToolResult::success(format!(
                 "[File {} exists but is empty]",

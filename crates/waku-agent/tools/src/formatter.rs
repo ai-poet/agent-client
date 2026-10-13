@@ -47,6 +47,10 @@ pub async fn try_format_file(path: &str, ctx: &ToolContext) {
         )
         .await;
 
+        // Fork (Waku): what the formatter left is what the agent's own
+        // write now looks like (`read_state`).
+        crate::read_state::record_current(&ctx.session_id, std::path::Path::new(path));
+
         // Only apply the first matching formatter.
         break;
     }

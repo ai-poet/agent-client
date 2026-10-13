@@ -110,6 +110,11 @@ impl Tool for NotebookEditTool {
             return ToolResult::error(e.to_string());
         }
 
+        // Fork (Waku): as for Edit (`read_state`).
+        if let Some(reason) = crate::read_state::refusal(&ctx.session_id, &path) {
+            return ToolResult::error(reason);
+        }
+
         // Read notebook
         let content = match tokio::fs::read_to_string(&path).await {
             Ok(c) => c,
@@ -340,6 +345,7 @@ mod tests {
         std::fs::write(&path, serde_json::to_string_pretty(&notebook).unwrap()).unwrap();
 
         let ctx = allow_all_context(dir.path().to_path_buf());
+        crate::read_state::mark_seen(&ctx.session_id, &path);
         let res = NotebookEditTool
             .execute(
                 json!({

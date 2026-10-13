@@ -2429,6 +2429,8 @@ status.background_fact:
   en: "%{count} running in the background"
 status.goal_done:
   en: "Goal achieved"
+changes.no_git_hint:
+  en: "This folder is not a Git repository, so this turn's changes can't be reviewed or undone here. Run git init in the folder to turn that on."
 changes.undo:
   en: "Undo"
 changes.undone:
@@ -3596,6 +3598,16 @@ native.empty_turn:
   en: "%{model} ended the turn without saying anything. The request went to %{endpoint} over the %{provider} API. Try this model over a different API, or a different model."
 native.route_not_found:
   en: "%{model} was not found: the %{provider} API answered 404 at %{url}. Check the model ID and the endpoint's address. (%{detail})"
+native.failure.context_overflow:
+  en: "The conversation no longer fits the model's context window, even after compacting it automatically. Send /compact to compact it by hand, or start a new task. (%{detail})"
+native.failure.rate_limited:
+  en: "The model's API kept answering \"too many requests\", and the retries ran out. Wait a moment and retry, or pick another model. (%{detail})"
+native.failure.network:
+  en: "Could not reach the model's API, and the retries ran out. Check your network or proxy, then retry. (%{detail})"
+native.failure.auth:
+  en: "The model's API refused the key. If you use the cloud account, sign in again; for your own endpoint, check its key in Settings → Model providers. (%{detail})"
+native.failure.unavailable:
+  en: "The model's service kept failing, and the retries ran out. Retry in a while, or pick another model. (%{detail})"
 native.turn_crashed:
   en: "The built-in agent hit an internal error and stopped this turn. It will not remember this turn, but files it changed stay changed. Send your message again to retry. (%{detail})"
 native.endpoint_unavailable:

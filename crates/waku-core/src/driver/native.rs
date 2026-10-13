@@ -550,8 +550,31 @@ impl SessionStore {
         crate::persistence::StateStore::default_path().with_file_name("agent-sessions")
     }
 
+    /// The transcript, or nothing. Fork: one the bridge cannot read is set
+    /// aside first — it used to load as an empty conversation, and the next
+    /// turn's write then replaced it for good.
     fn load(&self) -> Vec<u8> {
-        std::fs::read(&self.path).unwrap_or_default()
+        let bytes = std::fs::read(&self.path).unwrap_or_default();
+        if bytes.is_empty() {
+            return bytes;
+        }
+        if let Err(error) = waku_agent_bridge::history::parse(&bytes) {
+            let aside = self.path.with_extension(format!(
+                "json.unreadable-{}",
+                unix_time_millis()
+            ));
+            let moved = std::fs::rename(&self.path, &aside);
+            report_warning(&format!(
+                "the built-in agent's transcript {} could not be read ({error}); {}",
+                self.path.display(),
+                match moved {
+                    Ok(()) => format!("kept as {} and starting empty", aside.display()),
+                    Err(error) => format!("could not set it aside ({error}), starting empty"),
+                }
+            ));
+            return Vec::new();
+        }
+        bytes
     }
 
     /// Write the transcript. Atomic, because a crash between `TurnFinished`
@@ -574,7 +597,15 @@ impl SessionStore {
             format!("could not create {}", parent.display())
         })?;
         let temporary = self.path.with_extension("json.tmp");
-        std::fs::write(&temporary, bytes)?;
+        // Fork: flushed before the rename. Written mid-turn now as well as at
+        // its end, and a rename that outruns the data leaves an empty file
+        // after a power loss.
+        {
+            use std::io::Write as _;
+            let mut file = std::fs::File::create(&temporary)?;
+            file.write_all(bytes)?;
+            file.sync_all()?;
+        }
         std::fs::rename(&temporary, &self.path)?;
         restrict_permissions(&self.path);
         Ok(())
@@ -662,6 +693,18 @@ fn localize_refusal(output: &Value) -> Option<Value> {
     trimmed
         .strip_suffix(waku_agent_bridge::PLAN_MODE_DENIAL_SUFFIX)
         .map(|_| Value::String(tr!("native.plan_mode_denied")))
+}
+
+/// Fork: a remedy-bearing failure in the user's language.
+fn failure_message(kind: waku_agent_bridge::FailureKind, detail: &str) -> String {
+    use waku_agent_bridge::FailureKind as Kind;
+    match kind {
+        Kind::ContextOverflow => tr!("native.failure.context_overflow", detail = detail),
+        Kind::RateLimited => tr!("native.failure.rate_limited", detail = detail),
+        Kind::Network => tr!("native.failure.network", detail = detail),
+        Kind::Auth => tr!("native.failure.auth", detail = detail),
+        Kind::Unavailable => tr!("native.failure.unavailable", detail = detail),
+    }
 }
 
 /// The "finished planning" dialog's body, in the user's language.
@@ -936,6 +979,9 @@ impl EventTranslator {
             AgentEvent::TurnCrashed { detail } => {
                 self.fail(tr!("native.turn_crashed", detail = detail))
             }
+            // Fork: a failure with a remedy, said in the user's language with
+            // the original kept at the end.
+            AgentEvent::TurnFailed { kind, detail } => self.fail(failure_message(kind, &detail)),
             AgentEvent::Error(message) => self.send(DriverEvent::Error(message)),
             // Fork: a request being retried, or a goal about to resume.
             AgentEvent::Retry {
