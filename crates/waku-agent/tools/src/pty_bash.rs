@@ -150,18 +150,27 @@ fn apply_restored_env(cmd: &mut portable_pty::CommandBuilder, env_vars: &HashMap
 // Background execution (identical to bash.rs — no PTY needed for background)
 // ---------------------------------------------------------------------------
 
-async fn run_in_background(command: String, cwd: PathBuf, timeout_ms: u64) -> ToolResult {
-    let task_name = format!("bg: {}", &command[..command.len().min(60)]);
+async fn run_in_background(command: String, cwd: PathBuf) -> ToolResult {
+    // Fork departure (Waku): cut the name on a character boundary. This was a
+    // byte slice, and any command whose 60th byte fell inside a multi-byte
+    // character — a Chinese `echo`, a path in any non-Latin script — panicked.
+    let task_name = format!("bg: {}", &command[..floor_char_boundary(&command, 60)]);
     let mut task = BackgroundTask::new(&task_name);
     task.pid = None;
     let task_id = global_registry().register(task);
     let task_id_clone = task_id.clone();
     let command_clone = command.clone();
 
+    // Fork departure (Waku): no deadline. This used to run under the call's
+    // `timeout`, which is the foreground one (120 s unless the model set it),
+    // so the server or watcher a background command exists for was killed two
+    // minutes after it started. It now runs until it exits, until it is
+    // cancelled (`monitor`'s cancel, the background-work panel), or until the
+    // runtime goes down with the daemon.
     tokio::spawn(async move {
-        let result = tokio::time::timeout(Duration::from_millis(timeout_ms), async {
-            // kill_on_drop: when the timeout drops this future the child must die
-            // with it, otherwise a timed-out background command leaks (#220).
+        async {
+            // kill_on_drop: when this future is dropped — the runtime shutting
+            // down — the child must die with it, otherwise it leaks (#220).
             // A PowerShell script too long for the command line runs from a
             // temporary file, which has to outlive the process.
             let mut _script_file: Option<tempfile::TempPath> = None;
@@ -263,18 +272,8 @@ async fn run_in_background(command: String, cwd: PathBuf, timeout_ms: u64) -> To
                     );
                 }
             }
-        })
-        .await;
-
-        if result.is_err() {
-            global_registry().update_status(
-                &task_id_clone,
-                claurst_core::tasks::TaskStatus::Failed(format!(
-                    "timed out after {}ms",
-                    timeout_ms
-                )),
-            );
         }
+        .await;
     });
 
     ToolResult::success(format!(
@@ -841,11 +840,11 @@ impl Tool for PtyBashTool {
                 },
                 "timeout": {
                     "type": "number",
-                    "description": "Optional timeout in milliseconds (max 600000, default 120000)"
+                    "description": "Optional timeout in milliseconds (max 600000, default 120000). Not applied with run_in_background"
                 },
                 "run_in_background": {
                     "type": "boolean",
-                    "description": "Set to true to run command in the background"
+                    "description": "Set to true to run command in the background. It keeps running until it exits or is cancelled with the monitor tool"
                 }
             },
             "required": ["command"]
@@ -913,7 +912,7 @@ impl Tool for PtyBashTool {
                 let state = shell_state_arc.lock();
                 state.cwd.clone().unwrap_or_else(|| ctx.working_dir.clone())
             };
-            return run_in_background(params.command, cwd, timeout_ms).await;
+            return run_in_background(params.command, cwd).await;
         }
 
         debug!(command = %params.command, "Executing bash command via PTY");
@@ -1221,6 +1220,57 @@ mod tests {
             "execute should return promptly after the direct child exits, took {:?}",
             elapsed
         );
+    }
+
+    /// Fork (Waku): a background command outlives the call's timeout — the
+    /// servers and watchers it is meant for were killed at the foreground
+    /// deadline — and a command in a non-Latin script no longer panics when
+    /// its task name is cut to 60 bytes.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_background_command_outlives_the_call_timeout() {
+        let tool = PtyBashTool;
+        let ctx = allow_all_context();
+        // Three bytes a character after the five of `echo `: byte 60 falls
+        // inside one.
+        let input = json!({
+            "command": "echo 后台命令后台命令后台命令后台命令后台命令后台命令; sleep 1; echo finished",
+            "timeout": 200u64,
+            "run_in_background": true,
+        });
+
+        let result = tool.execute(input, &ctx).await;
+        assert!(!result.is_error, "{}", result.content);
+        let task_id = result
+            .content
+            .lines()
+            .find_map(|line| line.strip_prefix("Task ID: "))
+            .expect("the result names its task")
+            .trim()
+            .to_string();
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let task = global_registry().get(&task_id).expect("the task is tracked");
+            if !task.is_running() {
+                assert!(
+                    matches!(task.status, claurst_core::tasks::TaskStatus::Completed),
+                    "ended as {}",
+                    task.status
+                );
+                assert!(
+                    task.output.iter().any(|line| line.trim() == "finished"),
+                    "{:?}",
+                    task.output
+                );
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the background command never finished"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
 }
 

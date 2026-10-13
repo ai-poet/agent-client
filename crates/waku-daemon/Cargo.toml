@@ -22,6 +22,9 @@ required-features = ["dev-binary"]
 anyhow = "1.0"
 serde_json = "1.0"
 sub2api = { path = "../sub2api" }
+# Fork: the daemon's log file (`logging` in `main.rs`).
+tracing = "0.1"
+tracing-subscriber = "0.3"
 waku-core = { path = "../waku-core" }
 waku-protocol = { path = "../waku-protocol" }
 

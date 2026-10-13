@@ -103,8 +103,10 @@ async fn semantic_extraction(html: &str, ctx: &ToolContext) -> Option<String> {
     };
 
     // Truncate HTML to avoid exceeding token limits
+    // Fork departure (Waku): on a character boundary, as the other cuts in
+    // this file are — a byte slice panicked on any non-ASCII page.
     let html_excerpt = if html.len() > 20000 {
-        format!("{}...", &html[..20000])
+        format!("{}...", &html[..crate::pty_bash::floor_char_boundary(html, 20000)])
     } else {
         html.to_string()
     };

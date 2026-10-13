@@ -616,6 +616,10 @@ struct EventTranslator {
     /// runs many turns under one key; a fresh feed would restart the entry
     /// ids and overwrite its earlier rows.
     member_feeds: Mutex<std::collections::HashMap<String, SubagentFeed>>,
+    /// Fork: this turn's failure, already in the user's language. The
+    /// bridge's `TurnFinished` summary is the English fallback, and the
+    /// desktop's banner prefers the summary to the error it showed.
+    failure: Mutex<Option<String>>,
 }
 
 /// What a tool call looked like when it started, so its completion can be
@@ -687,6 +691,7 @@ impl EventTranslator {
             tools: Mutex::new(std::collections::HashMap::new()),
             subagents: Mutex::new(std::collections::HashMap::new()),
             member_feeds: Mutex::new(std::collections::HashMap::new()),
+            failure: Mutex::new(None),
         }
     }
 
@@ -699,6 +704,7 @@ impl EventTranslator {
         match event {
             AgentEvent::TurnStarted => {
                 self.tools.lock().clear();
+                *self.failure.lock() = None;
                 self.send(DriverEvent::TurnStarted);
             }
             AgentEvent::Text(text) => self.send(DriverEvent::TextDelta(text)),
@@ -840,7 +846,7 @@ impl EventTranslator {
                         label: if plan {
                             plan_answer_label(choice)
                         } else {
-                            permission_label(choice)
+                            permission_label(choice, &tool_name)
                         },
                         allow: choice.is_allow(),
                     })
@@ -908,24 +914,28 @@ impl EventTranslator {
                 provider,
                 model,
                 api_base,
-            } => self.send(DriverEvent::Error(tr!(
+            } => self.fail(tr!(
                 "native.empty_turn",
                 model = model,
                 provider = provider,
                 endpoint = api_base
-            ))),
+            )),
             AgentEvent::RouteNotFound {
                 provider,
                 model,
                 url,
                 detail,
-            } => self.send(DriverEvent::Error(tr!(
+            } => self.fail(tr!(
                 "native.route_not_found",
                 model = model,
                 provider = provider,
                 url = url,
                 detail = detail
-            ))),
+            )),
+            // Fork: the turn's task panicked and the bridge settled it.
+            AgentEvent::TurnCrashed { detail } => {
+                self.fail(tr!("native.turn_crashed", detail = detail))
+            }
             AgentEvent::Error(message) => self.send(DriverEvent::Error(message)),
             // Fork: a request being retried, or a goal about to resume.
             AgentEvent::Retry {
@@ -947,6 +957,20 @@ impl EventTranslator {
             })),
             AgentEvent::TurnFinished { success, summary } => {
                 self.tools.lock().clear();
+                // Fork: the summary is the bridge's English. A failure this
+                // translator already said in the user's language is said in
+                // it again — it is what the banner keeps — and a stop is
+                // named in the user's words.
+                let localized = self.failure.lock().take();
+                let summary = if success {
+                    summary
+                } else if localized.is_some() {
+                    localized
+                } else if summary.as_deref() == Some(waku_agent_bridge::STOPPED_SUMMARY) {
+                    Some(tr!("session.stopped"))
+                } else {
+                    summary
+                };
                 self.send(DriverEvent::TurnFinished { success, summary });
             }
         }
@@ -954,6 +978,13 @@ impl EventTranslator {
 
     fn send(&self, event: DriverEvent) {
         let _ = DriverEventSink::send(&self.events, event);
+    }
+
+    /// Report this turn's failure in the user's language, and keep it for the
+    /// `TurnFinished` that follows.
+    fn fail(&self, message: String) {
+        *self.failure.lock() = Some(message.clone());
+        self.send(DriverEvent::Error(message));
     }
 
     /// One step of a sub-agent's run: its entry in the background-work
@@ -1173,12 +1204,17 @@ fn plan_answer_label(choice: waku_agent_bridge::PermissionChoice) -> String {
     }
 }
 
-fn permission_label(choice: waku_agent_bridge::PermissionChoice) -> String {
+fn permission_label(choice: waku_agent_bridge::PermissionChoice, tool_name: &str) -> String {
     use waku_agent_bridge::PermissionChoice as Choice;
+    // Fork: on the shell a durable answer covers this one command, not the
+    // tool (`waku_agent_bridge::rule_is_per_command`), and says so.
+    let per_command = waku_agent_bridge::rule_is_per_command(tool_name);
     match choice {
         Choice::AllowOnce => tr!("permission.allow_once"),
+        Choice::AllowAlways if per_command => tr!("permission.always_allow_command"),
         Choice::AllowAlways => tr!("permission.always_allow"),
         Choice::RejectOnce => tr!("common.deny"),
+        Choice::RejectAlways if per_command => tr!("permission.always_deny_command"),
         Choice::RejectAlways => tr!("permission.always_deny"),
     }
 }
@@ -1607,5 +1643,49 @@ mod tests {
             store.path.parent().and_then(Path::file_name),
             Some(std::ffi::OsStr::new("agent-sessions"))
         );
+    }
+
+    /// Fork: the banner keeps a failed turn's summary, so a failure said in
+    /// the user's language must not be replaced there by the bridge's
+    /// English, and a stop is said in the user's words too.
+    #[test]
+    fn a_failed_turn_keeps_the_localized_failure_as_its_summary() {
+        let (translator, received) = translator();
+        translator.handle(AgentEvent::TurnStarted);
+        translator.handle(AgentEvent::TurnCrashed {
+            detail: "boom".into(),
+        });
+        translator.handle(AgentEvent::TurnFinished {
+            success: false,
+            summary: Some("The agent stopped on an internal error: boom".into()),
+        });
+        let events: Vec<_> = received.try_iter().collect();
+        let shown = events
+            .iter()
+            .find_map(|event| match event {
+                DriverEvent::Error(message) => Some(message.clone()),
+                _ => None,
+            })
+            .expect("the failure is shown");
+        let kept = events
+            .iter()
+            .find_map(|event| match event {
+                DriverEvent::TurnFinished { summary, .. } => summary.clone(),
+                _ => None,
+            })
+            .expect("the turn keeps a summary");
+        assert_eq!(shown, tr!("native.turn_crashed", detail = "boom"));
+        assert_eq!(kept, shown);
+
+        translator.handle(AgentEvent::TurnStarted);
+        translator.handle(AgentEvent::TurnFinished {
+            success: false,
+            summary: Some(waku_agent_bridge::STOPPED_SUMMARY.into()),
+        });
+        let kept = received.try_iter().find_map(|event| match event {
+            DriverEvent::TurnFinished { summary, .. } => summary,
+            _ => None,
+        });
+        assert_eq!(kept, Some(tr!("session.stopped")));
     }
 }

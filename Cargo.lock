@@ -9397,6 +9397,8 @@ dependencies = [
  "libc",
  "serde_json",
  "sub2api",
+ "tracing",
+ "tracing-subscriber",
  "waku-core",
  "waku-protocol",
  "windows-sys 0.61.2",

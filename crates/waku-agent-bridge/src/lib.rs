@@ -80,9 +80,9 @@ pub use goal::{GoalOp, GoalSnapshot, GoalState};
 // The refusals whose wording is the fork's rather than the engine's, so the
 // driver can recognise them exactly and say them in the user's language.
 pub use claurst_tools::{KEEP_PLANNING_DENIAL, MISSING_PLAN_ERROR, PLAN_MODE_DENIAL_SUFFIX};
-pub use permission::EXIT_PLAN_MODE_DETAIL;
+pub use permission::{EXIT_PLAN_MODE_DETAIL, rule_is_per_command};
 pub use oneshot::one_shot;
-pub use session::AgentSession;
+pub use session::{AgentSession, STOPPED_SUMMARY};
 
 /// Fork (AgentTeams): `/agent-teams` and its profile aliases for the
 /// composer, each with the profile it starts. Empty while switched off.

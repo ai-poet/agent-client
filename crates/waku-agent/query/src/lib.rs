@@ -2352,32 +2352,61 @@ pub async fn run_query_loop(
 
                 // Phase 2: build execution futures for non-blocked tools and join them.
                 // Blocked tools yield a ready future with the pre-computed error result.
-                // Non-blocked tools execute concurrently via join_all.
                 // Each async block owns its cloned name/input so there are no lifetime issues.
-                let exec_futures: Vec<_> = prepared
+                //
+                // Fork departure (Waku): only calls that may overlap run
+                // together — sub-agents and read-only calls
+                // (`runner::tools::runs_concurrently`), the judgement the
+                // provider branch already makes. This branch joined every
+                // call of the message, writes and commands included, so two
+                // `Edit`s of one file both read the original, the second
+                // write silently undid the first, and both reported success.
+                // Each stretch of overlapping calls is one batch; every other
+                // call runs alone, in order. A blocked call is a ready result
+                // and overlaps anything.
+                let overlaps: Vec<bool> = prepared
                     .iter()
                     .map(|p| {
-                        if p.blocked_result.is_some() {
-                            let r = p.blocked_result.clone().unwrap();
-                            futures::future::Either::Left(async move { r })
-                        } else {
-                            let name = p.name.clone();
-                            let input = p.input.clone();
-                            futures::future::Either::Right(async move {
-                                execute_tool(&name, &input, tools, tool_ctx).await
-                            })
-                        }
+                        p.blocked_result.is_some()
+                            || runner::tools::runs_concurrently(&p.name, tools)
                     })
                     .collect();
+                let mut exec_results: Vec<ToolResult> = Vec::with_capacity(prepared.len());
+                let mut batch_cancelled = false;
+                for run in runner::tools::concurrency_runs(&overlaps) {
+                    if batch_cancelled {
+                        // Every call still gets its answer, so the history
+                        // stays valid.
+                        exec_results.extend(run.map(|_| ToolResult::error(TOOL_CANCELLED_MSG)));
+                        continue;
+                    }
+                    let exec_futures: Vec<_> = prepared[run]
+                        .iter()
+                        .map(|p| {
+                            if p.blocked_result.is_some() {
+                                let r = p.blocked_result.clone().unwrap();
+                                futures::future::Either::Left(async move { r })
+                            } else {
+                                let name = p.name.clone();
+                                let input = p.input.clone();
+                                futures::future::Either::Right(async move {
+                                    execute_tool(&name, &input, tools, tool_ctx).await
+                                })
+                            }
+                        })
+                        .collect();
 
-                // Run all tool futures concurrently, but race the batch against the
-                // loop's cancel token (issue #218): on cancellation the in-flight
-                // tools are abandoned promptly instead of blocking until the
-                // slowest one finishes, and a cancelled ToolResult is synthesized
-                // for EVERY tool so each tool_use still gets a matching tool_result
-                // and the message history stays well-formed.
-                let (exec_results, batch_cancelled) =
-                    run_tool_batch(exec_futures, &tool_ctx.cancel_token).await;
+                    // Run the batch's futures concurrently, but race it against the
+                    // loop's cancel token (issue #218): on cancellation the in-flight
+                    // tools are abandoned promptly instead of blocking until the
+                    // slowest one finishes, and a cancelled ToolResult is synthesized
+                    // for EVERY tool so each tool_use still gets a matching tool_result
+                    // and the message history stays well-formed.
+                    let (results, cancelled) =
+                        run_tool_batch(exec_futures, &tool_ctx.cancel_token).await;
+                    exec_results.extend(results);
+                    batch_cancelled = cancelled;
+                }
 
                 // Phase 3: post-hooks, event emission, and result block assembly.
                 // When the batch was cancelled we skip the awaiting PostToolUse

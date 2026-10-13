@@ -221,13 +221,14 @@ impl PermissionBridge {
         answer
     }
 
-    /// Record a durable decision so the same tool is not asked about again,
-    /// and so it shows up in the Permissions settings page.
+    /// Record a durable decision so the same request is not asked about
+    /// again, and so it shows up in the Permissions settings page. `pattern`
+    /// narrows the rule ([`rule_pattern`]); `None` covers the whole tool.
     ///
     /// A failure to persist is logged and swallowed: the user's answer still
     /// applies to this call. Turning a read-only settings file into a denied
     /// tool would be the worse failure.
-    fn remember(&self, tool_name: &str, action: PermissionAction) {
+    fn remember(&self, tool_name: &str, pattern: Option<&str>, action: PermissionAction) {
         let mut settings = self.settings.lock();
         let Ok(mut manager) = self.manager.lock() else {
             return;
@@ -235,18 +236,21 @@ impl PermissionBridge {
         // The engine reports through its own `ClaudeError`, `save_sync`
         // through `anyhow`; both arms land on `anyhow` so one `if let`
         // reports either.
-        let result: anyhow::Result<()> = match action {
-            PermissionAction::Allow => manager
+        let result: anyhow::Result<()> = match (action, pattern) {
+            (PermissionAction::Allow, None) => manager
                 .add_persistent_allow(tool_name, &mut settings)
+                .map_err(anyhow::Error::from),
+            (PermissionAction::Allow, Some(pattern)) => manager
+                .add_persistent_allow_path(tool_name, pattern, &mut settings)
                 .map_err(anyhow::Error::from),
             // There is no `add_persistent_deny` upstream, so this does what
             // `add_persistent_allow` does: register the rule with the live
             // manager and append the same rule to the settings file the
             // Permissions page reads back.
-            PermissionAction::Deny => {
+            (PermissionAction::Deny, pattern) => {
                 let rule = PermissionRule {
                     tool_name: Some(tool_name.to_string()),
-                    path_pattern: None,
+                    path_pattern: pattern.map(str::to_string),
                     action: PermissionAction::Deny,
                     scope: PermissionScope::Persistent,
                 };
@@ -307,6 +311,49 @@ fn detail_for(request: &PermissionRequest, reason: &str) -> String {
                 reason.to_string()
             }
         })
+}
+
+/// Fork: whether a durable answer on `tool_name` covers the one command it
+/// was given for rather than the whole tool.
+///
+/// "Always allow" on the shell wrote a rule for the tool: one click, and
+/// every command in every project ran unasked from then on — and "Always
+/// deny" refused the shell for good. The shell tools pass the command as the
+/// request's path, which is what a rule's pattern matches, so the rule now
+/// carries the command and answers exactly that command again.
+pub fn rule_is_per_command(tool_name: &str) -> bool {
+    matches!(tool_name, "Bash" | "PowerShell")
+}
+
+/// The pattern a durable answer to `request` is kept under: `Some(None)` for
+/// a rule over the whole tool, `Some(Some(pattern))` for one command, and
+/// `None` when it cannot be kept at all — a shell request without its
+/// command, which must never widen into a rule for every command.
+fn rule_pattern(request: &PermissionRequest) -> Option<Option<String>> {
+    if !rule_is_per_command(&request.tool_name) {
+        return Some(None);
+    }
+    let command = request
+        .path
+        .as_deref()
+        .filter(|command| !command.is_empty())?;
+    Some(Some(escape_glob(command)))
+}
+
+/// `text` as a glob matching exactly it — `glob::Pattern::escape`: the four
+/// characters a pattern treats specially, each in a class of its own.
+fn escape_glob(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if matches!(ch, '?' | '*' | '[' | ']') {
+            escaped.push('[');
+            escaped.push(ch);
+            escaped.push(']');
+        } else {
+            escaped.push(ch);
+        }
+    }
+    escaped
 }
 
 /// The handler installed on the engine's `ToolContext`.
@@ -454,16 +501,22 @@ impl GuiPermissionHandler {
         match self.bridge.ask(request, &reason, member) {
             PermissionChoice::AllowOnce => PermissionDecision::Allow,
             PermissionChoice::AllowAlways => {
-                self.bridge
-                    .remember(&request.tool_name, PermissionAction::Allow);
-                self.remember_for_member(&request.tool_name, PermissionAction::Allow);
+                if let Some(pattern) = rule_pattern(request) {
+                    let pattern = pattern.as_deref();
+                    self.bridge
+                        .remember(&request.tool_name, pattern, PermissionAction::Allow);
+                    self.remember_for_member(&request.tool_name, pattern, PermissionAction::Allow);
+                }
                 PermissionDecision::Allow
             }
             PermissionChoice::RejectOnce => PermissionDecision::Deny,
             PermissionChoice::RejectAlways => {
-                self.bridge
-                    .remember(&request.tool_name, PermissionAction::Deny);
-                self.remember_for_member(&request.tool_name, PermissionAction::Deny);
+                if let Some(pattern) = rule_pattern(request) {
+                    let pattern = pattern.as_deref();
+                    self.bridge
+                        .remember(&request.tool_name, pattern, PermissionAction::Deny);
+                    self.remember_for_member(&request.tool_name, pattern, PermissionAction::Deny);
+                }
                 PermissionDecision::Deny
             }
         }
@@ -473,14 +526,19 @@ impl GuiPermissionHandler {
 impl GuiPermissionHandler {
     /// A member's manager is its own: a rule the user just made "always"
     /// applies to its next call too, not only from its next turn.
-    fn remember_for_member(&self, tool_name: &str, action: PermissionAction) {
+    fn remember_for_member(
+        &self,
+        tool_name: &str,
+        pattern: Option<&str>,
+        action: PermissionAction,
+    ) {
         let Some(member) = &self.member else {
             return;
         };
         if let Ok(mut manager) = member.manager.lock() {
             manager.add_rule(PermissionRule {
                 tool_name: Some(tool_name.to_string()),
-                path_pattern: None,
+                path_pattern: pattern.map(str::to_string),
                 action,
                 scope: PermissionScope::Persistent,
             });
@@ -907,5 +965,40 @@ mod tests {
         let mut req = request();
         req.context_description = None;
         assert_eq!(detail_for(&req, "Bash wants to run a command"), "Bash wants to run a command");
+    }
+
+    /// Fork: "always" on the shell is kept for the one command it answered,
+    /// glob characters and all. A rule for the whole tool let every command
+    /// run unasked after a single click.
+    #[test]
+    fn a_durable_shell_answer_covers_only_its_command() {
+        let command = "rm -rf build/*.o && ls [ab]?";
+        let shell = PermissionRequest {
+            path: Some(command.into()),
+            ..request()
+        };
+        let pattern = rule_pattern(&shell)
+            .expect("a shell answer with its command is kept")
+            .expect("for that command");
+        let rule = PermissionRule {
+            tool_name: Some("Bash".into()),
+            path_pattern: Some(pattern),
+            action: PermissionAction::Allow,
+            scope: PermissionScope::Persistent,
+        };
+        assert!(rule.matches("Bash", Some(command)));
+        assert!(!rule.matches("Bash", Some("rm -rf build/main.o && ls ab")));
+        assert!(!rule.matches("Bash", Some("rm -rf /")));
+        assert!(!rule.matches("Bash", None));
+
+        // Without its command a shell answer is not kept at all, rather than
+        // widening into a rule for every command…
+        assert_eq!(rule_pattern(&request()), None);
+        // …and any other tool's answer still covers the tool.
+        let edit = PermissionRequest {
+            tool_name: "Edit".into(),
+            ..request()
+        };
+        assert_eq!(rule_pattern(&edit), Some(None));
     }
 }

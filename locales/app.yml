@@ -1364,6 +1364,10 @@ permission.always_allow:
   en: Always allow
 permission.always_deny:
   en: Always deny
+permission.always_allow_command:
+  en: Always allow this command
+permission.always_deny_command:
+  en: Always deny this command
 permission.a_tool:
   en: a tool
 permission.run_a_tool:
@@ -3592,6 +3596,8 @@ native.empty_turn:
   en: "%{model} ended the turn without saying anything. The request went to %{endpoint} over the %{provider} API. Try this model over a different API, or a different model."
 native.route_not_found:
   en: "%{model} was not found: the %{provider} API answered 404 at %{url}. Check the model ID and the endpoint's address. (%{detail})"
+native.turn_crashed:
+  en: "The built-in agent hit an internal error and stopped this turn. It will not remember this turn, but files it changed stay changed. Send your message again to retry. (%{detail})"
 native.endpoint_unavailable:
   en: "The endpoint this model belongs to is no longer available: it was removed, switched off, or is missing its address, key or models. Pick another model, or fix it in Settings → Model providers."
 

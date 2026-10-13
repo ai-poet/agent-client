@@ -314,9 +314,7 @@ impl AgentSession {
             (cancel, queue)
         };
 
-        rt.spawn(async move {
-            run_turn(inner, text, team_seam::PromptOrigin::User, cancel, queue).await;
-        });
+        spawn_turn(rt, inner, text, team_seam::PromptOrigin::User, cancel, queue);
     }
 
     /// Inject a message into the running turn. It reaches the conversation at
@@ -842,6 +840,107 @@ async fn forward_questions(inner: Arc<Inner>, mut rx: mpsc::UnboundedReceiver<Us
     }
 }
 
+/// Start [`run_turn`] on a task of its own, and settle the turn if that task
+/// dies.
+///
+/// Fork: the slot a turn claims is released only by `run_turn` itself, on its
+/// way out. A panic anywhere under it — the loop, a tool, the event plumbing —
+/// skipped that, and the session stayed busy for good: every later prompt
+/// became a steer nobody would drain, rewind was refused, and only a restart
+/// brought it back. The panic now stops at this task's boundary and the turn
+/// ends as failed, the transcript as it stood before the turn.
+fn spawn_turn(
+    rt: &tokio::runtime::Runtime,
+    inner: Arc<Inner>,
+    text: String,
+    origin: team_seam::PromptOrigin,
+    cancel: CancellationToken,
+    queue: CommandQueue,
+) {
+    // The slot this turn claimed, told apart from any later one by its
+    // steering list.
+    let claimed = inner.turn.lock().as_ref().map(|turn| turn.steers.clone());
+    rt.spawn(async move {
+        let turn = tokio::spawn(run_turn(inner.clone(), text, origin, cancel, queue));
+        let Err(error) = turn.await else {
+            return;
+        };
+        if !error.is_panic() {
+            return;
+        }
+        let detail = panic_text(error.into_panic());
+        tracing::error!(session = %inner.id, %detail, "agent: a turn panicked");
+        if let Some(claimed) = claimed {
+            settle_crashed_turn(&inner, &claimed, detail);
+        }
+    });
+}
+
+/// A panic's message, when it carried one.
+fn panic_text(payload: Box<dyn std::any::Any + Send>) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|text| (*text).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a panic with no message".to_owned())
+}
+
+/// What [`run_turn`] does on its way out, for a turn whose task panicked —
+/// less what needed the state that went down with it. The history is left as
+/// it was before the turn: the loop's copy is gone, and a transcript is never
+/// rebuilt from guesses.
+fn settle_crashed_turn(inner: &Arc<Inner>, claimed: &Arc<Mutex<Vec<String>>>, detail: String) {
+    let turn = {
+        let mut guard = inner.turn.lock();
+        // Only the slot this turn claimed. A turn that panicked after letting
+        // it go — while it was reporting — has nothing left to settle, and a
+        // newer turn may hold the slot by now.
+        if !guard
+            .as_ref()
+            .is_some_and(|turn| Arc::ptr_eq(&turn.steers, claimed))
+        {
+            return;
+        }
+        guard.take()
+    };
+    let Some(turn) = turn else {
+        return;
+    };
+    // Whatever the loop left running — a tool, a sub-agent — hangs off its
+    // token, and its dialogs off the bridge, as on a stop.
+    turn.cancel.cancel();
+    inner
+        .bridge
+        .release_where(|id| !agent_teams::requests::is_member_request(id));
+    if let Some(browser) = &inner.browser {
+        browser.release_all();
+    }
+    inner.questions.lock().clear();
+    inner.subagents.end_turn();
+    let leftover: Vec<String> = turn.steers.lock().drain(..).collect();
+
+    inner.events.emit(AgentEvent::TurnCrashed {
+        detail: detail.clone(),
+    });
+    inner.events.emit(AgentEvent::TurnFinished {
+        success: false,
+        summary: Some(format!("The agent stopped on an internal error: {detail}")),
+    });
+    inner
+        .events
+        .emit(AgentEvent::BackgroundWork(team_seam::snapshot(inner)));
+    for message in leftover {
+        inner.events.emit(AgentEvent::SteerRejected {
+            message,
+            reason: "the turn stopped on an internal error".to_string(),
+        });
+    }
+    // Fork (AgentTeams): team mail the turn never took goes again.
+    inner
+        .team
+        .after_turn(team_seam::queued_texts(&turn.queue), false);
+}
+
 async fn run_turn(
     inner: Arc<Inner>,
     prompt: String,
@@ -1028,7 +1127,11 @@ async fn run_turn(
         _ => None,
     };
     let (success, summary) = describe(outcome, produced_output, &route);
-    if !success && let Some(reason) = summary.clone() {
+    // Fork: a stop is not an error. The desktop ended the turn the moment the
+    // person pressed Stop, so an `Error` arriving after it was shown on its
+    // own, as a toast reading "Stopped." in English; the summary below still
+    // says it, for a client that did not stop the turn itself.
+    if !success && !cancelled && let Some(reason) = summary.clone() {
         // The empty turn and the 404 get events of their own so the desktop
         // can say them in the user's language; the sentence in `summary` is
         // the fallback for any client that does not.
@@ -1155,7 +1258,7 @@ async fn compact_now(inner: Arc<Inner>, instructions: Option<String>, cancel: Ca
     let (success, summary) = match result {
         None => {
             report(CompactionPhase::Failed, None);
-            (false, Some("Stopped.".to_string()))
+            (false, Some(STOPPED_SUMMARY.to_string()))
         }
         Some(Ok(mut compacted)) if compacted.len() < messages.len() => {
             history::settle_compaction(weight_before, &mut compacted);
@@ -1389,6 +1492,11 @@ fn is_not_found(error: &ClaudeError) -> bool {
     }
 }
 
+/// The summary of a turn that was stopped. Exported so the desktop can say it
+/// in the user's language, as it does the plan-mode refusals: matched against
+/// the constant, not the prose.
+pub const STOPPED_SUMMARY: &str = "Stopped.";
+
 /// `MaxTokens` counts as a success: the model produced an answer and the
 /// engine's own recovery already ran. Everything else that is not `EndTurn`
 /// carries a reason the user can act on — reporting a turn that produced
@@ -1418,7 +1526,7 @@ fn describe(
             true,
             Some("The model reached its output limit for this turn.".to_string()),
         ),
-        QueryOutcome::Cancelled => (false, Some("Stopped.".to_string())),
+        QueryOutcome::Cancelled => (false, Some(STOPPED_SUMMARY.to_string())),
         QueryOutcome::BudgetExceeded { cost_usd, limit_usd } => (
             false,
             Some(format!(

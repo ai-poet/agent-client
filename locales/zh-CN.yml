@@ -671,6 +671,8 @@ permission.feedback_placeholder: "告诉智能体应该怎么做…"
 permission.allow_for_session: 本次任务允许
 permission.always_allow: 始终允许
 permission.always_deny: 始终拒绝
+permission.always_allow_command: 始终允许此命令
+permission.always_deny_command: 始终拒绝此命令
 permission.a_tool: 某个工具
 permission.run_a_tool: 运行工具
 permission.run_a_tool_lower: 运行工具
@@ -1770,6 +1772,7 @@ native.vendor.custom: "自定义"
 
 native.empty_turn: "%{model} 结束了这一轮，但什么也没说。请求发往 %{endpoint}，走的是 %{provider} 接口。可以给这个模型换一种接口格式，或者换个模型。"
 native.route_not_found: "找不到 %{model}：%{provider} 接口在 %{url} 返回了 404。请检查模型 ID 和接口地址。（%{detail}）"
+native.turn_crashed: "内置 Agent 遇到内部错误，已停止这一轮。它不会记得这一轮的内容，但这一轮改过的文件会保留修改。重新发送消息即可重试。（%{detail}）"
 native.endpoint_unavailable: "这个模型所属的接口已不可用：可能已被删除、停用，或缺少地址、密钥或模型。请换一个模型，或到「设置 → 模型接口」修复。"
 
 models.wire_format: "接口格式"

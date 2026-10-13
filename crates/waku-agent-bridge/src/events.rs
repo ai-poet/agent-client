@@ -157,6 +157,12 @@ pub enum AgentEvent {
         detail: String,
         between_turns: bool,
     },
+    /// Fork: the turn's task panicked. The turn is settled as failed right
+    /// after; this carries the panic's message so the desktop can say what
+    /// happened in the user's language.
+    TurnCrashed {
+        detail: String,
+    },
     /// Something went wrong. A turn may still settle afterwards.
     Error(String),
     /// The turn is over. `success` is false for cancellation, an unrecoverable

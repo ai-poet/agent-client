@@ -117,7 +117,8 @@ impl Tool for SendMessageTool {
             .as_deref()
             .unwrap_or_else(|| {
                 let s = params.message.as_str();
-                &s[..s.len().min(60)]
+                // Fork departure (Waku): on a character boundary, not a byte.
+                &s[..crate::pty_bash::floor_char_boundary(s, 60)]
             });
 
         if params.to == "*" {
