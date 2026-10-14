@@ -1077,6 +1077,12 @@ async fn run_turn(
     // The engine's heuristic answers a fixed guess for every model it does
     // not know, which is no basis for a percentage.
     let context_window = crate::config::context_window_for(&config, &query.model, &route.provider);
+    // Fork: the engine compacts against the window the meter shows. Its own
+    // lookup missed models the bundled registry does not file under their
+    // owner, fell back to a 256k guess, and compacted a 1M-window session
+    // at ~205k while the ring read 20%. Set after the sub-agent's copy was
+    // taken: a child may run another model.
+    query.context_window = context_window;
 
     let client = inner.client.lock().clone();
     inner.subagents.begin_turn(TurnScope {
@@ -1451,6 +1457,9 @@ async fn forward_events(
     weight_before: usize,
 ) {
     let mut decoder = StreamDecoder::new(context_window);
+    // Fork: what the last model request reported, for moving the meter as
+    // soon as a step's tool results are in rather than at the next answer.
+    let mut reported: Option<u64> = None;
     while let Some(event) = rx.recv().await {
         // Fork: the conversation at a step boundary. Written to the session's
         // store as the turn's end writes it, so a crash or a killed daemon
@@ -1459,6 +1468,21 @@ async fn forward_events(
         // again (`history::deserialize`). `inner.history` still changes only
         // at the turn's end: the turn owns its copy until then.
         if let QueryEvent::Checkpoint(mut messages) = event {
+            // After a step's calls ran, the results are what the next request
+            // adds: the meter shows the last report plus an estimate of them,
+            // which the next report then replaces.
+            if let Some(base) = reported
+                && let Some(answer) = messages
+                    .iter()
+                    .rposition(|message| message.role == claurst_core::types::Role::Assistant)
+                && answer + 1 < messages.len()
+            {
+                let added = claurst_query::estimate_context_tokens(&messages[answer + 1..], None);
+                inner.events.emit(AgentEvent::Usage {
+                    context_tokens: Some(base.saturating_add(added)),
+                    context_window,
+                });
+            }
             history::settle_compaction(weight_before, &mut messages);
             inner
                 .events
@@ -1466,6 +1490,13 @@ async fn forward_events(
             continue;
         }
         for mut translated in decoder.push(event) {
+            if let AgentEvent::Usage {
+                context_tokens: Some(tokens),
+                ..
+            } = &translated
+            {
+                reported = Some(*tokens);
+            }
             if let AgentEvent::TokenUsage { session, .. } = &mut translated {
                 *session = crate::events::TokenCounts::from_tracker(&inner.cost_tracker);
             }

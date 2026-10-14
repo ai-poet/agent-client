@@ -178,6 +178,13 @@ pub struct QueryConfig {
     /// boundary. Off by default — each one is a copy of the whole history,
     /// worth it only to a caller that persists the conversation.
     pub checkpoint_history: bool,
+    /// Fork departure (Waku): the model's context window as the caller
+    /// knows it — the one its usage meter shows. When set it wins over
+    /// `compact::resolve_context_window`, which only knows models the bundled
+    /// registry files under the provider that owns them (case-sensitively):
+    /// a gateway model it did not recognise fell back to a 256k guess, and a
+    /// 1M-window session compacted at ~205k while the meter read 20%.
+    pub context_window: Option<u64>,
 }
 
 impl Default for QueryConfig {
@@ -208,6 +215,7 @@ impl Default for QueryConfig {
             continuation: crate::continuation::ContinuationMode::Default,
             retry_budget: claurst_api::retry_policy::RetryBudget::Default,
             checkpoint_history: false,
+            context_window: None,
         }
     }
 }
@@ -1998,11 +2006,14 @@ pub async fn run_query_loop(
         // for every provider — 1M Gemini/GPT windows, 32k local models) and
         // fall back to the Claude-centric heuristic only when the registry has
         // no usable entry. All threshold logic below keys off this. (#216)
-        let context_window = compact::resolve_context_window(
-            config.model_registry.as_deref(),
-            tool_ctx.config.provider.as_deref().unwrap_or("anthropic"),
-            &config.model,
-        );
+        // Fork (Waku): the caller's window first (`QueryConfig::context_window`).
+        let context_window = config.context_window.unwrap_or_else(|| {
+            compact::resolve_context_window(
+                config.model_registry.as_deref(),
+                tool_ctx.config.provider.as_deref().unwrap_or("anthropic"),
+                &config.model,
+            )
+        });
 
         // Numerator for every threshold below: prefer the REAL context-token
         // count the provider just reported (input + cache-read + cache-creation
@@ -2740,8 +2751,10 @@ async fn manage_provider_context(
     event_tx: Option<&mpsc::UnboundedSender<QueryEvent>>,
     cancel: &tokio_util::sync::CancellationToken,
 ) {
-    let context_window =
-        compact::resolve_context_window(config.model_registry.as_deref(), provider_id, model_id);
+    // Fork (Waku): the caller's window first, as on the Messages branch.
+    let context_window = config.context_window.unwrap_or_else(|| {
+        compact::resolve_context_window(config.model_registry.as_deref(), provider_id, model_id)
+    });
     let context_tokens = provider_context_tokens(messages, usage);
     emit_token_warning(context_tokens, context_window, event_tx);
     auto_compact_on_route(
@@ -2946,6 +2959,7 @@ mod tests {
             continuation: crate::continuation::ContinuationMode::Default,
             retry_budget: claurst_api::retry_policy::RetryBudget::Default,
             checkpoint_history: false,
+            context_window: None,
         }
     }
 
