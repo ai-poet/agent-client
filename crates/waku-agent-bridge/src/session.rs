@@ -1457,9 +1457,9 @@ async fn forward_events(
     weight_before: usize,
 ) {
     let mut decoder = StreamDecoder::new(context_window);
-    // Fork: what the last model request reported, for moving the meter as
-    // soon as a step's tool results are in rather than at the next answer.
-    let mut reported: Option<u64> = None;
+    // Fork: the meter between reports (`LiveMeter`) — after a step's tools
+    // ran and while an answer streams, not only when a request reports.
+    let mut meter = crate::events::LiveMeter::default();
     while let Some(event) = rx.recv().await {
         // Fork: the conversation at a step boundary. Written to the session's
         // store as the turn's end writes it, so a crash or a killed daemon
@@ -1469,17 +1469,11 @@ async fn forward_events(
         // at the turn's end: the turn owns its copy until then.
         if let QueryEvent::Checkpoint(mut messages) = event {
             // After a step's calls ran, the results are what the next request
-            // adds: the meter shows the last report plus an estimate of them,
+            // adds: the meter shows the last figure plus an estimate of them,
             // which the next report then replaces.
-            if let Some(base) = reported
-                && let Some(answer) = messages
-                    .iter()
-                    .rposition(|message| message.role == claurst_core::types::Role::Assistant)
-                && answer + 1 < messages.len()
-            {
-                let added = claurst_query::estimate_context_tokens(&messages[answer + 1..], None);
+            if let Some(tokens) = meter.after_step(&messages) {
                 inner.events.emit(AgentEvent::Usage {
-                    context_tokens: Some(base.saturating_add(added)),
+                    context_tokens: Some(tokens),
                     context_window,
                 });
             }
@@ -1489,13 +1483,22 @@ async fn forward_events(
                 .emit(AgentEvent::HistoryCommitted(history::serialize(&messages)));
             continue;
         }
+        // Fork: the answer streaming in moves the meter a few times a second.
+        if let QueryEvent::Stream(frame) = &event
+            && let Some(tokens) = meter.observe(frame, std::time::Instant::now())
+        {
+            inner.events.emit(AgentEvent::Usage {
+                context_tokens: Some(tokens),
+                context_window,
+            });
+        }
         for mut translated in decoder.push(event) {
             if let AgentEvent::Usage {
                 context_tokens: Some(tokens),
                 ..
             } = &translated
             {
-                reported = Some(*tokens);
+                meter.settle(*tokens);
             }
             if let AgentEvent::TokenUsage { session, .. } = &mut translated {
                 *session = crate::events::TokenCounts::from_tracker(&inner.cost_tracker);
