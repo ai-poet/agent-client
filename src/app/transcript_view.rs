@@ -1517,11 +1517,14 @@ impl Waku {
     ) -> Option<AnyElement> {
         let session = self.selected_session()?;
         let turn = session.turns.iter().find(|turn| turn.id == turn_id)?;
-        let checkpoint = turn
+        let Some(checkpoint) = turn
             .checkpoint
             .as_ref()
             .filter(|checkpoint| checkpoint.status == CheckpointStatus::Ready)
-            .filter(|checkpoint| !checkpoint.files.is_empty())?;
+            .filter(|checkpoint| !checkpoint.files.is_empty())
+        else {
+            return no_checkpoint_hint(session, turn, theme);
+        };
 
         let files = checkpoint.files.as_slice();
         let additions = checkpoint.additions;
@@ -3533,4 +3536,36 @@ mod live_reasoning_window_tests {
         let content = "a".repeat(LIVE_REASONING_WINDOW_MAX);
         assert_eq!(live_reasoning_window_anchor(7, &content), 7);
     }
+}
+
+/// Fork: why a turn that changed files has no card. Outside a Git repository
+/// no turn checkpoint is taken, so review, undo and edit-and-resend are not
+/// offered; they used to vanish without a word.
+fn no_checkpoint_hint(
+    session: &AgentSession,
+    turn: &crate::model::AgentTurn,
+    theme: &Theme,
+) -> Option<AnyElement> {
+    let unavailable = turn
+        .checkpoint
+        .as_ref()
+        .is_some_and(|checkpoint| checkpoint.status == CheckpointStatus::Unavailable);
+    let changed_files = session
+        .transcript_blocks
+        .iter()
+        .filter(|block| block.turn_id == Some(turn.id))
+        .flat_map(|block| block.activities.iter())
+        .any(|activity| activity.kind == ActivityKind::FileChange);
+    if !unavailable || !changed_files {
+        return None;
+    }
+    Some(
+        div()
+            .w_full()
+            .text_size(sp(12.0))
+            .line_height(sp(16.0))
+            .text_color(theme.text_tertiary)
+            .child(tr!("changes.no_git_hint"))
+            .into_any_element(),
+    )
 }

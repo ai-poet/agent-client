@@ -17,6 +17,14 @@ use claurst_core::ToolDefinition;
 use claurst_tools::{PermissionLevel, Tool, ToolContext, ToolResult};
 use serde_json::Value;
 
+/// Fork: how long one MCP call may take before it is abandoned.
+///
+/// The engine's MCP client sets no deadline on a call, so a server that hung
+/// held the turn until the person pressed Stop — never, in an unattended
+/// goal. Ten minutes is far past any tool that is working (image generation
+/// and a desktop-control script included) and still ends a stuck one.
+const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
 pub struct McpTool {
     definition: ToolDefinition,
     server: String,
@@ -85,7 +93,23 @@ impl Tool for McpTool {
         }
 
         let arguments = (!input.is_null()).then_some(input);
-        match self.manager.call_tool(&self.definition.name, arguments).await {
+        let call = self.manager.call_tool(&self.definition.name, arguments);
+        let Ok(outcome) = tokio::time::timeout(CALL_TIMEOUT, call).await else {
+            tracing::warn!(
+                server = %self.server,
+                tool = self.bare_name(),
+                "agent: an MCP call timed out"
+            );
+            return ToolResult::error(format!(
+                "MCP tool `{}` on `{}` did not answer within {} minutes and was abandoned. \
+                 The server may be stuck. Do not call it again in a loop; if it keeps \
+                 happening, tell the user.",
+                self.bare_name(),
+                self.server,
+                CALL_TIMEOUT.as_secs() / 60
+            ));
+        };
+        match outcome {
             Ok(result) => {
                 // The text is the engine's own rendering, which reduces an
                 // image to a 32-character preview so the context is never

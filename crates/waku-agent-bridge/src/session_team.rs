@@ -14,7 +14,7 @@ use crate::background::{self, BackgroundEntry};
 use crate::config::AgentStartOptions;
 use crate::team::{CaptainPort, CaptainShared, Wake};
 
-use super::{AgentSession, Inner, ToolSets, Turn, run_turn};
+use super::{AgentSession, Inner, ToolSets, Turn, spawn_turn};
 
 /// Who a turn's prompt came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,9 +80,7 @@ impl CaptainPort for Port {
             });
             (cancel, queue)
         };
-        rt.spawn(async move {
-            run_turn(inner, text, PromptOrigin::Team, cancel, queue).await;
-        });
+        spawn_turn(rt, inner, text, PromptOrigin::Team, cancel, queue);
         Wake::Started
     }
 

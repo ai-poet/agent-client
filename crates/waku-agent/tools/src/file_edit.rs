@@ -91,6 +91,12 @@ impl Tool for FileEditTool {
             return ToolResult::error(e.to_string());
         }
 
+        // Fork (Waku): never on a file the model has not read, or one that
+        // changed since (`read_state`).
+        if let Some(reason) = crate::read_state::refusal(&ctx.session_id, &path) {
+            return ToolResult::error(reason);
+        }
+
         // Read current content
         let content = match tokio::fs::read_to_string(&path).await {
             Ok(c) => c,
@@ -176,6 +182,41 @@ mod tests {
     use super::*;
     use crate::test_support::allow_all_context;
 
+    /// Fork (Waku): an edit is refused on a file the model never read and on
+    /// one that changed after it read it; reading it again lets it through,
+    /// and the agent's own write counts as seen.
+    #[tokio::test]
+    async fn edits_need_a_current_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guarded.txt");
+        std::fs::write(&path, "alpha\n").unwrap();
+        let mut ctx = allow_all_context(dir.path().to_path_buf());
+        ctx.session_id = "edits-need-a-current-read".to_string();
+        let file = path.to_string_lossy().to_string();
+        let edit = |old: &str, new: &str| {
+            json!({"file_path": file.clone(), "old_string": old, "new_string": new})
+        };
+        let read = || json!({"file_path": file.clone()});
+
+        let res = FileEditTool.execute(edit("alpha", "beta"), &ctx).await;
+        assert!(res.is_error && res.content.contains("has not been read"), "{}", res.content);
+
+        crate::file_read::FileReadTool.execute(read(), &ctx).await;
+        std::fs::write(&path, "alpha, changed by the person\n").unwrap();
+        let res = FileEditTool.execute(edit("alpha", "beta"), &ctx).await;
+        assert!(res.is_error && res.content.contains("has changed"), "{}", res.content);
+
+        crate::file_read::FileReadTool.execute(read(), &ctx).await;
+        let res = FileEditTool.execute(edit("alpha", "beta"), &ctx).await;
+        assert!(!res.is_error, "{}", res.content);
+        let res = FileEditTool.execute(edit("beta", "gamma"), &ctx).await;
+        assert!(!res.is_error, "{}", res.content);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "gamma, changed by the person\n"
+        );
+    }
+
     /// #225: editing a CRLF file must keep CRLF; only the edited line changes.
     #[tokio::test]
     async fn edit_crlf_file_preserves_crlf() {
@@ -185,6 +226,7 @@ mod tests {
         std::fs::write(&path, original).unwrap();
 
         let ctx = allow_all_context(dir.path().to_path_buf());
+        crate::read_state::mark_seen(&ctx.session_id, &path);
         let res = FileEditTool
             .execute(
                 json!({
@@ -213,6 +255,7 @@ mod tests {
         std::fs::write(&path, original).unwrap();
 
         let ctx = allow_all_context(dir.path().to_path_buf());
+        crate::read_state::mark_seen(&ctx.session_id, &path);
         let res = FileEditTool
             .execute(
                 json!({

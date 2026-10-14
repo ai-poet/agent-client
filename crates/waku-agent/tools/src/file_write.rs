@@ -25,7 +25,8 @@ impl Tool for FileWriteTool {
 
     fn description(&self) -> &str {
         "Writes a file to the local filesystem. This tool will overwrite the existing \
-         file if there is one. Prefer the Edit tool for modifying existing files. \
+         file if there is one; an existing file must be read with the Read tool first. \
+         Prefer the Edit tool for modifying existing files. \
          Only use this tool to create new files or for complete rewrites."
     }
 
@@ -82,6 +83,14 @@ impl Tool for FileWriteTool {
         }
 
         let existed = path.exists();
+        // Fork (Waku): an existing file is replaced only once the model has
+        // read it and it has not changed since (`read_state`); a new one may
+        // always be created.
+        if existed {
+            if let Some(reason) = crate::read_state::refusal(&ctx.session_id, &path) {
+                return ToolResult::error(reason);
+            }
+        }
         let before_content = if existed {
             match tokio::fs::read(&path).await {
                 Ok(bytes) => bytes,

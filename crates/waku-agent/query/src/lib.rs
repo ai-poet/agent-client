@@ -28,6 +28,9 @@ pub mod session_memory;
 pub mod skill_prefetch;
 
 mod runner;
+// Fork addition (Waku): the loop end to end, every tool real.
+#[cfg(test)]
+mod e2e_tests;
 pub use runner::*;
 pub use agent_tool::{AgentTool, init_team_swarm_runner};
 pub use command_queue::{CommandPriority, CommandQueue, QueuedCommand, drain_command_queue};
@@ -171,6 +174,17 @@ pub struct QueryConfig {
     /// Fork departure (Waku): how persistent this run is about transient
     /// request failures (`claurst_api::retry_policy::RetryBudget`).
     pub retry_budget: claurst_api::retry_policy::RetryBudget,
+    /// Fork departure (Waku): send `QueryEvent::Checkpoint` at each step
+    /// boundary. Off by default — each one is a copy of the whole history,
+    /// worth it only to a caller that persists the conversation.
+    pub checkpoint_history: bool,
+    /// Fork departure (Waku): the model's context window as the caller
+    /// knows it — the one its usage meter shows. When set it wins over
+    /// `compact::resolve_context_window`, which only knows models the bundled
+    /// registry files under the provider that owns them (case-sensitively):
+    /// a gateway model it did not recognise fell back to a 256k guess, and a
+    /// 1M-window session compacted at ~205k while the meter read 20%.
+    pub context_window: Option<u64>,
 }
 
 impl Default for QueryConfig {
@@ -200,6 +214,8 @@ impl Default for QueryConfig {
             enabled_tools: None,
             continuation: crate::continuation::ContinuationMode::Default,
             retry_budget: claurst_api::retry_policy::RetryBudget::Default,
+            checkpoint_history: false,
+            context_window: None,
         }
     }
 }
@@ -276,6 +292,12 @@ pub enum QueryEvent {
     },
     /// Waku: a model request failed and is about to be sent again.
     Retry(RetryNotice),
+    /// Fork departure (Waku): the conversation at a step boundary — the
+    /// model's tool calls just before they run, then with their results —
+    /// sent only when `QueryConfig::checkpoint_history` asks for it. The
+    /// caller writes it down, so a crash mid-turn loses at most the step in
+    /// flight instead of the whole turn.
+    Checkpoint(Vec<Message>),
 }
 
 /// Waku: what a client needs to say about a retry.
@@ -459,6 +481,21 @@ fn effective_output_style_for_turn(
     (config.output_style, config.output_style_prompt.clone())
 }
 
+/// Fork departure (Waku): send the conversation at a step boundary, when the
+/// caller asked for it (`QueryConfig::checkpoint_history`).
+fn send_checkpoint(
+    config: &QueryConfig,
+    event_tx: &Option<mpsc::UnboundedSender<QueryEvent>>,
+    messages: &[Message],
+) {
+    if !config.checkpoint_history {
+        return;
+    }
+    if let Some(tx) = event_tx {
+        let _ = tx.send(QueryEvent::Checkpoint(messages.to_vec()));
+    }
+}
+
 /// Run the agentic query loop.
 ///
 /// This sends the conversation to the API, handles tool calls in a loop, and
@@ -493,6 +530,9 @@ pub async fn run_query_loop(
     // Tracks how many consecutive max_tokens recoveries we've attempted so
     // we don't loop forever on a model that can't finish within any budget.
     let mut max_tokens_recovery_count: u32 = 0;
+    // Fork (Waku): consecutive identical calls, for a reminder to change
+    // course (`runner::repeat_guard`). One per prompt from the person.
+    let mut repeat_guard = runner::repeat_guard::RepeatGuard::default();
     // Active model — may switch to fallback on overloaded errors.
     // Agent model override takes priority over the session model when set.
     let mut effective_model = if let Some(ref agent) = config.agent_definition {
@@ -1323,7 +1363,12 @@ pub async fn run_query_loop(
                                                     Some(claurst_api::provider_types::StopReason::ContentFiltered) => "content_filtered".to_string(),
                                                     Some(claurst_api::provider_types::StopReason::EndTurn) => "end_turn".to_string(),
                                                     Some(claurst_api::provider_types::StopReason::Other(s)) => s.clone(),
-                                                    None => "end_turn".to_string(),
+                                                    // Fork (Waku): a usage-only delta — the
+                                                    // spec's usage chunk comes after the
+                                                    // finish chunk — says nothing about why
+                                                    // the answer stopped; it used to reset a
+                                                    // `max_tokens` stop to `end_turn`.
+                                                    None => std::mem::take(&mut stop_str),
                                                 };
                                                 if let Some(u) = u {
                                                     merge_provider_stream_usage(&mut usage, u);
@@ -1486,6 +1531,9 @@ pub async fn run_query_loop(
                     // compatible providers (Ollama, LM Studio, etc.) return
                     // finish_reason "stop" even when tool calls are present.
                     if !tool_use_blocks.is_empty() {
+                        // Fork (Waku): the calls are on record before they
+                        // run (`QueryEvent::Checkpoint`).
+                        send_checkpoint(config, &event_tx, messages);
                         // Waku: these calls ran strictly one after another,
                         // so sub-agents asked for together ran back to back
                         // on every Responses and Chat Completions model. Each
@@ -1551,7 +1599,7 @@ pub async fn run_query_loop(
                             let (results, cancelled) =
                                 run_tool_batch(exec_futures, &tool_ctx.cancel_token).await;
                             batch_cancelled = cancelled;
-                            for ((tool_id, tool_name, _), result) in calls.iter().zip(results) {
+                            for ((tool_id, tool_name, tool_input), result) in calls.iter().zip(results) {
                                 if let Some(ref tx) = event_tx {
                                     let _ = tx.send(QueryEvent::ToolEnd {
                                         tool_name: tool_name.clone(),
@@ -1561,9 +1609,17 @@ pub async fn run_query_loop(
                                         metadata: result.metadata.clone(),
                                     });
                                 }
+                                // Fork (Waku): the model's copy carries the
+                                // repeat reminder; the transcript's does not.
+                                let content = runner::repeat_guard::with_repeat_note(
+                                    &mut repeat_guard,
+                                    tool_name,
+                                    tool_input,
+                                    result.content,
+                                );
                                 tool_results.push(ContentBlock::ToolResult {
                                     tool_use_id: tool_id.clone(),
-                                    content: claurst_core::types::ToolResultContent::Text(result.content),
+                                    content: claurst_core::types::ToolResultContent::Text(content),
                                     is_error: Some(result.is_error),
                                 });
                             }
@@ -1575,6 +1631,7 @@ pub async fn run_query_loop(
                             cost: None,
                             snapshot_patch: None,
                         });
+                        send_checkpoint(config, &event_tx, messages);
                         if batch_cancelled {
                             return QueryOutcome::Cancelled;
                         }
@@ -1954,11 +2011,14 @@ pub async fn run_query_loop(
         // for every provider — 1M Gemini/GPT windows, 32k local models) and
         // fall back to the Claude-centric heuristic only when the registry has
         // no usable entry. All threshold logic below keys off this. (#216)
-        let context_window = compact::resolve_context_window(
-            config.model_registry.as_deref(),
-            tool_ctx.config.provider.as_deref().unwrap_or("anthropic"),
-            &config.model,
-        );
+        // Fork (Waku): the caller's window first (`QueryConfig::context_window`).
+        let context_window = config.context_window.unwrap_or_else(|| {
+            compact::resolve_context_window(
+                config.model_registry.as_deref(),
+                tool_ctx.config.provider.as_deref().unwrap_or("anthropic"),
+                &config.model,
+            )
+        });
 
         // Numerator for every threshold below: prefer the REAL context-token
         // count the provider just reported (input + cache-read + cache-creation
@@ -2287,6 +2347,10 @@ pub async fn run_query_loop(
                     blocked_result: Option<ToolResult>,
                 }
 
+                // Fork (Waku): the calls are on record before they run
+                // (`QueryEvent::Checkpoint`).
+                send_checkpoint(config, &event_tx, messages);
+
                 // Phase 1: sequential pre-hook pass.
                 let mut prepared: Vec<PreparedTool> = Vec::with_capacity(tool_blocks.len());
                 for block in tool_blocks {
@@ -2352,32 +2416,61 @@ pub async fn run_query_loop(
 
                 // Phase 2: build execution futures for non-blocked tools and join them.
                 // Blocked tools yield a ready future with the pre-computed error result.
-                // Non-blocked tools execute concurrently via join_all.
                 // Each async block owns its cloned name/input so there are no lifetime issues.
-                let exec_futures: Vec<_> = prepared
+                //
+                // Fork departure (Waku): only calls that may overlap run
+                // together — sub-agents and read-only calls
+                // (`runner::tools::runs_concurrently`), the judgement the
+                // provider branch already makes. This branch joined every
+                // call of the message, writes and commands included, so two
+                // `Edit`s of one file both read the original, the second
+                // write silently undid the first, and both reported success.
+                // Each stretch of overlapping calls is one batch; every other
+                // call runs alone, in order. A blocked call is a ready result
+                // and overlaps anything.
+                let overlaps: Vec<bool> = prepared
                     .iter()
                     .map(|p| {
-                        if p.blocked_result.is_some() {
-                            let r = p.blocked_result.clone().unwrap();
-                            futures::future::Either::Left(async move { r })
-                        } else {
-                            let name = p.name.clone();
-                            let input = p.input.clone();
-                            futures::future::Either::Right(async move {
-                                execute_tool(&name, &input, tools, tool_ctx).await
-                            })
-                        }
+                        p.blocked_result.is_some()
+                            || runner::tools::runs_concurrently(&p.name, tools)
                     })
                     .collect();
+                let mut exec_results: Vec<ToolResult> = Vec::with_capacity(prepared.len());
+                let mut batch_cancelled = false;
+                for run in runner::tools::concurrency_runs(&overlaps) {
+                    if batch_cancelled {
+                        // Every call still gets its answer, so the history
+                        // stays valid.
+                        exec_results.extend(run.map(|_| ToolResult::error(TOOL_CANCELLED_MSG)));
+                        continue;
+                    }
+                    let exec_futures: Vec<_> = prepared[run]
+                        .iter()
+                        .map(|p| {
+                            if p.blocked_result.is_some() {
+                                let r = p.blocked_result.clone().unwrap();
+                                futures::future::Either::Left(async move { r })
+                            } else {
+                                let name = p.name.clone();
+                                let input = p.input.clone();
+                                futures::future::Either::Right(async move {
+                                    execute_tool(&name, &input, tools, tool_ctx).await
+                                })
+                            }
+                        })
+                        .collect();
 
-                // Run all tool futures concurrently, but race the batch against the
-                // loop's cancel token (issue #218): on cancellation the in-flight
-                // tools are abandoned promptly instead of blocking until the
-                // slowest one finishes, and a cancelled ToolResult is synthesized
-                // for EVERY tool so each tool_use still gets a matching tool_result
-                // and the message history stays well-formed.
-                let (exec_results, batch_cancelled) =
-                    run_tool_batch(exec_futures, &tool_ctx.cancel_token).await;
+                    // Run the batch's futures concurrently, but race it against the
+                    // loop's cancel token (issue #218): on cancellation the in-flight
+                    // tools are abandoned promptly instead of blocking until the
+                    // slowest one finishes, and a cancelled ToolResult is synthesized
+                    // for EVERY tool so each tool_use still gets a matching tool_result
+                    // and the message history stays well-formed.
+                    let (results, cancelled) =
+                        run_tool_batch(exec_futures, &tool_ctx.cancel_token).await;
+                    exec_results.extend(results);
+                    batch_cancelled = cancelled;
+                }
 
                 // Phase 3: post-hooks, event emission, and result block assembly.
                 // When the batch was cancelled we skip the awaiting PostToolUse
@@ -2423,9 +2516,17 @@ pub async fn run_query_loop(
                         });
                     }
 
+                    // Fork (Waku): the model's copy carries the repeat
+                    // reminder; the transcript's does not.
+                    let content = runner::repeat_guard::with_repeat_note(
+                        &mut repeat_guard,
+                        &p.name,
+                        &p.input,
+                        result.content,
+                    );
                     result_blocks.push(ContentBlock::ToolResult {
                         tool_use_id: p.id.clone(),
-                        content: ToolResultContent::Text(result.content),
+                        content: ToolResultContent::Text(content),
                         is_error: if result.is_error { Some(true) } else { None },
                     });
                 }
@@ -2433,6 +2534,7 @@ pub async fn run_query_loop(
                 // Append tool results as a user message so the history remains
                 // valid (every tool_use is answered) even on cancellation.
                 messages.push(Message::user_blocks(result_blocks));
+                send_checkpoint(config, &event_tx, messages);
 
                 // If the batch was abandoned due to cancellation, stop the loop
                 // now rather than sending the (cancelled) results back to the model.
@@ -2654,8 +2756,10 @@ async fn manage_provider_context(
     event_tx: Option<&mpsc::UnboundedSender<QueryEvent>>,
     cancel: &tokio_util::sync::CancellationToken,
 ) {
-    let context_window =
-        compact::resolve_context_window(config.model_registry.as_deref(), provider_id, model_id);
+    // Fork (Waku): the caller's window first, as on the Messages branch.
+    let context_window = config.context_window.unwrap_or_else(|| {
+        compact::resolve_context_window(config.model_registry.as_deref(), provider_id, model_id)
+    });
     let context_tokens = provider_context_tokens(messages, usage);
     emit_token_warning(context_tokens, context_window, event_tx);
     auto_compact_on_route(
@@ -2859,6 +2963,8 @@ mod tests {
             enabled_tools: None,
             continuation: crate::continuation::ContinuationMode::Default,
             retry_budget: claurst_api::retry_policy::RetryBudget::Default,
+            checkpoint_history: false,
+            context_window: None,
         }
     }
 

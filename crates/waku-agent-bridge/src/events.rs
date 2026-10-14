@@ -157,6 +157,20 @@ pub enum AgentEvent {
         detail: String,
         between_turns: bool,
     },
+    /// Fork: the turn's task panicked. The turn is settled as failed right
+    /// after; this carries the panic's message so the desktop can say what
+    /// happened in the user's language.
+    TurnCrashed {
+        detail: String,
+    },
+    /// Fork: the turn failed in a way the person can do something about,
+    /// named so the desktop can say what in their language. `detail` is the
+    /// failure as it came, kept whole: the paywall classifier and anyone
+    /// reporting a bug read it.
+    TurnFailed {
+        kind: FailureKind,
+        detail: String,
+    },
     /// Something went wrong. A turn may still settle afterwards.
     Error(String),
     /// The turn is over. `success` is false for cancellation, an unrecoverable
@@ -165,6 +179,22 @@ pub enum AgentEvent {
         success: bool,
         summary: Option<String>,
     },
+}
+
+/// Fork: what kind of failure ended a turn, when it is one with a remedy the
+/// person can apply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FailureKind {
+    /// The conversation no longer fits, even after the automatic compaction.
+    ContextOverflow,
+    /// The route kept answering "too many requests".
+    RateLimited,
+    /// The route could not be reached, or did not answer in time.
+    Network,
+    /// The route refused the key.
+    Auth,
+    /// The model's service kept failing (overloaded, 5xx).
+    Unavailable,
 }
 
 /// One step of a sub-agent's run, in the order it happened.
@@ -438,9 +468,14 @@ impl StreamDecoder {
             }
             Q::TurnComplete { .. } if self.compacted => Vec::new(),
             Q::TurnComplete { usage, .. } => {
-                let context_tokens = usage.as_ref().map(|usage| {
-                    (usage.total_input() as u64).saturating_add(usage.output_tokens as u64)
-                });
+                // Fork: a route that reported no usage says nothing about the
+                // conversation; a zero emptied the meter after every request.
+                let context_tokens = usage
+                    .as_ref()
+                    .map(|usage| {
+                        (usage.total_input() as u64).saturating_add(usage.output_tokens as u64)
+                    })
+                    .filter(|tokens| *tokens > 0);
                 let mut events = vec![AgentEvent::Usage {
                     context_tokens,
                     context_window: self.context_window,
@@ -495,6 +530,9 @@ impl StreamDecoder {
                 detail: notice.detail,
                 between_turns: false,
             }],
+            // Fork: written down by the session (`session::forward_events`),
+            // which takes it before the decoder sees it; nothing to show.
+            Q::Checkpoint(_) => Vec::new(),
         }
     }
 }

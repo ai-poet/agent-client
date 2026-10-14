@@ -148,6 +148,9 @@ struct Inner {
     memory: Arc<crate::memory::MemoryHost>,
     /// Fork addition: the goal's automatic resume after a failed turn.
     goal_resume: goal_resume::GoalResume,
+    /// Fork addition: background commands that ended while no turn could
+    /// take the news, for the next turn (`background_notifier`).
+    background_notices: Mutex<Vec<String>>,
 }
 
 /// The parts of a running turn that outside callers need to reach.
@@ -262,6 +265,7 @@ impl AgentSession {
             team,
             memory,
             goal_resume: goal_resume::GoalResume::default(),
+            background_notices: Mutex::new(Vec::new()),
         });
 
         inner
@@ -314,9 +318,7 @@ impl AgentSession {
             (cancel, queue)
         };
 
-        rt.spawn(async move {
-            run_turn(inner, text, team_seam::PromptOrigin::User, cancel, queue).await;
-        });
+        spawn_turn(rt, inner, text, team_seam::PromptOrigin::User, cancel, queue);
     }
 
     /// Inject a message into the running turn. It reaches the conversation at
@@ -842,6 +844,152 @@ async fn forward_questions(inner: Arc<Inner>, mut rx: mpsc::UnboundedReceiver<Us
     }
 }
 
+/// Start [`run_turn`] on a task of its own, and settle the turn if that task
+/// dies.
+///
+/// Fork: the slot a turn claims is released only by `run_turn` itself, on its
+/// way out. A panic anywhere under it — the loop, a tool, the event plumbing —
+/// skipped that, and the session stayed busy for good: every later prompt
+/// became a steer nobody would drain, rewind was refused, and only a restart
+/// brought it back. The panic now stops at this task's boundary and the turn
+/// ends as failed, the transcript as it stood before the turn.
+fn spawn_turn(
+    rt: &tokio::runtime::Runtime,
+    inner: Arc<Inner>,
+    text: String,
+    origin: team_seam::PromptOrigin,
+    cancel: CancellationToken,
+    queue: CommandQueue,
+) {
+    // The slot this turn claimed, told apart from any later one by its
+    // steering list.
+    let claimed = inner.turn.lock().as_ref().map(|turn| turn.steers.clone());
+    rt.spawn(async move {
+        let turn = tokio::spawn(run_turn(inner.clone(), text, origin, cancel, queue));
+        let Err(error) = turn.await else {
+            return;
+        };
+        if !error.is_panic() {
+            return;
+        }
+        let detail = panic_text(error.into_panic());
+        tracing::error!(session = %inner.id, %detail, "agent: a turn panicked");
+        if let Some(claimed) = claimed {
+            settle_crashed_turn(&inner, &claimed, detail);
+        }
+    });
+}
+
+/// A panic's message, when it carried one.
+fn panic_text(payload: Box<dyn std::any::Any + Send>) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|text| (*text).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a panic with no message".to_owned())
+}
+
+/// What [`run_turn`] does on its way out, for a turn whose task panicked —
+/// less what needed the state that went down with it. The history is left as
+/// it was before the turn: the loop's copy is gone, and a transcript is never
+/// rebuilt from guesses.
+fn settle_crashed_turn(inner: &Arc<Inner>, claimed: &Arc<Mutex<Vec<String>>>, detail: String) {
+    let turn = {
+        let mut guard = inner.turn.lock();
+        // Only the slot this turn claimed. A turn that panicked after letting
+        // it go — while it was reporting — has nothing left to settle, and a
+        // newer turn may hold the slot by now.
+        if !guard
+            .as_ref()
+            .is_some_and(|turn| Arc::ptr_eq(&turn.steers, claimed))
+        {
+            return;
+        }
+        guard.take()
+    };
+    let Some(turn) = turn else {
+        return;
+    };
+    // Whatever the loop left running — a tool, a sub-agent — hangs off its
+    // token, and its dialogs off the bridge, as on a stop.
+    turn.cancel.cancel();
+    inner
+        .bridge
+        .release_where(|id| !agent_teams::requests::is_member_request(id));
+    if let Some(browser) = &inner.browser {
+        browser.release_all();
+    }
+    inner.questions.lock().clear();
+    inner.subagents.end_turn();
+    let leftover: Vec<String> = turn.steers.lock().drain(..).collect();
+
+    inner.events.emit(AgentEvent::TurnCrashed {
+        detail: detail.clone(),
+    });
+    inner.events.emit(AgentEvent::TurnFinished {
+        success: false,
+        summary: Some(format!("The agent stopped on an internal error: {detail}")),
+    });
+    inner
+        .events
+        .emit(AgentEvent::BackgroundWork(team_seam::snapshot(inner)));
+    for message in leftover {
+        inner.events.emit(AgentEvent::SteerRejected {
+            message,
+            reason: "the turn stopped on an internal error".to_string(),
+        });
+    }
+    // Fork (AgentTeams): team mail the turn never took goes again.
+    let leftovers = keep_background_notices(inner, team_seam::queued_texts(&turn.queue));
+    inner.team.after_turn(leftovers, false);
+}
+
+/// Fork: tell the model when a background command it started has ended.
+///
+/// The engine's `run_in_background` reports through this; it used to say
+/// nothing, so the agent either polled `monitor` or never learned that a
+/// build had failed. A turn that is running takes the notice at its next
+/// step, silently, as it takes team mail — never through `push_steer`, which
+/// would echo it into the transcript as the person's own words. With nothing
+/// running, it waits for the next turn. The background-work panel refreshes
+/// either way.
+fn background_notifier(inner: &Arc<Inner>) -> claurst_tools::CompletionNotifier {
+    let weak = Arc::downgrade(inner);
+    claurst_tools::CompletionNotifier::new(move |notice| {
+        let Some(inner) = weak.upgrade() else {
+            return;
+        };
+        let parked = {
+            let guard = inner.turn.lock();
+            match guard.as_ref() {
+                Some(turn) if !turn.compacting => {
+                    turn.queue
+                        .push(QueuedCommand::InjectUserMessage(notice), CommandPriority::Normal);
+                    None
+                }
+                _ => Some(notice),
+            }
+        };
+        if let Some(notice) = parked {
+            inner.background_notices.lock().push(notice);
+        }
+        inner
+            .events
+            .emit(AgentEvent::BackgroundWork(team_seam::snapshot(&inner)));
+    })
+}
+
+/// The queued texts a turn left behind, less the background notices among
+/// them, which are kept for the next turn instead of being handed to the
+/// team as mail it never sent.
+fn keep_background_notices(inner: &Inner, leftovers: Vec<String>) -> Vec<String> {
+    let (notices, rest): (Vec<String>, Vec<String>) = leftovers
+        .into_iter()
+        .partition(|text| text.starts_with(claurst_tools::pty_bash::BACKGROUND_NOTICE_OPEN));
+    inner.background_notices.lock().extend(notices);
+    rest
+}
+
 async fn run_turn(
     inner: Arc<Inner>,
     prompt: String,
@@ -884,11 +1032,20 @@ async fn run_turn(
     // What a sub-agent started this turn runs with: this turn's config, taken
     // before the steering queue — the parent's alone — is attached.
     let subagent_query = query.clone();
+    // Fork: the conversation is written down at every step of this turn, not
+    // only at its end (`forward_events`). After the sub-agent's copy is
+    // taken: a child's history is not persisted.
+    query.checkpoint_history = true;
     // Fork: the captain protocol, once active; sub-agents never get it.
     inner.team.extend_rules(&mut query);
     // Fork: the memory index, root session only (`crate::memory`).
     inner.memory.extend_rules(&mut query);
     query.command_queue = Some(queue.clone());
+    // Fork: what background commands said while nothing was running goes in
+    // right after the prompt (the queue is read before the first request).
+    for notice in inner.background_notices.lock().drain(..) {
+        queue.push(QueuedCommand::InjectUserMessage(notice), CommandPriority::Normal);
+    }
     // A session with an active goal keeps going after each answer until the
     // model closes it with `GoalComplete` — the one tool set that has it.
     let goal_store = crate::goal::open_store();
@@ -920,6 +1077,12 @@ async fn run_turn(
     // The engine's heuristic answers a fixed guess for every model it does
     // not know, which is no basis for a percentage.
     let context_window = crate::config::context_window_for(&config, &query.model, &route.provider);
+    // Fork: the engine compacts against the window the meter shows. Its own
+    // lookup missed models the bundled registry does not file under their
+    // owner, fell back to a 256k guess, and compacted a 1M-window session
+    // at ~205k while the ring read 20%. Set after the sub-agent's copy was
+    // taken: a child may run another model.
+    query.context_window = context_window;
 
     let client = inner.client.lock().clone();
     inner.subagents.begin_turn(TurnScope {
@@ -947,7 +1110,8 @@ async fn run_turn(
         mcp_manager: inner.mcp.lock().clone(),
         managed_agent_config: config.managed_agents.clone(),
         config,
-        completion_notifier: None,
+        // Fork: a background command's end reaches the model.
+        completion_notifier: Some(background_notifier(&inner)),
         // Unused: `GuiPermissionHandler` never returns `Ask`, which is the
         // only thing that routes a request into this queue.
         pending_permissions: None,
@@ -957,7 +1121,12 @@ async fn run_turn(
     };
 
     let (tx, rx) = mpsc::unbounded_channel::<QueryEvent>();
-    let forwarder = tokio::spawn(forward_events(inner.clone(), rx, context_window));
+    let forwarder = tokio::spawn(forward_events(
+        inner.clone(),
+        rx,
+        context_window,
+        weight_before,
+    ));
 
     let outcome = claurst_query::run_query_loop(
         client.as_ref(),
@@ -1027,8 +1196,16 @@ async fn run_turn(
         QueryOutcome::Error(error) if is_not_found(error) => Some(error.to_string()),
         _ => None,
     };
+    let failure = match &outcome {
+        QueryOutcome::Error(error) if not_found.is_none() => failure_kind(error),
+        _ => None,
+    };
     let (success, summary) = describe(outcome, produced_output, &route);
-    if !success && let Some(reason) = summary.clone() {
+    // Fork: a stop is not an error. The desktop ended the turn the moment the
+    // person pressed Stop, so an `Error` arriving after it was shown on its
+    // own, as a toast reading "Stopped." in English; the summary below still
+    // says it, for a client that did not stop the turn itself.
+    if !success && !cancelled && let Some(reason) = summary.clone() {
         // The empty turn and the 404 get events of their own so the desktop
         // can say them in the user's language; the sentence in `summary` is
         // the fallback for any client that does not.
@@ -1044,6 +1221,11 @@ async fn run_turn(
                 model: route.model.clone(),
                 url: route.url.clone(),
                 detail,
+            });
+        } else if let Some(kind) = failure {
+            inner.events.emit(AgentEvent::TurnFailed {
+                kind,
+                detail: reason,
             });
         } else {
             inner.events.emit(AgentEvent::Error(reason));
@@ -1062,12 +1244,15 @@ async fn run_turn(
     goal_resume::after_turn(&inner, goal_mode, success, transient_failure, cancelled);
 
     // Steering messages the watcher had not yet accounted for. The queue
-    // itself is the authority, not the watcher's 120ms poll: `drain` empties
-    // it in one go, so an empty queue means every one of them reached the
-    // conversation, and a turn that ends within a poll interval of the drain
-    // must not report a delivered message as rejected.
-    let delivered = queue.is_empty();
+    // itself is the authority, not the watcher's 120ms poll: a message no
+    // longer in it reached the conversation, and a turn that ends within a
+    // poll interval of the drain must not report a delivered message as
+    // rejected. Fork: asked per message — the queue can also hold team mail
+    // or a background notice, and "the queue is not empty" then reported
+    // delivered messages as rejected, which the desktop sent again.
+    let remaining = team_seam::queued_texts(&queue);
     for message in leftover {
+        let delivered = !remaining.contains(&message);
         inner.events.emit(if delivered {
             AgentEvent::SteerAccepted { message }
         } else {
@@ -1079,10 +1264,12 @@ async fn run_turn(
     }
 
     // Fork (AgentTeams): team mail the turn never took goes again, and the
-    // captain's idle edge returns its takeovers to the pool.
+    // captain's idle edge returns its takeovers to the pool. Background
+    // notices the turn never took wait for the next one.
+    let leftovers = keep_background_notices(&inner, remaining);
     inner
         .team
-        .after_turn(team_seam::queued_texts(&queue), goal_follow_up.is_some());
+        .after_turn(leftovers, goal_follow_up.is_some());
     // Fork (auto-memory): every few turns, a consolidation pass on this
     // session's own route.
     inner
@@ -1155,7 +1342,7 @@ async fn compact_now(inner: Arc<Inner>, instructions: Option<String>, cancel: Ca
     let (success, summary) = match result {
         None => {
             report(CompactionPhase::Failed, None);
-            (false, Some("Stopped.".to_string()))
+            (false, Some(STOPPED_SUMMARY.to_string()))
         }
         Some(Ok(mut compacted)) if compacted.len() < messages.len() => {
             history::settle_compaction(weight_before, &mut compacted);
@@ -1265,9 +1452,25 @@ async fn forward_events(
     // `None` when no source knows this model's window — the meter then omits
     // the percentage rather than showing one against a guess.
     context_window: Option<u64>,
+    // What the conversation weighed before the turn, for marking a summary a
+    // compaction wrote mid-turn, as `run_turn` does at its end.
+    weight_before: usize,
 ) {
     let mut decoder = StreamDecoder::new(context_window);
     while let Some(event) = rx.recv().await {
+        // Fork: the conversation at a step boundary. Written to the session's
+        // store as the turn's end writes it, so a crash or a killed daemon
+        // loses the step in flight, not the turn — and the calls of that step
+        // are on record, to be closed as interrupted when the session loads
+        // again (`history::deserialize`). `inner.history` still changes only
+        // at the turn's end: the turn owns its copy until then.
+        if let QueryEvent::Checkpoint(mut messages) = event {
+            history::settle_compaction(weight_before, &mut messages);
+            inner
+                .events
+                .emit(AgentEvent::HistoryCommitted(history::serialize(&messages)));
+            continue;
+        }
         for mut translated in decoder.push(event) {
             if let AgentEvent::TokenUsage { session, .. } = &mut translated {
                 *session = crate::events::TokenCounts::from_tracker(&inner.cost_tracker);
@@ -1382,12 +1585,59 @@ impl Route {
 /// every 404 into `Model not found: unknown` and drop the rest. Either way
 /// the usual cause is a wrong address or a model id the endpoint does not
 /// serve, and neither message said which address was asked.
+/// Fork: the remedy-bearing kind of a failure that ended a turn, or `None` to
+/// show it as it came.
+///
+/// The gateway's own verdicts come first and keep their text: a balance, a
+/// spent plan or a disabled key is something the paywall classifier and the
+/// gateway's bilingual message already say better.
+fn failure_kind(error: &ClaudeError) -> Option<crate::events::FailureKind> {
+    use crate::events::FailureKind;
+    use claurst_api::retry_policy::{FailureClass, classify_claude_error};
+
+    let text = error.to_string();
+    if crate::retry_rules::gateway_failure_class(None, &text).is_some() {
+        return None;
+    }
+    let lower = text.to_ascii_lowercase();
+    match error {
+        ClaudeError::ContextWindowExceeded => return Some(FailureKind::ContextOverflow),
+        ClaudeError::RateLimit => return Some(FailureKind::RateLimited),
+        ClaudeError::Auth(_) => return Some(FailureKind::Auth),
+        ClaudeError::Http(_) => return Some(FailureKind::Network),
+        ClaudeError::ApiStatus { status: 401, .. } => return Some(FailureKind::Auth),
+        ClaudeError::ApiStatus { status: 429, .. } => return Some(FailureKind::RateLimited),
+        ClaudeError::ApiStatus { status: 500..=599, .. } => return Some(FailureKind::Unavailable),
+        _ => {}
+    }
+    match classify_claude_error(error) {
+        FailureClass::ContextOverflow => Some(FailureKind::ContextOverflow),
+        FailureClass::Retryable if lower.contains("rate limit") => Some(FailureKind::RateLimited),
+        FailureClass::Retryable if lower.contains("overloaded") || lower.contains("http 5") => {
+            Some(FailureKind::Unavailable)
+        }
+        FailureClass::Retryable
+            if ["network", "timed out", "connection"]
+                .iter()
+                .any(|word| lower.contains(word)) =>
+        {
+            Some(FailureKind::Network)
+        }
+        _ => None,
+    }
+}
+
 fn is_not_found(error: &ClaudeError) -> bool {
     match error {
         ClaudeError::ApiStatus { status, .. } => *status == 404,
         other => other.to_string().contains("Model not found"),
     }
 }
+
+/// The summary of a turn that was stopped. Exported so the desktop can say it
+/// in the user's language, as it does the plan-mode refusals: matched against
+/// the constant, not the prose.
+pub const STOPPED_SUMMARY: &str = "Stopped.";
 
 /// `MaxTokens` counts as a success: the model produced an answer and the
 /// engine's own recovery already ran. Everything else that is not `EndTurn`
@@ -1418,7 +1668,7 @@ fn describe(
             true,
             Some("The model reached its output limit for this turn.".to_string()),
         ),
-        QueryOutcome::Cancelled => (false, Some("Stopped.".to_string())),
+        QueryOutcome::Cancelled => (false, Some(STOPPED_SUMMARY.to_string())),
         QueryOutcome::BudgetExceeded { cost_usd, limit_usd } => (
             false,
             Some(format!(
@@ -1520,6 +1770,28 @@ mod tests {
         assert_eq!(route.provider, "openai");
         assert_eq!(route.api_base, "https://open.bigmodel.cn/api/paas/v4");
         assert_eq!(route.url, "https://open.bigmodel.cn/api/paas/v4/chat/completions");
+    }
+
+    /// Fork: failures with a remedy are named for the desktop to word; the
+    /// gateway's own verdicts keep their text, which the paywall reads.
+    #[test]
+    fn failures_with_a_remedy_are_named_and_gateway_verdicts_are_not() {
+        use crate::events::FailureKind;
+        let status = |status: u16, message: &str| ClaudeError::ApiStatus {
+            status,
+            message: message.to_string(),
+        };
+        assert_eq!(failure_kind(&ClaudeError::RateLimit), Some(FailureKind::RateLimited));
+        assert_eq!(
+            failure_kind(&ClaudeError::ContextWindowExceeded),
+            Some(FailureKind::ContextOverflow)
+        );
+        assert_eq!(failure_kind(&status(401, "unauthorized")), Some(FailureKind::Auth));
+        assert_eq!(failure_kind(&status(429, "slow down")), Some(FailureKind::RateLimited));
+        assert_eq!(failure_kind(&status(503, "overloaded")), Some(FailureKind::Unavailable));
+        assert_eq!(failure_kind(&status(403, "Insufficient account balance")), None);
+        assert_eq!(failure_kind(&status(429, "daily usage limit exceeded")), None);
+        assert_eq!(failure_kind(&status(400, "bad request")), None);
     }
 
     #[test]

@@ -123,7 +123,15 @@ pub(crate) async fn execute_tool(
                     return ToolResult::error(e.to_string());
                 }
             }
-            tool.execute(whole_floats_to_integers(input.clone()), ctx).await
+            let mut result = tool.execute(whole_floats_to_integers(input.clone()), ctx).await;
+            // Fork (Waku): an oversized result keeps its two ends and the
+            // path of the whole (`claurst_tools::spill`).
+            result.content = claurst_tools::spill::spill_if_large(
+                &ctx.session_id,
+                name,
+                std::mem::take(&mut result.content),
+            );
+            result
         }
         None => {
             warn!(tool = name, "Unknown tool requested");

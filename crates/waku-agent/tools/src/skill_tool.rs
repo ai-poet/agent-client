@@ -211,7 +211,10 @@ async fn read_skill_description(path: &std::path::Path) -> String {
     for line in body.lines() {
         let t = line.trim().trim_start_matches('#').trim();
         if !t.is_empty() {
-            let truncated = if t.len() > 80 { &t[..80] } else { t };
+            // Fork departure (Waku): on a character boundary. A byte slice
+            // panicked on a skill whose first line is not ASCII — any skill
+            // written in Chinese.
+            let truncated = &t[..crate::pty_bash::floor_char_boundary(t, 80)];
             return truncated.to_string();
         }
     }

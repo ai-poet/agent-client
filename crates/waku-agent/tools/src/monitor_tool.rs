@@ -125,6 +125,14 @@ impl Tool for MonitorTool {
                         let output = t.output.join("\n");
                         if output.is_empty() {
                             ToolResult::success("(no output yet)")
+                        } else if t.dropped_output_lines > 0 {
+                            // Fork (Waku): the registry keeps a bounded tail.
+                            ToolResult::success(format!(
+                                "[{} earlier lines were dropped; the last {} follow]\n{}",
+                                t.dropped_output_lines,
+                                t.output.len(),
+                                output
+                            ))
                         } else {
                             ToolResult::success(output)
                         }

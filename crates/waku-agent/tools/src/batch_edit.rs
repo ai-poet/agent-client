@@ -123,6 +123,11 @@ impl Tool for BatchEditTool {
                 // use cached edited content if available
                 content.clone()
             } else {
+                // Fork (Waku): as for Edit (`read_state`).
+                if let Some(reason) = crate::read_state::refusal(&ctx.session_id, &path) {
+                    pre_check_errors.push(format!("Edit {}: {}", i, reason));
+                    continue;
+                }
                 match tokio::fs::read_to_string(&path).await {
                     Ok(c) => c,
                     Err(e) => {
@@ -292,6 +297,7 @@ mod tests {
         std::fs::write(&path, original).unwrap();
 
         let ctx = allow_all_context(dir.path().to_path_buf());
+        crate::read_state::mark_seen(&ctx.session_id, &path);
         let res = BatchEditTool
             .execute(
                 json!({
@@ -325,6 +331,8 @@ mod tests {
         std::fs::write(&b, "two\n").unwrap();
 
         let ctx = allow_all_context(dir.path().to_path_buf());
+        crate::read_state::mark_seen(&ctx.session_id, &a);
+        crate::read_state::mark_seen(&ctx.session_id, &b);
         let res = BatchEditTool
             .execute(
                 json!({

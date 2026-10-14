@@ -215,8 +215,18 @@ impl LlmProvider for AnthropicProvider {
                             if let Some(r) = sr {
                                 stop_reason = r;
                             }
+                            // Fork departure (Waku): cumulative figures,
+                            // the prompt's too (see `StreamAccumulator`).
                             if let Some(u) = delta_usage {
-                                usage.output_tokens += u.output_tokens;
+                                if u.total_input() > 0 {
+                                    usage.input_tokens = u.input_tokens;
+                                    usage.cache_creation_input_tokens =
+                                        u.cache_creation_input_tokens;
+                                    usage.cache_read_input_tokens = u.cache_read_input_tokens;
+                                }
+                                if u.output_tokens > 0 {
+                                    usage.output_tokens = u.output_tokens;
+                                }
                             }
                         }
                         StreamEvent::MessageStop => break,

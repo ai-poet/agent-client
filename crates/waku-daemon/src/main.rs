@@ -14,6 +14,11 @@ fn main() -> anyhow::Result<()> {
     for warning in sub2api::migrate::migrate_legacy_storage() {
         eprintln!("warning: {warning}");
     }
+    // Fork: the engine's warnings and any panic go to a log file beside the
+    // state database. After the migration, which would otherwise find the
+    // new data directory already there.
+    let state_path = waku_core::persistence::StateStore::default_path();
+    logging::init(&state_path.with_file_name("logs"));
     let arguments = Arguments::parse(std::env::args().skip(1))?;
     let token =
         std::env::var(DAEMON_TOKEN_ENV).context("Waku daemon authentication token is missing")?;
@@ -66,6 +71,88 @@ fn main() -> anyhow::Result<()> {
             allow_shutdown: arguments.parent_pid.is_some(),
         },
     )
+}
+
+/// Fork addition: written inline rather than as `logging.rs` because
+/// `waku-debug-daemon` `include!`s this file from `src/bin`, where a `mod`
+/// declaration would look for its file.
+mod logging {
+    //! Fork addition: the daemon's log file.
+    //!
+    //! The built-in agent's engine and bridge report through `tracing` — retries,
+    //! MCP servers that would not start or calls that timed out, a transcript
+    //! that could not be read, a permission rule that could not be saved — and
+    //! nothing installed a subscriber, so all of it was dropped. This writes
+    //! warnings and errors to `logs/daemon.log` beside the state database, and
+    //! panics with them: the daemon's stderr is the desktop's, where nobody reads
+    //! it.
+
+    use std::fs::{self, File, OpenOptions};
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    use tracing_subscriber::filter::{LevelFilter, Targets};
+    use tracing_subscriber::prelude::*;
+
+    /// A log past this size is moved aside to `daemon.log.1` when the daemon
+    /// starts, replacing the one before, so at most two runs' worth is kept.
+    const ROTATE_AT_BYTES: u64 = 5 * 1024 * 1024;
+
+    /// Overrides the filter, in `tracing_subscriber`'s `Targets` syntax:
+    /// `info`, or `warn,claurst_query=debug`.
+    const FILTER_ENV: &str = "WAKU_LOG";
+
+    /// Install the subscriber and the panic hook. Never fails the daemon: with no
+    /// log file it runs as it did before, unlogged.
+    pub fn init(directory: &Path) {
+        let Some(file) = open(directory) else {
+            return;
+        };
+        let filter = std::env::var(FILTER_ENV)
+            .ok()
+            .and_then(|value| value.parse::<Targets>().ok())
+            .unwrap_or_else(|| Targets::new().with_default(LevelFilter::WARN));
+        let layer = tracing_subscriber::fmt::layer()
+            .with_writer(Mutex::new(file))
+            .with_ansi(false)
+            .with_target(true);
+        if tracing_subscriber::registry()
+            .with(layer.with_filter(filter))
+            .try_init()
+            .is_err()
+        {
+            return;
+        }
+        log_panics();
+    }
+
+    fn open(directory: &Path) -> Option<File> {
+        fs::create_dir_all(directory).ok()?;
+        let path = directory.join("daemon.log");
+        if fs::metadata(&path).is_ok_and(|metadata| metadata.len() > ROTATE_AT_BYTES) {
+            let _ = fs::rename(&path, directory.join("daemon.log.1"));
+        }
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        // Errors quote what the agent was doing; keep them the owner's, as the
+        // transcripts are.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        options.open(&path).ok()
+    }
+
+    /// A panic anywhere in the daemon — a tool, the engine, a driver — goes to
+    /// the log with its location before the default hook prints it.
+    fn log_panics() {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            tracing::error!(target: "panic", "{info}");
+            previous(info);
+        }));
+    }
 }
 
 fn ensure_bind_allowed(address: SocketAddr, allow_non_loopback: bool) -> anyhow::Result<()> {

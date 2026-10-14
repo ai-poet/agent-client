@@ -111,9 +111,20 @@ impl OpenAiChatDecoder {
             }
         };
 
+        // Fork departure (Waku): the usage chunk the spec describes carries
+        // `"choices": []`, not no `choices` at all, and was skipped as an
+        // empty chunk — no Chat Completions request reported its usage.
         let choice = match choices.first() {
             Some(c) => c,
-            None => return false,
+            None => {
+                if let Some(usage_val) = chunk_json.get("usage").filter(|u| u.is_object()) {
+                    out.push(StreamEvent::MessageDelta {
+                        stop_reason: None,
+                        usage: Some(OpenAiProvider::parse_usage_pub(Some(usage_val))),
+                    });
+                }
+                return false;
+            }
         };
 
         let delta = match choice.get("delta") {
@@ -466,6 +477,32 @@ mod tests {
             e,
             StreamEvent::ReasoningDelta { reasoning, .. } if reasoning == "hmm"
         )));
+    }
+
+    /// Fork (Waku): the spec's own usage chunk — `"choices": []` — yields its
+    /// usage too, cache hits split out as for any other usage.
+    #[test]
+    fn usage_chunk_with_empty_choices_yields_message_delta() {
+        let mut d = OpenAiChatDecoder::new(None);
+        let mut out = Vec::new();
+        d.feed_line(
+            r#"data: {"id":"c","model":"m","choices":[{"delta":{"content":"x"}}]}"#,
+            &mut out,
+        );
+        out.clear();
+        let stop = d.feed_line(
+            r#"data: {"id":"c","choices":[],"usage":{"prompt_tokens":120000,"completion_tokens":800,"prompt_tokens_details":{"cached_tokens":100000}}}"#,
+            &mut out,
+        );
+        assert!(!stop);
+        match out.as_slice() {
+            [StreamEvent::MessageDelta { usage: Some(usage), stop_reason: None }] => {
+                assert_eq!(usage.input_tokens + usage.cache_read_input_tokens, 120_000);
+                assert_eq!(usage.cache_read_input_tokens, 100_000);
+                assert_eq!(usage.output_tokens, 800);
+            }
+            other => panic!("expected one usage delta, got {other:?}"),
+        }
     }
 
     /// A usage-only chunk with no `choices` yields a usage MessageDelta and does

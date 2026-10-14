@@ -19,7 +19,7 @@
 //! with how many there were, so the count Waku keeps stays right. Rewinding
 //! into one is refused: the turns it replaced are no longer there to cut.
 
-use claurst_core::types::{ContentBlock, Message, MessageContent, Role};
+use claurst_core::types::{ContentBlock, Message, MessageContent, Role, ToolResultContent};
 use claurst_query::COMPACT_SUMMARY_OPEN;
 
 /// `Message.uuid` prefix on a prompt that started a turn.
@@ -38,17 +38,62 @@ pub fn serialize(messages: &[Message]) -> Vec<u8> {
 /// bad, but refusing to open the session loses the user their project too.
 ///
 /// A transcript written before turns were marked is marked here, once, by the
-/// rule that used to be applied on every count.
+/// rule that used to be applied on every count; one a crash cut short has its
+/// interrupted calls closed ([`close_interrupted_calls`]).
 pub fn deserialize(bytes: &[u8]) -> Vec<Message> {
     if bytes.is_empty() {
         return Vec::new();
     }
-    let mut messages: Vec<Message> = serde_json::from_slice(bytes).unwrap_or_else(|error| {
+    let mut messages: Vec<Message> = parse(bytes).unwrap_or_else(|error| {
         tracing::warn!(%error, "agent: unreadable session history, starting empty");
         Vec::new()
     });
     adopt_legacy(&mut messages);
+    close_interrupted_calls(&mut messages);
     messages
+}
+
+/// Fork: whether `bytes` is a transcript [`deserialize`] can read, for a
+/// store that sets an unreadable one aside instead of overwriting it.
+pub fn parse(bytes: &[u8]) -> Result<Vec<Message>, serde_json::Error> {
+    serde_json::from_slice(bytes)
+}
+
+/// What a call a crash cut off is answered with when the session loads again.
+pub const INTERRUPTED_CALL_RESULT: &str = "This call was cut off: the app stopped while it was \
+    running, so whether it finished, and what it changed, is unknown. Check the current state \
+    before doing it again, and re-run it only if it is read-only or safe to repeat.";
+
+/// Fork: answer the calls a crash cut off.
+///
+/// A turn writes the conversation down before its calls run
+/// (`QueryEvent::Checkpoint`), so a session loaded after a crash can end on
+/// calls with no results. Each is answered, as an error, saying it was
+/// interrupted and that its effect is unknown — the repair at request time
+/// would only say "[tool result unavailable]", and a model told nothing
+/// re-runs a half-finished write as if it had never happened.
+fn close_interrupted_calls(messages: &mut Vec<Message>) {
+    let Some(last) = messages.last() else {
+        return;
+    };
+    if last.role != Role::Assistant {
+        return;
+    }
+    let results: Vec<ContentBlock> = last
+        .get_tool_use_blocks()
+        .into_iter()
+        .filter_map(|block| match block {
+            ContentBlock::ToolUse { id, .. } => Some(ContentBlock::ToolResult {
+                tool_use_id: id.clone(),
+                content: ToolResultContent::Text(INTERRUPTED_CALL_RESULT.to_owned()),
+                is_error: Some(true),
+            }),
+            _ => None,
+        })
+        .collect();
+    if !results.is_empty() {
+        messages.push(Message::user_blocks(results));
+    }
 }
 
 /// Mark `message` as the prompt that starts a turn. Returns the mark, which
@@ -330,6 +375,32 @@ mod tests {
             input: serde_json::json!({}),
             thought_signature: None,
         }])
+    }
+
+    /// Fork: a session the turn's checkpoint left on unanswered calls loads
+    /// with each answered as interrupted, and a finished one loads as it was.
+    #[test]
+    fn calls_a_crash_cut_off_are_closed_as_interrupted() {
+        let cut_off = vec![prompt("go"), tool_use("call-1")];
+        let loaded = deserialize(&serialize(&cut_off));
+        assert_eq!(loaded.len(), 3);
+        match &loaded[2].content {
+            MessageContent::Blocks(blocks) => match blocks.as_slice() {
+                [ContentBlock::ToolResult {
+                    tool_use_id,
+                    content: ToolResultContent::Text(text),
+                    is_error: Some(true),
+                }] => {
+                    assert_eq!(tool_use_id, "call-1");
+                    assert_eq!(text, INTERRUPTED_CALL_RESULT);
+                }
+                other => panic!("expected one interrupted result, got {other:?}"),
+            },
+            other => panic!("expected blocks, got {other:?}"),
+        }
+
+        let finished = vec![prompt("go"), tool_use("call-1"), tool_result("call-1")];
+        assert_eq!(deserialize(&serialize(&finished)).len(), 3);
     }
 
     fn tool_result(id: &str) -> Message {

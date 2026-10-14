@@ -127,6 +127,9 @@ impl Tool for FileReadTool {
             }
         };
 
+        // Fork (Waku): the model has now seen this file (`read_state`).
+        crate::read_state::record(&ctx.session_id, &path, content.as_bytes());
+
         if content.is_empty() {
             return ToolResult::success(format!(
                 "[File {} exists but is empty]",
@@ -142,7 +145,10 @@ impl Tool for FileReadTool {
 
         // Convert 1-based offset to 0-based index
         let start = if offset > 0 { offset - 1 } else { 0 };
-        let end = (start + limit).min(total_lines);
+        // Fork departure (Waku): saturating. A model asking for "everything"
+        // with `limit: usize::MAX` overflowed here — a panic in a debug build,
+        // and in release an `end` below `start` that panicked on the slice.
+        let end = start.saturating_add(limit).min(total_lines);
 
         if start >= total_lines {
             return ToolResult::error(format!(
@@ -170,5 +176,37 @@ impl Tool for FileReadTool {
         }
 
         ToolResult::success(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::allow_all_context;
+
+    /// Fork (Waku): a limit big enough to overflow `start + limit` reads to
+    /// the end instead of panicking.
+    #[tokio::test]
+    async fn a_huge_limit_reads_to_the_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lines.txt");
+        std::fs::write(&path, "alpha\nbeta\ngamma\n").unwrap();
+
+        let ctx = allow_all_context(dir.path().to_path_buf());
+        let res = FileReadTool
+            .execute(
+                json!({
+                    "file_path": path.to_string_lossy(),
+                    "offset": 2,
+                    "limit": u64::MAX,
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(!res.is_error, "read failed: {}", res.content);
+        assert!(res.content.contains("beta"), "{}", res.content);
+        assert!(res.content.contains("gamma"), "{}", res.content);
+        assert!(!res.content.contains("alpha"), "{}", res.content);
     }
 }

@@ -40,6 +40,10 @@ pub mod lsp_tool;
 pub mod mcp_resources;
 pub mod todo_write;
 pub mod notebook_edit;
+// Fork addition (Waku): what the model has seen of each file.
+pub mod read_state;
+// Fork addition (Waku): oversized output to a file the model reads back.
+pub mod spill;
 /// Fork addition (Waku): concurrent, code-page-aware output capture.
 pub(crate) mod capture;
 pub mod powershell;
@@ -348,6 +352,9 @@ impl ToolContext {
     fn permission_allowed_roots(&self) -> Vec<PathBuf> {
         let mut roots = self.config.workspace_paths.clone();
         roots.extend(self.config.additional_dirs.clone());
+        // Fork (Waku): reading back output the agent itself produced
+        // (`spill`) never asks.
+        roots.push(crate::spill::root());
         roots
     }
 
@@ -533,6 +540,8 @@ impl ToolContext {
         after_content: &[u8],
         tool_name: &str,
     ) {
+        // Fork (Waku): what the agent wrote, it has seen (`read_state`).
+        crate::read_state::record(&self.session_id, &path, after_content);
         self.file_history.lock().record_modification(
             path,
             before_content,

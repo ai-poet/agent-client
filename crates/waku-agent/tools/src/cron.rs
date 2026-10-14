@@ -492,8 +492,12 @@ impl Tool for CronListTool {
                     cron_to_human(&t.cron),
                     t.recurring,
                     t.durable,
+                    // Fork departure (Waku): on a character boundary, not a byte.
                     if t.prompt.len() > 60 {
-                        format!("{}…", &t.prompt[..60])
+                        format!(
+                            "{}…",
+                            &t.prompt[..crate::pty_bash::floor_char_boundary(&t.prompt, 60)]
+                        )
                     } else {
                         t.prompt.clone()
                     }
