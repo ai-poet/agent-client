@@ -332,9 +332,22 @@ impl LlmProvider for AzureProvider {
                         }
                     };
 
+                    // Fork departure (Waku): the usage chunk the spec
+                    // describes carries `"choices": []`, not no `choices` at
+                    // all, and was skipped as an empty chunk — every Chat
+                    // Completions request reported no usage, the meter sat at
+                    // zero and compaction guessed from characters.
                     let choice = match choices.first() {
                         Some(c) => c,
-                        None => continue,
+                        None => {
+                            if let Some(usage_val) = chunk_json.get("usage").filter(|u| u.is_object()) {
+                                yield Ok(StreamEvent::MessageDelta {
+                                    stop_reason: None,
+                                    usage: Some(OpenAiProvider::parse_usage_pub(Some(usage_val))),
+                                });
+                            }
+                            continue;
+                        }
                     };
 
                     let delta = match choice.get("delta") {

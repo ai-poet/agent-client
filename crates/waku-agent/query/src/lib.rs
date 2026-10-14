@@ -1363,7 +1363,12 @@ pub async fn run_query_loop(
                                                     Some(claurst_api::provider_types::StopReason::ContentFiltered) => "content_filtered".to_string(),
                                                     Some(claurst_api::provider_types::StopReason::EndTurn) => "end_turn".to_string(),
                                                     Some(claurst_api::provider_types::StopReason::Other(s)) => s.clone(),
-                                                    None => "end_turn".to_string(),
+                                                    // Fork (Waku): a usage-only delta — the
+                                                    // spec's usage chunk comes after the
+                                                    // finish chunk — says nothing about why
+                                                    // the answer stopped; it used to reset a
+                                                    // `max_tokens` stop to `end_turn`.
+                                                    None => std::mem::take(&mut stop_str),
                                                 };
                                                 if let Some(u) = u {
                                                     merge_provider_stream_usage(&mut usage, u);
