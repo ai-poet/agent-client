@@ -29,6 +29,24 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.2.16]
+
+- 上下文圆环现在显示真实用量：DeepSeek、GLM、Kimi 等模型以及经网关转换格式的请求之前读不到用量，圆环一直接近 0；现在每一步模型调用和每次压缩后都会更新。自动压缩也改为按圆环显示的上下文窗口触发，1M 窗口的模型不再在 20 万左右就被压缩
+
+  The context ring now shows real usage: DeepSeek, GLM, Kimi and requests the gateway converts between API formats used to report none, leaving the ring near zero; it now updates after every model call and every compaction. Automatic compaction also follows the window the ring shows, so a 1M-window model is no longer compacted at around 200k
+
+- 内置 Agent 更稳、更安全：后台启动的开发服务器不再两分钟后被结束；命令或网页里的中文不再让会话卡在「工作中」；任务进行中每一步都会保存，应用意外退出后能接着做；同一文件的多处修改不再互相覆盖；修改文件前必须读过最新内容，不会再覆盖你刚改的地方；超长输出完整保存到文件，对话只保留首尾；后台命令结束时会主动告诉 Agent；反复执行同样的操作时会提醒它换个思路
+
+  The built-in agent is steadier and safer: a dev server started in the background is no longer stopped after two minutes; Chinese text in a command or a page no longer leaves a session stuck working; every step of a task is saved as it goes, so it can carry on after the app quits unexpectedly; several edits to one file no longer overwrite each other; a file is only changed once its latest content has been read, so your own recent edits are never overwritten; very long output is saved in full to a file with only its start and end kept in the conversation; the agent is told when a background command finishes; and it is nudged to change course when it keeps repeating the same step
+
+- 权限更细：Bash 和 PowerShell 的「始终允许 / 始终拒绝」只针对当前这一条命令，不再一次放行或封禁所有命令
+
+  Finer permissions: "Always allow" and "Always deny" on Bash and PowerShell now cover that one command, instead of every command
+
+- 出错时说得更清楚：限流、网络、上下文超长、密钥失效、服务故障会显示中文说明和处理建议；停止任务不再弹出英文提示；失败提示和权限卡上的按钮可以用键盘操作；在非 Git 文件夹里改了文件时，会说明为什么无法查看或撤销改动；MCP 工具最长等待 10 分钟，卡住时不再拖住整个任务
+
+  Clearer when something goes wrong: rate limits, network failures, an overflowing context, a rejected key and service outages are explained with what to do next; stopping a task no longer shows an English notice; the failure banner and permission card buttons work from the keyboard; outside a Git repository the app explains why changes can't be reviewed or undone; and an MCP tool that hangs is abandoned after ten minutes instead of holding up the whole task
+
 ## [0.2.15]
 
 - 新增「云端 API 节点」：登录后可在主站和 CDN 加速节点（中国及亚太地区可尝试）之间切换，后台配置的其他节点也会自动出现；聊天输入框上方的节点标签和侧边栏账户菜单都能一键切换，并显示测速延迟。只有模型请求走所选节点，登录、账户和支付始终使用主站；所选节点暂时连不上时会自动切到可用节点，恢复后再切回来
