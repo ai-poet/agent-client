@@ -1695,9 +1695,24 @@ impl StreamAccumulator {
                     self.stop_reason = Some(sr.clone());
                 }
                 if let Some(u) = usage {
-                    // The delta usage usually only has output_tokens;
-                    // add them to the running total.
-                    self.usage.output_tokens += u.output_tokens;
+                    // Fork departure (Waku): the delta's figures are
+                    // cumulative, and a gateway converting another API's
+                    // stream — the managed gateway's Chat Completions bridge
+                    // among them — reports the prompt only here, its
+                    // `message_start` carrying zeros. Only the output was
+                    // taken, so every such request reported a context of a few
+                    // hundred tokens: the meter sat at zero and compaction
+                    // fell back to guessing. Take what the delta reports, keep
+                    // `message_start`'s figures where it reports none — the
+                    // provider branch's `merge_provider_stream_usage` rule.
+                    if u.total_input() > 0 {
+                        self.usage.input_tokens = u.input_tokens;
+                        self.usage.cache_creation_input_tokens = u.cache_creation_input_tokens;
+                        self.usage.cache_read_input_tokens = u.cache_read_input_tokens;
+                    }
+                    if u.output_tokens > 0 {
+                        self.usage.output_tokens = u.output_tokens;
+                    }
                 }
             }
 
@@ -1785,6 +1800,54 @@ mod tests {
         assert_eq!(req.model, "claude-opus-4-6");
         assert_eq!(req.max_tokens, 4096);
         assert!(req.stream);
+    }
+
+    /// Fork (Waku): a converted stream reports the prompt in `message_delta`
+    /// and zeros in `message_start`; the accumulated usage must carry it.
+    /// A delta with only `output_tokens` parses and keeps the opening figures.
+    #[test]
+    fn message_delta_usage_is_taken_whole() {
+        let delta: UsageInfo = serde_json::from_value(serde_json::json!({
+            "input_tokens": 1_200,
+            "cache_read_input_tokens": 98_000,
+            "output_tokens": 350
+        }))
+        .expect("a full delta usage parses");
+        let mut acc = StreamAccumulator::new();
+        acc.on_event(&streaming::AnthropicStreamEvent::MessageStart {
+            id: "m1".into(),
+            model: "deepseek-v4-pro".into(),
+            usage: UsageInfo::default(),
+        });
+        acc.on_event(&streaming::AnthropicStreamEvent::MessageDelta {
+            stop_reason: Some("end_turn".into()),
+            usage: Some(delta),
+        });
+        let (_, usage, _) = acc.finish();
+        assert_eq!(usage.total_input(), 99_200);
+        assert_eq!(usage.output_tokens, 350);
+
+        let output_only: UsageInfo =
+            serde_json::from_value(serde_json::json!({ "output_tokens": 40 }))
+                .expect("an output-only delta usage parses");
+        let mut acc = StreamAccumulator::new();
+        acc.on_event(&streaming::AnthropicStreamEvent::MessageStart {
+            id: "m2".into(),
+            model: "claude".into(),
+            usage: UsageInfo {
+                input_tokens: 10,
+                cache_read_input_tokens: 50_000,
+                output_tokens: 1,
+                ..Default::default()
+            },
+        });
+        acc.on_event(&streaming::AnthropicStreamEvent::MessageDelta {
+            stop_reason: Some("end_turn".into()),
+            usage: Some(output_only),
+        });
+        let (_, usage, _) = acc.finish();
+        assert_eq!(usage.total_input(), 50_010);
+        assert_eq!(usage.output_tokens, 40);
     }
 
     #[test]

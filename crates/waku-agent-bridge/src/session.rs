@@ -1457,9 +1457,6 @@ async fn forward_events(
     weight_before: usize,
 ) {
     let mut decoder = StreamDecoder::new(context_window);
-    // Fork: the meter between reports (`LiveMeter`) — after a step's tools
-    // ran and while an answer streams, not only when a request reports.
-    let mut meter = crate::events::LiveMeter::default();
     while let Some(event) = rx.recv().await {
         // Fork: the conversation at a step boundary. Written to the session's
         // store as the turn's end writes it, so a crash or a killed daemon
@@ -1468,38 +1465,13 @@ async fn forward_events(
         // again (`history::deserialize`). `inner.history` still changes only
         // at the turn's end: the turn owns its copy until then.
         if let QueryEvent::Checkpoint(mut messages) = event {
-            // After a step's calls ran, the results are what the next request
-            // adds: the meter shows the last figure plus an estimate of them,
-            // which the next report then replaces.
-            if let Some(tokens) = meter.after_step(&messages) {
-                inner.events.emit(AgentEvent::Usage {
-                    context_tokens: Some(tokens),
-                    context_window,
-                });
-            }
             history::settle_compaction(weight_before, &mut messages);
             inner
                 .events
                 .emit(AgentEvent::HistoryCommitted(history::serialize(&messages)));
             continue;
         }
-        // Fork: the answer streaming in moves the meter a few times a second.
-        if let QueryEvent::Stream(frame) = &event
-            && let Some(tokens) = meter.observe(frame, std::time::Instant::now())
-        {
-            inner.events.emit(AgentEvent::Usage {
-                context_tokens: Some(tokens),
-                context_window,
-            });
-        }
         for mut translated in decoder.push(event) {
-            if let AgentEvent::Usage {
-                context_tokens: Some(tokens),
-                ..
-            } = &translated
-            {
-                meter.settle(*tokens);
-            }
             if let AgentEvent::TokenUsage { session, .. } = &mut translated {
                 *session = crate::events::TokenCounts::from_tracker(&inner.cost_tracker);
             }

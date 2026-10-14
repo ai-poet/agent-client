@@ -588,7 +588,13 @@ pub mod types {
 
     #[derive(Debug, Clone, Serialize, Deserialize, Default)]
     pub struct UsageInfo {
+        // Fork departure (Waku): defaulted, as the cache fields are. A
+        // `message_delta` usage carries only the figures that changed — the
+        // official stream's has `output_tokens` alone — and one missing field
+        // threw the whole usage away.
+        #[serde(default)]
         pub input_tokens: u64,
+        #[serde(default)]
         pub output_tokens: u64,
         #[serde(default)]
         pub cache_creation_input_tokens: u64,
