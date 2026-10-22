@@ -228,7 +228,12 @@ pub(crate) fn build_provider_options(
                     }),
                 );
             }
-        } else if model_id.contains("3.") || model_id.contains("gemini-3") {
+        // Fork departure (Waku): Gemini 4 takes a thinking level as Gemini 3
+        // does; without this branch its effort never reached the request.
+        } else if model_id.contains("3.")
+            || model_id.contains("gemini-3")
+            || model_id.contains("gemini-4")
+        {
             options.insert(
                 "thinkingConfig".to_string(),
                 serde_json::json!({

@@ -2327,6 +2327,8 @@ impl Waku {
             })
             .children(background_badge)
             .children(open_file_button)
+            // Fork: Inspect, the call's record in the trajectory.
+            .children(self.render_trajectory_inspect_pill(activity.source_id.as_deref(), &hover_group, theme, cx))
             .when(has_detail, |row| {
                 row.child(disclosure_chevron(
                     item_expanded,

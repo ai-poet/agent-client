@@ -510,6 +510,11 @@ fn reasoning_ladder(platform: &str, model: &str) -> Option<Vec<&'static str>> {
     if sub2api::model_routing::has_three_step_effort(model) {
         return Some(vec!["low", "high", "max"]);
     }
+    // Gemini's `thinkingLevel` has three steps; the engine maps the effort
+    // onto it (`google_thinking_level_for_effort`).
+    if is_native_gemini(model) {
+        return Some(vec!["low", "medium", "high"]);
+    }
     if !has_reasoning_ladder(platform, model) {
         return None;
     }
@@ -544,7 +549,7 @@ pub(super) struct WireFormatOption {
 // A `static`, not a `const`: `native_format_option` hands out `'static`
 // references into it, and a const would be copied into a temporary at
 // every use site with nothing to borrow from.
-pub(super) static NATIVE_WIRE_FORMATS: [WireFormatOption; 3] = [
+pub(super) static NATIVE_WIRE_FORMATS: [WireFormatOption; 4] = [
     WireFormatOption {
         id: "messages",
         label: "model_option.wire_messages",
@@ -560,7 +565,23 @@ pub(super) static NATIVE_WIRE_FORMATS: [WireFormatOption; 3] = [
         label: "model_option.wire_chat",
         description: "model_option.wire_chat_description",
     },
+    WireFormatOption {
+        id: "gemini",
+        label: "model_option.wire_gemini",
+        description: "model_option.wire_gemini_description",
+    },
 ];
+
+/// The Gemini models offered over Gemini's own API. Kept in step with
+/// `waku_agent_bridge::GEMINI_NATIVE_MODELS`: one for now, and every other
+/// `gemini-*` stays unoffered rather than sent somewhere that cannot serve it.
+const NATIVE_GEMINI_MODELS: [&str; 1] = ["gemini-4-argon"];
+
+fn is_native_gemini(model: &str) -> bool {
+    let model = model.trim().to_ascii_lowercase();
+    let model = model.rsplit('/').next().unwrap_or(&model);
+    NATIVE_GEMINI_MODELS.contains(&model)
+}
 
 /// The one API a catalog model is reachable over, or `None` when it is
 /// reachable over none of them and should not be offered.
@@ -577,6 +598,9 @@ pub(super) fn native_format_for_model(platform: &str, model: &str) -> Option<&'s
     let model = model.trim().to_ascii_lowercase();
     if model.starts_with("claude") {
         return Some("messages");
+    }
+    if is_native_gemini(&model) {
+        return Some("gemini");
     }
     if model.starts_with("gpt-")
         || model.starts_with("gpt5")
@@ -1030,12 +1054,16 @@ mod tests {
         let models = native_models_from_catalog(&[
             item("claude-sonnet-5", "anthropic"),
             item("gpt-5.6-sol", "openai"),
-            // Neither Messages nor Responses nor the user's own Chat
-            // Completions list: this product configures no Google route.
+            // Gemini's own API carries Gemini 4 Argon alone; any other
+            // Gemini model has no route here.
             item("gemini-3-pro", "gemini"),
+            item("gemini-4-argon", "antigravity"),
         ]);
         let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
-        assert_eq!(ids, ["anthropic::claude-sonnet-5", "openai::gpt-5.6-sol"]);
+        assert_eq!(
+            ids,
+            ["anthropic::claude-sonnet-5", "openai::gpt-5.6-sol", "gemini::gemini-4-argon"]
+        );
         assert_eq!(models[0].sub_provider.as_deref(), Some("anthropic"));
         assert_eq!(models[1].sub_provider.as_deref(), Some("openai"));
     }
@@ -1089,10 +1117,17 @@ mod tests {
 
     #[test]
     fn a_model_with_no_api_to_send_it_over_is_not_offered() {
-        // There is no Gemini route here: the gateway has no Responses
-        // translator for those groups, and this app holds no Gemini key.
-        // Listing it would promise something that fails.
+        // Gemini's own API is wired for Gemini 4 Argon alone; any other
+        // Gemini model would be listed and then fail on the wire.
         assert!(native_models_from_catalog(&[item("gemini-3-pro", "gemini")]).is_empty());
+        let argon = native_models_from_catalog(&[item("gemini-4-argon", "gemini")]);
+        assert_eq!(argon.len(), 1);
+        assert_eq!(argon[0].default_service_tier.as_deref(), Some("gemini"));
+        assert_eq!(native_format_for_model("gemini", "gemini-4-argon"), Some("gemini"));
+        assert_eq!(
+            reasoning_ladder("gemini", "gemini-4-argon"),
+            Some(vec!["low", "medium", "high"])
+        );
         assert!(native_models_from_catalog(&[item("some-unknown-model", "")]).is_empty());
     }
 
@@ -1340,8 +1375,9 @@ mod tests {
             );
         }
 
-        // A conversational model is caught by none of that.
-        for name in ["gpt-5.6-sol", "claude-sonnet-5", "gemini-3-pro"] {
+        // A conversational model is caught by none of that. (Of the Gemini
+        // family only Gemini 4 Argon has an API here.)
+        for name in ["gpt-5.6-sol", "claude-sonnet-5", "gemini-4-argon"] {
             assert_eq!(
                 native_models_from_catalog(&[item(name, "openai")]).len(),
                 1,

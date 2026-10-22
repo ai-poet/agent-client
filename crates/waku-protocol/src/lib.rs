@@ -60,5 +60,6 @@ pub use protocol::{
 };
 pub use settings::DaemonSettings;
 pub use workspace::{
-    TURN_UNDO_STALE, TurnUndoPlan, UndoFile, UndoReason, WorkspaceOperation, WorkspaceResult,
+    SideChatMessage, TURN_UNDO_STALE, TurnUndoPlan, UndoFile, UndoReason, WorkspaceOperation,
+    WorkspaceResult,
 };

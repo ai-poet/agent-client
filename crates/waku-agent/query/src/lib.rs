@@ -3167,6 +3167,25 @@ mod tests {
         );
     }
 
+    // Fork (Waku): Gemini 4 Argon over the gateway's `/v1beta` route.
+    #[test]
+    fn test_build_provider_options_for_google_gemini_4() {
+        let options = build_provider_options(
+            "google",
+            "gemini-4-argon",
+            Some(claurst_core::effort::EffortLevel::Medium),
+            None,
+        );
+        assert_eq!(
+            options["thinkingConfig"]["thinkingLevel"],
+            serde_json::json!("medium")
+        );
+        assert_eq!(
+            options["thinkingConfig"]["includeThoughts"],
+            serde_json::json!(true)
+        );
+    }
+
     #[test]
     fn test_build_provider_options_for_openrouter_gpt5() {
         let options = build_provider_options(

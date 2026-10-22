@@ -167,6 +167,9 @@ pub(crate) struct SubagentHost {
     /// had the turn not been stopped first — with whether it is an error.
     /// See [`SubagentHost::restore_answers`].
     answers: Mutex<HashMap<String, (String, bool)>>,
+    /// Fork: the parent session's trajectory, where children's requests and
+    /// tool calls are recorded under the call that started them.
+    trajectory: Mutex<Option<Arc<crate::trajectory::Recorder>>>,
 }
 
 impl SubagentHost {
@@ -180,7 +183,13 @@ impl SubagentHost {
             background: Mutex::new(HashSet::new()),
             progress: Mutex::new(HashMap::new()),
             answers: Mutex::new(HashMap::new()),
+            trajectory: Mutex::new(None),
         })
+    }
+
+    /// Fork: record children into the session's trajectory.
+    pub fn set_trajectory(&self, recorder: Arc<crate::trajectory::Recorder>) {
+        *self.trajectory.lock() = Some(recorder);
     }
 
     pub fn begin_turn(&self, scope: TurnScope) {
@@ -700,7 +709,11 @@ async fn forward_child(
             batch.push(more);
         }
         let mut text = String::new();
+        let trajectory = host.trajectory.lock().clone();
         for event in batch {
+            if let Some(trajectory) = &trajectory {
+                trajectory.observe_child(&parent_id, &event);
+            }
             for translated in decoder.push(event) {
                 match child_event(translated) {
                     Some(SubagentEvent::Text(delta)) => text.push_str(&delta),

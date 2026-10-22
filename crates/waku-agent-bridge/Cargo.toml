@@ -16,6 +16,7 @@ license = "GPL-3.0-only"
 [dependencies]
 # Fork: AgentTeams' durable state, rules and prompts (`src/team/`).
 agent-teams = { path = "../agent-teams" }
+agent-trajectory = { path = "../agent-trajectory" }
 # Fork: auto-memory's store, index and prompts (`src/memory/`).
 auto-memory = { path = "../auto-memory" }
 anyhow = "1.0"

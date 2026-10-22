@@ -1073,6 +1073,7 @@ impl Waku {
                     project_id: session.project_id,
                     timestamp,
                     running: session.is_busy(),
+                    needs_you: self.task_attention(session.id).is_some(), // fork: task_attention.rs
                     projectless: projectless_project_ids.contains(&session.project_id),
                     date_group: session_date_group(timestamp, today),
                 }
@@ -1096,7 +1097,7 @@ impl Waku {
         let just_started = self.sidebar_toolbar.take_just_started(
             entries
                 .iter()
-                .filter(|entry| entry.running)
+                .filter(|entry| entry.running || entry.needs_you)
                 .map(|entry| entry.id)
                 .collect(),
         );

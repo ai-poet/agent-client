@@ -80,6 +80,15 @@ pub struct WorkingTreeEntry {
     pub depth: usize,
 }
 
+/// Fork addition: one message of a side chat (`WorkspaceOperation::SideChatStart`).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SideChatMessage {
+    /// Said by the model; otherwise by the person.
+    pub assistant: bool,
+    pub text: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceOperation {
@@ -291,6 +300,29 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         relative_path: PathBuf,
     },
+    /// Fork addition: a side question about a task, answered by the built-in
+    /// engine in the background (`waku-core`'s `side_chat`). Nothing is kept:
+    /// no history, no session, no file. Poll for the answer.
+    SideChatStart {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        /// The picker's model id (`platform::model`), or `None` for the
+        /// engine's default.
+        model: Option<String>,
+        system: String,
+        messages: Vec<SideChatMessage>,
+    },
+    /// Fork addition: the answer's text from byte `from` on, waiting up to
+    /// `wait_ms` for more.
+    SideChatPoll {
+        job: Uuid,
+        from: usize,
+        wait_ms: u64,
+    },
+    /// Fork addition: stop answering.
+    SideChatCancel {
+        job: Uuid,
+    },
 }
 
 /// Fork addition: how the Files panel shows a file, by its extension.
@@ -442,5 +474,17 @@ pub enum WorkspaceResult {
     /// Fork addition: the answer to [`WorkspaceOperation::PreviewFile`].
     FilePreview {
         preview: FilePreview,
+    },
+    /// Fork addition: a side question was accepted.
+    SideChatStarted {
+        job: Uuid,
+    },
+    /// Fork addition: what the answer has added since the poll's `from`.
+    SideChatProgress {
+        text: String,
+        /// Where the next poll starts.
+        next: usize,
+        done: bool,
+        error: Option<String>,
     },
 }

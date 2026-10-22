@@ -195,6 +195,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-trajectory"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "similar 2.7.0",
+ "tempfile",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9257,6 +9267,7 @@ name = "waku"
 version = "0.2.16"
 dependencies = [
  "agent-teams",
+ "agent-trajectory",
  "alacritty_terminal",
  "anyhow",
  "auto-memory",
@@ -9313,6 +9324,7 @@ name = "waku-agent-bridge"
 version = "0.1.0"
 dependencies = [
  "agent-teams",
+ "agent-trajectory",
  "anyhow",
  "async-trait",
  "auto-memory",

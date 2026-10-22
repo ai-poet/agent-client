@@ -2303,6 +2303,8 @@ impl Waku {
             || self.execute_fast_mode_toggle(prompt, cx)
             || self.execute_goal_composer_command(prompt, cx)
             || self.execute_usage_report_command(prompt, cx)
+            // Fork: `/btw`, a question on the side (side_chat.rs).
+            || self.execute_side_chat_command(prompt, cx)
     }
 
     /// `/context` and `/cost` for the built-in agent: answered from the usage

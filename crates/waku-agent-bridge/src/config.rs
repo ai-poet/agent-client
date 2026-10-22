@@ -31,10 +31,24 @@ pub enum WireFormat {
     Responses,
     /// OpenAI Chat Completions.
     Chat,
+    /// Fork: Google's Gemini `streamGenerateContent`, for the one Gemini
+    /// model the gateway serves to the built-in agent ([`GEMINI_NATIVE_MODELS`]).
+    Gemini,
+}
+
+/// The Gemini models the built-in agent speaks Gemini's own API to. One for
+/// now, on purpose: every other `gemini-*` stays unoffered rather than
+/// guessed at. Kept in step with the desktop's `native_format_for_model`.
+pub const GEMINI_NATIVE_MODELS: [&str; 1] = ["gemini-4-argon"];
+
+/// Whether `model` (lowercased) is one of [`GEMINI_NATIVE_MODELS`].
+fn is_gemini_native(model: &str) -> bool {
+    let model = model.rsplit('/').next().unwrap_or(model);
+    GEMINI_NATIVE_MODELS.contains(&model)
 }
 
 impl WireFormat {
-    pub const ALL: [Self; 3] = [Self::Messages, Self::Responses, Self::Chat];
+    pub const ALL: [Self; 4] = [Self::Messages, Self::Responses, Self::Chat, Self::Gemini];
 
     /// Stable id, used as the model picker's tier id and on the wire.
     pub fn id(self) -> &'static str {
@@ -42,6 +56,7 @@ impl WireFormat {
             Self::Messages => "messages",
             Self::Responses => "responses",
             Self::Chat => "chat",
+            Self::Gemini => "gemini",
         }
     }
 
@@ -55,6 +70,7 @@ impl WireFormat {
             Self::Messages => "anthropic",
             Self::Responses => "codex",
             Self::Chat => "openai",
+            Self::Gemini => "google",
         }
     }
 
@@ -69,6 +85,9 @@ impl WireFormat {
         let model = model.trim().to_ascii_lowercase();
         if model.starts_with("claude") {
             return Some(Self::Messages);
+        }
+        if is_gemini_native(&model) {
+            return Some(Self::Gemini);
         }
         if model.starts_with("gpt-")
             || model.starts_with("gpt5")
@@ -125,6 +144,26 @@ impl WireFormat {
             Self::Messages => "messages",
             Self::Responses => "responses",
             Self::Chat => "chat/completions",
+            Self::Gemini => "models/{model}:streamGenerateContent",
+        }
+    }
+
+    /// The URL a request in this format goes to on `base` for `model`, built
+    /// the way the format's adapter builds it — for naming it when it
+    /// answers 404. Gemini's version root is `v1beta`, and the model is part
+    /// of its path.
+    pub fn request_url(self, base: &str, model: &str) -> String {
+        match self {
+            Self::Gemini => {
+                let base = base.trim().trim_end_matches('/');
+                let path = format!("models/{model}:streamGenerateContent");
+                if claurst_api::endpoint::ends_with_version_segment(base) {
+                    format!("{base}/{path}")
+                } else {
+                    format!("{base}/v1beta/{path}")
+                }
+            }
+            _ => claurst_api::endpoint::versioned_url(base, self.request_path()),
         }
     }
 
@@ -281,6 +320,9 @@ pub struct AgentStartOptions {
     /// Fork addition: the desktop that owns this session can drive its
     /// in-app browser, so the `browser_*` tools are offered (`crate::browser`).
     pub browser_tools: bool,
+    /// Fork addition: where the session's trajectory is recorded
+    /// (`crate::trajectory`); `None` records nothing.
+    pub trajectory_dir: Option<PathBuf>,
 }
 
 /// What the session needs to reach the Computer Use REPL.
@@ -340,6 +382,7 @@ impl Default for AgentStartOptions {
             computer_use: None,
             session_id: None,
             browser_tools: false,
+            trajectory_dir: None,
         }
     }
 }
@@ -588,6 +631,16 @@ fn select_route(config: &mut Config, options: &AgentStartOptions) {
         })
     });
 
+    // Fork: the platform of the group the model is routed to, which decides
+    // where on the gateway a Gemini request goes.
+    let routed_platform = gateway_keys.as_ref().and_then(|keys| {
+        let model = options.model.as_deref()?.trim();
+        keys.get(MODEL_PLATFORMS_MEMBER)?
+            .get(model)?
+            .as_str()
+            .map(str::to_owned)
+    });
+
     config.provider = Some(provider.to_owned());
     let entry = config
         .provider_configs
@@ -595,6 +648,11 @@ fn select_route(config: &mut Config, options: &AgentStartOptions) {
         .or_insert_with(ProviderConfig::default);
     if entry.api_base.as_deref().is_none_or(str::is_empty) {
         entry.api_base = anthropic.as_ref().and_then(|entry| entry.api_base.clone());
+    }
+    if format == WireFormat::Gemini
+        && let Some(base) = entry.api_base.as_deref()
+    {
+        entry.api_base = Some(gemini_base(base, routed_platform.as_deref()));
     }
     entry.enabled = true;
     if let Some(key) = key {
@@ -605,8 +663,25 @@ fn select_route(config: &mut Config, options: &AgentStartOptions) {
     }
 }
 
+/// The gateway mount that serves an antigravity group's Gemini requests.
+/// The plain `/v1beta` route answers such a group's key with "API key group
+/// platform is not gemini"; `gemini` and `composite` groups use the root.
+const ANTIGRAVITY_MOUNT: &str = "/antigravity";
+
+/// Where a Gemini request goes on the gateway at `base`, for a model routed
+/// to a group on `platform`. Idempotent: a base already on the mount is
+/// taken back to the root first.
+pub(crate) fn gemini_base(base: &str, platform: Option<&str>) -> String {
+    let root = base.trim().trim_end_matches('/');
+    let root = root.strip_suffix(ANTIGRAVITY_MOUNT).unwrap_or(root);
+    match platform.map(|platform| platform.trim().to_ascii_lowercase()) {
+        Some(platform) if platform == "antigravity" => format!("{root}{ANTIGRAVITY_MOUNT}"),
+        _ => root.to_owned(),
+    }
+}
+
 /// The engine provider entries the routing writer manages, one per format.
-const MANAGED_ENGINE_PROVIDERS: [&str; 3] = ["anthropic", "codex", "openai"];
+const MANAGED_ENGINE_PROVIDERS: [&str; 4] = ["anthropic", "codex", "openai", "google"];
 
 /// One endpoint of the user's own, as the routing writer filed it.
 #[derive(Clone, Debug, PartialEq)]
@@ -804,6 +879,11 @@ pub(crate) fn apply_network_timeouts(config: &Config) {
 /// `sub2api::global_config::native::MODEL_KEYS_MEMBER`.
 pub const MODEL_KEYS_MEMBER: &str = "models";
 
+/// Fork: the member of that table naming, per model, the platform of the
+/// group it is routed to (only Gemini's route reads it). Kept in step with
+/// `sub2api::global_config::native::MODEL_PLATFORMS_MEMBER`.
+pub const MODEL_PLATFORMS_MEMBER: &str = "model_platforms";
+
 /// Where the routing writer files the user's own endpoints, beside the key
 /// table on the anthropic entry: `{"<id>": {"format", "api_base", "api_key",
 /// "context_windows"}}`. Kept in step with
@@ -939,7 +1019,7 @@ pub(crate) fn declared_windows(config: &Config) -> BTreeMap<String, u64> {
         .provider
         .as_deref()
         .into_iter()
-        .chain(["anthropic", "codex", "openai"]);
+        .chain(MANAGED_ENGINE_PROVIDERS);
     for provider in providers {
         let Some(table) = config
             .provider_configs
@@ -2236,6 +2316,91 @@ mod tests {
         // And a model the catalog does not place is the user's own.
         assert_eq!(WireFormat::for_model(Some("gemini"), "gemini-3-pro"), None);
         assert_eq!(WireFormat::for_model(None, "my-local-model"), None);
+    }
+
+    /// Gemini 4 Argon, and only it, speaks Gemini's own API — whatever
+    /// platform its group reports.
+    #[test]
+    fn only_gemini_4_argon_speaks_gemini() {
+        for platform in [Some("gemini"), Some("antigravity"), Some("composite"), None] {
+            assert_eq!(
+                WireFormat::for_model(platform, "gemini-4-argon"),
+                Some(WireFormat::Gemini),
+                "{platform:?}"
+            );
+        }
+        assert_eq!(WireFormat::for_model(Some("gemini"), "gemini-4-argon-high"), None);
+        assert_eq!(WireFormat::for_model(Some("gemini"), "gemini-3.1-pro"), None);
+        assert_eq!(WireFormat::from_id("gemini"), Some(WireFormat::Gemini));
+        assert_eq!(WireFormat::Gemini.engine_provider(), "google");
+        assert_eq!(WireFormat::for_engine_provider("google"), Some(WireFormat::Gemini));
+    }
+
+    #[test]
+    fn gemini_requests_go_to_the_mount_their_groups_platform_needs() {
+        assert_eq!(gemini_base("https://gw.example/", Some("gemini")), "https://gw.example");
+        assert_eq!(gemini_base("https://gw.example", Some("composite")), "https://gw.example");
+        assert_eq!(gemini_base("https://gw.example", None), "https://gw.example");
+        assert_eq!(
+            gemini_base("https://gw.example", Some("antigravity")),
+            "https://gw.example/antigravity"
+        );
+        // Applied twice, it stays put; and a route back to `gemini` leaves it.
+        assert_eq!(
+            gemini_base("https://gw.example/antigravity", Some("antigravity")),
+            "https://gw.example/antigravity"
+        );
+        assert_eq!(
+            gemini_base("https://gw.example/antigravity", Some("gemini")),
+            "https://gw.example"
+        );
+        assert_eq!(
+            WireFormat::Gemini.request_url("https://gw.example/antigravity", "gemini-4-argon"),
+            "https://gw.example/antigravity/v1beta/models/gemini-4-argon:streamGenerateContent"
+        );
+        assert_eq!(
+            WireFormat::Chat.request_url("https://gw.example", "glm-5.1"),
+            "https://gw.example/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn a_gemini_session_takes_its_models_key_and_its_groups_mount() {
+        for (platform, base) in [
+            ("antigravity", "https://gw.example/antigravity"),
+            ("gemini", "https://gw.example"),
+        ] {
+            let mut config = Config::default();
+            let mut anthropic = ProviderConfig::default();
+            anthropic.api_key = Some("sk-claude".into());
+            anthropic.api_base = Some("https://gw.example".into());
+            anthropic.options.insert(
+                GATEWAY_KEYS_OPTION.into(),
+                serde_json::json!({
+                    "anthropic": "sk-claude",
+                    "default": "sk-general",
+                    "models": {"gemini-4-argon": "sk-argon"},
+                    "model_platforms": {"gemini-4-argon": platform},
+                }),
+            );
+            config.provider_configs.insert("anthropic".into(), anthropic);
+            let options = AgentStartOptions {
+                model: Some("gemini-4-argon".into()),
+                platform: Some("gemini".into()),
+                wire_format: Some(WireFormat::Gemini),
+                ..AgentStartOptions::default()
+            };
+            select_route(&mut config, &options);
+            assert_eq!(config.provider.as_deref(), Some("google"));
+            assert_eq!(config.api_key.as_deref(), Some("sk-argon"));
+            let google = config.provider_configs.get("google").unwrap();
+            assert_eq!(google.api_base.as_deref(), Some(base), "{platform}");
+            assert_eq!(google.api_key.as_deref(), Some("sk-argon"));
+            // A second pass over the same config lands in the same place.
+            select_route(&mut config, &options);
+            let google = config.provider_configs.get("google").unwrap();
+            assert_eq!(google.api_base.as_deref(), Some(base), "{platform}");
+        }
     }
 
     /// The families the gateway serves from Chat Completions accounts go

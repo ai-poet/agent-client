@@ -59,6 +59,7 @@ pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result
         computer_use: None,
         session_id: None,
         browser_tools: false,
+        trajectory_dir: None,
     };
     let config = build_config(&options)?;
     let mut query = build_query_config(&config, &options);
@@ -150,7 +151,7 @@ pub(crate) async fn ask_once(
 }
 
 /// The visible text of a message — every text block, thinking excluded.
-fn text_of(message: &Message) -> String {
+pub(crate) fn text_of(message: &Message) -> String {
     match &message.content {
         MessageContent::Text(text) => text.trim().to_owned(),
         MessageContent::Blocks(blocks) => blocks

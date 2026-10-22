@@ -58,6 +58,8 @@ pub(super) struct AgentPageState {
     pub teams: super::agent_teams_settings::AgentTeamsPageState,
     /// The Memory section (auto-memory), which saves to its own file.
     pub memory: super::agent_memory_settings::AgentMemoryPageState,
+    /// Fork: the Trajectory switch, which saves to its own file.
+    pub trajectory: super::agent_trajectory_settings::AgentTrajectoryPageState,
 }
 
 /// One of the built-in agent's three routes.
@@ -379,6 +381,7 @@ impl Waku {
             .child(self.render_agent_mcp(settings, theme, cx))
             .child(self.render_agent_teams_section(theme, cx))
             .child(self.render_agent_memory_section(theme, cx))
+            .child(self.render_agent_trajectory_section(theme, cx))
             .child(self.render_agent_behaviour(settings, theme, cx))
             .child(self.render_agent_rules(settings, theme, cx))
             .child(self.render_agent_tools(settings, theme, cx))

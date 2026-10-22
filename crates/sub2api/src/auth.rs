@@ -191,6 +191,12 @@ pub struct Credentials {
     /// its platform's slot.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub model_routes: BTreeMap<String, i64>,
+    /// The platform of the group each entry of `model_routes` goes through,
+    /// where the catalog said. Gemini's own API sits on a different mount for
+    /// an `antigravity` group than for a `gemini` one, so the built-in agent
+    /// needs to know which it was sent to.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub model_platforms: BTreeMap<String, String>,
     /// The group each image model was last seen to draw through, learned by
     /// the image studio. A group has to be granted image generation on its
     /// own, and the catalog lists image models under groups that were not,
@@ -328,6 +334,7 @@ impl Credentials {
             domestic_group_id: None,
             group_keys: BTreeMap::new(),
             model_routes: BTreeMap::new(),
+            model_platforms: BTreeMap::new(),
             image_groups: BTreeMap::new(),
             model_windows: BTreeMap::new(),
             // Signing in is an explicit request to route through the service.

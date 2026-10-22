@@ -123,6 +123,9 @@ pub struct NativeRoutes {
     /// `platform_keys`: the group that serves a model is not always the one
     /// holding its platform's key. Same invariant as `platform_keys`.
     pub model_keys: BTreeMap<String, String>,
+    /// The platform of the group behind each model in `model_keys`, where
+    /// known. Same invariant as `model_keys`.
+    pub model_platforms: BTreeMap<String, String>,
     /// Each model's context window in tokens: the gateway catalog's, with
     /// what the user declared for the models of an endpoint of their own on
     /// top. Not a secret and not tied to a route, so it has no invariant of
@@ -222,6 +225,7 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
             .any(|slot| custom.routed_endpoint(slot).is_some());
         let mut platform_keys = BTreeMap::new();
         let mut model_keys = BTreeMap::new();
+        let mut model_platforms = BTreeMap::new();
         // Only while every line is the gateway's. A per-platform table next
         // to somebody else's endpoint would hand that server our key.
         if let Some(config) = cloud.filter(|_| !any_custom) {
@@ -230,6 +234,12 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
                 .iter()
                 .filter(|(_, key)| !key.trim().is_empty())
                 .map(|(model, key)| (model.clone(), key.trim().to_owned()))
+                .collect();
+            model_platforms = config
+                .model_platforms
+                .iter()
+                .filter(|(model, _)| model_keys.contains_key(*model))
+                .map(|(model, platform)| (model.clone(), platform.clone()))
                 .collect();
             for (platform, key) in [
                 ("anthropic", config.key_for("claude")),
@@ -250,6 +260,7 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
                 .or_else(|| cloud_target(cloud.and_then(|config| config.api_key.as_deref()))),
             platform_keys,
             model_keys,
+            model_platforms,
             context_windows: native_context_windows(cloud, custom),
             endpoints: native_endpoints(custom),
         };
@@ -685,6 +696,7 @@ mod tests {
             codex_api_key: None,
             codex_model: None,
             model_keys: Default::default(),
+            model_platforms: Default::default(),
             model_windows: Default::default(),
             own_login_clis: Default::default(),
         };
@@ -865,6 +877,7 @@ mod tests {
             codex_api_key: None,
             codex_model: None,
             model_keys: Default::default(),
+            model_platforms: Default::default(),
             model_windows: Default::default(),
             own_login_clis: Default::default(),
         };
@@ -1066,6 +1079,7 @@ mod tests {
             codex_api_key: None,
             codex_model: None,
             model_keys: Default::default(),
+            model_platforms: Default::default(),
             model_windows: Default::default(),
             own_login_clis: Default::default(),
         };
@@ -1137,6 +1151,7 @@ mod tests {
                     ("openai".to_owned(), "sk-x".to_owned()),
                 ]),
                 model_keys: BTreeMap::new(),
+                model_platforms: Default::default(),
                 context_windows: BTreeMap::new(),
                 endpoints: BTreeMap::new(),
             }),

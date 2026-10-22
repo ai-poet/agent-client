@@ -183,6 +183,11 @@ impl NativeDriver {
             computer_use: wiring,
             session_id: Some(session_id.to_string()),
             browser_tools: in_app_browser_offered(),
+            // Fork: the trajectory beside the transcript.
+            trajectory_dir: Some(waku_agent_bridge::trajectory::directory(
+                &SessionStore::directory(),
+                &session_id.to_string(),
+            )),
         };
 
         let sink = EventTranslator::new(events.clone(), store.clone());
@@ -327,6 +332,13 @@ impl DriverControl for NativeDriver {
         // history has to be on disk before that happens.
         let branch_id = Uuid::new_v4();
         SessionStore::new(branch_id).save(&branched);
+        // Fork: the branch's trajectory says where it came from.
+        waku_agent_bridge::trajectory::note_branch(
+            &SessionStore::directory(),
+            &branch_id.to_string(),
+            &self.session_id.to_string(),
+            waku_agent_bridge::history::turn_count(&waku_agent_bridge::history::deserialize(&branched)) as u32,
+        );
         Ok(ProviderResumeCursor::Native {
             session_id: branch_id.to_string(),
         })
@@ -527,6 +539,8 @@ pub(crate) fn delete_agent_transcript(transcript_id: &str) -> anyhow::Result<()>
     let id = Uuid::parse_str(transcript_id)
         .with_context(|| format!("`{transcript_id}` is not a transcript id"))?;
     let store = SessionStore::new(id);
+    // Fork: the trajectory goes with the transcript.
+    waku_agent_bridge::trajectory::delete(&SessionStore::directory(), &id.to_string());
     match std::fs::remove_file(&store.path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),

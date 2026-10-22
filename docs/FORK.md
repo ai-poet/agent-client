@@ -271,6 +271,24 @@ lines below.
 | `crates/waku-agent/api/src/{providers/openai,providers/azure,protocol/openai_chat}.rs`, `crates/waku-agent/query/src/lib.rs` (Chat usage) | vendored engine, recorded departure: the spec's usage chunk — `"choices": []` — yields its usage (`usage_chunk_with_empty_choices_yields_message_delta`); only a chunk with no `choices` key did, so no Chat Completions request reported usage (DeepSeek, GLM, Kimi through the gateway: meter at zero, compaction guessing). The provider branch keeps the stop reason when a delta carries none, since that usage chunk now arrives after the finish chunk and used to reset `max_tokens` to `end_turn` | ~45 |
 | `crates/waku-agent-bridge/src/{events,session,lib}.rs`, `crates/waku-core/src/driver/native.rs`, `locales/{app,zh-CN,ja}.yml` (failure wording) | fork-owned: `AgentEvent::TurnFailed` with `FailureKind` (context overflow, rate limited, network, auth, unavailable) from `failure_kind` — the gateway's own verdicts (`retry_rules`) keep their text for the paywall; the driver words each one (`failure_message`, `native.failure.*`) with the original kept at the end, and it replaces the English summary like the other localized failures | ~110 + 5 keys |
 | `src/app/{error_banner,permission_card,transcript_view}.rs`, `locales/{app,zh-CN,ja}.yml` | the failure banner's actions and the permission card's options are focusable and answer Enter/Space (`ActivationExt::on_activation`, the `card_button` focus ring) — mouse-only before, against `AGENTS.md` § Accessibility; `no_checkpoint_hint` says why a turn that changed files outside a Git repository has no review or undo (`changes.no_git_hint`) | ~60 + 1 key |
+| `Cargo.toml` (root) | `crates/agent-trajectory` in `members`/`default-members`, `agent-trajectory` dependency; `NSDockTile` in the `objc2-app-kit` features (the needs-you Dock badge) | 4 |
+| `crates/waku-agent/api/src/providers/google.rs` | vendored engine, recorded departure: `with_gateway(base, key)` with the shared model-client timeouts; key in `x-goog-api-key` only (no `?key=` in the URL, which was logged); `api_url` keeps a base that already ends in a version segment; `thought` parts as reasoning; `usage_from_metadata` counts `thoughtsTokenCount` as output and `cachedContentTokenCount` as cache read; HTTP, transport and in-stream errors classified (`retry_policy`); a stream without a `finishReason` is truncated; tool-call ids carry a per-response nonce; `supports_thinking` admits `gemini-4` | ~150 |
+| `crates/waku-agent/api/src/registry.rs` | vendored engine, recorded departure: `provider_from_config`'s `google` arm uses a configured base (`GoogleProvider::with_gateway`) | 7 |
+| `crates/waku-agent/query/src/runner/provider_options.rs`, `crates/waku-agent/query/src/lib.rs` (test) | vendored engine, recorded departure: Gemini 4 takes `thinkingConfig.thinkingLevel` from the effort, as Gemini 3 does | 5 + test |
+| `crates/waku-protocol/src/{workspace,lib}.rs`, `packages/waku-client/src/generated/**` | additive: `SideChatMessage`, `WorkspaceOperation::SideChat{Start,Poll,Cancel}`, `WorkspaceResult::{SideChatStarted,SideChatProgress}` (regenerated with `bun run protocol:generate`) | ~45 |
+| `crates/waku-core/src/workspace.rs` | `mod side_chat` and the three side-chat arms of `execute` | ~25 |
+| `crates/waku-core/src/composer_complete.rs` | the built-in `/btw` entry for every provider, after `/plan` | 11 |
+| `crates/waku-core/src/driver/native.rs` | the trajectory directory in `AgentStartOptions`, `note_branch` in `fork`, `trajectory::delete` in `delete_agent_transcript` | ~15 |
+| `crates/waku-client/src/lib.rs` | `pub mod side_chat` | 2 |
+| `src/app.rs` | `mod review_comments`, `mod side_chat`, `mod task_attention`, `mod trajectory_panel`, `mod agent_trajectory_settings`; `RightPanelSurface::{SideChat, Trajectory}`; `review_comments` / `side_chat` / `trajectory_panel` fields + initializers | ~16 |
+| `src/app/right_panel.rs` | the `SideChat` and `Trajectory` arms (`label`, `icon_path`, `reusable_surface_index`, render dispatch, "+" menu — Trajectory for the built-in agent only); Review: `review_comment_row` around the code-row arm, `review_diff_body` on the list container, `render_review_comment_bar` under the content | ~16 |
+| `src/app/render.rs` | listeners for `JumpToNeedsYou`, `SubmitReviewComments`, `DismissReviewComment`, `ToggleSideChat`, `SideChatEscape`, `TrajectoryEscape` (main branch; `JumpToNeedsYou` also in the settings branch) | 8 |
+| `src/app/sidebar.rs` | `needs_you` on each `TaskEntry`; tasks that need the person open their folded groups like a task starting to run | 2 |
+| `src/app/sidebar_sections.rs` | a folded group's needs-you mark in `render_group_badge` | ~13 |
+| `src/app/composer.rs` | `execute_side_chat_command` in `execute_local_composer_command` (`/btw`) | 2 |
+| `src/app/command_palette.rs` | `PaletteAction::{JumpToNeedsYou, OpenSideChat, OpenTrajectory}`, their commands and dispatch arms | ~35 |
+| `src/app/transcript_view.rs` | the Inspect pill in `render_activity_item` | 2 |
+| `src/platform.rs` | `set_dock_badge` (macOS; a no-op elsewhere) | ~18 |
 | new `crates/waku-agent/query/src/e2e_tests.rs`, `lib.rs` (`mod e2e_tests`) | test-only: the loop end to end — a scripted provider, `claurst_tools::all_tools()` against a temporary workspace, files read back after the run (write then edit, read before edit, the repeat reminder) | test |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
@@ -278,7 +296,10 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 
 ### Files that are ours entirely
 
-`crates/sub2api/**`, `crates/agent-teams/**`, `src/app/cloud_account.rs`,
+`crates/sub2api/**`, `crates/agent-teams/**`, `crates/agent-trajectory/**`, `src/app/cloud_account.rs`,
+`src/app/{task_attention,review_comments,side_chat,trajectory_panel,agent_trajectory_settings}.rs`,
+`crates/waku-agent-bridge/src/{side_chat,trajectory}.rs`, `crates/waku-core/src/side_chat.rs`,
+`crates/waku-client/src/side_chat.rs`,
 `src/app/{cloud_failover,cloud_groups,cloud_menu,cloud_origins,cloud_sign_in}.rs`, `src/app/cli_setup.rs`,
 `src/app/cli_takeover.rs`, `src/app/model_windows.rs`,
 `src/app/providers_page.rs`, `src/app/confirm_dialog.rs`,

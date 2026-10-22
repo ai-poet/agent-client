@@ -560,6 +560,14 @@ image_studio.top_up:
   en: "Top up"
 image_studio.group_auto:
   en: "Group: automatic"
+image_studio.node_follow:
+  en: "Node: follow the agents"
+image_studio.node_follow_current:
+  en: "Follow the agents' node (now %{node})"
+image_studio.node_label:
+  en: "Node: %{node}"
+image_studio.node_unreachable:
+  en: "Could not reach %{node}. Pick another node, or follow the agents' node."
 image_studio.group_number:
   en: "Group #%{id}"
 image_studio.group_denied:
@@ -848,6 +856,280 @@ sidebar.group_running:
   en: Tasks running
 sidebar.awaiting_approval:
   en: Needs approval
+needs_you.approval:
+  en: "Needs approval"
+needs_you.plan:
+  en: "Plan to review"
+needs_you.question:
+  en: "Question for you"
+needs_you.teammate:
+  en: "Teammate asks"
+needs_you.tooltip:
+  en: "Needs you: %{what}"
+needs_you.tooltip_many:
+  en: "Needs you: %{what}, %{count} waiting"
+needs_you.group:
+  en: "A task in here needs you"
+needs_you.jump:
+  en: "Go to the next task that needs you"
+needs_you.none:
+  en: "No task needs you right now"
+needs_you.only_this:
+  en: "Only this task needs you"
+review_comments.add:
+  en: "Comment on this line"
+review_comments.placeholder:
+  en: "What should change here?"
+review_comments.yours:
+  en: "Your comment"
+review_comments.edit:
+  en: "Edit"
+review_comments.delete:
+  en: "Delete"
+review_comments.save:
+  en: "Add comment"
+review_comments.cancel:
+  en: "Cancel"
+review_comments.editor_hint:
+  en: "Enter adds · ⌘↩ sends all · Esc cancels"
+review_comments.count:
+  en: "%{count} comment(s) to send"
+review_comments.out_of_view:
+  en: "%{count} not on a line shown here"
+review_comments.discard:
+  en: "Discard all"
+review_comments.discard_title:
+  en: "Discard %{count} comment(s)?"
+review_comments.submit:
+  en: "Send to agent"
+review_comments.sent:
+  en: "Sent %{count} comment(s) to the agent"
+review_comments.queued:
+  en: "Queued %{count} comment(s) for after this turn"
+side_chat.surface:
+  en: "Side chat"
+side_chat.title:
+  en: "Side chat"
+side_chat.open:
+  en: "Open side chat"
+side_chat.subtitle:
+  en: "Answered by %{model} from this task's transcript. Nothing here reaches the task or is saved."
+side_chat.default_model:
+  en: "the built-in agent's default model"
+side_chat.placeholder:
+  en: "Ask about this task…"
+side_chat.hint:
+  en: "Enter to ask · Esc stops or returns"
+side_chat.empty:
+  en: "Ask anything about what this task is doing. The agent keeps working and never sees the question."
+side_chat.thinking:
+  en: "Reading the transcript…"
+side_chat.stopped:
+  en: "Stopped."
+side_chat.failed:
+  en: "Could not answer: %{error}"
+side_chat.stop:
+  en: "Stop"
+side_chat.clear:
+  en: "Clear"
+trajectory.surface:
+  en: "Trajectory"
+trajectory.summary:
+  en: "%{turns} turns · %{requests} requests · %{input} in · %{output} out"
+trajectory.dropped:
+  en: "Older records trimmed"
+trajectory.mode.sequence:
+  en: "Sequence"
+trajectory.mode.duration:
+  en: "Duration"
+trajectory.mode.actual:
+  en: "Actual time"
+trajectory.clear_focus:
+  en: "Show all"
+trajectory.lane.input:
+  en: "Input"
+trajectory.lane.model:
+  en: "Model"
+trajectory.lane.tools:
+  en: "Tools"
+trajectory.timeline_hint:
+  en: "Click a bar to inspect it · drag to focus an interval · right-click to clear"
+trajectory.no_session:
+  en: "Open a task to see its trajectory."
+trajectory.only_native:
+  en: "Only the built-in agent records a trajectory."
+trajectory.loading:
+  en: "Loading the trajectory…"
+trajectory.empty:
+  en: "Nothing recorded yet. Every request and tool call of the next turn appears here."
+trajectory.turn:
+  en: "Turn %{turn}"
+trajectory.turn_detail:
+  en: "%{steps} steps · %{tools} tool calls · %{tokens} out"
+trajectory.rewound:
+  en: "Rewound"
+trajectory.status.completed:
+  en: "Completed"
+trajectory.status.failed:
+  en: "Failed"
+trajectory.status.running:
+  en: "Running"
+trajectory.status.cancelled:
+  en: "Cancelled"
+trajectory.kind.system:
+  en: "System"
+trajectory.kind.user:
+  en: "User"
+trajectory.kind.message:
+  en: "Model"
+trajectory.kind.tool:
+  en: "Tool"
+trajectory.kind.subtool:
+  en: "Subtool"
+trajectory.kind.compacted:
+  en: "Compacted"
+trajectory.prompt.initial:
+  en: "Initial system prompt"
+trajectory.prompt.system:
+  en: "System prompt updated"
+trajectory.prompt.tools:
+  en: "Tools updated"
+trajectory.prompt.both:
+  en: "System prompt and tools updated"
+trajectory.request:
+  en: "Request #%{number}"
+trajectory.compacting:
+  en: "Compacting the context…"
+trajectory.compaction_failed:
+  en: "Context compaction failed"
+trajectory.compacted:
+  en: "Context compacted: %{before} → %{after}"
+trajectory.details:
+  en: "Event details"
+trajectory.tab.summary:
+  en: "Summary"
+trajectory.tab.raw:
+  en: "Raw"
+trajectory.tab.payload:
+  en: "Payload"
+trajectory.tab.result:
+  en: "Result"
+trajectory.tab.schema:
+  en: "Schema"
+trajectory.tab.timing:
+  en: "Timing"
+trajectory.tab.options:
+  en: "Options"
+trajectory.tab.usage:
+  en: "Usage"
+trajectory.tab.diff:
+  en: "Diff"
+trajectory.tab.system_prompt:
+  en: "System prompt"
+trajectory.tab.tools:
+  en: "Tools"
+trajectory.fact.size:
+  en: "Size"
+trajectory.fact.images:
+  en: "Images"
+trajectory.fact.started:
+  en: "Started"
+trajectory.fact.request:
+  en: "Request"
+trajectory.fact.status:
+  en: "Status"
+trajectory.fact.purpose:
+  en: "Purpose"
+trajectory.fact.provider:
+  en: "Provider"
+trajectory.fact.model:
+  en: "Model"
+trajectory.fact.wire_format:
+  en: "API format"
+trajectory.fact.stop_reason:
+  en: "Stop reason"
+trajectory.fact.tool_calls:
+  en: "Tool calls"
+trajectory.fact.retry:
+  en: "Retry"
+trajectory.fact.error:
+  en: "Error"
+trajectory.fact.api_base:
+  en: "API base"
+trajectory.fact.tool:
+  en: "Tool"
+trajectory.fact.call_id:
+  en: "Call ID"
+trajectory.fact.parent:
+  en: "Sub-agent of"
+trajectory.fact.trigger:
+  en: "Trigger"
+trajectory.fact.before:
+  en: "Before"
+trajectory.fact.after:
+  en: "After"
+trajectory.purpose.assistant:
+  en: "Assistant"
+trajectory.purpose.subagent:
+  en: "Sub-agent"
+trajectory.bytes:
+  en: "%{bytes} bytes"
+trajectory.payload_sizes:
+  en: "Payload %{args} bytes · result %{result} bytes"
+trajectory.usage.this_request:
+  en: "This request"
+trajectory.usage.session:
+  en: "Session total"
+trajectory.usage.thinking:
+  en: "Thinking"
+trajectory.usage_line:
+  en: "Input %{input} · cache read %{cache_read} · cache write %{cache_write} · output %{output}"
+trajectory.usage_not_reported:
+  en: "Usage not reported"
+trajectory.thinking_chars:
+  en: "%{chars} characters (token count not reported)"
+trajectory.timing.total:
+  en: "Total"
+trajectory.timing.ttft:
+  en: "Time to first token"
+trajectory.timing.generation:
+  en: "Generation"
+trajectory.timing.throughput:
+  en: "Throughput"
+trajectory.timing.first_token_unavailable:
+  en: "First token time not recorded"
+trajectory.timing.usage_unavailable:
+  en: "Usage unavailable"
+trajectory.timing.too_short:
+  en: "Too short to measure"
+trajectory.timing.inferred_start:
+  en: "A request's start is when the agent was ready to send it (the previous step's end); retries before its first token count toward that wait."
+trajectory.tokens_per_second:
+  en: "%{rate} tok/s"
+trajectory.no_result:
+  en: "No result captured"
+trajectory.schema_unavailable:
+  en: "Schema unavailable"
+trajectory.nothing:
+  en: "No content"
+trajectory.automatic:
+  en: "Automatic"
+trajectory.manual:
+  en: "Manual (/compact)"
+trajectory.tool_changes:
+  en: "Added: %{added} · removed: %{removed} · changed: %{changed}"
+trajectory.system_reconstructed:
+  en: "Rebuilt from this turn's settings the way the engine builds it; per-turn additions (todo reminders, persona keywords) are not included."
+trajectory.inspect:
+  en: "Inspect"
+trajectory.inspect_tooltip:
+  en: "Open this call in the trajectory"
+trajectory.open:
+  en: "Open trajectory"
+trajectory.settings_title:
+  en: "Trajectory"
+trajectory.settings_detail:
+  en: "Record every model request and tool call with its timing, usage and payload, next to the task's transcript. Shown in the right panel's Trajectory."
 sidebar.delete:
   en: Delete
 sidebar.delete_confirm_title:
@@ -3437,7 +3719,7 @@ cloud.failover_active:
 cloud.origin_title:
   en: "Cloud API nodes"
 cloud.origin_detail:
-  en: "The agents, the CLIs and image generation reach the service through the node you pick. Measure them to find the fastest; signing in, your account and payments always use the main site."
+  en: "The agents, the CLIs and image generation reach the service through the node you pick (the image studio can pick its own). Measure them to find the fastest; signing in, your account and payments always use the main site."
 cloud.origin_placeholder:
   en: "https://mirror.example.com"
 cloud.origin_duplicate:
@@ -3568,6 +3850,10 @@ model_option.wire_chat:
   en: "OpenAI Chat Completions"
 model_option.wire_chat_description:
   en: "The widest-supported OpenAI-compatible API."
+model_option.wire_gemini:
+  en: "Google Gemini"
+model_option.wire_gemini_description:
+  en: "Gemini's own generateContent API, through the gateway's v1beta route."
 
 native.no_api_key:
   en: "The built-in agent has no API key for its %{provider} route. Sign in to %{name}, or set provider_configs.%{provider}.api_key in %{path}."
@@ -3633,6 +3919,10 @@ commands.plan_description:
   en: "Plan before changing anything"
 commands.plan_argument_hint:
   en: "[off | what to plan]"
+commands.btw_description:
+  en: "Ask about this task on the side, without steering it"
+commands.btw_argument_hint:
+  en: "[question]"
 commands.plan_entered:
   en: "Plan mode — nothing will be applied"
 commands.plan_exited:

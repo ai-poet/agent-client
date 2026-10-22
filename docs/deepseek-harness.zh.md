@@ -342,6 +342,7 @@ Waku 没有槽位或服务注册表。一个 dsh 槽位要么变成一个封闭�
 | `sidebar.panellist`、`main` 面板 | `src/app/sidebar.rs` 的 `render_sidebar_search`、`render_sidebar_action_row`；`src/app/model_status.rs` 的 `main_page_open` / `close_main_pages` / `main_page_title` | 在新文件里写一行入口；加一个 `.child()`；两处行高倍数都要加；在 `Waku` 上加状态字段；在 `src/app/render.rs` 里加 `.when(open, …)`（范例：`src/app/image_studio.rs`） |
 | `sidebar.workspaces.session.*` | `src/app/sidebar.rs` 的 `SidebarRow`、`sidebar_row` | 新变体或行操作 |
 | `sidebar.right.pane.tab` | `src/app.rs` 的 `RightPanelSurface`；`src/app/right_panel.rs`；`src/app/surface_bar.rs` 的 `SurfaceKind` | 新变体；编译器会列出要补的分支（`label`、`icon_path`、`reusable_surface_index`、`render_right_panel`）；可选头部按钮和快捷键 |
+| `conversation.view`（轨迹） | `RightPanelSurface::Trajectory`、`src/app/trajectory_panel.rs`；记录由 `crates/waku-agent-bridge/src/trajectory.rs` 写入，模型在 `crates/agent-trajectory` | 2026-10-22 移植，仅内置 Agent：dsh 里它是聊天旁的一个标签页，这里是对话旁的右侧面板；工具行上有「查看」入口（`render_activity_item`） |
 | `shell.overlay`（对话框、toast） | `Option<XState>` + 在 `src/app/render.rs` 两个分支里的 `render_x`；`src/app/confirm_dialog.rs` 的 `request_confirm`；`src/app.rs` 的 `show_toast*` | 新建模态文件；toast 辅助函数 |
 | 横幅、`shell.quota-notice` | `src/app/update_banner.rs`、`src/app/daemon_banner.rs`、`src/app/error_banner.rs` | `render_x_banner` + 在 `render.rs` 里加 `.children()` |
 | `shell.bottom` | 没有（只有 `src/app/composer.rs` 里的 `render_workspace_footer`） | 需要新建 |

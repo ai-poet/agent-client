@@ -24,6 +24,8 @@ pub(super) struct TaskMarksState {
     saving: bool,
     /// The task last seen on screen.
     last_on_screen: Option<Uuid>,
+    /// How many tasks the Dock last said need the person (`task_attention.rs`).
+    pub(super) dock_badge: usize,
 }
 
 impl TaskMarksState {
@@ -33,6 +35,7 @@ impl TaskMarksState {
             revision: 0,
             saving: false,
             last_on_screen: None,
+            dock_badge: 0,
         }
     }
 
@@ -93,6 +96,8 @@ pub(super) fn archive_successor(
 impl Waku {
     /// Everything the sidebar rows read from the marks and the archive view.
     pub(super) fn mix_task_marks_fingerprint(&self, fingerprint: u64) -> u64 {
+        // Which tasks need the person, and for what (`task_attention.rs`).
+        let fingerprint = self.mix_task_attention_fingerprint(fingerprint);
         let fingerprint = mix(fingerprint, self.task_marks.revision);
         let fingerprint = mix(fingerprint, u64::from(self.sidebar_toolbar.archived_open));
         match self.sidebar_keep_visible() {
@@ -118,6 +123,9 @@ impl Waku {
 
     /// Hook in `render`: a task coming on screen has been read.
     pub(super) fn note_task_on_screen(&mut self, cx: &mut Context<Self>) {
+        // Fork: the Dock's count of tasks that need the person, settled from
+        // the same per-frame hook.
+        self.note_task_attention(cx);
         let on_screen = self.on_screen_task();
         if on_screen == self.task_marks.last_on_screen {
             return;

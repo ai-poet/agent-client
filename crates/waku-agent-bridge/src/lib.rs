@@ -59,6 +59,10 @@ mod project_context;
 mod retry_rules;
 mod runtime;
 mod session;
+// Fork addition: a side question about a task (`/btw`, ⌘;).
+pub mod side_chat;
+// Fork addition: the timed record of a session's requests (Trajectory).
+pub mod trajectory;
 mod subagent;
 // Fork addition: what an unfinished sub-agent got done, for its parent.
 mod subagent_progress;

@@ -80,6 +80,7 @@ export type { SessionMessageMatch } from "./SessionMessageMatch";
 export type { SessionRecord } from "./SessionRecord";
 export type { SessionStatus } from "./SessionStatus";
 export type { SessionWorkspace } from "./SessionWorkspace";
+export type { SideChatMessage } from "./SideChatMessage";
 export type { SkillEntry } from "./SkillEntry";
 export type { SkillInstall } from "./SkillInstall";
 export type { SkillLocation } from "./SkillLocation";

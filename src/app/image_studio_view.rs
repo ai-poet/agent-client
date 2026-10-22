@@ -530,6 +530,91 @@ impl Waku {
             .into_any_element()
     }
 
+    /// What a failed card says first. A network failure on a node picked on
+    /// this page names that node: the page chose it, so the remedy is here.
+    fn studio_failure_headline(&self, job: &StudioJob, error: &images::ImageError) -> String {
+        let picked = self.image_studio.store.prefs.node.as_deref();
+        match job.origin.as_deref() {
+            Some(origin) if error.kind == ImageErrorKind::Network && picked == Some(origin) => {
+                tr!("image_studio.node_unreachable", node = self.studio_node_name(origin))
+            }
+            _ => error_text(error.kind),
+        }
+    }
+
+    /// A node's short name: its label, or its host.
+    fn studio_node_name(&self, origin: &str) -> String {
+        self.gateway_node_label(origin).0.unwrap_or_else(|| {
+            origin
+                .split_once("://")
+                .map_or(origin, |(_, host)| host)
+                .to_owned()
+        })
+    }
+
+    /// The node chip: which gateway node this page draws through. Only while
+    /// the agents are routed through the service and it has more than one
+    /// node, as the chip above the composer.
+    fn render_studio_node_menu(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.cloud_account.routing_enabled || self.cloud_account.credentials.is_none() {
+            return None;
+        }
+        let menu = self.gateway_node_menu();
+        if !menu.has_choice() {
+            return None;
+        }
+        let picked = self
+            .image_studio
+            .store
+            .prefs
+            .node
+            .clone()
+            .filter(|node| menu.contains(node));
+        let routed_name = menu
+            .routed()
+            .map(|origin| self.studio_node_name(origin))
+            .unwrap_or_default();
+        let label = match picked.as_deref() {
+            Some(node) => tr!("image_studio.node_label", node = self.studio_node_name(node)),
+            None => tr!("image_studio.node_follow"),
+        };
+        let follow_label = tr!("image_studio.node_follow_current", node = routed_name);
+        let handle = self.menu_handle("image-studio-node-menu", cx);
+        let weak = cx.entity().downgrade();
+        Some(dropdown_menu(
+            chip(theme, "image-studio-node", label),
+            "image-studio-node-menu",
+            &handle,
+            MenuAlign::AboveLeft,
+            move |_| {
+                let follow = {
+                    let weak = weak.clone();
+                    MenuItem::new(follow_label.clone(), move |_, cx| {
+                        let _ = weak.update(cx, |this, cx| this.set_image_studio_node(None, cx));
+                    })
+                    .selected(picked.is_none())
+                };
+                let pick_weak = weak.clone();
+                let mut items = vec![follow, MenuItem::Separator];
+                items.extend(menu.node_items(
+                    picked.as_deref(),
+                    Rc::new(move |node, cx| {
+                        let _ = pick_weak
+                            .update(cx, |this, cx| this.set_image_studio_node(Some(node), cx));
+                    }),
+                ));
+                items.push(MenuItem::Separator);
+                let manage_weak = weak.clone();
+                items.push(MenuItem::new(tr!("cloud.node_manage"), move |_, cx| {
+                    let _ = manage_weak.update(cx, |this, cx| {
+                        this.open_settings_page(SettingsPage::CloudAccount, cx);
+                    });
+                }));
+                items
+            },
+        ))
+    }
+
     fn render_studio_failed(
         &self,
         job: &StudioJob,
@@ -600,7 +685,7 @@ impl Waku {
                             .text_size(sp(12.5))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.danger)
-                            .child(error_text(error.kind)),
+                            .child(self.studio_failure_headline(job, error)),
                     )
                     .when(
                         !detail.is_empty() && !matches!(error.kind, ImageErrorKind::Interrupted),
@@ -990,6 +1075,7 @@ impl Waku {
                         .child(add_images)
                         .child(model_menu)
                         .child(group_menu)
+                        .children(self.render_studio_node_menu(theme, cx))
                         .child(size_menu)
                         .children(quality_menu)
                         .child(count_menu)

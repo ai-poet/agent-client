@@ -24,6 +24,9 @@ mod workspace_edit;
 // documents.
 #[path = "workspace_preview.rs"]
 mod workspace_preview;
+// Fork addition: side questions about a task (`/btw`, ⌘;).
+#[path = "side_chat.rs"]
+mod side_chat;
 
 pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult> {
     Ok(match operation {
@@ -124,6 +127,28 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
                 base_branch.as_deref(),
             )?,
         },
+        // Fork addition: side questions (`side_chat.rs`).
+        WorkspaceOperation::SideChatStart {
+            cwd,
+            model,
+            system,
+            messages,
+        } => WorkspaceResult::SideChatStarted {
+            job: side_chat::start(cwd, model, system, messages)?,
+        },
+        WorkspaceOperation::SideChatPoll { job, from, wait_ms } => {
+            let progress = side_chat::poll(job, from, wait_ms)?;
+            WorkspaceResult::SideChatProgress {
+                text: progress.text,
+                next: progress.next,
+                done: progress.done,
+                error: progress.error,
+            }
+        }
+        WorkspaceOperation::SideChatCancel { job } => {
+            side_chat::cancel(job);
+            WorkspaceResult::Ack
+        }
         WorkspaceOperation::InspectCommit { cwd } => WorkspaceResult::CommitSnapshot {
             snapshot: crate::git_commit::inspect(&cwd)?,
         },

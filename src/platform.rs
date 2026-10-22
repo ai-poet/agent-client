@@ -14,6 +14,24 @@ pub fn show_about_panel() {
 #[cfg(not(target_os = "macos"))]
 pub fn show_about_panel() {}
 
+/// Fork: the Dock icon's badge — how many tasks need the person, or none.
+#[cfg(target_os = "macos")]
+pub fn set_dock_badge(count: usize) {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+    use objc2_foundation::NSString;
+
+    let Some(main_thread) = MainThreadMarker::new() else {
+        return;
+    };
+    let tile = NSApplication::sharedApplication(main_thread).dockTile();
+    let label = (count > 0).then(|| NSString::from_str(&count.to_string()));
+    tile.setBadgeLabel(label.as_deref());
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_dock_badge(_count: usize) {}
+
 /// Register embedded font data with CoreText at process scope. GPUI's
 /// `add_fonts` only feeds its private font-kit source, which CoreText cascade
 /// matching cannot see — and it refuses symbols-only faces outright (fonts

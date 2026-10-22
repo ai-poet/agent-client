@@ -85,6 +85,8 @@ pub(super) enum SidebarView {
 pub(super) struct GroupBadge {
     pub running: bool,
     pub unread: bool,
+    /// A task inside waits on the person (`task_attention.rs`).
+    pub needs_you: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -113,6 +115,9 @@ pub(super) struct TaskEntry {
     pub timestamp: u64,
     /// Connecting, working or waiting on the person.
     pub running: bool,
+    /// Holds a request for the person — a running task's, or a team member's
+    /// reaching an idle captain (`task_attention.rs`).
+    pub needs_you: bool,
     /// Lives under the project-less workspace root.
     pub projectless: bool,
     pub date_group: SessionDateGroup,
@@ -378,11 +383,14 @@ pub(super) fn build_sidebar_rows(inputs: &SidebarRowInputs) -> SidebarLayout {
     }
 }
 
-/// Running tasks first, then by recency in the chosen direction. Stable, so
-/// equal tasks keep the order they came in.
+/// Running tasks first — and with them the ones that need the person, as one
+/// block, so a task going from working to waiting never moves — then by
+/// recency in the chosen direction. Stable, so equal tasks keep the order
+/// they came in.
 fn sort_tasks(tasks: &mut [&TaskEntry], ordering: SidebarOrdering) {
+    let active = |entry: &TaskEntry| entry.running || entry.needs_you;
     tasks.sort_by(|a, b| {
-        b.running.cmp(&a.running).then_with(|| match ordering {
+        active(b).cmp(&active(a)).then_with(|| match ordering {
             SidebarOrdering::Newest => b.timestamp.cmp(&a.timestamp),
             SidebarOrdering::Oldest => a.timestamp.cmp(&b.timestamp),
         })
@@ -397,6 +405,7 @@ fn badge(collapsed: bool, tasks: &[&TaskEntry], marks: &TaskMarks) -> GroupBadge
     GroupBadge {
         running: tasks.iter().any(|entry| entry.running),
         unread: tasks.iter().any(|entry| marks.is_unread(entry.id)),
+        needs_you: tasks.iter().any(|entry| entry.needs_you),
     }
 }
 
@@ -498,6 +507,7 @@ mod tests {
             project_id: id(project),
             timestamp,
             running: false,
+            needs_you: false,
             projectless: project == LOOSE,
             date_group: SessionDateGroup::Today,
         }
@@ -505,6 +515,11 @@ mod tests {
 
     fn running(mut entry: TaskEntry) -> TaskEntry {
         entry.running = true;
+        entry
+    }
+
+    fn needs_you(mut entry: TaskEntry) -> TaskEntry {
+        entry.needs_you = true;
         entry
     }
 
@@ -595,6 +610,7 @@ mod tests {
     const PLAIN: GroupBadge = GroupBadge {
         running: false,
         unread: false,
+        needs_you: false,
     };
 
     #[test]
@@ -860,6 +876,39 @@ mod tests {
         assert_eq!(layout.toggle_all, ToggleAll::ExpandAll);
     }
 
+    /// An idle captain holding a team member's request sorts with the
+    /// running tasks, and its folded group says so.
+    #[test]
+    fn a_task_that_needs_you_sorts_with_running_ones_and_badges_its_group() {
+        let mut fixture = Fixture::new(vec![
+            task(1, PROJECT_A, 300),
+            needs_you(task(2, PROJECT_A, 100)),
+            running(task(3, PROJECT_A, 200)),
+        ]);
+        let layout = fixture.build(SidebarView::ByProject);
+        assert_eq!(sessions(&layout.rows), vec![id(3), id(2), id(1)]);
+
+        let group = SidebarGroup::Project(id(PROJECT_A));
+        fixture.collapsed.insert(group);
+        let layout = fixture.build(SidebarView::ByProject);
+        assert!(layout.rows.iter().any(|row| matches!(
+            row,
+            Header(header, GroupBadge { needs_you: true, .. }) if *header == group
+        )));
+    }
+
+    /// Working → waiting is one block: the row does not move.
+    #[test]
+    fn needs_you_never_reorders_a_task_already_running() {
+        let fixture = Fixture::new(vec![
+            running(task(1, PROJECT_A, 100)),
+            running(needs_you(task(2, PROJECT_A, 200))),
+            task(3, PROJECT_A, 300),
+        ]);
+        let layout = fixture.build(SidebarView::ByProject);
+        assert_eq!(sessions(&layout.rows), vec![id(2), id(1), id(3)]);
+    }
+
     #[test]
     fn a_folded_group_keeps_a_badge_for_every_task_inside() {
         let mut fixture = Fixture::new(
@@ -879,7 +928,8 @@ mod tests {
                 group,
                 GroupBadge {
                     running: true,
-                    unread: true
+                    unread: true,
+                    needs_you: false,
                 }
             )
         );

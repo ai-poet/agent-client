@@ -909,6 +909,8 @@ impl RightPanelSurface {
             Self::Diff => tr!("right_panel.diff"),
             Self::Team => tr!("team.surface"),
             Self::Plan => tr!("plan.surface"),
+            Self::SideChat => tr!("side_chat.surface"),
+            Self::Trajectory => tr!("trajectory.surface"),
             // Fork fix: Windows relative paths use backslashes.
             Self::File(path) => path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned(),
         }
@@ -923,6 +925,8 @@ impl RightPanelSurface {
             Self::Diff => "icons/file-diff.svg",
             Self::Team => "icons/users.svg",
             Self::Plan => "icons/list.svg",
+            Self::SideChat => "icons/corner-down-right.svg",
+            Self::Trajectory => "icons/chart-column.svg",
             Self::File(path) => file_icon_for_path(path),
         }
     }
@@ -966,7 +970,9 @@ fn reusable_surface_index(
         | RightPanelSurface::Diff
         | RightPanelSurface::File(_)
         | RightPanelSurface::Team
-        | RightPanelSurface::Plan => surfaces.iter().position(|surface| surface == requested),
+        | RightPanelSurface::Plan
+        | RightPanelSurface::SideChat
+        | RightPanelSurface::Trajectory => surfaces.iter().position(|surface| surface == requested),
     }
 }
 
@@ -2198,6 +2204,8 @@ impl Waku {
                 .into_any_element(),
             Some(RightPanelSurface::Team) => self.render_team_surface(window, cx),
             Some(RightPanelSurface::Plan) => self.render_plan_surface(window, cx),
+            Some(RightPanelSurface::SideChat) => self.render_side_chat_surface(window, cx),
+            Some(RightPanelSurface::Trajectory) => self.render_trajectory_surface(cx),
             Some(RightPanelSurface::Terminal(terminal_id)) => self
                 .right_panel_terminals
                 .get(&terminal_id)
@@ -2557,11 +2565,15 @@ impl Waku {
                 .is_some_and(|session| session.provider == ProviderKind::Native)
             {
                 options.push(RightPanelSurface::Team);
+                // Fork: the built-in agent's trajectory.
+                options.push(RightPanelSurface::Trajectory);
             }
             // Fork: the Plan surface, once the session has submitted a plan.
             if self.selected_session_has_plan() {
                 options.push(RightPanelSurface::Plan);
             }
+            // Fork: the side chat, for any task.
+            options.push(RightPanelSurface::SideChat);
             let handle = self.menu_handle("add-right-panel-surface", cx);
             header = header.child(
                 div()
@@ -3580,6 +3592,8 @@ impl Waku {
             ))
             .child(toolbar)
             .child(content)
+            // Fork: the comments written on this diff, and their send button.
+            .children(self.render_review_comment_bar(cx))
             .child(self.right_panel_diff_selection_input())
     }
 
@@ -3737,7 +3751,8 @@ impl Waku {
                 .into_any_element();
         }
         let entity = cx.entity().downgrade();
-        div()
+        // Fork: focusable, so the keyboard reaches the lines (review_comments.rs).
+        self.review_diff_body(div(), cx)
             .flex_1()
             .min_h_0()
             .min_w_0()
@@ -3975,13 +3990,18 @@ impl Waku {
                 .into_any_element(),
             crate::review_diff::LineKind::Context
             | crate::review_diff::LineKind::Addition
-            | crate::review_diff::LineKind::Deletion => render_diff_code_row(
+            | crate::review_diff::LineKind::Deletion => self.review_comment_row(
                 line,
                 index,
-                "review-diff",
-                &self.right_panel_diff_selection,
-                style,
-                &theme,
+                render_diff_code_row(
+                    line,
+                    index,
+                    "review-diff",
+                    &self.right_panel_diff_selection,
+                    style,
+                    &theme,
+                ),
+                cx,
             ),
         }
     }

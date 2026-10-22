@@ -171,7 +171,15 @@ pub fn provider_from_config(
             }
             Some(Arc::new(provider))
         }
-        "google" => api_key.map(|key| Arc::new(GoogleProvider::new(key)) as Arc<dyn LlmProvider>),
+        // Fork: a configured base points the Gemini client at it — the
+        // managed gateway's `/v1beta` mount — instead of Google's own API.
+        "google" => api_key.map(|key| {
+            let provider = match api_base {
+                Some(base) => GoogleProvider::with_gateway(base, key),
+                None => GoogleProvider::new(key),
+            };
+            Arc::new(provider) as Arc<dyn LlmProvider>
+        }),
         "minimax" => api_key.map(|key| {
             let mut provider = MinimaxProvider::new(key);
             if let Some(base) = api_base {

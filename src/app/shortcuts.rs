@@ -10,7 +10,21 @@ use super::*;
 
 actions!(
     waku_shortcuts,
-    [CycleAccessMode, TogglePlanMode, CycleReasoningEffort]
+    [
+        CycleAccessMode,
+        TogglePlanMode,
+        CycleReasoningEffort,
+        // The next task that needs the person (`task_attention.rs`).
+        JumpToNeedsYou,
+        // Review panel line comments (`review_comments.rs`).
+        SubmitReviewComments,
+        DismissReviewComment,
+        // The side chat (`side_chat.rs`).
+        ToggleSideChat,
+        SideChatEscape,
+        // The trajectory surface (`trajectory_panel.rs`).
+        TrajectoryEscape
+    ]
 );
 
 pub fn init(cx: &mut App) {
@@ -18,6 +32,35 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-shift-m", CycleAccessMode, Some("Waku")),
         KeyBinding::new("secondary-shift-p", TogglePlanMode, Some("Waku")),
         KeyBinding::new("secondary-t", CycleReasoningEffort, Some("Waku")),
+        KeyBinding::new("secondary-shift-a", JumpToNeedsYou, Some("Waku")),
+        KeyBinding::new(
+            "secondary-enter",
+            SubmitReviewComments,
+            Some(super::review_comments::REVIEW_DIFF_CONTEXT),
+        ),
+        // Escape in the diff or its comment editor stays there: unclaimed,
+        // it would reach `CancelTurn` and stop the agent.
+        KeyBinding::new(
+            "escape",
+            DismissReviewComment,
+            Some(super::review_comments::REVIEW_DIFF_CONTEXT),
+        ),
+        KeyBinding::new(
+            "escape",
+            DismissReviewComment,
+            Some(super::review_comments::REVIEW_COMMENT_EDITOR_CONTEXT),
+        ),
+        KeyBinding::new("secondary-;", ToggleSideChat, Some("Waku")),
+        KeyBinding::new(
+            "escape",
+            SideChatEscape,
+            Some(super::side_chat::SIDE_CHAT_CONTEXT),
+        ),
+        KeyBinding::new(
+            "escape",
+            TrajectoryEscape,
+            Some(super::trajectory_panel::TRAJECTORY_CONTEXT),
+        ),
     ]);
 }
 

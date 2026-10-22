@@ -1376,12 +1376,23 @@ not. The Responses adapter upstream only knew the ChatGPT backend; the fork
 gives it an endpoint and a bearer key (`CodexProvider::with_gateway`), one of
 the recorded departures in the vendored tree.
 
+**Gemini** — one model, Gemini 4 Argon (`GEMINI_NATIVE_MODELS` in the
+bridge, `NATIVE_GEMINI_MODELS` in `native_agent.rs`, kept in step), speaks
+Gemini's own API: a fourth format, `gemini`, on the engine's `google`
+adapter, which the fork points at the gateway (`GoogleProvider::with_gateway`)
+instead of Google's API. The gateway serves it on `/v1beta` for a `gemini` or
+`composite` group and only on `/antigravity/v1beta` for an `antigravity`
+group, so the routing writer files the platform of the group each model is
+routed to (`gateway_keys.model_platforms`) and `select_route` picks the
+mount from it. Every other `gemini-*` stays unoffered.
+
 A second departure keeps the chosen format from being overruled. The
 engine's query loop only honoured `config.provider` when it was *not*
 `anthropic`, falling through to a hard-coded family table otherwise —
 `grok-*` to xai, `gemini-*` to google, neither of which this product
-configures — so every session on the Messages route was re-routed by model
-name to a provider with no key. Waku picks the route itself, so an explicit
+configured then (the `gemini` format above now sets `google` explicitly) — so
+every session on the Messages route was re-routed by model name to a provider
+with no key. Waku picks the route itself, so an explicit
 provider is now the answer rather than a hint.
 
 **Prompt caching** — Anthropic caches a request's prefix only up to a

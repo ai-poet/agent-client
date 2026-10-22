@@ -151,6 +151,8 @@ struct Inner {
     /// Fork addition: background commands that ended while no turn could
     /// take the news, for the next turn (`background_notifier`).
     background_notices: Mutex<Vec<String>>,
+    /// Fork addition: the session's trajectory (`crate::trajectory`).
+    trajectory: Arc<crate::trajectory::Recorder>,
 }
 
 /// The parts of a running turn that outside callers need to reach.
@@ -231,6 +233,8 @@ impl AgentSession {
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let team = crate::team::TeamHost::new(&options, &id, events.clone());
         let memory = crate::memory::MemoryHost::new(&options.cwd, &id);
+        let trajectory = Arc::new(crate::trajectory::Recorder::new(options.trajectory_dir.clone(), &id));
+        subagents.set_trajectory(trajectory.clone());
         let tools = ToolSets::build(
             &config.disallowed_tools,
             None,
@@ -266,6 +270,7 @@ impl AgentSession {
             memory,
             goal_resume: goal_resume::GoalResume::default(),
             background_notices: Mutex::new(Vec::new()),
+            trajectory,
         });
 
         inner
@@ -591,6 +596,8 @@ impl AgentSession {
             anyhow::bail!("cannot rewind while a turn is running");
         }
         let removed = history::rollback(&mut self.inner.history.lock(), turns)?;
+        // Fork: the trajectory marks the turns this took away.
+        self.inner.trajectory.rewind(history::turn_count(&self.inner.history.lock()) as u32);
         Ok(removed)
     }
 
@@ -1083,6 +1090,8 @@ async fn run_turn(
     // at ~205k while the ring read 20%. Set after the sub-agent's copy was
     // taken: a child may run another model.
     query.context_window = context_window;
+    // Fork: the turn's start in the trajectory (`crate::trajectory`).
+    inner.trajectory.begin_turn(weight_before as u32, messages.last(), &route.provider, &route.api_base, options.wire_format().id(), &query, &tools);
 
     let client = inner.client.lock().clone();
     inner.subagents.begin_turn(TurnScope {
@@ -1231,6 +1240,8 @@ async fn run_turn(
             inner.events.emit(AgentEvent::Error(reason));
         }
     }
+    // Fork: the turn's end in the trajectory (`crate::trajectory`).
+    inner.trajectory.end_turn(success, summary.clone(), crate::trajectory::session_usage(&inner.cost_tracker));
     inner.events.emit(AgentEvent::TurnFinished { success, summary });
     inner.events.emit(AgentEvent::HistoryCommitted(history::serialize(
         &inner.history.lock(),
@@ -1297,6 +1308,8 @@ async fn compact_now(inner: Arc<Inner>, instructions: Option<String>, cancel: Ca
     let provider_id = config.selected_provider_id().to_owned();
     let tokens_before = claurst_query::estimate_context_tokens(&messages, None);
     let report = |phase, tokens_after| {
+        // Fork: `/compact` in the trajectory (`crate::trajectory`).
+        inner.trajectory.compaction(crate::trajectory::compaction_phase(&phase), tokens_before, tokens_after);
         inner.events.emit(AgentEvent::Compaction {
             phase,
             automatic: false,
@@ -1458,6 +1471,8 @@ async fn forward_events(
 ) {
     let mut decoder = StreamDecoder::new(context_window);
     while let Some(event) = rx.recv().await {
+        // Fork: every event is timed into the trajectory (`crate::trajectory`).
+        inner.trajectory.observe(&event);
         // Fork: the conversation at a step boundary. Written to the session's
         // store as the turn's end writes it, so a crash or a killed daemon
         // loses the step in flight, not the turn — and the calls of that step
@@ -1565,10 +1580,9 @@ impl Route {
     fn of(config: &Config, model: &str) -> Self {
         let provider = config.selected_provider_id().to_owned();
         let api_base = config.resolve_api_base();
-        let path = WireFormat::for_engine_provider(&provider)
+        let url = WireFormat::for_engine_provider(&provider)
             .unwrap_or(WireFormat::Messages)
-            .request_path();
-        let url = claurst_api::endpoint::versioned_url(&api_base, path);
+            .request_url(&api_base, model);
         Self {
             provider,
             model: model.to_owned(),

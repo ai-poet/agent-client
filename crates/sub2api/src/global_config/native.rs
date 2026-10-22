@@ -71,6 +71,12 @@ pub const ENDPOINTS_OPTION: &str = "endpoints";
 /// code path. No platform is called `models`.
 pub const MODEL_KEYS_MEMBER: &str = "models";
 
+/// Fork: the member of that table naming the platform of the group behind
+/// each per-model key (`{"<model>": "<platform>"}`). Only Gemini's route
+/// reads it: an `antigravity` group's Gemini requests go to another mount.
+/// Kept in step with `waku_agent_bridge`'s `MODEL_PLATFORMS_MEMBER`.
+pub const MODEL_PLATFORMS_MEMBER: &str = "model_platforms";
+
 /// Where each model's context window is filed (`{"<model>": <tokens>}`), in
 /// the options of every provider entry this writer points somewhere. The
 /// bridge reads the same path: it sizes the usage meter and the engine's
@@ -143,6 +149,9 @@ fn gateway_keys_value(routes: &NativeRoutes) -> Value {
         .collect();
     if !routes.model_keys.is_empty() {
         table.insert(MODEL_KEYS_MEMBER.to_owned(), json!(routes.model_keys));
+    }
+    if !routes.model_platforms.is_empty() {
+        table.insert(MODEL_PLATFORMS_MEMBER.to_owned(), json!(routes.model_platforms));
     }
     Value::Object(table)
 }
@@ -563,6 +572,7 @@ mod tests {
             chat: at("https://gateway.example.org", "sk-claude"),
             platform_keys: keys(),
             model_keys: BTreeMap::new(),
+            model_platforms: BTreeMap::new(),
             context_windows: BTreeMap::new(),
             endpoints: BTreeMap::new(),
         }
@@ -786,6 +796,7 @@ mod tests {
             chat: at("https://chat.example.org", "sk-chat"),
             platform_keys: BTreeMap::new(),
             model_keys: BTreeMap::new(),
+            model_platforms: BTreeMap::new(),
             context_windows: BTreeMap::new(),
             endpoints: BTreeMap::new(),
         };
@@ -819,7 +830,11 @@ mod tests {
         let dir = tempdir();
         let mut backups = CliBackups::default();
         let routes = NativeRoutes {
-            model_keys: BTreeMap::from([("deepseek-v4.1-flash".to_owned(), "sk-sub".to_owned())]),
+            model_keys: BTreeMap::from([
+                ("deepseek-v4.1-flash".to_owned(), "sk-sub".to_owned()),
+                ("gemini-4-argon".to_owned(), "sk-argon".to_owned()),
+            ]),
+            model_platforms: BTreeMap::from([("gemini-4-argon".to_owned(), "antigravity".to_owned())]),
             ..routes()
         };
         take_over(&dir, &routes, &mut backups).unwrap();
@@ -828,6 +843,7 @@ mod tests {
             .cloned()
             .expect("key table");
         assert_eq!(table.pointer("/models/deepseek-v4.1-flash").unwrap(), "sk-sub");
+        assert_eq!(table.pointer("/model_platforms/gemini-4-argon").unwrap(), "antigravity");
         assert_eq!(table.get("openai").unwrap(), "sk-codex");
 
         let custom = NativeRoutes {
@@ -907,6 +923,7 @@ mod tests {
             chat: None,
             platform_keys: BTreeMap::new(),
             model_keys: BTreeMap::new(),
+            model_platforms: BTreeMap::new(),
             context_windows: BTreeMap::new(),
             endpoints: BTreeMap::new(),
         };

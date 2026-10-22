@@ -469,6 +469,18 @@ fn assemble_slash_commands(
             template: None,
         });
     }
+    // Fork addition: `/btw` asks about the task on the side, for every
+    // provider (the desktop's `side_chat.rs`); a command owning the name
+    // keeps it.
+    if !commands.iter().any(|command| command.name == "btw") {
+        commands.push(SlashCommand {
+            name: "btw".to_owned(),
+            description: crate::i18n::translate("commands.btw_description"),
+            scope: CommandScope::Builtin,
+            argument_hint: Some(crate::i18n::translate("commands.btw_argument_hint")),
+            template: None,
+        });
+    }
     sort_commands_for_display(&mut commands);
     commands
 }

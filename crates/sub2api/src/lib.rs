@@ -358,6 +358,8 @@ pub struct ModelRoutesRefresh {
     pub group_keys: std::collections::BTreeMap<i64, String>,
     /// The new `Credentials::model_routes`.
     pub model_routes: std::collections::BTreeMap<String, i64>,
+    /// The new `Credentials::model_platforms`.
+    pub model_platforms: std::collections::BTreeMap<String, String>,
     /// The new `Credentials::model_windows`.
     pub model_windows: std::collections::BTreeMap<String, u64>,
 }
@@ -409,6 +411,7 @@ impl ModelRoutesRefresh {
             credentials.group_keys.entry(group).or_insert(key);
         }
         credentials.model_routes = self.model_routes.clone();
+        credentials.model_platforms = self.model_platforms.clone();
         credentials.model_windows = self.model_windows.clone();
     }
 }
@@ -514,14 +517,16 @@ pub fn refresh_model_routes(
     credentials.group_keys.retain(|group, _| needed.contains(group));
     // A group that could not be given a key leaves its models on their
     // platform's key rather than on nothing.
-    let model_routes = routes
+    let model_routes: std::collections::BTreeMap<String, i64> = routes
         .into_iter()
         .filter(|(_, group)| key_for_group(credentials, *group).is_some())
         .collect();
+    let model_platforms = routed_platforms(&model_routes, &offers);
     Ok(ModelRoutesRefresh {
         subscriptions,
         group_keys: credentials.group_keys.clone(),
         model_routes,
+        model_platforms,
         model_windows: model_windows_from_catalog(catalog),
     })
 }
@@ -582,7 +587,32 @@ pub fn route_one_model(
         return Ok(None);
     }
     credentials.model_routes.insert(model.to_owned(), group);
+    if let Some(offer) = offers.iter().find(|offer| offer.group_id == group) {
+        credentials
+            .model_platforms
+            .insert(model.to_owned(), offer.platform.clone());
+    }
     Ok(Some(group))
+}
+
+/// The platform of the group each route goes through, from the offer that
+/// put the model there. A route no offer explains (an image model's learned
+/// group, a group the catalog is silent about) is left out: a reader takes
+/// the platform's default then.
+pub fn routed_platforms(
+    routes: &std::collections::BTreeMap<String, i64>,
+    offers: &[model_routing::Offer],
+) -> std::collections::BTreeMap<String, String> {
+    routes
+        .iter()
+        .filter_map(|(model, group)| {
+            offers
+                .iter()
+                .find(|offer| offer.model == *model && offer.group_id == *group)
+                .filter(|offer| !offer.platform.trim().is_empty())
+                .map(|offer| (model.clone(), offer.platform.trim().to_owned()))
+        })
+        .collect()
 }
 
 /// Take what [`route_one_model`] learned into the session the app holds now:
@@ -593,11 +623,44 @@ pub fn merge_model_route(from: &Credentials, model: &str, group: i64, into: &mut
         into.group_keys.entry(group).or_insert_with(|| key.clone());
     }
     into.model_routes.insert(model.trim().to_owned(), group);
+    match from.model_platforms.get(model.trim()) {
+        Some(platform) => {
+            into.model_platforms
+                .insert(model.trim().to_owned(), platform.clone());
+        }
+        None => {
+            into.model_platforms.remove(model.trim());
+        }
+    }
 }
 
 #[cfg(test)]
 mod group_key_tests {
     use super::*;
+
+    #[test]
+    fn routed_platforms_name_the_group_each_route_went_to() {
+        let offer = |model: &str, group: i64, platform: &str| model_routing::Offer {
+            model: model.to_owned(),
+            group_id: group,
+            platform: platform.to_owned(),
+            rate_multiplier: 1.0,
+        };
+        let offers = [
+            offer("gemini-4-argon", 7, "antigravity"),
+            offer("gemini-4-argon", 8, "gemini"),
+            offer("claude-opus-5", 3, "anthropic"),
+        ];
+        let routes = std::collections::BTreeMap::from([
+            ("gemini-4-argon".to_owned(), 7),
+            ("claude-opus-5".to_owned(), 3),
+            ("gpt-image-2".to_owned(), 9),
+        ]);
+        let platforms = routed_platforms(&routes, &offers);
+        assert_eq!(platforms.get("gemini-4-argon").map(String::as_str), Some("antigravity"));
+        assert_eq!(platforms.get("claude-opus-5").map(String::as_str), Some("anthropic"));
+        assert!(!platforms.contains_key("gpt-image-2"));
+    }
 
     #[test]
     fn a_slot_bound_to_the_group_supplies_its_key() {
@@ -798,6 +861,15 @@ pub fn gateway_config_with_origin(
             .iter()
             .filter_map(|(model, group)| {
                 key_for_group(credentials, *group).map(|key| (model.clone(), key.to_owned()))
+            })
+            .collect(),
+        model_platforms: credentials
+            .model_routes
+            .iter()
+            .filter(|(_, group)| key_for_group(credentials, **group).is_some())
+            .filter_map(|(model, _)| {
+                let platform = credentials.model_platforms.get(model)?;
+                Some((model.clone(), platform.clone()))
             })
             .collect(),
         model_windows: credentials.model_windows.clone(),

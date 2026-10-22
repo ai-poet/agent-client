@@ -86,7 +86,7 @@ CheapRouter 把「低价模型网关」和「原生 Agent 工作台」合成了�
 执行命令、搜索代码、调用 MCP 工具、启动子 agent。会话记录由应用自己保存，回滚、
 分支、续聊都不依赖任何外部进程。
 
-**模型与接口格式。** 模型选择器列出网关目录里能对话的模型（Gemini 暂未接入），
+**模型与接口格式。** 模型选择器列出网关目录里能对话的模型（Gemini 系列目前只接入 Gemini 4 Argon），
 同一个模型只列一次。接口格式由模型家族决定，不需要手动选：
 
 | 模型家族 | 接口格式 | 推理强度 |
@@ -95,6 +95,7 @@ CheapRouter 把「低价模型网关」和「原生 Agent 工作台」合成了�
 | GPT / o 系列、Grok | OpenAI Responses | low 至 max |
 | DeepSeek、GLM 4.5 及以后、Kimi K3 | OpenAI Chat Completions | low / high / max |
 | Kimi K2、MiniMax | OpenAI Chat Completions | 由模型自己决定（接口不提供档位） |
+| Gemini 4 Argon | Google Gemini（网关 v1beta） | low / medium / high |
 
 **每个模型走对的分组。** 一个密钥只属于一个分组，而每个分组只提供它支持的那些
 模型。内置 Agent 按模型挑分组：Claude、GPT、Grok 走你为 Claude Code、Codex、

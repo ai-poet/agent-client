@@ -189,13 +189,12 @@ impl Waku {
                 .into_any_element()
         };
 
-        let status = if session.status == SessionStatus::Waiting {
+        // What the task waits on the person for, from its pending requests
+        // (`task_attention.rs`): a team member's request reaching an idle
+        // captain is shown too, and the tag goes the moment it is answered.
+        let status = if let Some(attention) = self.task_attention(session_id) {
             // Several requests can wait at once; say how many.
-            let waiting = self.runtimes.get(&session_id).map_or(0, |runtime| {
-                runtime.pending_permissions.len()
-                    + usize::from(runtime.pending_user_input.is_some())
-                    + usize::from(runtime.pending_computer_approval.is_some())
-            });
+            let waiting = attention.count;
             let (background, foreground) = approval_tag_colors(&theme);
             Some(
                 div()
@@ -210,7 +209,7 @@ impl Waku {
                     .text_size(sp(11.5))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(foreground)
-                    .child(tr!("sidebar.awaiting_approval"))
+                    .child(attention.label())
                     .when(waiting > 1, |tag| tag.child(format!("· {waiting}"))),
             )
         } else {
@@ -330,6 +329,25 @@ impl Waku {
             .justify_center();
         if session.status == SessionStatus::Failed {
             return slot.children(self.render_task_failure_badge(session, cx));
+        }
+        // Fork: a task that needs the person (`task_attention.rs`). An icon
+        // and a tooltip naming what for, not a colour alone.
+        if let Some(attention) = self.task_attention(session.id) {
+            let tooltip = if attention.count > 1 {
+                tr!("needs_you.tooltip_many", what = attention.label(), count = attention.count)
+            } else {
+                tr!("needs_you.tooltip", what = attention.label())
+            };
+            return slot.child(
+                div()
+                    .id(SharedString::from(format!("task-needs-you-{}", session.id)))
+                    .size(px(14.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .tooltip(Tooltip::text(tooltip))
+                    .child(icon("icons/alert.svg", 12.0, theme.warning)),
+            );
         }
         if unread {
             return slot.child(

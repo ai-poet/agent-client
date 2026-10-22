@@ -570,6 +570,11 @@ enum RightPanelSurface {
     Team,
     /// Fork addition: the plan the session's agent asks to have approved.
     Plan,
+    /// Fork addition: questions about the task on the side (`side_chat.rs`).
+    SideChat,
+    /// Fork addition: the built-in agent's request-by-request record
+    /// (`trajectory_panel.rs`).
+    Trajectory,
 }
 
 /// A turn whose checkpoint still has to be captured.
@@ -1495,6 +1500,12 @@ pub struct Waku {
     file_search: Option<file_search::FileSearch>,
     right_panel_diff_source: ReviewDiffSource,
     right_panel_diff_snapshot: Option<Arc<ReviewDiffSnapshot>>,
+    /// Fork: comments on the Review diff's lines (`review_comments.rs`).
+    review_comments: review_comments::ReviewCommentsState,
+    /// Fork: side questions about a task (`side_chat.rs`).
+    side_chat: side_chat::SideChatState,
+    /// Fork: the built-in agent's trajectory (`trajectory_panel.rs`).
+    trajectory_panel: trajectory_panel::TrajectoryPanelState,
     right_panel_diff_loading: bool,
     right_panel_diff_error: Option<String>,
     right_panel_diff_generation: u64,
@@ -1829,6 +1840,11 @@ mod model_retry;
 mod sidebar_rows;
 mod sidebar_sections;
 mod sidebar_toolbar;
+mod review_comments;
+mod side_chat;
+mod trajectory_panel;
+mod agent_trajectory_settings;
+mod task_attention;
 mod task_marks;
 mod task_rows;
 mod update_banner;
@@ -3300,6 +3316,9 @@ impl Waku {
                 file_search: None,
                 right_panel_diff_source: ReviewDiffSource::default(),
                 right_panel_diff_snapshot: None,
+                review_comments: Default::default(),
+                side_chat: Default::default(),
+                trajectory_panel: Default::default(),
                 right_panel_diff_loading: false,
                 right_panel_diff_error: None,
                 right_panel_diff_generation: 0,

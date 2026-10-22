@@ -294,7 +294,7 @@ impl Waku {
         badge: GroupBadge,
         theme: &Theme,
     ) -> Option<Div> {
-        if !badge.running && !badge.unread {
+        if !badge.running && !badge.unread && !badge.needs_you {
             return None;
         }
         Some(
@@ -303,6 +303,17 @@ impl Waku {
                 .flex()
                 .items_center()
                 .gap(px(4.0))
+                // Fork: a task inside needs the person (`task_attention.rs`).
+                .when(badge.needs_you, |element| {
+                    element.child(
+                        div()
+                            .id(SharedString::from(format!("sidebar-group-needs-you-{key}")))
+                            .flex()
+                            .items_center()
+                            .tooltip(Tooltip::text(tr!("needs_you.group")))
+                            .child(icon("icons/alert.svg", 12.0, theme.warning)),
+                    )
+                })
                 .when(badge.running, |element| {
                     element.child(
                         div()

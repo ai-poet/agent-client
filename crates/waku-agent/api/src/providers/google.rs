@@ -9,6 +9,15 @@
 // - Thinking config for Gemini 2.5+ and 3.0+ models
 // - Image/video inputs via inlineData parts
 // - list_models via GET /v1beta/models
+//
+// Fork departures (Waku), so the built-in agent can drive Gemini 4 Argon
+// through the managed gateway's `/v1beta` (or `/antigravity/v1beta`) mount:
+// `with_gateway` takes any base and the connect/read timeouts every other
+// model client uses; the key rides in `x-goog-api-key` only, never in the
+// URL (which was also logged); `thought` parts stream as reasoning instead
+// of answer text; usage counts thinking and cached tokens; failures are
+// classified for the retry loop and a stream that ends without a
+// `finishReason` is one; tool-call ids are unique across turns.
 
 use std::pin::Pin;
 
@@ -34,6 +43,15 @@ use super::request_options::merge_google_options;
 // GoogleProvider
 // ---------------------------------------------------------------------------
 
+const GOOGLE_API_BASE: &str = "https://generativelanguage.googleapis.com";
+
+/// Hex digits of the per-response nonce in a made-up tool-call id.
+const TOOL_ID_NONCE_LEN: usize = 8;
+
+/// The index thinking deltas stream under, apart from the text block at 0
+/// and the tool calls from 1000 (the Chat adapter uses the same one).
+const THINKING_BLOCK_INDEX: usize = usize::MAX - 100;
+
 pub struct GoogleProvider {
     id: ProviderId,
     api_key: String,
@@ -43,11 +61,22 @@ pub struct GoogleProvider {
 
 impl GoogleProvider {
     pub fn new(api_key: String) -> Self {
+        Self::with_gateway(GOOGLE_API_BASE, api_key)
+    }
+
+    /// Fork addition (Waku): the Gemini API behind any base — the managed
+    /// gateway's origin, its `/antigravity` mount, or a base that already
+    /// names its version (`…/v1beta`). Request shape, streaming and tool
+    /// translation are unchanged; only where the request goes moves.
+    pub fn with_gateway(base_url: impl Into<String>, api_key: String) -> Self {
+        let http_client = crate::retry_policy::model_client_builder()
+            .build()
+            .expect("failed to build reqwest client");
         Self {
             id: ProviderId::new(ProviderId::GOOGLE),
             api_key,
-            base_url: "https://generativelanguage.googleapis.com".to_string(),
-            http_client: reqwest::Client::new(),
+            base_url: base_url.into().trim().trim_end_matches('/').to_string(),
+            http_client,
         }
     }
 
@@ -55,28 +84,41 @@ impl GoogleProvider {
     // Internal helpers
     // -----------------------------------------------------------------------
 
-    /// Returns true if the model supports thinking config (Gemini 2.5+ / 3.0+).
+    /// Returns true if the model supports thinking config (Gemini 2.5+ / 3.0+ / 4).
     fn supports_thinking(model: &str) -> bool {
-        model.contains("2.5") || model.contains("3.0") || model.contains("3.1") || model.contains("gemini-3")
+        model.contains("2.5")
+            || model.contains("3.0")
+            || model.contains("3.1")
+            || model.contains("gemini-3")
+            || model.contains("gemini-4")
     }
 
-    /// Build the full generateContent URL for non-streaming.
+    /// `{base}/v1beta/{path}`, or `{base}/{path}` when the base already ends
+    /// in a version segment.
+    fn api_url(&self, path: &str) -> String {
+        if crate::endpoint::ends_with_version_segment(&self.base_url) {
+            format!("{}/{}", self.base_url, path)
+        } else {
+            format!("{}/v1beta/{}", self.base_url, path)
+        }
+    }
+
+    /// Build the full generateContent URL for non-streaming. The key is sent
+    /// as `x-goog-api-key`, never in the URL.
     fn generate_url(&self, model: &str) -> String {
-        format!(
-            "{}/v1beta/models/{}:generateContent?key={}",
-            self.base_url, model, self.api_key
-        )
+        self.api_url(&format!("models/{model}:generateContent"))
     }
 
     /// Build the full streamGenerateContent URL for streaming.
     fn stream_url(&self, model: &str) -> String {
-        format!(
-            "{}/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
-            self.base_url, model, self.api_key
-        )
+        self.api_url(&format!("models/{model}:streamGenerateContent?alt=sse"))
     }
 
-    fn tool_use_id_for_name(name: &str, occurrence: usize) -> String {
+    /// A tool call's id. Gemini sends none, so one is made up: the function
+    /// name, a per-response nonce — ids restarting at `call_<name>` every
+    /// response repeated across turns, and Waku keys tool rows by id — and an
+    /// occurrence number for a name called twice in one response.
+    fn tool_use_id_for_name(name: &str, nonce: &str, occurrence: usize) -> String {
         let sanitized: String = name
             .chars()
             .map(|ch| {
@@ -89,10 +131,16 @@ impl GoogleProvider {
             .collect();
         let base = if sanitized.is_empty() { "tool" } else { sanitized.as_str() };
         if occurrence == 0 {
-            format!("call_{}", base)
+            format!("call_{}_{}", base, nonce)
         } else {
-            format!("call_{}_{}", base, occurrence + 1)
+            format!("call_{}_{}_{}", base, nonce, occurrence + 1)
         }
+    }
+
+    /// A fresh nonce for [`Self::tool_use_id_for_name`]: eight hex digits.
+    fn tool_id_nonce() -> String {
+        let id = uuid_v4_simple();
+        id[id.len() - TOOL_ID_NONCE_LEN..].to_string()
     }
 
     fn tool_name_by_id(messages: &[Message]) -> std::collections::HashMap<String, String> {
@@ -120,6 +168,17 @@ impl GoogleProvider {
             }
         } else {
             raw
+        };
+        // Fork (Waku): then the nonce `tool_use_id_for_name` puts before it.
+        let trimmed = match trimmed.rsplit_once('_') {
+            Some((candidate, nonce))
+                if !candidate.is_empty()
+                    && nonce.len() == TOOL_ID_NONCE_LEN
+                    && nonce.chars().all(|ch| ch.is_ascii_hexdigit()) =>
+            {
+                candidate
+            }
+            _ => trimmed,
         };
 
         if trimmed.is_empty() {
@@ -535,10 +594,19 @@ impl GoogleProvider {
         let mut content_blocks: Vec<ContentBlock> = Vec::new();
         let mut tool_name_counts: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
+        let nonce = Self::tool_id_nonce();
 
         if let Some(parts) = parts {
             for part in parts {
                 if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                    // Fork (Waku): a thought summary is reasoning, not answer.
+                    if is_thought_part(part) {
+                        content_blocks.push(ContentBlock::Thinking {
+                            thinking: text.to_string(),
+                            signature: String::new(),
+                        });
+                        continue;
+                    }
                     content_blocks.push(ContentBlock::Text {
                         text: text.to_string(),
                     });
@@ -554,7 +622,7 @@ impl GoogleProvider {
                         .entry(name.clone())
                         .and_modify(|count| *count += 1)
                         .or_insert(0);
-                    let id = Self::tool_use_id_for_name(&name, *occurrence);
+                    let id = Self::tool_use_id_for_name(&name, &nonce, *occurrence);
                     content_blocks.push(ContentBlock::ToolUse {
                         id,
                         name,
@@ -579,18 +647,27 @@ impl GoogleProvider {
 
     /// Extract UsageInfo from a response body's usageMetadata field.
     fn extract_usage(&self, body: &Value) -> UsageInfo {
-        let meta = body.get("usageMetadata");
-        UsageInfo {
-            input_tokens: meta
-                .and_then(|m| m.get("promptTokenCount"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0),
-            output_tokens: meta
-                .and_then(|m| m.get("candidatesTokenCount"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0),
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
+        usage_from_metadata(body.get("usageMetadata"))
+    }
+
+    /// Fork (Waku): a failure to get any response, classified for the
+    /// retry loop.
+    fn transport_error(&self, error: &reqwest::Error) -> ProviderError {
+        ProviderError::Classified {
+            provider: self.id.clone(),
+            failure: crate::retry_policy::classify_transport(error),
+        }
+    }
+
+    /// Fork (Waku): an HTTP error answer, classified with its headers so the
+    /// loop sees `Retry-After` and the gateway's own message.
+    async fn http_error(&self, response: reqwest::Response) -> ProviderError {
+        let status = response.status().as_u16();
+        let headers = response.headers().clone();
+        let body = response.text().await.unwrap_or_default();
+        ProviderError::Classified {
+            provider: self.id.clone(),
+            failure: crate::retry_policy::classify_http(status, &headers, &body),
         }
     }
 
@@ -628,24 +705,13 @@ impl LlmProvider for GoogleProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ProviderError::ServerError {
-                provider: self.id.clone(),
-                status: None,
-                message: e.to_string(),
-                is_retryable: true,
-            })?;
+            .map_err(|e| self.transport_error(&e))?;
 
-        let status = resp.status().as_u16();
-        let resp_body = resp.text().await.map_err(|e| ProviderError::ServerError {
-            provider: self.id.clone(),
-            status: Some(status),
-            message: e.to_string(),
-            is_retryable: true,
-        })?;
-
-        if status >= 400 {
-            return Err(self.parse_error_response(status, &resp_body));
+        if !resp.status().is_success() {
+            return Err(self.http_error(resp).await);
         }
+        let status = resp.status().as_u16();
+        let resp_body = resp.text().await.map_err(|e| self.transport_error(&e))?;
 
         let json_body: Value =
             serde_json::from_str(&resp_body).map_err(|e| ProviderError::Other {
@@ -679,20 +745,10 @@ impl LlmProvider for GoogleProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ProviderError::ServerError {
-                provider: self.id.clone(),
-                status: None,
-                message: e.to_string(),
-                is_retryable: true,
-            })?;
+            .map_err(|e| self.transport_error(&e))?;
 
-        let status = resp.status().as_u16();
-        if status >= 400 {
-            let resp_body =
-                resp.text()
-                    .await
-                    .unwrap_or_else(|_| "<unreadable>".to_string());
-            return Err(self.parse_error_response(status, &resp_body));
+        if !resp.status().is_success() {
+            return Err(self.http_error(resp).await);
         }
 
         // Wrap the byte stream in a line-based SSE parser.
@@ -718,15 +774,18 @@ impl LlmProvider for GoogleProvider {
             let mut decoder = crate::SseByteDecoder::new();
             let mut tool_name_counts: std::collections::HashMap<String, usize> =
                 std::collections::HashMap::new();
+            let nonce = Self::tool_id_nonce();
+            // Fork (Waku): a stream that closes before any candidate names a
+            // finish reason broke off, and its partial answer must not stand.
+            let mut saw_finish = false;
 
             while let Some(chunk_result) = byte_stream.next().await {
                 let chunk: Bytes = match chunk_result {
                     Ok(c) => c,
                     Err(e) => {
-                        yield Err(ProviderError::StreamError {
+                        yield Err(ProviderError::Classified {
                             provider: provider_id_for_stream.clone(),
-                            message: e.to_string(),
-                            partial_response: None,
+                            failure: crate::retry_policy::classify_transport(&e),
                         });
                         return;
                     }
@@ -753,15 +812,9 @@ impl LlmProvider for GoogleProvider {
 
                         // Check for stream-level error.
                         if let Some(err) = parsed.get("error") {
-                            let msg = err
-                                .get("message")
-                                .and_then(|m| m.as_str())
-                                .unwrap_or("unknown error")
-                                .to_string();
-                            yield Err(ProviderError::StreamError {
+                            yield Err(ProviderError::Classified {
                                 provider: provider_id_for_stream.clone(),
-                                message: msg,
-                                partial_response: None,
+                                failure: stream_error_failure(err),
                             });
                             return;
                         }
@@ -769,19 +822,7 @@ impl LlmProvider for GoogleProvider {
                         // Emit MessageStart on first chunk.
                         if !emitted_message_start {
                             emitted_message_start = true;
-                            let meta = parsed.get("usageMetadata");
-                            let usage = UsageInfo {
-                                input_tokens: meta
-                                    .and_then(|m| m.get("promptTokenCount"))
-                                    .and_then(|v| v.as_u64())
-                                    .unwrap_or(0),
-                                output_tokens: meta
-                                    .and_then(|m| m.get("candidatesTokenCount"))
-                                    .and_then(|v| v.as_u64())
-                                    .unwrap_or(0),
-                                cache_creation_input_tokens: 0,
-                                cache_read_input_tokens: 0,
-                            };
+                            let usage = usage_from_metadata(parsed.get("usageMetadata"));
                             yield Ok(StreamEvent::MessageStart {
                                 id: message_id.clone(),
                                 model: model_clone.clone(),
@@ -804,6 +845,20 @@ impl LlmProvider for GoogleProvider {
                             if let Some(parts) = parts {
                                 for (part_idx, part) in parts.iter().enumerate() {
                                     if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                                        if text.is_empty() {
+                                            continue;
+                                        }
+                                        // Fork (Waku): with `includeThoughts`, the
+                                        // thought summary arrives as text parts
+                                        // marked `thought`; it is reasoning, not
+                                        // the answer.
+                                        if is_thought_part(part) {
+                                            yield Ok(StreamEvent::ReasoningDelta {
+                                                index: THINKING_BLOCK_INDEX,
+                                                reasoning: text.to_string(),
+                                            });
+                                            continue;
+                                        }
                                         yield Ok(StreamEvent::TextDelta {
                                             index: text_block_index,
                                             text: text.to_string(),
@@ -830,7 +885,7 @@ impl LlmProvider for GoogleProvider {
                                                 .entry(name.clone())
                                                 .and_modify(|count| *count += 1)
                                                 .or_insert(0);
-                                            let id = Self::tool_use_id_for_name(&name, *occurrence);
+                                            let id = Self::tool_use_id_for_name(&name, &nonce, *occurrence);
                                             let idx = tool_block_index;
                                             tool_block_index += 1;
                                             open_tool_calls.insert(part_idx, (idx, id.clone(), name.clone()));
@@ -863,6 +918,7 @@ impl LlmProvider for GoogleProvider {
                             if !finish_reason.is_empty()
                                 && finish_reason != "FINISH_REASON_UNSPECIFIED"
                             {
+                                saw_finish = true;
                                 // Close text block.
                                 yield Ok(StreamEvent::ContentBlockStop {
                                     index: text_block_index,
@@ -888,19 +944,7 @@ impl LlmProvider for GoogleProvider {
                                     other => Some(StopReason::Other(other.to_string())),
                                 };
 
-                                let meta = parsed.get("usageMetadata");
-                                let final_usage = UsageInfo {
-                                    input_tokens: meta
-                                        .and_then(|m| m.get("promptTokenCount"))
-                                        .and_then(|v| v.as_u64())
-                                        .unwrap_or(0),
-                                    output_tokens: meta
-                                        .and_then(|m| m.get("candidatesTokenCount"))
-                                        .and_then(|v| v.as_u64())
-                                        .unwrap_or(0),
-                                    cache_creation_input_tokens: 0,
-                                    cache_read_input_tokens: 0,
-                                };
+                                let final_usage = usage_from_metadata(parsed.get("usageMetadata"));
 
                                 yield Ok(StreamEvent::MessageDelta {
                                     stop_reason,
@@ -913,6 +957,13 @@ impl LlmProvider for GoogleProvider {
                     // SSE comment lines (": ...") and blank lines are ignored.
                 }
             }
+
+            if !saw_finish {
+                yield Err(ProviderError::Classified {
+                    provider: provider_id_for_stream.clone(),
+                    failure: crate::retry_policy::ModelFailure::truncated("the Gemini stream"),
+                });
+            }
         };
 
         Ok(Box::pin(stream))
@@ -921,7 +972,7 @@ impl LlmProvider for GoogleProvider {
     async fn health_check(&self) -> Result<ProviderStatus, ProviderError> {
         // Lightweight liveness probe: a models-listing GET on the live endpoint.
         // (Model *listing* for the picker comes from the catalog, not here.)
-        let url = format!("{}/v1beta/models?key={}", self.base_url, self.api_key);
+        let url = self.api_url("models");
         let resp = self
             .http_client
             .get(&url)
@@ -994,6 +1045,51 @@ fn thought_signature_from_part(part: &Value) -> Option<String> {
     part.get("thoughtSignature")
         .and_then(|s| s.as_str())
         .map(|s| s.to_string())
+}
+
+/// Fork (Waku): whether a text part is a thought summary (`"thought": true`).
+fn is_thought_part(part: &Value) -> bool {
+    part.get("thought").and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// Fork (Waku): usage from a `usageMetadata` object. `promptTokenCount`
+/// already includes the cached tokens, which are reported apart (as the
+/// Responses adapter does); thinking tokens are output, billed as such.
+fn usage_from_metadata(meta: Option<&Value>) -> UsageInfo {
+    let count = |key: &str| {
+        meta.and_then(|m| m.get(key))
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    };
+    let cached = count("cachedContentTokenCount");
+    UsageInfo {
+        input_tokens: count("promptTokenCount").saturating_sub(cached),
+        output_tokens: count("candidatesTokenCount") + count("thoughtsTokenCount"),
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: cached,
+    }
+}
+
+/// Fork (Waku): an `{"error": …}` object inside the stream. Gemini's carries
+/// the HTTP `code` it stands for, which classifies it the way the same answer
+/// outside a stream would be; without one, its `status` names the kind.
+fn stream_error_failure(error: &Value) -> crate::retry_policy::ModelFailure {
+    let message = error
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown error");
+    match error.get("code").and_then(Value::as_u64) {
+        Some(code @ 400..=599) => crate::retry_policy::classify_status(
+            code as u16,
+            &json!({ "error": error }).to_string(),
+            None,
+            None,
+        ),
+        _ => {
+            let kind = error.get("status").and_then(Value::as_str).unwrap_or("");
+            crate::retry_policy::classify_stream_error(kind, message)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1090,14 +1186,100 @@ mod tests {
             .parse_response_body(&response, "gemini-3-flash-preview")
             .expect("parsed response");
 
-        assert!(matches!(
-            &parsed.content[0],
-            ContentBlock::ToolUse { id, .. } if id == "call_search"
-        ));
-        assert!(matches!(
-            &parsed.content[1],
-            ContentBlock::ToolUse { id, .. } if id == "call_search_2"
-        ));
+        let ids: Vec<&str> = parsed
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::ToolUse { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids.len(), 2);
+        assert_ne!(ids[0], ids[1]);
+        assert!(ids[0].starts_with("call_search_"));
+        assert!(ids[1].ends_with("_2"));
+        // Either id still reads back as the function's name.
+        for id in &ids {
+            assert_eq!(GoogleProvider::infer_tool_name_from_id(id).as_deref(), Some("search"));
+        }
+    }
+
+    #[test]
+    fn tool_ids_differ_between_responses_and_keep_multi_word_names() {
+        let first = GoogleProvider::tool_use_id_for_name("web_fetch", "0a1b2c3d", 0);
+        let second = GoogleProvider::tool_use_id_for_name("web_fetch", "12345678", 0);
+        assert_ne!(first, second);
+        assert_eq!(GoogleProvider::infer_tool_name_from_id(&first).as_deref(), Some("web_fetch"));
+        assert_eq!(GoogleProvider::infer_tool_name_from_id(&second).as_deref(), Some("web_fetch"));
+        let third = GoogleProvider::tool_use_id_for_name("web_fetch", "12345678", 2);
+        assert_eq!(GoogleProvider::infer_tool_name_from_id(&third).as_deref(), Some("web_fetch"));
+    }
+
+    #[test]
+    fn urls_carry_no_key_and_respect_a_versioned_base() {
+        let provider = GoogleProvider::new("secret".to_string());
+        let url = provider.stream_url("gemini-4-argon");
+        assert_eq!(
+            url,
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-4-argon:streamGenerateContent?alt=sse"
+        );
+        assert!(!url.contains("secret"));
+
+        let gateway = GoogleProvider::with_gateway("https://cheaprouter.cc/antigravity/", "k".into());
+        assert_eq!(
+            gateway.generate_url("gemini-4-argon"),
+            "https://cheaprouter.cc/antigravity/v1beta/models/gemini-4-argon:generateContent"
+        );
+        let versioned = GoogleProvider::with_gateway("https://example.com/v1beta", "k".into());
+        assert_eq!(
+            versioned.stream_url("gemini-4-argon"),
+            "https://example.com/v1beta/models/gemini-4-argon:streamGenerateContent?alt=sse"
+        );
+    }
+
+    #[test]
+    fn thought_parts_are_thinking_and_usage_counts_thoughts_and_cache() {
+        let provider = GoogleProvider::new("test".to_string());
+        let response = json!({
+            "candidates": [{
+                "finishReason": "STOP",
+                "content": { "parts": [
+                    { "text": "weighing options", "thought": true },
+                    { "text": "answer" }
+                ]}
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 100,
+                "cachedContentTokenCount": 40,
+                "candidatesTokenCount": 7,
+                "thoughtsTokenCount": 30
+            }
+        });
+        let parsed = provider
+            .parse_response_body(&response, "gemini-4-argon")
+            .expect("parsed response");
+        assert!(matches!(&parsed.content[0], ContentBlock::Thinking { thinking, .. } if thinking == "weighing options"));
+        assert!(matches!(&parsed.content[1], ContentBlock::Text { text } if text == "answer"));
+        assert_eq!(parsed.usage.input_tokens, 60);
+        assert_eq!(parsed.usage.cache_read_input_tokens, 40);
+        assert_eq!(parsed.usage.output_tokens, 37);
+    }
+
+    #[test]
+    fn gemini_4_supports_thinking() {
+        assert!(GoogleProvider::supports_thinking("gemini-4-argon"));
+    }
+
+    #[test]
+    fn in_stream_errors_classify_by_their_http_code() {
+        let rate_limited = stream_error_failure(&json!({
+            "code": 429, "message": "Resource exhausted", "status": "RESOURCE_EXHAUSTED"
+        }));
+        assert!(rate_limited.is_retryable());
+        let bad_request = stream_error_failure(&json!({
+            "code": 400, "message": "Invalid argument", "status": "INVALID_ARGUMENT"
+        }));
+        assert!(!bad_request.is_retryable());
     }
 
     #[test]

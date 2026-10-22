@@ -164,6 +164,12 @@ enum PaletteAction {
     ToggleSidebar,
     ToggleRightPanel,
     OpenSurface(super::surface_bar::SurfaceKind),
+    /// Fork addition: the next task that needs the person.
+    JumpToNeedsYou,
+    /// Fork addition: the side chat.
+    OpenSideChat,
+    /// Fork addition: the built-in agent's trajectory.
+    OpenTrajectory,
     OpenSettings(SettingsPage),
     SelectTask(Uuid),
 }
@@ -842,6 +848,41 @@ impl Waku {
                 next(),
             )
         }));
+        // Fork addition: the next task that needs the person (task_attention.rs).
+        commands.push(CommandPaletteItem::command(
+            PaletteSection::Commands,
+            tr!("needs_you.jump"),
+            "icons/alert.svg",
+            Some(crate::platform::primary_shortcut("⇧⌘A", "Ctrl+Shift+A")),
+            PaletteAction::JumpToNeedsYou,
+            "needs you waiting approval permission question next task attention",
+            next(),
+        ));
+        // Fork addition: the side chat (side_chat.rs).
+        commands.push(CommandPaletteItem::command(
+            PaletteSection::Commands,
+            tr!("side_chat.open"),
+            "icons/corner-down-right.svg",
+            Some(crate::platform::primary_shortcut("⌘;", "Ctrl+;")),
+            PaletteAction::OpenSideChat,
+            "side chat btw ask question aside",
+            next(),
+        ));
+        // Fork addition: the trajectory, for a built-in agent task.
+        if self
+            .selected_session()
+            .is_some_and(|session| session.provider == ProviderKind::Native)
+        {
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("trajectory.open"),
+                "icons/chart-column.svg",
+                None,
+                PaletteAction::OpenTrajectory,
+                "trajectory timeline requests tokens ttft trace inspect",
+                next(),
+            ));
+        }
 
         for (page, label_key, icon, keywords) in [
             (
@@ -1631,6 +1672,9 @@ impl Waku {
                 self.toggle_right_panel_action(&ToggleRightPanel, window, cx)
             }
             PaletteAction::OpenSurface(kind) => self.activate_surface_kind(kind, cx),
+            PaletteAction::JumpToNeedsYou => self.jump_to_needs_you(window, cx),
+            PaletteAction::OpenSideChat => self.open_side_chat(cx),
+            PaletteAction::OpenTrajectory => self.open_trajectory(cx),
             PaletteAction::OpenSettings(page) => {
                 self.open_settings_action(&OpenSettings, window, cx);
                 self.open_settings_page(page, cx);

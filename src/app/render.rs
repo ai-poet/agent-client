@@ -270,6 +270,7 @@ impl Render for Waku {
                 .on_action(cx.listener(Self::select_last_task_action))
                 .on_action(cx.listener(Self::confirm_task_switch_action))
                 .on_action(cx.listener(Self::cancel_task_switch_action))
+                .on_action(cx.listener(Self::jump_to_needs_you_action))
                 .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
                 // Fork addition: an available update announces itself here too.
                 .children(self.render_update_banner(cx))
@@ -346,6 +347,13 @@ impl Render for Waku {
             .on_action(cx.listener(Self::cycle_access_mode_action))
             .on_action(cx.listener(Self::toggle_plan_mode_action))
             .on_action(cx.listener(Self::cycle_reasoning_effort_action))
+            // Fork: ⇧⌘A, the next task that needs the person.
+            .on_action(cx.listener(Self::jump_to_needs_you_action))
+            .on_action(cx.listener(Self::submit_review_comments_action))
+            .on_action(cx.listener(Self::dismiss_review_comment_action))
+            .on_action(cx.listener(Self::toggle_side_chat_action))
+            .on_action(cx.listener(Self::side_chat_escape_action))
+            .on_action(cx.listener(Self::trajectory_escape_action))
             .on_action(cx.listener(Self::toggle_usage_panel_action))
             .on_action(cx.listener(Self::save_right_panel_file_action))
             .on_action(cx.listener(Self::cancel_turn_action))
