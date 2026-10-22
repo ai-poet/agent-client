@@ -179,6 +179,12 @@ pub struct Credentials {
     /// agent's routing reads it ([`crate::model_routing::Bindings::domestic`]).
     #[serde(default)]
     pub domestic_group_id: Option<i64>,
+    /// Gemini's group, picked on Settings → Cloud Account — the first one
+    /// until the user picks another. Like the domestic group its key lives
+    /// in `group_keys` and only the built-in agent's routing reads it
+    /// ([`crate::model_routing::Bindings::gemini`]).
+    #[serde(default)]
+    pub gemini_group_id: Option<i64>,
     /// Keys for groups no CLI slot is bound to — the domestic group,
     /// subscriptions and the pay-as-you-go groups beside them — by group id.
     /// The built-in agent sends each model through the group that serves it,
@@ -332,6 +338,7 @@ impl Credentials {
             claude_group_id: None,
             codex_group_id: None,
             domestic_group_id: None,
+            gemini_group_id: None,
             group_keys: BTreeMap::new(),
             model_routes: BTreeMap::new(),
             model_platforms: BTreeMap::new(),

@@ -1945,6 +1945,7 @@ impl Waku {
             *platform == "anthropic"
                 || (*platform == "openai" && catalog_ready)
                 || *platform == sub2api::model_routing::DOMESTIC_LANE
+                || *platform == sub2api::model_routing::GEMINI_LANE
         }) {
             let bound = self
                 .cloud_account

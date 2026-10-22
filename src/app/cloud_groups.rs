@@ -2,11 +2,12 @@
 //! group.
 //!
 //! Fork addition. A lane is a CLI's slot — Claude Code, Codex, the general
-//! key — or the Chinese models' own ([`sub2api::model_routing::DOMESTIC_LANE`]),
-//! whose groups are `openai` groups on the live gateway and so cannot be
-//! filed by platform.
+//! key — Gemini's own ([`sub2api::model_routing::GEMINI_LANE`]), or the
+//! Chinese models' own ([`sub2api::model_routing::DOMESTIC_LANE`]), whose
+//! groups are `openai` groups on the live gateway and so cannot be filed by
+//! platform.
 
-use sub2api::model_routing::DOMESTIC_LANE;
+use sub2api::model_routing::{DOMESTIC_LANE, GEMINI_LANE};
 
 use super::cloud_account::{platform_display_name, section_title};
 use super::*;
@@ -461,6 +462,7 @@ pub(super) fn cloud_lanes(
 /// group)`: the Chinese models' lane first — so a CLI slot moved off one of
 /// their groups hands it over — then every lane whose slot is empty, or holds
 /// a group of the Chinese models it can never serve a CLI's requests through.
+/// Gemini's lane, like theirs, is bound again once its group is gone.
 ///
 /// Without the catalog a group of the Chinese models reads as its platform
 /// (`openai`), so the two lanes that tells apart wait for it.
@@ -507,6 +509,12 @@ pub(super) fn pending_group_bindings(
         if lane == DOMESTIC_LANE || (!catalog_ready && lane == "openai") {
             continue;
         }
+        if lane == GEMINI_LANE {
+            if let Some(group) = gemini_pick(credentials, groups, catalog) {
+                pending.push((lane, group));
+            }
+            continue;
+        }
         let bound = sub2api::bound_group_for_platform(credentials, &lane);
         let holds_domestic =
             catalog_ready && bound.and_then(lane_of).as_deref() == Some(DOMESTIC_LANE);
@@ -518,6 +526,32 @@ pub(super) fn pending_group_bindings(
         }
     }
     pending
+}
+
+/// The group Gemini's lane should be bound to, or `None` while the one it
+/// holds is still listed: a Gemini group the general slot already holds —
+/// how one was picked before the lane had a slot — else the first. Binding
+/// it reuses the account's key there or mints one.
+fn gemini_pick(
+    credentials: &sub2api::Credentials,
+    groups: &[sub2api::client::Group],
+    catalog: &[sub2api::client::ModelCatalogItem],
+) -> Option<i64> {
+    let gemini: Vec<i64> = groups
+        .iter()
+        .filter(|group| cloud_lane(group, catalog) == GEMINI_LANE)
+        .map(|group| group.id)
+        .collect();
+    if credentials
+        .gemini_group_id
+        .is_some_and(|held| gemini.contains(&held))
+    {
+        return None;
+    }
+    credentials
+        .group_id
+        .filter(|general| gemini.contains(general))
+        .or_else(|| gemini.first().copied())
 }
 
 /// `×0.50 · 99.2%` — a group's rate multiplier, 24h availability, and a
@@ -649,6 +683,59 @@ mod tests {
         assert_eq!(
             pending_group_bindings(&credentials, &groups, &catalog),
             [(DOMESTIC_LANE.to_owned(), 15)]
+        );
+    }
+
+    /// Gemini's lane takes its first group even though the general slot
+    /// holds another platform's, keeps a pick, and moves on when the picked
+    /// group is gone.
+    #[test]
+    fn the_gemini_lane_starts_on_its_first_group() {
+        let (mut groups, catalog) = live();
+        groups.push(group(9, "grok", false));
+        groups.push(group(50, "gemini", false));
+        groups.push(group(51, "gemini", true));
+        let credentials = sub2api::Credentials {
+            claude_group_id: Some(1),
+            codex_group_id: Some(2),
+            domestic_group_id: Some(14),
+            group_id: Some(9),
+            ..sub2api::Credentials::default()
+        };
+        assert_eq!(
+            pending_group_bindings(&credentials, &groups, &catalog),
+            [(GEMINI_LANE.to_owned(), 50)]
+        );
+
+        let picked = sub2api::Credentials {
+            gemini_group_id: Some(51),
+            ..credentials.clone()
+        };
+        assert!(pending_group_bindings(&picked, &groups, &catalog).is_empty());
+        groups.retain(|group| group.id != 51);
+        assert_eq!(
+            pending_group_bindings(&picked, &groups, &catalog),
+            [(GEMINI_LANE.to_owned(), 50)]
+        );
+    }
+
+    /// A Gemini group the general slot was bound to before the lane had a
+    /// slot of its own is the user's pick, and moves there.
+    #[test]
+    fn a_gemini_group_on_the_general_slot_becomes_the_gemini_pick() {
+        let (mut groups, catalog) = live();
+        groups.push(group(50, "gemini", false));
+        groups.push(group(51, "gemini", false));
+        let credentials = sub2api::Credentials {
+            claude_group_id: Some(1),
+            codex_group_id: Some(2),
+            domestic_group_id: Some(14),
+            group_id: Some(51),
+            ..sub2api::Credentials::default()
+        };
+        assert_eq!(
+            pending_group_bindings(&credentials, &groups, &catalog),
+            [(GEMINI_LANE.to_owned(), 51)]
         );
     }
 
