@@ -1386,6 +1386,12 @@ group, so the routing writer files the platform of the group each model is
 routed to (`gateway_keys.model_platforms`) and `select_route` picks the
 mount from it. Every other `gemini-*` stays unoffered.
 
+Gemini sends each `functionCall` part whole, and parallel calls come one
+chunk each, every one at `parts[0]`; the adapter opens a tool block per part
+rather than per position, which had run their arguments together. A prompt
+Gemini refuses (`promptFeedback.blockReason`, no candidate) is a final
+failure naming the reason, not a broken stream to ask again.
+
 A second departure keeps the chosen format from being overruled. The
 engine's query loop only honoured `config.provider` when it was *not*
 `anthropic`, falling through to a hard-coded family table otherwise —
@@ -1456,7 +1462,11 @@ anthropic entry, 15 s / 300 s by default); the loop's own stall timer is a
 
 Each retry reaches the desktop as `DriverEvent::ModelRetry { attempt,
 max_attempts, delay_ms, reason, discarded_output, detail, between_turns }`.
-The working row says "Reconnecting (2/10, 8 s)". `discarded_output` means
+The working row says why, by `RetryCause` (`waku-protocol/src/turn_failure.rs`,
+several engine reasons reading alike): "Rate limited · retrying in 8 s
+(2/10)…", "Service busy", "Connection problem", "Reply cut off"; once the
+wait is over, "Sending again (2/10)…" rather than a countdown stuck at 0 s;
+an empty answer is "Empty answer · asking again" with no count. `discarded_output` means
 part of the failed answer had streamed: the engine threw it away (it never
 reached the conversation) and the desktop takes back the text and reasoning
 shown since the last settled point — the turn's start, a finished request
@@ -1468,6 +1478,35 @@ instruction to pick up where it stopped, keeping the conversation Retry would
 rewind. A goal that failed on something transient resumes on its own after
 30 / 60 / 120 / 240 / 300 s (`between_turns`, at most five in a row; a
 message, Stop or a goal change cancels it — `session_goal_resume.rs`).
+
+**When a turn gives up**, the failure stays structured on its way out
+(after DeepSeek Harness's `LlmFailure`, behaviour only). The engine sends
+`QueryEvent::RequestFailed(ModelFailure)` — class, reason, status, the
+provider's error code, the response's request id (`x-request-id`, which the
+managed gateway's ops log is keyed on, else `request-id`) — right before the
+`ClaudeError` that keeps only the status and the text, and every failure
+message is scrubbed of anything that looks like a key
+(`retry_policy::redact_secrets`). The bridge names the failure from it
+(`waku-agent-bridge/src/failure.rs`): context overflow, rate limited,
+network (a stalled reply included), unavailable, interrupted (a reply that
+kept breaking off), auth, quota (`insufficient_quota`, 402, a quota-window
+429 — no longer retried ten times), forbidden, bad request, content policy.
+The gateway's account verdicts — balance, plan, key — are left unnamed so
+its own bilingual text and the paywall's buttons stay; its content-policy
+refusals and its own transient answers that ran out of retries are named.
+A refused key's provider text is never shown, only its status. The driver
+words the kind in the user's language with the original kept in
+parentheses and a "Request ID" line, sends `DriverEvent::TurnFailure`
+first, and the turn keeps the kind (`TurnError.kind`) so the error banner
+offers what fixes it: Compact context (then Continue, queued behind the
+compaction) for an overflow; Model providers or Account settings for auth,
+quota and forbidden, without Continue; neither Continue nor a fix for a
+content-policy or bad request; the old Retry / Continue for the rest. A
+sub-agent's or team member's retry is a line in its record, and a half
+answer it threw away is taken back there too. The trajectory keeps each
+retry's reason and request id, the request's final failure, and goal
+resumes. There is no model or provider failover: a retry resends the same
+bytes on the same route.
 
 **Reasoning effort** — every family the picker offers has a working ladder:
 Claude over Messages turns it into adaptive thinking plus

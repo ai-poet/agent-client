@@ -932,12 +932,15 @@ pub mod client {
             mut request: CreateMessageRequest,
             handler: Arc<dyn StreamHandler>,
             attempt: u32,
-        ) -> Result<mpsc::Receiver<streaming::AnthropicStreamEvent>, crate::retry_policy::ModelFailure> {
+        ) -> Result<
+            (mpsc::Receiver<streaming::AnthropicStreamEvent>, Option<String>),
+            crate::retry_policy::ModelFailure,
+        > {
             use crate::retry_policy::ModelFailure;
             if self.config.api_key.is_empty() || self.config.provider == Provider::Codex {
                 // The full checks, and their hints, live on the retrying path.
                 return match self.create_message_stream(request, handler).await {
-                    Ok(rx) => Ok(rx),
+                    Ok(rx) => Ok((rx, None)),
                     Err(error) => Err(ModelFailure::fatal(None, error.to_string())),
                 };
             }
@@ -950,7 +953,9 @@ pub mod client {
                 .await
                 .map_err(|error| ModelFailure::fatal(None, error.to_string()))?;
             let resp = self.send_attempt(&prepared, attempt).await?;
-            Ok(Self::spawn_sse_reader(resp, handler))
+            // The response's id, for a failure that arrives inside the stream.
+            let request_id = crate::retry_policy::request_id_of(resp.headers());
+            Ok((Self::spawn_sse_reader(resp, handler), request_id))
         }
 
         /// Read a successful streaming response on a task of its own,
@@ -1250,7 +1255,7 @@ pub mod client {
                 // The typed error the Messages path always produced, in the
                 // message the rest of the product reads.
                 if let ClaudeError::ApiStatus { message, .. } = self.parse_api_error(status, &text) {
-                    failure.message = message;
+                    failure.message = crate::retry_policy::redact_secrets(&message);
                 }
                 Err(failure)
             }

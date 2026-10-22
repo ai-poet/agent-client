@@ -935,6 +935,9 @@ struct SessionRuntime {
     output_boundary: Option<model_retry::OutputBoundary>,
     /// Fork: the retry the built-in agent is waiting on.
     model_retry: Option<model_retry::RetryStatus>,
+    /// Fork: what kind of failure the next error is, when the built-in agent
+    /// named it — the error banner picks its actions by it.
+    turn_failure: Option<crate::model::TurnFailure>,
 }
 
 #[derive(Clone)]
@@ -1504,6 +1507,8 @@ pub struct Waku {
     review_comments: review_comments::ReviewCommentsState,
     /// Fork: side questions about a task (`side_chat.rs`).
     side_chat: side_chat::SideChatState,
+    /// Fork: the session details rail and the docked todo list (`session_rail.rs`).
+    session_rail: session_rail::SessionRailState,
     /// Fork: the built-in agent's trajectory (`trajectory_panel.rs`).
     trajectory_panel: trajectory_panel::TrajectoryPanelState,
     right_panel_diff_loading: bool,
@@ -1841,6 +1846,7 @@ mod sidebar_rows;
 mod sidebar_sections;
 mod sidebar_toolbar;
 mod review_comments;
+mod session_rail;
 mod side_chat;
 mod trajectory_panel;
 mod agent_trajectory_settings;
@@ -3318,6 +3324,7 @@ impl Waku {
                 right_panel_diff_snapshot: None,
                 review_comments: Default::default(),
                 side_chat: Default::default(),
+                session_rail: Default::default(),
                 trajectory_panel: Default::default(),
                 right_panel_diff_loading: false,
                 right_panel_diff_error: None,

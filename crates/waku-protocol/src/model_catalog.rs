@@ -25,8 +25,6 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
             ProviderModel::new("gpt-6-sol", "GPT-6-Sol"),
             ProviderModel::new("gpt-5.6-sol", "GPT-5.6-Sol").default(),
             ProviderModel::new("gpt-5.6-terra", "GPT-5.6-Terra"),
-            ProviderModel::new("gpt-5.5", "GPT-5.5"),
-            ProviderModel::new("gpt-5.4", "GPT-5.4"),
         ]
         .into_iter()
         .map(|model| {

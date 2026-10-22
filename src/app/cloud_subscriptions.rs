@@ -28,13 +28,13 @@ const LISTED_MODELS: usize = 6;
 const ROUTE_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// The model behind picker id `id` when a turn on it must first be routed:
-/// a Chinese model the catalog lists with no route — or no key for its
-/// route's group — that no earlier lookup already came up empty for.
+/// a Chinese or Gemini model the catalog lists with no route — or no key for
+/// its route's group — that no earlier lookup already came up empty for.
 ///
-/// Only the Chinese models: they are the ones the routing always places
-/// when the catalog lists them, so a missing route means "not worked out
-/// yet". Claude and GPT may be left to their CLI slot's key on purpose. A
-/// model on the user's own endpoint carries no `::` and needs no gateway
+/// Only the Chinese models and Gemini: they are the ones the routing always
+/// places when the catalog lists them, so a missing route means "not worked
+/// out yet". Claude and GPT may be left to their CLI slot's key on purpose.
+/// A model on the user's own endpoint carries no `::` and needs no gateway
 /// key at all.
 pub(super) fn native_route_need(
     id: &str,
@@ -49,7 +49,9 @@ pub(super) fn native_route_need(
     }
     let (_, model) = super::native_agent::native_route_parts(id);
     let model = model.trim();
-    if !sub2api::model_routing::is_domestic_model(model) || misses.contains(model) {
+    let always_routed = sub2api::model_routing::is_domestic_model(model)
+        || sub2api::model_routing::model_family(model) == Some(sub2api::model_routing::GEMINI_LANE);
+    if !always_routed || misses.contains(model) {
         return None;
     }
     if !catalog.iter().any(|item| item.model.trim() == model) {
@@ -772,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_chinese_models_the_catalog_lists_wait_for_a_route() {
+    fn only_the_chinese_models_and_gemini_the_catalog_lists_wait_for_a_route() {
         let none = HashSet::new();
         let fresh = sub2api::Credentials::default();
         let gpt = [ModelCatalogItem {
@@ -783,5 +785,14 @@ mod tests {
         assert_eq!(native_route_need("openai::gpt-5.6-sol", &fresh, &gpt, &none), None);
         // Not in the catalog: there is no group to look up.
         assert_eq!(native_route_need("deepseek::deepseek-v4.1-flash", &fresh, &gpt, &none), None);
+        // Gemini's key is its group's own, never a CLI slot's.
+        let gemini = [ModelCatalogItem {
+            model: "gemini-4-argon".into(),
+            ..ModelCatalogItem::default()
+        }];
+        assert_eq!(
+            native_route_need("gemini::gemini-4-argon", &fresh, &gemini, &none).as_deref(),
+            Some("gemini-4-argon")
+        );
     }
 }

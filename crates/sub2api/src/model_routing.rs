@@ -19,6 +19,9 @@
 //!    the binding is trusted and the model is left to the per-platform key,
 //!    exactly as before this existed. The same holds for a family whose slot
 //!    is still the account default.
+//!    Gemini has a slot of its own ([`GEMINI_LANE`]), whose key is the
+//!    group's own rather than a CLI's, so that binding is trusted by routing
+//!    the model there even when the group lists nothing.
 //!    The Chinese models (DeepSeek, GLM, Kimi, MiniMax, Qwen) have a slot of
 //!    their own instead, the domestic one ([`DOMESTIC_LANE`]): the group
 //!    picked there — a pay-as-you-go group, or a subscription while it has
@@ -108,6 +111,10 @@ pub struct Bindings {
     pub codex: Option<i64>,
     /// The general key's group, which every other CLI shares.
     pub general: Option<i64>,
+    /// Gemini's group (`Credentials::gemini_group_id`), picked on Settings →
+    /// Cloud Account. No CLI holds it; only the built-in agent's routing
+    /// reads it.
+    pub gemini: Option<i64>,
     /// The platform of `general`, which decides the family it binds.
     pub general_platform: Option<String>,
     /// The Chinese models' group (`Credentials::domestic_group_id`): a
@@ -123,6 +130,7 @@ impl Bindings {
             claude: credentials.claude_group_id,
             codex: credentials.codex_group_id,
             general: credentials.group_id,
+            gemini: credentials.gemini_group_id,
             general_platform: general_platform.map(|platform| platform.trim().to_ascii_lowercase()),
             domestic: credentials.domestic_group_id,
         }
@@ -133,6 +141,12 @@ impl Bindings {
 /// and Qwen. A group in it binds no CLI slot — its key serves nothing Claude
 /// Code or Codex could send — so it gets a lane of its own.
 pub const DOMESTIC_LANE: &str = "domestic";
+
+/// The group-picker lane of Gemini's groups. Before it had a slot of its own
+/// a Gemini group was bound to the general key, which every other platform
+/// shares, so once that slot held anything the lane was never given a group
+/// — nor a key — and Gemini went out with whatever key the slot had.
+pub const GEMINI_LANE: &str = "gemini";
 
 /// Whether `model` is one of the Chinese families [`DOMESTIC_LANE`] covers.
 /// Qwen has no platform of its own on the gateway and is read by name.
@@ -335,6 +349,16 @@ fn slot_for(family: Option<&str>, bindings: &Bindings) -> Slot {
     match family {
         Some("anthropic") => bound(bindings.claude),
         Some("openai") => bound(bindings.codex),
+        // Unbound rather than the account default: the general key is not
+        // Gemini's, so with no group picked the rules below place it.
+        Some(GEMINI_LANE) => match (bindings.gemini, bindings.general) {
+            (Some(group), _) => Slot::Bound(group),
+            // Picked before Gemini had a slot of its own.
+            (None, Some(group)) if bindings.general_platform.as_deref() == Some(GEMINI_LANE) => {
+                Slot::Bound(group)
+            }
+            _ => Slot::Unbound,
+        },
         Some(family) => match bindings.general {
             Some(group) if bindings.general_platform.as_deref() == Some(family) => Slot::Bound(group),
             // The general key is Grok's; left as the account default it
@@ -376,8 +400,15 @@ pub fn resolve(
                     continue;
                 }
                 // The bound group lists nothing, so nothing says it does not
-                // serve this model: trust the binding.
-                Slot::Bound(group) if !listing_groups.contains(&group) => continue,
+                // serve this model: trust the binding. Gemini's slot holds no
+                // CLI key — its key is the group's own — so trusting it means
+                // routing the model there.
+                Slot::Bound(group) if !listing_groups.contains(&group) => {
+                    if family == Some(GEMINI_LANE) && bindings.gemini == Some(group) {
+                        routes.insert(model.to_owned(), group);
+                    }
+                    continue;
+                }
                 Slot::AccountDefault => continue,
                 _ => {}
             }
@@ -389,7 +420,13 @@ pub fn resolve(
         // the pay-as-you-go group is on `openai` too, and cheaper rates must
         // not hand the choice back to Codex.
         let bound_elsewhere = |group: i64| {
-            let slots = [bindings.claude, bindings.codex, bindings.general, bindings.domestic];
+            let slots = [
+                bindings.claude,
+                bindings.codex,
+                bindings.general,
+                bindings.gemini,
+                bindings.domestic,
+            ];
             slots.contains(&Some(group)) && !(domestic && bindings.domestic == Some(group))
         };
         let rank = |offer: &&&Offer| {
@@ -458,9 +495,46 @@ mod tests {
             claude: Some(3),
             codex: Some(7),
             general: Some(9),
+            gemini: None,
             general_platform: Some("grok".into()),
             domestic: None,
         }
+    }
+
+    /// Gemini's slot takes its models whether or not its group lists them,
+    /// since its key reaches the agent only through a route; with no group
+    /// picked the usual rules place them, never the general key.
+    #[test]
+    fn gemini_models_answer_to_the_gemini_slot() {
+        let offers = [
+            offer("gemini-4-argon", 50, "gemini", 1.0),
+            offer("gemini-4-argon", 51, "gemini", 0.5),
+            offer("gemini-4-argon", 60, "antigravity", 0.1),
+        ];
+        let picked = Bindings {
+            gemini: Some(50),
+            ..bindings()
+        };
+        let routes = resolve(&offers, &picked, &BTreeSet::new(), &BTreeSet::new());
+        assert_eq!(routes.get("gemini-4-argon"), Some(&50));
+
+        let silent = Bindings {
+            gemini: Some(52),
+            ..bindings()
+        };
+        let routes = resolve(&offers, &silent, &BTreeSet::new(), &BTreeSet::new());
+        assert_eq!(routes.get("gemini-4-argon"), Some(&52), "the binding is trusted");
+
+        let routes = resolve(&offers, &bindings(), &BTreeSet::new(), &BTreeSet::new());
+        assert_eq!(routes.get("gemini-4-argon"), Some(&51), "own platform, then the rate");
+
+        let legacy = Bindings {
+            general: Some(50),
+            general_platform: Some("gemini".into()),
+            ..bindings()
+        };
+        let routes = resolve(&offers, &legacy, &BTreeSet::new(), &BTreeSet::new());
+        assert_eq!(routes.get("gemini-4-argon"), Some(&50));
     }
 
     /// The report that started this: the Codex group's upstream also lists

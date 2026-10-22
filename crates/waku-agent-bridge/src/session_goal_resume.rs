@@ -116,10 +116,13 @@ pub(super) fn after_turn(
     };
     let message = claurst_core::goal_continuation_message(&goal);
     let (id, token) = inner.goal_resume.arm();
+    let delay_ms = u64::try_from(delay.as_millis()).unwrap_or(u64::MAX);
+    // Fork: on the record of the turn that failed (`crate::trajectory`).
+    inner.trajectory.goal_resume(attempt, Some(MAX_RESUMES), delay_ms);
     inner.events.emit(AgentEvent::Retry {
         attempt,
         max_attempts: Some(MAX_RESUMES),
-        delay_ms: u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
+        delay_ms,
         reason: "turn_failed".to_string(),
         discarded_output: false,
         detail: String::new(),

@@ -397,17 +397,21 @@ impl ModelRoutesRefresh {
     /// Put the result into the session the app holds now. Only the routing
     /// tables are taken: the refresh ran on a copy, and the user may have
     /// switched a group meanwhile — copying the whole struct back would
-    /// undo that. For the same reason the key of the domestic group picked
-    /// now survives a refresh that started before it was picked.
+    /// undo that. For the same reason the keys of the domestic and Gemini
+    /// groups picked now survive a refresh that started before they were.
     pub fn apply_to(&self, credentials: &mut Credentials) {
-        let domestic_key = credentials.domestic_group_id.and_then(|group| {
-            credentials
-                .group_keys
-                .get(&group)
-                .map(|key| (group, key.clone()))
-        });
+        let picked: Vec<(i64, String)> = [credentials.domestic_group_id, credentials.gemini_group_id]
+            .into_iter()
+            .flatten()
+            .filter_map(|group| {
+                credentials
+                    .group_keys
+                    .get(&group)
+                    .map(|key| (group, key.clone()))
+            })
+            .collect();
         credentials.group_keys = self.group_keys.clone();
-        if let Some((group, key)) = domestic_key {
+        for (group, key) in picked {
             credentials.group_keys.entry(group).or_insert(key);
         }
         credentials.model_routes = self.model_routes.clone();
@@ -505,13 +509,15 @@ pub fn refresh_model_routes(
             .map(|(model, group)| (model.clone(), *group)),
     );
 
-    // The domestic group keeps its key even while nothing routes through it
-    // (a spent subscription): picking it again must not wait for a mint.
+    // The domestic and Gemini groups keep their keys even while nothing
+    // routes through them (a spent subscription, a catalog that lists no
+    // Gemini yet): picking one again must not wait for a mint.
     let needed: BTreeSet<i64> = routes
         .values()
         .copied()
         .chain(subscribed.iter().copied())
         .chain(credentials.domestic_group_id)
+        .chain(credentials.gemini_group_id)
         .collect();
     ensure_group_keys(credentials, &needed)?;
     credentials.group_keys.retain(|group, _| needed.contains(group));
@@ -701,13 +707,17 @@ mod group_key_tests {
         );
     }
 
-    /// A refresh runs on a copy; the domestic group picked while it ran
-    /// keeps its key when the answer is merged back.
+    /// A refresh runs on a copy; the domestic and Gemini groups picked
+    /// while it ran keep their keys when the answer is merged back.
     #[test]
     fn a_refresh_keeps_the_domestic_key_picked_meanwhile() {
         let mut live = Credentials {
             domestic_group_id: Some(15),
-            group_keys: std::collections::BTreeMap::from([(15, "sk-domestic".to_owned())]),
+            gemini_group_id: Some(50),
+            group_keys: std::collections::BTreeMap::from([
+                (15, "sk-domestic".to_owned()),
+                (50, "sk-gemini".to_owned()),
+            ]),
             ..Credentials::default()
         };
         let refresh = ModelRoutesRefresh {
@@ -717,6 +727,7 @@ mod group_key_tests {
         };
         refresh.apply_to(&mut live);
         assert_eq!(key_for_group(&live, 15), Some("sk-domestic"));
+        assert_eq!(key_for_group(&live, 50), Some("sk-gemini"));
         assert_eq!(key_for_group(&live, 14), Some("sk-sub"));
     }
 
@@ -810,6 +821,13 @@ pub fn bind_group_for_platform(
             }
             credentials.domestic_group_id = group_id;
         }
+        // Gemini's slot, likewise: no CLI reads it.
+        model_routing::GEMINI_LANE => {
+            if let (Some(group), Some(key)) = (group_id, key) {
+                credentials.group_keys.insert(group, key);
+            }
+            credentials.gemini_group_id = group_id;
+        }
         _ => {
             // No dedicated slot for this platform; route the general key.
             if key.is_some() {
@@ -828,6 +846,7 @@ pub fn bound_group_for_platform(credentials: &Credentials, platform: &str) -> Op
         "anthropic" => credentials.claude_group_id,
         "openai" => credentials.codex_group_id,
         model_routing::DOMESTIC_LANE => credentials.domestic_group_id,
+        model_routing::GEMINI_LANE => credentials.gemini_group_id,
         _ => credentials.group_id,
     }
 }

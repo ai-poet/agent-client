@@ -123,6 +123,18 @@ fn connect_remote(
                             };
                             let event = match waku_client::event_from_wire(sequenced.event) {
                                 Ok(event) => event,
+                                // Fork: a newer daemon's event this build does not
+                                // know is skipped, not reported as a broken daemon;
+                                // the events around it still make sense.
+                                Err(error) if error.is::<waku_client::UnsupportedDriverEvent>() => {
+                                    if forwarding_events
+                                        .send(DriverEvent::RuntimeEventCursorAdvanced(cursor))
+                                        .is_err()
+                                    {
+                                        return;
+                                    }
+                                    continue;
+                                }
                                 Err(error) => DriverEvent::Error(format!(
                                     "the daemon sent an invalid event: {error}"
                                 )),

@@ -555,6 +555,9 @@ impl GoogleProvider {
         body: &Value,
         model: &str,
     ) -> Result<ProviderResponse, ProviderError> {
+        if let Some(failure) = prompt_block_failure(body) {
+            return Err(ProviderError::Classified { provider: self.id.clone(), failure });
+        }
         let candidates = body
             .get("candidates")
             .and_then(|c| c.as_array())
@@ -750,6 +753,8 @@ impl LlmProvider for GoogleProvider {
         if !resp.status().is_success() {
             return Err(self.http_error(resp).await);
         }
+        // Fork (Waku): a failure inside the stream still names its request.
+        let request_id = crate::retry_policy::request_id_of(resp.headers());
 
         // Wrap the byte stream in a line-based SSE parser.
         let provider_id_for_stream = self.id.clone();
@@ -763,8 +768,13 @@ impl LlmProvider for GoogleProvider {
             let mut byte_stream = byte_stream;
             let text_block_index: usize = 0;
             let mut tool_block_index: usize = 1000;
-            let mut open_tool_calls: std::collections::HashMap<usize, (usize, String, String)> =
-                std::collections::HashMap::new();
+            // Fork (Waku): the blocks opened so far, closed at the finish.
+            // Gemini sends every functionCall part whole and each chunk
+            // numbers its parts from 0, so parallel calls arrive as one
+            // chunk each at `parts[0]`; keying open calls by that position
+            // glued the second call's arguments onto the first's
+            // (`{…}{…}`), and the engine refused both as malformed JSON.
+            let mut open_tool_calls: Vec<usize> = Vec::new();
             let mut emitted_message_start = false;
             let message_id = format!("gemini-{}", uuid_v4_simple());
             // Shared byte-buffering decoder (#228): buffers raw bytes and only
@@ -819,6 +829,14 @@ impl LlmProvider for GoogleProvider {
                             return;
                         }
 
+                        if let Some(failure) = prompt_block_failure(&parsed) {
+                            yield Err(ProviderError::Classified {
+                                provider: provider_id_for_stream.clone(),
+                                failure,
+                            });
+                            return;
+                        }
+
                         // Emit MessageStart on first chunk.
                         if !emitted_message_start {
                             emitted_message_start = true;
@@ -843,7 +861,7 @@ impl LlmProvider for GoogleProvider {
                                 .and_then(|p| p.as_array());
 
                             if let Some(parts) = parts {
-                                for (part_idx, part) in parts.iter().enumerate() {
+                                for part in parts {
                                     if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
                                         if text.is_empty() {
                                             continue;
@@ -878,28 +896,23 @@ impl LlmProvider for GoogleProvider {
                                         // must ride along on the ToolUse block (#311).
                                         let thought_signature = thought_signature_from_part(part);
 
-                                        let idx = if let Some((existing_idx, _, _)) = open_tool_calls.get(&part_idx) {
-                                            *existing_idx
-                                        } else {
-                                            let occurrence = tool_name_counts
-                                                .entry(name.clone())
-                                                .and_modify(|count| *count += 1)
-                                                .or_insert(0);
-                                            let id = Self::tool_use_id_for_name(&name, &nonce, *occurrence);
-                                            let idx = tool_block_index;
-                                            tool_block_index += 1;
-                                            open_tool_calls.insert(part_idx, (idx, id.clone(), name.clone()));
-                                            yield Ok(StreamEvent::ContentBlockStart {
-                                                index: idx,
-                                                content_block: ContentBlock::ToolUse {
-                                                    id,
-                                                    name: name.clone(),
-                                                    input: json!({}),
-                                                    thought_signature,
-                                                },
-                                            });
-                                            idx
-                                        };
+                                        let occurrence = tool_name_counts
+                                            .entry(name.clone())
+                                            .and_modify(|count| *count += 1)
+                                            .or_insert(0);
+                                        let id = Self::tool_use_id_for_name(&name, &nonce, *occurrence);
+                                        let idx = tool_block_index;
+                                        tool_block_index += 1;
+                                        open_tool_calls.push(idx);
+                                        yield Ok(StreamEvent::ContentBlockStart {
+                                            index: idx,
+                                            content_block: ContentBlock::ToolUse {
+                                                id,
+                                                name: name.clone(),
+                                                input: json!({}),
+                                                thought_signature,
+                                            },
+                                        });
 
                                         yield Ok(StreamEvent::InputJsonDelta {
                                             index: idx,
@@ -925,16 +938,9 @@ impl LlmProvider for GoogleProvider {
                                 });
 
                                 // Close tool call blocks.
-                                let mut tool_indices: Vec<usize> =
-                                    open_tool_calls
-                                        .values()
-                                        .map(|(idx, _, _)| *idx)
-                                        .collect();
-                                tool_indices.sort_unstable();
-                                for idx in tool_indices {
+                                for idx in std::mem::take(&mut open_tool_calls) {
                                     yield Ok(StreamEvent::ContentBlockStop { index: idx });
                                 }
-                                open_tool_calls.clear();
 
                                 let stop_reason = match finish_reason {
                                     "STOP" => Some(StopReason::EndTurn),
@@ -966,7 +972,9 @@ impl LlmProvider for GoogleProvider {
             }
         };
 
-        Ok(Box::pin(stream))
+        Ok(Box::pin(futures::StreamExt::map(stream, move |item| {
+            item.map_err(|error| error.with_request_id(request_id.as_deref()))
+        })))
     }
 
     async fn health_check(&self) -> Result<ProviderStatus, ProviderError> {
@@ -1068,6 +1076,25 @@ fn usage_from_metadata(meta: Option<&Value>) -> UsageInfo {
         cache_creation_input_tokens: 0,
         cache_read_input_tokens: cached,
     }
+}
+
+/// Fork (Waku): a prompt Gemini refuses comes back as
+/// `promptFeedback.blockReason` with no candidate, and so with no finish
+/// reason; it read as a stream that broke off and was asked again ten times
+/// for the same refusal. It is final, and says why.
+fn prompt_block_failure(body: &Value) -> Option<crate::retry_policy::ModelFailure> {
+    let feedback = body.get("promptFeedback")?;
+    let reason = feedback.get("blockReason").and_then(Value::as_str)?;
+    if reason.is_empty() || reason == "BLOCK_REASON_UNSPECIFIED" {
+        return None;
+    }
+    let message = match feedback.get("blockReasonMessage").and_then(Value::as_str) {
+        Some(detail) if !detail.trim().is_empty() => {
+            format!("Gemini refused the prompt ({reason}): {}", detail.trim())
+        }
+        _ => format!("Gemini refused the prompt ({reason})"),
+    };
+    Some(crate::retry_policy::ModelFailure::fatal(None, message))
 }
 
 /// Fork (Waku): an `{"error": …}` object inside the stream. Gemini's carries
@@ -1237,6 +1264,78 @@ mod tests {
         );
     }
 
+    /// Parallel calls come one chunk each, every one at `parts[0]` — the
+    /// shape the gateway streams for Gemini 4 Argon. Each must be a block of
+    /// its own with exactly its own arguments.
+    #[tokio::test]
+    async fn parallel_calls_in_separate_chunks_keep_their_own_arguments() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let sse = concat!(
+            "data: {\"candidates\": [{\"content\": {\"role\": \"model\",\"parts\": [{\"functionCall\": {\"name\": \"Read\",\"args\": {\"file_path\": \"/tmp/a.txt\"},\"id\": \"call_1\"},\"thoughtSignature\": \"sig\"}]}}]}\r\n\r\n",
+            "data: {\"candidates\": [{\"content\": {\"role\": \"model\",\"parts\": [{\"functionCall\": {\"name\": \"Read\",\"args\": {\"file_path\": \"/tmp/b.txt\"},\"id\": \"call_2\"}}]}}]}\r\n\r\n",
+            "data: {\"candidates\": [{\"content\": {\"role\": \"model\",\"parts\": [{\"text\": \"\"}]},\"finishReason\": \"STOP\"}],\"usageMetadata\": {\"promptTokenCount\": 130,\"candidatesTokenCount\": 50}}\r\n\r\n",
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            // Read the headers and the body the content-length announces.
+            loop {
+                let read = socket.read(&mut buffer).await.unwrap();
+                request.extend_from_slice(&buffer[..read]);
+                let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
+                let headers = String::from_utf8_lossy(&request[..end]).to_ascii_lowercase();
+                let length = headers
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if request.len() >= end + 4 + length || read == 0 {
+                    break;
+                }
+            }
+            let head = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                sse.len()
+            );
+            socket.write_all(head.as_bytes()).await.unwrap();
+            socket.write_all(sse.as_bytes()).await.unwrap();
+        });
+
+        let provider = GoogleProvider::with_gateway(format!("http://{address}"), "k".into());
+        let mut request = test_request(vec![Message::user("read both")]);
+        request.model = "gemini-4-argon".to_string();
+        let mut stream = provider.create_message_stream(request).await.unwrap();
+
+        let mut starts = Vec::new();
+        let mut args: std::collections::HashMap<usize, String> = Default::default();
+        while let Some(event) = stream.next().await {
+            match event.unwrap() {
+                StreamEvent::ContentBlockStart {
+                    index,
+                    content_block: ContentBlock::ToolUse { id, thought_signature, .. },
+                } => starts.push((index, id, thought_signature)),
+                StreamEvent::InputJsonDelta { index, partial_json } => {
+                    args.entry(index).or_default().push_str(&partial_json)
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(starts.len(), 2, "each functionCall part is its own block");
+        assert_ne!(starts[0].0, starts[1].0);
+        assert_ne!(starts[0].1, starts[1].1);
+        assert_eq!(starts[0].2.as_deref(), Some("sig"));
+        assert_eq!(starts[1].2, None);
+        let first: Value = serde_json::from_str(&args[&starts[0].0]).unwrap();
+        let second: Value = serde_json::from_str(&args[&starts[1].0]).unwrap();
+        assert_eq!(first, json!({ "file_path": "/tmp/a.txt" }));
+        assert_eq!(second, json!({ "file_path": "/tmp/b.txt" }));
+    }
+
     #[test]
     fn thought_parts_are_thinking_and_usage_counts_thoughts_and_cache() {
         let provider = GoogleProvider::new("test".to_string());
@@ -1268,6 +1367,31 @@ mod tests {
     #[test]
     fn gemini_4_supports_thinking() {
         assert!(GoogleProvider::supports_thinking("gemini-4-argon"));
+    }
+
+    #[test]
+    fn a_refused_prompt_is_final_and_names_the_reason() {
+        let blocked = json!({
+            "promptFeedback": {
+                "blockReason": "SAFETY",
+                "blockReasonMessage": "The prompt is blocked due to safety"
+            }
+        });
+        let failure = prompt_block_failure(&blocked).expect("a blocked prompt fails");
+        assert_eq!(failure.class, crate::retry_policy::FailureClass::Fatal);
+        assert!(failure.message.contains("SAFETY"));
+        assert!(failure.message.contains("blocked due to safety"));
+
+        let provider = GoogleProvider::new("k".into());
+        assert!(matches!(
+            provider.parse_response_body(&blocked, "gemini-4-argon"),
+            Err(ProviderError::Classified { .. })
+        ));
+        assert!(prompt_block_failure(&json!({ "candidates": [] })).is_none());
+        assert!(prompt_block_failure(&json!({
+            "promptFeedback": { "blockReason": "BLOCK_REASON_UNSPECIFIED" }
+        }))
+        .is_none());
     }
 
     #[test]

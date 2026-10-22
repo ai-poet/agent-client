@@ -202,11 +202,21 @@ impl Waku {
             .find(|activity| activity.source_id.as_deref() == Some(source_id))
             .and_then(ActivityItem::settled_todos)
             .map(<[_]>::to_vec);
-        if let Some(todos) = todos
-            && session.todos != todos
-        {
+        let Some(todos) = todos.filter(|todos| *todos != session.todos) else {
+            return;
+        };
+        // Fork: an emptied list takes the transcript's todo row away while
+        // the turn runs on; splice it out, since a shrink found by the next
+        // sync resets the view (session_rail.rs).
+        let previous_kinds = (todos.is_empty() && super::session_rail::shows_todo_row(session))
+            .then(|| self.snapshot_selected_transcript_rows(session_id))
+            .flatten();
+        if let Some(session) = self.state.session_mut(session_id) {
             session.todos = todos;
-            self.state.mark_session_dirty(session_id);
+        }
+        self.state.mark_session_dirty(session_id);
+        if let Some(previous_kinds) = previous_kinds.as_deref() {
+            self.splice_active_transcript_rows_after_visibility_change(previous_kinds);
         }
     }
 
@@ -304,6 +314,7 @@ impl Waku {
             }
             DriverEvent::Connected { provider_cursor } => {
                 runtime.last_driver_error = None;
+                runtime.turn_failure = None;
                 runtime.last_background_refresh_at = Instant::now();
                 runtime.driver.refresh_background_work();
                 if let Some(session) = self.state.session_mut(session_id) {
@@ -352,6 +363,7 @@ impl Waku {
             }
             DriverEvent::TurnStarted => {
                 runtime.last_driver_error = None;
+                runtime.turn_failure = None;
                 if let Some(session) = self.state.session_mut(session_id) {
                     if session.active_turn_id().is_some() {
                         // Covers submissions and the optimistic pursuit turn
@@ -730,6 +742,7 @@ impl Waku {
                 self.complete_turn_blocks(session_id, !success);
                 runtime.stream_phase = None;
                 let needs_fallback = !self.turn_has_assistant_message(session_id);
+                let failure_kind = runtime.turn_failure.take().map(|failure| failure.kind);
                 if let Some(session) = self.state.session_mut(session_id) {
                     session.status = if success {
                         SessionStatus::Idle
@@ -746,11 +759,12 @@ impl Waku {
                             session.push_message(MessageRole::Assistant, summary);
                         }
                     } else {
-                        session.set_latest_turn_error(
+                        session.set_latest_turn_failure(
                             summary
                                 .filter(|summary| !summary.trim().is_empty())
                                 .or(last_driver_error)
                                 .unwrap_or_else(|| tr!("session.stopped_before_response")),
+                            failure_kind,
                         );
                     }
                 }
@@ -800,6 +814,9 @@ impl Waku {
             }
             // Fork: a built-in agent request being retried (`model_retry.rs`).
             DriverEvent::ModelRetry(retry) => self.handle_model_retry(session_id, runtime, retry),
+            // Fork: what kind of failure the error that follows is, kept for
+            // the turn's banner (`error_banner.rs`).
+            DriverEvent::TurnFailure(failure) => runtime.turn_failure = Some(failure),
             DriverEvent::Error(error) => {
                 let error = compact_driver_error(&error);
                 runtime.last_driver_error = Some(error.clone());
@@ -828,7 +845,10 @@ impl Waku {
                         if live_status.is_some()
                             && let Some(session) = self.state.session_mut(session_id)
                         {
-                            session.set_latest_turn_error(error);
+                            session.set_latest_turn_failure(
+                                error,
+                                runtime.turn_failure.as_ref().map(|failure| failure.kind),
+                            );
                             self.state.mark_session_dirty(session_id);
                         }
                     }
@@ -840,9 +860,10 @@ impl Waku {
                         self.finish_streaming_assistant(session_id);
                         self.complete_turn_blocks(session_id, true);
                         runtime.stream_phase = None;
+                        let kind = runtime.turn_failure.take().map(|failure| failure.kind);
                         if let Some(session) = self.state.session_mut(session_id) {
                             session.status = SessionStatus::Failed;
-                            session.set_latest_turn_error(error);
+                            session.set_latest_turn_failure(error, kind);
                             session.updated_at = unix_time();
                         }
                         let finished = self

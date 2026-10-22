@@ -648,6 +648,15 @@ impl Waku {
             .unwrap_or_default()
     }
 
+    /// Fork: all of the session's background work, live and finished, in
+    /// the panel's order (the session rail's Background tasks card).
+    pub(super) fn session_background_work(&self, session_id: Uuid) -> Vec<&BackgroundWorkItem> {
+        self.background_work
+            .get(&session_id)
+            .map(BackgroundWorkRegistry::ordered_items)
+            .unwrap_or_default()
+    }
+
     /// The session's background work still running, newest first.
     pub(super) fn live_background_work(&self, session_id: Uuid) -> Vec<&BackgroundWorkItem> {
         self.background_work

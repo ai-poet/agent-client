@@ -16,7 +16,7 @@ use super::{
     TranscriptRowKind::*, active_navigation_turn_index, append_text_delta_to_session,
     assistant_response_footer, assistant_response_footer_index, assistant_response_footer_time,
     compact_driver_error, disclosure_leading_space, fenced_code, fitted_file_tree_width,
-    fitted_panel_widths, folded_transcript_row_kinds, format_worked_duration,
+    fitted_panel_widths, folded_transcript_row_kinds, format_worked_duration, insert_todo_row,
     format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
     message_starts_followup_turn, navigation_preview_snippet, navigation_rail_fade_visibility,
     navigation_rail_height, navigation_rail_scale, paused_toast_duration, pop_stream_batch,
@@ -2123,6 +2123,26 @@ fn a_busy_turn_pins_the_working_indicator_after_the_last_row() {
         folded_transcript_row_kinds(&session, &HashSet::new()),
         vec![Message(0), Message(1), ResponseFooter(turn_id, 1)]
     );
+}
+
+/// The todo row sits right above "Working for …", and where that row would
+/// be — before the steers still on their way — while the turn waits.
+#[test]
+fn the_todo_row_sits_right_above_the_working_row() {
+    let mut rows = vec![Message(0), Message(1), WorkingIndicator, PendingSteer(0)];
+    insert_todo_row(&mut rows);
+    assert_eq!(
+        rows,
+        vec![Message(0), Message(1), TodoList, WorkingIndicator, PendingSteer(0)]
+    );
+
+    let mut waiting = vec![Message(0), Message(1), PendingSteer(0)];
+    insert_todo_row(&mut waiting);
+    assert_eq!(waiting, vec![Message(0), Message(1), TodoList, PendingSteer(0)]);
+
+    let mut plain = vec![Message(0), Message(1)];
+    insert_todo_row(&mut plain);
+    assert_eq!(plain, vec![Message(0), Message(1), TodoList]);
 }
 
 #[test]

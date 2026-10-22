@@ -1904,6 +1904,8 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         ),
         // Fork addition: a built-in agent request being retried.
         DriverEvent::ModelRetry(retry) => ("modelRetry", serde_json::to_value(retry)?),
+        // Fork addition: what kind of failure the next `error` is.
+        DriverEvent::TurnFailure(failure) => ("turnFailure", serde_json::to_value(failure)?),
         DriverEvent::Error(error) => ("error", Value::String(error)),
         DriverEvent::ProcessExited => ("processExited", Value::Null),
     };
@@ -1996,6 +1998,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
             }
         }
         "modelRetry" => DriverEvent::ModelRetry(serde_json::from_value(payload)?),
+        "turnFailure" => DriverEvent::TurnFailure(serde_json::from_value(payload)?),
         "error" => DriverEvent::Error(serde_json::from_value(payload)?),
         "processExited" => DriverEvent::ProcessExited,
         kind => bail!("daemon sent an unsupported driver event {kind:?}"),
@@ -2183,6 +2186,21 @@ mod tests {
         assert!(matches!(
             event_from_wire(wire).unwrap(),
             DriverEvent::TextDelta(text) if text == "hello"
+        ));
+    }
+
+    #[test]
+    fn wire_event_round_trip_preserves_a_turn_failure() {
+        use waku_protocol::model::{TurnFailure, TurnFailureKind};
+        let wire = event_to_wire(DriverEvent::TurnFailure(TurnFailure {
+            kind: TurnFailureKind::Auth,
+            request_id: None,
+        }))
+        .unwrap();
+        assert_eq!(wire.kind, "turnFailure");
+        assert!(matches!(
+            event_from_wire(wire).unwrap(),
+            DriverEvent::TurnFailure(TurnFailure { kind: TurnFailureKind::Auth, request_id: None })
         ));
     }
 }

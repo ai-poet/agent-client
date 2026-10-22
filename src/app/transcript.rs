@@ -1,3 +1,4 @@
+use super::session_rail::shows_todo_row;
 use super::*;
 use crate::turn_segments::{segment_default_open, segment_of, steer_indexes, turn_segments};
 
@@ -23,6 +24,12 @@ impl Waku {
             });
         let fingerprint = mix(fingerprint, self.selected_pending_steer_count() as u64);
         let fingerprint = mix(fingerprint, self.selected_session_compacting() as u64);
+        // Fork: the todo row comes and goes with the list, which the session
+        // fingerprint does not read (session_rail.rs).
+        let fingerprint = mix(
+            fingerprint,
+            self.selected_session().is_some_and(shows_todo_row) as u64,
+        );
         if self.transcript_row_kinds_fingerprint.get() != Some(fingerprint) {
             let next_kinds = self.selected_transcript_row_kinds();
             *self.transcript_row_kinds.borrow_mut() = next_kinds;
@@ -43,6 +50,11 @@ impl Waku {
             rows.push(TranscriptRowKind::WorkingIndicator);
         }
         rows.extend((0..self.selected_pending_steer_count()).map(TranscriptRowKind::PendingSteer));
+        // Fork: the running turn's todo list, a row so it scrolls with the
+        // conversation (session_rail.rs).
+        if self.selected_session().is_some_and(shows_todo_row) {
+            insert_todo_row(&mut rows);
+        }
         rows
     }
 
@@ -407,6 +419,10 @@ impl Waku {
         self.remeasure_transcript_row(TranscriptRowKind::Message(message_index));
     }
 
+    pub(super) fn remeasure_transcript_todos(&self) {
+        self.remeasure_transcript_row(TranscriptRowKind::TodoList);
+    }
+
     pub(super) fn remeasure_changed_files(&self, turn_id: Uuid) {
         let target = self
             .selected_session()
@@ -455,6 +471,10 @@ pub(super) enum TranscriptRowKind {
     /// place in the runtime's queue. Shown at once, so the message does not
     /// vanish between the composer clearing and the provider accepting it.
     PendingSteer(usize),
+    /// Fork: the session's todo list while a turn runs, right above the
+    /// working row — at the bottom while the view follows the tail, scrolled
+    /// away with the rest when the reader scrolls up (session_rail.rs).
+    TodoList,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -667,7 +687,8 @@ pub(super) fn assistant_response_footer(
                 | TranscriptRowKind::ResponseFooter(_, _)
                 | TranscriptRowKind::ChangedFiles(_)
                 | TranscriptRowKind::WorkingIndicator
-                | TranscriptRowKind::PendingSteer(_) => None,
+                | TranscriptRowKind::PendingSteer(_)
+                | TranscriptRowKind::TodoList => None,
             })
             .filter(|part| !part.content.trim().is_empty())
             .map(|part| part.content.as_str())
@@ -703,6 +724,22 @@ pub(super) fn response_footer_message_index(
 ) -> Option<usize> {
     let rows = turn_rows(session, turn_id);
     response_footer_message_index_from_rows(session, &rows)
+}
+
+/// Fork: place the todo row right above the working row, or where that row
+/// would be — before the pending steers — while the turn waits on the person
+/// (session_rail.rs).
+pub(super) fn insert_todo_row(rows: &mut Vec<TranscriptRowKind>) {
+    let at = rows
+        .iter()
+        .position(|row| {
+            matches!(
+                row,
+                TranscriptRowKind::WorkingIndicator | TranscriptRowKind::PendingSteer(_)
+            )
+        })
+        .unwrap_or(rows.len());
+    rows.insert(at, TranscriptRowKind::TodoList);
 }
 
 pub(super) fn transcript_row_splice(
@@ -1231,7 +1268,8 @@ fn response_footer_message_index_from_rows(
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
         | TranscriptRowKind::WorkingIndicator
-        | TranscriptRowKind::PendingSteer(_) => None,
+        | TranscriptRowKind::PendingSteer(_)
+        | TranscriptRowKind::TodoList => None,
     })?;
     let message = session.messages.get(message_index)?;
     if message.streaming {
@@ -1246,7 +1284,8 @@ fn response_footer_message_index_from_rows(
             | TranscriptRowKind::ResponseFooter(_, _)
             | TranscriptRowKind::ChangedFiles(_)
             | TranscriptRowKind::WorkingIndicator
-            | TranscriptRowKind::PendingSteer(_) => None,
+            | TranscriptRowKind::PendingSteer(_)
+            | TranscriptRowKind::TodoList => None,
         })
         .any(|message| !message.content.trim().is_empty())
         .then_some(message_index)
@@ -1270,7 +1309,8 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
         | TranscriptRowKind::WorkingIndicator
-        | TranscriptRowKind::PendingSteer(_) => false,
+        | TranscriptRowKind::PendingSteer(_)
+        | TranscriptRowKind::TodoList => false,
     };
     let Some(last_text) = turn_rows.iter().rposition(is_answer_text) else {
         return turn_rows.len();
@@ -1288,7 +1328,9 @@ fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Option<Uuid> {
         TranscriptRowKind::TurnFold(turn_id, _) => Some(turn_id),
         TranscriptRowKind::ResponseFooter(turn_id, _) => Some(turn_id),
         TranscriptRowKind::ChangedFiles(turn_id) => Some(turn_id),
-        TranscriptRowKind::WorkingIndicator | TranscriptRowKind::PendingSteer(_) => None,
+        TranscriptRowKind::WorkingIndicator
+        | TranscriptRowKind::PendingSteer(_)
+        | TranscriptRowKind::TodoList => None,
     }
 }
 
@@ -1304,7 +1346,9 @@ pub(super) fn response_row_turn_id(session: &AgentSession, row: TranscriptRowKin
                 .filter(|message| message.role == MessageRole::Assistant)?
                 .turn_id
         }
-        TranscriptRowKind::WorkingIndicator | TranscriptRowKind::PendingSteer(_) => None,
+        TranscriptRowKind::WorkingIndicator
+        | TranscriptRowKind::PendingSteer(_)
+        | TranscriptRowKind::TodoList => None,
         TranscriptRowKind::TurnBlock(_)
         | TranscriptRowKind::TurnFold(..)
         | TranscriptRowKind::ResponseFooter(_, _)

@@ -292,6 +292,14 @@ pub enum QueryEvent {
     },
     /// Waku: a model request failed and is about to be sent again.
     Retry(RetryNotice),
+    /// Fork departure (Waku): the failure the loop is about to end the turn
+    /// with — sent once, right before `QueryOutcome::Error`, carrying what
+    /// that `ClaudeError` no longer does: the class, the reason, the
+    /// provider's code and the request's id. A client names the failure
+    /// from this instead of guessing at the error's text. Not sent for
+    /// errors that never went through the retry policy (missing
+    /// credentials).
+    RequestFailed(claurst_api::retry_policy::ModelFailure),
     /// Fork departure (Waku): the conversation at a step boundary — the
     /// model's tool calls just before they run, then with their results —
     /// sent only when `QueryConfig::checkpoint_history` asks for it. The
@@ -316,6 +324,8 @@ pub struct RetryNotice {
     pub discarded_output: bool,
     /// The failure, in the server's words where it gave any.
     pub detail: String,
+    /// The failed attempt's request id, when the server sent one.
+    pub request_id: Option<String>,
 }
 
 /// Waku: where a compaction is.
@@ -717,6 +727,7 @@ pub async fn run_query_loop(
                             ?max,
                             delay_ms = delay.as_millis() as u64,
                             discarded_output = visible,
+                            request_id = ?failure.request_id,
                             error = %failure,
                             "Model request failed — retrying"
                         );
@@ -728,6 +739,7 @@ pub async fn run_query_loop(
                                 reason: failure.reason,
                                 discarded_output: visible,
                                 detail: failure.to_string(),
+                                request_id: failure.request_id.clone(),
                             }));
                         }
                         if runner::retry_loop::sleep_or_cancel(delay, &cancel_token).await {
@@ -743,10 +755,16 @@ pub async fn run_query_loop(
                             continue;
                         }
                         error!(error = %failure, "Context window exceeded and compaction did not help");
+                        if let Some(ref tx) = event_tx {
+                            let _ = tx.send(QueryEvent::RequestFailed(failure.clone()));
+                        }
                         return QueryOutcome::Error(failure.into_claude_error());
                     }
                     runner::retry_loop::RetryDecision::GiveUp => {
-                        error!(error = %failure, "Model request failed");
+                        error!(error = %failure, request_id = ?failure.request_id, "Model request failed");
+                        if let Some(ref tx) = event_tx {
+                            let _ = tx.send(QueryEvent::RequestFailed(failure.clone()));
+                        }
                         return QueryOutcome::Error(failure.into_claude_error());
                     }
                 }
@@ -1438,6 +1456,7 @@ pub async fn run_query_loop(
                                     reason: failure.reason,
                                     discarded_output: false,
                                     detail: failure.to_string(),
+                                    request_id: None,
                                 }));
                             }
                             if runner::retry_loop::sleep_or_cancel(delay, &cancel_token).await {
@@ -1787,8 +1806,9 @@ pub async fn run_query_loop(
             _ = cancel_token.cancelled() => return QueryOutcome::Cancelled,
             opened = client.create_message_stream_once(request, handler, retry.next_attempt()) => opened,
         };
-        let mut stream_rx = match opened {
-            Ok(rx) => rx,
+        // The response's id rides along for a failure inside the stream.
+        let (mut stream_rx, stream_request_id) = match opened {
+            Ok(opened) => opened,
             Err(failure) => {
                 // On overloaded/rate-limit errors, attempt one switch to the fallback model.
                 if !used_fallback
@@ -1887,7 +1907,7 @@ pub async fn run_query_loop(
 
         if let Some(failure) = stream_failure {
             retry_or_return!(
-                failure,
+                failure.with_request_id(stream_request_id.clone()),
                 visible_output,
                 compact_for_overflow(
                     messages,
@@ -1919,6 +1939,7 @@ pub async fn run_query_loop(
                         reason: failure.reason,
                         discarded_output: false,
                         detail: failure.to_string(),
+                        request_id: None,
                     }));
                 }
                 if runner::retry_loop::sleep_or_cancel(delay, &cancel_token).await {
@@ -4285,6 +4306,26 @@ mod tests {
         script: Vec<Step>,
         cancel_after: Option<std::time::Duration>,
     ) -> (QueryOutcome, usize, Vec<RetryNotice>, Vec<Message>) {
+        let run = drive_script_reporting(script, cancel_after, None).await;
+        (run.outcome, run.requests, run.notices, run.messages)
+    }
+
+    struct ScriptRun {
+        outcome: QueryOutcome,
+        requests: usize,
+        notices: Vec<RetryNotice>,
+        /// Every `QueryEvent::RequestFailed`, in order.
+        failures: Vec<claurst_api::retry_policy::ModelFailure>,
+        messages: Vec<Message>,
+    }
+
+    /// [`drive_script`], also collecting the reported failures; `auto_compact`
+    /// overrides the setting when given.
+    async fn drive_script_reporting(
+        script: Vec<Step>,
+        cancel_after: Option<std::time::Duration>,
+        auto_compact: Option<bool>,
+    ) -> ScriptRun {
         let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let provider = Arc::new(ScriptedProvider {
             id: claurst_core::provider_id::ProviderId::new("scripted"),
@@ -4301,6 +4342,9 @@ mod tests {
         let mut ctx = deny_all_context();
         ctx.session_id = "retry-test".to_string();
         ctx.config.provider = Some("scripted".to_string());
+        if let Some(auto_compact) = auto_compact {
+            ctx.config.auto_compact = auto_compact;
+        }
         let mut config = make_config(None, None);
         config.model = "mock-model".to_string();
         config.max_turns = 5;
@@ -4334,17 +4378,21 @@ mod tests {
         .await
         .expect("loop must not hang");
         let mut notices = Vec::new();
+        let mut failures = Vec::new();
         while let Ok(event) = rx.try_recv() {
-            if let QueryEvent::Retry(notice) = event {
-                notices.push(notice);
+            match event {
+                QueryEvent::Retry(notice) => notices.push(notice),
+                QueryEvent::RequestFailed(failure) => failures.push(failure),
+                _ => {}
             }
         }
-        (
+        ScriptRun {
             outcome,
-            requests.load(std::sync::atomic::Ordering::SeqCst),
+            requests: requests.load(std::sync::atomic::Ordering::SeqCst),
             notices,
+            failures,
             messages,
-        )
+        }
     }
 
     fn assistant_texts(messages: &[Message]) -> Vec<String> {
@@ -4455,6 +4503,75 @@ mod tests {
         }
         assert_eq!(requests, 1);
         assert!(notices.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_gives_up_reports_its_failure_before_it_ends() {
+        let refusal = claurst_api::ProviderError::Classified {
+            provider: claurst_core::provider_id::ProviderId::new("scripted"),
+            failure: claurst_api::retry_policy::ModelFailure {
+                code: Some("permission_error".into()),
+                request_id: Some("req_refused".into()),
+                ..claurst_api::retry_policy::ModelFailure::fatal(Some(403), "this key may not use the model")
+            },
+        };
+        let run = drive_script_reporting(vec![Step::Refuse(refusal)], None, None).await;
+        assert!(matches!(run.outcome, QueryOutcome::Error(_)), "{:?}", run.outcome);
+        assert_eq!(run.failures.len(), 1);
+        let failure = &run.failures[0];
+        assert_eq!(failure.class, claurst_api::retry_policy::FailureClass::Fatal);
+        assert_eq!(failure.status, Some(403));
+        assert_eq!(failure.code.as_deref(), Some("permission_error"));
+        assert_eq!(failure.request_id.as_deref(), Some("req_refused"));
+    }
+
+    #[tokio::test]
+    async fn an_overflow_compaction_cannot_fix_is_reported_as_one() {
+        let overflow = claurst_api::ProviderError::Classified {
+            provider: claurst_core::provider_id::ProviderId::new("scripted"),
+            failure: claurst_api::retry_policy::ModelFailure::context_overflow(
+                None,
+                "prompt is too long: 210000 tokens > 200000 maximum",
+            ),
+        };
+        let run = drive_script_reporting(vec![Step::Refuse(overflow)], None, Some(false)).await;
+        assert!(matches!(run.outcome, QueryOutcome::Error(_)), "{:?}", run.outcome);
+        assert_eq!(run.requests, 1);
+        assert_eq!(
+            run.failures.iter().map(|failure| failure.class).collect::<Vec<_>>(),
+            vec![claurst_api::retry_policy::FailureClass::ContextOverflow]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_request_that_recovers_reports_no_failure() {
+        use claurst_api::provider_types::StopReason;
+        use claurst_api::retry_policy::RetryReason;
+        let run = drive_script_reporting(
+            vec![
+                Step::Refuse(quick_failure(RetryReason::ServerError)),
+                Step::Stream(text_answer("Fine.", StopReason::EndTurn)),
+            ],
+            None,
+            None,
+        )
+        .await;
+        assert!(matches!(run.outcome, QueryOutcome::EndTurn { .. }), "{:?}", run.outcome);
+        assert_eq!(run.notices.len(), 1);
+        assert!(run.failures.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_retry_notice_names_the_failed_attempts_request_id() {
+        use claurst_api::provider_types::StopReason;
+        use claurst_api::retry_policy::RetryReason;
+        let stamped = quick_failure(RetryReason::Overloaded).with_request_id(Some("req_busy"));
+        let (_, _, notices, _) = drive_script(
+            vec![Step::Refuse(stamped), Step::Stream(text_answer("Ok.", StopReason::EndTurn))],
+            None,
+        )
+        .await;
+        assert_eq!(notices[0].request_id.as_deref(), Some("req_busy"));
     }
 
     #[tokio::test]

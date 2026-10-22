@@ -8,10 +8,44 @@
 use sub2api::paywall::{Paywall, PaywallState};
 
 use super::*;
+use crate::model::TurnFailureKind;
 use crate::ui::ActivationExt as _;
 
 /// Past this the message is clipped to two lines until its details open.
 const COLLAPSED_CHARS: usize = 160;
+
+/// Fork: the action that fixes a named failure, ahead of Retry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Fix {
+    /// Compact the conversation that no longer fits.
+    Compact,
+    /// Check the key or the account it belongs to.
+    Credentials,
+}
+
+/// Fork: what the banner offers for a failure of `kind`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Remedy {
+    /// Whether "Continue" makes sense: sending the same conversation on
+    /// cannot get past an overflow, a refused key or a refused request.
+    pub(super) continue_allowed: bool,
+    pub(super) fix: Option<Fix>,
+}
+
+/// The banner's actions for a failure the built-in agent named. A failure
+/// it did not name — and one named by a newer build — keeps the actions
+/// every failure had before.
+pub(super) fn remedy(kind: Option<TurnFailureKind>) -> Remedy {
+    use TurnFailureKind as Kind;
+    let (continue_allowed, fix) = match kind {
+        Some(Kind::ContextOverflow) => (false, Some(Fix::Compact)),
+        Some(Kind::Auth | Kind::Quota | Kind::Forbidden) => (false, Some(Fix::Credentials)),
+        Some(Kind::ContentPolicy | Kind::BadRequest) => (false, None),
+        Some(Kind::RateLimited | Kind::Network | Kind::Unavailable | Kind::Interrupted | Kind::Unknown)
+        | None => (true, None),
+    };
+    Remedy { continue_allowed, fix }
+}
 
 impl Waku {
     pub(super) fn render_error_banner(&self, cx: &mut Context<Self>) -> Option<Div> {
@@ -32,9 +66,16 @@ impl Waku {
         let details_open = self.error_details_open == Some(turn_id);
         let copy_text = message.clone();
         let paywall = self.turn_paywall(session.provider, &message);
+        // Fork: the failure's kind picks the action that fixes it; a paywall
+        // still comes first.
+        let remedy = remedy(error.kind);
+        let fix = remedy.fix.filter(|_| paywall.is_none());
+        let custom_endpoint = self.provider_on_custom_endpoint(session.provider);
         // Fork (model_retry): a turn that got work done can be continued
         // without rewinding it; a goal may be about to resume on its own.
-        let continuable = paywall.is_none() && super::model_retry::turn_did_work(session, turn_id);
+        let continuable = paywall.is_none()
+            && remedy.continue_allowed
+            && super::model_retry::turn_did_work(session, turn_id);
         let goal_resume = self.pending_goal_resume(session);
 
         // Fork: every action is keyboard-operable — focusable, with a visible
@@ -90,6 +131,28 @@ impl Waku {
                 },
             ));
         }
+        match fix {
+            Some(Fix::Compact) => {
+                actions = actions.child(
+                    button("compact", tr!("error_banner.compact"), true).on_activation(
+                        cx,
+                        move |this, _, cx| this.compact_failed_turn(session_id, cx),
+                    ),
+                );
+            }
+            Some(Fix::Credentials) => {
+                let (label, page) = if custom_endpoint {
+                    (tr!("error_banner.model_providers"), SettingsPage::ModelProviders)
+                } else {
+                    (tr!("error_banner.account_settings"), SettingsPage::CloudAccount)
+                };
+                actions = actions.child(button("credentials", label, true).on_activation(
+                    cx,
+                    move |this, _, cx| this.open_settings_page(page, cx),
+                ));
+            }
+            None => {}
+        }
         if continuable {
             actions = actions.child(
                 button("continue", tr!("error_banner.continue"), true).on_activation(
@@ -105,7 +168,7 @@ impl Waku {
                 button(
                     "retry",
                     tr!("error_banner.retry"),
-                    paywall.is_none() && !continuable,
+                    paywall.is_none() && !continuable && fix.is_none(),
                 )
                 .on_activation(cx, move |this, _, cx| {
                     this.retry_failed_turn(session_id, cx);
@@ -282,5 +345,46 @@ impl Waku {
             self.error_details_open = None;
         }
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remedies_follow_the_failure_kind() {
+        use TurnFailureKind as Kind;
+        assert_eq!(remedy(Some(Kind::ContextOverflow)), Remedy {
+            continue_allowed: false,
+            fix: Some(Fix::Compact)
+        });
+        for kind in [Kind::Auth, Kind::Quota, Kind::Forbidden] {
+            assert_eq!(remedy(Some(kind)), Remedy {
+                continue_allowed: false,
+                fix: Some(Fix::Credentials)
+            });
+        }
+        for kind in [Kind::ContentPolicy, Kind::BadRequest] {
+            assert_eq!(remedy(Some(kind)), Remedy {
+                continue_allowed: false,
+                fix: None
+            });
+        }
+        // Transient failures, unnamed ones and kinds from a newer build keep
+        // the actions every failure had.
+        for kind in [
+            Some(Kind::RateLimited),
+            Some(Kind::Network),
+            Some(Kind::Unavailable),
+            Some(Kind::Interrupted),
+            Some(Kind::Unknown),
+            None,
+        ] {
+            assert_eq!(remedy(kind), Remedy {
+                continue_allowed: true,
+                fix: None
+            });
+        }
     }
 }

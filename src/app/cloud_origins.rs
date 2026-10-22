@@ -27,19 +27,7 @@ impl NodeMenu {
         self.nodes.len() > 1
     }
 
-    /// The node the agents are routed to.
-    pub(super) fn routed(&self) -> Option<&str> {
-        self.routed.as_deref()
-    }
-
-    /// Whether `origin` is one of the nodes.
-    pub(super) fn contains(&self, origin: &str) -> bool {
-        self.nodes.iter().any(|(url, _)| url == origin)
-    }
-
     /// One entry per node, `selected` checked, each pick handed to `on_pick`.
-    /// Fork: the image studio chooses its own node with these, without
-    /// moving the agents' route.
     pub(super) fn node_items(
         &self,
         selected: Option<&str>,

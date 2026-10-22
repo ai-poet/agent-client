@@ -165,6 +165,8 @@ impl Waku {
         f32::from(window.viewport_size().width)
             - self.sidebar_rendered_width
             - self.right_panel_rendered_width
+            // Fork: the session rail beside the conversation (session_rail.rs).
+            - self.session_rail.rendered_width
     }
 
     /// [`WakuPane`] delegate for the sidebar island.
@@ -229,6 +231,8 @@ impl Render for Waku {
         // panel is mid-slide, and settling here rather than at the point of
         // use keeps the pane islands and the transcript on one set of widths.
         let panels = self.settle_panel_slides(window);
+        // Fork: whether the session rail takes its column this frame.
+        self.session_rail.rendered_width = self.session_rail_width(window);
         if panels.sliding {
             // The manual drive for the width tweens — the same scheduling
             // `with_animation` would do, minus its element-id keying.
@@ -322,6 +326,7 @@ impl Render for Waku {
         let cli_takeover = self.render_cli_takeover_prompt(window, cx);
         let confirm_dialog = self.render_confirm_dialog(window, cx);
         let toast = self.render_active_toast(cx);
+        let session_rail = self.render_session_rail(cx);
         let content = div()
             .key_context("Waku")
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
@@ -412,42 +417,60 @@ impl Render for Waku {
                     .children(self.render_update_banner(cx))
                     .children(self.render_daemon_connection_banner(cx))
                     .child(self.render_header(window, cx))
-                    // Fork addition: the image studio takes the column in
-                    // place of the task.
-                    .when(self.image_studio.open, |element| {
-                        element.child(self.render_image_studio(cx))
-                    })
-                    .when(self.model_status.open, |element| {
-                        element.child(self.render_model_status(cx))
-                    })
-                    .when(!self.main_page_open(), |element| {
-                        element
-                            .child(if empty {
-                                self.render_empty_state(cx).into_any_element()
-                            } else {
+                    // Fork: under the header, the task and beside it the
+                    // session rail (session_rail.rs) — the header spans both.
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .w_full()
+                            .flex()
+                            .child(
                                 div()
                                     .flex_1()
-                                    .min_h(px(0.0))
-                                    .w_full()
+                                    .min_w_0()
+                                    .h_full()
                                     .flex()
                                     .flex_col()
-                                    .relative()
-                                    .child(self.transcript_pane.clone().cached(
-                                        StyleRefinement::default().flex_1().min_h(px(0.0)).w_full(),
-                                    ))
-                                    .children(self.render_status_capsule(cx))
-                                    .into_any_element()
-                            })
-                            .children(permission)
-                            .children(self.render_error_banner(cx))
-                            .when(self.selected_project().is_some(), |element| {
-                                element
-                                    .children(self.render_queued_messages(cx))
-                                    .children(self.render_onboarding_strip(cx))
-                                    .child(self.render_composer(window, cx))
-                                    .child(self.render_workspace_footer(cx))
-                            })
-                    })
+                                    // Fork addition: the image studio takes the column in
+                                    // place of the task.
+                                    .when(self.image_studio.open, |element| {
+                                        element.child(self.render_image_studio(cx))
+                                    })
+                                    .when(self.model_status.open, |element| {
+                                        element.child(self.render_model_status(cx))
+                                    })
+                                    .when(!self.main_page_open(), |element| {
+                                        element
+                                            .child(if empty {
+                                                self.render_empty_state(cx).into_any_element()
+                                            } else {
+                                                div()
+                                                    .flex_1()
+                                                    .min_h(px(0.0))
+                                                    .w_full()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .relative()
+                                                    .child(self.transcript_pane.clone().cached(
+                                                        StyleRefinement::default().flex_1().min_h(px(0.0)).w_full(),
+                                                    ))
+                                                    .children(self.render_status_capsule(cx))
+                                                    .into_any_element()
+                                            })
+                                            .children(permission)
+                                            .children(self.render_error_banner(cx))
+                                            .when(self.selected_project().is_some(), |element| {
+                                                element
+                                                    .children(self.render_queued_messages(cx))
+                                                    .children(self.render_onboarding_strip(cx))
+                                                    .child(self.render_composer(window, cx))
+                                                    .child(self.render_workspace_footer(cx))
+                                            })
+                                    })
+                            )
+                            .children(session_rail),
+                    )
                     .relative()
                     .children(toast)
                     .children(computer_use)

@@ -125,8 +125,7 @@ pub enum AgentEvent {
         /// Where the request went.
         api_base: String,
     },
-    /// The turn failed on a 404. The engine reports that as "Model not
-    /// found: unknown" on two of its three routes, which names neither the
+    /// The turn failed on a 404. The engine's own text names neither the
     /// model nor where it was looked for; the usual cause is a wrong address,
     /// so this carries the URL that was asked.
     RouteNotFound {
@@ -163,13 +162,17 @@ pub enum AgentEvent {
     TurnCrashed {
         detail: String,
     },
-    /// Fork: the turn failed in a way the person can do something about,
-    /// named so the desktop can say what in their language. `detail` is the
-    /// failure as it came, kept whole: the paywall classifier and anyone
-    /// reporting a bug read it.
+    /// Fork: the turn failed on a model request. `kind` names the failure
+    /// when the person can do something about it, so the desktop can say
+    /// what in their language; `None` shows `detail` as it came. `detail` is
+    /// the failure, scrubbed of anything that looks like a credential and
+    /// otherwise whole: the paywall classifier and anyone reporting a bug
+    /// read it.
     TurnFailed {
-        kind: FailureKind,
+        kind: Option<FailureKind>,
         detail: String,
+        /// The failed request's id, for a support ticket.
+        request_id: Option<String>,
     },
     /// Something went wrong. A turn may still settle afterwards.
     Error(String),
@@ -189,12 +192,23 @@ pub enum FailureKind {
     ContextOverflow,
     /// The route kept answering "too many requests".
     RateLimited,
-    /// The route could not be reached, or did not answer in time.
+    /// The route could not be reached, did not answer in time, or stopped
+    /// responding.
     Network,
     /// The route refused the key.
     Auth,
     /// The model's service kept failing (overloaded, 5xx).
     Unavailable,
+    /// The request was refused under a content policy.
+    ContentPolicy,
+    /// The provider says the account's quota or credit is spent.
+    Quota,
+    /// The provider refused this key this request.
+    Forbidden,
+    /// The request was rejected as invalid.
+    BadRequest,
+    /// The reply kept breaking off before it was complete.
+    Interrupted,
 }
 
 /// One step of a sub-agent's run, in the order it happened.
@@ -212,6 +226,19 @@ pub enum SubagentEvent {
     },
     /// Text it wrote.
     Text(String),
+    /// Fork addition: one of its model requests failed and is being sent
+    /// again. With `discarded_output`, what it had written since its last
+    /// [`SubagentEvent::Settled`] was thrown away.
+    Retry {
+        attempt: u32,
+        max_attempts: Option<u32>,
+        /// `claurst_api::retry_policy::RetryReason::as_str`.
+        reason: String,
+        discarded_output: bool,
+    },
+    /// Fork addition: one of its model requests finished; what it wrote so
+    /// far stays whatever a later retry does.
+    Settled,
     /// One of its tool calls is about to run.
     ToolStarted {
         id: String,
@@ -521,6 +548,9 @@ impl StreamDecoder {
                 Vec::new()
             }
             Q::Error(message) => vec![AgentEvent::Error(message)],
+            // Fork: kept by the session (`session::forward_events`) to name the
+            // failure the turn ends with; the turn's end says it.
+            Q::RequestFailed(_) => Vec::new(),
             Q::Retry(notice) => vec![AgentEvent::Retry {
                 attempt: notice.attempt,
                 max_attempts: notice.max_attempts,
