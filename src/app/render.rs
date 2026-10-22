@@ -327,7 +327,6 @@ impl Render for Waku {
         let confirm_dialog = self.render_confirm_dialog(window, cx);
         let toast = self.render_active_toast(cx);
         let session_rail = self.render_session_rail(cx);
-        let todo_dock = self.render_todo_dock(cx);
         let content = div()
             .key_context("Waku")
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
@@ -459,9 +458,6 @@ impl Render for Waku {
                                                     .children(self.render_status_capsule(cx))
                                                     .into_any_element()
                                             })
-                                            // Fork: the todo list stays at the bottom while a
-                                            // turn runs (session_rail.rs).
-                                            .children(todo_dock)
                                             .children(permission)
                                             .children(self.render_error_banner(cx))
                                             .when(self.selected_project().is_some(), |element| {

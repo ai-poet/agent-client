@@ -12,8 +12,10 @@
 //! hides the rail; it also steps aside on a window too narrow for both.
 //!
 //! The todo list moves into the stream the same way: while a turn runs, the
-//! session's list stays at the bottom of the conversation, above the
-//! composer, instead of only under the call that last wrote it.
+//! session's list is the conversation's last row, instead of only under the
+//! call that last wrote it. The transcript follows its tail while streaming,
+//! so the list sits right above the composer; scrolled up, it goes away with
+//! the rest of the conversation rather than holding space of its own.
 //!
 //! Frames read only stored state; the Changes card's figures are read by a
 //! daemon request off the UI thread, throttled and dropped when superseded.
@@ -61,7 +63,7 @@ pub(super) struct SessionRailState {
     changes: HashMap<Uuid, Changes>,
     context_open: bool,
     finished_open: bool,
-    /// Sessions whose docked todo list is folded to its header.
+    /// Sessions whose todo row is folded to its header.
     todo_folded: HashSet<Uuid>,
 }
 
@@ -599,15 +601,15 @@ impl Waku {
         body
     }
 
-    /// The todo list, kept at the bottom of the conversation while a turn
-    /// runs. Folds to its header on a click; the fold is per task.
-    pub(super) fn render_todo_dock(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let session = self.selected_session()?;
-        if !session.status.is_busy() || session.todos.is_empty() {
-            return None;
-        }
+    /// The transcript's [`TranscriptRowKind::TodoList`] row: the todo list,
+    /// closing the conversation while a turn runs. Folds to its header on a
+    /// click; the fold is per task.
+    pub(super) fn render_todo_row(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let Some(session) = self.selected_session().filter(|session| shows_todo_row(session))
+        else {
+            return div().into_any_element();
+        };
         let session_id = session.id;
-        let theme = Theme::current(cx);
         let done = session
             .todos
             .iter()
@@ -615,7 +617,7 @@ impl Waku {
             .count();
         let folded = self.session_rail.todo_folded.contains(&session_id);
         let header = div()
-            .id("todo-dock-header")
+            .id("transcript-todo-header")
             .tab_index(0)
             .flex()
             .items_center()
@@ -629,6 +631,11 @@ impl Waku {
                 if !this.session_rail.todo_folded.remove(&session_id) {
                     this.session_rail.todo_folded.insert(session_id);
                 }
+                // Unlike the transcript's other disclosures this does not
+                // pin the scroll position first: while the view follows the
+                // tail, the list's bottom stays above the composer and the
+                // header moves instead.
+                this.remeasure_transcript_todos();
                 cx.notify();
             })
             .child(icon("icons/list.svg", 12.0, theme.text_tertiary))
@@ -639,39 +646,36 @@ impl Waku {
                 10.0,
                 theme.text_tertiary,
             ));
-        Some(
-            div()
-                .flex_none()
-                .w_full()
-                .px(px(16.0))
-                .pb(px(6.0))
-                .child(
+        div()
+            .w_full()
+            .px(px(12.0))
+            .py(px(8.0))
+            .rounded(px(10.0))
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.surface)
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .child(header)
+            .when(!folded, |card| {
+                card.child(
                     div()
-                        .max_w(px(760.0))
-                        .mx_auto()
-                        .px(px(12.0))
-                        .py(px(8.0))
-                        .rounded(px(10.0))
-                        .border_1()
-                        .border_color(theme.border)
-                        .bg(theme.surface)
-                        .flex()
-                        .flex_col()
-                        .gap(px(6.0))
-                        .child(header)
-                        .when(!folded, |card| {
-                            card.child(
-                                div()
-                                    .id("todo-dock-items")
-                                    .max_h(px(168.0))
-                                    .overflow_y_scroll()
-                                    .child(render_todo_list(&session.todos, 12.5, &theme)),
-                            )
-                        }),
+                        .id("transcript-todo-items")
+                        .max_h(px(168.0))
+                        .overflow_y_scroll()
+                        .child(render_todo_list(&session.todos, 12.5, theme)),
                 )
-                .into_any_element(),
-        )
+            })
+            .into_any_element()
     }
+}
+
+/// Whether the transcript closes with the todo row: a turn runs (or waits on
+/// the person) and the agent has a list. The row fingerprint reads it on
+/// every frame, so it stays this cheap.
+pub(super) fn shows_todo_row(session: &AgentSession) -> bool {
+    session.status.is_busy() && !session.todos.is_empty()
 }
 
 #[cfg(test)]
@@ -684,6 +688,30 @@ mod tests {
         assert!(rail_fits(1000.0, 252.0));
         assert!(!rail_fits(880.0, 252.0));
         assert!(rail_fits(880.0, 0.0));
+    }
+
+    /// The todo row closes the transcript only while a turn runs (a pending
+    /// question included) and the agent has a list; a settled task keeps its
+    /// list without the row.
+    #[test]
+    fn the_todo_row_shows_while_a_turn_runs_with_a_list() {
+        use waku_protocol::todo::{TodoItem, TodoStatus};
+
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("go");
+        session.status = SessionStatus::Working;
+        assert!(!shows_todo_row(&session));
+
+        session.todos = vec![TodoItem {
+            content: "Run the tests".to_owned(),
+            status: TodoStatus::InProgress,
+            active_form: None,
+        }];
+        assert!(shows_todo_row(&session));
+        session.status = SessionStatus::Waiting;
+        assert!(shows_todo_row(&session));
+        session.status = SessionStatus::Idle;
+        assert!(!shows_todo_row(&session));
     }
 
     #[test]

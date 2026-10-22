@@ -202,11 +202,21 @@ impl Waku {
             .find(|activity| activity.source_id.as_deref() == Some(source_id))
             .and_then(ActivityItem::settled_todos)
             .map(<[_]>::to_vec);
-        if let Some(todos) = todos
-            && session.todos != todos
-        {
+        let Some(todos) = todos.filter(|todos| *todos != session.todos) else {
+            return;
+        };
+        // Fork: an emptied list takes the transcript's todo row away while
+        // the turn runs on; splice it out, since a shrink found by the next
+        // sync resets the view (session_rail.rs).
+        let previous_kinds = (todos.is_empty() && super::session_rail::shows_todo_row(session))
+            .then(|| self.snapshot_selected_transcript_rows(session_id))
+            .flatten();
+        if let Some(session) = self.state.session_mut(session_id) {
             session.todos = todos;
-            self.state.mark_session_dirty(session_id);
+        }
+        self.state.mark_session_dirty(session_id);
+        if let Some(previous_kinds) = previous_kinds.as_deref() {
+            self.splice_active_transcript_rows_after_visibility_change(previous_kinds);
         }
     }
 

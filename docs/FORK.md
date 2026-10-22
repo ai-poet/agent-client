@@ -290,7 +290,8 @@ lines below.
 | `src/app/command_palette.rs` | `PaletteAction::{JumpToNeedsYou, OpenSideChat, OpenTrajectory}`, their commands and dispatch arms | ~35 |
 | `src/app/transcript_view.rs` | the Inspect pill in `render_activity_item` | 2 |
 | `src/platform.rs` | `set_dock_badge` (macOS; a no-op elsewhere) | ~18 |
-| `src/app/render.rs` (session rail) | the rail's width each frame, `chat_viewport_width` minus it; under the header the column is a row — the task, then the rail — so the header spans both (the right panel, a sibling of the whole column, covers the rail); the docked todo list above the permission card | ~25 |
+| `src/app/render.rs` (session rail) | the rail's width each frame, `chat_viewport_width` minus it; under the header the column is a row — the task, then the rail — so the header spans both (the right panel, a sibling of the whole column, covers the rail) | ~20 |
+| `src/app/transcript.rs`, `src/app/transcript_view.rs`, `src/app/streaming.rs` (session rail) | `TranscriptRowKind::TodoList`: the transcript's last row while a turn runs and the session has todos (`shows_todo_row`), so it sits above the composer while the view follows the tail and scrolls away with the conversation; mixed into the row fingerprint, appended in `selected_transcript_row_kinds`, rendered by `render_todo_row`, remeasured by `remeasure_transcript_todos`; a no-op arm in each row-kind match; `adopt_settled_todos` splices the row out when the agent empties its list mid-turn | ~35 |
 | `src/app/status_capsule.rs` | stands down while the session rail is on screen | 4 |
 | `src/app/background_work.rs` | `session_background_work` (live and finished items, for the rail) | 8 |
 | new `crates/waku-agent/query/src/e2e_tests.rs`, `lib.rs` (`mod e2e_tests`) | test-only: the loop end to end — a scripted provider, `claurst_tools::all_tools()` against a temporary workspace, files read back after the run (write then edit, read before edit, the repeat reminder) | test |

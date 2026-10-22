@@ -1262,7 +1262,8 @@ impl Waku {
             | TranscriptRowKind::ResponseFooter(_, _)
             | TranscriptRowKind::ChangedFiles(_)
             | TranscriptRowKind::WorkingIndicator
-            | TranscriptRowKind::PendingSteer(_) => false,
+            | TranscriptRowKind::PendingSteer(_)
+            | TranscriptRowKind::TodoList => false,
         };
         let inner = match kind {
             TranscriptRowKind::Message(message_index) => self
@@ -1397,6 +1398,8 @@ impl Waku {
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::WorkingIndicator => self.render_working_indicator_row(&theme),
             TranscriptRowKind::PendingSteer(index) => self.render_pending_steer_row(index, &theme),
+            // Fork: session_rail.rs.
+            TranscriptRowKind::TodoList => self.render_todo_row(&theme, cx),
         };
         let mut row = div()
             .id(("transcript-row", index))
