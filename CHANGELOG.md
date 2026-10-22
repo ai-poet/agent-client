@@ -29,6 +29,40 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.3.0]
+
+- 内置 Agent 支持 Gemini 4 Argon：走 Gemini 原生接口，可选低、中、高三档思考，Gemini 和 Antigravity 分组都能用；设置 → 云账户里有单独的 Gemini 分组，默认选第一个并自动准备好密钥；一次并行调用多个工具也能正常执行
+
+  The built-in agent can use Gemini 4 Argon over Gemini's own API, with low, medium and high thinking, through Gemini and Antigravity groups alike; Settings → Cloud Account has a Gemini group of its own that starts on the first one with a key set up for you; and several tools called at once run as they should
+
+- 新增会话详情栏：对话右侧显示运行环境（电脑、文件夹、分支）、上下文用量、未提交的改动和后台任务，可以直接停止后台任务、打开 Review 或提交；打开浏览器、终端等工具时会被覆盖，窗口较窄时自动让出位置，标题栏按钮可显示或隐藏。任务执行中，待办清单作为对话的最后一行显示
+
+  A new session details rail beside the conversation shows the environment (computer, folder, branch), context usage, uncommitted changes and background tasks, and lets you stop a background task, open Review or commit; tools such as the browser or terminal cover it, it steps aside on narrow windows, and a title-bar button shows or hides it. While a task runs, its to-do list is the last row of the conversation
+
+- 需要你处理的任务一眼可见：等待授权、确认计划、回答问题或团队成员请求的任务，在侧栏显示提醒图标并排在前面，Dock 图标显示数量；⇧⌘A（Windows 为 Ctrl+Shift+A）跳到下一个
+
+  Tasks waiting on you stand out: one holding a permission, a finished plan, a question or a team member's request gets an alert icon in the sidebar and sorts to the top, the Dock icon shows how many, and ⇧⌘A (Ctrl+Shift+A on Windows) jumps to the next one
+
+- 侧边提问：按 ⌘;（Windows 为 Ctrl+;）、点标题栏按钮或输入 /btw，就能针对当前任务另外提问；回答显示在右侧，不写进主对话，也不打断正在进行的任务
+
+  Side chat: press ⌘; (Ctrl+; on Windows), use the title-bar button or type /btw to ask about the current task; the answer appears on the right, never enters the main conversation and does not interrupt the running task
+
+- Review 面板支持行内评论：在改动的任意一行点「+」（或用方向键加 Enter）写评论，⌘↩（Windows 为 Ctrl+Enter）一次全部发给 Agent，任务进行中会自动排队
+
+  Line comments in Review: click "+" on any changed line (or use the arrow keys and Enter) to comment, and ⌘↩ (Ctrl+Enter on Windows) sends them all to the agent at once, queued while a task is running
+
+- 内置 Agent 新增轨迹面板：用时间线和明细列出每次模型请求（首字延迟、用时、用量、重试原因）、工具调用、压缩和回退，点工具行上的「检查」可直接定位；记录可在设置 → Agent 中关闭
+
+  A trajectory panel for the built-in agent lays out every model request (time to first token, duration, usage, retry causes), tool call, compaction and rewind on a timeline and in a ledger, and "Inspect" on a tool row jumps straight to it; recording can be switched off in Settings → Agent
+
+- 出错时更好排查：错误信息末尾附上请求 ID；错误提示按原因给出对应操作，例如压缩上下文后继续、打开模型提供方或账户设置；重新发送时显示「正在重新发送」，子 Agent 的重试也会显示；额度已用完的错误不再白白重试
+
+  Failures are easier to act on: the message ends with the request ID; the banner offers the step that fits the cause, such as compacting the context and continuing or opening model provider or account settings; a resend says so, and sub-agent retries show too; and an exhausted quota is no longer retried
+
+- 画图使用聊天输入框上方选择的节点（主站或 CDN），不必再单独选择
+
+  The image studio draws through the node picked above the composer (main site or CDN), with no separate choice to make
+
 - Codex 的模型列表去掉已停用的 GPT-5.5 和 GPT-5.4，只保留 GPT-6.1-Sol、GPT-6-Astra、GPT-6-Sol、GPT-5.6-Sol 和 GPT-5.6-Terra
 
   The Codex model list drops the retired GPT-5.5 and GPT-5.4, leaving GPT-6.1-Sol, GPT-6-Astra, GPT-6-Sol, GPT-5.6-Sol and GPT-5.6-Terra
