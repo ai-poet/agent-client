@@ -30,9 +30,11 @@ use super::todo_list::render_todo_list;
 use super::*;
 
 /// The rail's width.
-pub(super) const RAIL_WIDTH: f32 = 284.0;
-/// The conversation keeps at least this much beside it.
-const MIN_CHAT_WIDTH: f32 = 560.0;
+pub(super) const RAIL_WIDTH: f32 = 260.0;
+/// The conversation keeps at least this much beside it. Low enough that a
+/// default window with the sidebar open (252 px) shows the rail from about
+/// 910 px wide.
+const MIN_CHAT_WIDTH: f32 = 400.0;
 /// How often a running task's changes are read again.
 const BUSY_REFRESH: Duration = Duration::from_secs(5);
 /// The shortest gap between two reads.
@@ -678,9 +680,10 @@ mod tests {
 
     #[test]
     fn the_rail_steps_aside_on_a_narrow_window() {
-        assert!(rail_fits(1440.0, 260.0));
-        assert!(!rail_fits(1000.0, 260.0));
-        assert!(rail_fits(900.0, 0.0));
+        assert!(rail_fits(1440.0, 252.0));
+        assert!(rail_fits(1000.0, 252.0));
+        assert!(!rail_fits(880.0, 252.0));
+        assert!(rail_fits(880.0, 0.0));
     }
 
     #[test]

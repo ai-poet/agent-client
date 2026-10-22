@@ -108,10 +108,6 @@ pub(super) struct StudioPrefs {
     pub(super) quality: Option<String>,
     #[serde(default)]
     pub(super) count: u8,
-    /// Fork: the gateway node this page draws through, picked on the page;
-    /// `None` follows the agents' route (`cloud_origins.rs`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) node: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -297,22 +293,13 @@ pub(super) fn job_candidates(
 }
 
 /// Where a job's requests go: the node it was submitted to, when it is
-/// resumed; else the node picked on the page, while that is still one of
-/// the nodes; else wherever the agents are routed. A picked node that was
-/// removed is not guessed at — the page follows the route again.
-pub(super) fn studio_origin(
-    submitted: Option<&str>,
-    picked: Option<&str>,
-    nodes: &[String],
-    global: &str,
-) -> String {
-    if let Some(submitted) = submitted.filter(|origin| !origin.trim().is_empty()) {
-        return submitted.to_owned();
-    }
-    match picked {
-        Some(picked) if nodes.iter().any(|node| node == picked) => picked.to_owned(),
-        _ => global.to_owned(),
-    }
+/// resumed (its task lives there); else the node the agents are routed to,
+/// chosen with the chip above the composer.
+pub(super) fn studio_origin(submitted: Option<&str>, global: &str) -> String {
+    submitted
+        .filter(|origin| !origin.trim().is_empty())
+        .unwrap_or(global)
+        .to_owned()
 }
 
 /// A refusal that says "not here", after which the next group is asked.
@@ -858,13 +845,6 @@ impl Waku {
         cx.notify();
     }
 
-    /// Fork: the node this page draws through; `None` follows the agents'.
-    pub(super) fn set_image_studio_node(&mut self, node: Option<String>, cx: &mut Context<Self>) {
-        self.image_studio.store.prefs.node = node;
-        self.save_image_studio(cx);
-        cx.notify();
-    }
-
     pub(super) fn set_image_studio_count(&mut self, count: u8, cx: &mut Context<Self>) {
         self.image_studio.store.prefs.count = count.clamp(1, images::MAX_COUNT);
         self.save_image_studio(cx);
@@ -1178,12 +1158,7 @@ impl Waku {
             .gateway_origin
             .origin()
             .unwrap_or_else(|| credentials.endpoint.clone());
-        let origin = studio_origin(
-            job.origin.as_deref(),
-            self.image_studio.store.prefs.node.as_deref(),
-            &self.cloud_account.gateway_origin.effective_candidates(),
-            &global,
-        );
+        let origin = studio_origin(job.origin.as_deref(), &global);
         if job.origin.is_none()
             && let Some(job) = self.image_studio.store.job_mut(job_id)
         {
@@ -1678,34 +1653,14 @@ mod tests {
     }
 
     #[test]
-    fn a_job_goes_where_it_was_sent_then_where_the_page_says() {
-        let nodes = vec![
-            "https://cheaprouter.cc".to_owned(),
-            "https://cdn.cheaprouter.cc".to_owned(),
-        ];
+    fn a_job_follows_the_agents_node_and_a_resumed_one_stays_where_it_was_sent() {
         let global = "https://cheaprouter.cc";
-        // Nothing picked: the agents' route.
-        assert_eq!(studio_origin(None, None, &nodes, global), global);
-        // Picked and still a node.
+        assert_eq!(studio_origin(None, global), global);
         assert_eq!(
-            studio_origin(None, Some("https://cdn.cheaprouter.cc"), &nodes, global),
+            studio_origin(Some("https://cdn.cheaprouter.cc"), global),
             "https://cdn.cheaprouter.cc"
         );
-        // Picked, then removed: back to the route.
-        assert_eq!(
-            studio_origin(None, Some("https://gone.example"), &nodes, global),
-            global
-        );
-        // A resumed task stays on the node it was submitted to.
-        assert_eq!(
-            studio_origin(
-                Some("https://cdn.cheaprouter.cc"),
-                None,
-                &nodes,
-                global
-            ),
-            "https://cdn.cheaprouter.cc"
-        );
+        assert_eq!(studio_origin(Some(" "), global), global);
     }
 
     #[test]
@@ -1717,7 +1672,6 @@ mod tests {
                 size: Some("1536x1024".into()),
                 quality: None,
                 count: 2,
-                node: Some("https://cdn.cheaprouter.cc".into()),
             },
             jobs: vec![
                 job(JobStatus::Done {

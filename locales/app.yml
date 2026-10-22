@@ -560,14 +560,6 @@ image_studio.top_up:
   en: "Top up"
 image_studio.group_auto:
   en: "Group: automatic"
-image_studio.node_follow:
-  en: "Node: follow the agents"
-image_studio.node_follow_current:
-  en: "Follow the agents' node (now %{node})"
-image_studio.node_label:
-  en: "Node: %{node}"
-image_studio.node_unreachable:
-  en: "Could not reach %{node}. Pick another node, or follow the agents' node."
 image_studio.group_number:
   en: "Group #%{id}"
 image_studio.group_denied:
@@ -3769,7 +3761,7 @@ cloud.failover_active:
 cloud.origin_title:
   en: "Cloud API nodes"
 cloud.origin_detail:
-  en: "The agents, the CLIs and image generation reach the service through the node you pick (the image studio can pick its own). Measure them to find the fastest; signing in, your account and payments always use the main site."
+  en: "The agents, the CLIs and image generation reach the service through the node you pick. Measure them to find the fastest; signing in, your account and payments always use the main site."
 cloud.origin_placeholder:
   en: "https://mirror.example.com"
 cloud.origin_duplicate:
