@@ -1386,6 +1386,12 @@ group, so the routing writer files the platform of the group each model is
 routed to (`gateway_keys.model_platforms`) and `select_route` picks the
 mount from it. Every other `gemini-*` stays unoffered.
 
+Gemini sends each `functionCall` part whole, and parallel calls come one
+chunk each, every one at `parts[0]`; the adapter opens a tool block per part
+rather than per position, which had run their arguments together. A prompt
+Gemini refuses (`promptFeedback.blockReason`, no candidate) is a final
+failure naming the reason, not a broken stream to ask again.
+
 A second departure keeps the chosen format from being overruled. The
 engine's query loop only honoured `config.provider` when it was *not*
 `anthropic`, falling through to a hard-coded family table otherwise —
