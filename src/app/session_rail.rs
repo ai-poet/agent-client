@@ -12,10 +12,11 @@
 //! hides the rail; it also steps aside on a window too narrow for both.
 //!
 //! The todo list moves into the stream the same way: while a turn runs, the
-//! session's list is the conversation's last row, instead of only under the
-//! call that last wrote it. The transcript follows its tail while streaming,
-//! so the list sits right above the composer; scrolled up, it goes away with
-//! the rest of the conversation rather than holding space of its own.
+//! session's list is a row of the conversation right above "Working for …",
+//! instead of only under the call that last wrote it. The transcript follows
+//! its tail while streaming, so the list sits at the bottom; scrolled up, it
+//! goes away with the rest of the conversation rather than holding space of
+//! its own.
 //!
 //! Frames read only stored state; the Changes card's figures are read by a
 //! daemon request off the UI thread, throttled and dropped when superseded.
@@ -602,8 +603,8 @@ impl Waku {
     }
 
     /// The transcript's [`TranscriptRowKind::TodoList`] row: the todo list,
-    /// closing the conversation while a turn runs. Folds to its header on a
-    /// click; the fold is per task.
+    /// right above the working row while a turn runs. Folds to its header on
+    /// a click; the fold is per task.
     pub(super) fn render_todo_row(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let Some(session) = self.selected_session().filter(|session| shows_todo_row(session))
         else {
@@ -633,7 +634,7 @@ impl Waku {
                 }
                 // Unlike the transcript's other disclosures this does not
                 // pin the scroll position first: while the view follows the
-                // tail, the list's bottom stays above the composer and the
+                // tail, the list's bottom stays above the working row and the
                 // header moves instead.
                 this.remeasure_transcript_todos();
                 cx.notify();
@@ -671,8 +672,8 @@ impl Waku {
     }
 }
 
-/// Whether the transcript closes with the todo row: a turn runs (or waits on
-/// the person) and the agent has a list. The row fingerprint reads it on
+/// Whether the transcript shows the todo row: a turn runs (or waits on the
+/// person) and the agent has a list. The row fingerprint reads it on
 /// every frame, so it stays this cheap.
 pub(super) fn shows_todo_row(session: &AgentSession) -> bool {
     session.status.is_busy() && !session.todos.is_empty()
@@ -690,7 +691,7 @@ mod tests {
         assert!(rail_fits(880.0, 0.0));
     }
 
-    /// The todo row closes the transcript only while a turn runs (a pending
+    /// The todo row is in the transcript only while a turn runs (a pending
     /// question included) and the agent has a list; a settled task keeps its
     /// list without the row.
     #[test]

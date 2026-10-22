@@ -50,10 +50,10 @@ impl Waku {
             rows.push(TranscriptRowKind::WorkingIndicator);
         }
         rows.extend((0..self.selected_pending_steer_count()).map(TranscriptRowKind::PendingSteer));
-        // Fork: the running turn's todo list closes the conversation, so it
-        // scrolls with it (session_rail.rs).
+        // Fork: the running turn's todo list, a row so it scrolls with the
+        // conversation (session_rail.rs).
         if self.selected_session().is_some_and(shows_todo_row) {
-            rows.push(TranscriptRowKind::TodoList);
+            insert_todo_row(&mut rows);
         }
         rows
     }
@@ -471,9 +471,9 @@ pub(super) enum TranscriptRowKind {
     /// place in the runtime's queue. Shown at once, so the message does not
     /// vanish between the composer clearing and the provider accepting it.
     PendingSteer(usize),
-    /// Fork: the session's todo list while a turn runs, the last row of all —
-    /// at the bottom while the view follows the tail, scrolled away with the
-    /// rest when the reader scrolls up (session_rail.rs).
+    /// Fork: the session's todo list while a turn runs, right above the
+    /// working row — at the bottom while the view follows the tail, scrolled
+    /// away with the rest when the reader scrolls up (session_rail.rs).
     TodoList,
 }
 
@@ -724,6 +724,22 @@ pub(super) fn response_footer_message_index(
 ) -> Option<usize> {
     let rows = turn_rows(session, turn_id);
     response_footer_message_index_from_rows(session, &rows)
+}
+
+/// Fork: place the todo row right above the working row, or where that row
+/// would be — before the pending steers — while the turn waits on the person
+/// (session_rail.rs).
+pub(super) fn insert_todo_row(rows: &mut Vec<TranscriptRowKind>) {
+    let at = rows
+        .iter()
+        .position(|row| {
+            matches!(
+                row,
+                TranscriptRowKind::WorkingIndicator | TranscriptRowKind::PendingSteer(_)
+            )
+        })
+        .unwrap_or(rows.len());
+    rows.insert(at, TranscriptRowKind::TodoList);
 }
 
 pub(super) fn transcript_row_splice(
