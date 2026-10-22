@@ -44,6 +44,8 @@ mod browser;
 mod computer_use;
 mod config;
 mod events;
+// Fork addition: naming the failure a turn ended with.
+mod failure;
 // Fork: `WebSearch` through the gateway's Codex search endpoint.
 mod gateway_search;
 mod goal;

@@ -26,6 +26,7 @@ use agent_trajectory::snapshot::{CellDetail, CellKind, PromptChange, Snapshot};
 use agent_trajectory::timeline::{self, Mode};
 use gpui::{ContentMask, size};
 
+use crate::model::RetryCause;
 use crate::ui::ActivationExt as _;
 
 use super::providers_page::card_button;
@@ -967,12 +968,22 @@ impl Waku {
                     .ended_at
                     .map(|end| metrics::format_duration(end - turn.started_at))
                     .unwrap_or_default();
-                let detail = tr!(
+                let mut detail = tr!(
                     "trajectory.turn_detail",
                     steps = turn.steps,
                     tools = turn.tool_calls,
                     tokens = metrics::format_tokens(turn.usage.output)
                 );
+                // Fork: a failed turn whose goal resumes on its own.
+                if let Some(resume) = turn.goal_resume {
+                    detail.push_str(" · ");
+                    detail.push_str(&tr!(
+                        "trajectory.goal_resume",
+                        delay = metrics::format_duration(resume.delay_ms as i64),
+                        attempt = resume.attempt,
+                        max = resume.max_attempts.map(|max| max.to_string()).unwrap_or_else(|| "∞".into())
+                    ));
+                }
                 div()
                     .id(SharedString::from(format!("trajectory-turn-{position}")))
                     .w_full()
@@ -1254,6 +1265,31 @@ fn empty_message(theme: Theme, message: String) -> AnyElement {
 }
 
 /// A label and its value, one row.
+/// Fork: one retry of a request — its count, why, how long it waited, what
+/// failed, whether a half answer was thrown away, and the failed attempt's
+/// request id.
+fn retry_line(retry: &agent_trajectory::record::RetryInfo) -> String {
+    let mut parts = vec![format!(
+        "{}/{}",
+        retry.attempt,
+        retry.max_attempts.map(|max| max.to_string()).unwrap_or_else(|| "∞".into())
+    )];
+    if !retry.reason.is_empty() {
+        parts.push(RetryCause::from_reason(&retry.reason).label());
+    }
+    parts.push(metrics::format_duration(retry.delay_ms as i64));
+    if !retry.error.is_empty() {
+        parts.push(retry.error.clone());
+    }
+    if retry.discarded_output {
+        parts.push(tr!("trajectory.retry_discarded"));
+    }
+    if let Some(id) = &retry.request_id {
+        parts.push(id.clone());
+    }
+    parts.join(" · ")
+}
+
 fn fact(theme: &Theme, label: String, value: String) -> Div {
     div()
         .flex()
@@ -1311,20 +1347,34 @@ fn inspector_body(snapshot: &Snapshot, cell: &agent_trajectory::Cell, tab: Tab, 
                 .child(fact(theme, tr!("trajectory.fact.stop_reason"), request.stop_reason.clone()))
                 .child(fact(theme, tr!("trajectory.fact.tool_calls"), request.tool_calls.to_string()));
             for retry in &request.retries {
-                body = body.child(fact(
-                    theme,
-                    tr!("trajectory.fact.retry"),
-                    format!(
-                        "{}/{} · {} · {}",
-                        retry.attempt,
-                        retry.max_attempts.map(|max| max.to_string()).unwrap_or_else(|| "∞".into()),
-                        metrics::format_duration(retry.delay_ms as i64),
-                        retry.error
-                    ),
-                ));
+                body = body.child(fact(theme, tr!("trajectory.fact.retry"), retry_line(retry)));
             }
             if let Some(error) = &request.error {
                 body = body.child(fact(theme, tr!("trajectory.fact.error"), error.clone()));
+            }
+            // Fork: the failure the request ended its turn with.
+            if let Some(failure) = &request.failure {
+                let class = match failure.class.as_str() {
+                    "retryable" => tr!("trajectory.failure_class.retryable"),
+                    "context_overflow" => tr!("trajectory.failure_class.context_overflow"),
+                    "fatal" => tr!("trajectory.failure_class.fatal"),
+                    other => other.to_owned(),
+                };
+                let class = if failure.class == "retryable" && !failure.reason.is_empty() {
+                    format!("{class} · {}", RetryCause::from_reason(&failure.reason).label())
+                } else {
+                    class
+                };
+                body = body.child(fact(theme, tr!("trajectory.fact.failure"), class));
+                if let Some(status) = failure.status {
+                    body = body.child(fact(theme, tr!("trajectory.fact.http_status"), status.to_string()));
+                }
+                if let Some(code) = &failure.code {
+                    body = body.child(fact(theme, tr!("trajectory.fact.error_code"), code.clone()));
+                }
+                if let Some(id) = &failure.request_id {
+                    body = body.child(fact(theme, tr!("trajectory.fact.request_id"), id.clone()));
+                }
             }
             body
         }

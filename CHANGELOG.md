@@ -29,6 +29,10 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- Codex 的模型列表去掉已停用的 GPT-5.5 和 GPT-5.4，只保留 GPT-6.1-Sol、GPT-6-Astra、GPT-6-Sol、GPT-5.6-Sol 和 GPT-5.6-Terra
+
+  The Codex model list drops the retired GPT-5.5 and GPT-5.4, leaving GPT-6.1-Sol, GPT-6-Astra, GPT-6-Sol, GPT-5.6-Sol and GPT-5.6-Terra
+
 ## [0.2.16]
 
 - 上下文圆环现在显示真实用量：DeepSeek、GLM、Kimi 等模型以及经网关转换格式的请求之前读不到用量，圆环一直接近 0；现在每一步模型调用和每次压缩后都会更新。自动压缩也改为按圆环显示的上下文窗口触发，1M 窗口的模型不再在 20 万左右就被压缩

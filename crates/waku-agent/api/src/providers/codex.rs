@@ -688,6 +688,8 @@ impl LlmProvider for CodexProvider {
     {
         let resp = self.send_responses_streaming_request(&request).await?;
         let provider_id = self.id.clone();
+        // Fork (Waku): a failure inside the stream still names its request.
+        let request_id = crate::retry_policy::request_id_of(resp.headers());
 
         let s = stream! {
             let mut byte_stream = resp.bytes_stream();
@@ -1114,7 +1116,7 @@ impl LlmProvider for CodexProvider {
             });
         };
 
-        Ok(Box::pin(s))
+        Ok(Box::pin(s.map(move |item| item.map_err(|error| error.with_request_id(request_id.as_deref())))))
     }
 
     async fn discover_models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
@@ -1269,5 +1271,67 @@ mod fork_argument_decoding_tests {
         assert_eq!(input.len(), 1);
         assert_eq!(input[0]["role"], "user");
         assert!(!body.to_string().contains(r#""role":"system""#));
+    }
+
+    /// A stream that breaks off after a 200 still names the request it
+    /// belonged to: the turn that gives up reports the id support needs.
+    #[tokio::test]
+    async fn an_in_stream_failure_carries_the_responses_request_id() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("connect");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            loop {
+                let read = socket.read(&mut buffer).await.expect("read");
+                request.extend_from_slice(&buffer[..read]);
+                let Some(end) = request.windows(4).position(|window| window == b"\r\n\r\n") else {
+                    continue;
+                };
+                let headers = String::from_utf8_lossy(&request[..end]).to_ascii_lowercase();
+                let length = headers
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length:"))
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if read == 0 || request.len() >= end + 4 + length {
+                    break;
+                }
+            }
+            // A 200 whose stream ends before `response.completed`.
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nx-request-id: req_cut_off\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                )
+                .await
+                .expect("write");
+        });
+        let provider = CodexProvider::with_gateway(format!("http://{address}/v1/responses"), "test-key".into());
+        let request = ProviderRequest {
+            model: "gpt-5.6-sol".into(),
+            messages: vec![claurst_core::types::Message::user("hi")],
+            system_prompt: None,
+            tools: vec![],
+            max_tokens: 1024,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: vec![],
+            thinking: None,
+            provider_options: json!({}),
+        };
+        let mut stream = provider.create_message_stream(request).await.expect("the stream opens");
+        let mut failure = None;
+        while let Some(item) = stream.next().await {
+            if let Err(error) = item {
+                failure = Some(crate::retry_policy::from_provider_error(&error));
+            }
+        }
+        server.await.expect("server");
+        let failure = failure.expect("a truncated stream fails");
+        assert_eq!(failure.reason, crate::retry_policy::RetryReason::Truncated);
+        assert_eq!(failure.request_id.as_deref(), Some("req_cut_off"));
     }
 }

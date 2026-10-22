@@ -45,6 +45,17 @@ pub enum FailureClass {
     Fatal,
 }
 
+impl FailureClass {
+    /// A stable identifier, for logs and the trajectory.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FailureClass::Retryable => "retryable",
+            FailureClass::ContextOverflow => "context_overflow",
+            FailureClass::Fatal => "fatal",
+        }
+    }
+}
+
 /// Why a retryable failure happened, for the notice the user sees.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RetryReason {
@@ -91,16 +102,28 @@ pub struct ModelFailure {
     pub message: String,
     /// How long the server asked to wait, when it said.
     pub retry_after: Option<Duration>,
+    /// The provider's own type or code for the error, lower-cased —
+    /// `insufficient_quota`, `content_policy_violation`, `permission_error` —
+    /// when it gave one. Names a failure the status alone does not.
+    pub code: Option<String>,
+    /// The server's id for the request: what support looks a failure up by.
+    /// The managed gateway keys its error log on `X-Request-ID`.
+    pub request_id: Option<String>,
 }
 
 impl ModelFailure {
+    /// The constructors scrub the message ([`redact_secrets`]): a provider
+    /// that echoes the key it refused must not have it shown, logged or
+    /// written into the trajectory.
     pub fn retryable(reason: RetryReason, message: impl Into<String>) -> Self {
         Self {
             class: FailureClass::Retryable,
             reason,
             status: None,
-            message: message.into(),
+            message: redact_secrets(&message.into()),
             retry_after: None,
+            code: None,
+            request_id: None,
         }
     }
 
@@ -109,8 +132,10 @@ impl ModelFailure {
             class: FailureClass::Fatal,
             reason: RetryReason::ServerError,
             status,
-            message: message.into(),
+            message: redact_secrets(&message.into()),
             retry_after: None,
+            code: None,
+            request_id: None,
         }
     }
 
@@ -119,9 +144,26 @@ impl ModelFailure {
             class: FailureClass::ContextOverflow,
             reason: RetryReason::ServerError,
             status,
-            message: message.into(),
+            message: redact_secrets(&message.into()),
             retry_after: None,
+            code: None,
+            request_id: None,
         }
+    }
+
+    /// The request's id, unless the failure already carries one.
+    pub fn with_request_id(mut self, id: Option<String>) -> Self {
+        if self.request_id.is_none() {
+            self.request_id = id;
+        }
+        self
+    }
+
+    fn with_code(mut self, code: Option<String>) -> Self {
+        if self.code.is_none() {
+            self.code = code.filter(|code| !code.is_empty());
+        }
+        self
     }
 
     /// The stream ended before its terminal event (`message_stop`,
@@ -206,7 +248,19 @@ pub fn classify_http(status: u16, headers: &reqwest::header::HeaderMap, body: &s
         .get("x-should-retry")
         .and_then(|value| value.to_str().ok())
         .map(|value| !matches!(value.trim().to_ascii_lowercase().as_str(), "false" | "0"));
-    classify_status(status, body, retry_after, should_retry)
+    classify_status(status, body, retry_after, should_retry).with_request_id(request_id_of(headers))
+}
+
+/// The server's id for a request, from the response headers: the gateway's
+/// `X-Request-ID` first — its error log is keyed on it — then the names
+/// Anthropic and DeepSeek use. Only a short run of visible ASCII is kept.
+pub fn request_id_of(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    ["x-request-id", "request-id", "x-deepseek-request-id"]
+        .iter()
+        .filter_map(|name| headers.get(*name)?.to_str().ok())
+        .map(str::trim)
+        .find(|id| !id.is_empty() && id.len() <= 128 && id.bytes().all(|byte| byte.is_ascii_graphic()))
+        .map(str::to_string)
 }
 
 /// [`classify_http`] once the headers have been read.
@@ -221,8 +275,9 @@ pub fn classify_status(
         529 => "overloaded".to_string(),
         _ => format!("the server answered HTTP {status}"),
     });
+    let code = error_code_from_body(body);
     if matches!(status, 400 | 413 | 422) && (names_context_overflow(&message) || names_context_overflow(body)) {
-        return ModelFailure::context_overflow(Some(status), message);
+        return ModelFailure::context_overflow(Some(status), message).with_code(code);
     }
 
     let reason = match status {
@@ -236,18 +291,24 @@ pub fn classify_status(
     };
     let mut failure = match reason {
         Some(reason) => ModelFailure {
-            class: FailureClass::Retryable,
-            reason,
             status: Some(status),
-            message,
             retry_after,
+            ..ModelFailure::retryable(reason, message)
         },
         None => ModelFailure {
             retry_after,
             ..ModelFailure::fatal(Some(status), message)
         },
-    };
+    }
+    .with_code(code);
     if should_retry == Some(false) {
+        failure.class = FailureClass::Fatal;
+    }
+    // OpenAI's spent credit comes as a 429; waiting does not refill it.
+    if matches!(
+        failure.code.as_deref(),
+        Some("insufficient_quota" | "billing_hard_limit_reached")
+    ) {
         failure.class = FailureClass::Fatal;
     }
     // A wait this long is a quota window, not congestion.
@@ -259,14 +320,21 @@ pub fn classify_status(
 
 /// Classify a failure to get any response, or to read the rest of one.
 pub fn classify_transport(error: &reqwest::Error) -> ModelFailure {
-    let detail = error_chain(error);
+    classify_transport_detail(&error_chain(error), error.is_timeout())
+}
+
+/// [`classify_transport`] once the error is text.
+fn classify_transport_detail(detail: &str, is_timeout: bool) -> ModelFailure {
     let lower = detail.to_ascii_lowercase();
     // A rejected certificate stays rejected; asking again only delays the
     // message that says so.
     if lower.contains("certificate") || lower.contains("unknownissuer") {
-        return ModelFailure::fatal(None, format!("TLS error: {detail}"));
+        return ModelFailure {
+            reason: RetryReason::Network,
+            ..ModelFailure::fatal(None, format!("TLS error: {detail}"))
+        };
     }
-    if error.is_timeout() || lower.contains("timed out") {
+    if is_timeout || lower.contains("timed out") {
         return ModelFailure::retryable(RetryReason::Timeout, format!("timed out: {detail}"));
     }
     ModelFailure::retryable(RetryReason::Network, format!("network error: {detail}"))
@@ -277,8 +345,9 @@ pub fn classify_transport(error: &reqwest::Error) -> ModelFailure {
 /// type or code, when it carried one.
 pub fn classify_stream_error(kind: &str, message: &str) -> ModelFailure {
     let kind = kind.trim().to_ascii_lowercase();
+    let code = Some(kind.clone());
     if names_context_overflow(message) || kind.contains("context_length") || kind.contains("context_window") {
-        return ModelFailure::context_overflow(None, message);
+        return ModelFailure::context_overflow(None, message).with_code(code);
     }
     let lower = message.to_ascii_lowercase();
     let failure = match kind.as_str() {
@@ -294,7 +363,7 @@ pub fn classify_stream_error(kind: &str, message: &str) -> ModelFailure {
         }
         _ => ModelFailure::retryable(RetryReason::StreamInterrupted, message),
     };
-    with_override(failure)
+    with_override(failure.with_code(code))
 }
 
 /// Classify whatever a provider adapter returned.
@@ -356,10 +425,19 @@ pub fn from_provider_error(error: &crate::provider_error::ProviderError) -> Mode
                 with_override(ModelFailure::fatal(None, message.clone()))
             }
         }
-        E::AuthFailed { message, .. }
-        | E::QuotaExceeded { message, .. }
-        | E::InvalidRequest { message, .. }
-        | E::ContentFiltered { message, .. } => with_override(ModelFailure::fatal(None, message.clone())),
+        // The variant names the failure; the code says so to the client.
+        E::AuthFailed { message, .. } => {
+            with_override(ModelFailure::fatal(None, message.clone()).with_code(Some("authentication_error".into())))
+        }
+        E::QuotaExceeded { message, .. } => {
+            with_override(ModelFailure::fatal(None, message.clone()).with_code(Some("insufficient_quota".into())))
+        }
+        E::InvalidRequest { message, .. } => {
+            with_override(ModelFailure::fatal(None, message.clone()).with_code(Some("invalid_request_error".into())))
+        }
+        E::ContentFiltered { message, .. } => {
+            with_override(ModelFailure::fatal(None, message.clone()).with_code(Some("content_filter".into())))
+        }
         E::ModelNotFound { .. } => ModelFailure::fatal(Some(404), error.to_string()),
     }
 }
@@ -433,6 +511,72 @@ fn error_message_from_body(body: &str) -> Option<String> {
         );
     }
     Some(trimmed.chars().take(2_000).collect())
+}
+
+/// The provider's type or code for an error, from a JSON body: Anthropic's
+/// `error.type`, OpenAI's `error.code` (falling back to its `error.type`),
+/// Gemini's `error.status`. Lower-cased; `None` without one.
+fn error_code_from_body(body: &str) -> Option<String> {
+    let json = serde_json::from_str::<serde_json::Value>(body.trim()).ok()?;
+    ["/error/code", "/error/type", "/error/status", "/code", "/type"]
+        .iter()
+        .filter_map(|path| json.pointer(path)?.as_str())
+        .map(str::trim)
+        .find(|code| !code.is_empty())
+        .map(str::to_ascii_lowercase)
+}
+
+/// `text` with anything that looks like a credential replaced by
+/// `[redacted]`: OpenAI-style `sk-` keys (masked echoes included), bearer
+/// tokens, `x-api-key` / `authorization` / `api_key` assignments, `key=` and
+/// `token=` in a URL, Google API keys, JWTs, and long runs that mix upper
+/// case, lower case and digits the way generated secrets do. Hex hashes and
+/// UUIDs — the gateway's `（hash: …）`, request ids — are left alone.
+/// Applying it twice changes nothing.
+pub fn redact_secrets(text: &str) -> String {
+    use regex::{Captures, Regex};
+    use std::sync::LazyLock;
+
+    static OPENAI_KEY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bsk-[A-Za-z0-9_*\-]{8,}").unwrap());
+    static BEARER: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=\-]{8,}").unwrap());
+    static ASSIGNED: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r#"(?i)\b(x-api-key|x-goog-api-key|api[_-]?key|authorization)(["']?\s*[:=]\s*["']?)([^\s"',}&]+)"#,
+        )
+        .unwrap()
+    });
+    static QUERY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"([?&](?:key|api_key|access_token|token)=)[^&\s"']+"#).unwrap());
+    static GOOGLE_KEY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"AIza[0-9A-Za-z_\-]{35}").unwrap());
+    static JWT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}").unwrap()
+    });
+    static LONG_RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z0-9_\-]{40,}").unwrap());
+    const REDACTED: &str = "[redacted]";
+
+    let text = OPENAI_KEY.replace_all(text, "sk-[redacted]");
+    let text = BEARER.replace_all(&text, "$1 [redacted]");
+    let text = ASSIGNED.replace_all(&text, |caps: &Captures| {
+        let value = &caps[3];
+        // `Authorization: Bearer …` was handled above; keep its scheme.
+        if value.eq_ignore_ascii_case("bearer") || value.starts_with(REDACTED) {
+            caps[0].to_string()
+        } else {
+            format!("{}{}{REDACTED}", &caps[1], &caps[2])
+        }
+    });
+    let text = QUERY.replace_all(&text, "${1}[redacted]");
+    let text = GOOGLE_KEY.replace_all(&text, REDACTED);
+    let text = JWT.replace_all(&text, REDACTED);
+    let text = LONG_RUN.replace_all(&text, |caps: &Captures| {
+        let run = &caps[0];
+        let mixed = run.bytes().any(|byte| byte.is_ascii_uppercase())
+            && run.bytes().any(|byte| byte.is_ascii_lowercase())
+            && run.bytes().any(|byte| byte.is_ascii_digit());
+        if mixed { REDACTED.to_string() } else { run.to_string() }
+    });
+    text.into_owned()
 }
 
 /// The error and everything that caused it, in one line.
@@ -774,5 +918,103 @@ mod tests {
         set_network_timeouts(Duration::ZERO, Duration::ZERO);
         assert_eq!(connect_timeout(), DEFAULT_CONNECT_TIMEOUT);
         assert_eq!(idle_timeout(), DEFAULT_IDLE_TIMEOUT);
+    }
+
+    #[test]
+    fn the_request_id_comes_from_the_response_headers() {
+        let gateway = classify_http(
+            503,
+            &headers(&[("x-request-id", "a4293c1e-0d5f-4c9e-9b1a-2f6d8e7c1b20"), ("request-id", "req_other")]),
+            "{}",
+        );
+        assert_eq!(gateway.request_id.as_deref(), Some("a4293c1e-0d5f-4c9e-9b1a-2f6d8e7c1b20"));
+        let anthropic = classify_http(529, &headers(&[("request-id", "req_011CSHoEeqs5C35K2UUqR7Fy")]), "{}");
+        assert_eq!(anthropic.request_id.as_deref(), Some("req_011CSHoEeqs5C35K2UUqR7Fy"));
+        assert_eq!(classify_http(500, &HeaderMap::new(), "{}").request_id, None);
+        // An id already known is not overwritten.
+        let stamped = anthropic.clone().with_request_id(Some("later".into()));
+        assert_eq!(stamped.request_id.as_deref(), Some("req_011CSHoEeqs5C35K2UUqR7Fy"));
+    }
+
+    #[test]
+    fn the_provider_error_code_survives_classification() {
+        let none = HeaderMap::new();
+        let openai = classify_http(
+            400,
+            &none,
+            r#"{"error":{"type":"invalid_request_error","code":"content_policy_violation","message":"blocked"}}"#,
+        );
+        assert_eq!(openai.code.as_deref(), Some("content_policy_violation"));
+        let anthropic = classify_http(403, &none, r#"{"type":"error","error":{"type":"permission_error","message":"no"}}"#);
+        assert_eq!(anthropic.code.as_deref(), Some("permission_error"));
+        let gemini = classify_http(429, &none, r#"{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"slow"}}"#);
+        assert_eq!(gemini.code.as_deref(), Some("resource_exhausted"));
+        assert_eq!(classify_stream_error("overloaded_error", "busy").code.as_deref(), Some("overloaded_error"));
+        assert_eq!(classify_stream_error("", "connection reset").code, None);
+    }
+
+    #[test]
+    fn an_insufficient_quota_answer_never_retries() {
+        let spent = classify_http(
+            429,
+            &HeaderMap::new(),
+            r#"{"error":{"type":"insufficient_quota","code":"insufficient_quota","message":"You exceeded your current quota"}}"#,
+        );
+        assert_eq!(spent.class, FailureClass::Fatal);
+        assert_eq!(spent.status, Some(429));
+        // A plain rate limit still waits.
+        let busy = classify_http(429, &HeaderMap::new(), r#"{"error":{"code":"rate_limit_exceeded","message":"slow down"}}"#);
+        assert_eq!(busy.class, FailureClass::Retryable);
+    }
+
+    #[test]
+    fn secrets_never_survive_into_a_failure_message() {
+        let cases = [
+            "Incorrect API key provided: sk-proj-abcdEFGH1234ijkl. You can find your API key at https://platform.openai.com",
+            "Incorrect API key provided: sk-ant-api03-****wxyz.",
+            "upstream said Authorization: Bearer abcDEF123456ghiJKL",
+            r#"{"x-api-key": "cr_9f8e7d6c5b4a39281706"}"#,
+            "GET https://generativelanguage.googleapis.com/v1beta/models?key=AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
+            "token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U rejected",
+            "secret Zx81kQp0Lm2Nb7Vc4Xs9Ad3Fg6Hj1Kl5Qw8Er0Ty2Ui4Op rejected",
+        ];
+        for case in cases {
+            let failure = ModelFailure::fatal(Some(401), case);
+            for secret in [
+                "abcdEFGH1234ijkl",
+                "****wxyz",
+                "abcDEF123456ghiJKL",
+                "cr_9f8e7d6c5b4a39281706",
+                "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
+                "dozjgNryP4J3jVmNHl0w5N",
+                "Zx81kQp0Lm2Nb7Vc4Xs9Ad3Fg6Hj1Kl5Qw8Er0Ty2Ui4Op",
+            ] {
+                assert!(!failure.message.contains(secret), "{secret} survived in {}", failure.message);
+            }
+            assert!(failure.message.contains("[redacted]"), "{}", failure.message);
+            assert_eq!(redact_secrets(&failure.message), failure.message, "redaction is idempotent");
+        }
+    }
+
+    #[test]
+    fn redaction_leaves_the_gateways_wording_and_ids_alone() {
+        for text in [
+            "API Key 余额不足 / Insufficient balance for this API key",
+            "内容审核未通过 / Content audit rejected（hash: 3f2a9c8e7d6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a09）",
+            "request a4293c1e-0d5f-4c9e-9b1a-2f6d8e7c1b20 failed: risk-management-service unavailable",
+            "model claude-opus-5-5 is temporarily unavailable",
+        ] {
+            assert_eq!(redact_secrets(text), text);
+        }
+    }
+
+    #[test]
+    fn a_rejected_certificate_reads_as_a_network_failure() {
+        let tls = classify_transport_detail("error sending request: invalid peer certificate: UnknownIssuer", false);
+        assert_eq!(tls.class, FailureClass::Fatal);
+        assert_eq!(tls.reason, RetryReason::Network);
+        let refused = classify_transport_detail("error sending request: connection refused", false);
+        assert_eq!((refused.class, refused.reason), (FailureClass::Retryable, RetryReason::Network));
+        assert_eq!(classify_transport_detail("operation", true).reason, RetryReason::Timeout);
     }
 }

@@ -1094,6 +1094,24 @@ trajectory.fact.tool_calls:
   en: "Tool calls"
 trajectory.fact.retry:
   en: "Retry"
+trajectory.fact.failure:
+  en: "Failure"
+trajectory.fact.http_status:
+  en: "HTTP status"
+trajectory.fact.error_code:
+  en: "Error code"
+trajectory.fact.request_id:
+  en: "Request ID"
+trajectory.failure_class.retryable:
+  en: "Transient — retries ran out"
+trajectory.failure_class.context_overflow:
+  en: "Context overflow"
+trajectory.failure_class.fatal:
+  en: "Not retryable"
+trajectory.retry_discarded:
+  en: "partial reply discarded"
+trajectory.goal_resume:
+  en: "goal resumes after %{delay} (%{attempt}/%{max})"
 trajectory.fact.error:
   en: "Error"
 trajectory.fact.api_base:
@@ -2072,6 +2090,12 @@ error_banner.retry:
   en: "Retry"
 error_banner.continue:
   en: "Continue"
+error_banner.compact:
+  en: "Compact context"
+error_banner.account_settings:
+  en: "Account settings"
+error_banner.model_providers:
+  en: "Model providers"
 error_banner.continue_message:
   en: "Continue from where it stopped"
 error_banner.goal_auto_resume:
@@ -2405,6 +2429,12 @@ subagent.show_prompt:
   en: Show prompt
 subagent.hide_prompt:
   en: Hide prompt
+subagent.retried:
+  en: "%{cause} · asked again (%{attempt}/%{max})"
+subagent.retried_unbounded:
+  en: "%{cause} · asked again (attempt %{attempt})"
+subagent.empty_retried:
+  en: "Empty answer · asked again"
 background.no_work:
   en: No background work
 background.no_work_description:
@@ -2724,9 +2754,19 @@ session.context_compacted_manual:
 session.context_compacted:
   en: "Context compacted"
 session.stream_discarded:
-  en: "The connection dropped mid-reply — the unfinished reply was discarded and is being requested again (%{attempt}/%{max})"
+  en: "%{lead} — the unfinished reply was discarded and is being requested again (%{attempt}/%{max})"
 session.stream_discarded_unbounded:
-  en: "The connection dropped mid-reply — the unfinished reply was discarded and is being requested again (attempt %{attempt})"
+  en: "%{lead} — the unfinished reply was discarded and is being requested again (attempt %{attempt})"
+session.stream_discarded_lead.connection:
+  en: "The connection dropped mid-reply"
+session.stream_discarded_lead.cut_off:
+  en: "The reply ended before it was complete"
+session.stream_discarded_lead.busy:
+  en: "The service failed mid-reply"
+session.stream_discarded_lead.rate_limited:
+  en: "The service hit a rate limit mid-reply"
+session.stream_discarded_lead.other:
+  en: "The reply failed partway"
 session.context_compaction_failed:
   en: "Could not compact the context; the conversation is unchanged"
 transcript.thinking:
@@ -3926,16 +3966,28 @@ native.empty_turn:
   en: "%{model} ended the turn without saying anything. The request went to %{endpoint} over the %{provider} API. Try this model over a different API, or a different model."
 native.route_not_found:
   en: "%{model} was not found: the %{provider} API answered 404 at %{url}. Check the model ID and the endpoint's address. (%{detail})"
-native.failure.context_overflow:
-  en: "The conversation no longer fits the model's context window, even after compacting it automatically. Send /compact to compact it by hand, or start a new task. (%{detail})"
 native.failure.rate_limited:
   en: "The model's API kept answering \"too many requests\", and the retries ran out. Wait a moment and retry, or pick another model. (%{detail})"
-native.failure.network:
-  en: "Could not reach the model's API, and the retries ran out. Check your network or proxy, then retry. (%{detail})"
 native.failure.auth:
   en: "The model's API refused the key. If you use the cloud account, sign in again; for your own endpoint, check its key in Settings → Model providers. (%{detail})"
 native.failure.unavailable:
   en: "The model's service kept failing, and the retries ran out. Retry in a while, or pick another model. (%{detail})"
+native.failure.context_overflow:
+  en: "The conversation no longer fits the model's context window. Compact it (Compact context, or /compact), or start a new task. (%{detail})"
+native.failure.network:
+  en: "Could not reach the model's API, or it stopped responding, and the retries ran out. Check your network or proxy, then retry. (%{detail})"
+native.failure.content_policy:
+  en: "The model's API refused this request under its content policy. Rephrase it or leave out what it objected to, then send it again. (%{detail})"
+native.failure.quota:
+  en: "The provider says this account's quota or credit is used up. Check the plan and billing with the provider, or pick another model. (%{detail})"
+native.failure.forbidden:
+  en: "The provider refused this request for this key: the key may not have access to this model, or the account is restricted. Check the account with the provider, or pick another model. (%{detail})"
+native.failure.bad_request:
+  en: "The model's API rejected the request as invalid — usually a model that does not support this API format or one of the request's options. Pick another API format for it in the model options beside the composer, or pick another model. (%{detail})"
+native.failure.interrupted:
+  en: "The model's reply kept breaking off before it was complete, and the retries ran out. Retry, or continue from where it stopped. (%{detail})"
+native.failure.request_id:
+  en: "Request ID: %{id}"
 native.turn_crashed:
   en: "The built-in agent hit an internal error and stopped this turn. It will not remember this turn, but files it changed stay changed. Send your message again to retry. (%{detail})"
 native.endpoint_unavailable:
@@ -4427,10 +4479,30 @@ turn_status.running_tools:
   en: "Running %{count} tools…"
 turn_status.waiting_for_model:
   en: "Waiting for the model…"
-turn_status.reconnecting:
-  en: "Reconnecting (%{attempt}/%{max}, %{seconds} s)…"
-turn_status.reconnecting_unbounded:
-  en: "Reconnecting (attempt %{attempt}, %{seconds} s)…"
+turn_status.retry_cause.rate_limited:
+  en: "Rate limited"
+turn_status.retry_cause.busy:
+  en: "Service busy"
+turn_status.retry_cause.connection:
+  en: "Connection problem"
+turn_status.retry_cause.cut_off:
+  en: "Reply cut off"
+turn_status.retry_cause.empty:
+  en: "Empty answer"
+turn_status.retry_cause.other:
+  en: "Request failed"
+turn_status.retry_waiting:
+  en: "%{cause} · retrying in %{seconds} s (%{attempt}/%{max})…"
+turn_status.retry_waiting_unbounded:
+  en: "%{cause} · retrying in %{seconds} s (attempt %{attempt})…"
+turn_status.retry_sending:
+  en: "Sending again (%{attempt}/%{max})…"
+turn_status.retry_sending_unbounded:
+  en: "Sending again (attempt %{attempt})…"
+turn_status.empty_retry:
+  en: "Empty answer · asking again in %{seconds} s…"
+turn_status.empty_sending:
+  en: "Empty answer · asking again…"
 turn_status.waiting_for_you:
   en: "Waiting for you"
 home_overview.tab_overview:

@@ -14,7 +14,8 @@
 use std::collections::HashMap;
 
 use crate::record::{
-    CompactionPhase, Purpose, Record, RequestOptions, RequestStatus, RetryInfo, ToolSpec, Usage,
+    CompactionPhase, FailureInfo, Purpose, Record, RequestOptions, RequestStatus, RetryInfo, ToolSpec,
+    Usage,
 };
 
 /// What a cell is, after dsh's `TrajectoryCellKind`.
@@ -71,6 +72,8 @@ pub struct RequestView {
     pub tool_calls: u32,
     pub retries: Vec<RetryInfo>,
     pub error: Option<String>,
+    /// Fork: the failure it ended its turn with, when it gave up.
+    pub failure: Option<FailureInfo>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -143,6 +146,17 @@ pub struct TurnView {
     pub steps: u32,
     pub tool_calls: u32,
     pub usage: Usage,
+    /// Fork: the goal this turn worked on resumes on its own after it.
+    pub goal_resume: Option<GoalResumeView>,
+}
+
+/// Fork: a goal's automatic resume after a failed turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GoalResumeView {
+    pub attempt: u32,
+    pub max_attempts: Option<u32>,
+    pub delay_ms: u64,
+    pub at: i64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -240,6 +254,22 @@ pub fn build(records: &[Record]) -> Snapshot {
                 from, through_turn, ..
             } => snapshot.branched = Some((from.clone(), *through_turn)),
             Record::Dropped { segments, .. } => snapshot.dropped += segments,
+            Record::GoalResume {
+                turn,
+                attempt,
+                max_attempts,
+                delay_ms,
+                at,
+            } => {
+                if let Some(view) = snapshot.turns.iter_mut().rev().find(|view| view.turn == *turn) {
+                    view.goal_resume = Some(GoalResumeView {
+                        attempt: *attempt,
+                        max_attempts: *max_attempts,
+                        delay_ms: *delay_ms,
+                        at: *at,
+                    });
+                }
+            }
             Record::Rewind { keep_turns, .. } => {
                 for turn in &mut snapshot.turns {
                     if turn.turn > *keep_turns {
@@ -281,6 +311,7 @@ pub fn build(records: &[Record]) -> Snapshot {
                     steps: 0,
                     tool_calls: 0,
                     usage: Usage::default(),
+                    goal_resume: None,
                 });
                 current_turn = Some(snapshot.turns.len() - 1);
                 let change = match &previous_prompt {
@@ -353,6 +384,7 @@ pub fn build(records: &[Record]) -> Snapshot {
                 tool_calls,
                 retries,
                 error,
+                failure,
             } => {
                 snapshot.requests += 1;
                 if let Some(usage) = usage {
@@ -391,6 +423,7 @@ pub fn build(records: &[Record]) -> Snapshot {
                     tool_calls: *tool_calls,
                     retries: retries.clone(),
                     error: error.clone(),
+                    failure: failure.clone(),
                 };
                 let text = if !text_preview.trim().is_empty() {
                     one_line(text_preview, 160)
@@ -610,6 +643,7 @@ pub(crate) mod tests {
             tool_calls: 1,
             retries: Vec::new(),
             error: None,
+            failure: None,
         }
     }
 
@@ -745,5 +779,34 @@ pub(crate) mod tests {
         assert_eq!(cell.duration_ms, Some(50));
         assert!(!cell.running);
         assert!(matches!(cell.detail, CellDetail::Compaction { tokens_after: Some(100), .. }));
+    }
+
+    #[test]
+    fn a_goal_resume_is_kept_on_the_turn_it_follows() {
+        let mut records = vec![turn_start(1, 0, "s1", "t1")];
+        records.push(Record::TurnEnd {
+            turn: 1,
+            success: false,
+            summary: Some("HTTP 529: Overloaded".into()),
+            session_usage: Usage::default(),
+            at: 100,
+        });
+        records.push(Record::GoalResume {
+            turn: 1,
+            attempt: 2,
+            max_attempts: Some(5),
+            delay_ms: 60_000,
+            at: 101,
+        });
+        let snapshot = build(&records);
+        assert_eq!(
+            snapshot.turns[0].goal_resume,
+            Some(GoalResumeView {
+                attempt: 2,
+                max_attempts: Some(5),
+                delay_ms: 60_000,
+                at: 101,
+            })
+        );
     }
 }

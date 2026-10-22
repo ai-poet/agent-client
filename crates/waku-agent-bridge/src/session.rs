@@ -1153,7 +1153,7 @@ async fn run_turn(
     // Both forwarders end when their senders go: the loop dropped its event
     // sender on return, and the question sender lives in `tool_ctx`.
     drop(tool_ctx);
-    let _ = forwarder.await;
+    let request_failure = forwarder.await.ok().flatten();
     let _ = questions.await;
     // A stop answered every sub-agent the abandoned batch was waiting on
     // "cancelled", finished ones included; give back what each one did.
@@ -1194,19 +1194,27 @@ async fn run_turn(
     let ended_empty = !produced_output && matches!(outcome, QueryOutcome::EndTurn { .. });
     let cancelled = matches!(outcome, QueryOutcome::Cancelled);
     // Fork: whether a later attempt could get past this failure, for the
-    // goal's automatic resume.
+    // goal's automatic resume — from the failure the loop reported when it
+    // did, rather than from the flattened error's text.
     let transient_failure = matches!(
         &outcome,
-        QueryOutcome::Error(error)
-            if claurst_api::retry_policy::classify_claude_error(error)
-                == claurst_api::retry_policy::FailureClass::Retryable
+        QueryOutcome::Error(error) if crate::failure::is_transient(request_failure.as_ref(), error)
     );
     let not_found = match &outcome {
-        QueryOutcome::Error(error) if is_not_found(error) => Some(error.to_string()),
+        QueryOutcome::Error(error)
+            if request_failure.as_ref().is_some_and(|failure| failure.status == Some(404))
+                || is_not_found(error) =>
+        {
+            Some(error.to_string())
+        }
         _ => None,
     };
-    let failure = match &outcome {
-        QueryOutcome::Error(error) if not_found.is_none() => failure_kind(error),
+    let failed_request = matches!(outcome, QueryOutcome::Error(_)) && not_found.is_none();
+    let failure_kind = match &outcome {
+        QueryOutcome::Error(error) if failed_request => match &request_failure {
+            Some(failure) => crate::failure::kind_of(failure),
+            None => crate::failure::kind_of_error(error),
+        },
         _ => None,
     };
     let (success, summary) = describe(outcome, produced_output, &route);
@@ -1231,10 +1239,11 @@ async fn run_turn(
                 url: route.url.clone(),
                 detail,
             });
-        } else if let Some(kind) = failure {
+        } else if failed_request {
             inner.events.emit(AgentEvent::TurnFailed {
-                kind,
-                detail: reason,
+                kind: failure_kind,
+                detail: crate::failure::shown_detail(failure_kind, request_failure.as_ref(), &reason),
+                request_id: request_failure.and_then(|failure| failure.request_id),
             });
         } else {
             inner.events.emit(AgentEvent::Error(reason));
@@ -1468,11 +1477,18 @@ async fn forward_events(
     // What the conversation weighed before the turn, for marking a summary a
     // compaction wrote mid-turn, as `run_turn` does at its end.
     weight_before: usize,
-) {
+) -> Option<claurst_api::retry_policy::ModelFailure> {
     let mut decoder = StreamDecoder::new(context_window);
+    // Fork: the failure the loop ended the turn with, which names it
+    // (`crate::failure`). `run_turn` awaits this task before reading the
+    // outcome, so the last one sent is here by then.
+    let mut request_failure = None;
     while let Some(event) = rx.recv().await {
         // Fork: every event is timed into the trajectory (`crate::trajectory`).
         inner.trajectory.observe(&event);
+        if let QueryEvent::RequestFailed(failure) = &event {
+            request_failure = Some(failure.clone());
+        }
         // Fork: the conversation at a step boundary. Written to the session's
         // store as the turn's end writes it, so a crash or a killed daemon
         // loses the step in flight, not the turn — and the calls of that step
@@ -1564,6 +1580,7 @@ async fn forward_events(
             }
         }
     }
+    request_failure
 }
 
 /// What a turn was pointed at, for the messages a failed turn has to write.
@@ -1592,55 +1609,13 @@ impl Route {
     }
 }
 
-/// Whether a turn failed because the server answered 404.
-///
-/// The engine says it two ways: the Messages client keeps the status
-/// (`ApiStatus { status: 404 }`), while the Responses and Chat adapters turn
-/// every 404 into `Model not found: unknown` and drop the rest. Either way
-/// the usual cause is a wrong address or a model id the endpoint does not
-/// serve, and neither message said which address was asked.
-/// Fork: the remedy-bearing kind of a failure that ended a turn, or `None` to
-/// show it as it came.
-///
-/// The gateway's own verdicts come first and keep their text: a balance, a
-/// spent plan or a disabled key is something the paywall classifier and the
-/// gateway's bilingual message already say better.
-fn failure_kind(error: &ClaudeError) -> Option<crate::events::FailureKind> {
-    use crate::events::FailureKind;
-    use claurst_api::retry_policy::{FailureClass, classify_claude_error};
-
-    let text = error.to_string();
-    if crate::retry_rules::gateway_failure_class(None, &text).is_some() {
-        return None;
-    }
-    let lower = text.to_ascii_lowercase();
-    match error {
-        ClaudeError::ContextWindowExceeded => return Some(FailureKind::ContextOverflow),
-        ClaudeError::RateLimit => return Some(FailureKind::RateLimited),
-        ClaudeError::Auth(_) => return Some(FailureKind::Auth),
-        ClaudeError::Http(_) => return Some(FailureKind::Network),
-        ClaudeError::ApiStatus { status: 401, .. } => return Some(FailureKind::Auth),
-        ClaudeError::ApiStatus { status: 429, .. } => return Some(FailureKind::RateLimited),
-        ClaudeError::ApiStatus { status: 500..=599, .. } => return Some(FailureKind::Unavailable),
-        _ => {}
-    }
-    match classify_claude_error(error) {
-        FailureClass::ContextOverflow => Some(FailureKind::ContextOverflow),
-        FailureClass::Retryable if lower.contains("rate limit") => Some(FailureKind::RateLimited),
-        FailureClass::Retryable if lower.contains("overloaded") || lower.contains("http 5") => {
-            Some(FailureKind::Unavailable)
-        }
-        FailureClass::Retryable
-            if ["network", "timed out", "connection"]
-                .iter()
-                .any(|word| lower.contains(word)) =>
-        {
-            Some(FailureKind::Network)
-        }
-        _ => None,
-    }
-}
-
+/// Whether a turn failed because the server answered 404, read from the
+/// error alone. Every route keeps the status now (`retry_policy::classify_http`
+/// and `ApiStatus`), and `run_turn` checks the reported failure's status
+/// first; the "Model not found" text is left for `ProviderError::ModelNotFound`
+/// raised outside the retry policy. The usual cause is a wrong address or a
+/// model id the endpoint does not serve, and neither message said which
+/// address was asked.
 fn is_not_found(error: &ClaudeError) -> bool {
     match error {
         ClaudeError::ApiStatus { status, .. } => *status == 404,
@@ -1697,7 +1672,11 @@ fn describe(
                 route.model, route.provider, route.url
             )),
         ),
-        QueryOutcome::Error(error) => (false, Some(error.to_string())),
+        // Fork: a provider may echo the key it refused.
+        QueryOutcome::Error(error) => (
+            false,
+            Some(claurst_api::retry_policy::redact_secrets(&error.to_string())),
+        ),
     }
 }
 
@@ -1784,28 +1763,6 @@ mod tests {
         assert_eq!(route.provider, "openai");
         assert_eq!(route.api_base, "https://open.bigmodel.cn/api/paas/v4");
         assert_eq!(route.url, "https://open.bigmodel.cn/api/paas/v4/chat/completions");
-    }
-
-    /// Fork: failures with a remedy are named for the desktop to word; the
-    /// gateway's own verdicts keep their text, which the paywall reads.
-    #[test]
-    fn failures_with_a_remedy_are_named_and_gateway_verdicts_are_not() {
-        use crate::events::FailureKind;
-        let status = |status: u16, message: &str| ClaudeError::ApiStatus {
-            status,
-            message: message.to_string(),
-        };
-        assert_eq!(failure_kind(&ClaudeError::RateLimit), Some(FailureKind::RateLimited));
-        assert_eq!(
-            failure_kind(&ClaudeError::ContextWindowExceeded),
-            Some(FailureKind::ContextOverflow)
-        );
-        assert_eq!(failure_kind(&status(401, "unauthorized")), Some(FailureKind::Auth));
-        assert_eq!(failure_kind(&status(429, "slow down")), Some(FailureKind::RateLimited));
-        assert_eq!(failure_kind(&status(503, "overloaded")), Some(FailureKind::Unavailable));
-        assert_eq!(failure_kind(&status(403, "Insufficient account balance")), None);
-        assert_eq!(failure_kind(&status(429, "daily usage limit exceeded")), None);
-        assert_eq!(failure_kind(&status(400, "bad request")), None);
     }
 
     #[test]

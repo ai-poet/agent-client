@@ -53,6 +53,9 @@ pub(crate) struct Progress {
     steps: Vec<Step>,
     /// Text since its last tool call.
     current_text: String,
+    /// Fork: how much of `current_text` its finished requests wrote; a
+    /// retry that threw its answer away cuts back to this.
+    settled_len: usize,
     /// The last stretch of text that had any.
     last_text: String,
 }
@@ -65,9 +68,23 @@ impl Progress {
                 // Only the tail is ever shown; a long report must not grow
                 // this without bound.
                 if self.current_text.len() > LAST_TEXT_CHARS * 8 {
+                    let before = self.current_text.len();
                     self.current_text = tail(&self.current_text, LAST_TEXT_CHARS * 2);
+                    self.settled_len = self.settled_len.saturating_sub(before - self.current_text.len());
                 }
             }
+            SubagentEvent::Settled => self.settled_len = self.current_text.len(),
+            SubagentEvent::Retry {
+                discarded_output: true,
+                ..
+            } => {
+                let mut keep = self.settled_len.min(self.current_text.len());
+                while !self.current_text.is_char_boundary(keep) {
+                    keep -= 1;
+                }
+                self.current_text.truncate(keep);
+            }
+            SubagentEvent::Retry { .. } => {}
             SubagentEvent::ToolStarted { id, name, input } => {
                 self.close_text();
                 self.steps.push(Step {
@@ -97,6 +114,7 @@ impl Progress {
     }
 
     fn close_text(&mut self) {
+        self.settled_len = 0;
         let text = std::mem::take(&mut self.current_text);
         if !text.trim().is_empty() {
             self.last_text = text;
@@ -421,5 +439,30 @@ mod tests {
             describe_input(&json!({ "command": long })).chars().count(),
             "command=".len() + STEP_INPUT_CHARS + 1
         );
+    }
+
+    #[test]
+    fn a_discarded_reply_is_left_out_of_the_digest() {
+        let retry = |discarded_output| SubagentEvent::Retry {
+            attempt: 1,
+            max_attempts: Some(10),
+            reason: "stream_interrupted".into(),
+            discarded_output,
+        };
+        let mut progress = Progress::default();
+        progress.record(&SubagentEvent::Text("Settled part. ".into()));
+        progress.record(&SubagentEvent::Settled);
+        progress.record(&SubagentEvent::Text("Half an ans".into()));
+        progress.record(&retry(true));
+        assert_eq!(progress.latest_text(), "Settled part. ");
+        // A retry with nothing thrown away keeps what streamed.
+        progress.record(&SubagentEvent::Text("The whole answer.".into()));
+        progress.record(&retry(false));
+        assert_eq!(progress.latest_text(), "Settled part. The whole answer.");
+        // A tool call starts a new stretch; nothing is settled in it yet.
+        progress.record(&started("1", "Read", json!({"file_path": "a"})));
+        progress.record(&SubagentEvent::Text("Next".into()));
+        progress.record(&retry(true));
+        assert_eq!(progress.latest_text(), "Settled part. The whole answer.");
     }
 }

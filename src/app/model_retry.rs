@@ -13,6 +13,7 @@
 //! messages and the notices in between stay.
 
 use super::*;
+use crate::model::RetryCause;
 
 /// What "Continue" sends. English for the model, whatever the interface
 /// language; the transcript shows `error_banner.continue_message` instead.
@@ -162,6 +163,8 @@ pub(super) struct RetryStatus {
     attempt: u32,
     max_attempts: Option<u32>,
     resume_at: Instant,
+    /// Why it is being retried, read once from the engine's reason.
+    cause: RetryCause,
     pub(super) between_turns: bool,
 }
 
@@ -178,21 +181,36 @@ impl RetryStatus {
         self.resume_at > Instant::now()
     }
 
-    /// "Reconnecting (2/10, 8 s)…" for the working row.
+    /// "Rate limited · retrying in 8 s (2/10)…" for the working row while
+    /// the wait runs, then "Sending again (2/10)…" while the request is out
+    /// — not a countdown stuck at 0 s. An empty answer is asked again once,
+    /// so it carries no count. The row redraws on the pulse clock already
+    /// running for its dots; the switch costs no timer of its own.
     pub(super) fn working_label(&self) -> String {
-        let seconds = self.seconds_left();
-        match self.max_attempts {
-            Some(max) => tr!(
-                "turn_status.reconnecting",
+        let waiting = self.pending();
+        if self.cause == RetryCause::Empty {
+            return if waiting {
+                tr!("turn_status.empty_retry", seconds = self.seconds_left())
+            } else {
+                tr!("turn_status.empty_sending")
+            };
+        }
+        match (waiting, self.max_attempts) {
+            (true, Some(max)) => tr!(
+                "turn_status.retry_waiting",
+                cause = self.cause.label(),
+                seconds = self.seconds_left(),
                 attempt = self.attempt,
-                max = max,
-                seconds = seconds
+                max = max
             ),
-            None => tr!(
-                "turn_status.reconnecting_unbounded",
-                attempt = self.attempt,
-                seconds = seconds
+            (true, None) => tr!(
+                "turn_status.retry_waiting_unbounded",
+                cause = self.cause.label(),
+                seconds = self.seconds_left(),
+                attempt = self.attempt
             ),
+            (false, Some(max)) => tr!("turn_status.retry_sending", attempt = self.attempt, max = max),
+            (false, None) => tr!("turn_status.retry_sending_unbounded", attempt = self.attempt),
         }
     }
 
@@ -216,6 +234,7 @@ impl Waku {
         runtime: &mut SessionRuntime,
         retry: crate::model::ModelRetry,
     ) {
+        let cause = RetryCause::from_reason(&retry.reason);
         if retry.discarded_output && self.accepts_turn_output(session_id) {
             let previous_kinds = self.snapshot_selected_transcript_rows(session_id);
             let boundary = runtime.output_boundary.clone();
@@ -228,10 +247,15 @@ impl Waku {
                     match retry.max_attempts {
                         Some(max) => tr!(
                             "session.stream_discarded",
+                            lead = cause.discarded_lead(),
                             attempt = retry.attempt,
                             max = max
                         ),
-                        None => tr!("session.stream_discarded_unbounded", attempt = retry.attempt),
+                        None => tr!(
+                            "session.stream_discarded_unbounded",
+                            lead = cause.discarded_lead(),
+                            attempt = retry.attempt
+                        ),
                     },
                 );
                 session.updated_at = unix_time();
@@ -246,6 +270,7 @@ impl Waku {
             attempt: retry.attempt,
             max_attempts: retry.max_attempts,
             resume_at: Instant::now() + Duration::from_millis(retry.delay_ms),
+            cause,
             between_turns: retry.between_turns,
         });
         self.note_output_boundary(session_id, runtime);
@@ -277,6 +302,46 @@ impl Waku {
         );
     }
 
+    /// A turn that failed because the conversation no longer fits: compact
+    /// it (the built-in agent's own `/compact`), and when the turn had got
+    /// work done, queue "Continue" behind it — the queue drains only after
+    /// the compaction succeeds. Held for a route lookup, it only compacts.
+    pub(super) fn compact_failed_turn(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let did_work = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| Some((session, session.turns.last()?.id)))
+            .is_some_and(|(session, turn_id)| turn_did_work(session, turn_id));
+        self.submit_submission_for_session(
+            session_id,
+            ComposerSubmission {
+                prompt: "/compact".to_owned(),
+                display_content: None,
+                attachments: Vec::new(),
+            },
+            cx,
+        );
+        let compacting = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(AgentSession::is_busy);
+        if did_work && compacting {
+            self.enqueue_follow_up_submission(
+                session_id,
+                ComposerSubmission {
+                    prompt: CONTINUE_PROMPT.to_owned(),
+                    display_content: Some(tr!("error_banner.continue_message")),
+                    attachments: Vec::new(),
+                },
+                cx,
+            );
+        }
+    }
+
     /// The goal's automatic resume waiting after a failed turn, for the
     /// error banner — while its goal is still being pursued.
     pub(super) fn pending_goal_resume(&self, session: &AgentSession) -> Option<String> {
@@ -292,6 +357,44 @@ impl Waku {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn retry(cause: RetryCause, max_attempts: Option<u32>, wait: Duration) -> RetryStatus {
+        RetryStatus {
+            attempt: 2,
+            max_attempts,
+            resume_at: Instant::now() + wait,
+            cause,
+            between_turns: false,
+        }
+    }
+
+    #[test]
+    fn a_retry_reads_as_sending_once_its_wait_is_over() {
+        let waiting = retry(RetryCause::RateLimited, Some(10), Duration::from_secs(30));
+        assert_eq!(
+            waiting.working_label(),
+            tr!(
+                "turn_status.retry_waiting",
+                cause = RetryCause::RateLimited.label(),
+                seconds = 30,
+                attempt = 2,
+                max = 10
+            )
+        );
+        let sent = retry(RetryCause::RateLimited, Some(10), Duration::ZERO);
+        assert_eq!(sent.working_label(), tr!("turn_status.retry_sending", attempt = 2, max = 10));
+        let unbounded = retry(RetryCause::Busy, None, Duration::ZERO);
+        assert_eq!(unbounded.working_label(), tr!("turn_status.retry_sending_unbounded", attempt = 2));
+    }
+
+    #[test]
+    fn an_empty_answer_is_asked_again_without_a_count() {
+        let waiting = retry(RetryCause::Empty, Some(1), Duration::from_secs(2));
+        assert_eq!(waiting.working_label(), tr!("turn_status.empty_retry", seconds = 2));
+        let sent = retry(RetryCause::Empty, Some(1), Duration::ZERO);
+        assert_eq!(sent.working_label(), tr!("turn_status.empty_sending"));
+        assert!(!sent.working_label().contains("1/1"));
+    }
 
     fn session_with_turn() -> (AgentSession, Uuid) {
         let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Native);

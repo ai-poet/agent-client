@@ -45,13 +45,14 @@ pub mod settings;
 pub mod skills;
 pub mod theme;
 pub mod todo;
+pub mod turn_failure;
 pub mod usage;
 pub mod usage_history;
 pub mod workspace;
 
 mod protocol;
 
-pub use driver_wire::{decode_enum, encode_enum, event_from_wire, event_to_wire};
+pub use driver_wire::{UnsupportedDriverEvent, decode_enum, encode_enum, event_from_wire, event_to_wire};
 pub use protocol::{
     APP_EXECUTABLE_ENV, ClientMessage, Command, DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonReady,
     MAX_WIRE_MESSAGE_BYTES, PROTOCOL_VERSION, ReplayCursor, Request, ResponseOutcome,

@@ -106,6 +106,20 @@ pub enum ProviderError {
 // ---------------------------------------------------------------------------
 
 impl ProviderError {
+    /// Fork (Waku): stamp the response's request id onto a classified
+    /// failure that came out of its stream, so the turn that gives up on it
+    /// can name the request support would look up. Other variants carry no
+    /// failure to stamp and are returned as they are.
+    pub fn with_request_id(self, id: Option<&str>) -> Self {
+        match self {
+            ProviderError::Classified { provider, failure } => ProviderError::Classified {
+                provider,
+                failure: failure.with_request_id(id.map(str::to_string)),
+            },
+            other => other,
+        }
+    }
+
     /// Returns `true` if the caller should retry the request after a delay.
     pub fn is_retryable(&self) -> bool {
         match self {

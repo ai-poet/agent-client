@@ -935,6 +935,9 @@ struct SessionRuntime {
     output_boundary: Option<model_retry::OutputBoundary>,
     /// Fork: the retry the built-in agent is waiting on.
     model_retry: Option<model_retry::RetryStatus>,
+    /// Fork: what kind of failure the next error is, when the built-in agent
+    /// named it — the error banner picks its actions by it.
+    turn_failure: Option<crate::model::TurnFailure>,
 }
 
 #[derive(Clone)]

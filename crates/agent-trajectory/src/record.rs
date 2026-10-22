@@ -93,6 +93,34 @@ pub struct RetryInfo {
     pub delay_ms: u64,
     #[serde(default)]
     pub error: String,
+    /// Fork: why it was retried (`claurst_api::retry_policy::RetryReason::as_str`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+    /// Fork: what had streamed of the failed answer was thrown away.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub discarded_output: bool,
+    /// Fork: the failed attempt's request id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+/// Fork: the failure a request ended its turn with, as the engine
+/// classified it. Strings, since this crate does not depend on the engine.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct FailureInfo {
+    /// `retryable` (and the retries ran out), `context_overflow` or `fatal`.
+    #[serde(default)]
+    pub class: String,
+    /// Why, for a retryable one.
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    /// The provider's own type or code for the error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
 }
 
 /// Where a compaction is.
@@ -168,6 +196,9 @@ pub enum Record {
         retries: Vec<RetryInfo>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        /// Fork: the failure it ended with, when it gave up.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failure: Option<FailureInfo>,
     },
     ToolStart {
         turn: u32,
@@ -212,6 +243,16 @@ pub enum Record {
     Branched { from: String, through_turn: u32, at: i64 },
     /// Older segments were deleted to stay within the size cap.
     Dropped { segments: u32, at: i64 },
+    /// Fork: turn `turn` failed and the goal it worked on resumes on its
+    /// own after `delay_ms`.
+    GoalResume {
+        turn: u32,
+        attempt: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_attempts: Option<u32>,
+        delay_ms: u64,
+        at: i64,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -257,6 +298,21 @@ mod tests {
         assert_eq!(serde_json::from_str::<Record>(&line).unwrap(), record);
         let future: Record = serde_json::from_str(r#"{"type":"something_new","x":1}"#).unwrap();
         assert_eq!(future, Record::Unknown);
+    }
+
+    #[test]
+    fn records_written_before_failures_were_recorded_still_read() {
+        let line = r#"{"type":"request","turn":1,"step":1,"started_at":0,"ended_at":5,"status":"error","retries":[{"attempt":1,"max_attempts":10,"delay_ms":2000,"error":"HTTP 529: Overloaded"}],"error":"boom"}"#;
+        let Record::Request { retries, failure, .. } = serde_json::from_str::<Record>(line).unwrap() else {
+            panic!("a request record");
+        };
+        assert_eq!(failure, None);
+        assert_eq!(retries[0].reason, "");
+        assert!(!retries[0].discarded_output);
+        assert_eq!(retries[0].request_id, None);
+        // And the new fields stay out of a record that has none.
+        let written = serde_json::to_string(&retries[0]).unwrap();
+        assert!(!written.contains("reason") && !written.contains("discarded") && !written.contains("request_id"));
     }
 
     #[test]

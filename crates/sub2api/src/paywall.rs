@@ -14,9 +14,10 @@
 //! * Claude Code — `API Error: 403 {raw body}`: the code survives.
 //! * Codex — `unexpected status 403 …: {body}`: the code survives, except that
 //!   a 429 is retried away into `exceeded retry limit, last status: 429`.
-//! * the built-in agent, Anthropic route — `API error 403: {body}`.
-//! * the built-in agent, OpenAI route — `Authentication failed: Insufficient
-//!   account balance`, or a bare `Rate limited` for a 429.
+//! * the built-in agent, every route — `API error 403: {the gateway's
+//!   message}`, the status and the gateway's own words both kept; a failure
+//!   it named reads as the remedy with that text in parentheses, then a
+//!   `Request ID` line.
 //!
 //! So the text is read first and the account's own state fills the gaps the
 //! drivers leave. An upstream account's billing trouble (`Upstream payment
@@ -72,16 +73,26 @@ pub fn classify(message: &str, state: &PaywallState) -> Option<Paywall> {
     }
 
     // The drivers that lost the code: judge by the account.
-    if state.exhausted_subscription && (text.contains("429") || text.contains("rate limit")) {
+    if state.exhausted_subscription && (mentions_status(&text, "429") || text.contains("rate limit")) {
         return Some(Paywall::PlanLimit);
     }
     if !state.has_active_subscription
         && state.balance.is_some_and(|balance| balance <= 0.0)
-        && (text.contains("403") || text.contains("forbidden") || text.contains("authentication failed"))
+        && (mentions_status(&text, "403") || text.contains("forbidden") || text.contains("authentication failed"))
     {
         return Some(Paywall::Balance);
     }
     None
+}
+
+/// Whether `text` names the status `code` as a number of its own — not as
+/// digits inside a request id such as `a4293c1e-…`.
+fn mentions_status(text: &str, code: &str) -> bool {
+    text.match_indices(code).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + code.len()..].chars().next();
+        !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
+    })
 }
 
 #[cfg(test)]
@@ -169,5 +180,25 @@ mod tests {
             classify("403 Forbidden", &PaywallState::default()),
             None
         );
+    }
+
+    #[test]
+    fn status_codes_are_read_as_whole_numbers() {
+        let broke = PaywallState {
+            balance: Some(0.0),
+            has_active_subscription: false,
+            exhausted_subscription: true,
+        };
+        assert_eq!(
+            classify("The model's API kept failing.\nRequest ID: a4293c1e-0d5f-4c9e-4031-2f6d8e7c1b20", &broke),
+            None
+        );
+        assert_eq!(classify("API error 429: slow down", &broke), Some(Paywall::PlanLimit));
+        let unpaid = PaywallState {
+            exhausted_subscription: false,
+            ..broke
+        };
+        assert_eq!(classify("unexpected status 403 Forbidden", &unpaid), Some(Paywall::Balance));
+        assert_eq!(classify("request x403y failed", &unpaid), None);
     }
 }

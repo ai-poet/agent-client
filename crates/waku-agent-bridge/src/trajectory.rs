@@ -25,8 +25,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use agent_trajectory::record::{
-    CompactionPhase, Purpose, Record, RequestOptions, RequestStatus, RetryInfo, ToolSpec, Usage,
-    fingerprint, preview,
+    CompactionPhase, FailureInfo, Purpose, Record, RequestOptions, RequestStatus, RetryInfo, ToolSpec,
+    Usage, fingerprint, preview,
 };
 use agent_trajectory::writer::Writer;
 use claurst_core::types::{ContentBlock, Message, MessageContent, UsageInfo};
@@ -115,6 +115,7 @@ struct Pending {
     tool_calls: u32,
     retries: Vec<RetryInfo>,
     error: Option<String>,
+    failure: Option<FailureInfo>,
 }
 
 #[derive(Default)]
@@ -335,6 +336,23 @@ impl Recorder {
         }
     }
 
+    /// Fork: the turn just ended failed, and its goal resumes on its own
+    /// after `delay_ms` (`session_goal_resume`).
+    pub fn goal_resume(&self, attempt: u32, max_attempts: Option<u32>, delay_ms: u64) {
+        if self.tx.is_none() {
+            return;
+        }
+        let turn = self.state.lock().turn;
+        let at = (self.clock)();
+        self.record(Record::GoalResume {
+            turn,
+            attempt,
+            max_attempts,
+            delay_ms,
+            at,
+        });
+    }
+
     /// The conversation was rewound to its first `keep_turns` turns.
     pub fn rewind(&self, keep_turns: u32) {
         let at = (self.clock)();
@@ -399,6 +417,9 @@ fn observe_stream(
                 max_attempts: notice.max_attempts,
                 delay_ms: notice.delay_ms,
                 error: notice.detail.clone(),
+                reason: notice.reason.as_str().to_owned(),
+                discarded_output: notice.discarded_output,
+                request_id: notice.request_id.clone(),
             });
             if notice.discarded_output {
                 pending.text.clear();
@@ -408,6 +429,20 @@ fn observe_stream(
                 pending.tool_calls = 0;
             }
             pending.first_token_at = None;
+        }
+        // Fork: the failure the turn is about to end with. The request it
+        // ended is closed by the turn's end; a request refused before it
+        // streamed anything gets its record here too.
+        QueryEvent::RequestFailed(failure) => {
+            let pending = open(stream, now);
+            pending.error = Some(failure.to_string());
+            pending.failure = Some(FailureInfo {
+                class: failure.class.as_str().to_owned(),
+                reason: failure.reason.as_str().to_owned(),
+                status: failure.status,
+                code: failure.code.clone(),
+                request_id: failure.request_id.clone(),
+            });
         }
         QueryEvent::TurnComplete { stop_reason, usage, .. } => {
             if let Some(record) = finish(
@@ -537,6 +572,7 @@ fn finish(
         tool_calls: pending.tool_calls,
         retries: pending.retries,
         error: pending.error,
+        failure: pending.failure,
     })
 }
 
@@ -789,6 +825,7 @@ mod tests {
             reason: claurst_api::retry_policy::RetryReason::Overloaded,
             discarded_output: false,
             detail: "overloaded".into(),
+            request_id: None,
         }));
         clock.store(3_600, Ordering::SeqCst);
         recorder.observe(&start());
@@ -809,6 +846,78 @@ mod tests {
             .unwrap();
         assert_eq!(second, (1_400, Some(3_600), 1));
         assert!(matches!(all.last(), Some(Record::TurnEnd { success: true, .. })));
+    }
+
+    #[test]
+    fn a_retry_records_its_reason_and_discarded_output() {
+        let (recorder, rx, _) = recorder();
+        recorder.begin_turn_with(1, "go", 0, "anthropic", "", "messages", &QueryConfig::default(), &[]);
+        recorder.observe(&start());
+        recorder.observe(&text("half an ans"));
+        recorder.observe(&QueryEvent::Retry(claurst_query::RetryNotice {
+            attempt: 1,
+            max_attempts: Some(10),
+            delay_ms: 2_000,
+            reason: claurst_api::retry_policy::RetryReason::StreamInterrupted,
+            discarded_output: true,
+            detail: "connection reset".into(),
+            request_id: Some("req_1".into()),
+        }));
+        recorder.observe(&start());
+        recorder.observe(&text("whole"));
+        recorder.observe(&complete(1));
+        recorder.end_turn(true, None, Usage::default());
+        let retry = records(&rx)
+            .into_iter()
+            .find_map(|record| match record {
+                Record::Request { retries, text_preview, .. } => Some((retries, text_preview)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(retry.1, "whole");
+        assert_eq!(retry.0[0].reason, "stream_interrupted");
+        assert!(retry.0[0].discarded_output);
+        assert_eq!(retry.0[0].request_id.as_deref(), Some("req_1"));
+    }
+
+    #[test]
+    fn a_failed_request_keeps_its_failure_and_request_id() {
+        let (recorder, rx, _) = recorder();
+        recorder.begin_turn_with(1, "go", 0, "anthropic", "", "messages", &QueryConfig::default(), &[]);
+        // Refused before anything streamed: the failure alone opens it.
+        recorder.observe(&QueryEvent::RequestFailed(claurst_api::retry_policy::ModelFailure {
+            code: Some("permission_error".into()),
+            request_id: Some("req_refused".into()),
+            ..claurst_api::retry_policy::ModelFailure::fatal(Some(403), "no access to this model")
+        }));
+        recorder.end_turn(false, Some("HTTP 403".into()), Usage::default());
+        let (status, error, failure) = records(&rx)
+            .into_iter()
+            .find_map(|record| match record {
+                Record::Request { status, error, failure, .. } => Some((status, error, failure)),
+                _ => None,
+            })
+            .expect("the refused request has a record");
+        assert_eq!(status, RequestStatus::Error);
+        assert_eq!(error.as_deref(), Some("HTTP 403: no access to this model"));
+        let failure = failure.unwrap();
+        assert_eq!(failure.class, "fatal");
+        assert_eq!(failure.status, Some(403));
+        assert_eq!(failure.code.as_deref(), Some("permission_error"));
+        assert_eq!(failure.request_id.as_deref(), Some("req_refused"));
+    }
+
+    #[test]
+    fn a_goal_resume_is_recorded_after_its_turn() {
+        let (recorder, rx, _) = recorder();
+        recorder.begin_turn_with(3, "go", 0, "anthropic", "", "messages", &QueryConfig::default(), &[]);
+        recorder.end_turn(false, Some("Overloaded".into()), Usage::default());
+        recorder.goal_resume(1, Some(5), 30_000);
+        let all = records(&rx);
+        assert!(matches!(
+            all.last(),
+            Some(Record::GoalResume { turn: 3, attempt: 1, max_attempts: Some(5), delay_ms: 30_000, .. })
+        ), "{all:?}");
     }
 
     #[test]

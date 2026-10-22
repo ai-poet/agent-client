@@ -805,6 +805,8 @@ impl LlmProvider for OpenAiProvider {
         }
         let resp = self.do_streaming(&request).await?;
         let provider_id = self.id.clone();
+        // Fork (Waku): a failure inside the stream still names its request.
+        let request_id = crate::retry_policy::request_id_of(resp.headers());
 
         // We need the message ID to emit MessageStart.  We'll generate one on
         // the first chunk that carries it.
@@ -1124,7 +1126,9 @@ impl LlmProvider for OpenAiProvider {
             }
         };
 
-        Ok(Box::pin(s))
+        Ok(Box::pin(futures::StreamExt::map(s, move |item| {
+            item.map_err(|error| error.with_request_id(request_id.as_deref()))
+        })))
     }
 
     async fn health_check(&self) -> Result<ProviderStatus, ProviderError> {

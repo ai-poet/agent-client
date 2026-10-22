@@ -44,8 +44,8 @@ use crate::model::{
     ActivityKind, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey,
     BackgroundWorkKind, BackgroundWorkStatus, CompactionPhase, DriverEvent, InteractionMode,
     Message, MessageRole, PermissionOption, ProviderResumeCursor, ProviderSessionHistory,
-    RuntimeMode, SubagentCall, TurnStatus, UserInputAnswer, UserInputOption, UserInputQuestion,
-    unix_time_millis,
+    RetryCause, RuntimeMode, SubagentCall, TurnFailure, TurnFailureKind, TurnStatus,
+    UserInputAnswer, UserInputOption, UserInputQuestion, unix_time_millis,
 };
 
 pub struct NativeDriver {
@@ -718,7 +718,73 @@ fn failure_message(kind: waku_agent_bridge::FailureKind, detail: &str) -> String
         Kind::Network => tr!("native.failure.network", detail = detail),
         Kind::Auth => tr!("native.failure.auth", detail = detail),
         Kind::Unavailable => tr!("native.failure.unavailable", detail = detail),
+        Kind::ContentPolicy => tr!("native.failure.content_policy", detail = detail),
+        Kind::Quota => tr!("native.failure.quota", detail = detail),
+        Kind::Forbidden => tr!("native.failure.forbidden", detail = detail),
+        Kind::BadRequest => tr!("native.failure.bad_request", detail = detail),
+        Kind::Interrupted => tr!("native.failure.interrupted", detail = detail),
     }
+}
+
+/// Fork: the kind the desktop's error banner picks its actions by.
+fn turn_failure_kind(kind: waku_agent_bridge::FailureKind) -> TurnFailureKind {
+    use waku_agent_bridge::FailureKind as Kind;
+    match kind {
+        Kind::ContextOverflow => TurnFailureKind::ContextOverflow,
+        Kind::RateLimited => TurnFailureKind::RateLimited,
+        Kind::Network => TurnFailureKind::Network,
+        Kind::Auth => TurnFailureKind::Auth,
+        Kind::Unavailable => TurnFailureKind::Unavailable,
+        Kind::ContentPolicy => TurnFailureKind::ContentPolicy,
+        Kind::Quota => TurnFailureKind::Quota,
+        Kind::Forbidden => TurnFailureKind::Forbidden,
+        Kind::BadRequest => TurnFailureKind::BadRequest,
+        Kind::Interrupted => TurnFailureKind::Interrupted,
+    }
+}
+
+/// How much of a failure's own words the message keeps. The desktop shows
+/// a failure in a few lines; past this, the request id that ends the
+/// message would be cut off with the rest.
+const FAILURE_DETAIL_CHARS: usize = 500;
+
+/// Fork: a failed turn's message — the remedy when the failure was named,
+/// the failure itself otherwise — ending with the request's id when the
+/// server sent one, for a support ticket.
+fn turn_failure_message(
+    kind: Option<waku_agent_bridge::FailureKind>,
+    detail: &str,
+    request_id: Option<&str>,
+) -> String {
+    let detail = match detail.char_indices().nth(FAILURE_DETAIL_CHARS) {
+        Some((cut, _)) => format!("{}…", &detail[..cut]),
+        None => detail.to_owned(),
+    };
+    let mut message = match kind {
+        Some(kind) => failure_message(kind, &detail),
+        None => detail,
+    };
+    if let Some(id) = request_id {
+        message.push('\n');
+        message.push_str(&tr!("native.failure.request_id", id = id));
+    }
+    message
+}
+
+/// Fork: a sub-agent's retry, as a line in its record.
+fn subagent_retry_line(attempt: u32, max_attempts: Option<u32>, reason: &str) -> String {
+    let cause = RetryCause::from_reason(reason);
+    let line = match (cause, max_attempts) {
+        (RetryCause::Empty, _) => tr!("subagent.empty_retried"),
+        (cause, Some(max)) => tr!(
+            "subagent.retried",
+            cause = cause.label(),
+            attempt = attempt,
+            max = max
+        ),
+        (cause, None) => tr!("subagent.retried_unbounded", cause = cause.label(), attempt = attempt),
+    };
+    format!("*{line}*")
 }
 
 /// The "finished planning" dialog's body, in the user's language.
@@ -993,9 +1059,24 @@ impl EventTranslator {
             AgentEvent::TurnCrashed { detail } => {
                 self.fail(tr!("native.turn_crashed", detail = detail))
             }
-            // Fork: a failure with a remedy, said in the user's language with
-            // the original kept at the end.
-            AgentEvent::TurnFailed { kind, detail } => self.fail(failure_message(kind, &detail)),
+            // Fork: a failed model request — its remedy said in the user's
+            // language with the original kept at the end, or the original
+            // alone — then the request's id. The kind goes first, so the
+            // banner the message lands in knows its actions.
+            AgentEvent::TurnFailed {
+                kind,
+                detail,
+                request_id,
+            } => {
+                let message = turn_failure_message(kind, &detail, request_id.as_deref());
+                if let Some(kind) = kind {
+                    self.send(DriverEvent::TurnFailure(TurnFailure {
+                        kind: turn_failure_kind(kind),
+                        request_id,
+                    }));
+                }
+                self.fail(message);
+            }
             AgentEvent::Error(message) => self.send(DriverEvent::Error(message)),
             // Fork: a request being retried, or a goal about to resume.
             AgentEvent::Retry {
@@ -1088,6 +1169,28 @@ impl EventTranslator {
                     .get_mut(&parent_tool_id)
                     .and_then(|child| child.feed.text(&text))
                 {
+                    self.send(DriverEvent::BackgroundWork(event));
+                }
+            }
+            // Fork: a request of the child's finished; what it wrote stays.
+            SubagentEvent::Settled => {
+                if let Some(child) = running.get_mut(&parent_tool_id) {
+                    child.feed.settle();
+                }
+            }
+            // Fork: a request of the child's is sent again — a line in its
+            // record, and the half answer taken back when it was thrown away.
+            SubagentEvent::Retry {
+                attempt,
+                max_attempts,
+                reason,
+                discarded_output,
+            } => {
+                let Some(child) = running.get_mut(&parent_tool_id) else {
+                    return;
+                };
+                let line = subagent_retry_line(attempt, max_attempts, &reason);
+                for event in child.feed.retry(discarded_output, line) {
                     self.send(DriverEvent::BackgroundWork(event));
                 }
             }
@@ -1747,5 +1850,133 @@ mod tests {
             _ => None,
         });
         assert_eq!(kept, Some(tr!("session.stopped")));
+    }
+
+    fn failed(translator: &EventTranslator, kind: Option<waku_agent_bridge::FailureKind>, request_id: Option<&str>) {
+        translator.handle(AgentEvent::TurnStarted);
+        translator.handle(AgentEvent::TurnFailed {
+            kind,
+            detail: "HTTP 400: unsupported parameter: reasoning".into(),
+            request_id: request_id.map(str::to_owned),
+        });
+    }
+
+    #[test]
+    fn a_named_failure_reaches_the_desktop_before_its_message() {
+        let (translator, received) = translator();
+        failed(&translator, Some(waku_agent_bridge::FailureKind::BadRequest), Some("req_9"));
+        let events: Vec<_> = received.try_iter().collect();
+        let kind_at = events
+            .iter()
+            .position(|event| {
+                matches!(
+                    event,
+                    DriverEvent::TurnFailure(TurnFailure {
+                        kind: TurnFailureKind::BadRequest,
+                        request_id: Some(id),
+                    }) if id == "req_9"
+                )
+            })
+            .expect("the kind is sent");
+        let message_at = events
+            .iter()
+            .position(|event| matches!(event, DriverEvent::Error(_)))
+            .expect("the message is sent");
+        assert!(kind_at < message_at, "{events:?}");
+    }
+
+    #[test]
+    fn a_failure_ends_with_its_request_id() {
+        let (translator, received) = translator();
+        failed(&translator, Some(waku_agent_bridge::FailureKind::BadRequest), Some("req_9"));
+        let message = received
+            .try_iter()
+            .find_map(|event| match event {
+                DriverEvent::Error(message) => Some(message),
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            message.starts_with(&tr!(
+                "native.failure.bad_request",
+                detail = "HTTP 400: unsupported parameter: reasoning"
+            )),
+            "{message}"
+        );
+        assert!(message.ends_with(&tr!("native.failure.request_id", id = "req_9")), "{message}");
+        // A long failure is cut so the id is never what falls off.
+        let long = turn_failure_message(None, &"x".repeat(5_000), Some("req_long"));
+        assert!(long.chars().count() < FAILURE_DETAIL_CHARS + 100);
+        assert!(long.ends_with(&tr!("native.failure.request_id", id = "req_long")));
+    }
+
+    #[test]
+    fn an_unnamed_failure_keeps_its_text_and_request_id() {
+        let (translator, received) = translator();
+        failed(&translator, None, Some("req_gw"));
+        translator.handle(AgentEvent::TurnFinished {
+            success: false,
+            summary: Some("API error 400: unsupported parameter: reasoning".into()),
+        });
+        let events: Vec<_> = received.try_iter().collect();
+        assert!(!events.iter().any(|event| matches!(event, DriverEvent::TurnFailure(_))));
+        let shown = events
+            .iter()
+            .find_map(|event| match event {
+                DriverEvent::Error(message) => Some(message.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert!(shown.starts_with("HTTP 400: unsupported parameter: reasoning"), "{shown}");
+        assert!(shown.ends_with(&tr!("native.failure.request_id", id = "req_gw")), "{shown}");
+        let kept = events.iter().find_map(|event| match event {
+            DriverEvent::TurnFinished { summary, .. } => summary.clone(),
+            _ => None,
+        });
+        assert_eq!(kept, Some(shown));
+    }
+
+    #[test]
+    fn a_sub_agent_retry_shows_in_its_record() {
+        let (translator, received) = translator();
+        let step = |event| {
+            translator.handle(AgentEvent::Subagent {
+                parent_tool_id: "toolu_1".into(),
+                event,
+            })
+        };
+        step(SubagentEvent::Started {
+            description: "Find it".into(),
+            prompt: "Look".into(),
+            model: "gpt-6-sol".into(),
+            background: false,
+            started_at_ms: 1_000,
+        });
+        step(SubagentEvent::Text("Half an ans".into()));
+        step(SubagentEvent::Retry {
+            attempt: 1,
+            max_attempts: Some(10),
+            reason: "stream_interrupted".into(),
+            discarded_output: true,
+        });
+        let texts: Vec<(String, String)> = received
+            .try_iter()
+            .filter_map(|event| match event {
+                DriverEvent::BackgroundWork(BackgroundWorkEvent::Transcript { entry, .. }) => match entry.body {
+                    crate::model::SubagentTranscriptBody::Text { text, .. } => Some((entry.id, text)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts.last().map(|(id, _)| id.as_str()), Some("retry-0"));
+        assert_eq!(
+            texts.last().map(|(_, text)| text.clone()),
+            Some(subagent_retry_line(1, Some(10), "stream_interrupted"))
+        );
+        assert!(
+            texts.iter().any(|(id, text)| id == "text-1" && text.is_empty()),
+            "the half answer is taken back: {texts:?}"
+        );
     }
 }

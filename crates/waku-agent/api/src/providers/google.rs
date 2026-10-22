@@ -753,6 +753,8 @@ impl LlmProvider for GoogleProvider {
         if !resp.status().is_success() {
             return Err(self.http_error(resp).await);
         }
+        // Fork (Waku): a failure inside the stream still names its request.
+        let request_id = crate::retry_policy::request_id_of(resp.headers());
 
         // Wrap the byte stream in a line-based SSE parser.
         let provider_id_for_stream = self.id.clone();
@@ -970,7 +972,9 @@ impl LlmProvider for GoogleProvider {
             }
         };
 
-        Ok(Box::pin(stream))
+        Ok(Box::pin(futures::StreamExt::map(stream, move |item| {
+            item.map_err(|error| error.with_request_id(request_id.as_deref()))
+        })))
     }
 
     async fn health_check(&self) -> Result<ProviderStatus, ProviderError> {

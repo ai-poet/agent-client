@@ -733,13 +733,29 @@ async fn forward_child(
     }
 }
 
-/// The part of a child's stream its record shows: what it wrote and the
-/// tools it called. Its usage is already in the session's totals (the cost
-/// tracker is shared) and must not move the parent's context meter; its
-/// errors end up in `Finished`.
+/// The part of a child's stream its record shows: what it wrote, the tools
+/// it called, and (fork) its requests being retried. Its usage is already in
+/// the session's totals (the cost tracker is shared) and must not move the
+/// parent's context meter — a settled request reaches the record only as
+/// `Settled`, so a later retry knows what to take back; its errors end up in
+/// `Finished`.
 pub(crate) fn child_event(event: AgentEvent) -> Option<SubagentEvent> {
     match event {
         AgentEvent::Text(text) => Some(SubagentEvent::Text(text)),
+        AgentEvent::Retry {
+            attempt,
+            max_attempts,
+            reason,
+            discarded_output,
+            between_turns: false,
+            ..
+        } => Some(SubagentEvent::Retry {
+            attempt,
+            max_attempts,
+            reason,
+            discarded_output,
+        }),
+        AgentEvent::Usage { .. } => Some(SubagentEvent::Settled),
         AgentEvent::ToolStarted { id, name, input } => {
             Some(SubagentEvent::ToolStarted { id, name, input })
         }
@@ -1064,10 +1080,11 @@ mod tests {
         assert_eq!(host.take_match("B", "b"), None);
     }
 
-    /// The record shows what the child wrote and the tools it called — not
-    /// its usage, which is not the parent's context, nor turn bookkeeping.
+    /// The record shows what the child wrote, the tools it called and its
+    /// retries — not its usage, which is not the parent's context, nor turn
+    /// bookkeeping. A settled request reaches it only as a boundary.
     #[test]
-    fn only_text_and_tool_calls_reach_the_record() {
+    fn text_tool_calls_retries_and_request_ends_reach_the_record() {
         assert!(matches!(
             child_event(AgentEvent::Text("hi".into())),
             Some(SubagentEvent::Text(_))
@@ -1081,11 +1098,25 @@ mod tests {
             Some(SubagentEvent::ToolStarted { .. })
         ));
         assert!(child_event(AgentEvent::TurnStarted).is_none());
-        assert!(child_event(AgentEvent::Usage {
-            context_tokens: Some(1),
-            context_window: None
-        })
-        .is_none());
+        assert!(matches!(
+            child_event(AgentEvent::Usage {
+                context_tokens: Some(1),
+                context_window: None
+            }),
+            Some(SubagentEvent::Settled)
+        ));
+        assert!(matches!(
+            child_event(AgentEvent::Retry {
+                attempt: 2,
+                max_attempts: Some(10),
+                delay_ms: 4_000,
+                reason: "overloaded".into(),
+                discarded_output: true,
+                detail: "HTTP 529: Overloaded".into(),
+                between_turns: false,
+            }),
+            Some(SubagentEvent::Retry { attempt: 2, discarded_output: true, .. })
+        ));
         assert!(child_event(AgentEvent::Error("boom".into())).is_none());
     }
 

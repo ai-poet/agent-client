@@ -98,6 +98,7 @@ export type { TodoStatus } from "./TodoStatus";
 export type { TokenTotals } from "./TokenTotals";
 export type { TranscriptBlock } from "./TranscriptBlock";
 export type { TurnError } from "./TurnError";
+export type { TurnFailureKind } from "./TurnFailureKind";
 export type { TurnPause } from "./TurnPause";
 export type { TurnStatus } from "./TurnStatus";
 export type { TurnUndoPlan } from "./TurnUndoPlan";

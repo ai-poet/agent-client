@@ -14,8 +14,9 @@
 
 use claurst_api::retry_policy::FailureClass;
 
-/// Rejections about this account or this request that no retry can change.
-const FATAL: &[&str] = &[
+/// Rejections about this account that no retry can change. The desktop's
+/// paywall reads the same text and offers the way out.
+const ACCOUNT: &[&str] = &[
     "too many invalid authentication attempts",
     "invalid api key",
     "api key is required",
@@ -43,6 +44,11 @@ const FATAL: &[&str] = &[
     "7-day limit exhausted",
     "usage quota exhausted for this platform",
     "billing error",
+];
+
+/// Rejections of this request's content. No retry changes them either, but
+/// rewording the request can.
+const CONTENT_POLICY: &[&str] = &[
     "content audit matched a risk rule",
     "request blocked by content policy",
     "content moderation blocked this request",
@@ -59,19 +65,42 @@ const TRANSIENT: &[&str] = &[
     "prompt security audit is temporarily unavailable",
 ];
 
-/// The gateway's verdict on a failure, or `None` to keep the generic one.
-pub fn gateway_failure_class(_status: Option<u16>, message: &str) -> Option<FailureClass> {
+/// What the gateway said about a failure, when it said anything.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GatewayVerdict {
+    /// This account cannot make the request: key, group, plan, balance.
+    Account,
+    /// The request's content was refused.
+    ContentPolicy,
+    /// The gateway's own temporary trouble.
+    Transient,
+}
+
+/// The gateway's verdict on a failure's message, or `None` when it is not
+/// one of the gateway's own (or is about an upstream account).
+pub(crate) fn gateway_verdict(message: &str) -> Option<GatewayVerdict> {
     let text = message.to_ascii_lowercase();
     if text.contains("upstream") {
         return None;
     }
-    if FATAL.iter().any(|needle| text.contains(needle)) {
-        return Some(FailureClass::Fatal);
+    let says = |needles: &[&str]| needles.iter().any(|needle| text.contains(needle));
+    if says(ACCOUNT) {
+        Some(GatewayVerdict::Account)
+    } else if says(CONTENT_POLICY) {
+        Some(GatewayVerdict::ContentPolicy)
+    } else if says(TRANSIENT) {
+        Some(GatewayVerdict::Transient)
+    } else {
+        None
     }
-    if TRANSIENT.iter().any(|needle| text.contains(needle)) {
-        return Some(FailureClass::Retryable);
-    }
-    None
+}
+
+/// The gateway's verdict on a failure, or `None` to keep the generic one.
+pub fn gateway_failure_class(_status: Option<u16>, message: &str) -> Option<FailureClass> {
+    gateway_verdict(message).map(|verdict| match verdict {
+        GatewayVerdict::Account | GatewayVerdict::ContentPolicy => FailureClass::Fatal,
+        GatewayVerdict::Transient => FailureClass::Retryable,
+    })
 }
 
 /// Install the rules for this process. Idempotent.
@@ -124,6 +153,27 @@ mod tests {
             None
         );
         assert_eq!(gateway_failure_class(Some(502), "Bad gateway"), None);
+    }
+
+    #[test]
+    fn content_policy_verdicts_are_told_apart_from_account_ones() {
+        assert_eq!(
+            gateway_verdict("请求被内容安全策略拦截 / Request blocked by content policy"),
+            Some(GatewayVerdict::ContentPolicy)
+        );
+        assert_eq!(
+            gateway_verdict("Prompt security audit rejected this request. Please adjust your input and try again."),
+            Some(GatewayVerdict::ContentPolicy)
+        );
+        assert_eq!(
+            gateway_verdict("账户余额不足 / Insufficient account balance"),
+            Some(GatewayVerdict::Account)
+        );
+        assert_eq!(
+            gateway_verdict("用户每分钟请求数已达上限 / user requests-per-minute limit exceeded"),
+            Some(GatewayVerdict::Transient)
+        );
+        assert_eq!(gateway_verdict("Bad gateway"), None);
     }
 
     /// The needles are the gateway's English halves; if the table there is

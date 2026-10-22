@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+pub use crate::turn_failure::{RetryCause, TurnFailure, TurnFailureKind};
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ProviderKind {
@@ -849,6 +851,11 @@ pub struct TurnError {
     pub message: String,
     #[serde(default)]
     pub dismissed: bool,
+    /// Fork addition: what kind of failure it was, when the built-in agent
+    /// named it — the error banner offers the action that fixes it. A kind
+    /// from a newer build reads as [`TurnFailureKind::Unknown`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<TurnFailureKind>,
 }
 
 impl AgentTurn {
@@ -1588,10 +1595,17 @@ impl AgentSession {
 
     /// Record why the latest turn failed, replacing an earlier reason.
     pub fn set_latest_turn_error(&mut self, message: impl Into<String>) {
+        self.set_latest_turn_failure(message, None);
+    }
+
+    /// [`Self::set_latest_turn_error`], with the kind of failure when the
+    /// agent named it.
+    pub fn set_latest_turn_failure(&mut self, message: impl Into<String>, kind: Option<TurnFailureKind>) {
         if let Some(turn) = self.turns.last_mut() {
             turn.error = Some(TurnError {
                 message: message.into(),
                 dismissed: false,
+                kind,
             });
         }
     }
@@ -2031,6 +2045,9 @@ pub enum DriverEvent {
     /// — or, with `between_turns`, an autonomous goal will resume after a
     /// failed turn. Built-in agent only.
     ModelRetry(ModelRetry),
+    /// Fork addition: what kind of failure the `Error` that follows is, when
+    /// the built-in agent named it. Built-in agent only.
+    TurnFailure(TurnFailure),
     Error(String),
     ProcessExited,
 }

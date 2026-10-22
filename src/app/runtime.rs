@@ -3142,6 +3142,7 @@ impl Waku {
                     .unwrap_or_else(Instant::now),
                 output_boundary: None,
                 model_retry: None,
+                turn_failure: None,
             },
         );
         // Startup can emit before the background task hands this receiver to
