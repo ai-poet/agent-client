@@ -932,8 +932,16 @@ side_chat.stop:
   en: "Stop"
 side_chat.clear:
   en: "Clear"
+side_chat.button_open:
+  en: "Side chat (%{shortcut}): ask about this task without interrupting it"
+side_chat.button_hide:
+  en: "Hide side chat (%{shortcut})"
 trajectory.surface:
   en: "Trajectory"
+trajectory.button_open:
+  en: "Trajectory: the timing, usage and tool calls of every request"
+trajectory.button_hide:
+  en: "Hide the trajectory"
 trajectory.summary:
   en: "%{turns} turns · %{requests} requests · %{input} in · %{output} out"
 trajectory.dropped:

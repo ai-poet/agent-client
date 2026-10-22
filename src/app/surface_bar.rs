@@ -248,6 +248,64 @@ impl Waku {
             .children(self.render_team_surface_button(theme, cx))
             // The Plan surface, once the session has submitted a plan.
             .children(self.render_plan_surface_button(theme, cx))
+            // Fork: the side chat, for any task, and the built-in agent's
+            // trajectory — each one click away rather than behind "+".
+            .children(self.render_side_chat_surface_button(theme, cx))
+            .children(self.render_trajectory_surface_button(theme, cx))
+    }
+
+    /// A header button for a surface outside the four: in the accent colour
+    /// while it is the panel in front, where a click puts the panel away;
+    /// otherwise a click opens it. The tooltip says what it is for.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn render_extra_surface_button(
+        &self,
+        id: &'static str,
+        surface: RightPanelSurface,
+        icon_path: &'static str,
+        tooltip_open: String,
+        tooltip_hide: String,
+        theme: Theme,
+        cx: &mut Context<Self>,
+        open: fn(&mut Waku, &mut Context<Waku>),
+    ) -> Stateful<Div> {
+        let shown = self.right_panel_visible && self.active_right_panel_surface() == Some(&surface);
+        let tooltip: SharedString = if shown { tooltip_hide } else { tooltip_open }.into();
+        div()
+            .id(id)
+            .tab_index(0)
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .w(px(26.0))
+            .h(px(26.0))
+            .flex_none()
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .when(shown, |element| element.bg(theme.overlay))
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .child(icon(
+                icon_path,
+                14.0,
+                if shown {
+                    theme.accent
+                } else {
+                    theme.text_tertiary
+                },
+            ))
+            .tooltip(Tooltip::text(tooltip))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .on_activation(cx, move |this, _, cx| {
+                if shown {
+                    this.set_right_panel_visible(false, cx);
+                } else {
+                    open(this, cx);
+                }
+            })
     }
 
     fn render_surface_button(
