@@ -165,6 +165,8 @@ impl Waku {
         f32::from(window.viewport_size().width)
             - self.sidebar_rendered_width
             - self.right_panel_rendered_width
+            // Fork: the session rail beside the conversation (session_rail.rs).
+            - self.session_rail.rendered_width
     }
 
     /// [`WakuPane`] delegate for the sidebar island.
@@ -229,6 +231,8 @@ impl Render for Waku {
         // panel is mid-slide, and settling here rather than at the point of
         // use keeps the pane islands and the transcript on one set of widths.
         let panels = self.settle_panel_slides(window);
+        // Fork: whether the session rail takes its column this frame.
+        self.session_rail.rendered_width = self.session_rail_width(window);
         if panels.sliding {
             // The manual drive for the width tweens — the same scheduling
             // `with_animation` would do, minus its element-id keying.
@@ -322,6 +326,8 @@ impl Render for Waku {
         let cli_takeover = self.render_cli_takeover_prompt(window, cx);
         let confirm_dialog = self.render_confirm_dialog(window, cx);
         let toast = self.render_active_toast(cx);
+        let session_rail = self.render_session_rail(cx);
+        let todo_dock = self.render_todo_dock(cx);
         let content = div()
             .key_context("Waku")
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
@@ -438,6 +444,9 @@ impl Render for Waku {
                                     .children(self.render_status_capsule(cx))
                                     .into_any_element()
                             })
+                            // Fork: the todo list stays at the bottom while a
+                            // turn runs (session_rail.rs).
+                            .children(todo_dock)
                             .children(permission)
                             .children(self.render_error_banner(cx))
                             .when(self.selected_project().is_some(), |element| {
@@ -459,6 +468,8 @@ impl Render for Waku {
                         ))
                     }),
             )
+            // Fork: the session rail, where the right panel opens over it.
+            .children(session_rail)
             .when(panels.right_panel > 0.0, |root| {
                 root.child(
                     div()

@@ -239,6 +239,8 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(2.0))
+            // Fork: show or hide the session rail (session_rail.rs).
+            .children(self.render_session_rail_button(theme, cx))
             .children(
                 SurfaceKind::ALL
                     .into_iter()

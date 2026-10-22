@@ -16,6 +16,11 @@ const PANEL_WIDTH: f32 = 320.0;
 
 impl Waku {
     pub(super) fn render_status_capsule(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        // The session rail and the docked todo list say this beside the
+        // conversation; the capsule is for when the rail is away.
+        if self.session_rail_on_screen() {
+            return None;
+        }
         let session = self.selected_session()?;
         let (processes, agents) = self.background_work_counts(session.id);
         let goal_status = session.thread_goal.as_ref().map(|goal| goal.status);

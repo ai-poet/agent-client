@@ -932,6 +932,48 @@ side_chat.stop:
   en: "Stop"
 side_chat.clear:
   en: "Clear"
+session_rail.show:
+  en: "Show session details"
+session_rail.hide:
+  en: "Hide session details"
+session_rail.environment:
+  en: "Environment"
+session_rail.this_computer:
+  en: "This computer"
+session_rail.worktree:
+  en: "worktree"
+session_rail.context:
+  en: "Context"
+session_rail.context_used:
+  en: "Used"
+session_rail.last_input:
+  en: "Last request input"
+session_rail.last_cached:
+  en: "Last request cache read"
+session_rail.last_output:
+  en: "Last request output"
+session_rail.session_total:
+  en: "Session total"
+session_rail.changes:
+  en: "Changes"
+session_rail.no_git:
+  en: "Not a Git repository"
+session_rail.no_changes:
+  en: "No uncommitted changes"
+session_rail.open_review:
+  en: "Open in Review"
+session_rail.commit:
+  en: "Commit"
+session_rail.background:
+  en: "Background tasks"
+session_rail.no_background:
+  en: "Nothing running"
+session_rail.stop:
+  en: "Stop"
+session_rail.finished:
+  en: "%{count} finished"
+session_rail.todos:
+  en: "Todos %{done}/%{total}"
 side_chat.button_open:
   en: "Side chat (%{shortcut}): ask about this task without interrupting it"
 side_chat.button_hide:

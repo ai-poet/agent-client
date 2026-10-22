@@ -289,6 +289,9 @@ lines below.
 | `src/app/command_palette.rs` | `PaletteAction::{JumpToNeedsYou, OpenSideChat, OpenTrajectory}`, their commands and dispatch arms | ~35 |
 | `src/app/transcript_view.rs` | the Inspect pill in `render_activity_item` | 2 |
 | `src/platform.rs` | `set_dock_badge` (macOS; a no-op elsewhere) | ~18 |
+| `src/app/render.rs` (session rail) | the rail's width each frame, `chat_viewport_width` minus it, the rail beside the main column (before the right panel, which covers it), the docked todo list above the permission card | 9 |
+| `src/app/status_capsule.rs` | stands down while the session rail is on screen | 4 |
+| `src/app/background_work.rs` | `session_background_work` (live and finished items, for the rail) | 8 |
 | new `crates/waku-agent/query/src/e2e_tests.rs`, `lib.rs` (`mod e2e_tests`) | test-only: the loop end to end — a scripted provider, `claurst_tools::all_tools()` against a temporary workspace, files read back after the run (write then edit, read before edit, the repeat reminder) | test |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
@@ -297,7 +300,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 ### Files that are ours entirely
 
 `crates/sub2api/**`, `crates/agent-teams/**`, `crates/agent-trajectory/**`, `src/app/cloud_account.rs`,
-`src/app/{task_attention,review_comments,side_chat,trajectory_panel,agent_trajectory_settings}.rs`,
+`src/app/{task_attention,review_comments,side_chat,trajectory_panel,agent_trajectory_settings,session_rail}.rs`,
 `crates/waku-agent-bridge/src/{side_chat,trajectory}.rs`, `crates/waku-core/src/side_chat.rs`,
 `crates/waku-client/src/side_chat.rs`,
 `src/app/{cloud_failover,cloud_groups,cloud_menu,cloud_origins,cloud_sign_in}.rs`, `src/app/cli_setup.rs`,
