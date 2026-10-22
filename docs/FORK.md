@@ -289,7 +289,7 @@ lines below.
 | `src/app/command_palette.rs` | `PaletteAction::{JumpToNeedsYou, OpenSideChat, OpenTrajectory}`, their commands and dispatch arms | ~35 |
 | `src/app/transcript_view.rs` | the Inspect pill in `render_activity_item` | 2 |
 | `src/platform.rs` | `set_dock_badge` (macOS; a no-op elsewhere) | ~18 |
-| `src/app/render.rs` (session rail) | the rail's width each frame, `chat_viewport_width` minus it, the rail beside the main column (before the right panel, which covers it), the docked todo list above the permission card | 9 |
+| `src/app/render.rs` (session rail) | the rail's width each frame, `chat_viewport_width` minus it; under the header the column is a row — the task, then the rail — so the header spans both (the right panel, a sibling of the whole column, covers the rail); the docked todo list above the permission card | ~25 |
 | `src/app/status_capsule.rs` | stands down while the session rail is on screen | 4 |
 | `src/app/background_work.rs` | `session_background_work` (live and finished items, for the rail) | 8 |
 | new `crates/waku-agent/query/src/e2e_tests.rs`, `lib.rs` (`mod e2e_tests`) | test-only: the loop end to end — a scripted provider, `claurst_tools::all_tools()` against a temporary workspace, files read back after the run (write then edit, read before edit, the repeat reminder) | test |

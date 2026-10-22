@@ -418,45 +418,63 @@ impl Render for Waku {
                     .children(self.render_update_banner(cx))
                     .children(self.render_daemon_connection_banner(cx))
                     .child(self.render_header(window, cx))
-                    // Fork addition: the image studio takes the column in
-                    // place of the task.
-                    .when(self.image_studio.open, |element| {
-                        element.child(self.render_image_studio(cx))
-                    })
-                    .when(self.model_status.open, |element| {
-                        element.child(self.render_model_status(cx))
-                    })
-                    .when(!self.main_page_open(), |element| {
-                        element
-                            .child(if empty {
-                                self.render_empty_state(cx).into_any_element()
-                            } else {
+                    // Fork: under the header, the task and beside it the
+                    // session rail (session_rail.rs) — the header spans both.
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .w_full()
+                            .flex()
+                            .child(
                                 div()
                                     .flex_1()
-                                    .min_h(px(0.0))
-                                    .w_full()
+                                    .min_w_0()
+                                    .h_full()
                                     .flex()
                                     .flex_col()
-                                    .relative()
-                                    .child(self.transcript_pane.clone().cached(
-                                        StyleRefinement::default().flex_1().min_h(px(0.0)).w_full(),
-                                    ))
-                                    .children(self.render_status_capsule(cx))
-                                    .into_any_element()
-                            })
-                            // Fork: the todo list stays at the bottom while a
-                            // turn runs (session_rail.rs).
-                            .children(todo_dock)
-                            .children(permission)
-                            .children(self.render_error_banner(cx))
-                            .when(self.selected_project().is_some(), |element| {
-                                element
-                                    .children(self.render_queued_messages(cx))
-                                    .children(self.render_onboarding_strip(cx))
-                                    .child(self.render_composer(window, cx))
-                                    .child(self.render_workspace_footer(cx))
-                            })
-                    })
+                                    // Fork addition: the image studio takes the column in
+                                    // place of the task.
+                                    .when(self.image_studio.open, |element| {
+                                        element.child(self.render_image_studio(cx))
+                                    })
+                                    .when(self.model_status.open, |element| {
+                                        element.child(self.render_model_status(cx))
+                                    })
+                                    .when(!self.main_page_open(), |element| {
+                                        element
+                                            .child(if empty {
+                                                self.render_empty_state(cx).into_any_element()
+                                            } else {
+                                                div()
+                                                    .flex_1()
+                                                    .min_h(px(0.0))
+                                                    .w_full()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .relative()
+                                                    .child(self.transcript_pane.clone().cached(
+                                                        StyleRefinement::default().flex_1().min_h(px(0.0)).w_full(),
+                                                    ))
+                                                    .children(self.render_status_capsule(cx))
+                                                    .into_any_element()
+                                            })
+                                            // Fork: the todo list stays at the bottom while a
+                                            // turn runs (session_rail.rs).
+                                            .children(todo_dock)
+                                            .children(permission)
+                                            .children(self.render_error_banner(cx))
+                                            .when(self.selected_project().is_some(), |element| {
+                                                element
+                                                    .children(self.render_queued_messages(cx))
+                                                    .children(self.render_onboarding_strip(cx))
+                                                    .child(self.render_composer(window, cx))
+                                                    .child(self.render_workspace_footer(cx))
+                                            })
+                                    })
+                            )
+                            .children(session_rail),
+                    )
                     .relative()
                     .children(toast)
                     .children(computer_use)
@@ -468,8 +486,6 @@ impl Render for Waku {
                         ))
                     }),
             )
-            // Fork: the session rail, where the right panel opens over it.
-            .children(session_rail)
             .when(panels.right_panel > 0.0, |root| {
                 root.child(
                     div()
