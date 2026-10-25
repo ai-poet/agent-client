@@ -55,6 +55,7 @@ pub mod promotion;
 pub mod providers;
 pub mod speedtest;
 pub mod task_marks;
+pub mod ui_prefs;
 #[cfg(windows)]
 pub mod win_process;
 

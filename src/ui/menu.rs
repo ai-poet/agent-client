@@ -34,6 +34,10 @@ use gpui::{
     prelude::FluentBuilder, px,
 };
 
+// Fork: entrance/exit motion, dismiss-only outside presses, submenu hover intent.
+#[path = "menu_motion.rs"]
+mod menu_motion;
+
 actions!(
     waku_menu,
     [
@@ -228,6 +232,8 @@ struct MenuState {
     /// outside-click capture must leave that click alone so the later trigger
     /// handler can close it; a context-menu row has no such handler.
     trigger_click_toggles: bool,
+    /// Fork: see `menu_motion.rs`.
+    motion: menu_motion::MenuMotion,
 }
 
 /// Cross-frame state for one context menu. The owner keeps one per menu site.
@@ -310,6 +316,7 @@ impl ContextMenuHandle {
         let was_open = {
             let mut state = self.state.borrow_mut();
             let was_open = state.open.is_some();
+            menu_motion::remember_closing(&mut state, cx);
             state.open = None;
             state.highlighted = None;
             state.active_submenu = None;
@@ -321,6 +328,7 @@ impl ContextMenuHandle {
         if was_open {
             self.notify_toggle(false, window, cx);
         }
+        menu_motion::after_close(self, window, cx);
     }
 
     /// Dismiss for a mouse down outside the card, except a left click on a
@@ -337,6 +345,7 @@ impl ContextMenuHandle {
         if on_toggling_trigger {
             return;
         }
+        menu_motion::swallow_press(self);
         self.close(window, cx);
         window.refresh();
     }
@@ -357,6 +366,7 @@ impl ContextMenuHandle {
             state.submenu_highlighted = None;
             state.submenu_focused = false;
             state.trigger_click_toggles = trigger_click_toggles;
+            menu_motion::reopened(&mut state);
             was_open
         };
         if !was_open {
@@ -810,7 +820,7 @@ where
             }
         });
 
-    let Some(position) = open_at else {
+    let Some(position) = open_at.or_else(|| menu_motion::closing_position(handle)) else {
         return trigger.into_any_element();
     };
     let trigger_bounds = handle
@@ -821,7 +831,7 @@ where
     trigger
         .child(
             deferred(FloatingSurface::new(
-                card(handle),
+                menu_motion::animate(card(handle), handle, menu_motion::dropdown_travel(align)),
                 trigger_bounds,
                 align,
                 px(TRIGGER_GAP),
@@ -877,6 +887,7 @@ impl RenderOnce for PopoverCard {
                 let handle = self.handle.clone();
                 move |event, window, cx| handle.dismiss_on_down_out(event, window, cx)
             })
+            .child(menu_motion::outside_press_guard(&self.handle))
             .child(body)
     }
 }
@@ -918,7 +929,7 @@ where
             },
         );
 
-    let Some(position) = open_at else {
+    let Some(position) = open_at.or_else(|| menu_motion::closing_position(handle)) else {
         return element.into_any_element();
     };
 
@@ -928,11 +939,16 @@ where
                 anchored()
                     .position(position)
                     .snap_to_window_with_margin(px(8.0))
-                    .child(MenuCard {
-                        id,
-                        handle: handle.clone(),
-                        items: Rc::new(items),
-                    }),
+                    .child(menu_motion::animate(
+                        MenuCard {
+                            id,
+                            handle: handle.clone(),
+                            items: Rc::new(items),
+                        }
+                        .into_any_element(),
+                        handle,
+                        menu_motion::CONTEXT_MENU_TRAVEL,
+                    )),
             )
             .with_priority(1),
         )
@@ -1018,6 +1034,7 @@ impl RenderOnce for MenuCard {
                     on_menu_key(&handle, &focusable, &items, event, window, cx);
                 }
             })
+            .child(menu_motion::outside_press_guard(&self.handle))
             .child(root_card);
 
         if let Some((parent_index, submenu_items)) = submenu {
@@ -1033,7 +1050,9 @@ impl RenderOnce for MenuCard {
                 .bg(theme.raised)
                 .shadow_lg()
                 .flex()
-                .flex_col();
+                .flex_col()
+                .relative()
+                .child(menu_motion::submenu_bounds_probe(&self.handle));
             for (index, item) in submenu_items.into_iter().enumerate() {
                 submenu_card = submenu_card.child(render_menu_item(
                     item,
@@ -1131,13 +1150,18 @@ fn render_menu_item(
             let hover = theme.overlay;
             let hover_handle = handle.clone();
             let click_handle = handle.clone();
-            row(index, highlighted, theme, handle, None)
+            let origin_handle = handle.clone();
+            menu_motion::track_submenu_origin(row(index, highlighted, theme, handle, None), origin_handle, index)
                 .cursor_default()
                 .hover(move |element| element.bg(hover))
                 .text_color(theme.text_secondary)
-                .on_hover(move |hovered, window, _| {
+                .on_hover(move |hovered, window, cx| {
                     if *hovered {
+                        if menu_motion::defer_hover(&hover_handle, menu_motion::PendingHover::Submenu(index), window, cx) {
+                            return;
+                        }
                         open_submenu(&hover_handle, index, false);
+                        menu_motion::submenu_entered(&hover_handle, window);
                         window.refresh();
                     }
                 })
@@ -1193,13 +1217,17 @@ fn track_pointer_highlight(
     handle: ContextMenuHandle,
 ) -> gpui::Stateful<gpui::Div> {
     row.when(!disabled, |row| {
-        row.on_hover(move |hovered, window, _| {
+        row.on_hover(move |hovered, window, cx| {
             if !*hovered {
+                return;
+            }
+            if !in_submenu && menu_motion::defer_hover(&handle, menu_motion::PendingHover::Highlight(index), window, cx) {
                 return;
             }
             let mut state = handle.state.borrow_mut();
             if in_submenu {
                 state.submenu_highlighted = Some(index);
+                menu_motion::cancel_pending(&mut state);
             } else {
                 state.highlighted = Some(index);
                 state.active_submenu = None;
@@ -1287,6 +1315,9 @@ fn on_menu_key(
     window: &mut Window,
     cx: &mut App,
 ) {
+    if !menu_motion::accepts_keys(handle) {
+        return;
+    }
     let key = event.keystroke.key.as_str();
     if key == "escape" {
         handle.close(window, cx);

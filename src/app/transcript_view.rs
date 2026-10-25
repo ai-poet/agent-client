@@ -238,21 +238,24 @@ impl Waku {
         // watching the reply grow past the bottom edge with no way but the
         // button to rejoin it.
         if self.transcript_tail_recheck.get()
+            // Fork: a downward scroll rejoins near the tail (transcript_follow.rs).
             && let Some(rests_at_tail) =
-                transcript_rests_at_tail(viewport_bottom, tail_bottom, anchor_end_space)
+                self.transcript_rejoins_tail(viewport_bottom, tail_bottom, anchor_end_space, &transcript_rows)
         {
             self.transcript_tail_recheck.set(false);
             if rests_at_tail {
                 self.pin_transcript_to_tail();
             }
         }
-        let scroll_to_bottom_visible = should_show_scroll_to_bottom(
+        // Fork: the button appears late and leaves late (transcript_follow.rs).
+        let scroll_to_bottom_visible = self.transcript_jump_visibility(
             self.transcript_is_scrolled.get(),
             self.transcript_anchor_following.get(),
             transcript_scrollable,
             viewport_bottom,
             tail_bottom,
             anchor_end_space,
+            &transcript_rows,
         )
         .unwrap_or_else(|| self.transcript_scroll_to_bottom_visible.get());
         self.transcript_scroll_to_bottom_visible
@@ -1278,6 +1281,7 @@ impl Waku {
                         self.assistant_message_action_for_message(message_index);
                     let user_message_action = self.user_message_action_for_message(message_index);
                     let resend_action = self.resend_action_for_message(message_index);
+                    let prompt_clamp = self.prompt_clamp(&message, message_index, window, &waku);
                     let message_edit_input = user_message_action.and_then(|action| {
                         self.message_edit
                             .as_ref()
@@ -1351,6 +1355,7 @@ impl Waku {
                             assistant_message_action,
                             user_message_action,
                             resend_action,
+                            prompt_clamp,
                             message_edit_input,
                             attachment_menus,
                             attachment_images,

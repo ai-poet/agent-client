@@ -350,6 +350,20 @@ settings.code_font_size:
   en: Code font size
 settings.code_font_size_description:
   en: Text size in the file editor, diffs, code blocks, and tool output
+settings.reduce_motion:
+  en: Reduce motion
+settings.reduce_motion_description:
+  en: Replace sliding, fading and spinning with instant changes
+settings.reduce_motion_system:
+  en: System
+settings.reduce_motion_on:
+  en: On
+settings.reduce_motion_off:
+  en: Off
+settings.pause_motion_background:
+  en: Pause animations in the background
+settings.pause_motion_background_description:
+  en: Hold every animation still while another window is in front
 settings.theme_system:
   en: System
 settings.theme_light:
@@ -1987,6 +2001,12 @@ composer.steer:
   en: Steer
 composer.remove_followup:
   en: Remove from queue
+composer.send_next:
+  en: Send next
+composer.queue_move_up:
+  en: Move up
+composer.queue_move_down:
+  en: Move down
 composer.queued_message_actions:
   en: Follow-up actions
 user_input.other_placeholder:
@@ -2129,6 +2149,14 @@ errors.move_projectless_task:
   en: "Could not move the old projectless task beneath ~/.cheaprouter/projects: %{error}"
 errors.remote_host_path:
   en: This path belongs to the daemon host and cannot be opened by the desktop
+errors.link_blocked:
+  en: "Link not opened. %{reason}"
+errors.link_not_web:
+  en: Only web (http, https) and mail links open from here.
+errors.link_invalid:
+  en: The address is malformed.
+errors.link_credentials:
+  en: The address contains a username or password.
 errors.change_branch:
   en: "Could not change branch: %{error}"
 errors.capture_pre_turn_checkpoint:
@@ -2833,6 +2861,10 @@ changes.open_diff:
   en: "Open this file's diff"
 transcript.show_more_files:
   en: Show %{count} more files
+transcript.show_more_prompt:
+  en: Show more
+transcript.show_less_prompt:
+  en: Show less
 transcript.show_fewer_files:
   en: Show fewer files
 transcript.showing_first_files:

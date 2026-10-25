@@ -673,7 +673,7 @@ fn text_element_with_selection(
                     if let Some(handler) = &link_handler {
                         handler(url, window, cx);
                     } else {
-                        cx.open_url(url);
+                        crate::link_policy::open_checked_or_log(url, cx);
                     }
                 }
             })

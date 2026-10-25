@@ -32,6 +32,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         if let Some(input) = self.selected_runtime()?.pending_user_input.clone() {
+            self.focus_new_question(&input.request_id, window, cx);
             return Some(self.render_user_input(input, cx));
         }
         if let Some(permission) = self.selected_runtime()?.pending_computer_approval.as_ref() {
@@ -237,8 +238,8 @@ impl Waku {
         });
 
         div().flex_none().px(px(20.0)).pb(px(8.0)).child(
-            div()
-                .id(SharedString::from(format!("user-input-{request_id}")))
+            // Fork: digits, Enter and Escape (question_panel.rs).
+            self.question_card_keys(div().id(SharedString::from(format!("user-input-{request_id}"))), cx)
                 .w_full()
                 .max_w(px(CONTENT_MAX_WIDTH))
                 .mx_auto()
@@ -2766,10 +2767,12 @@ impl Waku {
                 SharedString::from(format!("queued-message-more-menu-{message_id}")),
                 &menu_handle,
                 MenuAlign::BelowRight,
-                move |_| {
+                move |cx| {
                     let edit_weak = weak.clone();
                     let remove_weak = weak.clone();
-                    vec![
+                    // Fork: send next, move up, move down (queue_rows.rs).
+                    let mut items = super::queue_rows::queue_menu_items(&weak, session_id, message_id, cx);
+                    items.extend([
                         MenuItem::new(tr!("composer.edit_in_composer"), move |window, cx| {
                             let _ = edit_weak.update(cx, |this, cx| {
                                 this.edit_queued_message(session_id, message_id, window, cx);
@@ -2782,12 +2785,13 @@ impl Waku {
                             });
                         })
                         .icon("icons/trash.svg"),
-                    ]
+                    ]);
+                    items
                 },
             );
             list = list.child(
-                div()
-                    .id(SharedString::from(format!("queued-message-{message_id}")))
+                // Fork: Alt-↑ / Alt-↓ reorders (queue_rows.rs).
+                self.queue_row_keys(div().id(SharedString::from(format!("queued-message-{message_id}"))), session_id, message_id, cx)
                     .h(px(30.0))
                     .pl(px(12.0))
                     .pr(px(6.0))
@@ -2994,133 +2998,14 @@ impl Waku {
                         .child(self.render_interaction_mode_control(cx))
                         .children(self.render_goal_control(cx))
                         .child(div().flex_1())
-                        .child(match submit_action {
-                            ComposerSubmitAction::Preparing => div()
-                                .id("send-or-stop")
-                                .w(px(26.0))
-                                .h(px(26.0))
-                                .rounded_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .cursor_default()
-                                .bg(theme.overlay_strong)
-                                .child(motion::spin(icon(
-                                    "icons/loader-circle.svg",
-                                    15.0,
-                                    theme.text_secondary,
-                                )))
-                                .tooltip(Tooltip::text(tr!("composer.preparing_task"))),
-                            ComposerSubmitAction::Stop => div()
-                                .id("working-actions")
-                                .flex()
-                                .items_center()
-                                .gap(px(6.0))
-                                .child(
-                                    div()
-                                        .id("send-or-stop")
-                                        .w(px(26.0))
-                                        .h(px(26.0))
-                                        .rounded_full()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .cursor_default()
-                                        .bg(theme.overlay_strong)
-                                        .hover(|element| element.bg(theme.danger_soft))
-                                        .active(|element| element.opacity(0.8))
-                                        .when(escape_stop_armed, |element| {
-                                            element.child(
-                                                div()
-                                                    .text_size(sp(12.5))
-                                                    .font_weight(FontWeight::SEMIBOLD)
-                                                    .text_color(theme.text)
-                                                    .child("Esc"),
-                                            )
-                                        })
-                                        .when(!escape_stop_armed, |element| {
-                                            element.child(icon("icons/stop.svg", 18.0, theme.text))
-                                        })
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.cancel_turn(cx);
-                                        })),
-                                )
-                                .when(can_send, |element| {
-                                    element.child(
-                                        div()
-                                            .id("queue-follow-up")
-                                            .w(px(26.0))
-                                            .h(px(26.0))
-                                            .rounded_full()
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .cursor_default()
-                                            .bg(theme.inverse)
-                                            .hover(|element| element.opacity(0.9))
-                                            .active(|element| element.opacity(0.8))
-                                            .child(icon(
-                                                "icons/arrow-up.svg",
-                                                16.0,
-                                                theme.on_inverse,
-                                            ))
-                                            .tooltip(Tooltip::text(tr!("composer.queue_followup")))
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                let prompt =
-                                                    this.composer.read(cx).content(cx).to_owned();
-                                                if let Some(submission) =
-                                                    this.submission_with_attachments(&prompt, cx)
-                                                {
-                                                    this.composer
-                                                        .update(cx, |input, cx| input.clear(cx));
-                                                    this.submit_composer_submission(submission, cx);
-                                                }
-                                            })),
-                                    )
-                                }),
-                            ComposerSubmitAction::Send => div()
-                                .id("send-or-stop")
-                                .w(px(26.0))
-                                .h(px(26.0))
-                                .rounded_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .bg(if can_send {
-                                    theme.inverse
-                                } else {
-                                    theme.overlay_strong
-                                })
-                                .when(can_send, |element| {
-                                    element
-                                        .cursor_default()
-                                        .hover(|element| element.opacity(0.9))
-                                        .active(|element| element.opacity(0.8))
-                                })
-                                .child(icon(
-                                    "icons/arrow-up.svg",
-                                    16.0,
-                                    if can_send {
-                                        theme.on_inverse
-                                    } else {
-                                        theme.text_ghost
-                                    },
-                                ))
-                                // Says why the button is dead, for the case
-                                // the draft is ready and the machine is not.
-                                .when(no_providers, |element| {
-                                    element.tooltip(Tooltip::text(tr!("composer.no_providers")))
-                                })
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    let prompt = this.composer.read(cx).content(cx).to_owned();
-                                    if let Some(submission) =
-                                        this.submission_with_attachments(&prompt, cx)
-                                    {
-                                        this.composer.update(cx, |input, cx| input.clear(cx));
-                                        this.submit_composer_submission(submission, cx);
-                                    }
-                                })),
-                        }),
+                        // Fork: moved to composer_submit.rs (keyboard focus).
+                        .child(self.render_submit_controls(
+                            submit_action,
+                            escape_stop_armed,
+                            can_send,
+                            no_providers,
+                            cx,
+                        )),
                 ),
         )
     }

@@ -177,6 +177,13 @@ settings.ui_font_size: UI のフォントサイズ
 settings.ui_font_size_description: インターフェース全体とメッセージの文字サイズ
 settings.code_font_size: コードのフォントサイズ
 settings.code_font_size_description: ファイルエディタ、差分表示、コードブロック、ツール出力の文字サイズ
+settings.reduce_motion: 視差効果を減らす
+settings.reduce_motion_description: スライド、フェード、回転のアニメーションを即時の切り替えに置き換えます
+settings.reduce_motion_system: システムに従う
+settings.reduce_motion_on: オン
+settings.reduce_motion_off: オフ
+settings.pause_motion_background: バックグラウンドではアニメーションを止める
+settings.pause_motion_background_description: 別のウインドウが前面にある間はアニメーションを止めます
 settings.theme_system: システム
 settings.theme_light: ライト
 settings.theme_dark: ダーク
@@ -1008,6 +1015,9 @@ goal.usage_tokens_unbudgeted: "%{used} トークン"
 composer.edit_in_composer: 入力欄で編集
 composer.steer: 指示を追加
 composer.remove_followup: キューから削除
+composer.send_next: 次に送信
+composer.queue_move_up: 上へ移動
+composer.queue_move_down: 下へ移動
 user_input.other_placeholder: 別の回答を入力
 user_input.back: 戻る
 user_input.next: 次へ
@@ -1082,6 +1092,10 @@ errors.create_projectless_task: "~/.cheaprouter/projects 内にタスクを作�
 errors.save_projectless_migration: "プロジェクトなしタスクの移行を保存できませんでした：%{error}"
 errors.move_projectless_task: "以前のルート直下のプロジェクトなしタスクを ~/.cheaprouter/projects 内に移動できませんでした：%{error}"
 errors.remote_host_path: このパスはデーモンホスト上にあるため、デスクトップアプリでは開けません
+errors.link_blocked: リンクを開きませんでした。%{reason}
+errors.link_not_web: ここで開けるのは Web（http、https）とメールのリンクだけです。
+errors.link_invalid: アドレスの形式が正しくありません。
+errors.link_credentials: アドレスにユーザー名またはパスワードが含まれています。
 errors.change_branch: "ブランチを変更できませんでした：%{error}"
 errors.capture_pre_turn_checkpoint: "ターン開始前のチェックポイントを取得できませんでした：%{error}"
 errors.capture_turn_checkpoint: "ターンのチェックポイントを取得できませんでした：%{error}"
@@ -1439,6 +1453,8 @@ changes.undone_count: "%{count} 件のファイルの変更を元に戻しまし
 changes.undo_failed: "元に戻せませんでした：%{error}"
 changes.open_diff: "このファイルの差分を開く"
 transcript.show_more_files: "さらに %{count} 個のファイルを表示"
+transcript.show_more_prompt: もっと見る
+transcript.show_less_prompt: 折りたたむ
 transcript.show_fewer_files: 表示するファイルを減らす
 transcript.showing_first_files: "%{total} 個中、先頭 %{count} 個を表示"
 transcript.scroll_to_bottom: 一番下へスクロール

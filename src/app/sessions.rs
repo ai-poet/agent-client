@@ -150,6 +150,7 @@ impl Waku {
                         } else if waku.state.selected_session == Some(session_id) {
                             waku.reset_visible_state();
                             waku.reset_transcript_rows(waku.transcript_row_count());
+                            waku.restore_transcript_scroll();
                             waku.refresh_composer_sources(cx);
                         }
                     }
@@ -172,6 +173,8 @@ impl Waku {
     fn activate_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         let session_changed = self.state.selected_session != Some(session_id);
         if session_changed {
+            // Fork: keep the place in the task being left (transcript_memory.rs).
+            self.remember_transcript_scroll();
             self.capture_and_save_current_composer_draft(cx);
             self.store_selected_right_panel_state();
         }
@@ -226,6 +229,7 @@ impl Waku {
         }
         self.refresh_composer_sources(cx);
         self.reset_transcript_rows(self.transcript_row_count());
+        self.restore_transcript_scroll();
         self.save();
         if self
             .selected_session()
@@ -1511,6 +1515,7 @@ impl Waku {
         pending.custom_answers.remove(&question_id);
         self.user_input_answer
             .update(cx, |input, cx| input.clear(cx));
+        self.after_user_input_selection(cx);
         cx.notify();
     }
 

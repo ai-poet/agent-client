@@ -362,6 +362,8 @@ pub(super) struct MessageRender<'a> {
     pub(super) assistant_message_action: Option<AssistantMessageAction>,
     pub(super) user_message_action: Option<UserMessageAction>,
     pub(super) resend_action: Option<super::message_resend::ResendAction>,
+    /// Fork: a long prompt's fold (prompt_clamp.rs).
+    pub(super) prompt_clamp: Option<super::prompt_clamp::PromptClamp>,
     pub(super) message_edit_input: Option<Entity<ComposerInput>>,
     pub(super) attachment_menus: Vec<ContextMenuHandle>,
     pub(super) attachment_images: Vec<Option<Arc<gpui::Image>>>,
@@ -558,6 +560,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         assistant_message_action,
         user_message_action,
         resend_action,
+        prompt_clamp,
         message_edit_input,
         attachment_menus,
         attachment_images,
@@ -686,7 +689,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             } else {
                 if !content.trim().is_empty() {
                     let body = render_markdown_message_body(&content, markdown, theme, ctx);
-                    column = column.child(
+                    column = column.child(super::prompt_clamp::clamp_user_bubble(
                         div()
                             .max_w(px(540.0))
                             .min_w_0()
@@ -697,7 +700,9 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                             .text_size(sp(14.0))
                             .line_height(sp(20.0))
                             .child(body),
-                    );
+                        prompt_clamp.as_ref(),
+                        theme,
+                    ));
                 }
                 column = column.child(render_message_footer(
                     theme,

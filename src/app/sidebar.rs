@@ -922,12 +922,13 @@ impl Waku {
                         div().px(px(10.0)).size_full().child(
                             list(
                                 self.sidebar_list_state.clone(),
-                                move |index, _window, cx| {
+                                move |index, window, cx| {
                                     entity
                                         .upgrade()
                                         .map(|entity| {
                                             entity.update(cx, |this, cx| {
-                                                this.sidebar_row(index, &rows, cx)
+                                                let row = this.sidebar_row(index, &rows, cx);
+                                                this.sidebar_resort_row(rows.get(index).copied(), row, window, cx)
                                             })
                                         })
                                         .unwrap_or_else(|| div().into_any_element())
@@ -1129,6 +1130,8 @@ impl Waku {
             return;
         };
         let old_count = cached.len();
+        // Fork: rows glide from their old places (sidebar_resort.rs).
+        self.fork_motion.sidebar_resort.borrow_mut().rows_changed(&cached, rows, |row| f32::from(sidebar_row_height(row)), f32::from(self.sidebar_list_state.viewport_bounds().size.height));
         *cached = rows.to_vec();
         if old_count == 0 {
             self.sidebar_list_state

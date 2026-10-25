@@ -36,6 +36,8 @@ mod computer_use;
 pub mod daemon;
 mod driver;
 mod input;
+// Fork: which external links may reach the OS.
+mod link_policy;
 mod md;
 mod platform;
 mod query;
@@ -219,12 +221,13 @@ pub fn run() {
             crate::app::init_confirm_dialog_keys(cx);
             crate::app::init_cli_takeover_keys(cx);
             crate::app::init_permission_card_keys(cx);
+            crate::app::init_question_panel_keys(cx);
             crate::app::init_shortcut_keys(cx);
             crate::app::init_image_preview_keys(cx);
             crate::app::init_sidebar_keys(cx);
             crate::app::init_skills_keys(cx);
             crate::theme::init(cx);
-            crate::platform::init_reduce_motion(cx);
+            crate::app::init_motion_prefs(cx);
 
             // Sparkle only runs from a bundled release build (or when forced
             // via WAKU_FORCE_UPDATER=1); everywhere else the menu item is

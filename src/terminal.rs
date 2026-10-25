@@ -844,7 +844,7 @@ impl TerminalView {
             self.selecting = false;
             self.hovered_link = Some(link);
             match target {
-                TerminalLinkTarget::Url(url) => cx.open_url(&url),
+                TerminalLinkTarget::Url(url) => crate::link_policy::open_checked_or_log(&url, cx),
                 TerminalLinkTarget::File(path) => {
                     crate::platform::reveal_in_file_manager(&path, cx)
                 }

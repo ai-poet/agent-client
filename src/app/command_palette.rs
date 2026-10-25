@@ -2142,7 +2142,7 @@ impl Waku {
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.close_command_palette(window, cx)),
             )
-            .child(card);
+            .child(crate::ui::motion_kit::dialog_in("command-palette-in", card));
         Some(gpui::deferred(layer).with_priority(3).into_any_element())
     }
 }

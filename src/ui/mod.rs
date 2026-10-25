@@ -7,6 +7,8 @@ use gpui::{
 
 pub mod menu;
 pub mod motion;
+// Fork: named curves, durations and entrance/exit helpers.
+pub mod motion_kit;
 pub mod scrollbar;
 pub mod text_field;
 pub mod tooltip;

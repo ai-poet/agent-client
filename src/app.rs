@@ -1441,6 +1441,10 @@ pub struct Waku {
     sidebar_project_reveal_counts: HashMap<SidebarGroup, usize>,
     /// Fork: pinned, archived and unread tasks (task_marks.rs).
     task_marks: task_marks::TaskMarksState,
+    /// Fork: state of the ported motion (fork_motion.rs).
+    fork_motion: fork_motion::ForkMotion,
+    /// Fork: the question card's keyboard (question_panel.rs).
+    question_panel: question_panel::QuestionPanelState,
     /// Fork: the sidebar toolbar's state — the archive view and what
     /// expand/collapse-all offers (sidebar_toolbar.rs).
     sidebar_toolbar: sidebar_toolbar::SidebarToolbarState,
@@ -1839,6 +1843,25 @@ mod native_agent;
 mod onboarding;
 mod permission_card;
 mod message_resend;
+// Fork: external transcript links go through `link_policy`.
+mod external_links;
+// Fork: the reduce-motion preference.
+mod motion_prefs;
+// Fork: the composer's send / queue / stop controls.
+mod composer_submit;
+// Fork: motion state (fork_motion.rs) and the sidebar's row glide.
+mod fork_motion;
+mod sidebar_resort;
+mod toast_motion;
+// Fork: transcript tail rejoining, the jump button, per-task scroll memory.
+mod transcript_follow;
+mod transcript_memory;
+// Fork: long user prompts fold until asked for.
+mod prompt_clamp;
+// Fork: the question card answers the keyboard.
+mod question_panel;
+// Fork: queued follow-ups can be reordered.
+mod queue_rows;
 // Fork addition: a built-in agent request being retried.
 mod model_retry;
 // Fork: the ZCode-style task sidebar (rows, sections, toolbar, task marks).
@@ -1898,6 +1921,8 @@ pub use permission_card::init as init_permission_card_keys;
 pub use shortcuts::init as init_shortcut_keys;
 use components::*;
 pub use image_preview::init as init_image_preview_keys;
+pub use motion_prefs::init as init_motion_prefs;
+pub use question_panel::init as init_question_panel_keys;
 pub use settings::init as init_settings_keys;
 pub use sidebar::init as init_sidebar_keys;
 use sidebar::{SidebarGroup, SidebarRow};
@@ -2087,6 +2112,7 @@ impl Waku {
         }
         self.toast_selection.selection.borrow_mut().clear();
         self.toast_selection.registry.borrow_mut().clear();
+        self.toast_shown();
         self.toast = Some(ToastState {
             message,
             tone,
@@ -2143,7 +2169,9 @@ impl Waku {
     }
 
     pub(super) fn hide_toast(&mut self) {
-        if self.toast.take().is_some() {
+        if let Some(toast) = self.toast.take() {
+            // Fork: it fades out (toast_motion.rs).
+            self.fork_motion.toast.leave(&toast);
             self.toast_selection.selection.borrow_mut().clear();
             self.toast_selection.registry.borrow_mut().clear();
             // Detached timers are deliberately cheap, but their generation
@@ -2665,6 +2693,8 @@ impl Waku {
             .detach();
 
             cx.observe_window_activation(window, |this: &mut Self, window, cx| {
+                this.motion_window_activation_changed(window.is_window_active(), cx);
+                this.toast_window_activation_changed(window.is_window_active(), cx);
                 if window.is_window_active() {
                     this.reload_clean_right_panel_file_editors(cx);
                     // The working tree and branch may have moved while another
@@ -3100,7 +3130,7 @@ impl Waku {
                         .update(cx, |waku, cx| waku.open_transcript_link(target, cx))
                         .unwrap_or(false);
                     if !handled {
-                        cx.open_url(target);
+                        let _ = waku.update(cx, |waku, cx| waku.open_external_link(target, cx));
                     }
                 })
             };
@@ -3276,6 +3306,8 @@ impl Waku {
                 sidebar_collapsed_groups: HashSet::new(),
                 sidebar_project_reveal_counts: HashMap::new(),
                 task_marks,
+                fork_motion: Default::default(),
+                question_panel: Default::default(),
                 sidebar_toolbar: sidebar_toolbar::SidebarToolbarState::new(cx),
                 sidebar_group_header_focuses: RefCell::new(HashMap::new()),
                 sidebar_group_compose_focuses: RefCell::new(HashMap::new()),

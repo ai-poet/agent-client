@@ -173,6 +173,13 @@ settings.ui_font_size: 界面字号
 settings.ui_font_size_description: 整个界面与消息的文字大小
 settings.code_font_size: 代码字号
 settings.code_font_size_description: 文件编辑器、差分视图、代码块与工具输出的文字大小
+settings.reduce_motion: 减弱动态效果
+settings.reduce_motion_description: 用直接切换代替滑动、淡入淡出和旋转动画
+settings.reduce_motion_system: 跟随系统
+settings.reduce_motion_on: 开启
+settings.reduce_motion_off: 关闭
+settings.pause_motion_background: 后台时暂停动画
+settings.pause_motion_background_description: 其他窗口在前台时，所有动画保持静止
 settings.theme_system: 跟随系统
 settings.theme_light: 浅色
 settings.theme_dark: 深色
@@ -979,6 +986,9 @@ goal.usage_tokens_unbudgeted: "%{used} 个 token"
 composer.edit_in_composer: 在输入框中编辑
 composer.steer: 引导
 composer.remove_followup: 从队列中移除
+composer.send_next: 下一条发送
+composer.queue_move_up: 上移
+composer.queue_move_down: 下移
 user_input.other_placeholder: 输入其他回答
 user_input.back: 上一步
 user_input.next: 下一步
@@ -1047,6 +1057,10 @@ errors.create_projectless_task: "无法在 ~/.cheaprouter/projects 下创建任�
 errors.save_projectless_migration: "无法保存无项目任务的迁移结果：%{error}"
 errors.move_projectless_task: "无法将旧的根目录无项目任务移至 ~/.cheaprouter/projects：%{error}"
 errors.remote_host_path: 此路径属于守护进程主机，无法在桌面应用中打开
+errors.link_blocked: 未打开链接。%{reason}
+errors.link_not_web: 这里只能打开网页（http、https）和邮件链接。
+errors.link_invalid: 地址格式不正确。
+errors.link_credentials: 地址中包含用户名或密码。
 errors.change_branch: "无法切换分支：%{error}"
 errors.capture_pre_turn_checkpoint: "无法创建任务开始前的检查点：%{error}"
 errors.capture_turn_checkpoint: "无法创建本轮任务的检查点：%{error}"
@@ -1390,6 +1404,8 @@ changes.undone_count: "已撤销 %{count} 个文件的改动"
 changes.undo_failed: "撤销失败：%{error}"
 changes.open_diff: "查看这个文件的改动"
 transcript.show_more_files: 再显示 %{count} 个文件
+transcript.show_more_prompt: 展开
+transcript.show_less_prompt: 收起
 transcript.show_fewer_files: 收起文件列表
 transcript.showing_first_files: 仅显示前 %{count}/%{total} 个
 transcript.scroll_to_bottom: 滚动到底部

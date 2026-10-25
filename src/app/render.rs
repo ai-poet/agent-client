@@ -555,13 +555,16 @@ impl Waku {
             .toast
             .as_ref()
             .map(|toast| (toast.message.clone(), toast.tone, toast.id));
-        toast.map(|(message, tone, generation)| {
-            self.render_toast(message, tone, generation, cx)
-                .into_any_element()
-        })
+        toast
+            .map(|(message, tone, generation)| {
+                self.render_toast(message, tone, generation, cx)
+                    .into_any_element()
+            })
+            // Fork: a dismissed toast fades out (toast_motion.rs).
+            .or_else(|| self.render_leaving_toast(cx))
     }
 
-    fn render_toast(
+    pub(super) fn render_toast(
         &self,
         message: String,
         tone: ToastTone,

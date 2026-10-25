@@ -303,3 +303,11 @@ opt-level = 2
 # is the crates.io release plus the future-incompatibility fix only.
 [patch.crates-io]
 block = { git = "https://github.com/Dicklesworthstone/rust-block", rev = "b39ae859d1ee8e8cb5eef6a516471f1578d26b96" }
+
+# Fork: GPUI comes from our fork, egoist/zed `waku-webview` plus zeronsh/zui
+# and wingleeio/zed renderer work (EdgeFade, rounded clip, idle frame
+# parking, ...). Upstream dependency lines above stay as they are; see
+# docs/gpui-fork.md for what is ported and how to re-sync.
+[patch."https://github.com/egoist/zed"]
+gpui = { path = "/Users/administrator/Desktop/Projects/agent-client-gpui/crates/gpui" }
+gpui_platform = { path = "/Users/administrator/Desktop/Projects/agent-client-gpui/crates/gpui_platform" }

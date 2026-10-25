@@ -323,7 +323,7 @@ impl Waku {
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.dismiss_confirm_dialog(window, cx)),
             )
-            .child(card);
+            .child(crate::ui::motion_kit::dialog_in("confirm-dialog-in", card));
         // Above every other modal: a confirmation is the last word.
         Some(gpui::deferred(layer).with_priority(5).into_any_element())
     }

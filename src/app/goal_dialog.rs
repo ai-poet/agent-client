@@ -527,7 +527,7 @@ impl Waku {
                 MouseButton::Left,
                 cx.listener(|waku, _, window, cx| waku.close_goal_dialog(window, cx)),
             )
-            .child(card);
+            .child(crate::ui::motion_kit::dialog_in("goal-dialog-in", card));
         Some(gpui::deferred(layer).with_priority(4).into_any_element())
     }
 }
