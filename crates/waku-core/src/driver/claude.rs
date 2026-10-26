@@ -339,7 +339,9 @@ impl ClaudeDriver {
                     plan_mode: reader_plan_mode,
                     ..ClaudeStreamState::default()
                 };
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                for line in
+                    super::support::read_lossy_lines(BufReader::new(stdout)).map_while(Result::ok)
+                {
                     if line.trim().is_empty() {
                         continue;
                     }

@@ -12,7 +12,7 @@
 //! document and event stream, not guessed.
 
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -332,7 +332,10 @@ impl OpenCodeDriver {
                                 &state.permissions,
                             );
                         }
-                        for line in BufReader::new(stream).lines().map_while(Result::ok) {
+                        for line in
+                            super::support::read_lossy_lines(BufReader::new(stream))
+                                .map_while(Result::ok)
+                        {
                             if stream_control.is_cancelled() {
                                 break;
                             }

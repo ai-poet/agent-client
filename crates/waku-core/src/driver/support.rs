@@ -4,6 +4,7 @@
 
 use std::ffi::OsString;
 use std::fs;
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, anyhow};
@@ -523,6 +524,40 @@ pub(super) fn classify_tool(name: &str) -> ActivityKind {
     ActivityKind::from_tool_name(name)
 }
 
+/// Reads a provider's output one line at a time from the raw bytes, decoding
+/// every line lossily.
+///
+/// `BufRead::lines` fails with `InvalidData` ("stream did not contain valid
+/// UTF-8") on a line that is not valid UTF-8, and a reader loop can only treat
+/// that error as the end of the stream. Providers write raw bytes — a command's
+/// output quoted into a JSON frame, a diagnostic printer, a Windows console code
+/// page — so one bad byte used to stop a provider from being read at all, in the
+/// middle of a turn and with nothing to recover it. Here those bytes become
+/// `U+FFFD`: a frame that no longer parses is reported as invalid JSON, which the
+/// loops already survive, and only a real I/O error ends the stream.
+pub(super) fn read_lossy_lines<R>(mut reader: R) -> impl Iterator<Item = std::io::Result<String>>
+where
+    R: BufRead,
+{
+    let mut buffer = Vec::new();
+    std::iter::from_fn(move || {
+        buffer.clear();
+        match reader.read_until(b'\n', &mut buffer) {
+            Ok(0) => None,
+            Ok(_) => {
+                if buffer.last() == Some(&b'\n') {
+                    buffer.pop();
+                    if buffer.last() == Some(&b'\r') {
+                        buffer.pop();
+                    }
+                }
+                Some(Ok(String::from_utf8_lossy(&buffer).into_owned()))
+            }
+            Err(error) => Some(Err(error)),
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -849,5 +884,31 @@ mod tests {
             provider_stderr_error(vec!["warning: optional integration unavailable".into()]),
             None
         );
+    }
+
+    /// Providers write raw bytes: one invalid line must not end their stream,
+    /// and the frames around it must still arrive.
+    #[test]
+    fn lossy_lines_survive_bytes_that_are_not_utf8() {
+        let input: &[u8] = b"{\"id\":1}\n\xff\xfe broken\n{\"id\":2}";
+        let lines = super::read_lossy_lines(std::io::Cursor::new(input))
+            .map(|line| line.expect("reading a cursor cannot fail"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], "{\"id\":1}");
+        assert!(lines[1].contains('\u{fffd}'));
+        assert_eq!(lines[2], "{\"id\":2}");
+    }
+
+    /// The same line endings `BufRead::lines` strips, so callers can simply
+    /// swap one for the other.
+    #[test]
+    fn lossy_lines_strip_windows_line_endings() {
+        let lines = super::read_lossy_lines(std::io::Cursor::new(b"one\r\ntwo\nthree\r"))
+            .map(|line| line.expect("reading a cursor cannot fail"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(lines, ["one", "two", "three\r"]);
     }
 }

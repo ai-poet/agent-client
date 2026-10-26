@@ -766,7 +766,9 @@ impl CodexDriver {
             .name("waku-codex-reader".into())
             .spawn(move || {
                 let mut stream_state = CodexStreamState::default();
-                for line in BufReader::new(stdout).lines() {
+                // Lossy per line: a frame carrying bytes that are not UTF-8
+                // must not end the reader for the rest of the session.
+                for line in super::support::read_lossy_lines(BufReader::new(stdout)) {
                     match line {
                         Ok(line) if !line.trim().is_empty() => {
                             match serde_json::from_str::<Value>(&line) {
@@ -1208,7 +1210,9 @@ fn generate_codex_title(binary: &Path, cwd: &Path, prompt: &str) -> anyhow::Resu
     let reader = thread::Builder::new()
         .name("waku-codex-title-reader".into())
         .spawn(move || {
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            for line in
+                super::support::read_lossy_lines(BufReader::new(stdout)).map_while(Result::ok)
+            {
                 if let Ok(value) = serde_json::from_str::<Value>(&line) {
                     let _ = messages.send(value);
                 }

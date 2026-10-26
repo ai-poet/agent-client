@@ -290,7 +290,9 @@ impl PiDriver {
                 .spawn(move || {
                     let mut stream_state = PiStreamState::default();
                     let mut chunks = ChunkAssembly::default();
-                    for line in BufReader::new(stdout).lines() {
+                    // Lossy per line: one frame with bytes that are not UTF-8
+                    // must not end the reader for the rest of the session.
+                    for line in super::support::read_lossy_lines(BufReader::new(stdout)) {
                         match line {
                             Ok(line) if !line.trim().is_empty() => {
                                 match serde_json::from_str::<Value>(&line) {
@@ -1149,7 +1151,9 @@ fn clone_ohmypi_session(
             .name("waku-ohmypi-clone".into())
             .spawn(move || {
                 let mut chunks = ChunkAssembly::default();
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                for line in
+                    super::support::read_lossy_lines(BufReader::new(stdout)).map_while(Result::ok)
+                {
                     let Ok(value) = serde_json::from_str::<Value>(&line) else {
                         continue;
                     };
