@@ -131,6 +131,28 @@ pub(super) fn accepts_keys(handle: &ContextMenuHandle) -> bool {
     state.open.is_some()
 }
 
+/// Blur follows the same wall-clock progress as the exit opacity. Backdrop
+/// blur does not inherit element opacity, so fading only the card would leave
+/// a sharp glass slab behind for the last few frames.
+pub(super) fn blur_scale(handle: &ContextMenuHandle) -> f32 {
+    let (open, closing) = {
+        let state = handle.state.borrow();
+        (state.open.is_some(), state.motion.closing)
+    };
+    blur_scale_for(open, closing)
+}
+
+fn blur_scale_for(open: bool, closing: Option<Closing>) -> f32 {
+    if open {
+        return 1.0;
+    }
+    closing.map_or(1.0, |closing| {
+        1.0 - MENU_OUT
+            .progress_after(closing.started.elapsed())
+            .unwrap_or(1.0)
+    })
+}
+
 /// The card, entering or leaving. `travel` is the entrance's signed starting
 /// offset; the exit retreats the same way.
 pub(super) fn animate(card: AnyElement, handle: &ContextMenuHandle, travel: f32) -> AnyElement {
@@ -442,6 +464,22 @@ mod motion_tests {
         assert!(!in_corridor(origin, point(px(110.0), px(160.0)), submenu()));
         // Past the submenu's near edge.
         assert!(!in_corridor(origin, point(px(260.0), px(120.0)), submenu()));
+    }
+
+    #[test]
+    fn the_blur_fades_with_the_exit_and_restores_on_reopen() {
+        let now = Instant::now();
+        let closing = Closing {
+            position: point(px(0.0), px(0.0)),
+            started: now,
+        };
+        assert_eq!(blur_scale_for(true, Some(closing)), 1.0);
+        assert_eq!(blur_scale_for(false, Some(closing)), 1.0);
+        let finished = Closing {
+            started: now - MENU_OUT.total(),
+            ..closing
+        };
+        assert_eq!(blur_scale_for(false, Some(finished)), 0.0);
     }
 
     #[test]

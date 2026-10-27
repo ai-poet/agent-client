@@ -2096,7 +2096,7 @@ impl Waku {
                 .h(px(card_height))
                 .overflow_hidden()
                 .rounded(px(15.0))
-                .bg(theme.raised)
+                .bg(crate::ui::frost::background(&theme))
                 .shadow_xl()
                 .relative()
                 .flex()
@@ -2142,7 +2142,10 @@ impl Waku {
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.close_command_palette(window, cx)),
             )
-            .child(crate::ui::motion_kit::dialog_in("command-palette-in", card));
+            .child(crate::ui::motion_kit::dialog_in(
+                "command-palette-in",
+                crate::ui::frost::frosted(15.0, crate::ui::frost::MENU_BLUR, card),
+            ));
         Some(gpui::deferred(layer).with_priority(3).into_any_element())
     }
 }

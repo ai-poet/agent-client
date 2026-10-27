@@ -83,7 +83,7 @@ pub fn init(cx: &mut App) {
 }
 
 use crate::theme::{Theme, sp};
-use crate::ui::icon;
+use crate::ui::{frost, icon};
 
 /// One row of a menu.
 pub enum MenuItem {
@@ -966,6 +966,7 @@ struct MenuCard {
 impl RenderOnce for MenuCard {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::current(cx);
+        let blur = frost::MENU_BLUR * menu_motion::blur_scale(&self.handle);
         let items = (self.items)(cx);
         let focusable = focusable_indexes(&items);
         let (highlighted, active_submenu, submenu_highlighted) = {
@@ -991,7 +992,7 @@ impl RenderOnce for MenuCard {
             .rounded(px(9.0))
             .border_1()
             .border_color(theme.border_strong)
-            .bg(theme.raised)
+            .bg(frost::background(&theme))
             .shadow_lg()
             .flex()
             .flex_col();
@@ -1035,7 +1036,7 @@ impl RenderOnce for MenuCard {
                 }
             })
             .child(menu_motion::outside_press_guard(&self.handle))
-            .child(root_card);
+            .child(frost::frosted(9.0, blur, root_card));
 
         if let Some((parent_index, submenu_items)) = submenu {
             let mut submenu_card = div()
@@ -1047,7 +1048,7 @@ impl RenderOnce for MenuCard {
                 .rounded(px(9.0))
                 .border_1()
                 .border_color(theme.border_strong)
-                .bg(theme.raised)
+                .bg(frost::background(&theme))
                 .shadow_lg()
                 .flex()
                 .flex_col()
@@ -1065,7 +1066,7 @@ impl RenderOnce for MenuCard {
                     cx,
                 ));
             }
-            surface = surface.child(submenu_card);
+            surface = surface.child(frost::frosted(9.0, blur, submenu_card));
         }
         surface
     }

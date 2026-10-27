@@ -1,19 +1,18 @@
 //! Direct entries for the right panel's surfaces.
 //!
-//! Fork addition. Upstream reaches Terminal, Files, Browser and Review only
-//! through the right panel itself: open it (a small toggle, ⇧⌘B, the View
-//! menu or the palette), then pick one of four cards or the "+" menu in its
-//! header. This puts the four surfaces in the window header as always-visible
-//! buttons — one click opens, switches to, or puts away each one — and gives
-//! them a shortcut, a View-menu item and a palette command apiece.
+//! Fork addition. Terminal, Files and Review stay one click away in the window
+//! header; lower-frequency surfaces share its More menu. Every surface is also
+//! available in the right panel's "+" menu, and each pinned surface keeps its
+//! shortcut, View-menu item and palette command.
 //!
-//! The panel is untouched: every button ends in `open_right_panel_surface`
+//! The panel is untouched: every entry ends in `open_right_panel_surface`
 //! or `set_right_panel_visible`, the same calls the panel's own chrome makes,
 //! and a second terminal or browser still comes from the panel's "+" menu.
 
 use gpui::{Action, KeyBinding, MenuItem};
 
 use crate::ui::ActivationExt as _;
+use crate::ui::menu::{MenuAlign, MenuItem as UiMenuItem, dropdown_menu};
 
 use super::*;
 
@@ -27,8 +26,10 @@ pub enum SurfaceKind {
 }
 
 impl SurfaceKind {
-    /// Header order.
+    /// Every surface with a direct action.
     pub const ALL: [SurfaceKind; 4] = [Self::Terminal, Self::Files, Self::Browser, Self::Review];
+    /// The entries kept visible in the window header.
+    const PINNED: [SurfaceKind; 3] = [Self::Terminal, Self::Files, Self::Review];
 
     fn element_id(self) -> &'static str {
         match self {
@@ -182,6 +183,27 @@ pub(crate) fn surface_menu_items() -> Vec<MenuItem> {
         .collect()
 }
 
+/// A More-menu row that opens a surface, or hides it when already in front.
+fn more_surface_item(
+    weak: &WeakEntity<Waku>,
+    surface: RightPanelSurface,
+    shown: bool,
+    open: fn(&mut Waku, &mut Context<Waku>),
+) -> UiMenuItem {
+    let weak = weak.clone();
+    UiMenuItem::new(surface.label(), move |_, cx| {
+        let _ = weak.update(cx, |this, cx| {
+            if shown {
+                this.set_right_panel_visible(false, cx);
+            } else {
+                open(this, cx);
+            }
+        });
+    })
+    .icon(surface.icon_path())
+    .selected(shown)
+}
+
 impl Waku {
     /// Open, switch to, or put away the surface behind a button.
     pub(super) fn activate_surface_kind(&mut self, kind: SurfaceKind, cx: &mut Context<Self>) {
@@ -228,7 +250,7 @@ impl Waku {
         self.activate_surface_kind(action.kind, cx);
     }
 
-    /// The four buttons for the window header.
+    /// The pinned surface buttons and the lower-frequency More menu.
     pub(super) fn render_surface_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
         div()
@@ -239,10 +261,8 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(2.0))
-            // Fork: show or hide the session rail (session_rail.rs).
-            .children(self.render_session_rail_button(theme, cx))
             .children(
-                SurfaceKind::ALL
+                SurfaceKind::PINNED
                     .into_iter()
                     .map(|kind| self.render_surface_button(kind, theme, cx)),
             )
@@ -250,64 +270,87 @@ impl Waku {
             .children(self.render_team_surface_button(theme, cx))
             // The Plan surface, once the session has submitted a plan.
             .children(self.render_plan_surface_button(theme, cx))
-            // Fork: the side chat, for any task, and the built-in agent's
-            // trajectory — each one click away rather than behind "+".
-            .children(self.render_side_chat_surface_button(theme, cx))
-            .children(self.render_trajectory_surface_button(theme, cx))
+            .child(self.render_surface_more_menu(theme, cx))
     }
 
-    /// A header button for a surface outside the four: in the accent colour
-    /// while it is the panel in front, where a click puts the panel away;
-    /// otherwise a click opens it. The tooltip says what it is for.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn render_extra_surface_button(
-        &self,
-        id: &'static str,
-        surface: RightPanelSurface,
-        icon_path: &'static str,
-        tooltip_open: String,
-        tooltip_hide: String,
-        theme: Theme,
-        cx: &mut Context<Self>,
-        open: fn(&mut Waku, &mut Context<Waku>),
-    ) -> Stateful<Div> {
-        let shown = self.right_panel_visible && self.active_right_panel_surface() == Some(&surface);
-        let tooltip: SharedString = if shown { tooltip_hide } else { tooltip_open }.into();
-        div()
-            .id(id)
-            .tab_index(0)
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .w(px(26.0))
-            .h(px(26.0))
-            .flex_none()
-            .rounded(px(6.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .when(shown, |element| element.bg(theme.overlay))
-            .hover(|element| element.bg(theme.overlay))
-            .active(|element| element.bg(theme.overlay_strong))
-            .child(icon(
-                icon_path,
-                14.0,
-                if shown {
-                    theme.accent
-                } else {
-                    theme.text_tertiary
-                },
-            ))
-            .tooltip(Tooltip::text(tooltip))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                cx.stop_propagation();
-            })
-            .on_activation(cx, move |this, _, cx| {
-                if shown {
-                    this.set_right_panel_visible(false, cx);
-                } else {
-                    open(this, cx);
+    /// Browser, session details, side chat and trajectory, without spending a
+    /// permanent header button on each one.
+    fn render_surface_more_menu(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let menu_handle = self.menu_handle("surface-bar-more", cx);
+        let menu_open = menu_handle.is_open();
+        let weak = cx.entity().downgrade();
+        let has_session = self.selected_session().is_some();
+        let session_rail_shown = self.session_rail_on_screen();
+        let trajectory_available = self
+            .state
+            .selected_session
+            .is_some_and(|session_id| self.trajectory_capable(session_id));
+        let browser = SurfaceKind::Browser.new_surface();
+        let browser_shown = self.right_panel_visible
+            && self
+                .active_right_panel_surface()
+                .is_some_and(|surface| matches!(surface, RightPanelSurface::Browser(_)));
+        let side_chat_shown = self.right_panel_visible
+            && self.active_right_panel_surface() == Some(&RightPanelSurface::SideChat);
+        let trajectory_shown = self.right_panel_visible
+            && self.active_right_panel_surface() == Some(&RightPanelSurface::Trajectory);
+
+        dropdown_menu(
+            div()
+                .id("surface-bar-more-trigger")
+                .w(px(26.0))
+                .h(px(26.0))
+                .flex_none()
+                .rounded(px(6.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_default()
+                .when(menu_open, |element| element.bg(theme.overlay))
+                .hover(|element| element.bg(theme.overlay))
+                .active(|element| element.bg(theme.overlay_strong))
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .child(icon("icons/ellipsis.svg", 14.0, theme.text_tertiary))
+                .tooltip(Tooltip::text(tr!("surface_bar.more"))),
+            "surface-bar-more-menu",
+            &menu_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                let mut items = vec![more_surface_item(
+                    &weak,
+                    browser.clone(),
+                    browser_shown,
+                    |this, cx| this.activate_surface_kind(SurfaceKind::Browser, cx),
+                )];
+                if has_session {
+                    let session_weak = weak.clone();
+                    items.push(
+                        UiMenuItem::new(tr!("session_rail.surface"), move |_, cx| {
+                            let _ = session_weak.update(cx, |this, cx| {
+                                this.toggle_session_rail(cx);
+                            });
+                        })
+                        .icon("icons/panel-right.svg")
+                        .selected(session_rail_shown),
+                    );
+                    items.push(more_surface_item(
+                        &weak,
+                        RightPanelSurface::SideChat,
+                        side_chat_shown,
+                        |this, cx| this.open_side_chat(cx),
+                    ));
                 }
-            })
+                if trajectory_available {
+                    items.push(more_surface_item(
+                        &weak,
+                        RightPanelSurface::Trajectory,
+                        trajectory_shown,
+                        |this, cx| this.open_trajectory(cx),
+                    ));
+                }
+                items
+            },
+        )
     }
 
     fn render_surface_button(
@@ -391,6 +434,19 @@ mod tests {
 
     fn browser() -> RightPanelSurface {
         RightPanelSurface::Browser(Uuid::new_v4())
+    }
+
+    #[test]
+    fn only_high_frequency_surfaces_are_pinned_in_the_header() {
+        assert_eq!(
+            SurfaceKind::PINNED,
+            [
+                SurfaceKind::Terminal,
+                SurfaceKind::Files,
+                SurfaceKind::Review,
+            ]
+        );
+        assert!(!SurfaceKind::PINNED.contains(&SurfaceKind::Browser));
     }
 
     #[test]

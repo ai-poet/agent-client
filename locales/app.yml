@@ -942,6 +942,8 @@ session_rail.show:
   en: "Show session details"
 session_rail.hide:
   en: "Hide session details"
+session_rail.surface:
+  en: "Session details"
 session_rail.environment:
   en: "Environment"
 session_rail.this_computer:
@@ -3760,6 +3762,8 @@ surface_bar.switch:
   en: "Switch to %{surface} (%{shortcut})"
 surface_bar.hide:
   en: "Hide %{surface} (%{shortcut})"
+surface_bar.more:
+  en: "More surfaces"
 command_palette.open_surface:
   en: "Open %{surface}"
 cli_setup.candidate_placeholder:

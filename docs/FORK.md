@@ -293,6 +293,7 @@ lines below.
 | `src/app/render.rs` (session rail) | the rail's width each frame, `chat_viewport_width` minus it; under the header the column is a row — the task, then the rail — so the header spans both (the right panel, a sibling of the whole column, covers the rail) | ~20 |
 | `src/app/transcript.rs`, `src/app/transcript_view.rs`, `src/app/streaming.rs` (session rail) | `TranscriptRowKind::TodoList`: a transcript row right above the working row while a turn runs and the session has todos (`shows_todo_row`), so it sits at the bottom while the view follows the tail and scrolls away with the conversation; mixed into the row fingerprint, inserted in `selected_transcript_row_kinds`, rendered by `render_todo_row`, remeasured by `remeasure_transcript_todos`; a no-op arm in each row-kind match; `adopt_settled_todos` splices the row out when the agent empties its list mid-turn | ~35 |
 | `src/app/status_capsule.rs` | stands down while the session rail is on screen | 4 |
+| `src/ui/{menu,menu_motion}.rs`, `src/app/{command_palette,status_capsule}.rs` (floating glass) | menus, the command palette and the status capsule share `ui::frost`; menu blur follows the exit progress so no glass slab outlives the fade | ~20 |
 | `src/app/background_work.rs` | `session_background_work` (live and finished items, for the rail) | 8 |
 | new `crates/waku-agent/query/src/e2e_tests.rs`, `lib.rs` (`mod e2e_tests`) | test-only: the loop end to end — a scripted provider, `claurst_tools::all_tools()` against a temporary workspace, files read back after the run (write then edit, read before edit, the repeat reminder) | test |
 
@@ -325,6 +326,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `crates/waku-core/src/driver/memory_titles.rs`, `src/app/agent_memory_settings.rs`,
 `docs/auto-memory.md`,
 `src/app/error_banner.rs`, `src/app/turn_undo.rs`, `src/app/status_capsule.rs`,
+`src/ui/frost.rs`,
 `src/app/permission_card.rs`, `src/app/shortcuts.rs`,
 `src/app/image_studio.rs`, `src/app/image_studio_view.rs`, `assets/icons/image.svg`,
 `src/app/model_status.rs`, `src/app/model_status_view.rs`, `src/app/model_retry.rs`,

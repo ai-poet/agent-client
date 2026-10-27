@@ -322,7 +322,7 @@ fn read_trajectory(
 }
 
 impl Waku {
-    fn trajectory_capable(&self, session_id: Uuid) -> bool {
+    pub(super) fn trajectory_capable(&self, session_id: Uuid) -> bool {
         self.state
             .sessions
             .iter()
@@ -422,29 +422,6 @@ impl Waku {
             });
         })
         .detach();
-    }
-
-    /// The header button: the trajectory one click away, for a built-in
-    /// agent task (no other provider records one).
-    pub(super) fn render_trajectory_surface_button(
-        &self,
-        theme: Theme,
-        cx: &mut Context<Self>,
-    ) -> Option<Stateful<Div>> {
-        let session_id = self.state.selected_session?;
-        if !self.trajectory_capable(session_id) {
-            return None;
-        }
-        Some(self.render_extra_surface_button(
-            "surface-bar-trajectory",
-            RightPanelSurface::Trajectory,
-            "icons/chart-column.svg",
-            tr!("trajectory.button_open"),
-            tr!("trajectory.button_hide"),
-            theme,
-            cx,
-            |this, cx| this.open_trajectory(cx),
-        ))
     }
 
     pub(super) fn open_trajectory(&mut self, cx: &mut Context<Self>) {

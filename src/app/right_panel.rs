@@ -914,7 +914,7 @@ impl RightPanelSurface {
         }
     }
 
-    fn label(&self) -> String {
+    pub(super) fn label(&self) -> String {
         match self {
             Self::Browser(_) => tr!("right_panel.browser"),
             Self::Terminal(_) => tr!("right_panel.terminal"),
@@ -940,7 +940,7 @@ impl RightPanelSurface {
         }
     }
 
-    fn icon_path(&self) -> &'static str {
+    pub(super) fn icon_path(&self) -> &'static str {
         match self {
             Self::Browser(_) => "icons/globe.svg",
             Self::Terminal(_) => "icons/terminal.svg",

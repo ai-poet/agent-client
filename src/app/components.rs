@@ -20,35 +20,62 @@ pub(super) fn pulse_dot(size: f32, color: Hsla) -> AnyElement {
     .into_any_element()
 }
 
-/// Three dots chasing a brightness wave, the transcript's "still working"
-/// signal. Each dot rides the shared pulse clock with a phase offset, so the
-/// bright spot travels left to right. Under reduce-motion the clock holds the
-/// cycle's first frame — the lead dot bright, the tail dim — which reads as a
-/// static ellipsis.
-pub(super) fn working_wave_dots(color: Hsla) -> AnyElement {
-    const DOT_PHASE_STEP: f32 = 0.18;
-    motion::pulse(Duration::from_millis(1400), move |phase| {
+/// A small fixed-cell activity wave for the transcript's working row. The
+/// upward phase follows Zeron's gradient spinner (MIT); opacity is the only
+/// animated property, so neither the row nor its neighbors ever re-layout.
+pub(super) fn working_activity_cells(color: Hsla) -> AnyElement {
+    motion::pulse(Duration::from_millis(1200), move |phase| {
         div()
             .flex()
-            .items_center()
-            .gap(px(3.5))
-            .children((0..3).map(|index| {
-                let dot_phase = (phase + 1.0 - index as f32 * DOT_PHASE_STEP) % 1.0;
-                let wave = ((dot_phase * std::f32::consts::TAU).sin() + 1.0) / 2.0;
+            .flex_col()
+            .gap(px(1.5))
+            .children((0..3).map(move |row| {
                 div()
-                    .size(px(4.5))
-                    .flex_none()
-                    .rounded_full()
-                    .bg(color)
-                    .opacity(0.25 + 0.75 * wave)
+                    .flex()
+                    .items_center()
+                    .gap(px(1.5))
+                    .children((0..3).map(move |col| {
+                        div()
+                            .size(px(2.0))
+                            .flex_none()
+                            .rounded_full()
+                            .bg(color)
+                            .opacity(working_cell_opacity(phase, row, col))
+                    }))
             }))
             .into_any_element()
     })
-    // Mounted for the whole turn: this is what sets the transcript pane's
-    // tick floor, and every tick rebuilds each visible row. The 1400 ms wave
-    // reads identically at half cadence.
+    // A whole-turn loader shares the transcript's slow pulse cadence.
     .every(2)
     .into_any_element()
+}
+
+fn working_cell_opacity(phase: f32, row: usize, col: usize) -> f32 {
+    let distance = (2 - row) + col.abs_diff(1);
+    let phase = (phase + distance as f32 / 5.0).fract();
+    let wave = ((phase * std::f32::consts::TAU).sin() + 1.0) / 2.0;
+    0.18 + 0.52 * wave
+}
+
+#[cfg(test)]
+mod working_cell_tests {
+    use super::*;
+
+    #[test]
+    fn the_activity_wave_stays_subtle_and_converges_upward() {
+        assert!(
+            working_cell_opacity(0.0, 2, 1) > working_cell_opacity(0.0, 0, 1),
+            "the bottom center leads the top center"
+        );
+        for row in 0..3 {
+            for col in 0..3 {
+                for step in 0..20 {
+                    let opacity = working_cell_opacity(step as f32 / 20.0, row, col);
+                    assert!((0.18..=0.70).contains(&opacity));
+                }
+            }
+        }
+    }
 }
 
 pub(super) fn format_message_time(created_at: u64) -> String {

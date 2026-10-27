@@ -170,49 +170,17 @@ impl Waku {
         self.session_rail.rendered_width > 0.0
     }
 
-    /// The header button: show or hide the rail. With the right panel in
+    /// The More-menu entry: show or hide the rail. With the right panel in
     /// front, it puts the panel away and shows the rail.
-    pub(super) fn render_session_rail_button(&self, theme: Theme, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
-        self.selected_session()?;
+    pub(super) fn toggle_session_rail(&mut self, cx: &mut Context<Self>) {
         let shown = self.session_rail_on_screen();
-        let tooltip: SharedString = if shown {
-            tr!("session_rail.hide")
+        if self.right_panel_visible {
+            self.set_right_panel_visible(false, cx);
+            self.session_rail.enabled = true;
         } else {
-            tr!("session_rail.show")
+            self.session_rail.enabled = !shown;
         }
-        .into();
-        Some(
-            div()
-                .id("surface-bar-session-rail")
-                .tab_index(0)
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
-                .w(px(26.0))
-                .h(px(26.0))
-                .flex_none()
-                .rounded(px(6.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_default()
-                .when(shown, |element| element.bg(theme.overlay))
-                .hover(|element| element.bg(theme.overlay))
-                .child(icon(
-                    "icons/panel-right.svg",
-                    14.0,
-                    if shown { theme.accent } else { theme.text_tertiary },
-                ))
-                .tooltip(Tooltip::text(tooltip))
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_activation(cx, move |this, _, cx| {
-                    if this.right_panel_visible {
-                        this.set_right_panel_visible(false, cx);
-                        this.session_rail.enabled = true;
-                    } else {
-                        this.session_rail.enabled = !shown;
-                    }
-                    cx.notify();
-                }),
-        )
+        cx.notify();
     }
 
     /// Read the working tree's changes again when the task moved since the

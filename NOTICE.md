@@ -140,6 +140,7 @@ This fork remains licensed under GPL-3.0-only.
 | 2026-10-22 | Curated Codex catalog (waku-core and waku-protocol): `gpt-5.5` and `gpt-5.4`, retired on the gateway, are dropped; the list is `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-5.6-sol` (default) and `gpt-5.6-terra`. The fingerprint check's verdict labels for those models (`crates/sub2api/src/group_status.rs`) stay, since a group can still be caught serving one. |
 | 2026-10-22 | Built-in agent failures, after DeepSeek Harness's `LlmFailure` (`packages/llm/llm/src/error.ts`), its request-id capture (`llm-deepseek/src/transport.ts`) and its retry row and `displayFailure` (`client/ui-chat`) — behaviour only, no code or text taken: a turn that gives up reports its failure structured (`QueryEvent::RequestFailed`: class, reason, status, the provider's code, the response's request id), the bridge names it from that instead of from the error's text (`crates/waku-agent-bridge/src/failure.rs`), failure messages are scrubbed of keys and a refused key's provider text is never shown, the message ends with a "Request ID" line, the working row says why it retries and switches to "Sending again" once the wait is over, the error banner offers the action the failure's kind calls for (Compact context, Model providers / Account settings) over the additive `turnFailure` wire event, sub-agents' retries show in their record, and the trajectory keeps retry causes, the final failure and goal resumes. An `insufficient_quota` 429 is no longer retried. Model or provider failover is left out, as in dsh. |
 | 2026-10-22 | Gemini gets a group slot of its own on Settings → Cloud Account (`GEMINI_LANE`, `Credentials::gemini_group_id`, `crates/sub2api/src/{auth,lib,model_routing}.rs`, `src/app/cloud_groups.rs`). A Gemini group used to be bound to the general key, which every other platform shares, so once that slot held anything the Gemini lane never got a group or a key. The lane now binds to the first Gemini group — or to a Gemini group the general slot already held — reusing the account's key there or minting one; a pick stays until its group is gone. Routing sends Gemini models through that group even when it lists nothing, the key survives route refreshes, the first Gemini turn after sign-in waits for its route like the Chinese models' (`native_route_need`), and a held Gemini plan can be pointed at the lane. |
+| 2026-10-27 | Floating surfaces use Zeron-derived frosted glass (`src/ui/frost.rs`, MIT notice below): menus and submenus fade their backdrop blur out with the exit, while the command palette and status capsule use the same translucent treatment. The Agent working row now uses a quiet fixed-cell activity wave (`src/app/components.rs`) and static subdued status text instead of shimmering the whole line; stream commits and the Markdown veil are unchanged. |
 
 ## Upstream attribution
 
@@ -160,6 +161,35 @@ kuberwastaken and contributors, licensed GPL-3.0:
 alongside the vendored sources; the modifications listed above are this fork's.
 
 ## Third-party notices
+
+The floating-surface wrapper (`src/ui/frost.rs`), the shared motion helpers,
+and the working-cell phase pattern (`src/app/components.rs`) are derived from
+Zeron (<https://github.com/zeronsh/zeron>), by Wing and contributors. Zeron's
+MIT licence is preserved below:
+
+```text
+MIT License
+
+Copyright (c) 2026 Wing
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 The Effort slider card (`src/app/effort_panel.rs`, `src/app/effort_scale.rs`,
 `src/app/effort_fire.rs`) is derived from dsh-effort-slider

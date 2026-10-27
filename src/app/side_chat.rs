@@ -110,26 +110,6 @@ impl Waku {
         cx.notify();
     }
 
-    /// The header button: the side chat one click away, for any task.
-    pub(super) fn render_side_chat_surface_button(
-        &self,
-        theme: Theme,
-        cx: &mut Context<Self>,
-    ) -> Option<Stateful<Div>> {
-        self.state.selected_session?;
-        let shortcut = crate::platform::primary_shortcut("⌘;", "Ctrl+;");
-        Some(self.render_extra_surface_button(
-            "surface-bar-side-chat",
-            RightPanelSurface::SideChat,
-            "icons/corner-down-right.svg",
-            tr!("side_chat.button_open", shortcut = shortcut),
-            tr!("side_chat.button_hide", shortcut = shortcut),
-            theme,
-            cx,
-            |this, cx| this.open_side_chat(cx),
-        ))
-    }
-
     pub(super) fn open_side_chat(&mut self, cx: &mut Context<Self>) {
         self.settings_page = None;
         self.open_right_panel_surface(RightPanelSurface::SideChat, cx);

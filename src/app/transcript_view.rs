@@ -1890,10 +1890,15 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(8.0))
-            .child(working_wave_dots(theme.text_tertiary))
-            .child(div().text_size(sp(13.5)).line_height(sp(18.0)).child(
-                motion::shimmer(label, theme.text_tertiary, theme.text).weight(FontWeight::MEDIUM),
-            ))
+            .child(working_activity_cells(theme.accent))
+            .child(
+                div()
+                    .text_size(sp(13.5))
+                    .line_height(sp(18.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_tertiary)
+                    .child(label),
+            )
             .into_any_element()
     }
 

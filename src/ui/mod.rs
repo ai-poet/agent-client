@@ -6,6 +6,8 @@ use gpui::{
 };
 
 pub mod menu;
+// Fork: shared backdrop-blurred floating surfaces.
+pub mod frost;
 pub mod motion;
 // Fork: named curves, durations and entrance/exit helpers.
 pub mod motion_kit;

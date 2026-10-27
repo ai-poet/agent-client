@@ -62,7 +62,7 @@ impl Waku {
             .rounded_full()
             .border_1()
             .border_color(theme.border_strong)
-            .bg(theme.raised)
+            .bg(crate::ui::frost::background(&theme))
             .shadow_md()
             .flex()
             .items_center()
@@ -95,7 +95,11 @@ impl Waku {
             .flex_col()
             .items_end()
             .gap(px(6.0))
-            .child(pill);
+            .child(crate::ui::frost::frosted(
+                14.0,
+                crate::ui::frost::MENU_BLUR,
+                pill,
+            ));
         if open {
             root = root.child(self.render_status_panel(session, &theme, cx));
         }
@@ -137,7 +141,7 @@ impl Waku {
             .rounded(px(12.0))
             .border_1()
             .border_color(theme.border_strong)
-            .bg(theme.raised)
+            .bg(crate::ui::frost::background(theme))
             .shadow_lg()
             .p(px(12.0))
             .flex()
@@ -317,6 +321,6 @@ impl Waku {
                     ),
             );
         }
-        panel.into_any_element()
+        crate::ui::frost::frosted(12.0, crate::ui::frost::MENU_BLUR, panel).into_any_element()
     }
 }
