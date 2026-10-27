@@ -323,6 +323,8 @@ impl ClaudeDriver {
         let pending_task_stops = Arc::new(Mutex::new(HashMap::<String, BackgroundWorkKey>::new()));
         let pending_user_inputs = Arc::new(Mutex::new(HashMap::<String, Value>::new()));
 
+        let (readers_done, readers_done_rx) = unbounded();
+        let reader_done = readers_done.clone();
         let reader_events = events.clone();
         let reader_commands = commands.clone();
         let reader_turn = turn_active.clone();
@@ -333,6 +335,7 @@ impl ClaudeDriver {
         let reader_thread = thread::Builder::new()
             .name("waku-claude-reader".into())
             .spawn(move || {
+                let _reader_done = reader_done;
                 let mut state = ClaudeStreamState {
                     pending_task_stops: reader_pending_task_stops,
                     pending_user_inputs: reader_pending_user_inputs,
@@ -574,9 +577,11 @@ impl ClaudeDriver {
         let last_visible_stderr = Arc::new(Mutex::new(None::<String>));
         let stderr_last_error = last_visible_stderr.clone();
         let stderr_events = events.clone();
+        let stderr_done = readers_done.clone();
         let stderr_thread = thread::Builder::new()
             .name("waku-claude-stderr".into())
             .spawn(move || {
+                let _stderr_done = stderr_done;
                 let lines = BufReader::new(stderr)
                     .lines()
                     .map_while(Result::ok)
@@ -589,23 +594,32 @@ impl ClaudeDriver {
                 }
             })?;
 
+        drop(readers_done);
         thread::Builder::new()
             .name("waku-claude-process".into())
             .spawn(move || {
                 let status = child.wait();
-                let _ = reader_thread.join();
-                let _ = stderr_thread.join();
-                if let Ok(status) = status
-                    && !status.success()
-                    && last_visible_stderr.lock().is_none()
-                {
-                    let _ = events.send(DriverEvent::Error(tr!(
-                        "errors.provider_exited",
-                        provider = "Claude Code",
-                        status = status
-                    )));
-                }
-                let _ = events.send(DriverEvent::ProcessExited);
+                super::support::finish_process_exit(
+                    &events,
+                    &readers_done_rx,
+                    reader_thread,
+                    stderr_thread,
+                    super::support::PROCESS_EXIT_DRAIN_GRACE,
+                    || {
+                        if let Ok(status) = status
+                            && !status.success()
+                            && last_visible_stderr.lock().is_none()
+                        {
+                            Some(DriverEvent::Error(tr!(
+                                "errors.provider_exited",
+                                provider = "Claude Code",
+                                status = status
+                            )))
+                        } else {
+                            None
+                        }
+                    },
+                );
             })?;
 
         Ok(Self {

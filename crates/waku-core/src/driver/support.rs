@@ -6,14 +6,17 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use anyhow::{Context as _, anyhow};
+use crossbeam_channel::{Receiver, RecvTimeoutError};
 use serde_json::Value;
 
 use super::computer_use as computer_use_runtime;
 use crate::driver::DriverEventSender;
 use crate::fs_ext;
-use crate::model::{ActivityKind, ProviderKind};
+use crate::model::{ActivityKind, DriverEvent, ProviderKind};
 
 /// The context-window occupancy of one API call from a Claude-wire `usage`
 /// object (Claude Code and Amp share the format): prompt (fresh + cached) plus
@@ -524,6 +527,44 @@ pub(super) fn classify_tool(name: &str) -> ActivityKind {
     ActivityKind::from_tool_name(name)
 }
 
+/// How long a dead provider's readers may drain their final output before the
+/// UI is told the process exited. A grandchild can inherit stdout/stderr and
+/// keep both pipes open forever; that must not strand a running turn.
+pub(super) const PROCESS_EXIT_DRAIN_GRACE: Duration = Duration::from_millis(500);
+
+/// Finish a provider process after `wait` returns. The readers each hold one
+/// sender on `readers_done`; once both guards drop, their queued events are
+/// already ahead of the exit event. If a descendant keeps a pipe open, detach
+/// the readers after `grace` rather than joining them forever.
+///
+/// `error` is evaluated after the drain so stderr's more specific message wins
+/// on the normal path. Returns whether both readers finished in time.
+pub(super) fn finish_process_exit(
+    events: &DriverEventSender,
+    readers_done: &Receiver<()>,
+    reader_thread: JoinHandle<()>,
+    stderr_thread: JoinHandle<()>,
+    grace: Duration,
+    error: impl FnOnce() -> Option<DriverEvent>,
+) -> bool {
+    let drained = matches!(
+        readers_done.recv_timeout(grace),
+        Err(RecvTimeoutError::Disconnected)
+    );
+    if drained {
+        let _ = reader_thread.join();
+        let _ = stderr_thread.join();
+    } else {
+        drop(reader_thread);
+        drop(stderr_thread);
+    }
+    if let Some(error) = error() {
+        let _ = events.send(error);
+    }
+    let _ = events.send(DriverEvent::ProcessExited);
+    drained
+}
+
 /// Reads a provider's output one line at a time from the raw bytes, decoding
 /// every line lossily.
 ///
@@ -560,6 +601,117 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+    use std::time::Duration;
+
+    use crossbeam_channel::unbounded;
+
+    use crate::model::DriverEvent;
+
+    #[test]
+    fn process_exit_drains_final_events_before_exiting() {
+        let (events, received) = crate::driver::test_event_channel();
+        let (readers_done, done) = unbounded();
+        let reader_done = readers_done.clone();
+        let reader_events = events.clone();
+        let reader = thread::spawn(move || {
+            let _reader_done = reader_done;
+            reader_events
+                .send(DriverEvent::TurnFinished {
+                    success: true,
+                    summary: None,
+                })
+                .expect("final event");
+        });
+        let stderr_done = readers_done.clone();
+        let stderr = thread::spawn(move || {
+            let _stderr_done = stderr_done;
+        });
+        drop(readers_done);
+
+        assert!(super::finish_process_exit(
+            &events,
+            &done,
+            reader,
+            stderr,
+            Duration::from_secs(1),
+            || None,
+        ));
+        assert!(matches!(
+            received.recv(),
+            Ok(DriverEvent::TurnFinished { success: true, .. })
+        ));
+        assert!(matches!(received.recv(), Ok(DriverEvent::ProcessExited)));
+        assert!(received.is_empty());
+    }
+
+    #[test]
+    fn process_exit_reports_an_error_before_one_exit_event() {
+        let (events, received) = crate::driver::test_event_channel();
+        let (readers_done, done) = unbounded();
+        let reader_done = readers_done.clone();
+        let reader = thread::spawn(move || {
+            let _reader_done = reader_done;
+        });
+        let stderr_done = readers_done.clone();
+        let stderr = thread::spawn(move || {
+            let _stderr_done = stderr_done;
+        });
+        drop(readers_done);
+
+        assert!(super::finish_process_exit(
+            &events,
+            &done,
+            reader,
+            stderr,
+            Duration::from_secs(1),
+            || Some(DriverEvent::Error("boom".to_owned())),
+        ));
+        assert!(matches!(
+            received.recv(),
+            Ok(DriverEvent::Error(error)) if error == "boom"
+        ));
+        assert!(matches!(received.recv(), Ok(DriverEvent::ProcessExited)));
+        assert!(received.is_empty());
+    }
+
+    #[test]
+    fn process_exit_cannot_be_blocked_by_a_reader_that_never_reaches_eof() {
+        let (events, received) = crate::driver::test_event_channel();
+        let (readers_done, done) = unbounded();
+        let (release, released) = unbounded();
+        let reader_done = readers_done.clone();
+        let reader_events = events.clone();
+        let reader = thread::spawn(move || {
+            let _reader_done = reader_done;
+            released.recv().expect("release reader");
+            reader_events
+                .send(DriverEvent::Error("late reader".to_owned()))
+                .expect("late event");
+        });
+        let stderr_done = readers_done.clone();
+        let stderr = thread::spawn(move || {
+            let _stderr_done = stderr_done;
+        });
+        drop(readers_done);
+
+        assert!(!super::finish_process_exit(
+            &events,
+            &done,
+            reader,
+            stderr,
+            Duration::from_millis(20),
+            || None,
+        ));
+        assert!(matches!(received.recv(), Ok(DriverEvent::ProcessExited)));
+
+        release.send(()).expect("unblock reader");
+        assert!(matches!(
+            received.recv(),
+            Ok(DriverEvent::Error(error)) if error == "late reader"
+        ));
+        assert!(received.is_empty());
+    }
 
     /// Every driver runs its Computer Use setup through this, so a setup
     /// that fails — no helper installed, most often — leaves the session

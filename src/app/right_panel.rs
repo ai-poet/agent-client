@@ -29,7 +29,7 @@ pub(super) struct WorkingTreeEntry {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum TranscriptLinkRoute {
     ProjectFile(String),
-    Finder(PathBuf),
+    LocalFile(PathBuf),
     External,
 }
 
@@ -104,6 +104,14 @@ fn percent_decode_file_path(path: &str) -> String {
     String::from_utf8(decoded).unwrap_or_else(|_| path.to_owned())
 }
 
+fn has_windows_absolute_prefix(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    matches!(
+        bytes,
+        [drive, b':', b'/' | b'\\', ..] if drive.is_ascii_alphabetic()
+    ) || path.starts_with(r"\\")
+}
+
 fn markdown_file_link_path(target: &str) -> Option<PathBuf> {
     let target = strip_file_location(target.trim());
     if target
@@ -113,8 +121,11 @@ fn markdown_file_link_path(target: &str) -> Option<PathBuf> {
         return url::Url::parse(target).ok()?.to_file_path().ok();
     }
 
-    let path = PathBuf::from(percent_decode_file_path(target));
-    path.is_absolute().then_some(path)
+    let decoded = percent_decode_file_path(target);
+    let path = PathBuf::from(&decoded);
+    // A remote session may use Windows paths while the desktop runs on Unix.
+    // Route them lexically instead of asking the local OS whether they exist.
+    (path.is_absolute() || has_windows_absolute_prefix(&decoded)).then_some(path)
 }
 
 fn normalized_path(path: &Path) -> PathBuf {
@@ -147,17 +158,30 @@ fn workspace_relative_file_path(workspace: &Path, target: &Path) -> Option<Strin
     relative(&workspace, &target)
 }
 
+fn is_browser_document(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("html") || extension.eq_ignore_ascii_case("htm")
+        })
+}
+
 fn transcript_link_route(target: &str, workspace: Option<&Path>) -> TranscriptLinkRoute {
     let Some(path) = markdown_file_link_path(target) else {
         return TranscriptLinkRoute::External;
     };
     let path = normalized_path(&path);
+    // Review pages are documents to read, not source files to preview. This
+    // takes precedence over the workspace's ordinary project-file viewer.
+    if is_browser_document(&path) {
+        return TranscriptLinkRoute::LocalFile(path);
+    }
     if let Some(relative_path) =
         workspace.and_then(|workspace| workspace_relative_file_path(workspace, &path))
     {
         TranscriptLinkRoute::ProjectFile(relative_path)
     } else {
-        TranscriptLinkRoute::Finder(path)
+        TranscriptLinkRoute::LocalFile(path)
     }
 }
 
@@ -1131,12 +1155,40 @@ mod tests {
         let outside_file_with_line = format!("{}:20", outside_file.display());
         assert_eq!(
             transcript_link_route(&outside_file_with_line, Some(workspace)),
-            TranscriptLinkRoute::Finder(normalized_path(&outside_file))
+            TranscriptLinkRoute::LocalFile(normalized_path(&outside_file))
         );
         assert_eq!(
             transcript_link_route("https://example.com/file.rs:12", Some(workspace)),
             TranscriptLinkRoute::External
         );
+    }
+
+    #[test]
+    fn windows_drive_links_are_local_files_on_every_host() {
+        let target = r"D:\断崖_低模表白参考\output\LP_camera_review.html";
+        assert_eq!(
+            transcript_link_route(target, None),
+            TranscriptLinkRoute::LocalFile(PathBuf::from(target))
+        );
+        assert!(is_browser_document(Path::new(target)));
+    }
+
+    #[test]
+    fn html_links_open_in_the_browser_even_inside_the_workspace() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let target = workspace.join("output").join("review.html");
+        assert_eq!(
+            transcript_link_route(&target.to_string_lossy(), Some(workspace)),
+            TranscriptLinkRoute::LocalFile(target)
+        );
+    }
+
+    #[test]
+    fn only_browser_documents_open_with_the_default_app() {
+        assert!(is_browser_document(Path::new(r"D:\reviews\camera.HTM")));
+        assert!(is_browser_document(Path::new("/tmp/review.html")));
+        assert!(!is_browser_document(Path::new(r"D:\reviews\setup.exe")));
+        assert!(!is_browser_document(Path::new("/tmp/notes.txt")));
     }
 
     /// Selection resolves rows by key, so a repeated key makes a drag jump
@@ -1766,10 +1818,15 @@ impl Waku {
                 self.open_right_panel_surface(RightPanelSurface::Files, cx);
                 self.open_right_panel_file(relative_path, cx);
             }
-            TranscriptLinkRoute::Finder(path) => {
+            TranscriptLinkRoute::LocalFile(path) => {
                 if self.daemon.is_remote() {
                     self.show_toast(tr!("errors.remote_host_path"));
                     cx.notify();
+                } else if is_browser_document(&path) {
+                    // A review link should open the document, not just select it.
+                    // Other targets still reveal rather than launch a file an
+                    // agent-written link names.
+                    crate::platform::open_with_default_app(&path, cx);
                 } else {
                     crate::platform::reveal_in_file_manager(&path, cx);
                 }
@@ -1782,9 +1839,9 @@ impl Waku {
     /// Open a path a tool reported, from an activity in the transcript.
     ///
     /// Providers name a changed file however they like — absolute, or relative
-    /// to the session's workspace — so resolve it before routing. Inside the
-    /// workspace it opens in the file viewer; anywhere else it goes to the file
-    /// manager, the same split a file link in the transcript takes.
+    /// to the session's workspace — so resolve it before routing. HTML opens
+    /// in the default browser. Other paths open in the file viewer when inside
+    /// the workspace, and in the file manager when outside it.
     pub(super) fn open_activity_file(&mut self, path: &str, cx: &mut Context<Self>) {
         let path = Path::new(path.trim());
         let resolved = if path.is_absolute() {

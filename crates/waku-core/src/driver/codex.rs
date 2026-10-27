@@ -751,6 +751,8 @@ impl CodexDriver {
                 }
             })?;
 
+        let (readers_done, readers_done_rx) = unbounded();
+        let reader_done = readers_done.clone();
         let reader_thread_id = thread_id.clone();
         let reader_turn_id = turn_id.clone();
         let reader_turn_ids = turn_ids.clone();
@@ -765,6 +767,7 @@ impl CodexDriver {
         let reader_thread = thread::Builder::new()
             .name("waku-codex-reader".into())
             .spawn(move || {
+                let _reader_done = reader_done;
                 let mut stream_state = CodexStreamState::default();
                 // Lossy per line: a frame carrying bytes that are not UTF-8
                 // must not end the reader for the rest of the session.
@@ -847,9 +850,11 @@ impl CodexDriver {
         let last_visible_stderr = Arc::new(Mutex::new(None::<String>));
         let stderr_last_error = last_visible_stderr.clone();
         let stderr_events = events.clone();
+        let stderr_done = readers_done.clone();
         let stderr_thread = thread::Builder::new()
             .name("waku-codex-stderr".into())
             .spawn(move || {
+                let _stderr_done = stderr_done;
                 for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                     if is_visible_stderr_notice(&line) {
                         let error = clean_stderr(&line);
@@ -859,30 +864,35 @@ impl CodexDriver {
                 }
             })?;
 
+        drop(readers_done);
         thread::Builder::new()
             .name("waku-codex-process".into())
             .spawn(move || {
                 let status = child.wait();
-                let _ = reader_thread.join();
-                let _ = stderr_thread.join();
-                match status {
-                    Ok(status) if !status.success() && last_visible_stderr.lock().is_none() => {
-                        let _ = events.send(DriverEvent::Error(tr!(
-                            "errors.provider_exited",
-                            provider = "Codex app-server",
-                            status = status
-                        )));
-                    }
-                    Err(error) => {
-                        let _ = events.send(DriverEvent::Error(tr!(
+                super::support::finish_process_exit(
+                    &events,
+                    &readers_done_rx,
+                    reader_thread,
+                    stderr_thread,
+                    super::support::PROCESS_EXIT_DRAIN_GRACE,
+                    || match status {
+                        Ok(status)
+                            if !status.success() && last_visible_stderr.lock().is_none() =>
+                        {
+                            Some(DriverEvent::Error(tr!(
+                                "errors.provider_exited",
+                                provider = "Codex app-server",
+                                status = status
+                            )))
+                        }
+                        Err(error) => Some(DriverEvent::Error(tr!(
                             "errors.read_provider_exit_status",
                             provider = "Codex app-server",
                             error = error
-                        )));
-                    }
-                    _ => {}
-                }
-                let _ = events.send(DriverEvent::ProcessExited);
+                        ))),
+                        _ => None,
+                    },
+                );
             })?;
 
         Ok(Self {

@@ -24,6 +24,7 @@
 use std::time::{Duration, Instant};
 
 use agent_trajectory::metrics::format_tokens;
+use waku_protocol::todo::{TodoItem, current_todo};
 
 use crate::ui::ActivationExt as _;
 
@@ -672,16 +673,31 @@ impl Waku {
     }
 }
 
-/// Whether the transcript shows the todo row: a turn runs (or waits on the
-/// person) and the agent has a list. The row fingerprint reads it on
-/// every frame, so it stays this cheap.
+/// Whether a todo list belongs in the transcript for this session status:
+/// a turn runs (or waits on the person) and something remains to be done.
+/// The row fingerprint reads this on every frame, so it stays this cheap.
+pub(super) fn todo_row_visible(status: SessionStatus, todos: &[TodoItem]) -> bool {
+    status.is_busy() && current_todo(todos).is_some()
+}
+
 pub(super) fn shows_todo_row(session: &AgentSession) -> bool {
-    session.status.is_busy() && !session.todos.is_empty()
+    todo_row_visible(session.status, &session.todos)
+}
+
+/// Whether replacing the list removes the transcript row, so the caller can
+/// splice it out instead of letting a generic row shrink reset the view.
+pub(super) fn todo_row_hides_after_update(
+    status: SessionStatus,
+    before: &[TodoItem],
+    after: &[TodoItem],
+) -> bool {
+    todo_row_visible(status, before) && !todo_row_visible(status, after)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use waku_protocol::todo::TodoStatus;
 
     #[test]
     fn the_rail_steps_aside_on_a_narrow_window() {
@@ -691,28 +707,81 @@ mod tests {
         assert!(rail_fits(880.0, 0.0));
     }
 
+    fn todo(status: TodoStatus) -> TodoItem {
+        TodoItem {
+            content: "Run the tests".to_owned(),
+            status,
+            active_form: None,
+        }
+    }
+
     /// The todo row is in the transcript only while a turn runs (a pending
-    /// question included) and the agent has a list; a settled task keeps its
-    /// list without the row.
+    /// question included) and the agent still has work on its list. A settled
+    /// task keeps its list without the row.
     #[test]
     fn the_todo_row_shows_while_a_turn_runs_with_a_list() {
-        use waku_protocol::todo::{TodoItem, TodoStatus};
-
         let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
         session.begin_turn("go");
         session.status = SessionStatus::Working;
         assert!(!shows_todo_row(&session));
 
-        session.todos = vec![TodoItem {
-            content: "Run the tests".to_owned(),
-            status: TodoStatus::InProgress,
-            active_form: None,
-        }];
+        session.todos = vec![todo(TodoStatus::InProgress)];
         assert!(shows_todo_row(&session));
         session.status = SessionStatus::Waiting;
         assert!(shows_todo_row(&session));
         session.status = SessionStatus::Idle;
         assert!(!shows_todo_row(&session));
+
+        session.status = SessionStatus::Working;
+        session.todos[0].status = TodoStatus::Completed;
+        assert!(!shows_todo_row(&session));
+        session.todos[0].status = TodoStatus::Cancelled;
+        assert!(!shows_todo_row(&session));
+
+        session.todos = vec![todo(TodoStatus::Completed), todo(TodoStatus::Pending)];
+        assert!(shows_todo_row(&session));
+
+        session.todos = vec![todo(TodoStatus::Completed)];
+        session.finish_active_turn(TurnStatus::Completed);
+        session.begin_turn("next");
+        session.status = SessionStatus::Working;
+        assert!(
+            !shows_todo_row(&session),
+            "a new turn must not resurrect the previous settled list"
+        );
+    }
+
+    #[test]
+    fn the_todo_row_splices_out_only_when_an_update_hides_it() {
+        let pending = vec![todo(TodoStatus::Pending)];
+        let completed = vec![todo(TodoStatus::Completed)];
+        let in_progress = vec![todo(TodoStatus::InProgress)];
+
+        assert!(todo_row_hides_after_update(
+            SessionStatus::Working,
+            &pending,
+            &completed
+        ));
+        assert!(todo_row_hides_after_update(
+            SessionStatus::Working,
+            &pending,
+            &[]
+        ));
+        assert!(!todo_row_hides_after_update(
+            SessionStatus::Working,
+            &pending,
+            &in_progress
+        ));
+        assert!(!todo_row_hides_after_update(
+            SessionStatus::Working,
+            &completed,
+            &pending
+        ));
+        assert!(!todo_row_hides_after_update(
+            SessionStatus::Idle,
+            &pending,
+            &completed
+        ));
     }
 
     #[test]

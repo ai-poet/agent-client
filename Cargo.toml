@@ -309,5 +309,5 @@ block = { git = "https://github.com/Dicklesworthstone/rust-block", rev = "b39ae8
 # parking, ...). Upstream dependency lines above stay as they are; see
 # docs/gpui-fork.md for what is ported and how to re-sync.
 [patch."https://github.com/egoist/zed"]
-gpui = { path = "/Users/administrator/Desktop/Projects/agent-client-gpui/crates/gpui" }
-gpui_platform = { path = "/Users/administrator/Desktop/Projects/agent-client-gpui/crates/gpui_platform" }
+gpui = { path = "../../agent-client-gpui/crates/gpui" }
+gpui_platform = { path = "../../agent-client-gpui/crates/gpui_platform" }

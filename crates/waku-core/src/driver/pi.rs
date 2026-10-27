@@ -281,6 +281,8 @@ impl PiDriver {
 
         let (commands, command_rx) = unbounded();
         let pending = Arc::new(Mutex::new(HashMap::new()));
+        let (readers_done, readers_done_rx) = unbounded();
+        let reader_done = readers_done.clone();
         let reader_pending = pending.clone();
         let reader_commands = commands.clone();
         let reader_events = events.clone();
@@ -288,6 +290,7 @@ impl PiDriver {
             thread::Builder::new()
                 .name("waku-pi-reader".into())
                 .spawn(move || {
+                    let _reader_done = reader_done;
                     let mut stream_state = PiStreamState::default();
                     let mut chunks = ChunkAssembly::default();
                     // Lossy per line: one frame with bytes that are not UTF-8
@@ -664,10 +667,12 @@ impl PiDriver {
         let last_visible_stderr = Arc::new(Mutex::new(None::<String>));
         let stderr_last_error = last_visible_stderr.clone();
         let stderr_events = events.clone();
+        let stderr_done = readers_done.clone();
         let stderr_thread =
             thread::Builder::new()
                 .name("waku-pi-stderr".into())
                 .spawn(move || {
+                    let _stderr_done = stderr_done;
                     for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                         if line.to_ascii_lowercase().contains("error") {
                             let error = format!("{}: {}", flavor.display_name(), line.trim());
@@ -677,6 +682,7 @@ impl PiDriver {
                     }
                 })?;
 
+        drop(readers_done);
         // Nothing signals or kills the agent process: it exits when the writer
         // thread drops its stdin. Something still has to reap it, or every
         // session that ever ran leaves a zombie behind for the life of the app.
@@ -684,26 +690,30 @@ impl PiDriver {
             .name("waku-pi-process".into())
             .spawn(move || {
                 let status = child.wait();
-                let _ = reader_thread.join();
-                let _ = stderr_thread.join();
-                match status {
-                    Ok(status) if !status.success() && last_visible_stderr.lock().is_none() => {
-                        let _ = events.send(DriverEvent::Error(tr!(
-                            "errors.provider_rpc_exited",
-                            provider = flavor.display_name(),
-                            status = status
-                        )));
-                    }
-                    Err(error) => {
-                        let _ = events.send(DriverEvent::Error(tr!(
+                super::support::finish_process_exit(
+                    &events,
+                    &readers_done_rx,
+                    reader_thread,
+                    stderr_thread,
+                    super::support::PROCESS_EXIT_DRAIN_GRACE,
+                    || match status {
+                        Ok(status)
+                            if !status.success() && last_visible_stderr.lock().is_none() =>
+                        {
+                            Some(DriverEvent::Error(tr!(
+                                "errors.provider_rpc_exited",
+                                provider = flavor.display_name(),
+                                status = status
+                            )))
+                        }
+                        Err(error) => Some(DriverEvent::Error(tr!(
                             "errors.read_provider_exit_status",
                             provider = format!("{} RPC", flavor.display_name()),
                             error = error
-                        )));
-                    }
-                    _ => {}
-                }
-                let _ = events.send(DriverEvent::ProcessExited);
+                        ))),
+                        _ => None,
+                    },
+                );
             })?;
 
         Ok(Self {

@@ -205,12 +205,16 @@ impl Waku {
         let Some(todos) = todos.filter(|todos| *todos != session.todos) else {
             return;
         };
-        // Fork: an emptied list takes the transcript's todo row away while
-        // the turn runs on; splice it out, since a shrink found by the next
-        // sync resets the view (session_rail.rs).
-        let previous_kinds = (todos.is_empty() && super::session_rail::shows_todo_row(session))
-            .then(|| self.snapshot_selected_transcript_rows(session_id))
-            .flatten();
+        // Fork: an emptied or fully settled list takes the transcript's todo
+        // row away while the turn runs on; splice it out, since a shrink found
+        // by the next sync resets the view (session_rail.rs).
+        let previous_kinds = super::session_rail::todo_row_hides_after_update(
+            session.status,
+            &session.todos,
+            &todos,
+        )
+        .then(|| self.snapshot_selected_transcript_rows(session_id))
+        .flatten();
         if let Some(session) = self.state.session_mut(session_id) {
             session.todos = todos;
         }
