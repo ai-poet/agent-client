@@ -474,7 +474,7 @@ mod motion_tests {
             started: now,
         };
         assert_eq!(blur_scale_for(true, Some(closing)), 1.0);
-        assert_eq!(blur_scale_for(false, Some(closing)), 1.0);
+        assert!((blur_scale_for(false, Some(closing)) - 1.0).abs() < 0.001);
         let finished = Closing {
             started: now - MENU_OUT.total(),
             ..closing

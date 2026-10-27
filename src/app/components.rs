@@ -52,9 +52,18 @@ pub(super) fn working_activity_cells(color: Hsla) -> AnyElement {
 
 fn working_cell_opacity(phase: f32, row: usize, col: usize) -> f32 {
     let distance = (2 - row) + col.abs_diff(1);
-    let phase = (phase + distance as f32 / 5.0).fract();
-    let wave = ((phase * std::f32::consts::TAU).sin() + 1.0) / 2.0;
-    0.18 + 0.52 * wave
+    let phase = (phase + distance as f32 / 5.0).rem_euclid(1.0);
+    const DIM: f32 = 0.18;
+    const PEAK: f32 = 0.70;
+    // Zeron's short bright pulse followed by a longer rest, rather than a
+    // continuously shimmering sine wave.
+    if phase < 0.45 {
+        PEAK + (DIM - PEAK) * (phase / 0.45)
+    } else if phase < 0.92 {
+        DIM
+    } else {
+        DIM + (PEAK - DIM) * ((phase - 0.92) / 0.08)
+    }
 }
 
 #[cfg(test)]
