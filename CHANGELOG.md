@@ -29,6 +29,28 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.3.1]
+
+- 界面更清爽、更有层次：菜单、命令面板和状态胶囊采用半透明毛玻璃，退出时模糊与内容一起淡出；标题栏低频面板入口收进「三个点」菜单；Agent 工作行改为安静的点阵活动提示，时间、token 和状态文字不再整行闪烁
+
+  A cleaner, more layered interface: menus, the command palette and the status capsule use translucent frosted glass, with the blur fading out alongside the content; lower-frequency panel entries move into the title bar's "..." menu; and the Agent working row uses a quiet cell activity indicator instead of shimmering its timer, token count and status text
+
+- 新增界面动态效果偏好：可跟随系统或减少动态效果，也可让动画在窗口进入后台时暂停；菜单、Toast、侧栏重排和长消息折叠等交互更连贯
+
+  New interface motion preferences: follow the system setting or reduce motion, and optionally pause animations while the window is in the background; menus, toasts, sidebar reordering and long-message folding now move more coherently
+
+- 外部链接打开更安全：应用和终端只允许 HTTP、HTTPS 与 mailto 链接，阻止其他协议被外部调用；HTML/HTM 文件优先交给默认浏览器，Windows 本地路径也能正确识别
+
+  Safer external links: the app and terminal only allow HTTP, HTTPS and mailto links, preventing other protocols from being invoked externally; HTML/HTM files open in the default browser first, and Windows local paths are recognized correctly
+
+- 修复 Windows 内置浏览器与 GPUI 的 DirectComposition 接口兼容性，WebView2 的显示、裁剪和可见性使用正确的原生视觉对象；GPUI 源码现已随项目提供，源码构建不再依赖电脑上的外置目录
+
+  Fixed DirectComposition compatibility between the built-in browser and GPUI on Windows: WebView2 now uses the correct native visual interfaces for display, clipping and visibility; GPUI sources are also bundled with the project, so building from source no longer depends on an external directory on the computer
+
+- 提升 Agent 后端与开发工具的稳定性：包含非 UTF-8 字节的输出使用替换字符读取，不再中断；进程退出时避免管道长期阻塞；开发脚本兼容不支持 `.nothrow()` 的旧版 Bun
+
+  Improved Agent backend and development-tool stability: output containing non-UTF-8 bytes is decoded with replacement characters instead of failing, process exits no longer wait indefinitely on blocked pipes, and the development script works with older Bun versions that do not support `.nothrow()`
+
 ## [0.3.0]
 
 - 内置 Agent 支持 Gemini 4 Argon：走 Gemini 原生接口，可选低、中、高三档思考，Gemini 和 Antigravity 分组都能用；设置 → 云账户里有单独的 Gemini 分组，默认选第一个并自动准备好密钥；一次并行调用多个工具也能正常执行
