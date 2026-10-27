@@ -365,18 +365,18 @@ mod host {
     //!
     //! Visual hosting is the supported answer. A composition controller
     //! renders into a DirectComposition visual instead of an HWND, and the
-    //! pinned gpui fork already prepares the slot:
-    //! `DirectCompositionRenderer::create_portal` inserts an empty
-    //! `IDCompositionVisual` into `portal_container`, which sits between the
-    //! base and overlay swap chains —
+    //! pinned gpui fork exposes its native layer through `NativeComposition`.
+    //! `NativeSurface` mounts one clipped visual there, between the base and
+    //! overlay swap chains:
     //!
     //! ```text
-    //! root_visual.AddVisual(&portal_container, true, &base_visual)
-    //! root_visual.AddVisual(&overlay_visual,  true, &portal_container)
+    //! root_visual.AddVisual(&layer, true, &base_visual)
+    //! root_visual.AddVisual(&overlay_visual, true, &layer)
+    //! layer.AddVisual(&page_visual, false, None)
     //! ```
     //!
     //! — so the page composites above GPUI's ordinary content and below its
-    //! menus, tooltips and dialogs, with the portal's rectangle clip handling
+    //! menus, tooltips and dialogs, with the visual's rectangle clip handling
     //! the panel edge. The visual comes from GPUI's own `IDCompositionDevice`,
     //! which is what `SetRootVisualTarget` requires, and gpui and
     //! webview2-com are both built against `windows` 0.61, so the handle
@@ -409,8 +409,8 @@ mod host {
     use std::rc::Rc;
 
     use gpui::{
-        Bounds, CursorStyle, Modifiers, MouseButton, Pixels, PlatformNativeSurface, Point,
-        ScrollDelta,
+        Bounds, CursorStyle, DevicePixels, Modifiers, MouseButton, NativeComposition, Pixels,
+        Point, ScrollDelta, Window,
     };
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
     use webview2_com::{
@@ -421,8 +421,11 @@ mod host {
         NavigationCompletedEventHandler, NavigationStartingEventHandler,
         NewWindowRequestedEventHandler, SourceChangedEventHandler, take_pwstr,
     };
-    use windows::Win32::Foundation::{E_FAIL, E_NOINTERFACE, HWND, POINT, RECT};
-    use windows::core::{BOOL, HSTRING, IUnknown, Interface, PCWSTR, PWSTR};
+    use windows::Win32::Foundation::{E_FAIL, HWND, POINT, RECT};
+    use windows::Win32::Graphics::DirectComposition::{
+        IDCompositionDevice, IDCompositionRectangleClip, IDCompositionVisual,
+    };
+    use windows::core::{BOOL, HSTRING, Interface, PCWSTR, PWSTR};
 
     use super::PageLoad;
 
@@ -626,13 +629,88 @@ mod host {
         }
     }
 
+    /// One WebView2-sized visual mounted into GPUI's native-composition layer.
+    /// The COM clones own their references; GPUI's raw handles are borrowed.
+    pub(super) struct NativeSurface {
+        device: IDCompositionDevice,
+        layer: IDCompositionVisual,
+        visual: IDCompositionVisual,
+        clip: IDCompositionRectangleClip,
+    }
+
+    impl NativeSurface {
+        pub fn new(window: &Window) -> Result<Rc<Self>, String> {
+            window
+                .enable_scene_overlay()
+                .map_err(|error| error.to_string())?;
+            let composition = window
+                .native_composition()
+                .ok_or_else(|| "GPUI has no native composition layer".to_owned())?;
+            let NativeComposition { device, layer, .. } = composition;
+            // SAFETY: `native_composition` returns live COM interfaces. Cloning
+            // them adds the references this surface keeps beyond the frame.
+            let (device, layer) = unsafe {
+                (
+                    IDCompositionDevice::from_raw_borrowed(&device)
+                        .ok_or_else(|| "GPUI returned a null composition device".to_owned())?
+                        .clone(),
+                    IDCompositionVisual::from_raw_borrowed(&layer)
+                        .ok_or_else(|| "GPUI returned a null composition layer".to_owned())?
+                        .clone(),
+                )
+            };
+            let (visual, clip) = (|| unsafe {
+                let visual = device.CreateVisual()?;
+                let clip = device.CreateRectangleClip()?;
+                visual.SetClip(&clip)?;
+                visual.SetVisible(false)?;
+                layer.AddVisual(&visual, false, None::<&IDCompositionVisual>)?;
+                device.Commit()?;
+                Ok::<_, windows::core::Error>((visual, clip))
+            })()
+            .map_err(|error| error.to_string())?;
+            Ok(Rc::new(Self {
+                device,
+                layer,
+                visual,
+                clip,
+            }))
+        }
+
+        fn set_bounds(&self, bounds: Bounds<DevicePixels>) -> windows::core::Result<()> {
+            unsafe {
+                self.visual.SetOffsetX2(bounds.origin.x.0 as f32)?;
+                self.visual.SetOffsetY2(bounds.origin.y.0 as f32)?;
+                self.clip.SetRight2(bounds.size.width.0.max(0) as f32)?;
+                self.clip.SetBottom2(bounds.size.height.0.max(0) as f32)?;
+                self.device.Commit()
+            }
+        }
+
+        fn set_visible(&self, visible: bool) -> windows::core::Result<()> {
+            unsafe {
+                self.visual.SetVisible(visible)?;
+                self.device.Commit()
+            }
+        }
+    }
+
+    impl Drop for NativeSurface {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = self.layer.RemoveVisual(&self.visual);
+                let _ = self.device.Commit();
+            }
+        }
+    }
+
     pub(super) struct WebviewHost {
         pub(super) webview: Webview,
         controller: ICoreWebView2Controller,
         composition: ICoreWebView2CompositionController,
         /// GPUI's slot in the composition tree, which owns the page's
         /// position and clip. WebView2's own bounds only set the raster size.
-        surface: Rc<dyn PlatformNativeSurface>,
+        surface: Rc<NativeSurface>,
         /// GPUI's window, for handing the keyboard back.
         parent: isize,
         last_bounds: Cell<Option<Bounds<Pixels>>>,
@@ -664,7 +742,7 @@ mod host {
         /// already handles.
         pub fn create(
             parent: isize,
-            surface: Rc<dyn PlatformNativeSurface>,
+            surface: Rc<NativeSurface>,
             callbacks: Callbacks,
             ready: Box<dyn FnOnce(Result<Rc<WebviewHost>, String>)>,
         ) {
@@ -703,7 +781,7 @@ mod host {
         /// Called from the element's paint callback every frame, so an
         /// unchanged rect must cost nothing.
         ///
-        /// The portal carries the position and the clip; WebView2's own
+        /// The visual carries the position and the clip; WebView2's own
         /// bounds start at the origin and only give the page its raster size.
         /// Both are device pixels, which is
         /// `COREWEBVIEW2_BOUNDS_MODE_USE_RAW_PIXELS`, the default.
@@ -911,7 +989,7 @@ mod host {
     /// it for a composition controller.
     fn create_controller(
         parent: isize,
-        surface: Rc<dyn PlatformNativeSurface>,
+        surface: Rc<NativeSurface>,
         environment: ICoreWebView2Environment,
         callbacks: Callbacks,
         ready: Ready,
@@ -943,19 +1021,15 @@ mod host {
         }
     }
 
-    /// Bind a freshly created composition controller into GPUI's portal
-    /// visual and subscribe to everything the surface renders from.
+    /// Bind a freshly created composition controller into GPUI's native layer
+    /// and subscribe to everything the surface renders from.
     fn attach(
         parent: isize,
-        surface: Rc<dyn PlatformNativeSurface>,
+        surface: Rc<NativeSurface>,
         composition: ICoreWebView2CompositionController,
         callbacks: Callbacks,
     ) -> windows::core::Result<Rc<WebviewHost>> {
-        let visual = surface
-            .platform_handle()
-            .downcast::<IUnknown>()
-            .map_err(|_| windows::core::Error::from(E_NOINTERFACE))?;
-        unsafe { composition.SetRootVisualTarget(&*visual) }?;
+        unsafe { composition.SetRootVisualTarget(&surface.visual) }?;
 
         let controller: ICoreWebView2Controller = composition.cast()?;
         // The page starts hidden and empty; the surface shows it once its tab
@@ -971,7 +1045,7 @@ mod host {
         // The toolbar has a devtools button, so make sure the runtime agrees
         // they are available. Everything else stays at WebView2's defaults,
         // including the status bar: it draws inside the page raster, so the
-        // portal clips it along with everything else, and a link preview on
+        // visual clips it along with everything else, and a link preview on
         // hover is worth having.
         if let Ok(settings) = unsafe { webview.Settings() } {
             let _ = unsafe { settings.SetAreDevToolsEnabled(true) };
@@ -1477,9 +1551,9 @@ impl BrowserView {
             self.host_error = Some("the window has no native handle".to_owned());
             return;
         }
-        // The portal is a visual GPUI keeps between its own base and overlay
-        // planes, so the page composites under menus rather than over them.
-        let surface = match window.create_native_surface() {
+        // Mount the page into the visual layer GPUI keeps between its own
+        // base and overlay planes, so menus remain above native content.
+        let surface = match host::NativeSurface::new(window) {
             Ok(surface) => surface,
             Err(error) => {
                 self.host_error = Some(error.to_string());
