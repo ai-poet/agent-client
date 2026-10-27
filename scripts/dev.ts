@@ -32,6 +32,11 @@ type HyprlandContext = {
 
 $.cwd(root);
 
+// Bun 1.0 already returns failed shell results without throwing.
+function allowFailure<T extends { nothrow?: () => T }>(command: T): T {
+  return command.nothrow ? command.nothrow() : command;
+}
+
 let app: ReturnType<typeof Bun.spawn> | undefined;
 let stopping = false;
 let building = false;
@@ -69,8 +74,8 @@ async function activeHyprlandContext(): Promise<HyprlandContext | undefined> {
   }
 
   const [workspaceResult, windowResult] = await Promise.all([
-    $`hyprctl -j activeworkspace`.quiet().nothrow(),
-    $`hyprctl -j activewindow`.quiet().nothrow(),
+    allowFailure($`hyprctl -j activeworkspace`.quiet()),
+    allowFailure($`hyprctl -j activewindow`.quiet()),
   ]);
   if (workspaceResult.exitCode !== 0) return undefined;
 
@@ -251,7 +256,7 @@ async function prepareHyprlandLaunch(): Promise<void> {
     _G[background_key]:set_enabled(${isAnotherWorkspaceActive})
     _G[armed_key] = true
   `;
-  const result = await $`hyprctl eval ${code}`.quiet().nothrow();
+  const result = await allowFailure($`hyprctl eval ${code}`.quiet());
   if (result.exitCode !== 0) {
     if (!hyprlandWarningShown) {
       const detail =
@@ -293,7 +298,7 @@ async function releaseHyprlandRules(): Promise<void> {
       _G[owner_key] = nil
     end
   `;
-  await $`hyprctl eval ${code}`.quiet().nothrow();
+  await allowFailure($`hyprctl eval ${code}`.quiet());
 }
 
 async function build(target: BuildTarget): Promise<boolean> {
@@ -309,8 +314,10 @@ async function build(target: BuildTarget): Promise<boolean> {
     return false;
   }
   const result = isMacOS
-    ? await $`${join(root, "scripts/bundle.sh")} debug`.nothrow()
-    : await $`cargo build --package waku --bin waku --bin waku_js_repl`.nothrow();
+    ? await allowFailure($`${join(root, "scripts/bundle.sh")} debug`)
+    : await allowFailure(
+        $`cargo build --package waku --bin waku --bin waku_js_repl`,
+      );
   if (result.exitCode !== 0) {
     console.error("[waku-dev] Build failed; keeping the current app open.");
     return false;
@@ -320,8 +327,9 @@ async function build(target: BuildTarget): Promise<boolean> {
 
 async function buildDaemon(): Promise<boolean> {
   console.log("[waku-dev] Building daemon...");
-  const result =
-    await $`cargo build --package waku-daemon --features dev-binary --bin waku-debug-daemon`.nothrow();
+  const result = await allowFailure(
+    $`cargo build --package waku-daemon --features dev-binary --bin waku-debug-daemon`,
+  );
   if (result.exitCode !== 0) {
     console.error(
       "[waku-dev] Daemon build failed; keeping the current daemon running.",
@@ -335,7 +343,7 @@ async function stopApp(): Promise<void> {
   const waiter = app;
   app = undefined;
   if (isMacOS) {
-    await $`pkill -TERM -x ${appName}`.quiet().nothrow();
+    await allowFailure($`pkill -TERM -x ${appName}`.quiet());
   } else if (waiter?.exitCode === null) {
     waiter.kill("SIGTERM");
   }
