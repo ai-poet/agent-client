@@ -423,7 +423,7 @@ mod host {
     };
     use windows::Win32::Foundation::{E_FAIL, HWND, POINT, RECT};
     use windows::Win32::Graphics::DirectComposition::{
-        IDCompositionDevice, IDCompositionRectangleClip, IDCompositionVisual,
+        IDCompositionDevice, IDCompositionRectangleClip, IDCompositionVisual, IDCompositionVisual3,
     };
     use windows::core::{BOOL, HSTRING, Interface, PCWSTR, PWSTR};
 
@@ -634,7 +634,7 @@ mod host {
     pub(super) struct NativeSurface {
         device: IDCompositionDevice,
         layer: IDCompositionVisual,
-        visual: IDCompositionVisual,
+        visual: IDCompositionVisual3,
         clip: IDCompositionRectangleClip,
     }
 
@@ -660,7 +660,7 @@ mod host {
                 )
             };
             let (visual, clip) = (|| unsafe {
-                let visual = device.CreateVisual()?;
+                let visual = device.CreateVisual()?.cast::<IDCompositionVisual3>()?;
                 let clip = device.CreateRectangleClip()?;
                 visual.SetClip(&clip)?;
                 visual.SetVisible(false)?;
