@@ -2142,9 +2142,10 @@ impl Waku {
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.close_command_palette(window, cx)),
             )
-            .child(crate::ui::motion_kit::dialog_in(
-                "command-palette-in",
-                crate::ui::frost::frosted(15.0, crate::ui::frost::MENU_BLUR, card),
+            .child(crate::ui::frost::frosted(
+                15.0,
+                crate::ui::frost::MENU_BLUR,
+                crate::ui::motion_kit::dialog_in("command-palette-in", card),
             ));
         Some(gpui::deferred(layer).with_priority(3).into_any_element())
     }
