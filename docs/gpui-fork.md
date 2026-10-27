@@ -1,18 +1,19 @@
 # Local GPUI fork
 
-Waku uses a local GPUI workspace so the desktop can combine the `waku-webview`
-integration with Zeron's renderer work. The two `patch` entries in `Cargo.toml`
-resolve `gpui` and `gpui_platform` to `../../agent-client-gpui/crates/`.
+Waku vendors its GPUI workspace under `vendor/agent-client-gpui/` so the
+desktop can combine the `waku-webview` integration with Zeron's renderer work
+without requiring a separate checkout. The two `patch` entries in `Cargo.toml`
+resolve `gpui` and `gpui_platform` to that directory.
 
 ## Current base
 
 - Repository: <https://github.com/zeronsh/zui>
 - Branch upstream: `main`
 - Base commit: `361ff20b919fdfb80199ee6d9aed725300cb7d54`
-- Local integration branch: `waku-local`
+- Vendored source: `waku-local` at `00179677e60d5a65858c8545136077f1df7e78eb`
 - Additional Waku patches:
   - `e99616cdd466` (`gpui: Add resizable and minimizable state to Window`,
-    local commit `00179677e60d5a65858c8545136077f1df7e78eb`),
+    included in the vendored commit above),
     limited to `crates/gpui/src/{platform,window}.rs` and
     `crates/gpui_macos/src/window.rs`. The Zed-only `platform_title_bar` and
     `workspace` parts do not apply to this standalone workspace.
@@ -53,6 +54,6 @@ cargo fetch --locked
 cargo check --locked
 ```
 
-Run focused zui tests for any additional patch. Keep the local integration
-branch reproducible and do not replace it with a machine-specific absolute
-path in `Cargo.toml`.
+Run focused zui tests for any additional patch. Record the source commit for
+every sync. Keep the fork under `vendor/agent-client-gpui/` and do not replace
+it with a machine-specific absolute path in `Cargo.toml`.

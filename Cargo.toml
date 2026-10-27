@@ -23,6 +23,7 @@ members = [
     "crates/waku-daemon",
     "crates/waku-protocol",
 ]
+exclude = ["vendor/agent-client-gpui"]
 # The vendored engine under `crates/waku-agent` is deliberately absent here.
 # It builds as a dependency of `waku-agent-bridge`, but a bare `cargo test`
 # should not run 76k lines of upstream tests written against Claurst's own
@@ -309,5 +310,5 @@ block = { git = "https://github.com/Dicklesworthstone/rust-block", rev = "b39ae8
 # parking, ...). Upstream dependency lines above stay as they are; see
 # docs/gpui-fork.md for what is ported and how to re-sync.
 [patch."https://github.com/egoist/zed"]
-gpui = { path = "../../agent-client-gpui/crates/gpui" }
-gpui_platform = { path = "../../agent-client-gpui/crates/gpui_platform" }
+gpui = { path = "./vendor/agent-client-gpui/crates/gpui" }
+gpui_platform = { path = "./vendor/agent-client-gpui/crates/gpui_platform" }

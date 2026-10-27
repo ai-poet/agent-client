@@ -149,6 +149,11 @@ and releases: <https://github.com/egoist/waku>.
 The GPUI framework is developed by Zed Industries:
 <https://github.com/zed-industries/zed>.
 
+The GPUI workspace vendored under `vendor/agent-client-gpui` is derived from
+zeronsh/zui (<https://github.com/zeronsh/zui>) at the integration commit
+recorded in `docs/gpui-fork.md`, with Waku's local patches. Its original
+licence files and notice are preserved alongside the vendored sources.
+
 The agent engine vendored under `crates/waku-agent` is Claurst by
 kuberwastaken and contributors, licensed GPL-3.0:
 <https://github.com/kuberwastaken/claurst>. Its licence text is preserved

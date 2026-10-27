@@ -1,0 +1,36 @@
+name: Renderer tests
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: renderer-tests-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Direct3D WARP pixel and security regressions
+        run: cargo test --locked --release -p gpui_windows --lib -- --test-threads=1 --nocapture
+      - name: Scene ordering and SVG regressions
+        run: |
+          cargo test --locked --release -p gpui --lib scene::tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --release -p gpui --lib svg_renderer::tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build backdrop example
+        run: cargo build --locked --release -p gpui --example backdrop_blur

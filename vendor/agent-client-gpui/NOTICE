@@ -1,0 +1,6 @@
+
+The macOS GPUIOverlayView event-registration pattern and deferred scene-plane
+architecture in this change were adapted from the Apache-2.0 GPUI crates in
+https://github.com/egoist/zed at 57bd4fe181639797d395978d5de17bc9e10a6219.
+The overlay input policy, Metal integration and lifecycle adaptations are Zeron
+changes.

@@ -1,0 +1,1 @@
+These unmodified IBM Plex Sans and Lilex regular faces restore the fixtures already referenced by the GPUI SVG regression tests. Each directory includes its upstream font license. They are test fixtures, not executable dependencies.

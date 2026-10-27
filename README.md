@@ -231,7 +231,9 @@ replace the daemon without relaunching the debug build.
 Development is supported on macOS and Windows and requires
 [Rust 1.96 or newer](https://www.rust-lang.org/tools/install) and
 [Bun](https://bun.sh/). Windows needs the MSVC toolchain; install the native
-build prerequisites listed in [CONTRIBUTING.md](CONTRIBUTING.md) first. Linux
+build prerequisites listed in [CONTRIBUTING.md](CONTRIBUTING.md) first. The
+customized GPUI workspace is vendored under `vendor/agent-client-gpui/`; no
+separate checkout or submodule initialization is needed. Linux
 still builds from source, but it is not tested in CI and no Linux package is
 published.
 
