@@ -471,6 +471,7 @@ pub fn start_window_move(window: &Window) {
 /// is a no-op once the window is already zoomed, so a restore button would do
 /// nothing. Ask the window manager directly instead: `SW_MAXIMIZE` to grow,
 /// `SW_RESTORE` to fall back to the pre-maximize frame.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub fn toggle_window_maximized(window: &mut Window) {
     #[cfg(target_os = "windows")]
     {

@@ -92,18 +92,55 @@ impl CubicBezier {
     }
 }
 
-/// Fast start, long landing — CSS `cubic-bezier(0.16, 1, 0.3, 1)`.
-pub const EASE_OUT_EXPO: CubicBezier = CubicBezier::new(0.16, 1.0, 0.3, 1.0);
-/// CSS `ease-out`.
-pub const EASE_OUT: CubicBezier = CubicBezier::new(0.0, 0.0, 0.58, 1.0);
 /// CSS `ease`.
 pub const EASE: CubicBezier = CubicBezier::new(0.25, 0.1, 0.25, 1.0);
 /// CSS `cubic-bezier(0.22, 1, 0.36, 1)`.
 pub const EASE_OUT_QUINT: CubicBezier = CubicBezier::new(0.22, 1.0, 0.36, 1.0);
-/// CSS `ease-in-out`: gentle start, cruise, gentle landing.
-pub const EASE_IN_OUT: CubicBezier = CubicBezier::new(0.42, 0.0, 0.58, 1.0);
-/// CSS `cubic-bezier(0.2, 0, 0, 1)`.
-pub const EASE_OUT_SOFT: CubicBezier = CubicBezier::new(0.2, 0.0, 0.0, 1.0);
+
+// The catalog carries every curve and timing the product may ask for; only
+// some of them are wired to a surface so far. The rest stay here rather than
+// being deleted and re-added later, and the tests below still pin their shape.
+#[allow(dead_code)]
+mod catalog {
+    use super::{CubicBezier, MotionSpec};
+    use gpui::{AnimationElement, AnimationExt, ElementId, IntoElement, Styled, px};
+
+    /// Fast start, long landing — CSS `cubic-bezier(0.16, 1, 0.3, 1)`.
+    pub const EASE_OUT_EXPO: CubicBezier = CubicBezier::new(0.16, 1.0, 0.3, 1.0);
+    /// CSS `ease-out`.
+    pub const EASE_OUT: CubicBezier = CubicBezier::new(0.0, 0.0, 0.58, 1.0);
+    /// CSS `ease-in-out`: gentle start, cruise, gentle landing.
+    pub const EASE_IN_OUT: CubicBezier = CubicBezier::new(0.42, 0.0, 0.58, 1.0);
+    /// CSS `cubic-bezier(0.2, 0, 0, 1)`.
+    pub const EASE_OUT_SOFT: CubicBezier = CubicBezier::new(0.2, 0.0, 0.0, 1.0);
+
+    /// Entrances: a 500ms fade with a 4px rise.
+    pub const FADE_IN: MotionSpec = MotionSpec::new(500, EASE_OUT_EXPO);
+    /// A section folding open or shut.
+    pub const COLLAPSE: MotionSpec = MotionSpec::new(180, EASE_OUT);
+    /// A selection indicator gliding between segments.
+    pub const INDICATOR_SLIDE: MotionSpec = MotionSpec::new(260, EASE_OUT_SOFT);
+    /// A scroll that jumps a long way: a fixed-length gentle glide.
+    pub const SCROLL_GLIDE: MotionSpec = MotionSpec::new(500, EASE_IN_OUT);
+
+    /// Entrance: fade in while rising 4px into place over [`FADE_IN`].
+    pub fn fade_in<E>(id: impl Into<ElementId>, element: E) -> AnimationElement<E>
+    where
+        E: Styled + IntoElement + 'static,
+    {
+        element.with_animation(id, FADE_IN.animation(), |element, t| {
+            element.relative().opacity(t).top(px(4.0 * (1.0 - t)))
+        })
+    }
+
+    /// Opacity alone over [`FADE_QUICK`].
+    pub fn fade_quick<E>(id: impl Into<ElementId>, element: E) -> AnimationElement<E>
+    where
+        E: Styled + IntoElement + 'static,
+    {
+        element.with_animation(id, super::FADE_QUICK.animation(), |element, t| element.opacity(t))
+    }
+}
 
 /// One catalog entry: duration, optional delay, curve. gpui animations have
 /// no delay of their own, so the delay is folded into the timeline: it runs
@@ -124,11 +161,17 @@ impl MotionSpec {
         }
     }
 
+    /// The delay before the curve runs. gpui animations have no delay of
+    /// their own, so it is folded into the timeline instead. Nothing wires a
+    /// delay yet; the field and its maths are ready for a surface that does.
+    #[allow(dead_code)]
     pub const fn with_delay(mut self, delay_ms: u64) -> Self {
         self.delay_ms = delay_ms;
         self
     }
 
+    /// The animation's own length, without the delay.
+    #[allow(dead_code)]
     pub fn duration(&self) -> Duration {
         Duration::from_millis(self.duration_ms)
     }
@@ -161,8 +204,6 @@ impl MotionSpec {
     }
 }
 
-/// Entrances: a 500ms fade with a 4px rise.
-pub const FADE_IN: MotionSpec = MotionSpec::new(500, EASE_OUT_EXPO);
 /// A quick 150ms fade.
 pub const FADE_QUICK: MotionSpec = MotionSpec::new(150, EASE);
 /// A menu or popover opening.
@@ -171,32 +212,8 @@ pub const MENU_IN: MotionSpec = MotionSpec::new(140, EASE);
 pub const MENU_OUT: MotionSpec = MotionSpec::new(100, EASE);
 /// A dialog appearing.
 pub const DIALOG_IN: MotionSpec = MotionSpec::new(180, EASE);
-/// A section folding open or shut.
-pub const COLLAPSE: MotionSpec = MotionSpec::new(180, EASE_OUT);
-/// A selection indicator gliding between segments.
-pub const INDICATOR_SLIDE: MotionSpec = MotionSpec::new(260, EASE_OUT_SOFT);
 /// List rows gliding to their new places after a reorder.
 pub const RESORT: MotionSpec = MotionSpec::new(260, EASE_OUT_QUINT);
-/// A scroll that jumps a long way: a fixed-length gentle glide.
-pub const SCROLL_GLIDE: MotionSpec = MotionSpec::new(500, EASE_IN_OUT);
-
-/// Entrance: fade in while rising 4px into place over [`FADE_IN`].
-pub fn fade_in<E>(id: impl Into<ElementId>, element: E) -> AnimationElement<E>
-where
-    E: Styled + IntoElement + 'static,
-{
-    element.with_animation(id, FADE_IN.animation(), |element, t| {
-        element.relative().opacity(t).top(px(4.0 * (1.0 - t)))
-    })
-}
-
-/// Opacity alone over [`FADE_QUICK`].
-pub fn fade_quick<E>(id: impl Into<ElementId>, element: E) -> AnimationElement<E>
-where
-    E: Styled + IntoElement + 'static,
-{
-    element.with_animation(id, FADE_QUICK.animation(), |element, t| element.opacity(t))
-}
 
 /// A menu opening from its trigger's side over [`MENU_IN`]. `from` is the
 /// signed starting offset: negative above the resting place for a menu that
@@ -287,6 +304,7 @@ fn tween_at(from: f32, target: f32, spec: MotionSpec, elapsed: Duration) -> Opti
 
 #[cfg(test)]
 mod tests {
+    use super::catalog::{EASE_IN_OUT, EASE_OUT, EASE_OUT_EXPO, EASE_OUT_SOFT};
     use super::*;
 
     #[test]

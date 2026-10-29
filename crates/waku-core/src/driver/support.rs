@@ -70,7 +70,6 @@ pub(super) enum HeadlessComputerUseConfig {
     /// the command line, the skill as a throwaway plugin directory. Nothing
     /// is written to the user's own `~/.claude`.
     Claude {
-        base: computer_use_runtime::ComputerUseConfig,
         mcp_config: String,
         /// `None` on a build too old for `--plugin-dir`. The server still
         /// loads; only the instructions are missing, and the Skills page can
@@ -189,13 +188,11 @@ fn build_claude_computer_use_config(
             "warning: the Computer Use plugin directory could not be built: {error}"
         );
         return Ok(HeadlessComputerUseConfig::Claude {
-            base,
             mcp_config,
             plugin_dir: None,
         });
     }
     Ok(HeadlessComputerUseConfig::Claude {
-        base,
         mcp_config,
         plugin_dir: Some(plugin_dir),
     })
@@ -840,7 +837,6 @@ mod tests {
     fn the_plugin_flag_is_withheld_from_a_build_that_cannot_take_it() {
         let root = std::env::temp_dir().join("waku-claude-args");
         let config = HeadlessComputerUseConfig::Claude {
-            base: sample_base(&root),
             mcp_config: "{}".to_owned(),
             plugin_dir: Some(root.join("plugin")),
         };

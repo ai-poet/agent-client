@@ -19,6 +19,8 @@ use super::*;
 
 /// Why a request cannot run on this platform.
 pub const UNSUPPORTED: &str = "the in-app browser cannot be automated on this platform yet";
+// Only the Windows build drives the page, so only it reports "not ready yet".
+#[cfg(target_os = "windows")]
 const NOT_READY: &str = "the in-app browser has not finished starting";
 
 /// What the page is showing.
