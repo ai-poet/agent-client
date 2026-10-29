@@ -502,7 +502,9 @@ fn restore_window(window: &mut Window) {
     let RawWindowHandle::Win32(handle) = handle.as_raw() else {
         return;
     };
-    let hwnd = HWND(handle.hwnd.get());
+    // `raw-window-handle` hands the handle over as a `NonZeroIsize`; Win32
+    // wants it back as the pointer it always was.
+    let hwnd = HWND(handle.hwnd.get() as *mut core::ffi::c_void);
     // `ShowWindowAsync` reports the previous visibility, not success, so the
     // return value says nothing useful here.
     let _ = unsafe { ShowWindowAsync(hwnd, SW_RESTORE) };
