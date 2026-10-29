@@ -777,7 +777,11 @@ impl Waku {
         let Some(dialog) = self.wallpaper.adjustment_dialog.as_mut() else {
             return;
         };
-        let step = if event.keystroke.modifiers.shift { 0.1 } else { 0.02 };
+        let step = if event.keystroke.modifiers.shift {
+            0.1
+        } else {
+            0.02
+        };
         match key {
             "left" => dialog.draft.focal_x -= step,
             "right" => dialog.draft.focal_x += step,

@@ -1,6 +1,6 @@
 //! Appearance controls for the new-task wallpaper.
 
-use gpui::{MouseButton, RenderImage};
+use gpui::MouseButton;
 
 use super::*;
 use crate::persistence::WallpaperEffect;
@@ -55,10 +55,7 @@ fn wallpaper_row_separator(theme: Theme) -> Div {
 }
 
 impl Waku {
-    pub(super) fn render_wallpaper_settings_rows(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn render_wallpaper_settings_rows(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let settings = self.state.wallpaper.clone();
         let loading = self.wallpaper.loading;
@@ -81,38 +78,43 @@ impl Waku {
             || tr!("wallpaper.description"),
             |settings| settings.name.clone(),
         );
-        let mut rows = div().w_full().flex().flex_col().child(wallpaper_row_separator(theme)).child(
-            div()
-                .w_full()
-                .min_h(px(60.0))
-                .px(px(20.0))
-                .py(px(12.0))
-                .flex()
-                .items_center()
-                .gap(px(24.0))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .child(
-                            div()
-                                .text_size(sp(13.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(tr!("wallpaper.title")),
-                        )
-                        .child(
-                            div()
-                                .mt(px(5.0))
-                                .text_size(sp(12.5))
-                                .line_height(sp(18.0))
-                                .text_color(theme.text_secondary)
-                                .truncate()
-                                .child(description),
-                        ),
-                )
-                .child(choose),
-        );
+        let mut rows = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(wallpaper_row_separator(theme))
+            .child(
+                div()
+                    .w_full()
+                    .min_h(px(60.0))
+                    .px(px(20.0))
+                    .py(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(24.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(tr!("wallpaper.title")),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(5.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(18.0))
+                                    .text_color(theme.text_secondary)
+                                    .truncate()
+                                    .child(description),
+                            ),
+                    )
+                    .child(choose),
+            );
 
         if let Some(settings) = settings {
             let selected_effect = settings.effect;

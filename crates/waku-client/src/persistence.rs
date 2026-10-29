@@ -119,6 +119,34 @@ pub struct WallpaperSettings {
     pub theme_colors: bool,
 }
 
+#[cfg(test)]
+mod wallpaper_tests {
+    use super::*;
+
+    #[test]
+    fn wallpaper_adjustment_is_finite_and_bounded() {
+        let adjusted = WallpaperAdjustment {
+            focal_x: -1.0,
+            focal_y: 2.0,
+            zoom: f32::NAN,
+        }
+        .normalized();
+        assert_eq!(adjusted.focal_x, 0.0);
+        assert_eq!(adjusted.focal_y, 1.0);
+        assert_eq!(adjusted.zoom, 1.0);
+    }
+
+    #[test]
+    fn older_wallpaper_settings_get_safe_defaults() {
+        let settings: WallpaperSettings =
+            serde_json::from_str(r#"{"path":"/tmp/wallpaper.png","name":"wallpaper.png"}"#)
+                .expect("minimal settings remain compatible");
+        assert_eq!(settings.adjustment, WallpaperAdjustment::default());
+        assert_eq!(settings.effect, WallpaperEffect::None);
+        assert!(!settings.theme_colors);
+    }
+}
+
 /// Direction of task history inside the sidebar's current grouping.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

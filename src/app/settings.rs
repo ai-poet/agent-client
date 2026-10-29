@@ -1554,7 +1554,7 @@ impl Waku {
                     )
                     .child(code_font_size_selector),
             )
-            .children(self.render_wallpaper_settings_rows(cx))
+            .child(self.render_wallpaper_settings_rows(cx))
             .children(self.render_motion_settings_rows(cx))
             .into_any_element()
     }

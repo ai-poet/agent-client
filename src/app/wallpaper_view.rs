@@ -19,8 +19,6 @@ const CUTOUT_REVEAL_OPACITY: f32 = 0.5;
 #[derive(Clone, Copy, Debug)]
 struct FittedGeometry {
     bounds: Bounds<Pixels>,
-    width: f32,
-    height: f32,
     overflow_x: f32,
     overflow_y: f32,
 }
@@ -58,8 +56,6 @@ fn fitted_geometry(
             ),
             size(px(fitted_width), px(fitted_height)),
         ),
-        width: fitted_width,
-        height: fitted_height,
         overflow_x,
         overflow_y,
     })
@@ -290,8 +286,8 @@ mod tests {
             },
         )
         .expect("valid geometry");
-        assert_eq!(fitted.width, 400.0);
-        assert_eq!(fitted.height, 200.0);
+        assert_eq!(fitted.bounds.size.width, px(400.0));
+        assert_eq!(fitted.bounds.size.height, px(200.0));
         assert_eq!(fitted.bounds.left(), px(-290.0));
         assert_eq!(fitted.bounds.top(), px(-30.0));
     }
