@@ -17,6 +17,18 @@ resolve `gpui` and `gpui_platform` to that directory.
     limited to `crates/gpui/src/{platform,window}.rs` and
     `crates/gpui_macos/src/window.rs`. The Zed-only `platform_title_bar` and
     `workspace` parts do not apply to this standalone workspace.
+  - Local edits on top of the vendored commit, not ported from any upstream
+    commit:
+    - `crates/gpui/src/elements/uniform_list.rs`: dropped the `std::usize`
+      module import, whose constants are deprecated in favour of the
+      associated `usize::MAX`. The call site itself is unchanged.
+
+    Windows' `zoom()` in `crates/gpui_windows/src/window.rs` is *not*
+    patched. It only ever calls `ShowWindowAsync(SW_MAXIMIZE)`, which is a
+    no-op once the window is already zoomed, so it cannot restore a maximized
+    window. Waku works around this in its own layer
+    (`src/platform.rs::toggle_window_maximized`) rather than here, to keep
+    the vendored crate free of product-specific behaviour.
 
 Zui is a standalone extraction of GPUI from `wingleeio/zed`. Its `main` branch
 already includes the native-content overlay planes, per-pixel edge fades,

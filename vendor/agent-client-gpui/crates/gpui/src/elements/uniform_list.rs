@@ -11,7 +11,7 @@ use crate::{
     StyleRefinement, Styled, Window, point, px, size,
 };
 use smallvec::SmallVec;
-use std::{cell::RefCell, cmp, ops::Range, rc::Rc, usize};
+use std::{cell::RefCell, cmp, ops::Range, rc::Rc};
 
 use super::ListHorizontalSizingBehavior;
 
@@ -250,8 +250,7 @@ impl UniformListScrollHandle {
 
     /// Scroll to the bottom of the list.
     pub fn scroll_to_bottom(&self) {
-        self.scroll_to_item(usize::MAX, ScrollStrategy::Bottom);
-    }
+        self.scroll_to_item(usize::MAX, ScrollStrategy::Bottom);    }
 }
 
 impl Styled for UniformList {
