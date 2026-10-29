@@ -1176,9 +1176,7 @@ fn cloud_card(
                 match action {
                     CloudAction::SignIn => this.start_cloud_sign_in(cx),
                     CloudAction::SignOut => this.sign_out_cloud(cx),
-                    CloudAction::SetRouting(enabled) => {
-                        this.set_cloud_routing_enabled(enabled, cx)
-                    }
+                    CloudAction::SetRouting(enabled) => this.set_cloud_routing_enabled(enabled, cx),
                     CloudAction::TopUp => this.open_cloud_pay_modal(cx),
                     CloudAction::CopyReferral => {
                         if let Some(referral) = this.cloud_account.referral.clone() {

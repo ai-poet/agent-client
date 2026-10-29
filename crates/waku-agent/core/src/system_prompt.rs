@@ -5,8 +5,8 @@
 //! volatile, session-specific sections follow it.
 
 use serde::{Deserialize, Serialize};
-use std::sync::{Mutex, OnceLock};
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 // ---------------------------------------------------------------------------
 // Dynamic boundary marker
@@ -47,7 +47,11 @@ pub struct SystemPromptSection {
 impl SystemPromptSection {
     /// Create a memoizable (cacheable) section.
     pub fn cached(tag: &'static str, content: impl Into<String>) -> Self {
-        Self { tag, content: Some(content.into()), cache_break: false }
+        Self {
+            tag,
+            content: Some(content.into()),
+            cache_break: false,
+        }
     }
 
     /// Create a volatile section that re-evaluates every turn.
@@ -97,9 +101,9 @@ impl OutputStyle {
                 "Be maximally concise. Skip preamble, summaries, and filler. \
                 Lead with the answer. One sentence is better than three.",
             ),
-            OutputStyle::Formal => Some(
-                "Maintain a formal, professional tone. Use precise technical language.",
-            ),
+            OutputStyle::Formal => {
+                Some("Maintain a formal, professional tone. Use precise technical language.")
+            }
             OutputStyle::Casual => Some("Use a casual, conversational tone."),
             OutputStyle::Default => None,
         }
@@ -272,14 +276,9 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
         }
     }
 
-    let prefix = opts
-        .prefix
-        .unwrap_or_else(|| {
-            SystemPromptPrefix::detect(
-                opts.is_non_interactive,
-                opts.has_append_system_prompt,
-            )
-        });
+    let prefix = opts.prefix.unwrap_or_else(|| {
+        SystemPromptPrefix::detect(opts.is_non_interactive, opts.has_append_system_prompt)
+    });
 
     // ------------------------------------------------------------------ //
     // CACHEABLE sections (before the dynamic boundary)                   //
@@ -341,10 +340,7 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
 
     // 12. Memory injection (from memdir)
     if !opts.memory_content.is_empty() {
-        parts.push(format!(
-            "\n<memory>\n{}\n</memory>",
-            opts.memory_content
-        ));
+        parts.push(format!("\n<memory>\n{}\n</memory>", opts.memory_content));
     }
 
     // 13. Active goal addendum (dynamic — changes each session)
@@ -400,7 +396,10 @@ fn build_env_info_section(working_dir: Option<&str>) -> String {
             let (name, chaining) = if crate::shell::is_powershell_7() {
                 ("PowerShell 7", "`;`, or `&&` / `||`")
             } else {
-                ("Windows PowerShell 5.1", "`;` - not `&&` or `||`, which 5.1 rejects")
+                (
+                    "Windows PowerShell 5.1",
+                    "`;` - not `&&` or `||`, which 5.1 rejects",
+                )
             };
             format!(
                 "Shell: {name}. Git Bash is not installed, so the Bash tool runs commands in \

@@ -120,7 +120,11 @@ pub fn ends_with_version_segment(base: &str) -> bool {
     let Some((_, path)) = after_scheme.split_once('/') else {
         return false;
     };
-    let segment = path.rsplit('/').next().unwrap_or_default().to_ascii_lowercase();
+    let segment = path
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     let Some(rest) = segment.strip_prefix('v') else {
         return false;
     };
@@ -183,7 +187,10 @@ mod tests {
             openai_base_url("https://ark.cn-beijing.volces.com/api/v3"),
             "https://ark.cn-beijing.volces.com/api/v3"
         );
-        assert_eq!(openai_base_url("https://a.org/video"), "https://a.org/video/v1");
+        assert_eq!(
+            openai_base_url("https://a.org/video"),
+            "https://a.org/video/v1"
+        );
     }
 
     #[test]
@@ -192,13 +199,21 @@ mod tests {
             versioned_url("https://a.org", "chat/completions"),
             "https://a.org/v1/chat/completions"
         );
-        assert_eq!(versioned_url("https://a.org/v1/", "/models"), "https://a.org/v1/models");
+        assert_eq!(
+            versioned_url("https://a.org/v1/", "/models"),
+            "https://a.org/v1/models"
+        );
         assert_eq!(
             versioned_url("https://open.bigmodel.cn/api/paas/v4", "chat/completions"),
             "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         );
         assert!(ends_with_version_segment("https://a.org/v1beta"));
-        for base in ["https://a.org", "https://a.org/v2proxy", "https://v1.a.org", "a.org:8080"] {
+        for base in [
+            "https://a.org",
+            "https://a.org/v2proxy",
+            "https://v1.a.org",
+            "a.org:8080",
+        ] {
             assert!(!ends_with_version_segment(base), "{base}");
         }
     }

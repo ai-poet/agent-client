@@ -707,8 +707,13 @@ async fn run_sdk_connection(
                         }
                         acp_effort::Reapply::Effort => {
                             if let Some(effort) = options.reasoning_effort.as_deref()
-                                && acp_effort::apply_effort(&connection, provider, &session_id, effort)
-                                    .await
+                                && acp_effort::apply_effort(
+                                    &connection,
+                                    provider,
+                                    &session_id,
+                                    effort,
+                                )
+                                .await
                             {
                                 current_effort = options.reasoning_effort;
                             }

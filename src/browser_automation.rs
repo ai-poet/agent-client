@@ -385,7 +385,12 @@ return __describe(el);
 }
 
 pub fn select_script(input: &Value) -> String {
-    let option = json!(input.get("option").and_then(Value::as_str).unwrap_or_default());
+    let option = json!(
+        input
+            .get("option")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    );
     page_script(&format!(
         r#"
 const el = __find({target});
@@ -501,7 +506,10 @@ mod tests {
 
     #[test]
     fn screenshots_answer_their_data() {
-        assert_eq!(screenshot_data(r#"{"data":"iVBOR"}"#), Ok("iVBOR".to_owned()));
+        assert_eq!(
+            screenshot_data(r#"{"data":"iVBOR"}"#),
+            Ok("iVBOR".to_owned())
+        );
         assert!(screenshot_data(r#"{}"#).is_err());
     }
 }

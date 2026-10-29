@@ -60,10 +60,16 @@ mod tests {
 
     #[test]
     fn expands_one_level_skipping_self_broken_and_duplicates() {
-        let (linked, truncated) =
-            expand_links("[[k-a]] [[self]] [[missing]] [[k-a]] [[k-b]]", "self", known);
+        let (linked, truncated) = expand_links(
+            "[[k-a]] [[self]] [[missing]] [[k-a]] [[k-b]]",
+            "self",
+            known,
+        );
         assert_eq!(
-            linked.iter().map(|link| link.name.as_str()).collect::<Vec<_>>(),
+            linked
+                .iter()
+                .map(|link| link.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["k-a", "k-b"]
         );
         assert!(truncated, "the broken link counts as left out");
@@ -71,7 +77,10 @@ mod tests {
 
     #[test]
     fn stops_at_the_limit() {
-        let body = (0..6).map(|i| format!("[[k-{i}]]")).collect::<Vec<_>>().join(" ");
+        let body = (0..6)
+            .map(|i| format!("[[k-{i}]]"))
+            .collect::<Vec<_>>()
+            .join(" ");
         let (linked, truncated) = expand_links(&body, "x", known);
         assert_eq!(linked.len(), LINK_LIMIT);
         assert!(truncated);

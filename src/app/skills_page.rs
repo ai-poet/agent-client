@@ -501,19 +501,14 @@ impl Waku {
                 } else {
                     Some(tr!("skills.install"))
                 };
-                let mut row = div()
-                    .mt(px(6.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_secondary)
-                            .child(SharedString::from(target.location.source.label())),
-                    );
+                let mut row = div().mt(px(6.0)).flex().items_center().gap(px(8.0)).child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(SharedString::from(target.location.source.label())),
+                );
                 row = match action {
                     Some(label) => row.child(
                         div()

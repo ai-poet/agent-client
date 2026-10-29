@@ -1,4 +1,57 @@
-use gpui::Window;
+use gpui::{Window, WindowBackgroundAppearance};
+
+/// The native backdrop behind Waku's translucent window surfaces.
+///
+/// This is also the capability check used by the theme: an opaque window must
+/// keep opaque GPUI surfaces, otherwise their alpha would blend into the
+/// renderer's clear color instead of a real desktop material.
+pub fn preferred_window_background() -> WindowBackgroundAppearance {
+    #[cfg(target_os = "macos")]
+    {
+        return WindowBackgroundAppearance::Blurred;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        static BACKGROUND: std::sync::OnceLock<WindowBackgroundAppearance> =
+            std::sync::OnceLock::new();
+        return *BACKGROUND.get_or_init(|| windows_background_for_build(windows_build_number()));
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        WindowBackgroundAppearance::Opaque
+    }
+}
+
+pub fn window_glass_enabled() -> bool {
+    !matches!(
+        preferred_window_background(),
+        WindowBackgroundAppearance::Opaque
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn windows_build_number() -> Option<u32> {
+    use windows::Wdk::System::SystemServices::RtlGetVersion;
+    use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
+
+    let mut version = OSVERSIONINFOW::default();
+    version.dwOSVersionInfoSize = std::mem::size_of::<OSVERSIONINFOW>() as u32;
+    let status = unsafe { RtlGetVersion(&mut version) };
+    status.is_ok().then_some(version.dwBuildNumber)
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_background_for_build(build: Option<u32>) -> WindowBackgroundAppearance {
+    match build {
+        // DWMWA_SYSTEMBACKDROP_TYPE is available from Windows 11 22H2.
+        Some(build) if build >= 22621 => WindowBackgroundAppearance::MicaBackdrop,
+        // SetWindowCompositionAttribute's acrylic path starts at Windows 10 1809.
+        Some(build) if build >= 17763 => WindowBackgroundAppearance::Blurred,
+        _ => WindowBackgroundAppearance::Opaque,
+    }
+}
 
 #[cfg(target_os = "macos")]
 pub fn show_about_panel() {
@@ -297,7 +350,11 @@ const OPEN_IN_CATALOG: &[(&str, &str, &[&str])] = &[
     ("ghostty", "Ghostty", &["com.mitchellh.ghostty"]),
     ("warp", "Warp", &["dev.warp.Warp-Stable", "dev.warp.Warp"]),
     ("xcode", "Xcode", &["com.apple.dt.Xcode"]),
-    ("android-studio", "Android Studio", &["com.google.android.studio"]),
+    (
+        "android-studio",
+        "Android Studio",
+        &["com.google.android.studio"],
+    ),
 ];
 
 /// Resolve which catalog apps are installed, with their icons.
@@ -450,15 +507,6 @@ pub fn hide_window(window: &mut Window) {
     window.remove_window();
 }
 
-#[cfg(target_os = "macos")]
-thread_local! {
-    static SIDEBAR_TINT_VIEW: std::cell::RefCell<Option<objc2::rc::Retained<objc2_app_kit::NSView>>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-#[cfg(target_os = "macos")]
-const SIDEBAR_WIDTH: f64 = 252.0;
-
 pub fn start_window_move(window: &Window) {
     window.start_window_move();
 }
@@ -529,16 +577,15 @@ pub fn titlebar_double_click(window: &Window) {
     }
 }
 
-/// Match Cursor's macOS glass window stack without asking GPUI's transparent
-/// Metal target to blend two translucent quads. The semantic tint is a native
-/// view above active Sidebar vibrancy; GPUI paints clear sidebar chrome and one
-/// translucent interaction layer above it.
+/// Configure GPUI's native effect view for the whole window. Surface tints
+/// live in GPUI's sibling sidebar/main-area quads, so no second AppKit tint
+/// layer multiplies their alpha or needs resizing with the sidebar.
 #[cfg(target_os = "macos")]
-pub fn configure_sidebar_material(window: &Window, dark: bool) {
-    use objc2::{MainThreadMarker, MainThreadOnly};
+pub fn configure_window_material(window: &Window, dark: bool) {
+    use objc2::MainThreadMarker;
     use objc2_app_kit::{
-        NSAutoresizingMaskOptions, NSColor, NSView, NSVisualEffectBlendingMode,
-        NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindowOrderingMode,
+        NSColor, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState,
+        NSVisualEffectView,
     };
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -548,9 +595,9 @@ pub fn configure_sidebar_material(window: &Window, dark: bool) {
     let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
         return;
     };
-    let Some(main_thread) = MainThreadMarker::new() else {
+    if MainThreadMarker::new().is_none() {
         return;
-    };
+    }
 
     // GPUI owns the view hierarchy and creates the effect view before the
     // root entity is installed. We only adjust public AppKit properties.
@@ -560,7 +607,7 @@ pub fn configure_sidebar_material(window: &Window, dark: bool) {
             return;
         };
         let background = if dark {
-            NSColor::colorWithSRGBRed_green_blue_alpha(0.0, 0.0, 0.0, 0.25)
+            NSColor::colorWithSRGBRed_green_blue_alpha(0.0, 0.0, 0.0, 0.12)
         } else {
             NSColor::colorWithSRGBRed_green_blue_alpha(1.0, 1.0, 1.0, 0.0)
         };
@@ -569,94 +616,19 @@ pub fn configure_sidebar_material(window: &Window, dark: bool) {
         let Some(content_view) = native_window.contentView() else {
             return;
         };
-
-        let mut configured_effect = false;
         for subview in content_view.subviews().iter() {
             let Some(effect_view) = subview.downcast_ref::<NSVisualEffectView>() else {
                 continue;
             };
-            effect_view.setMaterial(NSVisualEffectMaterial::Sidebar);
+            effect_view.setMaterial(NSVisualEffectMaterial::UnderWindowBackground);
             effect_view.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
             effect_view.setState(NSVisualEffectState::Active);
-            configured_effect = true;
         }
-        if !configured_effect {
-            return;
-        }
-
-        let channel = if dark { 0x18 } else { 0xF3 } as f64 / 255.0;
-        let tint = NSColor::colorWithSRGBRed_green_blue_alpha(channel, channel, channel, 0.92);
-
-        SIDEBAR_TINT_VIEW.with_borrow_mut(|slot| {
-            let needs_new_view = slot.as_ref().is_none_or(|tint_view| {
-                tint_view
-                    .window()
-                    .as_deref()
-                    .is_none_or(|window| !std::ptr::eq(window, native_window.as_ref()))
-            });
-            if needs_new_view {
-                let mut frame = content_view.bounds();
-                frame.size.width = SIDEBAR_WIDTH;
-                let tint_view = NSView::initWithFrame(NSView::alloc(main_thread), frame);
-                tint_view.setAutoresizingMask(NSAutoresizingMaskOptions::ViewHeightSizable);
-                tint_view.setWantsLayer(true);
-                content_view.addSubview_positioned_relativeTo(
-                    &tint_view,
-                    NSWindowOrderingMode::Below,
-                    Some(view),
-                );
-                *slot = Some(tint_view);
-            }
-
-            if let Some(layer) = slot.as_ref().and_then(|tint_view| tint_view.layer()) {
-                layer.setBackgroundColor(Some(&tint.CGColor()));
-            }
-        });
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn configure_sidebar_material(_: &Window, _: bool) {}
-
-#[cfg(target_os = "macos")]
-pub fn set_sidebar_material_width(window: &Window, width: f32) {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::NSView;
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
-        return;
-    };
-    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
-        return;
-    };
-    let Some(_main_thread) = MainThreadMarker::new() else {
-        return;
-    };
-
-    unsafe {
-        let view = handle.ns_view.cast::<NSView>().as_ref();
-        let Some(native_window) = view.window() else {
-            return;
-        };
-        SIDEBAR_TINT_VIEW.with_borrow(|slot| {
-            let Some(tint_view) = slot.as_ref().filter(|tint_view| {
-                tint_view
-                    .window()
-                    .as_deref()
-                    .is_some_and(|window| std::ptr::eq(window, native_window.as_ref()))
-            }) else {
-                return;
-            };
-            let mut frame = tint_view.frame();
-            frame.size.width = width.into();
-            tint_view.setFrame(frame);
-        });
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn set_sidebar_material_width(_: &Window, _: f32) {}
+pub fn configure_window_material(_: &Window, _: bool) {}
 
 /// Follow macOS when `dark` is `None`, otherwise force the native titlebar,
 /// traffic lights, menus, and vibrancy to the selected appearance.
@@ -714,6 +686,37 @@ mod tests {
         let icon = super::linux_app_icon().expect("embedded PNG should decode");
 
         assert_eq!(icon.dimensions(), (256, 256));
+    }
+}
+
+#[cfg(test)]
+mod material_tests {
+    use gpui::WindowBackgroundAppearance;
+
+    use super::windows_background_for_build;
+
+    #[test]
+    fn windows_material_uses_mica_then_acrylic_then_opaque() {
+        assert_eq!(
+            windows_background_for_build(Some(22621)),
+            WindowBackgroundAppearance::MicaBackdrop
+        );
+        assert_eq!(
+            windows_background_for_build(Some(22620)),
+            WindowBackgroundAppearance::Blurred
+        );
+        assert_eq!(
+            windows_background_for_build(Some(17763)),
+            WindowBackgroundAppearance::Blurred
+        );
+        assert_eq!(
+            windows_background_for_build(Some(17762)),
+            WindowBackgroundAppearance::Opaque
+        );
+        assert_eq!(
+            windows_background_for_build(None),
+            WindowBackgroundAppearance::Opaque
+        );
     }
 }
 

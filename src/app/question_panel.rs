@@ -30,7 +30,11 @@ const CARD_CONTEXT: &str = "UserInputCard";
 const AUTO_ADVANCE: Duration = Duration::from_millis(220);
 
 pub fn init(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("escape", QuestionEscape, Some(CARD_CONTEXT))]);
+    cx.bind_keys([KeyBinding::new(
+        "escape",
+        QuestionEscape,
+        Some(CARD_CONTEXT),
+    )]);
 }
 
 #[derive(Default)]
@@ -98,7 +102,12 @@ impl Waku {
     }
 
     /// Returns whether the key answered.
-    fn question_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    fn question_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if event.keystroke.modifiers.modified() {
             return false;
         }

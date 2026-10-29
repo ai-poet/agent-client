@@ -49,9 +49,9 @@ pub fn ask_streaming(
         anyhow::bail!("the side thread does not end with a question");
     }
     let rt = runtime::shared()?;
-    let (platform, model) = model.map(split_model).map_or((None, None), |(platform, model)| {
-        (platform, Some(model))
-    });
+    let (platform, model) = model
+        .map(split_model)
+        .map_or((None, None), |(platform, model)| (platform, Some(model)));
     let options = AgentStartOptions {
         cwd: cwd.to_path_buf(),
         access_mode: AccessMode::Ask,
@@ -149,7 +149,11 @@ pub fn ask_streaming(
     })
 }
 
-fn forward(decoder: &mut StreamDecoder, event: claurst_query::QueryEvent, on_text: &mut dyn FnMut(&str)) {
+fn forward(
+    decoder: &mut StreamDecoder,
+    event: claurst_query::QueryEvent,
+    on_text: &mut dyn FnMut(&str),
+) {
     for event in decoder.push(event) {
         if let AgentEvent::Text(text) = event {
             on_text(&text);
@@ -192,15 +196,34 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("does not end with a question"));
-        assert!(ask_streaming(Path::new("."), None, "", &[], &mut |_| {}, CancellationToken::new()).is_err());
+        assert!(
+            ask_streaming(
+                Path::new("."),
+                None,
+                "",
+                &[],
+                &mut |_| {},
+                CancellationToken::new()
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn the_thread_keeps_its_order_and_roles() {
         let messages = thread_messages(&[
-            SideMessage { assistant: false, text: "q1".into() },
-            SideMessage { assistant: true, text: "a1".into() },
-            SideMessage { assistant: false, text: "q2".into() },
+            SideMessage {
+                assistant: false,
+                text: "q1".into(),
+            },
+            SideMessage {
+                assistant: true,
+                text: "a1".into(),
+            },
+            SideMessage {
+                assistant: false,
+                text: "q2".into(),
+            },
         ]);
         assert_eq!(messages.len(), 3);
         assert_eq!(text_of(&messages[1]), "a1");

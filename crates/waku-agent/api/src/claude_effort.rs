@@ -167,7 +167,11 @@ fn dash_dotted_versions(id: &str) -> String {
                 && index > 0
                 && bytes[index - 1].is_ascii_digit()
                 && bytes.get(index + 1).is_some_and(u8::is_ascii_digit);
-            if between_digits { '-' } else { ch }
+            if between_digits {
+                '-'
+            } else {
+                ch
+            }
         })
         .collect()
 }
@@ -178,7 +182,10 @@ mod tests {
 
     #[test]
     fn sonnet_5_5_takes_the_full_ladder() {
-        assert_eq!(effort_levels("claude-sonnet-5-5"), Some(LOW_TO_MAX_WITH_XHIGH));
+        assert_eq!(
+            effort_levels("claude-sonnet-5-5"),
+            Some(LOW_TO_MAX_WITH_XHIGH)
+        );
         assert_eq!(
             claude_reasoning("claude-sonnet-5-5", Some(EffortLevel::XHigh), Some(16_000)),
             ClaudeReasoning::Effort("xhigh".into())
@@ -188,9 +195,18 @@ mod tests {
     #[test]
     fn dotted_minor_versions_read_like_dashed_ones() {
         assert_eq!(normalize_model_id("claude-sonnet-5.5"), "claude-sonnet-5-5");
-        assert_eq!(normalize_model_id("anthropic/claude-opus-5.5"), "claude-opus-5-5");
-        assert_eq!(normalize_model_id("anthropic/claude-sonnet-4.6"), "claude-sonnet-4-6");
-        assert_eq!(effort_levels("claude-sonnet-4.6"), Some(LOW_MEDIUM_HIGH_MAX));
+        assert_eq!(
+            normalize_model_id("anthropic/claude-opus-5.5"),
+            "claude-opus-5-5"
+        );
+        assert_eq!(
+            normalize_model_id("anthropic/claude-sonnet-4.6"),
+            "claude-sonnet-4-6"
+        );
+        assert_eq!(
+            effort_levels("claude-sonnet-4.6"),
+            Some(LOW_MEDIUM_HIGH_MAX)
+        );
         // Only Claude ids, and only a dot between digits.
         assert_eq!(normalize_model_id("gpt-6.1-sol"), "gpt-6.1-sol");
         assert_eq!(normalize_model_id("claude-x.y"), "claude-x.y");

@@ -28,7 +28,9 @@ use waku_protocol::todo::{TodoItem, current_todo};
 
 use crate::ui::ActivationExt as _;
 
-use super::background_work::{rendered_work_status_icon, work_elapsed, work_kind_icon, work_status_color};
+use super::background_work::{
+    rendered_work_status_icon, work_elapsed, work_kind_icon, work_status_color,
+};
 use super::providers_page::card_button;
 use super::todo_list::render_todo_list;
 use super::*;
@@ -151,8 +153,13 @@ impl Waku {
             && !self.main_page_open()
             && !self.right_panel_visible
             && self.right_panel_rendered_width <= 0.0
-            && self.selected_session().is_some_and(|session| session.has_started())
-            && rail_fits(f32::from(window.viewport_size().width), self.sidebar_rendered_width)
+            && self
+                .selected_session()
+                .is_some_and(|session| session.has_started())
+            && rail_fits(
+                f32::from(window.viewport_size().width),
+                self.sidebar_rendered_width,
+            )
     }
 
     /// The rail's width this frame, for the layout and the chat column.
@@ -186,12 +193,20 @@ impl Waku {
     /// Read the working tree's changes again when the task moved since the
     /// last read, or every few seconds while it runs.
     fn maybe_refresh_rail_changes(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        let Some(session) = self.state.sessions.iter().find(|session| session.id == session_id) else {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
             return;
         };
         let busy = session.status.is_busy();
         let updated_at = session.updated_at;
-        let Some(cwd) = self.workspace_path_for_session(session).map(Path::to_path_buf) else {
+        let Some(cwd) = self
+            .workspace_path_for_session(session)
+            .map(Path::to_path_buf)
+        else {
             return;
         };
         let entry = self.session_rail.changes.entry(session_id).or_default();
@@ -216,7 +231,9 @@ impl Waku {
         cx.spawn(async move |this, cx| {
             let read = cx
                 .background_executor()
-                .spawn(async move { workspace.request(waku_client::WorkspaceOperation::InspectCommit { cwd }) })
+                .spawn(async move {
+                    workspace.request(waku_client::WorkspaceOperation::InspectCommit { cwd })
+                })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 let Some(entry) = this.session_rail.changes.get_mut(&session_id) else {
@@ -277,7 +294,11 @@ impl Waku {
 
     fn render_rail_environment(&self, theme: &Theme) -> Option<Div> {
         let session = self.selected_session()?;
-        let project = self.state.projects.iter().find(|project| project.id == session.project_id);
+        let project = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id);
         let folder_name = project
             .filter(|project| !project.is_projectless())
             .map(Project::display_name)
@@ -294,8 +315,18 @@ impl Waku {
         Some(
             card(theme)
                 .child(card_title(theme, tr!("session_rail.environment")))
-                .child(fact_row(theme, "icons/laptop.svg", tr!("session_rail.this_computer"), None))
-                .child(fact_row(theme, "icons/folder.svg", folder_name, folder_path))
+                .child(fact_row(
+                    theme,
+                    "icons/laptop.svg",
+                    tr!("session_rail.this_computer"),
+                    None,
+                ))
+                .child(fact_row(
+                    theme,
+                    "icons/folder.svg",
+                    folder_name,
+                    folder_path,
+                ))
                 .children(branch.map(|branch| {
                     fact_row(
                         theme,
@@ -335,7 +366,11 @@ impl Waku {
             })
             .child(card_title(theme, tr!("session_rail.context")))
             .child(icon(
-                if open { "icons/chevron-down.svg" } else { "icons/chevron-right.svg" },
+                if open {
+                    "icons/chevron-down.svg"
+                } else {
+                    "icons/chevron-right.svg"
+                },
                 10.0,
                 theme.text_tertiary,
             ))
@@ -375,18 +410,34 @@ impl Waku {
             body = body.child(line(
                 tr!("session_rail.context_used"),
                 match usage.window {
-                    Some(window) => format!("{} / {}", format_tokens(usage.tokens), format_tokens(window)),
+                    Some(window) => format!(
+                        "{} / {}",
+                        format_tokens(usage.tokens),
+                        format_tokens(window)
+                    ),
                     None => format_tokens(usage.tokens),
                 },
             ));
             if let Some(last) = usage.last {
                 body = body
-                    .child(line(tr!("session_rail.last_input"), format_tokens(last.uncached_input)))
-                    .child(line(tr!("session_rail.last_cached"), format_tokens(last.cached_input)))
-                    .child(line(tr!("session_rail.last_output"), format_tokens(last.output)));
+                    .child(line(
+                        tr!("session_rail.last_input"),
+                        format_tokens(last.uncached_input),
+                    ))
+                    .child(line(
+                        tr!("session_rail.last_cached"),
+                        format_tokens(last.cached_input),
+                    ))
+                    .child(line(
+                        tr!("session_rail.last_output"),
+                        format_tokens(last.output),
+                    ));
             }
             if let Some(total) = usage.session {
-                body = body.child(line(tr!("session_rail.session_total"), format_tokens(total.total())));
+                body = body.child(line(
+                    tr!("session_rail.session_total"),
+                    format_tokens(total.total()),
+                ));
             }
         }
         Some(body)
@@ -419,8 +470,16 @@ impl Waku {
                     this.open_right_panel_surface(RightPanelSurface::Diff, cx);
                 })
                 .child(icon("icons/file-diff.svg", 12.0, theme.text_tertiary))
-                .child(div().text_color(theme.success).child(format!("+{}", snapshot.additions)))
-                .child(div().text_color(theme.danger).child(format!("−{}", snapshot.deletions)))
+                .child(
+                    div()
+                        .text_color(theme.success)
+                        .child(format!("+{}", snapshot.additions)),
+                )
+                .child(
+                    div()
+                        .text_color(theme.danger)
+                        .child(format!("−{}", snapshot.deletions)),
+                )
                 .into_any_element(),
             Some(Changes {
                 snapshot: Some(_), ..
@@ -460,7 +519,12 @@ impl Waku {
             )
     }
 
-    fn render_rail_background(&self, session_id: Uuid, theme: &Theme, cx: &mut Context<Self>) -> Div {
+    fn render_rail_background(
+        &self,
+        session_id: Uuid,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let all = self.session_background_work(session_id);
         let (live, finished): (Vec<&BackgroundWorkItem>, Vec<&BackgroundWorkItem>) =
             all.into_iter().partition(|item| item.status.is_live());
@@ -486,7 +550,11 @@ impl Waku {
                 .on_activation(cx, move |this, _, cx| {
                     this.open_background_work_surface(session_id, key.clone(), cx);
                 })
-                .child(icon(work_kind_icon(item.key.kind), 12.0, theme.text_tertiary))
+                .child(icon(
+                    work_kind_icon(item.key.kind),
+                    12.0,
+                    theme.text_tertiary,
+                ))
                 .child(
                     div()
                         .flex_1()
@@ -502,7 +570,11 @@ impl Waku {
                         .text_color(theme.text_tertiary)
                         .child(work_elapsed(item)),
                 )
-                .child(rendered_work_status_icon(item.status, 11.0, work_status_color(item.status, *theme)))
+                .child(rendered_work_status_icon(
+                    item.status,
+                    11.0,
+                    work_status_color(item.status, *theme),
+                ))
                 .when(stoppable, |row| {
                     row.child(
                         div()
@@ -556,7 +628,11 @@ impl Waku {
                         cx.notify();
                     })
                     .child(icon(
-                        if open { "icons/chevron-down.svg" } else { "icons/chevron-right.svg" },
+                        if open {
+                            "icons/chevron-down.svg"
+                        } else {
+                            "icons/chevron-right.svg"
+                        },
                         10.0,
                         theme.text_tertiary,
                     ))
@@ -575,7 +651,9 @@ impl Waku {
     /// right above the working row while a turn runs. Folds to its header on
     /// a click; the fold is per task.
     pub(super) fn render_todo_row(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let Some(session) = self.selected_session().filter(|session| shows_todo_row(session))
+        let Some(session) = self
+            .selected_session()
+            .filter(|session| shows_todo_row(session))
         else {
             return div().into_any_element();
         };
@@ -609,10 +687,18 @@ impl Waku {
                 cx.notify();
             })
             .child(icon("icons/list.svg", 12.0, theme.text_tertiary))
-            .child(tr!("session_rail.todos", done = done, total = session.todos.len()))
+            .child(tr!(
+                "session_rail.todos",
+                done = done,
+                total = session.todos.len()
+            ))
             .child(div().flex_1())
             .child(icon(
-                if folded { "icons/chevron-up.svg" } else { "icons/chevron-down.svg" },
+                if folded {
+                    "icons/chevron-up.svg"
+                } else {
+                    "icons/chevron-down.svg"
+                },
                 10.0,
                 theme.text_tertiary,
             ));

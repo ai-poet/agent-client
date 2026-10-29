@@ -70,7 +70,9 @@ impl Progress {
                 if self.current_text.len() > LAST_TEXT_CHARS * 8 {
                     let before = self.current_text.len();
                     self.current_text = tail(&self.current_text, LAST_TEXT_CHARS * 2);
-                    self.settled_len = self.settled_len.saturating_sub(before - self.current_text.len());
+                    self.settled_len = self
+                        .settled_len
+                        .saturating_sub(before - self.current_text.len());
                 }
             }
             SubagentEvent::Settled => self.settled_len = self.current_text.len(),

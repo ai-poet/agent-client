@@ -16,7 +16,9 @@
 use std::path::{Path, PathBuf};
 
 use auto_memory::scan::MemoryGroup;
-use auto_memory::{MemoryConfig, MemoryDraft, MemoryRecord, MemoryScope, MemoryStore, MemoryType, ScopeDir};
+use auto_memory::{
+    MemoryConfig, MemoryDraft, MemoryRecord, MemoryScope, MemoryStore, MemoryType, ScopeDir,
+};
 
 use super::providers_page::card_button;
 use super::settings::abbreviate_home_path;
@@ -153,7 +155,11 @@ impl Waku {
     }
 
     /// Apply a change to the settings and write the file.
-    fn update_agent_memory_config(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut MemoryConfig)) {
+    fn update_agent_memory_config(
+        &mut self,
+        cx: &mut Context<Self>,
+        edit: impl FnOnce(&mut MemoryConfig),
+    ) {
         let state = &mut self.agent_page.memory;
         let Some(config) = state.config.as_mut() else {
             return;
@@ -262,7 +268,12 @@ impl Waku {
         });
     }
 
-    fn confirm_delete_agent_memory(&mut self, dir: ScopeDir, record: &MemoryRecord, cx: &mut Context<Self>) {
+    fn confirm_delete_agent_memory(
+        &mut self,
+        dir: ScopeDir,
+        record: &MemoryRecord,
+        cx: &mut Context<Self>,
+    ) {
         let name = record.name.clone();
         let detail = if dir.scope == MemoryScope::Project {
             tr!("memory.settings.delete_detail_project")
@@ -276,7 +287,13 @@ impl Waku {
             true,
             cx,
             move |this, _, cx| {
-                if this.agent_page.memory.editor.as_ref().is_some_and(|editor| editor.name == name) {
+                if this
+                    .agent_page
+                    .memory
+                    .editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.name == name)
+                {
                     this.agent_page.memory.editor = None;
                 }
                 this.change_agent_memory(cx, move |store| store.delete(&dir, &name).map(|_| ()));
@@ -284,7 +301,13 @@ impl Waku {
         );
     }
 
-    fn confirm_clear_agent_memory(&mut self, dir: ScopeDir, label: String, count: usize, cx: &mut Context<Self>) {
+    fn confirm_clear_agent_memory(
+        &mut self,
+        dir: ScopeDir,
+        label: String,
+        count: usize,
+        cx: &mut Context<Self>,
+    ) {
         let detail = if dir.scope == MemoryScope::Project {
             tr!("memory.settings.clear_detail_project", count = count)
         } else {
@@ -310,7 +333,11 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let field = |text: String, placeholder: String, multi_line: bool, window: &mut Window, cx: &mut Context<Self>| {
+        let field = |text: String,
+                     placeholder: String,
+                     multi_line: bool,
+                     window: &mut Window,
+                     cx: &mut Context<Self>| {
             let input = cx.new(|cx| {
                 let mut input = TextInput::new(window, cx).placeholder(placeholder);
                 if multi_line {
@@ -549,7 +576,12 @@ impl Waku {
         })
     }
 
-    fn render_agent_memory_groups(&self, config: &MemoryConfig, theme: Theme, cx: &mut Context<Self>) -> Div {
+    fn render_agent_memory_groups(
+        &self,
+        config: &MemoryConfig,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let state = &self.agent_page.memory;
         let busy = state.busy || state.saving;
         let budget = auto_memory::prompt::index_budget(config.max_bytes());
@@ -574,18 +606,13 @@ impl Waku {
                 cx,
                 |this, _, cx| this.change_agent_memory(cx, |_| Ok(())),
             ));
-        let mut block = div()
-            .mt(px(16.0))
-            .flex()
-            .flex_col()
-            .child(header)
-            .child(
-                div()
-                    .text_size(sp(12.0))
-                    .line_height(sp(17.0))
-                    .text_color(theme.text_tertiary)
-                    .child(tr!("memory.settings.memories_description")),
-            );
+        let mut block = div().mt(px(16.0)).flex().flex_col().child(header).child(
+            div()
+                .text_size(sp(12.0))
+                .line_height(sp(17.0))
+                .text_color(theme.text_tertiary)
+                .child(tr!("memory.settings.memories_description")),
+        );
         let Some(groups) = state.groups.as_ref() else {
             return block.child(placeholder_line(theme, tr!("common.loading")));
         };
@@ -594,7 +621,8 @@ impl Waku {
         }
         let stale_days = config.stale_after_days();
         for group in groups {
-            block = block.child(self.render_agent_memory_group(group, budget, stale_days, busy, theme, cx));
+            block = block
+                .child(self.render_agent_memory_group(group, budget, stale_days, busy, theme, cx));
         }
         block
     }
@@ -706,7 +734,8 @@ impl Waku {
         let mut rows = div().flex().flex_col();
         for record in &group.memories {
             let stale = auto_memory::store::is_stale(record, stale_days, now);
-            rows = rows.child(self.render_agent_memory_row(group, &key, record, stale, busy, theme, cx));
+            rows = rows
+                .child(self.render_agent_memory_row(group, &key, record, stale, busy, theme, cx));
         }
         block = block.child(rows);
         block
@@ -730,7 +759,12 @@ impl Waku {
             .is_some_and(|(dir, name)| dir == &group.dir.dir && name == &record.name);
         let row_id = format!("agent-memory-row-{key}-{}", record.name);
 
-        let mut chips = div().flex().flex_wrap().items_center().gap(px(6.0)).child(chip(theme, type_label(record.kind)));
+        let mut chips = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(6.0))
+            .child(chip(theme, type_label(record.kind)));
         if record.pinned {
             chips = chips.child(chip(theme, tr!("memory.settings.pinned")));
         }
@@ -759,17 +793,15 @@ impl Waku {
             .on_activation(cx, move |this, _, cx| {
                 this.toggle_agent_memory_row(toggle_dir.clone(), toggle_name.clone(), cx)
             })
-            .child(
-                div().pt(px(2.0)).flex_none().child(icon(
-                    if open {
-                        "icons/chevron-down.svg"
-                    } else {
-                        "icons/chevron-right.svg"
-                    },
-                    12.0,
-                    theme.text_tertiary,
-                )),
-            )
+            .child(div().pt(px(2.0)).flex_none().child(icon(
+                if open {
+                    "icons/chevron-down.svg"
+                } else {
+                    "icons/chevron-right.svg"
+                },
+                12.0,
+                theme.text_tertiary,
+            )))
             .child(
                 div()
                     .flex_1()
@@ -808,7 +840,12 @@ impl Waku {
                     ),
             );
 
-        let mut row = div().flex().flex_col().border_b_1().border_color(theme.border).child(summary);
+        let mut row = div()
+            .flex()
+            .flex_col()
+            .border_b_1()
+            .border_color(theme.border)
+            .child(summary);
         if !open {
             return row;
         }
@@ -866,7 +903,12 @@ impl Waku {
                             busy,
                             cx,
                             move |this, window, cx| {
-                                this.open_agent_memory_editor(edit_dir.clone(), &edit_record, window, cx)
+                                this.open_agent_memory_editor(
+                                    edit_dir.clone(),
+                                    &edit_record,
+                                    window,
+                                    cx,
+                                )
                             },
                         ))
                         .child(card_button(
@@ -892,7 +934,11 @@ impl Waku {
                             busy,
                             cx,
                             move |this, _, cx| {
-                                this.confirm_delete_agent_memory(delete_dir.clone(), &delete_record, cx)
+                                this.confirm_delete_agent_memory(
+                                    delete_dir.clone(),
+                                    &delete_record,
+                                    cx,
+                                )
                             },
                         )),
                 ),

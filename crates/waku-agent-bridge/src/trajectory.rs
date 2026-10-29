@@ -25,8 +25,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use agent_trajectory::record::{
-    CompactionPhase, FailureInfo, Purpose, Record, RequestOptions, RequestStatus, RetryInfo, ToolSpec,
-    Usage, fingerprint, preview,
+    CompactionPhase, FailureInfo, Purpose, Record, RequestOptions, RequestStatus, RetryInfo,
+    ToolSpec, Usage, fingerprint, preview,
 };
 use agent_trajectory::writer::Writer;
 use claurst_core::types::{ContentBlock, Message, MessageContent, UsageInfo};
@@ -143,7 +143,9 @@ pub struct Recorder {
 impl Recorder {
     /// A recorder writing under `dir`, or one that records nothing.
     pub fn new(dir: Option<PathBuf>, session_id: &str) -> Self {
-        let tx = dir.filter(|_| enabled()).and_then(|dir| spawn_writer(dir, session_id.to_owned()));
+        let tx = dir
+            .filter(|_| enabled())
+            .and_then(|dir| spawn_writer(dir, session_id.to_owned()));
         Self::with(tx, Box::new(now_ms))
     }
 
@@ -185,7 +187,16 @@ impl Recorder {
         let tools: Vec<claurst_core::types::ToolDefinition> =
             tools.iter().map(|tool| tool.to_definition()).collect();
         let (prompt, images) = message.map(prompt_of).unwrap_or_default();
-        self.begin_turn_with(turn, &prompt, images, provider, api_base, wire_format, query, &tools);
+        self.begin_turn_with(
+            turn,
+            &prompt,
+            images,
+            provider,
+            api_base,
+            wire_format,
+            query,
+            &tools,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -288,7 +299,12 @@ impl Recorder {
     }
 
     /// A compaction asked for outside the loop (`/compact`).
-    pub fn compaction(&self, phase: CompactionPhase, tokens_before: u64, tokens_after: Option<u64>) {
+    pub fn compaction(
+        &self,
+        phase: CompactionPhase,
+        tokens_before: u64,
+        tokens_after: Option<u64>,
+    ) {
         let at = (self.clock)();
         self.record(Record::Compaction {
             turn: None,
@@ -309,18 +325,31 @@ impl Recorder {
         let mut state = self.state.lock();
         let turn = state.turn;
         let mut records = Vec::new();
-        if let Some(record) = finish(&mut state.main, turn, None, now, if success {
-            RequestStatus::Cancelled
-        } else {
-            RequestStatus::Error
-        }, None)
-        {
+        if let Some(record) = finish(
+            &mut state.main,
+            turn,
+            None,
+            now,
+            if success {
+                RequestStatus::Cancelled
+            } else {
+                RequestStatus::Error
+            },
+            None,
+        ) {
             records.push(record);
         }
         let children: Vec<(String, Stream)> = state.children.drain().collect();
         drop(state);
         for (parent, mut stream) in children {
-            if let Some(record) = finish(&mut stream, turn, Some(&parent), now, RequestStatus::Cancelled, None) {
+            if let Some(record) = finish(
+                &mut stream,
+                turn,
+                Some(&parent),
+                now,
+                RequestStatus::Cancelled,
+                None,
+            ) {
                 records.push(record);
             }
         }
@@ -444,7 +473,9 @@ fn observe_stream(
                 request_id: failure.request_id.clone(),
             });
         }
-        QueryEvent::TurnComplete { stop_reason, usage, .. } => {
+        QueryEvent::TurnComplete {
+            stop_reason, usage, ..
+        } => {
             if let Some(record) = finish(
                 stream,
                 turn,
@@ -672,7 +703,10 @@ fn spawn_writer(dir: PathBuf, session: String) -> Option<mpsc::Sender<Outbox>> {
                                 fp: system_fp,
                                 text: system,
                             },
-                            Record::Tools { fp: tools_fp, tools },
+                            Record::Tools {
+                                fp: tools_fp,
+                                tools,
+                            },
                         ];
                     }
                     Outbox::Record(record, at) => {
@@ -765,7 +799,16 @@ mod tests {
     #[test]
     fn a_request_is_timed_from_its_boundary_to_its_completion() {
         let (recorder, rx, clock) = recorder();
-        recorder.begin_turn_with(1, "fix it", 0, "anthropic", "https://gw", "messages", &QueryConfig::default(), &[]);
+        recorder.begin_turn_with(
+            1,
+            "fix it",
+            0,
+            "anthropic",
+            "https://gw",
+            "messages",
+            &QueryConfig::default(),
+            &[],
+        );
         clock.store(1_300, Ordering::SeqCst);
         recorder.observe(&start());
         clock.store(1_500, Ordering::SeqCst);
@@ -773,7 +816,14 @@ mod tests {
         clock.store(2_000, Ordering::SeqCst);
         recorder.observe(&complete(40));
         let all = records(&rx);
-        assert!(matches!(all[0], Record::TurnStart { turn: 1, at: 1_000, .. }));
+        assert!(matches!(
+            all[0],
+            Record::TurnStart {
+                turn: 1,
+                at: 1_000,
+                ..
+            }
+        ));
         match &all[1] {
             Record::Request {
                 step,
@@ -785,7 +835,10 @@ mod tests {
                 model,
                 ..
             } => {
-                assert_eq!((*step, *started_at, *first_token_at, *ended_at), (1, 1_000, Some(1_500), 2_000));
+                assert_eq!(
+                    (*step, *started_at, *first_token_at, *ended_at),
+                    (1, 1_000, Some(1_500), 2_000)
+                );
                 assert_eq!(usage.unwrap().output, 40);
                 assert_eq!(usage.unwrap().cache_read, 5);
                 assert_eq!(text_preview, "hello");
@@ -798,7 +851,16 @@ mod tests {
     #[test]
     fn a_tool_call_sets_the_next_requests_start_and_a_retry_stays_on_its_request() {
         let (recorder, rx, clock) = recorder();
-        recorder.begin_turn_with(1, "go", 0, "anthropic", "", "messages", &QueryConfig::default(), &[]);
+        recorder.begin_turn_with(
+            1,
+            "go",
+            0,
+            "anthropic",
+            "",
+            "messages",
+            &QueryConfig::default(),
+            &[],
+        );
         recorder.observe(&start());
         recorder.observe(&text("x"));
         clock.store(1_100, Ordering::SeqCst);
@@ -837,21 +899,37 @@ mod tests {
         let second = all
             .iter()
             .filter_map(|record| match record {
-                Record::Request { step: 2, started_at, first_token_at, retries, .. } => {
-                    Some((*started_at, *first_token_at, retries.len()))
-                }
+                Record::Request {
+                    step: 2,
+                    started_at,
+                    first_token_at,
+                    retries,
+                    ..
+                } => Some((*started_at, *first_token_at, retries.len())),
                 _ => None,
             })
             .next()
             .unwrap();
         assert_eq!(second, (1_400, Some(3_600), 1));
-        assert!(matches!(all.last(), Some(Record::TurnEnd { success: true, .. })));
+        assert!(matches!(
+            all.last(),
+            Some(Record::TurnEnd { success: true, .. })
+        ));
     }
 
     #[test]
     fn a_retry_records_its_reason_and_discarded_output() {
         let (recorder, rx, _) = recorder();
-        recorder.begin_turn_with(1, "go", 0, "anthropic", "", "messages", &QueryConfig::default(), &[]);
+        recorder.begin_turn_with(
+            1,
+            "go",
+            0,
+            "anthropic",
+            "",
+            "messages",
+            &QueryConfig::default(),
+            &[],
+        );
         recorder.observe(&start());
         recorder.observe(&text("half an ans"));
         recorder.observe(&QueryEvent::Retry(claurst_query::RetryNotice {
@@ -870,7 +948,11 @@ mod tests {
         let retry = records(&rx)
             .into_iter()
             .find_map(|record| match record {
-                Record::Request { retries, text_preview, .. } => Some((retries, text_preview)),
+                Record::Request {
+                    retries,
+                    text_preview,
+                    ..
+                } => Some((retries, text_preview)),
                 _ => None,
             })
             .unwrap();
@@ -883,18 +965,37 @@ mod tests {
     #[test]
     fn a_failed_request_keeps_its_failure_and_request_id() {
         let (recorder, rx, _) = recorder();
-        recorder.begin_turn_with(1, "go", 0, "anthropic", "", "messages", &QueryConfig::default(), &[]);
+        recorder.begin_turn_with(
+            1,
+            "go",
+            0,
+            "anthropic",
+            "",
+            "messages",
+            &QueryConfig::default(),
+            &[],
+        );
         // Refused before anything streamed: the failure alone opens it.
-        recorder.observe(&QueryEvent::RequestFailed(claurst_api::retry_policy::ModelFailure {
-            code: Some("permission_error".into()),
-            request_id: Some("req_refused".into()),
-            ..claurst_api::retry_policy::ModelFailure::fatal(Some(403), "no access to this model")
-        }));
+        recorder.observe(&QueryEvent::RequestFailed(
+            claurst_api::retry_policy::ModelFailure {
+                code: Some("permission_error".into()),
+                request_id: Some("req_refused".into()),
+                ..claurst_api::retry_policy::ModelFailure::fatal(
+                    Some(403),
+                    "no access to this model",
+                )
+            },
+        ));
         recorder.end_turn(false, Some("HTTP 403".into()), Usage::default());
         let (status, error, failure) = records(&rx)
             .into_iter()
             .find_map(|record| match record {
-                Record::Request { status, error, failure, .. } => Some((status, error, failure)),
+                Record::Request {
+                    status,
+                    error,
+                    failure,
+                    ..
+                } => Some((status, error, failure)),
                 _ => None,
             })
             .expect("the refused request has a record");
@@ -910,14 +1011,32 @@ mod tests {
     #[test]
     fn a_goal_resume_is_recorded_after_its_turn() {
         let (recorder, rx, _) = recorder();
-        recorder.begin_turn_with(3, "go", 0, "anthropic", "", "messages", &QueryConfig::default(), &[]);
+        recorder.begin_turn_with(
+            3,
+            "go",
+            0,
+            "anthropic",
+            "",
+            "messages",
+            &QueryConfig::default(),
+            &[],
+        );
         recorder.end_turn(false, Some("Overloaded".into()), Usage::default());
         recorder.goal_resume(1, Some(5), 30_000);
         let all = records(&rx);
-        assert!(matches!(
-            all.last(),
-            Some(Record::GoalResume { turn: 3, attempt: 1, max_attempts: Some(5), delay_ms: 30_000, .. })
-        ), "{all:?}");
+        assert!(
+            matches!(
+                all.last(),
+                Some(Record::GoalResume {
+                    turn: 3,
+                    attempt: 1,
+                    max_attempts: Some(5),
+                    delay_ms: 30_000,
+                    ..
+                })
+            ),
+            "{all:?}"
+        );
     }
 
     #[test]

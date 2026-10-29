@@ -23,14 +23,14 @@
 pub mod agent_settings;
 pub mod auth;
 pub mod brand;
+pub mod claude_compat;
 pub mod cli_detect;
 pub mod cli_install;
-pub mod cua_install;
-pub mod client;
-pub mod claude_compat;
 pub mod cli_takeover;
+pub mod client;
 pub mod codex_compat;
 pub mod content_translations;
+pub mod cua_install;
 pub mod custom_api;
 pub mod env_conflicts;
 pub mod env_fix;
@@ -38,6 +38,7 @@ pub mod failover;
 pub mod gateway;
 pub mod gateway_origin;
 pub mod global_config;
+pub mod group_status;
 pub mod http;
 pub mod images;
 pub mod mcp_stdio;
@@ -48,7 +49,6 @@ pub mod model_test;
 pub mod model_windows;
 pub mod node_install;
 pub mod onboarding;
-pub mod group_status;
 pub mod pay;
 pub mod paywall;
 pub mod promotion;
@@ -227,7 +227,9 @@ pub fn ensure_key_for_group(
     let client = authenticated(credentials)?;
     let existing = client.list_keys(&credentials.access_token)?;
     let reusable = existing.items.into_iter().find(|key| {
-        key.group_id == group_id && !key.key.is_empty() && !key.status.eq_ignore_ascii_case("disabled")
+        key.group_id == group_id
+            && !key.key.is_empty()
+            && !key.status.eq_ignore_ascii_case("disabled")
     });
     match reusable {
         Some(key) => Ok(key),
@@ -243,8 +245,14 @@ pub fn ensure_key_for_group(
 /// to it, otherwise one kept for it in `group_keys`.
 pub fn key_for_group(credentials: &Credentials, group_id: i64) -> Option<&str> {
     [
-        (credentials.claude_group_id, credentials.claude_api_key.as_deref()),
-        (credentials.codex_group_id, credentials.codex_api_key.as_deref()),
+        (
+            credentials.claude_group_id,
+            credentials.claude_api_key.as_deref(),
+        ),
+        (
+            credentials.codex_group_id,
+            credentials.codex_api_key.as_deref(),
+        ),
         (credentials.group_id, credentials.api_key.as_deref()),
     ]
     .into_iter()
@@ -283,9 +291,8 @@ pub fn ensure_group_keys(
     }
     let client = authenticated(credentials)?;
     let listing = client.list_keys(&credentials.access_token)?;
-    let usable = |key: &client::ApiKey| {
-        !key.key.is_empty() && !key.status.eq_ignore_ascii_case("disabled")
-    };
+    let usable =
+        |key: &client::ApiKey| !key.key.is_empty() && !key.status.eq_ignore_ascii_case("disabled");
     if listing.total <= listing.items.len() as i64 {
         credentials.group_keys.retain(|_, kept| {
             listing
@@ -326,7 +333,11 @@ pub fn ensure_group_keys(
     // Only a refusal that left nothing keyed is the caller's problem — the
     // one-group callers need to hear why.
     match refused {
-        Some(error) if wanted.iter().all(|group| key_for_group(credentials, *group).is_none()) => {
+        Some(error)
+            if wanted
+                .iter()
+                .all(|group| key_for_group(credentials, *group).is_none()) =>
+        {
             Err(error)
         }
         _ => Ok(()),
@@ -401,16 +412,17 @@ impl ModelRoutesRefresh {
     /// undo that. For the same reason the keys of the domestic and Gemini
     /// groups picked now survive a refresh that started before they were.
     pub fn apply_to(&self, credentials: &mut Credentials) {
-        let picked: Vec<(i64, String)> = [credentials.domestic_group_id, credentials.gemini_group_id]
-            .into_iter()
-            .flatten()
-            .filter_map(|group| {
-                credentials
-                    .group_keys
-                    .get(&group)
-                    .map(|key| (group, key.clone()))
-            })
-            .collect();
+        let picked: Vec<(i64, String)> =
+            [credentials.domestic_group_id, credentials.gemini_group_id]
+                .into_iter()
+                .flatten()
+                .filter_map(|group| {
+                    credentials
+                        .group_keys
+                        .get(&group)
+                        .map(|key| (group, key.clone()))
+                })
+                .collect();
         credentials.group_keys = self.group_keys.clone();
         for (group, key) in picked {
             credentials.group_keys.entry(group).or_insert(key);
@@ -521,7 +533,9 @@ pub fn refresh_model_routes(
         .chain(credentials.gemini_group_id)
         .collect();
     ensure_group_keys(credentials, &needed)?;
-    credentials.group_keys.retain(|group, _| needed.contains(group));
+    credentials
+        .group_keys
+        .retain(|group, _| needed.contains(group));
     // A group that could not be given a key leaves its models on their
     // platform's key rather than on nothing.
     let model_routes: std::collections::BTreeMap<String, i64> = routes
@@ -664,8 +678,14 @@ mod group_key_tests {
             ("gpt-image-2".to_owned(), 9),
         ]);
         let platforms = routed_platforms(&routes, &offers);
-        assert_eq!(platforms.get("gemini-4-argon").map(String::as_str), Some("antigravity"));
-        assert_eq!(platforms.get("claude-opus-5").map(String::as_str), Some("anthropic"));
+        assert_eq!(
+            platforms.get("gemini-4-argon").map(String::as_str),
+            Some("antigravity")
+        );
+        assert_eq!(
+            platforms.get("claude-opus-5").map(String::as_str),
+            Some("anthropic")
+        );
         assert!(!platforms.contains_key("gpt-image-2"));
     }
 
@@ -723,7 +743,10 @@ mod group_key_tests {
         };
         let refresh = ModelRoutesRefresh {
             group_keys: std::collections::BTreeMap::from([(14, "sk-sub".to_owned())]),
-            model_routes: std::collections::BTreeMap::from([("deepseek-v4.1-flash".to_owned(), 14)]),
+            model_routes: std::collections::BTreeMap::from([(
+                "deepseek-v4.1-flash".to_owned(),
+                14,
+            )]),
             ..ModelRoutesRefresh::default()
         };
         refresh.apply_to(&mut live);
@@ -956,7 +979,9 @@ mod refresh_tests {
             let mut generation = 1u32;
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { break };
-                let Some((path, body)) = read_request(&mut stream) else { continue };
+                let Some((path, body)) = read_request(&mut stream) else {
+                    continue;
+                };
                 if path != "/api/v1/auth/refresh" {
                     respond(&mut stream, 404, r#"{"code":404,"message":"not found"}"#);
                     continue;
@@ -1065,7 +1090,10 @@ mod refresh_tests {
         // The symptom the user sees is "signed out"; the app must be able to
         // tell this apart from a network hiccup and say so.
         assert!(session_ended(&error), "{error:#}");
-        assert!(error.to_string().contains("invalid refresh token"), "{error:#}");
+        assert!(
+            error.to_string().contains("invalid refresh token"),
+            "{error:#}"
+        );
         // Nothing was written: the dead pair is not re-saved.
         assert_eq!(store.saved(), Some(desktop));
         assert_eq!(
@@ -1209,5 +1237,4 @@ mod tests {
         assert!(!encoded.contains("secret-refresh"));
         assert!(encoded.contains("sk-claude"));
     }
-
 }

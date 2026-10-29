@@ -876,9 +876,7 @@ impl CodexDriver {
                     stderr_thread,
                     super::support::PROCESS_EXIT_DRAIN_GRACE,
                     || match status {
-                        Ok(status)
-                            if !status.success() && last_visible_stderr.lock().is_none() =>
-                        {
+                        Ok(status) if !status.success() && last_visible_stderr.lock().is_none() => {
                             Some(DriverEvent::Error(tr!(
                                 "errors.provider_exited",
                                 provider = "Codex app-server",
@@ -2632,11 +2630,7 @@ mod tests {
     #[test]
     fn goal_set_responses_become_goal_updates() {
         let harness = GoalHarness::new();
-        harness
-            .goals
-            .lock()
-            .pending
-            .insert(42, PendingGoalRpc::Set);
+        harness.goals.lock().pending.insert(42, PendingGoalRpc::Set);
         harness.handle(json!({"id": 42, "result": {"goal": goal_json()}}));
 
         let Ok(DriverEvent::GoalUpdated(Some(goal))) = harness.received.try_recv() else {

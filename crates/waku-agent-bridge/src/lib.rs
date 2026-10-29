@@ -64,8 +64,8 @@ mod session;
 // Fork addition: a side question about a task (`/btw`, ⌘;).
 pub mod side_chat;
 // Fork addition: the timed record of a session's requests (Trajectory).
-pub mod trajectory;
 mod subagent;
+pub mod trajectory;
 // Fork addition: what an unfinished sub-agent got done, for its parent.
 mod subagent_progress;
 // Fork addition: AgentTeams for the built-in agent.
@@ -74,9 +74,8 @@ mod tool_guidance;
 
 pub use background::{BackgroundEntry, BackgroundKind, BackgroundStatus};
 pub use config::{
-    AccessMode, AgentStartOptions, COMPUTER_USE_TOOLS, ComputerUseWiring,
-    ENDPOINT_PLATFORM_PREFIX, MissingApiKey, TurnOptions, UnknownEndpoint, WireFormat,
-    endpoint_id, split_model,
+    AccessMode, AgentStartOptions, COMPUTER_USE_TOOLS, ComputerUseWiring, ENDPOINT_PLATFORM_PREFIX,
+    MissingApiKey, TurnOptions, UnknownEndpoint, WireFormat, endpoint_id, split_model,
 };
 pub use events::{
     AgentEvent, CompactionPhase, EventSink, FailureKind, PermissionChoice, SubagentEvent,
@@ -86,8 +85,8 @@ pub use goal::{GoalOp, GoalSnapshot, GoalState};
 // The refusals whose wording is the fork's rather than the engine's, so the
 // driver can recognise them exactly and say them in the user's language.
 pub use claurst_tools::{KEEP_PLANNING_DENIAL, MISSING_PLAN_ERROR, PLAN_MODE_DENIAL_SUFFIX};
-pub use permission::{EXIT_PLAN_MODE_DETAIL, rule_is_per_command};
 pub use oneshot::one_shot;
+pub use permission::{EXIT_PLAN_MODE_DETAIL, rule_is_per_command};
 pub use session::{AgentSession, STOPPED_SUMMARY};
 
 /// Fork (AgentTeams): `/agent-teams` and its profile aliases for the
@@ -138,12 +137,42 @@ mod tests {
     // this crate, and must not become one. Keep in step with
     // `sub2api::agent_settings::BUILTIN_TOOLS`.
     const BUILTIN_TOOLS_FROM_SETTINGS: [&str; 37] = [
-        "Agent", "ApplyPatch", "AskUserQuestion", "Bash", "BatchEdit", "Brief",
-        "Config", "Edit", "EnterPlanMode", "EnterWorktree", "ExitPlanMode",
-        "ExitWorktree", "Glob", "Grep", "LSP", "ListMcpResources", "NotebookEdit",
-        "PowerShell", "REPL", "Read", "ReadMcpResource", "Skill", "Sleep",
-        "StructuredOutput", "TaskCreate", "TaskGet", "TaskList", "TaskOutput",
-        "TaskStop", "TaskUpdate", "TodoWrite", "ToolSearch", "WebFetch",
-        "WebSearch", "Write", "mcp__auth", "monitor",
+        "Agent",
+        "ApplyPatch",
+        "AskUserQuestion",
+        "Bash",
+        "BatchEdit",
+        "Brief",
+        "Config",
+        "Edit",
+        "EnterPlanMode",
+        "EnterWorktree",
+        "ExitPlanMode",
+        "ExitWorktree",
+        "Glob",
+        "Grep",
+        "LSP",
+        "ListMcpResources",
+        "NotebookEdit",
+        "PowerShell",
+        "REPL",
+        "Read",
+        "ReadMcpResource",
+        "Skill",
+        "Sleep",
+        "StructuredOutput",
+        "TaskCreate",
+        "TaskGet",
+        "TaskList",
+        "TaskOutput",
+        "TaskStop",
+        "TaskUpdate",
+        "TodoWrite",
+        "ToolSearch",
+        "WebFetch",
+        "WebSearch",
+        "Write",
+        "mcp__auth",
+        "monitor",
     ];
 }

@@ -16,9 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::Value;
 
-use crate::custom_api::{
-    ProbeResult, ProbeVerdict, UrlError, normalize_base_url,
-};
+use crate::custom_api::{ProbeResult, ProbeVerdict, UrlError, normalize_base_url};
 
 pub const MIN_TIMEOUT_SECS: u32 = 2;
 pub const MAX_TIMEOUT_SECS: u32 = 30;
@@ -182,8 +180,7 @@ fn probe_for_format_with_timeout(
     api_key: &str,
     timeout: u32,
 ) -> ProbeResult {
-    let (url, request) =
-        crate::custom_api::probe_request_for_format(format, url, api_key, timeout);
+    let (url, request) = crate::custom_api::probe_request_for_format(format, url, api_key, timeout);
     crate::custom_api::send_probe_request(&url, request)
 }
 
@@ -333,9 +330,7 @@ mod tests {
                 let mut reader = BufReader::new(stream.try_clone().expect("clone"));
                 loop {
                     let mut line = String::new();
-                    if reader.read_line(&mut line).unwrap_or(0) == 0
-                        || line.trim_end().is_empty()
-                    {
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line.trim_end().is_empty() {
                         break;
                     }
                 }

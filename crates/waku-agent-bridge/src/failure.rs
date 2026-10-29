@@ -30,12 +30,17 @@ pub(crate) fn kind_of(failure: &ModelFailure) -> Option<FailureKind> {
         Some(GatewayVerdict::Account) => return None,
         Some(GatewayVerdict::ContentPolicy) => return Some(FailureKind::ContentPolicy),
         Some(GatewayVerdict::Transient) => {
-            let per_minute = failure.message.to_ascii_lowercase().contains("requests-per-minute");
-            return Some(if failure.reason == RetryReason::RateLimited || per_minute {
-                FailureKind::RateLimited
-            } else {
-                FailureKind::Unavailable
-            });
+            let per_minute = failure
+                .message
+                .to_ascii_lowercase()
+                .contains("requests-per-minute");
+            return Some(
+                if failure.reason == RetryReason::RateLimited || per_minute {
+                    FailureKind::RateLimited
+                } else {
+                    FailureKind::Unavailable
+                },
+            );
         }
         None => {}
     }
@@ -46,9 +51,9 @@ pub(crate) fn kind_of(failure: &ModelFailure) -> Option<FailureKind> {
             RetryReason::RateLimited => FailureKind::RateLimited,
             RetryReason::Overloaded | RetryReason::ServerError => FailureKind::Unavailable,
             RetryReason::Network | RetryReason::Timeout => FailureKind::Network,
-            RetryReason::StreamInterrupted | RetryReason::Truncated | RetryReason::EmptyResponse => {
-                FailureKind::Interrupted
-            }
+            RetryReason::StreamInterrupted
+            | RetryReason::Truncated
+            | RetryReason::EmptyResponse => FailureKind::Interrupted,
         }),
         FailureClass::Fatal => fatal_kind(failure),
     }
@@ -128,11 +133,15 @@ pub(crate) fn kind_of_error(error: &ClaudeError) -> Option<FailureKind> {
     match classify_claude_error(error) {
         FailureClass::ContextOverflow => Some(FailureKind::ContextOverflow),
         FailureClass::Retryable if says(&["rate limit"]) => Some(FailureKind::RateLimited),
-        FailureClass::Retryable if says(&["overloaded", "http 5"]) => Some(FailureKind::Unavailable),
+        FailureClass::Retryable if says(&["overloaded", "http 5"]) => {
+            Some(FailureKind::Unavailable)
+        }
         FailureClass::Retryable if says(&["ended before the response was complete", "stream"]) => {
             Some(FailureKind::Interrupted)
         }
-        FailureClass::Retryable if says(&["network", "timed out", "connection"]) => Some(FailureKind::Network),
+        FailureClass::Retryable if says(&["network", "timed out", "connection"]) => {
+            Some(FailureKind::Network)
+        }
         _ => None,
     }
 }
@@ -152,7 +161,11 @@ pub(crate) fn is_transient(failure: Option<&ModelFailure>, error: &ClaudeError) 
 /// key's message shows only its status: a provider may echo the key it
 /// refused, and the remedy already says what to do (after dsh's ui-chat,
 /// which blanks AUTH failures; behaviour only).
-pub(crate) fn shown_detail(kind: Option<FailureKind>, failure: Option<&ModelFailure>, summary: &str) -> String {
+pub(crate) fn shown_detail(
+    kind: Option<FailureKind>,
+    failure: Option<&ModelFailure>,
+    summary: &str,
+) -> String {
     if kind == Some(FailureKind::Auth) {
         if let Some(status) = failure.and_then(|failure| failure.status) {
             return format!("HTTP {status}");
@@ -166,7 +179,12 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    fn failure(class: FailureClass, reason: RetryReason, status: Option<u16>, message: &str) -> ModelFailure {
+    fn failure(
+        class: FailureClass,
+        reason: RetryReason,
+        status: Option<u16>,
+        message: &str,
+    ) -> ModelFailure {
         ModelFailure {
             class,
             reason,
@@ -187,15 +205,46 @@ mod tests {
         use FailureClass::*;
         use RetryReason::*;
         let cases = [
-            (failure(ContextOverflow, ServerError, None, "prompt is too long"), Some(FailureKind::ContextOverflow)),
-            (failure(Retryable, RateLimited, Some(429), "slow down"), Some(FailureKind::RateLimited)),
-            (failure(Retryable, Overloaded, Some(529), "Overloaded"), Some(FailureKind::Unavailable)),
-            (failure(Retryable, ServerError, Some(502), "Bad gateway"), Some(FailureKind::Unavailable)),
-            (failure(Retryable, Network, None, "network error: connection reset"), Some(FailureKind::Network)),
-            (coded(Some(400), "content_policy_violation", "flagged"), Some(FailureKind::ContentPolicy)),
-            (coded(None, "content_filter", "blocked"), Some(FailureKind::ContentPolicy)),
-            (coded(Some(429), "insufficient_quota", "You exceeded your current quota"), Some(FailureKind::Quota)),
-            (failure(Fatal, ServerError, Some(402), "Payment required"), Some(FailureKind::Quota)),
+            (
+                failure(ContextOverflow, ServerError, None, "prompt is too long"),
+                Some(FailureKind::ContextOverflow),
+            ),
+            (
+                failure(Retryable, RateLimited, Some(429), "slow down"),
+                Some(FailureKind::RateLimited),
+            ),
+            (
+                failure(Retryable, Overloaded, Some(529), "Overloaded"),
+                Some(FailureKind::Unavailable),
+            ),
+            (
+                failure(Retryable, ServerError, Some(502), "Bad gateway"),
+                Some(FailureKind::Unavailable),
+            ),
+            (
+                failure(Retryable, Network, None, "network error: connection reset"),
+                Some(FailureKind::Network),
+            ),
+            (
+                coded(Some(400), "content_policy_violation", "flagged"),
+                Some(FailureKind::ContentPolicy),
+            ),
+            (
+                coded(None, "content_filter", "blocked"),
+                Some(FailureKind::ContentPolicy),
+            ),
+            (
+                coded(
+                    Some(429),
+                    "insufficient_quota",
+                    "You exceeded your current quota",
+                ),
+                Some(FailureKind::Quota),
+            ),
+            (
+                failure(Fatal, ServerError, Some(402), "Payment required"),
+                Some(FailureKind::Quota),
+            ),
             (
                 ModelFailure {
                     retry_after: Some(Duration::from_secs(86_400)),
@@ -203,15 +252,47 @@ mod tests {
                 },
                 Some(FailureKind::Quota),
             ),
-            (failure(Fatal, ServerError, Some(401), "unauthorized"), Some(FailureKind::Auth)),
-            (coded(Some(403), "authentication_error", "OAuth token revoked"), Some(FailureKind::Auth)),
-            (coded(Some(403), "permission_error", "no access to this model"), Some(FailureKind::Forbidden)),
-            (coded(None, "permission_error", "no access"), Some(FailureKind::Forbidden)),
-            (failure(Fatal, ServerError, Some(400), "unsupported parameter: reasoning"), Some(FailureKind::BadRequest)),
-            (coded(None, "invalid_request_error", "bad tool schema"), Some(FailureKind::BadRequest)),
-            (failure(Fatal, ServerError, Some(503), "x-should-retry: false"), Some(FailureKind::Unavailable)),
-            (failure(Fatal, Network, None, "TLS error: invalid peer certificate"), Some(FailureKind::Network)),
-            (failure(Fatal, ServerError, None, "something else entirely"), None),
+            (
+                failure(Fatal, ServerError, Some(401), "unauthorized"),
+                Some(FailureKind::Auth),
+            ),
+            (
+                coded(Some(403), "authentication_error", "OAuth token revoked"),
+                Some(FailureKind::Auth),
+            ),
+            (
+                coded(Some(403), "permission_error", "no access to this model"),
+                Some(FailureKind::Forbidden),
+            ),
+            (
+                coded(None, "permission_error", "no access"),
+                Some(FailureKind::Forbidden),
+            ),
+            (
+                failure(
+                    Fatal,
+                    ServerError,
+                    Some(400),
+                    "unsupported parameter: reasoning",
+                ),
+                Some(FailureKind::BadRequest),
+            ),
+            (
+                coded(None, "invalid_request_error", "bad tool schema"),
+                Some(FailureKind::BadRequest),
+            ),
+            (
+                failure(Fatal, ServerError, Some(503), "x-should-retry: false"),
+                Some(FailureKind::Unavailable),
+            ),
+            (
+                failure(Fatal, Network, None, "TLS error: invalid peer certificate"),
+                Some(FailureKind::Network),
+            ),
+            (
+                failure(Fatal, ServerError, None, "something else entirely"),
+                None,
+            ),
         ];
         for (failure, kind) in cases {
             assert_eq!(kind_of(&failure), kind, "{failure:?}");
@@ -225,8 +306,24 @@ mod tests {
             "已超出每日用量上限 / daily usage limit exceeded",
             "Invalid API key",
         ] {
-            assert_eq!(kind_of(&failure(FailureClass::Fatal, RetryReason::RateLimited, Some(429), message)), None);
-            assert_eq!(kind_of(&failure(FailureClass::Fatal, RetryReason::ServerError, Some(401), message)), None);
+            assert_eq!(
+                kind_of(&failure(
+                    FailureClass::Fatal,
+                    RetryReason::RateLimited,
+                    Some(429),
+                    message
+                )),
+                None
+            );
+            assert_eq!(
+                kind_of(&failure(
+                    FailureClass::Fatal,
+                    RetryReason::ServerError,
+                    Some(401),
+                    message
+                )),
+                None
+            );
         }
         assert_eq!(
             kind_of(&failure(
@@ -259,17 +356,25 @@ mod tests {
 
     #[test]
     fn a_stalled_or_cut_off_reply_is_transient_and_named() {
-        let stalled = ModelFailure::retryable(RetryReason::Timeout, "no data from the model for 1200 s");
+        let stalled =
+            ModelFailure::retryable(RetryReason::Timeout, "no data from the model for 1200 s");
         assert_eq!(kind_of(&stalled), Some(FailureKind::Network));
-        assert!(is_transient(Some(&stalled), &stalled.clone().into_claude_error()));
+        assert!(is_transient(
+            Some(&stalled),
+            &stalled.clone().into_claude_error()
+        ));
 
         let cut_off = ModelFailure::truncated("the response stream");
         assert_eq!(kind_of(&cut_off), Some(FailureKind::Interrupted));
 
-        let internal = claurst_api::retry_policy::classify_stream_error("api_error", "Internal error");
+        let internal =
+            claurst_api::retry_policy::classify_stream_error("api_error", "Internal error");
         assert_eq!(kind_of(&internal), Some(FailureKind::Interrupted));
         // Read back from the flattened error alone, it used to look fatal.
-        assert!(is_transient(Some(&internal), &internal.clone().into_claude_error()));
+        assert!(is_transient(
+            Some(&internal),
+            &internal.clone().into_claude_error()
+        ));
 
         let overflow = claurst_api::retry_policy::classify_stream_error(
             "invalid_request_error",
@@ -284,31 +389,64 @@ mod tests {
             status,
             message: message.to_string(),
         };
-        assert_eq!(kind_of_error(&ClaudeError::RateLimit), Some(FailureKind::RateLimited));
-        assert_eq!(kind_of_error(&ClaudeError::ContextWindowExceeded), Some(FailureKind::ContextOverflow));
-        assert_eq!(kind_of_error(&status(401, "unauthorized")), Some(FailureKind::Auth));
-        assert_eq!(kind_of_error(&status(429, "slow down")), Some(FailureKind::RateLimited));
-        assert_eq!(kind_of_error(&status(503, "overloaded")), Some(FailureKind::Unavailable));
-        assert_eq!(kind_of_error(&status(403, "Insufficient account balance")), None);
-        assert_eq!(kind_of_error(&status(429, "daily usage limit exceeded")), None);
-        assert_eq!(kind_of_error(&status(400, "bad request")), Some(FailureKind::BadRequest));
         assert_eq!(
-            kind_of_error(&ClaudeError::Api("prompt is too long: 210000 tokens > 200000 maximum".into())),
+            kind_of_error(&ClaudeError::RateLimit),
+            Some(FailureKind::RateLimited)
+        );
+        assert_eq!(
+            kind_of_error(&ClaudeError::ContextWindowExceeded),
             Some(FailureKind::ContextOverflow)
         );
         assert_eq!(
-            kind_of_error(&ClaudeError::Api("network error: connection refused".into())),
+            kind_of_error(&status(401, "unauthorized")),
+            Some(FailureKind::Auth)
+        );
+        assert_eq!(
+            kind_of_error(&status(429, "slow down")),
+            Some(FailureKind::RateLimited)
+        );
+        assert_eq!(
+            kind_of_error(&status(503, "overloaded")),
+            Some(FailureKind::Unavailable)
+        );
+        assert_eq!(
+            kind_of_error(&status(403, "Insufficient account balance")),
+            None
+        );
+        assert_eq!(
+            kind_of_error(&status(429, "daily usage limit exceeded")),
+            None
+        );
+        assert_eq!(
+            kind_of_error(&status(400, "bad request")),
+            Some(FailureKind::BadRequest)
+        );
+        assert_eq!(
+            kind_of_error(&ClaudeError::Api(
+                "prompt is too long: 210000 tokens > 200000 maximum".into()
+            )),
+            Some(FailureKind::ContextOverflow)
+        );
+        assert_eq!(
+            kind_of_error(&ClaudeError::Api(
+                "network error: connection refused".into()
+            )),
             Some(FailureKind::Network)
         );
         assert_eq!(
-            kind_of_error(&ClaudeError::Api("No API key for provider 'openai' (model 'gpt-6').".into())),
+            kind_of_error(&ClaudeError::Api(
+                "No API key for provider 'openai' (model 'gpt-6').".into()
+            )),
             None
         );
     }
 
     #[test]
     fn a_refused_key_never_shows_what_the_provider_echoed() {
-        let refused = ModelFailure::fatal(Some(401), "Incorrect API key provided: sk-proj-abcdEFGH1234ijkl.");
+        let refused = ModelFailure::fatal(
+            Some(401),
+            "Incorrect API key provided: sk-proj-abcdEFGH1234ijkl.",
+        );
         let kind = kind_of(&refused);
         assert_eq!(kind, Some(FailureKind::Auth));
         let summary = refused.clone().into_claude_error().to_string();

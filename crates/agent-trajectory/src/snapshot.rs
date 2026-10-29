@@ -14,8 +14,8 @@
 use std::collections::HashMap;
 
 use crate::record::{
-    CompactionPhase, FailureInfo, Purpose, Record, RequestOptions, RequestStatus, RetryInfo, ToolSpec,
-    Usage,
+    CompactionPhase, FailureInfo, Purpose, Record, RequestOptions, RequestStatus, RetryInfo,
+    ToolSpec, Usage,
 };
 
 /// What a cell is, after dsh's `TrajectoryCellKind`.
@@ -178,14 +178,22 @@ pub struct Snapshot {
 impl Snapshot {
     /// The cell of a tool call, for the transcript's Inspect.
     pub fn cell_for_call(&self, call_id: &str) -> Option<usize> {
-        self.cells.iter().position(|cell| {
-            matches!(&cell.detail, CellDetail::Tool(tool) if tool.call_id == call_id)
-        })
+        self.cells.iter().position(
+            |cell| matches!(&cell.detail, CellDetail::Tool(tool) if tool.call_id == call_id),
+        )
     }
 
     /// The system prompt and catalog a turn's requests ran with, and the
     /// ones before them (for the diff).
-    pub fn prompt_of(&self, cell: &Cell) -> Option<(Option<&str>, Option<&str>, Option<&[ToolSpec]>, Option<&[ToolSpec]>)> {
+    pub fn prompt_of(
+        &self,
+        cell: &Cell,
+    ) -> Option<(
+        Option<&str>,
+        Option<&str>,
+        Option<&[ToolSpec]>,
+        Option<&[ToolSpec]>,
+    )> {
         let CellDetail::System {
             system_fp,
             tools_fp,
@@ -261,7 +269,12 @@ pub fn build(records: &[Record]) -> Snapshot {
                 delay_ms,
                 at,
             } => {
-                if let Some(view) = snapshot.turns.iter_mut().rev().find(|view| view.turn == *turn) {
+                if let Some(view) = snapshot
+                    .turns
+                    .iter_mut()
+                    .rev()
+                    .find(|view| view.turn == *turn)
+                {
                     view.goal_resume = Some(GoalResumeView {
                         attempt: *attempt,
                         max_attempts: *max_attempts,
@@ -328,42 +341,50 @@ pub fn build(records: &[Record]) -> Snapshot {
                         Some((system, tools)) => (Some(system.clone()), Some(tools.clone())),
                         None => (None, None),
                     };
-                    push(&mut snapshot, current_turn, Cell {
+                    push(
+                        &mut snapshot,
+                        current_turn,
+                        Cell {
+                            index: 0,
+                            kind: CellKind::System,
+                            turn: Some(*turn),
+                            step: None,
+                            text: String::new(),
+                            started_at: Some(*at),
+                            duration_ms: None,
+                            is_error: false,
+                            running: false,
+                            detail: CellDetail::System {
+                                change,
+                                system_fp: system_fp.clone(),
+                                tools_fp: tools_fp.clone(),
+                                previous_system_fp,
+                                previous_tools_fp,
+                            },
+                        },
+                    );
+                }
+                previous_prompt = Some((system_fp.clone(), tools_fp.clone()));
+                push(
+                    &mut snapshot,
+                    current_turn,
+                    Cell {
                         index: 0,
-                        kind: CellKind::System,
+                        kind: CellKind::User,
                         turn: Some(*turn),
                         step: None,
-                        text: String::new(),
+                        text: one_line(prompt_preview, 160),
                         started_at: Some(*at),
                         duration_ms: None,
                         is_error: false,
                         running: false,
-                        detail: CellDetail::System {
-                            change,
-                            system_fp: system_fp.clone(),
-                            tools_fp: tools_fp.clone(),
-                            previous_system_fp,
-                            previous_tools_fp,
+                        detail: CellDetail::User {
+                            prompt: prompt_preview.clone(),
+                            bytes: *prompt_bytes,
+                            images: *images,
                         },
-                    });
-                }
-                previous_prompt = Some((system_fp.clone(), tools_fp.clone()));
-                push(&mut snapshot, current_turn, Cell {
-                    index: 0,
-                    kind: CellKind::User,
-                    turn: Some(*turn),
-                    step: None,
-                    text: one_line(prompt_preview, 160),
-                    started_at: Some(*at),
-                    duration_ms: None,
-                    is_error: false,
-                    running: false,
-                    detail: CellDetail::User {
-                        prompt: prompt_preview.clone(),
-                        bytes: *prompt_bytes,
-                        images: *images,
                     },
-                });
+                );
             }
             Record::Request {
                 turn,
@@ -405,7 +426,11 @@ pub fn build(records: &[Record]) -> Snapshot {
                     purpose: *purpose,
                     parent_call_id: parent_call_id.clone(),
                     provider: route.provider.clone(),
-                    model: if model.is_empty() { route.model.clone() } else { model.clone() },
+                    model: if model.is_empty() {
+                        route.model.clone()
+                    } else {
+                        model.clone()
+                    },
                     api_base: route.api_base.clone(),
                     wire_format: route.wire_format.clone(),
                     options: route.options.clone(),
@@ -432,18 +457,22 @@ pub fn build(records: &[Record]) -> Snapshot {
                 } else {
                     String::new()
                 };
-                push(&mut snapshot, current_turn, Cell {
-                    index: 0,
-                    kind: CellKind::Message,
-                    turn: Some(*turn),
-                    step: Some(*step),
-                    text,
-                    started_at: Some(*started_at),
-                    duration_ms: Some((ended_at - started_at).max(0)),
-                    is_error: *status == RequestStatus::Error,
-                    running: *status == RequestStatus::Running,
-                    detail: CellDetail::Request(Box::new(view)),
-                });
+                push(
+                    &mut snapshot,
+                    current_turn,
+                    Cell {
+                        index: 0,
+                        kind: CellKind::Message,
+                        turn: Some(*turn),
+                        step: Some(*step),
+                        text,
+                        started_at: Some(*started_at),
+                        duration_ms: Some((ended_at - started_at).max(0)),
+                        is_error: *status == RequestStatus::Error,
+                        running: *status == RequestStatus::Running,
+                        detail: CellDetail::Request(Box::new(view)),
+                    },
+                );
             }
             Record::ToolStart {
                 turn,
@@ -465,30 +494,38 @@ pub fn build(records: &[Record]) -> Snapshot {
                     .get(&route.tools_fp)
                     .and_then(|tools| tools.iter().find(|tool| tool.name == *name))
                     .map(|tool| tool.input_schema.clone());
-                let index = push(&mut snapshot, current_turn, Cell {
-                    index: 0,
-                    kind: if parent_call_id.is_some() { CellKind::Subtool } else { CellKind::Tool },
-                    turn: Some(*turn),
-                    step: Some(*step),
-                    text: format!("{name}  {}", one_line(args_preview, 120)),
-                    started_at: Some(*at),
-                    duration_ms: None,
-                    is_error: false,
-                    running: true,
-                    detail: CellDetail::Tool(Box::new(ToolView {
-                        call_id: call_id.clone(),
-                        name: name.clone(),
-                        args: args_preview.clone(),
-                        args_bytes: *args_bytes,
-                        result: None,
-                        result_bytes: 0,
+                let index = push(
+                    &mut snapshot,
+                    current_turn,
+                    Cell {
+                        index: 0,
+                        kind: if parent_call_id.is_some() {
+                            CellKind::Subtool
+                        } else {
+                            CellKind::Tool
+                        },
+                        turn: Some(*turn),
+                        step: Some(*step),
+                        text: format!("{name}  {}", one_line(args_preview, 120)),
+                        started_at: Some(*at),
+                        duration_ms: None,
                         is_error: false,
-                        started_at: *at,
-                        ended_at: None,
-                        parent_call_id: parent_call_id.clone(),
-                        schema,
-                    })),
-                });
+                        running: true,
+                        detail: CellDetail::Tool(Box::new(ToolView {
+                            call_id: call_id.clone(),
+                            name: name.clone(),
+                            args: args_preview.clone(),
+                            args_bytes: *args_bytes,
+                            result: None,
+                            result_bytes: 0,
+                            is_error: false,
+                            started_at: *at,
+                            ended_at: None,
+                            parent_call_id: parent_call_id.clone(),
+                            schema,
+                        })),
+                    },
+                );
                 tool_cells.insert(call_id.clone(), index);
             }
             Record::ToolEnd {
@@ -523,23 +560,27 @@ pub fn build(records: &[Record]) -> Snapshot {
                 at,
             } => match (phase, open_compaction.take()) {
                 (CompactionPhase::Started, _) => {
-                    let index = push(&mut snapshot, current_turn.filter(|_| turn.is_some()), Cell {
-                        index: 0,
-                        kind: CellKind::Compacted,
-                        turn: *turn,
-                        step: None,
-                        text: String::new(),
-                        started_at: Some(*at),
-                        duration_ms: None,
-                        is_error: false,
-                        running: true,
-                        detail: CellDetail::Compaction {
-                            automatic: *automatic,
-                            phase: *phase,
-                            tokens_before: *tokens_before,
-                            tokens_after: None,
+                    let index = push(
+                        &mut snapshot,
+                        current_turn.filter(|_| turn.is_some()),
+                        Cell {
+                            index: 0,
+                            kind: CellKind::Compacted,
+                            turn: *turn,
+                            step: None,
+                            text: String::new(),
+                            started_at: Some(*at),
+                            duration_ms: None,
+                            is_error: false,
+                            running: true,
+                            detail: CellDetail::Compaction {
+                                automatic: *automatic,
+                                phase: *phase,
+                                tokens_before: *tokens_before,
+                                tokens_after: None,
+                            },
                         },
-                    });
+                    );
                     open_compaction = Some(index);
                 }
                 (_, Some(index)) => {
@@ -618,7 +659,14 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) fn request(turn: u32, step: u32, started: i64, first: i64, ended: i64, output: u64) -> Record {
+    pub(crate) fn request(
+        turn: u32,
+        step: u32,
+        started: i64,
+        first: i64,
+        ended: i64,
+        output: u64,
+    ) -> Record {
         Record::Request {
             turn,
             step,
@@ -671,12 +719,18 @@ pub(crate) mod tests {
 
     pub(crate) fn sample() -> Vec<Record> {
         let mut records = vec![
-            Record::System { fp: "s1".into(), text: "be helpful".into() },
-            Record::Tools { fp: "t1".into(), tools: vec![ToolSpec {
-                name: "Read".into(),
-                description: String::new(),
-                input_schema: serde_json::json!({"type": "object"}),
-            }] },
+            Record::System {
+                fp: "s1".into(),
+                text: "be helpful".into(),
+            },
+            Record::Tools {
+                fp: "t1".into(),
+                tools: vec![ToolSpec {
+                    name: "Read".into(),
+                    description: String::new(),
+                    input_schema: serde_json::json!({"type": "object"}),
+                }],
+            },
             turn_start(1, 1_000, "s1", "t1"),
             request(1, 1, 1_000, 1_400, 2_000, 50),
         ];
@@ -698,7 +752,13 @@ pub(crate) mod tests {
         let kinds: Vec<CellKind> = snapshot.cells.iter().map(|cell| cell.kind).collect();
         assert_eq!(
             kinds,
-            [CellKind::System, CellKind::User, CellKind::Message, CellKind::Tool, CellKind::Message]
+            [
+                CellKind::System,
+                CellKind::User,
+                CellKind::Message,
+                CellKind::Tool,
+                CellKind::Message
+            ]
         );
         let turn = &snapshot.turns[0];
         assert_eq!((turn.steps, turn.tool_calls, turn.cell_count), (2, 1, 5));
@@ -737,7 +797,11 @@ pub(crate) mod tests {
             .collect();
         assert_eq!(
             changes,
-            [PromptChange::Initial, PromptChange::System, PromptChange::SystemAndTools]
+            [
+                PromptChange::Initial,
+                PromptChange::System,
+                PromptChange::SystemAndTools
+            ]
         );
     }
 
@@ -745,10 +809,17 @@ pub(crate) mod tests {
     fn a_rewind_marks_the_turns_it_dropped() {
         let mut records = sample();
         records.push(turn_start(2, 4_000, "s1", "t1"));
-        records.push(Record::Rewind { keep_turns: 1, at: 5_000 });
+        records.push(Record::Rewind {
+            keep_turns: 1,
+            at: 5_000,
+        });
         records.push(turn_start(2, 6_000, "s1", "t1"));
         let snapshot = build(&records);
-        let rewound: Vec<(u32, bool)> = snapshot.turns.iter().map(|turn| (turn.turn, turn.rewound)).collect();
+        let rewound: Vec<(u32, bool)> = snapshot
+            .turns
+            .iter()
+            .map(|turn| (turn.turn, turn.rewound))
+            .collect();
         assert_eq!(rewound, [(1, false), (2, true), (2, false)]);
     }
 
@@ -778,7 +849,13 @@ pub(crate) mod tests {
         assert_eq!(cell.kind, CellKind::Compacted);
         assert_eq!(cell.duration_ms, Some(50));
         assert!(!cell.running);
-        assert!(matches!(cell.detail, CellDetail::Compaction { tokens_after: Some(100), .. }));
+        assert!(matches!(
+            cell.detail,
+            CellDetail::Compaction {
+                tokens_after: Some(100),
+                ..
+            }
+        ));
     }
 
     #[test]

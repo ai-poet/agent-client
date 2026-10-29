@@ -138,7 +138,9 @@ mod catalog {
     where
         E: Styled + IntoElement + 'static,
     {
-        element.with_animation(id, super::FADE_QUICK.animation(), |element, t| element.opacity(t))
+        element.with_animation(id, super::FADE_QUICK.animation(), |element, t| {
+            element.opacity(t)
+        })
     }
 }
 
@@ -355,7 +357,10 @@ mod tests {
         let start = tween_at(0.0, 100.0, RESORT, Duration::ZERO).expect("in flight");
         assert!(start.abs() < 0.01);
         let middle = tween_at(0.0, 100.0, RESORT, RESORT.duration() / 2).expect("in flight");
-        assert!(middle > 50.0, "ease-out is past halfway at half time, got {middle}");
+        assert!(
+            middle > 50.0,
+            "ease-out is past halfway at half time, got {middle}"
+        );
         assert_eq!(tween_at(0.0, 100.0, RESORT, RESORT.duration()), None);
     }
 

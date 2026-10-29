@@ -18,7 +18,10 @@ const CAPACITY: usize = 256;
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum SavedScroll {
     Tail,
-    Row { kind: TranscriptRowKind, offset: f32 },
+    Row {
+        kind: TranscriptRowKind,
+        offset: f32,
+    },
 }
 
 #[derive(Default)]
@@ -124,7 +127,10 @@ mod tests {
             TranscriptRowKind::TurnBlock(0),
             TranscriptRowKind::Message(1),
         ];
-        assert_eq!(restore_index(&kinds, TranscriptRowKind::TurnBlock(0)), Some(1));
+        assert_eq!(
+            restore_index(&kinds, TranscriptRowKind::TurnBlock(0)),
+            Some(1)
+        );
     }
 
     #[test]
@@ -134,7 +140,10 @@ mod tests {
             TranscriptRowKind::Message(4),
             TranscriptRowKind::Message(9),
         ];
-        assert_eq!(restore_index(&kinds, TranscriptRowKind::Message(7)), Some(1));
+        assert_eq!(
+            restore_index(&kinds, TranscriptRowKind::Message(7)),
+            Some(1)
+        );
         assert_eq!(restore_index(&kinds, TranscriptRowKind::TurnBlock(3)), None);
     }
 
@@ -146,9 +155,15 @@ mod tests {
         }
         assert_eq!(memory.entries.len(), CAPACITY);
         assert_eq!(memory.get(Uuid::from_u128(0)), None);
-        assert_eq!(memory.get(Uuid::from_u128(CAPACITY as u128 + 9)), Some(SavedScroll::Tail));
+        assert_eq!(
+            memory.get(Uuid::from_u128(CAPACITY as u128 + 9)),
+            Some(SavedScroll::Tail)
+        );
 
         memory.insert(Uuid::from_u128(20), SavedScroll::Tail);
-        assert_eq!(memory.entries.last().map(|(id, _)| *id), Some(Uuid::from_u128(20)));
+        assert_eq!(
+            memory.entries.last().map(|(id, _)| *id),
+            Some(Uuid::from_u128(20))
+        );
     }
 }

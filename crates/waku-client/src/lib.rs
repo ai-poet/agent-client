@@ -12,8 +12,8 @@ pub mod computer_use;
 pub mod driver;
 pub mod persistence;
 // Fork addition: the digest a side question (`/btw`, ⌘;) is asked with.
-pub mod side_chat;
 mod process;
+pub mod side_chat;
 pub mod status_capsule;
 pub mod turn_segments;
 mod workspace_client;

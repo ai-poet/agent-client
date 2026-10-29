@@ -210,7 +210,8 @@ pub(super) fn visible_ticks(labels: &[String], active: usize, track_width: f32) 
     }
     let active = active.min(count - 1);
     let overlaps = |a: usize, b: usize| {
-        let gap = (stop_center_x(track_width, a, count) - stop_center_x(track_width, b, count)).abs();
+        let gap =
+            (stop_center_x(track_width, a, count) - stop_center_x(track_width, b, count)).abs();
         gap < (tick_width(&labels[a]) + tick_width(&labels[b])) / 2.0 + 4.0
     };
     if count <= 5 && (1..count).all(|index| !overlaps(index - 1, index)) {
@@ -285,13 +286,22 @@ pub(super) fn resolve_traits(session: &AgentSession, model: &ProviderModel) -> T
                 .any(|option| option.id == *selected)
         })
         .or(model.default_reasoning_effort.as_deref())
-        .or_else(|| model.reasoning_efforts.first().map(|option| option.id.as_str()))
+        .or_else(|| {
+            model
+                .reasoning_efforts
+                .first()
+                .map(|option| option.id.as_str())
+        })
         .map(str::to_owned);
     let tier = session
         .service_tier
         .as_deref()
         .filter(|selected| {
-            *selected == "default" || model.service_tiers.iter().any(|option| option.id == *selected)
+            *selected == "default"
+                || model
+                    .service_tiers
+                    .iter()
+                    .any(|option| option.id == *selected)
         })
         .or(model.default_service_tier.as_deref())
         .unwrap_or("default")
@@ -306,7 +316,12 @@ pub(super) fn resolve_traits(session: &AgentSession, model: &ProviderModel) -> T
                 .any(|option| option.id == *selected)
         })
         .or(model.default_context_window.as_deref())
-        .or_else(|| model.context_windows.first().map(|option| option.id.as_str()))
+        .or_else(|| {
+            model
+                .context_windows
+                .first()
+                .map(|option| option.id.as_str())
+        })
         .map(str::to_owned);
     Traits {
         effort,
@@ -523,12 +538,21 @@ mod tests {
         let mut session = AgentSession::new(uuid::Uuid::new_v4(), ProviderKind::Claude);
 
         session.reasoning_effort = Some("max".to_owned());
-        assert_eq!(resolve_traits(&session, &model).effort.as_deref(), Some("max"));
+        assert_eq!(
+            resolve_traits(&session, &model).effort.as_deref(),
+            Some("max")
+        );
         // A choice the model does not offer falls back to its default.
         session.reasoning_effort = Some("xhigh".to_owned());
-        assert_eq!(resolve_traits(&session, &model).effort.as_deref(), Some("high"));
+        assert_eq!(
+            resolve_traits(&session, &model).effort.as_deref(),
+            Some("high")
+        );
         model.default_reasoning_effort = None;
-        assert_eq!(resolve_traits(&session, &model).effort.as_deref(), Some("low"));
+        assert_eq!(
+            resolve_traits(&session, &model).effort.as_deref(),
+            Some("low")
+        );
         let traits = resolve_traits(&session, &model);
         assert_eq!(traits.tier, "default");
         assert_eq!(traits.window.as_deref(), Some("200k"));

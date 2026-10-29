@@ -5,8 +5,8 @@ use super::sidebar_rows::{
     GroupBadge, ProjectEntry, SIDEBAR_EMPTY_ROW_HEIGHT, SIDEBAR_GROUP_SPACER_HEIGHT,
     SIDEBAR_HEADER_BOTTOM_GAP, SIDEBAR_PROJECT_HEADER_HEIGHT, SIDEBAR_SECTION_HEADER_HEIGHT,
     SIDEBAR_SHOW_MORE_ROW_HEIGHT, SIDEBAR_TASK_ROW_GAP, SIDEBAR_TASK_ROW_HEIGHT,
-    SIDEBAR_TOOLBAR_HEIGHT, SidebarEmpty, SidebarRowInputs, TaskEntry,
-    build_sidebar_rows, reveal_batch, sidebar_splice,
+    SIDEBAR_TOOLBAR_HEIGHT, SidebarEmpty, SidebarRowInputs, TaskEntry, build_sidebar_rows,
+    reveal_batch, sidebar_splice,
 };
 use super::*;
 
@@ -854,9 +854,6 @@ impl Waku {
     ) -> Div {
         let theme = Theme::current(cx);
         self.ensure_sidebar_branch_labels(cx);
-        let is_resizing = self
-            .panel_resize_drag
-            .is_some_and(|drag| drag.target == PanelResizeTarget::Sidebar);
 
         let rows = self.sidebar_rows_cached(Local::now().date_naive());
         self.sync_sidebar_rows(&rows);
@@ -900,11 +897,7 @@ impl Waku {
             .flex_none()
             .flex()
             .flex_col()
-            .bg(if is_resizing {
-                theme.sidebar_drag_background
-            } else {
-                theme.sidebar
-            })
+            .bg(theme.sidebar_surface())
             .child(self.render_sidebar_titlebar(window, cx))
             .child(
                 div()
@@ -920,20 +913,22 @@ impl Waku {
                     .relative()
                     .child(
                         div().px(px(10.0)).size_full().child(
-                            list(
-                                self.sidebar_list_state.clone(),
-                                move |index, window, cx| {
-                                    entity
-                                        .upgrade()
-                                        .map(|entity| {
-                                            entity.update(cx, |this, cx| {
-                                                let row = this.sidebar_row(index, &rows, cx);
-                                                this.sidebar_resort_row(rows.get(index).copied(), row, window, cx)
-                                            })
+                            list(self.sidebar_list_state.clone(), move |index, window, cx| {
+                                entity
+                                    .upgrade()
+                                    .map(|entity| {
+                                        entity.update(cx, |this, cx| {
+                                            let row = this.sidebar_row(index, &rows, cx);
+                                            this.sidebar_resort_row(
+                                                rows.get(index).copied(),
+                                                row,
+                                                window,
+                                                cx,
+                                            )
                                         })
-                                        .unwrap_or_else(|| div().into_any_element())
-                                },
-                            )
+                                    })
+                                    .unwrap_or_else(|| div().into_any_element())
+                            })
                             .size_full(),
                         ),
                     )
@@ -1115,8 +1110,11 @@ impl Waku {
             keep_visible: self.sidebar_keep_visible(),
             just_started: &just_started,
         });
-        self.sidebar_toolbar
-            .remember_layout(layout.toggle_all, layout.toggle_targets, layout.unfolded);
+        self.sidebar_toolbar.remember_layout(
+            layout.toggle_all,
+            layout.toggle_targets,
+            layout.unfolded,
+        );
         layout.rows
     }
 
@@ -1131,7 +1129,12 @@ impl Waku {
         };
         let old_count = cached.len();
         // Fork: rows glide from their old places (sidebar_resort.rs).
-        self.fork_motion.sidebar_resort.borrow_mut().rows_changed(&cached, rows, |row| f32::from(sidebar_row_height(row)), f32::from(self.sidebar_list_state.viewport_bounds().size.height));
+        self.fork_motion.sidebar_resort.borrow_mut().rows_changed(
+            &cached,
+            rows,
+            |row| f32::from(sidebar_row_height(row)),
+            f32::from(self.sidebar_list_state.viewport_bounds().size.height),
+        );
         *cached = rows.to_vec();
         if old_count == 0 {
             self.sidebar_list_state
@@ -1163,9 +1166,7 @@ impl Waku {
             SidebarRow::Session(session_id) => {
                 // Inside a project group when the header above it is one.
                 let nested = rows[..index].iter().rev().find_map(|row| match row {
-                    SidebarRow::Header(group, _) => {
-                        Some(matches!(group, SidebarGroup::Project(_)))
-                    }
+                    SidebarRow::Header(group, _) => Some(matches!(group, SidebarGroup::Project(_))),
                     _ => None,
                 });
                 self.render_task_row(session_id, nested == Some(true), cx)
@@ -1233,11 +1234,7 @@ impl Waku {
         } else {
             self.sidebar_collapsed_groups.remove(&group)
         };
-        let reveal_reset = collapsed
-            && self
-                .sidebar_project_reveal_counts
-                .remove(&group)
-                .is_some();
+        let reveal_reset = collapsed && self.sidebar_project_reveal_counts.remove(&group).is_some();
         if collapse_changed || reveal_reset {
             self.sidebar_rows_fingerprint.set(None);
             cx.notify();
@@ -1519,7 +1516,12 @@ impl Waku {
                 .px_8()
                 .pb(px(46.0))
                 // Fork addition: the brand mark here too, not upstream's sparkle.
-                .child(img("images/logo.png").w(px(30.0)).h(px(30.0)).rounded(px(7.0)))
+                .child(
+                    img("images/logo.png")
+                        .w(px(30.0))
+                        .h(px(30.0))
+                        .rounded(px(7.0)),
+                )
                 .child(
                     div()
                         .mt(px(16.0))
@@ -1692,7 +1694,12 @@ impl Waku {
             .px_8()
             .pb(px(52.0))
             // Fork addition: the brand mark, where upstream drew a sparkle.
-            .child(img("images/logo.png").w(px(30.0)).h(px(30.0)).rounded(px(7.0)))
+            .child(
+                img("images/logo.png")
+                    .w(px(30.0))
+                    .h(px(30.0))
+                    .rounded(px(7.0)),
+            )
             .child(
                 div()
                     .mt(px(14.0))

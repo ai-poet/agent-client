@@ -258,7 +258,11 @@ async fn a_file_is_written_then_edited_on_disk() {
     )
     .await;
 
-    assert!(matches!(run.outcome, QueryOutcome::EndTurn { .. }), "{:?}", run.outcome);
+    assert!(
+        matches!(run.outcome, QueryOutcome::EndTurn { .. }),
+        "{:?}",
+        run.outcome
+    );
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "beta\n");
     let results = results(&run.messages);
     assert_eq!(results.len(), 2);
@@ -286,10 +290,17 @@ async fn an_unread_file_is_left_alone_until_it_is_read() {
     )
     .await;
 
-    assert!(matches!(run.outcome, QueryOutcome::EndTurn { .. }), "{:?}", run.outcome);
+    assert!(
+        matches!(run.outcome, QueryOutcome::EndTurn { .. }),
+        "{:?}",
+        run.outcome
+    );
     let results = results(&run.messages);
     assert_eq!(results.len(), 3);
-    assert!(results[0].1 && results[0].0.contains("has not been read"), "{results:?}");
+    assert!(
+        results[0].1 && results[0].0.contains("has not been read"),
+        "{results:?}"
+    );
     assert!(!results[1].1 && !results[2].1, "{results:?}");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "mode = \"two\"\n");
 }
@@ -316,7 +327,11 @@ async fn the_same_call_a_third_time_draws_a_reminder() {
     assert_eq!(results.len(), 3);
     assert!(!results[0].0.contains("<system-reminder>"));
     assert!(!results[1].0.contains("<system-reminder>"));
-    assert!(results[2].0.contains("<system-reminder>"), "{}", results[2].0);
+    assert!(
+        results[2].0.contains("<system-reminder>"),
+        "{}",
+        results[2].0
+    );
     // The file itself is untouched.
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "nothing new\n");
 }

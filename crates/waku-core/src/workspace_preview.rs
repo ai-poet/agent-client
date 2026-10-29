@@ -141,7 +141,11 @@ fn number_text(number: f64) -> String {
     }
     let text = format!("{number:.10}");
     let text = text.trim_end_matches('0').trim_end_matches('.');
-    if text == "-0" { "0".to_owned() } else { text.to_owned() }
+    if text == "-0" {
+        "0".to_owned()
+    } else {
+        text.to_owned()
+    }
 }
 
 fn spreadsheet(path: &Path, size: u64) -> anyhow::Result<FilePreview> {
@@ -206,7 +210,11 @@ fn delimited(path: &Path, extension: &str, size: u64) -> anyhow::Result<FilePrev
 /// RFC 4180 fields: quoted fields may hold the delimiter, newlines and
 /// doubled quotes. Keeps the first [`MAX_ROWS`] rows and counts the rest.
 /// When the text was cut short, its last, likely partial, row is dropped.
-fn parse_delimited(text: &str, delimiter: char, cut_short: bool) -> (Vec<Vec<String>>, usize, usize) {
+fn parse_delimited(
+    text: &str,
+    delimiter: char,
+    cut_short: bool,
+) -> (Vec<Vec<String>>, usize, usize) {
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut total_rows = 0;
     let mut total_columns = 0;
@@ -446,13 +454,19 @@ mod tests {
         fs::write(root.join("song.mp3"), [0u8; 10]).unwrap();
         assert_eq!(
             preview_file(&root, Path::new("song.mp3")).unwrap(),
-            FilePreview::Unavailable { size: 10, reason: None }
+            FilePreview::Unavailable {
+                size: 10,
+                reason: None
+            }
         );
         // A spreadsheet that is not one says why instead of failing.
         fs::write(root.join("fake.xlsx"), b"not a zip").unwrap();
         assert!(matches!(
             preview_file(&root, Path::new("fake.xlsx")).unwrap(),
-            FilePreview::Unavailable { reason: Some(_), .. }
+            FilePreview::Unavailable {
+                reason: Some(_),
+                ..
+            }
         ));
         assert!(preview_file(&root, Path::new("../escape.png")).is_err());
         fs::remove_dir_all(root).unwrap();
@@ -502,7 +516,8 @@ mod tests {
                 ),
             ],
         );
-        let FilePreview::Table { sheets, .. } = preview_file(&root, Path::new("budget.xlsx")).unwrap()
+        let FilePreview::Table { sheets, .. } =
+            preview_file(&root, Path::new("budget.xlsx")).unwrap()
         else {
             panic!("a table preview");
         };
@@ -531,8 +546,9 @@ mod tests {
             .write_all(br#"<w:document xmlns:w="w"><w:p><w:r><w:t>Quarterly plan</w:t></w:r></w:p></w:document>"#)
             .unwrap();
         archive.finish().unwrap();
-        let FilePreview::Document { text, truncated, .. } =
-            preview_file(&root, Path::new("note.docx")).unwrap()
+        let FilePreview::Document {
+            text, truncated, ..
+        } = preview_file(&root, Path::new("note.docx")).unwrap()
         else {
             panic!("a document preview");
         };

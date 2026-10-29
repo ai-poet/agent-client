@@ -111,7 +111,11 @@ mod tests {
             for count in [20, 50, 100, 200] {
                 let index = index_of(count, 0);
                 let text = render_section(Some(&index), Some(&index), max);
-                assert!(text.len() <= max, "{count} memories at {max}: {} bytes", text.len());
+                assert!(
+                    text.len() <= max,
+                    "{count} memories at {max}: {} bytes",
+                    text.len()
+                );
                 if index.len() * 2 > index_budget(max) {
                     assert!(text.contains("index truncated"), "{count} at {max}");
                 }
@@ -135,7 +139,9 @@ mod tests {
             .collect::<String>();
         let index = format!("{pinned}{}", index_of(150, 0));
         let text = render_section(None, Some(&index), 2048);
-        let kept = (0..10).filter(|i| text.contains(&format!("pinned-{i}.md"))).count();
+        let kept = (0..10)
+            .filter(|i| text.contains(&format!("pinned-{i}.md")))
+            .count();
         assert!(kept >= 8, "only {kept} of 10 pinned entries kept");
     }
 }

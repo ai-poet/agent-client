@@ -97,7 +97,14 @@ pub fn start(
                     }
                     registry.changed.notify_all();
                 };
-                let result = ask_streaming(&cwd, model.as_deref(), &system, &thread, &mut on_text, cancel);
+                let result = ask_streaming(
+                    &cwd,
+                    model.as_deref(),
+                    &system,
+                    &thread,
+                    &mut on_text,
+                    cancel,
+                );
                 let mut jobs = registry.jobs.lock().expect("side chat jobs");
                 if let Some(job) = jobs.get_mut(&id) {
                     match result {
@@ -215,8 +222,14 @@ mod tests {
     fn finished_jobs_nobody_polls_are_forgotten() {
         let now = Instant::now() + Duration::from_secs(1_000);
         let mut jobs = HashMap::from([
-            (Uuid::from_u128(1), finished("a", Some(Duration::from_secs(300)), now)),
-            (Uuid::from_u128(2), finished("b", Some(Duration::from_secs(10)), now)),
+            (
+                Uuid::from_u128(1),
+                finished("a", Some(Duration::from_secs(300)), now),
+            ),
+            (
+                Uuid::from_u128(2),
+                finished("b", Some(Duration::from_secs(10)), now),
+            ),
             (Uuid::from_u128(3), Job::default()),
         ]);
         forget_stale(&mut jobs, now);

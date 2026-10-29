@@ -98,7 +98,11 @@ impl CaptureBuffer {
 }
 
 /// The model's instructions (verbatim from the reference).
-pub fn build_consolidation_prompt(existing_names: &[String], transcript: &str, max: usize) -> String {
+pub fn build_consolidation_prompt(
+    existing_names: &[String],
+    transcript: &str,
+    max: usize,
+) -> String {
     let known = if existing_names.is_empty() {
         "(none)".to_owned()
     } else {
@@ -225,8 +229,17 @@ mod tests {
     #[test]
     fn captures_are_capped_by_speaker() {
         let long = "x".repeat(3000);
-        assert_eq!(capture_text(Speaker::User, &long).unwrap().chars().count(), 2001);
-        assert_eq!(capture_text(Speaker::Assistant, &long).unwrap().chars().count(), 501);
+        assert_eq!(
+            capture_text(Speaker::User, &long).unwrap().chars().count(),
+            2001
+        );
+        assert_eq!(
+            capture_text(Speaker::Assistant, &long)
+                .unwrap()
+                .chars()
+                .count(),
+            501
+        );
         assert_eq!(capture_text(Speaker::User, "  "), None);
     }
 
@@ -259,7 +272,10 @@ mod tests {
         let candidate = sanitize_candidate(&ok, true).unwrap();
         assert_eq!(candidate.draft.name, "use-pnpm");
         assert_eq!(candidate.scope, MemoryScope::User);
-        assert_eq!(sanitize_candidate(&ok, false).unwrap().scope, MemoryScope::Project);
+        assert_eq!(
+            sanitize_candidate(&ok, false).unwrap().scope,
+            MemoryScope::Project
+        );
         for bad in [
             json!({"name":"中文","description":"d","body":"b"}),
             json!({"name":"a","description":"","body":"b"}),
@@ -269,7 +285,15 @@ mod tests {
             assert!(sanitize_candidate(&bad, true).is_none(), "{bad}");
         }
         let long = json!({"name":"a","description":"d".repeat(400),"body":"b"});
-        assert_eq!(sanitize_candidate(&long, true).unwrap().draft.description.chars().count(), 161);
+        assert_eq!(
+            sanitize_candidate(&long, true)
+                .unwrap()
+                .draft
+                .description
+                .chars()
+                .count(),
+            161
+        );
     }
 
     #[test]
@@ -284,7 +308,13 @@ mod tests {
             2
         );
         assert_eq!(
-            apply_candidates(&store, Some(&user), &project, &[item("a"), item("c"), item("d"), item("e")], 2),
+            apply_candidates(
+                &store,
+                Some(&user),
+                &project,
+                &[item("a"), item("c"), item("d"), item("e")],
+                2
+            ),
             2
         );
         assert_eq!(store.list(&project).len(), 4);

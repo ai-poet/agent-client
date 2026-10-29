@@ -118,7 +118,9 @@ pub(super) fn after_turn(
     let (id, token) = inner.goal_resume.arm();
     let delay_ms = u64::try_from(delay.as_millis()).unwrap_or(u64::MAX);
     // Fork: on the record of the turn that failed (`crate::trajectory`).
-    inner.trajectory.goal_resume(attempt, Some(MAX_RESUMES), delay_ms);
+    inner
+        .trajectory
+        .goal_resume(attempt, Some(MAX_RESUMES), delay_ms);
     inner.events.emit(AgentEvent::Retry {
         attempt,
         max_attempts: Some(MAX_RESUMES),

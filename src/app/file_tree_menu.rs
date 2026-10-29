@@ -109,7 +109,9 @@ fn mention_path(relative: &str, is_dir: bool) -> String {
 /// A name typed into the tree, as a path under `parent`. `None` when it is
 /// empty or would leave the folder it is typed in.
 fn typed_path(parent: &str, name: &str) -> Option<String> {
-    let name = name.trim().replace(['/', '\\'], &MAIN_SEPARATOR.to_string());
+    let name = name
+        .trim()
+        .replace(['/', '\\'], &MAIN_SEPARATOR.to_string());
     if name.is_empty()
         || Path::new(&name).is_absolute()
         || Path::new(&name)
@@ -132,8 +134,7 @@ fn moved_path(path: &str, from: &str, to: &str) -> Option<String> {
         return Some(to.to_owned());
     }
     let rest = path.strip_prefix(from)?;
-    rest.starts_with(['/', '\\'])
-        .then(|| format!("{to}{rest}"))
+    rest.starts_with(['/', '\\']).then(|| format!("{to}{rest}"))
 }
 
 fn is_under(path: &str, root: &str) -> bool {
@@ -188,9 +189,12 @@ impl Waku {
             })
             .when(cursor, |row| {
                 row.child(
-                    canvas(|_, _, _| (), move |row_bounds, _, _, _| bounds.set(Some(row_bounds)))
-                        .absolute()
-                        .size_full(),
+                    canvas(
+                        |_, _, _| (),
+                        move |row_bounds, _, _, _| bounds.set(Some(row_bounds)),
+                    )
+                    .absolute()
+                    .size_full(),
                 )
             })
             .on_mouse_down(
@@ -221,7 +225,10 @@ impl Waku {
         };
         let (matches, depth) = match after {
             None => (parent.is_empty(), 0),
-            Some(target) => (target.is_dir && target.relative_path == *parent, target.depth + 1),
+            Some(target) => (
+                target.is_dir && target.relative_path == *parent,
+                target.depth + 1,
+            ),
         };
         matches.then(|| {
             self.render_file_edit_row(depth, *directory, cx)
@@ -237,56 +244,52 @@ impl Waku {
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
         let field = self.file_tree.input.clone();
-        div()
-            .id("file-tree-edit")
-            .h(px(30.0))
-            .mx(px(8.0))
-            .child(
-                div()
-                    .size_full()
-                    .pl(px(8.0 + depth as f32 * 16.0))
-                    .pr(px(8.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    // The row this replaces still carries its click (open
-                    // the file, fold the folder); a press in here must not
-                    // reach it.
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if event.keystroke.key == "escape" {
-                            cx.stop_propagation();
-                            this.cancel_file_edit(window, cx);
-                        }
-                    }))
-                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                        if this.file_tree.edit.is_some() {
-                            this.commit_file_edit(cx);
-                        }
-                    }))
-                    .child(div().w(px(10.0)).h(px(10.0)).flex_none())
-                    .child(if is_dir {
-                        icon("icons/folder.svg", 13.0, theme.text_tertiary).into_any_element()
-                    } else {
-                        icon("icons/file.svg", 13.0, theme.text_tertiary).into_any_element()
-                    })
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .h(px(22.0))
-                            .px(px(4.0))
-                            .rounded(px(4.0))
-                            .border_1()
-                            .border_color(theme.accent)
-                            .bg(theme.inset)
-                            .flex()
-                            .items_center()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text)
-                            .children(field),
-                    ),
-            )
+        div().id("file-tree-edit").h(px(30.0)).mx(px(8.0)).child(
+            div()
+                .size_full()
+                .pl(px(8.0 + depth as f32 * 16.0))
+                .pr(px(8.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                // The row this replaces still carries its click (open
+                // the file, fold the folder); a press in here must not
+                // reach it.
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                    if event.keystroke.key == "escape" {
+                        cx.stop_propagation();
+                        this.cancel_file_edit(window, cx);
+                    }
+                }))
+                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                    if this.file_tree.edit.is_some() {
+                        this.commit_file_edit(cx);
+                    }
+                }))
+                .child(div().w(px(10.0)).h(px(10.0)).flex_none())
+                .child(if is_dir {
+                    icon("icons/folder.svg", 13.0, theme.text_tertiary).into_any_element()
+                } else {
+                    icon("icons/file.svg", 13.0, theme.text_tertiary).into_any_element()
+                })
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .h(px(22.0))
+                        .px(px(4.0))
+                        .rounded(px(4.0))
+                        .border_1()
+                        .border_color(theme.accent)
+                        .bg(theme.inset)
+                        .flex()
+                        .items_center()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text)
+                        .children(field),
+                ),
+        )
     }
 
     /// Hook: the tree's scroll area. It takes keyboard focus, clears a stale
@@ -329,7 +332,9 @@ impl Waku {
             )
             .child(
                 icon_button("file-tree-new-folder", "icons/folder-new.svg", theme)
-                    .tooltip(|window, cx| Tooltip::new(tr!("file_tree.new_folder")).build(window, cx))
+                    .tooltip(|window, cx| {
+                        Tooltip::new(tr!("file_tree.new_folder")).build(window, cx)
+                    })
                     .on_click(cx.listener(|this, _, window, cx| {
                         let parent = this.file_tree_focus_container();
                         this.begin_file_create(parent, true, window, cx);
@@ -362,7 +367,12 @@ impl Waku {
             .map(FileTarget::of)
     }
 
-    fn file_tree_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn file_tree_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.file_tree.edit.is_some() {
             return;
         }
@@ -469,16 +479,21 @@ impl Waku {
         self.file_tree.menu_target = target;
         let menu = self.file_tree_menu(cx);
         match self.file_tree.cursor_bounds.get() {
-            Some(bounds) if self.file_tree.menu_target.is_some() => {
-                menu.open_context_menu_at(point(bounds.left() + px(8.0), bounds.bottom()), window, cx)
-            }
+            Some(bounds) if self.file_tree.menu_target.is_some() => menu.open_context_menu_at(
+                point(bounds.left() + px(8.0), bounds.bottom()),
+                window,
+                cx,
+            ),
             _ => menu.open_context_menu(window, cx),
         }
         true
     }
 
     fn toggle_file_tree_dir(&mut self, target: &FileTarget, cx: &mut Context<Self>) {
-        if !self.right_panel_expanded_paths.remove(&target.absolute_path) {
+        if !self
+            .right_panel_expanded_paths
+            .remove(&target.absolute_path)
+        {
             self.right_panel_expanded_paths
                 .insert(target.absolute_path.clone());
         }
@@ -500,10 +515,21 @@ impl Waku {
         {
             self.refresh_right_panel_working_tree(cx);
         }
-        self.begin_file_edit(FileEdit::Create { parent, directory }, String::new(), 0..0, window, cx);
+        self.begin_file_edit(
+            FileEdit::Create { parent, directory },
+            String::new(),
+            0..0,
+            window,
+            cx,
+        );
     }
 
-    fn begin_file_rename(&mut self, target: FileTarget, window: &mut Window, cx: &mut Context<Self>) {
+    fn begin_file_rename(
+        &mut self,
+        target: FileTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let name = target.name().to_owned();
         let selection = stem_range(&name, target.is_dir);
         self.begin_file_edit(FileEdit::Rename { target }, name, selection, window, cx);
@@ -677,7 +703,12 @@ impl Waku {
         .detach();
     }
 
-    fn apply_file_edit_outcome(&mut self, root: &Path, outcome: FileEditOutcome, cx: &mut Context<Self>) {
+    fn apply_file_edit_outcome(
+        &mut self,
+        root: &Path,
+        outcome: FileEditOutcome,
+        cx: &mut Context<Self>,
+    ) {
         match outcome {
             FileEditOutcome::Created { path, directory } => {
                 self.file_tree.cursor = Some(path.clone());
@@ -713,14 +744,15 @@ impl Waku {
                     })
                     .collect();
                 let (old_root, new_root) = (root.join(&from), root.join(&to));
-                self.right_panel_expanded_paths = std::mem::take(&mut self.right_panel_expanded_paths)
-                    .into_iter()
-                    .map(|path| match path.strip_prefix(&old_root) {
-                        Ok(rest) if rest.as_os_str().is_empty() => new_root.clone(),
-                        Ok(rest) => new_root.join(rest),
-                        Err(_) => path,
-                    })
-                    .collect();
+                self.right_panel_expanded_paths =
+                    std::mem::take(&mut self.right_panel_expanded_paths)
+                        .into_iter()
+                        .map(|path| match path.strip_prefix(&old_root) {
+                            Ok(rest) if rest.as_os_str().is_empty() => new_root.clone(),
+                            Ok(rest) => new_root.join(rest),
+                            Err(_) => path,
+                        })
+                        .collect();
             }
             FileEditOutcome::Trashed { path } => {
                 // Tabs on what is gone close; their editors go with them.
@@ -748,14 +780,20 @@ impl Waku {
                     .as_deref()
                     .is_some_and(|cursor| is_under(cursor, &path))
                 {
-                    self.file_tree.cursor = Some(parent_of(&path)).filter(|parent| !parent.is_empty());
+                    self.file_tree.cursor =
+                        Some(parent_of(&path)).filter(|parent| !parent.is_empty());
                 }
             }
         }
     }
 
     /// Put `@path` into the composer at its caret and give it focus.
-    fn mention_in_composer(&mut self, target: &FileTarget, window: &mut Window, cx: &mut Context<Self>) {
+    fn mention_in_composer(
+        &mut self,
+        target: &FileTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let mention = format!("@{} ", mention_path(&target.relative_path, target.is_dir));
         self.composer.update(cx, |composer, cx| {
             let at = composer.cursor(cx);
@@ -974,7 +1012,10 @@ mod tests {
     #[test]
     fn a_typed_name_stays_inside_its_folder() {
         assert_eq!(typed_path("", "notes.md").as_deref(), Some("notes.md"));
-        assert_eq!(typed_path(&sep("src/app"), "mod.rs"), Some(sep("src/app/mod.rs")));
+        assert_eq!(
+            typed_path(&sep("src/app"), "mod.rs"),
+            Some(sep("src/app/mod.rs"))
+        );
         assert_eq!(typed_path("src", " a/b.rs "), Some(sep("src/a/b.rs")));
         assert_eq!(typed_path("src", "a\\b.rs"), Some(sep("src/a/b.rs")));
         for bad in ["", "  ", "../x", "a/../../x", "/abs", "./x"] {
@@ -985,7 +1026,10 @@ mod tests {
     #[test]
     fn moved_paths_follow_a_rename_but_not_a_lookalike() {
         assert_eq!(moved_path("src", "src", "lib").as_deref(), Some("lib"));
-        assert_eq!(moved_path(&sep("src/a.rs"), "src", "lib"), Some(sep("lib/a.rs")));
+        assert_eq!(
+            moved_path(&sep("src/a.rs"), "src", "lib"),
+            Some(sep("lib/a.rs"))
+        );
         assert_eq!(moved_path("src2/a.rs", "src", "lib"), None);
         assert!(is_under(&sep("src/deep/a.rs"), "src"));
         assert!(!is_under("srcs", "src"));

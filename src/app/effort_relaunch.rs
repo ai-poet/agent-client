@@ -165,7 +165,14 @@ mod tests {
             ProviderKind::Kimi,
         ] {
             assert_eq!(
-                decide(provider, true, false, Some(&some("high")), &some("max"), false),
+                decide(
+                    provider,
+                    true,
+                    false,
+                    Some(&some("high")),
+                    &some("max"),
+                    false
+                ),
                 Relaunch::Keep,
                 "{provider:?}"
             );
@@ -175,7 +182,14 @@ mod tests {
     #[test]
     fn a_runtime_about_to_start_is_recorded_with_what_it_starts_with() {
         assert_eq!(
-            decide(ProviderKind::Claude, false, false, None, &some("max"), false),
+            decide(
+                ProviderKind::Claude,
+                false,
+                false,
+                None,
+                &some("max"),
+                false
+            ),
             Relaunch::Record
         );
         assert_eq!(

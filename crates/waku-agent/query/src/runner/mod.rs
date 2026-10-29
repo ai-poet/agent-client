@@ -12,8 +12,8 @@ pub(crate) use step_reminder::*;
 // Fork addition (Waku): the loop's retry bookkeeping.
 pub(crate) mod retry_loop;
 // Fork addition (Waku): a reminder when the model repeats one call.
-pub(crate) mod repeat_guard;
 pub(crate) mod prompt;
+pub(crate) mod repeat_guard;
 pub(crate) use prompt::*;
 pub(crate) mod stream;
 pub(crate) use stream::*;

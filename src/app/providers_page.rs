@@ -197,13 +197,21 @@ pub(super) fn probe_status_line(theme: Theme, test: &EndpointTest) -> Div {
             theme,
             "icons/x.svg",
             theme.danger,
-            tr!("cli_setup.custom_connect_failed", error = result.detail.clone()),
+            tr!(
+                "cli_setup.custom_connect_failed",
+                error = result.detail.clone()
+            ),
         ),
     }
 }
 
 /// A status line inside a card: icon, tinted text.
-pub(super) fn status_line(theme: Theme, icon_path: &'static str, color: gpui::Hsla, text: String) -> Div {
+pub(super) fn status_line(
+    theme: Theme,
+    icon_path: &'static str,
+    color: gpui::Hsla,
+    text: String,
+) -> Div {
     let _ = theme;
     div()
         .flex()
@@ -212,7 +220,12 @@ pub(super) fn status_line(theme: Theme, icon_path: &'static str, color: gpui::Hs
         .text_size(sp(12.0))
         .line_height(sp(17.0))
         .text_color(color)
-        .child(div().flex_none().pt(px(2.0)).child(icon(icon_path, 12.0, color)))
+        .child(
+            div()
+                .flex_none()
+                .pt(px(2.0))
+                .child(icon(icon_path, 12.0, color)),
+        )
         .child(div().min_w_0().flex_1().child(text))
 }
 
@@ -388,7 +401,10 @@ impl Waku {
                     .conflicts
                     .iter()
                     .filter(|conflict| {
-                        !self.cloud_account.cli_takeover.keeps_own(conflict.provider_id)
+                        !self
+                            .cloud_account
+                            .cli_takeover
+                            .keeps_own(conflict.provider_id)
                             || custom.routed_endpoint(conflict.provider_id).is_some()
                     })
                     .cloned()
@@ -446,13 +462,16 @@ impl Waku {
         let busy = self.cli_setup.running.is_some();
         let installable = sub2api::node_install::install_supported();
 
-        let (status_icon, status_color, status_text) = match snapshot.map(|snapshot| &snapshot.node) {
+        let (status_icon, status_color, status_text) = match snapshot.map(|snapshot| &snapshot.node)
+        {
             None => (
                 "icons/loader-circle.svg",
                 theme.text_ghost,
                 tr!("cli_setup.detecting"),
             ),
-            Some(Probe::Found { version, .. }) if sub2api::cli_install::node_is_supported(version) => {
+            Some(Probe::Found { version, .. })
+                if sub2api::cli_install::node_is_supported(version) =>
+            {
                 let npm = snapshot
                     .and_then(|snapshot| snapshot.npm.version())
                     .map(|npm| format!("  \u{00b7}  npm {npm}"))
@@ -525,10 +544,7 @@ impl Waku {
                             .text_size(sp(13.0))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.text)
-                            .child(format!(
-                                "{}  \u{00b7}  Node.js",
-                                tr!("cli_setup.env_title")
-                            )),
+                            .child(format!("{}  \u{00b7}  Node.js", tr!("cli_setup.env_title"))),
                     )
                     .child(status_line(
                         theme,
@@ -575,16 +591,17 @@ impl Waku {
             .collect();
         let has_backup = self.cli_setup.env_backup_latest.is_some();
 
-        let mut header = div()
-            .flex()
-            .items_start()
-            .gap(px(8.0))
-            .child(div().flex_1().min_w_0().child(status_line(
-                theme,
-                "icons/alert.svg",
-                theme.warning,
-                tr!("cli_setup.env_conflicts_title"),
-            )));
+        let mut header =
+            div()
+                .flex()
+                .items_start()
+                .gap(px(8.0))
+                .child(div().flex_1().min_w_0().child(status_line(
+                    theme,
+                    "icons/alert.svg",
+                    theme.warning,
+                    tr!("cli_setup.env_conflicts_title"),
+                )));
         if removable.len() > 1 {
             let all = removable.clone();
             header = header.child(card_button(
@@ -671,9 +688,7 @@ impl Waku {
                         false,
                         busy,
                         cx,
-                        move |this, _, cx| {
-                            this.confirm_remove_env_conflicts(one.clone(), cx)
-                        },
+                        move |this, _, cx| this.confirm_remove_env_conflicts(one.clone(), cx),
                     ));
                 }
                 // Machine-wide: an elevated shell is required, so the
@@ -737,12 +752,7 @@ impl Waku {
             }
         }
         if let Some(report) = self.cli_setup.env_fix_report.clone() {
-            card = card.child(status_line(
-                theme,
-                "icons/alert.svg",
-                theme.warning,
-                report,
-            ));
+            card = card.child(status_line(theme, "icons/alert.svg", theme.warning, report));
         }
         card
     }
@@ -826,7 +836,11 @@ impl Waku {
                     tr!("providers.model_count_many", count = model_count)
                 });
             }
-            (theme.success, parts.join("  \u{00b7}  "), theme.text_tertiary)
+            (
+                theme.success,
+                parts.join("  \u{00b7}  "),
+                theme.text_tertiary,
+            )
         };
 
         let expanded = self.expanded_provider_settings == Some(kind);
@@ -1014,19 +1028,15 @@ impl Waku {
                             // user opens to decide whether to trust any of
                             // this. It is about the CLI, not the endpoint, so
                             // it stayed here when the form left.
-                            .child(
-                                div().child(card_button(
-                                    theme,
-                                    SharedString::from(format!("open-config-{provider_id}")),
-                                    tr!("cli_setup.custom_open_file"),
-                                    false,
-                                    false,
-                                    cx,
-                                    move |this, _, cx| {
-                                        this.open_provider_config_file(provider_id, cx)
-                                    },
-                                )),
-                            ),
+                            .child(div().child(card_button(
+                                theme,
+                                SharedString::from(format!("open-config-{provider_id}")),
+                                tr!("cli_setup.custom_open_file"),
+                                false,
+                                false,
+                                cx,
+                                move |this, _, cx| this.open_provider_config_file(provider_id, cx),
+                            ))),
                     );
             }
         }
@@ -1056,18 +1066,16 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(
-                        div().flex_1().min_w_0().child(status_line(
-                            theme,
-                            "icons/alert.svg",
-                            theme.warning,
-                            tr!(
-                                "cli_setup.installed_not_on_path",
-                                name = kind.display_name(),
-                                dir = bin_dir.display().to_string()
-                            ),
-                        )),
-                    )
+                    .child(div().flex_1().min_w_0().child(status_line(
+                        theme,
+                        "icons/alert.svg",
+                        theme.warning,
+                        tr!(
+                            "cli_setup.installed_not_on_path",
+                            name = kind.display_name(),
+                            dir = bin_dir.display().to_string()
+                        ),
+                    )))
                     .child(card_button(
                         theme,
                         SharedString::from(format!("use-installed-path-{provider_id}")),
@@ -1197,17 +1205,22 @@ impl Waku {
                             .text_color(theme.text_secondary)
                             .child(label),
                     )
-                    .when(matches!(route, RouteKind::Cloud) || cloud.is_some(), |row| {
-                        row.child(card_button(
-                            theme,
-                            SharedString::from(format!("route-manage-{provider_id}")),
-                            tr!("providers.route_manage"),
-                            false,
-                            false,
-                            cx,
-                            |this, _, cx| this.open_settings_page(SettingsPage::CloudAccount, cx),
-                        ))
-                    }),
+                    .when(
+                        matches!(route, RouteKind::Cloud) || cloud.is_some(),
+                        |row| {
+                            row.child(card_button(
+                                theme,
+                                SharedString::from(format!("route-manage-{provider_id}")),
+                                tr!("providers.route_manage"),
+                                false,
+                                false,
+                                cx,
+                                |this, _, cx| {
+                                    this.open_settings_page(SettingsPage::CloudAccount, cx)
+                                },
+                            ))
+                        },
+                    ),
             )
             .when(
                 matches!(route, RouteKind::Cloud) && custom_configured,

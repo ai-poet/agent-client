@@ -93,7 +93,10 @@ mod tests {
         unsafe { std::env::set_var("CLAURST_HOME", &home) };
 
         let path = install_skill("# desktop control").expect("install");
-        assert!(path.ends_with("commands/waku-computer-use.md") || path.ends_with("commands\\waku-computer-use.md"));
+        assert!(
+            path.ends_with("commands/waku-computer-use.md")
+                || path.ends_with("commands\\waku-computer-use.md")
+        );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "# desktop control");
 
         // Same content: still there, and no temporary file left behind.

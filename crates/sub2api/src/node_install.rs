@@ -35,7 +35,9 @@ pub enum NodeStage {
     ResolvingDownload,
     Downloading,
     /// `method` is `"zip"`, `"msi"`, `"winget"`, or `"tarball"`.
-    Installing { method: &'static str },
+    Installing {
+        method: &'static str,
+    },
     Verifying,
 }
 
@@ -57,7 +59,11 @@ pub fn managed_node_dir() -> Option<PathBuf> {
     } else {
         "linux"
     };
-    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
+    let arch = if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        "x64"
+    };
     Some(
         brand::data_dir()?
             .join("toolchains")
@@ -231,7 +237,11 @@ pub fn parse_listing(body: &str) -> Result<Vec<MirrorEntry>> {
             Some(MirrorEntry {
                 name: entry.get("name")?.as_str()?.to_owned(),
                 is_dir: entry.get("type").and_then(|t| t.as_str()) == Some("dir"),
-                url: entry.get("url").and_then(|u| u.as_str()).unwrap_or("").to_owned(),
+                url: entry
+                    .get("url")
+                    .and_then(|u| u.as_str())
+                    .unwrap_or("")
+                    .to_owned(),
             })
         })
         .collect())
@@ -262,11 +272,19 @@ pub fn latest_asset_url(entries: &[MirrorEntry], suffix: &str) -> Option<String>
 }
 
 fn windows_zip_suffix() -> &'static str {
-    if cfg!(target_arch = "aarch64") { "-win-arm64.zip" } else { "-win-x64.zip" }
+    if cfg!(target_arch = "aarch64") {
+        "-win-arm64.zip"
+    } else {
+        "-win-x64.zip"
+    }
 }
 
 fn windows_msi_suffix() -> &'static str {
-    if cfg!(target_arch = "aarch64") { "-arm64.msi" } else { "-x64.msi" }
+    if cfg!(target_arch = "aarch64") {
+        "-arm64.msi"
+    } else {
+        "-x64.msi"
+    }
 }
 
 // Referenced only by the macOS installer, which is cfg-gated.
@@ -319,7 +337,8 @@ pub(crate) fn download(
     report: &mut impl FnMut(NodeStage),
 ) -> Result<()> {
     report(NodeStage::Downloading);
-    let write_out = format!("{WRITE_OUT_PREFIX}%{{http_code}} %{{size_download}} %{{filename_effective}}\\n");
+    let write_out =
+        format!("{WRITE_OUT_PREFIX}%{{http_code}} %{{size_download}} %{{filename_effective}}\\n");
     download_with(url, destination, std::time::Duration::from_secs(1), || {
         cli_install::run_program(
             http::CURL_PATH,
@@ -524,7 +543,10 @@ fn ps_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
-fn install_windows_zip(entries: &[MirrorEntry], report: &mut impl FnMut(NodeStage)) -> Result<String> {
+fn install_windows_zip(
+    entries: &[MirrorEntry],
+    report: &mut impl FnMut(NodeStage),
+) -> Result<String> {
     if !cfg!(target_os = "windows") {
         return Err(anyhow!("not Windows"));
     }
@@ -555,7 +577,13 @@ fn install_windows_zip(entries: &[MirrorEntry], report: &mut impl FnMut(NodeStag
     );
     let outcome = cli_install::run_program(
         "powershell.exe",
-        &["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script],
+        &[
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ],
     );
     let _ = std::fs::remove_dir_all(&staging);
     if !outcome.success {
@@ -569,7 +597,10 @@ fn install_windows_zip(entries: &[MirrorEntry], report: &mut impl FnMut(NodeStag
     Ok(format!("installed Node from {url}"))
 }
 
-fn install_windows_msi(entries: &[MirrorEntry], report: &mut impl FnMut(NodeStage)) -> Result<String> {
+fn install_windows_msi(
+    entries: &[MirrorEntry],
+    report: &mut impl FnMut(NodeStage),
+) -> Result<String> {
     if !cfg!(target_os = "windows") {
         return Err(anyhow!("not Windows"));
     }
@@ -640,7 +671,13 @@ pub(crate) fn persist_windows_user_path(directory: &Path) {
     );
     let _ = cli_install::run_program(
         "powershell.exe",
-        &["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script],
+        &[
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ],
     );
 }
 
@@ -772,13 +809,18 @@ mod tests {
         let staging = staging_dir().expect("staging");
         let archive = staging.join("driver.zip");
         let mut calls = 0;
-        download_with("https://example/driver.zip", &archive, Duration::ZERO, || {
-            calls += 1;
-            if calls == 2 {
-                std::fs::write(&archive, b"zip").unwrap();
-            }
-            succeeded("")
-        })
+        download_with(
+            "https://example/driver.zip",
+            &archive,
+            Duration::ZERO,
+            || {
+                calls += 1;
+                if calls == 2 {
+                    std::fs::write(&archive, b"zip").unwrap();
+                }
+                succeeded("")
+            },
+        )
         .expect("the second attempt lands");
         assert_eq!(calls, 2);
         let _ = std::fs::remove_dir_all(&staging);
@@ -790,16 +832,24 @@ mod tests {
         let archive = staging.join("driver.zip");
         std::fs::write(staging.join("leftover.txt"), b"x").unwrap();
         let mut calls = 0;
-        let error = download_with("https://example/driver.zip", &archive, Duration::ZERO, || {
-            calls += 1;
-            succeeded("download-result: 200 27636131 C:\\a b\\driver.zip\n")
-        })
+        let error = download_with(
+            "https://example/driver.zip",
+            &archive,
+            Duration::ZERO,
+            || {
+                calls += 1;
+                succeeded("download-result: 200 27636131 C:\\a b\\driver.zip\n")
+            },
+        )
         .expect_err("nothing ever lands");
         assert_eq!(calls, DOWNLOAD_ATTEMPTS);
         let vanished = error.downcast_ref::<VanishedDownload>().expect("typed");
         assert_eq!(vanished.attempts, DOWNLOAD_ATTEMPTS);
         let text = error.to_string();
-        assert!(text.contains("HTTP 200, 27636131 bytes written to C:\\a b\\driver.zip"), "{text}");
+        assert!(
+            text.contains("HTTP 200, 27636131 bytes written to C:\\a b\\driver.zip"),
+            "{text}"
+        );
         assert!(text.contains("3 attempts"), "{text}");
         assert!(text.contains("the folder holds: leftover.txt"), "{text}");
         let _ = std::fs::remove_dir_all(&staging);
@@ -810,18 +860,29 @@ mod tests {
         let staging = staging_dir().expect("staging");
         let archive = staging.join("driver.zip");
         let mut calls = 0;
-        let error = download_with("https://example/driver.zip", &archive, Duration::ZERO, || {
-            calls += 1;
-            // Every later attempt finds the folder back in place.
-            if calls > 1 {
-                assert!(staging.is_dir(), "attempt {calls} has no folder to write into");
-            }
-            let _ = std::fs::remove_dir_all(&staging);
-            succeeded("")
-        })
+        let error = download_with(
+            "https://example/driver.zip",
+            &archive,
+            Duration::ZERO,
+            || {
+                calls += 1;
+                // Every later attempt finds the folder back in place.
+                if calls > 1 {
+                    assert!(
+                        staging.is_dir(),
+                        "attempt {calls} has no folder to write into"
+                    );
+                }
+                let _ = std::fs::remove_dir_all(&staging);
+                succeeded("")
+            },
+        )
         .expect_err("nothing ever lands");
         assert_eq!(calls, DOWNLOAD_ATTEMPTS);
-        assert!(error.to_string().contains("the folder itself is gone"), "{error}");
+        assert!(
+            error.to_string().contains("the folder itself is gone"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -829,26 +890,39 @@ mod tests {
         let staging = staging_dir().expect("staging");
         let archive = staging.join("driver.zip");
         let mut calls = 0;
-        let error = download_with("https://example/driver.zip", &archive, Duration::ZERO, || {
-            calls += 1;
-            std::fs::write(&archive, b"").unwrap();
-            succeeded("")
-        })
+        let error = download_with(
+            "https://example/driver.zip",
+            &archive,
+            Duration::ZERO,
+            || {
+                calls += 1;
+                std::fs::write(&archive, b"").unwrap();
+                succeeded("")
+            },
+        )
         .expect_err("empty");
         assert_eq!(calls, 1);
         assert!(error.to_string().contains("empty file"), "{error}");
 
         calls = 0;
-        let error = download_with("https://example/driver.zip", &archive, Duration::ZERO, || {
-            calls += 1;
-            InstallOutcome {
-                success: false,
-                output: "curl: (22) The requested URL returned error: 404".to_owned(),
-            }
-        })
+        let error = download_with(
+            "https://example/driver.zip",
+            &archive,
+            Duration::ZERO,
+            || {
+                calls += 1;
+                InstallOutcome {
+                    success: false,
+                    output: "curl: (22) The requested URL returned error: 404".to_owned(),
+                }
+            },
+        )
         .expect_err("failed");
         assert_eq!(calls, 1);
-        assert!(error.to_string().starts_with("download failed: curl: (22)"), "{error}");
+        assert!(
+            error.to_string().starts_with("download failed: curl: (22)"),
+            "{error}"
+        );
         let _ = std::fs::remove_dir_all(&staging);
     }
 

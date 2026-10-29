@@ -175,7 +175,11 @@ impl SubscriptionProgress {
             .as_ref()
             .map(|group| group.name.clone())
             .filter(|name| !name.trim().is_empty())
-            .or_else(|| self.progress.as_ref().map(|progress| progress.group_name.clone()))
+            .or_else(|| {
+                self.progress
+                    .as_ref()
+                    .map(|progress| progress.group_name.clone())
+            })
             .unwrap_or_default()
     }
 
@@ -984,8 +988,14 @@ mod tests {
     #[test]
     fn api_url_joins_without_double_slashes() {
         let client = Client::new("https://example.org/");
-        assert_eq!(client.api_url("/auth/me"), "https://example.org/api/v1/auth/me");
-        assert_eq!(client.api_url("auth/me"), "https://example.org/api/v1/auth/me");
+        assert_eq!(
+            client.api_url("/auth/me"),
+            "https://example.org/api/v1/auth/me"
+        );
+        assert_eq!(
+            client.api_url("auth/me"),
+            "https://example.org/api/v1/auth/me"
+        );
         assert_eq!(client.endpoint(), "https://example.org");
     }
 
@@ -1005,8 +1015,7 @@ mod tests {
         assert_eq!(user.balance, 999980.6);
 
         let page: Paginated<ApiKey> =
-            unwrap_envelope(&ok(r#"{"code":0,"data":{"items":null,"total":0}}"#))
-                .expect("unwrap");
+            unwrap_envelope(&ok(r#"{"code":0,"data":{"items":null,"total":0}}"#)).expect("unwrap");
         assert!(page.items.is_empty());
 
         let catalog: ModelCatalog =
@@ -1075,14 +1084,12 @@ mod tests {
     fn model_catalog_keeps_optional_prices_optional() {
         // A per-request model has no per-token price; rendering 0.00 there
         // would claim it is free.
-        let catalog: ModelCatalog = unwrap_envelope(&ok(
-            r#"{"code":0,"data":{"items":[
+        let catalog: ModelCatalog = unwrap_envelope(&ok(r#"{"code":0,"data":{"items":[
                 {"model":"gpt-x","display_name":"GPT X","platform":"openai",
                  "best_group":{"id":3,"name":"Std"},
                  "effective_pricing_usd":{"input_per_mtok_usd":1.5,"output_per_mtok_usd":null},
                  "comparison":{"savings_percent":42.0,"is_cheaper_than_official":true}}
-            ]}}"#,
-        ))
+            ]}}"#))
         .expect("unwrap");
         let item = &catalog.items[0];
         assert_eq!(item.display_name, "GPT X");
@@ -1095,8 +1102,7 @@ mod tests {
     #[test]
     fn catalog_tolerates_an_entry_missing_everything_optional() {
         let catalog: ModelCatalog =
-            unwrap_envelope(&ok(r#"{"code":0,"data":{"items":[{"model":"m"}]}}"#))
-                .expect("unwrap");
+            unwrap_envelope(&ok(r#"{"code":0,"data":{"items":[{"model":"m"}]}}"#)).expect("unwrap");
         assert_eq!(catalog.items[0].model, "m");
         assert!(catalog.items[0].display_name.is_empty());
     }
@@ -1105,8 +1111,7 @@ mod tests {
     fn catalog_carries_both_price_columns_and_companions() {
         // The plaza renders official struck through beside effective; losing
         // either column silently would misstate the price.
-        let catalog: ModelCatalog = unwrap_envelope(&ok(
-            r#"{"code":0,"data":{"items":[
+        let catalog: ModelCatalog = unwrap_envelope(&ok(r#"{"code":0,"data":{"items":[
                 {"model":"claude-x","display_name":"Claude X","platform":"anthropic",
                  "billing_mode":"token",
                  "best_group":{"id":1,"name":"Fast","rate_multiplier":0.5},
@@ -1120,8 +1125,7 @@ mod tests {
                     "effective_pricing_usd":{"input_per_mtok_usd":3.0},
                     "comparison":{"savings_percent":0.0,"is_cheaper_than_official":false}}]}
             ],"summary":{"total_models":10,"token_models":8,"non_token_models":2,
-                "max_savings_percent":72.5}}}"#,
-        ))
+                "max_savings_percent":72.5}}}"#))
         .expect("unwrap");
         let item = &catalog.items[0];
         assert_eq!(item.official_pricing.input_per_mtok_usd, Some(3.0));

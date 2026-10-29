@@ -147,7 +147,10 @@ mod tests {
         guard.observe("Read", &json!({"file_path": "a.rs", "offset": 1}));
         guard.observe("Read", &json!({"offset": 1, "file_path": "a.rs"}));
         let third = guard.observe("Read", &json!({"file_path": "a.rs", "offset": 1}));
-        assert!(third.is_some(), "the same call three times, keys in any order");
+        assert!(
+            third.is_some(),
+            "the same call three times, keys in any order"
+        );
     }
 
     #[test]
@@ -172,7 +175,10 @@ mod tests {
             );
         }
         let third = with_repeat_note(&mut guard, "Grep", &input, "no matches".into());
-        assert!(third.starts_with("no matches\n\n<system-reminder>"), "{third}");
+        assert!(
+            third.starts_with("no matches\n\n<system-reminder>"),
+            "{third}"
+        );
         assert!(third.contains("Grep"), "{third}");
     }
 

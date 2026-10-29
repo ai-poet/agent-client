@@ -119,7 +119,12 @@ mod tests {
 
         assert_eq!(probe.models[0].id, "claude-sonnet-5");
         assert!(probe.models[0].is_default);
-        assert!(probe.models.iter().any(|model| model.id == "claude-fable-5-1"));
+        assert!(
+            probe
+                .models
+                .iter()
+                .any(|model| model.id == "claude-fable-5-1")
+        );
         assert_eq!(
             probe
                 .models

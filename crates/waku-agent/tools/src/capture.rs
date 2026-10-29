@@ -32,7 +32,10 @@ pub(crate) struct Captured {
 }
 
 /// Run `command` to completion or until `timeout`, whichever is first.
-pub(crate) async fn run_captured(mut command: Command, timeout: Duration) -> std::io::Result<Captured> {
+pub(crate) async fn run_captured(
+    mut command: Command,
+    timeout: Duration,
+) -> std::io::Result<Captured> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -167,12 +170,20 @@ fn decode_legacy_line(line: &[u8]) -> String {
     unsafe {
         let console = GetConsoleOutputCP();
         let code_page = if console == 0 { CP_OEMCP } else { console };
-        let needed = MultiByteToWideChar(code_page, 0, line.as_ptr(), length, std::ptr::null_mut(), 0);
+        let needed =
+            MultiByteToWideChar(code_page, 0, line.as_ptr(), length, std::ptr::null_mut(), 0);
         if needed <= 0 {
             return String::from_utf8_lossy(line).into_owned();
         }
         let mut wide = vec![0u16; needed as usize];
-        let written = MultiByteToWideChar(code_page, 0, line.as_ptr(), length, wide.as_mut_ptr(), needed);
+        let written = MultiByteToWideChar(
+            code_page,
+            0,
+            line.as_ptr(),
+            length,
+            wide.as_mut_ptr(),
+            needed,
+        );
         if written <= 0 {
             return String::from_utf8_lossy(line).into_owned();
         }
@@ -220,7 +231,10 @@ mod tests {
 
     #[test]
     fn utf8_output_is_kept_and_crlf_normalized() {
-        assert_eq!(decode_output("编译完成\r\nok\r\n".as_bytes()), "编译完成\nok\n");
+        assert_eq!(
+            decode_output("编译完成\r\nok\r\n".as_bytes()),
+            "编译完成\nok\n"
+        );
     }
 
     /// One undecodable line must not take the rest of the output with it.
@@ -249,7 +263,8 @@ mod tests {
     /// reader until the timeout.
     #[tokio::test]
     async fn a_full_stderr_pipe_does_not_stall_the_command() {
-        let script = "for i in $(seq 1 20000); do echo 'line of stderr output' >&2; done; echo done";
+        let script =
+            "for i in $(seq 1 20000); do echo 'line of stderr output' >&2; done; echo done";
         let mut command = if cfg!(windows) {
             match claurst_core::shell::windows_bash() {
                 Some(bash) => {
@@ -265,7 +280,9 @@ mod tests {
             command
         };
         command.current_dir(std::env::temp_dir());
-        let captured = run_captured(command, Duration::from_secs(60)).await.expect("spawn");
+        let captured = run_captured(command, Duration::from_secs(60))
+            .await
+            .expect("spawn");
         assert!(!captured.timed_out);
         assert_eq!(captured.stdout.trim(), "done");
         assert!(captured.stderr.len() > 100_000);

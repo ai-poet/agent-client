@@ -6,7 +6,8 @@
 use std::time::Duration;
 
 use claurst_api::retry_policy::{
-    backoff_delay, FailureClass, ModelFailure, RetryBudget, RetryReason, UNBOUNDED_SERVER_ERROR_LIMIT,
+    backoff_delay, FailureClass, ModelFailure, RetryBudget, RetryReason,
+    UNBOUNDED_SERVER_ERROR_LIMIT,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -57,7 +58,11 @@ impl RetryState {
 
     /// Decide on a failed attempt. `visible_output` says whether the user had
     /// already seen part of its answer, which the retry will take back.
-    pub(crate) fn on_failure(&mut self, failure: &ModelFailure, visible_output: bool) -> RetryDecision {
+    pub(crate) fn on_failure(
+        &mut self,
+        failure: &ModelFailure,
+        visible_output: bool,
+    ) -> RetryDecision {
         match failure.class {
             FailureClass::Fatal => RetryDecision::GiveUp,
             FailureClass::ContextOverflow => {
@@ -154,7 +159,9 @@ mod tests {
         let mut state = RetryState::new(RetryBudget::Default);
         for attempt in 1..=10 {
             match state.on_failure(&retryable(), false) {
-                RetryDecision::Retry { attempt: got, max, .. } => {
+                RetryDecision::Retry {
+                    attempt: got, max, ..
+                } => {
                     assert_eq!(got, attempt);
                     assert_eq!(max, Some(10));
                 }
@@ -174,12 +181,18 @@ mod tests {
     fn taking_back_streamed_output_is_limited_per_prompt() {
         let mut state = RetryState::new(RetryBudget::Default);
         for _ in 0..10 {
-            assert!(matches!(state.on_failure(&retryable(), true), RetryDecision::Retry { .. }));
+            assert!(matches!(
+                state.on_failure(&retryable(), true),
+                RetryDecision::Retry { .. }
+            ));
             state.on_success();
         }
         assert_eq!(state.on_failure(&retryable(), true), RetryDecision::GiveUp);
         // A failure before anything was shown still retries.
-        assert!(matches!(state.on_failure(&retryable(), false), RetryDecision::Retry { .. }));
+        assert!(matches!(
+            state.on_failure(&retryable(), false),
+            RetryDecision::Retry { .. }
+        ));
 
         let mut light = RetryState::new(RetryBudget::Light);
         assert_eq!(light.on_failure(&retryable(), true), RetryDecision::GiveUp);
@@ -203,11 +216,17 @@ mod tests {
     fn unbounded_runs_until_server_errors_pile_up() {
         let mut state = RetryState::new(RetryBudget::Unbounded);
         for _ in 0..100 {
-            assert!(matches!(state.on_failure(&retryable(), false), RetryDecision::Retry { max: None, .. }));
+            assert!(matches!(
+                state.on_failure(&retryable(), false),
+                RetryDecision::Retry { max: None, .. }
+            ));
         }
         let server = ModelFailure::retryable(RetryReason::ServerError, "502");
         for _ in 0..UNBOUNDED_SERVER_ERROR_LIMIT {
-            assert!(matches!(state.on_failure(&server, false), RetryDecision::Retry { .. }));
+            assert!(matches!(
+                state.on_failure(&server, false),
+                RetryDecision::Retry { .. }
+            ));
         }
         assert_eq!(state.on_failure(&server, false), RetryDecision::GiveUp);
     }
@@ -219,7 +238,9 @@ mod tests {
         assert!(state.on_empty().is_none());
         state.on_success();
         assert!(state.on_empty().is_some());
-        assert!(RetryState::new(RetryBudget::SingleAttempt).on_empty().is_none());
+        assert!(RetryState::new(RetryBudget::SingleAttempt)
+            .on_empty()
+            .is_none());
     }
 
     #[tokio::test]

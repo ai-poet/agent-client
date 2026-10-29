@@ -61,7 +61,9 @@ pub(super) struct PlansState {
 pub(super) enum CardState {
     Buy,
     /// The account holds this plan's group; `days` until it lapses, when known.
-    Renew { days: Option<i64> },
+    Renew {
+        days: Option<i64>,
+    },
 }
 
 /// A subscription window a plan caps.
@@ -107,7 +109,12 @@ impl Waku {
         if self.plans.loading {
             return;
         }
-        if !force && self.plans.loaded_at.is_some_and(|at| at.elapsed() < PLANS_TTL) {
+        if !force
+            && self
+                .plans
+                .loaded_at
+                .is_some_and(|at| at.elapsed() < PLANS_TTL)
+        {
             return;
         }
         let Some((client, credentials)) = self.pay_session() else {
@@ -200,7 +207,11 @@ impl Waku {
     }
 
     /// A plan order settled: pick the subscription up everywhere it shows.
-    pub(super) fn activate_purchased_plan(&mut self, plan: &SubscriptionPlan, cx: &mut Context<Self>) {
+    pub(super) fn activate_purchased_plan(
+        &mut self,
+        plan: &SubscriptionPlan,
+        cx: &mut Context<Self>,
+    ) {
         self.show_toast(tr!("plans.activated_toast", plan = self.tx(&plan.name)));
         self.pick_up_new_subscription(cx);
     }
@@ -249,7 +260,11 @@ impl Waku {
         .detach();
     }
 
-    pub(super) fn render_plans_settings(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_plans_settings(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
 
         if self.cloud_account.credentials.is_none() {
@@ -279,8 +294,8 @@ impl Waku {
 
         if let Some(error) = &self.plans.error {
             page = page.child(
-                notice_card(theme, error.clone()).child(
-                    div().mt(px(10.0)).child(super::providers_page::card_button(
+                notice_card(theme, error.clone()).child(div().mt(px(10.0)).child(
+                    super::providers_page::card_button(
                         theme,
                         "plans-retry".into(),
                         tr!("plans.retry"),
@@ -288,27 +303,25 @@ impl Waku {
                         self.plans.loading,
                         cx,
                         |this, _, cx| this.load_plans_if_needed(true, cx),
-                    )),
-                ),
+                    ),
+                )),
             );
         }
 
         match self.plans.availability {
             PlansAvailability::Unavailable => {
                 return page
-                    .child(
-                        notice_card(theme, tr!("plans.unavailable")).child(
-                            div().mt(px(10.0)).child(super::providers_page::card_button(
-                                theme,
-                                "plans-top-up".into(),
-                                tr!("cloud.top_up"),
-                                false,
-                                false,
-                                cx,
-                                |this, _, cx| this.open_cloud_pay_modal(cx),
-                            )),
-                        ),
-                    )
+                    .child(notice_card(theme, tr!("plans.unavailable")).child(
+                        div().mt(px(10.0)).child(super::providers_page::card_button(
+                            theme,
+                            "plans-top-up".into(),
+                            tr!("cloud.top_up"),
+                            false,
+                            false,
+                            cx,
+                            |this, _, cx| this.open_cloud_pay_modal(cx),
+                        )),
+                    ))
                     .into_any_element();
             }
             _ if self.plans.items.is_empty() => {
@@ -341,7 +354,8 @@ impl Waku {
         let font = window.text_style().font();
         let mut grid = div().w_full().flex().flex_wrap().gap(px(12.0));
         for plan in &self.plans.items {
-            grid = grid.child(self.plan_card(plan, subscriptions, &routes, theme, font.clone(), cx));
+            grid =
+                grid.child(self.plan_card(plan, subscriptions, &routes, theme, font.clone(), cx));
         }
         page.child(grid).into_any_element()
     }
@@ -358,20 +372,16 @@ impl Waku {
         let state = card_state(plan, subscriptions);
         let held = matches!(state, CardState::Renew { .. });
 
-        let mut header = div()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(sp(14.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text)
-                    .child(self.tx(&plan.name)),
-            );
+        let mut header = div().flex().items_center().gap(px(8.0)).child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_size(sp(14.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text)
+                .child(self.tx(&plan.name)),
+        );
         // A plan for the Chinese models is sold on an `openai` group; filed
         // by platform it read as Codex's, and "use for Codex" broke GPT.
         let lane = sub2api::model_routing::plan_lane(plan, &self.model_plaza.items);
@@ -537,7 +547,12 @@ impl Waku {
                         .text_size(sp(12.0))
                         .line_height(sp(17.0))
                         .text_color(theme.text_secondary)
-                        .child(div().flex_none().text_color(theme.text_ghost).child("\u{2022}"))
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_color(theme.text_ghost)
+                                .child("\u{2022}"),
+                        )
                         .child(div().flex_1().min_w_0().child(self.tx(feature))),
                 );
             }
@@ -608,7 +623,9 @@ impl Waku {
                     false,
                     self.cloud_account.busy,
                     cx,
-                    move |this, _, cx| this.select_cloud_group(platform.clone(), Some(group_id), cx),
+                    move |this, _, cx| {
+                        this.select_cloud_group(platform.clone(), Some(group_id), cx)
+                    },
                 ));
             }
         }
@@ -650,7 +667,10 @@ fn subscription_fingerprint(subscriptions: Option<&[SubscriptionProgress]>) -> V
 }
 
 /// Buy, or renew what the account already holds.
-pub(super) fn card_state(plan: &SubscriptionPlan, subscriptions: &[SubscriptionProgress]) -> CardState {
+pub(super) fn card_state(
+    plan: &SubscriptionPlan,
+    subscriptions: &[SubscriptionProgress],
+) -> CardState {
     match subscriptions
         .iter()
         .find(|subscription| subscription.group_id() == plan.group_id)
@@ -676,7 +696,11 @@ pub(super) fn limit_figures(plan: &SubscriptionPlan) -> Vec<(LimitWindow, f64)> 
         (LimitWindow::Monthly, limits.monthly_limit_usd),
     ]
     .into_iter()
-    .filter_map(|(window, limit)| limit.filter(|limit| *limit > 0.0).map(|limit| (window, limit)))
+    .filter_map(|(window, limit)| {
+        limit
+            .filter(|limit| *limit > 0.0)
+            .map(|limit| (window, limit))
+    })
     .collect()
 }
 
@@ -722,7 +746,11 @@ fn format_usd(value: f64) -> String {
 /// Which models the plan serves: what the account routes through it when
 /// held, the group's model scopes otherwise (a group the account does not
 /// hold is absent from its catalog).
-fn models_line(plan: &SubscriptionPlan, held: bool, routes: &BTreeMap<String, i64>) -> Option<String> {
+fn models_line(
+    plan: &SubscriptionPlan,
+    held: bool,
+    routes: &BTreeMap<String, i64>,
+) -> Option<String> {
     if held {
         let mut models: Vec<&str> = routes
             .iter()
@@ -795,7 +823,10 @@ mod tests {
             card_state(&plan(7), &[held(8, None), held(7, Some(12))]),
             CardState::Renew { days: Some(12) }
         );
-        assert_eq!(card_state(&plan(7), &[held(7, None)]), CardState::Renew { days: None });
+        assert_eq!(
+            card_state(&plan(7), &[held(7, None)]),
+            CardState::Renew { days: None }
+        );
     }
 
     #[test]
@@ -820,7 +851,10 @@ mod tests {
         let fingerprint = |held: Vec<SubscriptionProgress>| subscription_fingerprint(Some(&held));
         let before = fingerprint(vec![held(8, Some(3))]);
         // A new group, or the same group running longer, both differ.
-        assert_ne!(before, fingerprint(vec![held(8, Some(3)), held(7, Some(30))]));
+        assert_ne!(
+            before,
+            fingerprint(vec![held(8, Some(3)), held(7, Some(30))])
+        );
         let mut extended = held(8, Some(33));
         extended.subscription.expires_at = "2026-11-24T00:00:00Z".into();
         assert_ne!(before, fingerprint(vec![extended]));

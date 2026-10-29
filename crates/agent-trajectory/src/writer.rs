@@ -82,7 +82,10 @@ impl Writer {
         }
         let mut line = serde_json::to_string(record).map_err(std::io::Error::other)?;
         line.push('\n');
-        let file = self.file.as_mut().ok_or_else(|| std::io::Error::other("no segment"))?;
+        let file = self
+            .file
+            .as_mut()
+            .ok_or_else(|| std::io::Error::other("no segment"))?;
         file.write_all(line.as_bytes())?;
         self.written += line.len() as u64;
         Ok(())
@@ -105,7 +108,13 @@ impl Writer {
             at,
         )?;
         if dropped > 0 {
-            self.append(&Record::Dropped { segments: dropped, at }, at)?;
+            self.append(
+                &Record::Dropped {
+                    segments: dropped,
+                    at,
+                },
+                at,
+            )?;
         }
         Ok(())
     }
@@ -118,7 +127,9 @@ pub fn prune(dir: &Path, cap: u64, keep: u32) -> u32 {
     let sizes: Vec<(u32, u64)> = numbers
         .iter()
         .map(|n| {
-            let size = fs::metadata(dir.join(segment_name(*n))).map(|meta| meta.len()).unwrap_or(0);
+            let size = fs::metadata(dir.join(segment_name(*n)))
+                .map(|meta| meta.len())
+                .unwrap_or(0);
             (*n, size)
         })
         .collect();
@@ -159,17 +170,39 @@ mod tests {
     fn a_new_directory_starts_a_segment_and_appends_records() {
         let dir = tempfile::tempdir().unwrap();
         let mut writer = Writer::open(dir.path(), "s1").unwrap();
-        writer.append(&Record::Rewind { keep_turns: 1, at: 3 }, 3).unwrap();
+        writer
+            .append(
+                &Record::Rewind {
+                    keep_turns: 1,
+                    at: 3,
+                },
+                3,
+            )
+            .unwrap();
         let text = fs::read_to_string(dir.path().join(segment_name(1))).unwrap();
         let (records, consumed) = parse_lines(&text, 0);
         assert_eq!(consumed, text.len());
         assert!(matches!(records[0], Record::Segment { schema: SCHEMA, .. }));
-        assert_eq!(records[1], Record::Rewind { keep_turns: 1, at: 3 });
+        assert_eq!(
+            records[1],
+            Record::Rewind {
+                keep_turns: 1,
+                at: 3
+            }
+        );
 
         // Reopening appends to the same segment.
         let mut again = Writer::open(dir.path(), "s1").unwrap();
         assert_eq!(again.segment(), 1);
-        again.append(&Record::Rewind { keep_turns: 0, at: 4 }, 4).unwrap();
+        again
+            .append(
+                &Record::Rewind {
+                    keep_turns: 0,
+                    at: 4,
+                },
+                4,
+            )
+            .unwrap();
         let text = fs::read_to_string(dir.path().join(segment_name(1))).unwrap();
         assert_eq!(parse_lines(&text, 0).0.len(), 3);
     }

@@ -327,7 +327,12 @@ pub(super) fn native_models_routed(
         let note = routing.route_note(model_id, &groups);
         // No API to send it over means it is not a choice, however well it
         // reads in a catalog.
-        models.extend(native_row(item, &platform, format!("{platform}::{model_id}"), note));
+        models.extend(native_row(
+            item,
+            &platform,
+            format!("{platform}::{model_id}"),
+            note,
+        ));
     }
 
     if let Some(default) = default_row(&models) {
@@ -353,7 +358,11 @@ fn default_row(models: &[ProviderModel]) -> Option<usize> {
             let id = bare(model);
             id == "claude-sonnet-5-5" || id.starts_with("claude-sonnet-5-5-")
         })
-        .or_else(|| models.iter().position(|model| bare(model).contains("sonnet-5")))
+        .or_else(|| {
+            models
+                .iter()
+                .position(|model| bare(model).contains("sonnet-5"))
+        })
         .or_else(|| (!models.is_empty()).then_some(0))
 }
 
@@ -381,8 +390,10 @@ fn native_row(
     });
     if let Some(entry) = native_format_option(format) {
         model = model.service_tiers(
-            [ProviderModelOption::new(entry.id, crate::i18n::translate(entry.label))
-                .description(crate::i18n::translate(entry.description))],
+            [
+                ProviderModelOption::new(entry.id, crate::i18n::translate(entry.label))
+                    .description(crate::i18n::translate(entry.description)),
+            ],
             entry.id,
         );
     }
@@ -734,7 +745,11 @@ pub(super) fn native_vendor(id: &str) -> &'static NativeVendor {
     NATIVE_VENDORS
         .iter()
         .find(|vendor| vendor.id == id)
-        .or_else(|| NATIVE_VENDORS.iter().find(|vendor| vendor.id == OTHER_VENDOR))
+        .or_else(|| {
+            NATIVE_VENDORS
+                .iter()
+                .find(|vendor| vendor.id == OTHER_VENDOR)
+        })
         .expect("the vendor table lists `other`")
 }
 
@@ -894,15 +909,15 @@ pub(super) fn native_endpoint_models(entry: &ProviderEntry) -> Vec<ProviderModel
         .filter(|model| !model.id.trim().is_empty())
         .filter(|model| seen.insert(model.id.trim().to_string()))
         .map(|model| {
-            let mut row = ProviderModel::new(
-                agent_model_id(&entry.id, &model.id),
-                model.display_name(),
-            );
+            let mut row =
+                ProviderModel::new(agent_model_id(&entry.id, &model.id), model.display_name());
             row.sub_provider = Some(label.clone());
             if let Some(format) = format {
                 row = row.service_tiers(
-                    [ProviderModelOption::new(format.id, crate::i18n::translate(format.label))
-                        .description(crate::i18n::translate(format.description))],
+                    [
+                        ProviderModelOption::new(format.id, crate::i18n::translate(format.label))
+                            .description(crate::i18n::translate(format.description)),
+                    ],
                     format.id,
                 );
             }
@@ -974,7 +989,10 @@ pub(super) fn native_probe_models(
             models[index].is_default = true;
         }
     }
-    for entry in endpoints.iter().filter(|entry| entry.offers_models_to_agent()) {
+    for entry in endpoints
+        .iter()
+        .filter(|entry| entry.offers_models_to_agent())
+    {
         models.extend(native_endpoint_models(entry));
     }
     if models.is_empty() {
@@ -1062,7 +1080,11 @@ mod tests {
         let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
         assert_eq!(
             ids,
-            ["anthropic::claude-sonnet-5", "openai::gpt-5.6-sol", "gemini::gemini-4-argon"]
+            [
+                "anthropic::claude-sonnet-5",
+                "openai::gpt-5.6-sol",
+                "gemini::gemini-4-argon"
+            ]
         );
         assert_eq!(models[0].sub_provider.as_deref(), Some("anthropic"));
         assert_eq!(models[1].sub_provider.as_deref(), Some("openai"));
@@ -1090,11 +1112,17 @@ mod tests {
         };
 
         assert_eq!(
-            format(&native_models_from_catalog(&[item("claude-sonnet-5", "anthropic")])),
+            format(&native_models_from_catalog(&[item(
+                "claude-sonnet-5",
+                "anthropic"
+            )])),
             Some("messages".into())
         );
         assert_eq!(
-            format(&native_models_from_catalog(&[item("gpt-5.6-sol", "openai")])),
+            format(&native_models_from_catalog(&[item(
+                "gpt-5.6-sol",
+                "openai"
+            )])),
             Some("responses".into())
         );
         // The combination that used to default to Messages and get hijacked
@@ -1106,11 +1134,17 @@ mod tests {
         // The family beats the group's platform, which is what makes a
         // composite group — every model in it reports `composite` — work.
         assert_eq!(
-            format(&native_models_from_catalog(&[item("grok-4.6", "composite")])),
+            format(&native_models_from_catalog(&[item(
+                "grok-4.6",
+                "composite"
+            )])),
             Some("responses".into())
         );
         assert_eq!(
-            format(&native_models_from_catalog(&[item("claude-sonnet-5", "composite")])),
+            format(&native_models_from_catalog(&[item(
+                "claude-sonnet-5",
+                "composite"
+            )])),
             Some("messages".into())
         );
     }
@@ -1123,7 +1157,10 @@ mod tests {
         let argon = native_models_from_catalog(&[item("gemini-4-argon", "gemini")]);
         assert_eq!(argon.len(), 1);
         assert_eq!(argon[0].default_service_tier.as_deref(), Some("gemini"));
-        assert_eq!(native_format_for_model("gemini", "gemini-4-argon"), Some("gemini"));
+        assert_eq!(
+            native_format_for_model("gemini", "gemini-4-argon"),
+            Some("gemini")
+        );
         assert_eq!(
             reasoning_ladder("gemini", "gemini-4-argon"),
             Some(vec!["low", "medium", "high"])
@@ -1163,11 +1200,20 @@ mod tests {
     /// routes and declares models is listed, under its own name.
     #[test]
     fn every_usable_provider_is_listed_under_its_own_name() {
-        let mut entry = endpoint("pr-1", "Kimi", ApiFormat::Anthropic, &["kimi-k3", " ", "kimi-k3"]);
+        let mut entry = endpoint(
+            "pr-1",
+            "Kimi",
+            ApiFormat::Anthropic,
+            &["kimi-k3", " ", "kimi-k3"],
+        );
         entry.models.push(ModelEntry::new(" "));
         let declared = native_endpoint_models(&entry);
         let ids: Vec<&str> = declared.iter().map(|model| model.id.as_str()).collect();
-        assert_eq!(ids, ["custom:pr-1::kimi-k3"], "blank and duplicate entries are dropped");
+        assert_eq!(
+            ids,
+            ["custom:pr-1::kimi-k3"],
+            "blank and duplicate entries are dropped"
+        );
         assert_eq!(declared[0].sub_provider.as_deref(), Some("Kimi"));
         assert_eq!(declared[0].name, "kimi-k3");
         // Nothing declared, so no ladder is offered — one whose tiers the
@@ -1236,7 +1282,10 @@ mod tests {
             .map(|option| option.id.as_str())
             .collect();
         assert_eq!(tiers, ["low", "high"]);
-        assert_eq!(declared[0].default_reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(
+            declared[0].default_reasoning_effort.as_deref(),
+            Some("high")
+        );
 
         // A default naming a tier that is not offered falls back to the
         // first, rather than starting the session on something refused.
@@ -1303,9 +1352,17 @@ mod tests {
     #[test]
     fn hiding_the_default_row_picks_another() {
         let models = native_probe_models(
-            &[item("claude-sonnet-5-5", "anthropic"), item("gpt-6.1-sol", "openai")],
+            &[
+                item("claude-sonnet-5-5", "anthropic"),
+                item("gpt-6.1-sol", "openai"),
+            ],
             &NativeRouting::default(),
-            &[endpoint("pr-1", "Relay", ApiFormat::Anthropic, &["relay-model"])],
+            &[endpoint(
+                "pr-1",
+                "Relay",
+                ApiFormat::Anthropic,
+                &["relay-model"],
+            )],
             &["messages"],
         );
         let defaults: Vec<&str> = models
@@ -1320,7 +1377,12 @@ mod tests {
     /// belong to; anything a name rule placed stays where it routes.
     #[test]
     fn bare_ids_saved_on_the_chat_slot_move_to_their_provider() {
-        let chat = endpoint("pr-1", "Relay", ApiFormat::OpenAiChat, &["my-model", "claude-sonnet-5"]);
+        let chat = endpoint(
+            "pr-1",
+            "Relay",
+            ApiFormat::OpenAiChat,
+            &["my-model", "claude-sonnet-5"],
+        );
         let mut state = PersistedState::fresh(std::path::PathBuf::from("."));
         let project = state.projects[0].id;
         let mut session = AgentSession::new(project, ProviderKind::Native);
@@ -1343,14 +1405,23 @@ mod tests {
         state.last_model = Some("my-model".to_owned());
 
         assert!(migrate_bare_endpoint_ids(&mut state, Some(&chat)));
-        assert_eq!(state.sessions[state.sessions.len() - 2].model.as_deref(), Some("custom:pr-1::my-model"));
+        assert_eq!(
+            state.sessions[state.sessions.len() - 2].model.as_deref(),
+            Some("custom:pr-1::my-model")
+        );
         // A bare `claude-*` went to Messages under the old rule, and still does.
-        assert_eq!(state.sessions[state.sessions.len() - 1].model.as_deref(), Some("claude-sonnet-5"));
+        assert_eq!(
+            state.sessions[state.sessions.len() - 1].model.as_deref(),
+            Some("claude-sonnet-5")
+        );
         assert_eq!(state.last_model.as_deref(), Some("custom:pr-1::my-model"));
         // Both stars were the same model; one is left.
         assert_eq!(state.favorite_models.len(), 1);
 
-        assert!(!migrate_bare_endpoint_ids(&mut state, Some(&chat)), "a second launch moves nothing");
+        assert!(
+            !migrate_bare_endpoint_ids(&mut state, Some(&chat)),
+            "a second launch moves nothing"
+        );
         assert!(!migrate_bare_endpoint_ids(&mut state, None));
     }
 
@@ -1407,11 +1478,27 @@ mod tests {
         };
         let fallback = ids(crate::model_catalog::fallback_models(ProviderKind::Native));
         assert!(!fallback.is_empty());
-        assert_eq!(ids(native_probe_models(&[], &NativeRouting::default(), &[], &[])), fallback);
+        assert_eq!(
+            ids(native_probe_models(
+                &[],
+                &NativeRouting::default(),
+                &[],
+                &[]
+            )),
+            fallback
+        );
         // A catalog with nothing a coding agent can drive counts as empty.
         let mut image = item("gpt-image-2", "openai");
         image.billing_mode = "image".into();
-        assert_eq!(ids(native_probe_models(&[image], &NativeRouting::default(), &[], &[])), fallback);
+        assert_eq!(
+            ids(native_probe_models(
+                &[image],
+                &NativeRouting::default(),
+                &[],
+                &[]
+            )),
+            fallback
+        );
     }
 
     #[test]
@@ -1434,7 +1521,12 @@ mod tests {
         let models = native_probe_models(
             &[],
             &NativeRouting::default(),
-            &[endpoint("pr-1", "Mine", ApiFormat::OpenAiChat, &["my-model"])],
+            &[endpoint(
+                "pr-1",
+                "Mine",
+                ApiFormat::OpenAiChat,
+                &["my-model"],
+            )],
             &[],
         );
         let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
@@ -1555,7 +1647,10 @@ mod tests {
             subtitle(&routing),
             format!(
                 "deepseek \u{00b7} {}",
-                tr!("native.pay_as_you_go_group", group = "国模按量付费分组".to_owned())
+                tr!(
+                    "native.pay_as_you_go_group",
+                    group = "国模按量付费分组".to_owned()
+                )
             )
         );
 
@@ -1564,7 +1659,10 @@ mod tests {
             subtitle(&routing),
             format!(
                 "deepseek \u{00b7} {}",
-                tr!("native.subscription_spent_payg", group = "国模订阅".to_owned())
+                tr!(
+                    "native.subscription_spent_payg",
+                    group = "国模订阅".to_owned()
+                )
             )
         );
     }
@@ -1610,7 +1708,11 @@ mod tests {
         let session = state.sessions.last().expect("session");
         assert_eq!(session.model.as_deref(), Some(plain));
         assert_eq!(state.last_model.as_deref(), Some(plain));
-        let stars: Vec<&str> = state.favorite_models.iter().map(|f| f.model.as_str()).collect();
+        let stars: Vec<&str> = state
+            .favorite_models
+            .iter()
+            .map(|f| f.model.as_str())
+            .collect();
         assert_eq!(stars, [plain]);
 
         // Nothing left to move: a second launch saves nothing.
@@ -1678,12 +1780,23 @@ mod tests {
         let ladder = |models: &[ProviderModel]| !models[0].reasoning_efforts.is_empty();
         // Grok reaches the same Responses adapter as the GPT family and the
         // gateway accepts an effort for it, so it gets the ladder too.
-        assert!(ladder(&native_models_from_catalog(&[item("grok-4.6", "grok")])));
-        assert!(ladder(&native_models_from_catalog(&[item("claude-sonnet-5", "anthropic")])));
+        assert!(ladder(&native_models_from_catalog(&[item(
+            "grok-4.6", "grok"
+        )])));
+        assert!(ladder(&native_models_from_catalog(&[item(
+            "claude-sonnet-5",
+            "anthropic"
+        )])));
         // The family carries it through a composite group, where the
         // platform says nothing.
-        assert!(ladder(&native_models_from_catalog(&[item("gpt-5.6-sol", "composite")])));
-        assert!(ladder(&native_models_from_catalog(&[item("grok-4.6", "composite")])));
+        assert!(ladder(&native_models_from_catalog(&[item(
+            "gpt-5.6-sol",
+            "composite"
+        )])));
+        assert!(ladder(&native_models_from_catalog(&[item(
+            "grok-4.6",
+            "composite"
+        )])));
     }
 
     /// DeepSeek, GLM and Kimi K3 share three efforts, as their APIs and the
@@ -1758,11 +1871,19 @@ mod tests {
                 .collect()
         };
         let pairs = |expected: &[(&str, usize)]| -> Vec<(String, usize)> {
-            expected.iter().map(|(id, count)| ((*id).to_owned(), *count)).collect()
+            expected
+                .iter()
+                .map(|(id, count)| ((*id).to_owned(), *count))
+                .collect()
         };
         assert_eq!(
             column(&models),
-            pairs(&[("anthropic", 2), ("deepseek", 1), ("zhipu", 1), ("custom", 0)])
+            pairs(&[
+                ("anthropic", 2),
+                ("deepseek", 1),
+                ("zhipu", 1),
+                ("custom", 0)
+            ])
         );
 
         // Each endpoint of the user's own gets an entry of its own, last,

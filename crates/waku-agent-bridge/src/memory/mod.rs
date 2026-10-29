@@ -90,7 +90,12 @@ impl MemoryHost {
         Self::with_config(load_config(), &config_dir(), cwd, session_id)
     }
 
-    fn with_config(config: MemoryConfig, config_dir: &Path, cwd: &Path, session_id: &str) -> Arc<Self> {
+    fn with_config(
+        config: MemoryConfig,
+        config_dir: &Path,
+        cwd: &Path,
+        session_id: &str,
+    ) -> Arc<Self> {
         let store = Arc::new(auto_memory::store_for(config_dir, &config));
         let host = Arc::new(Self {
             config,
@@ -123,9 +128,7 @@ impl MemoryHost {
     }
 
     fn user_dir(&self) -> Option<ScopeDir> {
-        self.config
-            .enable_user_scope
-            .then(|| self.store.user_dir())
+        self.config.enable_user_scope.then(|| self.store.user_dir())
     }
 
     fn project_dir(&self) -> ScopeDir {
@@ -178,10 +181,8 @@ impl MemoryHost {
         if section.is_empty() {
             return;
         }
-        query.append_system_prompt = crate::subagent::join_prompts(
-            query.append_system_prompt.take(),
-            Some(section.clone()),
-        );
+        query.append_system_prompt =
+            crate::subagent::join_prompts(query.append_system_prompt.take(), Some(section.clone()));
     }
 
     fn consolidates(&self) -> bool {
@@ -209,7 +210,9 @@ impl MemoryHost {
         let mut capture = self.capture.lock();
         for message in &messages[start + 1..] {
             if message.role == Role::Assistant {
-                capture.buffer.push(Speaker::Assistant, &history::visible_text(message));
+                capture
+                    .buffer
+                    .push(Speaker::Assistant, &history::visible_text(message));
             }
         }
     }
@@ -322,7 +325,10 @@ mod tests {
         let session = host(tmp.path(), quiet());
         session
             .store
-            .write(&session.project_dir(), draft("use-pnpm", "The project uses pnpm"))
+            .write(
+                &session.project_dir(),
+                draft("use-pnpm", "The project uses pnpm"),
+            )
             .unwrap();
         let first = turn(&session).unwrap();
         assert!(first.starts_with("rules\n\n# Persistent memory index"));
@@ -331,7 +337,10 @@ mod tests {
         // A memory written mid-session leaves this session's prompt as it was.
         session
             .store
-            .write(&session.project_dir(), draft("node-22", "Node 22 is required"))
+            .write(
+                &session.project_dir(),
+                draft("node-22", "Node 22 is required"),
+            )
             .unwrap();
         assert_eq!(turn(&session).as_deref(), Some(first.as_str()));
 

@@ -39,7 +39,9 @@ fn default_edit_mode() -> String {
 #[async_trait]
 impl Tool for NotebookEditTool {
     // Gates itself: calls `ctx.check_permission` in `execute()` (#210).
-    fn self_gates(&self) -> bool { true }
+    fn self_gates(&self) -> bool {
+        true
+    }
 
     fn name(&self) -> &str {
         claurst_core::constants::TOOL_NAME_NOTEBOOK_EDIT
@@ -132,25 +134,44 @@ impl Tool for NotebookEditTool {
             "replace" => {
                 let cell_id = match &params.cell_id {
                     Some(id) => id.clone(),
-                    None => return ToolResult::error("cell_id is required for replace mode".to_string()),
+                    None => {
+                        return ToolResult::error(
+                            "cell_id is required for replace mode".to_string(),
+                        )
+                    }
                 };
                 let new_source = match &params.new_source {
                     Some(s) => s.clone(),
-                    None => return ToolResult::error("new_source is required for replace mode".to_string()),
+                    None => {
+                        return ToolResult::error(
+                            "new_source is required for replace mode".to_string(),
+                        )
+                    }
                 };
                 replace_cell(&mut notebook, &cell_id, &new_source)
             }
             "insert" => {
                 let new_source = match &params.new_source {
                     Some(s) => s.clone(),
-                    None => return ToolResult::error("new_source is required for insert mode".to_string()),
+                    None => {
+                        return ToolResult::error(
+                            "new_source is required for insert mode".to_string(),
+                        )
+                    }
                 };
-                insert_cell(&mut notebook, params.cell_id.as_deref(), &new_source, &params.cell_type)
+                insert_cell(
+                    &mut notebook,
+                    params.cell_id.as_deref(),
+                    &new_source,
+                    &params.cell_type,
+                )
             }
             "delete" => {
                 let cell_id = match &params.cell_id {
                     Some(id) => id.clone(),
-                    None => return ToolResult::error("cell_id is required for delete mode".to_string()),
+                    None => {
+                        return ToolResult::error("cell_id is required for delete mode".to_string())
+                    }
                 };
                 delete_cell(&mut notebook, &cell_id)
             }
@@ -162,7 +183,9 @@ impl Tool for NotebookEditTool {
                 // Write back
                 let updated = match serde_json::to_string_pretty(&notebook) {
                     Ok(s) => s,
-                    Err(e) => return ToolResult::error(format!("Failed to serialize notebook: {}", e)),
+                    Err(e) => {
+                        return ToolResult::error(format!("Failed to serialize notebook: {}", e))
+                    }
                 };
                 if let Err(e) = crate::write_atomic(&path, updated.as_bytes()).await {
                     return ToolResult::error(format!("Failed to write notebook: {}", e));
@@ -198,7 +221,11 @@ fn find_cell_index(cells: &[Value], cell_id: &str) -> Result<usize, String> {
         if idx < cells.len() {
             return Ok(idx);
         }
-        return Err(format!("Cell index {} is out of range (notebook has {} cells)", idx, cells.len()));
+        return Err(format!(
+            "Cell index {} is out of range (notebook has {} cells)",
+            idx,
+            cells.len()
+        ));
     }
 
     // Try UUID match
@@ -296,7 +323,10 @@ fn insert_cell(
     let cell = make_cell(cell_type, new_source, &new_id);
 
     cells.insert(insert_at, cell);
-    Ok(format!("Inserted {} cell '{}' at position {}", cell_type, new_id, insert_at))
+    Ok(format!(
+        "Inserted {} cell '{}' at position {}",
+        cell_type, new_id, insert_at
+    ))
 }
 
 fn delete_cell(notebook: &mut Value, cell_id: &str) -> Result<String, String> {

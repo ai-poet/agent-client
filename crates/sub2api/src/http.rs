@@ -47,8 +47,12 @@ impl Response {
         if !self.is_success() {
             return Err(ApiError::from_body(self.status, &self.body).into());
         }
-        serde_json::from_str(&self.body)
-            .with_context(|| format!("could not parse response body: {}", truncate(&self.body, 200)))
+        serde_json::from_str(&self.body).with_context(|| {
+            format!(
+                "could not parse response body: {}",
+                truncate(&self.body, 200)
+            )
+        })
     }
 }
 
@@ -116,7 +120,11 @@ impl std::fmt::Display for ApiError {
         if (200..300).contains(&self.status) {
             write!(f, "{}", self.message)?;
         } else {
-            write!(f, "request failed with status {}: {}", self.status, self.message)?;
+            write!(
+                f,
+                "request failed with status {}: {}",
+                self.status, self.message
+            )?;
         }
         if !self.reason.is_empty() {
             write!(f, " ({})", self.reason)?;
@@ -384,8 +392,7 @@ fn parse(raw: &str) -> Result<Response> {
     let mut rest = raw;
     let mut status = None;
     loop {
-        let Some(status_line) = rest.lines().next().filter(|line| line.starts_with("HTTP/"))
-        else {
+        let Some(status_line) = rest.lines().next().filter(|line| line.starts_with("HTTP/")) else {
             break;
         };
         let Some(code) = status_line
@@ -546,7 +553,9 @@ mod tests {
         let raw = "HTTP/1.1 200 Connection established\r\n\r\nplain";
         assert_eq!(parse(raw).expect("parse").body, "plain");
         assert!(!is_proxy_connect_reply("HTTP/1.1 200 OK"));
-        assert!(!is_proxy_connect_reply("HTTP/1.1 200 Connection established now"));
+        assert!(!is_proxy_connect_reply(
+            "HTTP/1.1 200 Connection established now"
+        ));
     }
 
     #[test]

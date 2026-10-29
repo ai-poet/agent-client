@@ -171,9 +171,7 @@ impl Waku {
                         .iter()
                         .filter(|group| lanes.get(&group.id) == Some(platform))
                         .map(|group| {
-                            let status = statuses
-                                .iter()
-                                .find(|status| status.group_id == group.id);
+                            let status = statuses.iter().find(|status| status.group_id == group.id);
                             let suffix = group_status_suffix(group, status);
                             let name = display_names
                                 .get(&group.id)
@@ -214,11 +212,7 @@ impl Waku {
                                     MenuItem::new(label.clone(), move |_, cx| {
                                         let platform = entry_platform.clone();
                                         let _ = entry_weak.update(cx, |this, cx| {
-                                            this.select_cloud_group(
-                                                platform,
-                                                Some(group_id),
-                                                cx,
-                                            );
+                                            this.select_cloud_group(platform, Some(group_id), cx);
                                         });
                                     })
                                     .selected(bound == Some(group_id)),

@@ -65,7 +65,9 @@ pub fn session_config_args() -> &'static [&'static str] {
 /// better than ours.
 fn supports_stdio_flag(binary: &Path) -> bool {
     static CACHE: Mutex<Option<HashMap<PathBuf, bool>>> = Mutex::new(None);
-    let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut cache = CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let cache = cache.get_or_insert_with(HashMap::new);
     if let Some(&known) = cache.get(binary) {
         return known;

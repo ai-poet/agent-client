@@ -98,12 +98,18 @@ mod tests {
 
     #[test]
     fn an_effort_only_change_reaches_each_agent_its_own_way() {
-        assert_eq!(reapply(ProviderKind::Grok, false, true, true), Reapply::Model);
+        assert_eq!(
+            reapply(ProviderKind::Grok, false, true, true),
+            Reapply::Model
+        );
         assert_eq!(
             reapply(ProviderKind::Cursor, false, true, true),
             Reapply::Model
         );
-        assert_eq!(reapply(ProviderKind::Kimi, false, true, true), Reapply::Effort);
+        assert_eq!(
+            reapply(ProviderKind::Kimi, false, true, true),
+            Reapply::Effort
+        );
         assert_eq!(
             reapply(ProviderKind::OpenCode, false, true, true),
             Reapply::Nothing

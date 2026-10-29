@@ -175,17 +175,25 @@ fn load(preview: FilePreview) -> Result<Loaded, String> {
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(data)
                 .map_err(|error| error.to_string())?;
-            let format = image_format(&format).ok_or_else(|| format!("unknown image format {format}"))?;
+            let format =
+                image_format(&format).ok_or_else(|| format!("unknown image format {format}"))?;
             Loaded::Image {
                 image: Arc::new(gpui::Image::from_bytes(format, bytes)),
                 size,
             }
         }
         FilePreview::Table { sheets, size } => Loaded::Table {
-            sheets: sheets.into_iter().map(|sheet| Arc::new(Sheet::new(sheet))).collect(),
+            sheets: sheets
+                .into_iter()
+                .map(|sheet| Arc::new(Sheet::new(sheet)))
+                .collect(),
             size,
         },
-        FilePreview::Document { text, truncated, size } => Loaded::Document {
+        FilePreview::Document {
+            text,
+            truncated,
+            size,
+        } => Loaded::Document {
             paragraphs: text.lines().map(str::to_owned).collect(),
             truncated,
             size,
@@ -274,7 +282,9 @@ impl Waku {
         }
 
         let body = match entry {
-            None | Some(Entry::Loading) => self.preview_message(tr!("file_preview.loading"), None, cx),
+            None | Some(Entry::Loading) => {
+                self.preview_message(tr!("file_preview.loading"), None, cx)
+            }
             Some(Entry::Failed(error)) => {
                 let retry_key = key.clone();
                 self.preview_message(
@@ -295,7 +305,9 @@ impl Waku {
                 )
             }
             Some(Entry::Ready(_)) => match loaded.as_deref() {
-                Some(Loaded::Image { image, .. }) => self.render_picture_preview(image.clone(), actual, cx),
+                Some(Loaded::Image { image, .. }) => {
+                    self.render_picture_preview(image.clone(), actual, cx)
+                }
                 Some(Loaded::Table { sheets, .. }) => self.render_table_preview(&key, sheets, cx),
                 Some(Loaded::Document {
                     paragraphs,
@@ -491,7 +503,12 @@ impl Waku {
             }))
     }
 
-    fn preview_message(&self, message: String, action: Option<AnyElement>, cx: &mut Context<Self>) -> Div {
+    fn preview_message(
+        &self,
+        message: String,
+        action: Option<AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let theme = Theme::current(cx);
         div()
             .flex_1()
@@ -513,7 +530,12 @@ impl Waku {
             .children(action)
     }
 
-    fn render_picture_preview(&self, image: Arc<gpui::Image>, actual: bool, cx: &mut Context<Self>) -> Div {
+    fn render_picture_preview(
+        &self,
+        image: Arc<gpui::Image>,
+        actual: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let theme = Theme::current(cx);
         let picture = img(image).id("file-preview-image");
         let canvas = if actual {
@@ -547,7 +569,12 @@ impl Waku {
             .child(canvas)
     }
 
-    fn render_table_preview(&self, key: &PreviewKey, sheets: &[Arc<Sheet>], cx: &mut Context<Self>) -> Div {
+    fn render_table_preview(
+        &self,
+        key: &PreviewKey,
+        sheets: &[Arc<Sheet>],
+        cx: &mut Context<Self>,
+    ) -> Div {
         let theme = Theme::current(cx);
         if sheets.is_empty() {
             return self.preview_message(tr!("file_preview.empty_sheet"), None, cx);
@@ -620,20 +647,21 @@ impl Waku {
 
         let preview = &sheet.preview;
         let shown_rows = preview.rows.len();
-        let summary = if shown_rows < preview.total_rows || sheet.widths.len() < preview.total_columns {
-            tr!(
-                "file_preview.rows_shown",
-                shown = shown_rows,
-                rows = preview.total_rows,
-                columns = preview.total_columns
-            )
-        } else {
-            tr!(
-                "file_preview.rows_all",
-                rows = preview.total_rows,
-                columns = preview.total_columns
-            )
-        };
+        let summary =
+            if shown_rows < preview.total_rows || sheet.widths.len() < preview.total_columns {
+                tr!(
+                    "file_preview.rows_shown",
+                    shown = shown_rows,
+                    rows = preview.total_rows,
+                    columns = preview.total_columns
+                )
+            } else {
+                tr!(
+                    "file_preview.rows_all",
+                    rows = preview.total_rows,
+                    columns = preview.total_columns
+                )
+            };
 
         let header_sheet = sheet.clone();
         let column_header = div()
@@ -650,78 +678,75 @@ impl Waku {
                     .border_r_1()
                     .border_color(theme.border),
             )
-            .children(header_sheet.widths.iter().enumerate().map(|(index, width)| {
-                div()
-                    .w(px(*width))
-                    .flex_none()
-                    .h_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .border_r_1()
-                    .border_color(theme.border)
-                    .text_size(sp(11.5))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text_tertiary)
-                    .child(column_name(header_sheet.preview.first_column + index))
-            }));
+            .children(
+                header_sheet
+                    .widths
+                    .iter()
+                    .enumerate()
+                    .map(|(index, width)| {
+                        div()
+                            .w(px(*width))
+                            .flex_none()
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .border_r_1()
+                            .border_color(theme.border)
+                            .text_size(sp(11.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_tertiary)
+                            .child(column_name(header_sheet.preview.first_column + index))
+                    }),
+            );
 
         let rows_sheet = sheet.clone();
-        let rows = uniform_list(
-            "file-preview-rows",
-            shown_rows,
-            move |range, _, cx| {
-                let theme = Theme::current(cx);
-                range
-                    .map(|row_index| {
-                        let row = &rows_sheet.preview.rows[row_index];
-                        div()
-                            .flex()
-                            .h(px(ROW_HEIGHT))
-                            .border_b_1()
-                            .border_color(theme.border)
-                            .child(
-                                div()
-                                    .w(px(ROW_NUMBER_WIDTH))
-                                    .flex_none()
-                                    .h_full()
-                                    .flex()
-                                    .items_center()
-                                    .justify_end()
-                                    .pr(px(8.0))
-                                    .bg(theme.surface)
-                                    .border_r_1()
-                                    .border_color(theme.border)
-                                    .text_size(sp(11.5))
-                                    .text_color(theme.text_tertiary)
-                                    .child((rows_sheet.preview.first_row + row_index + 1).to_string()),
-                            )
-                            .children(rows_sheet.widths.iter().enumerate().map(|(column, width)| {
-                                let text = row.get(column).map(String::as_str).unwrap_or_default();
-                                let numeric = !text.is_empty() && text.trim().parse::<f64>().is_ok();
-                                div()
-                                    .w(px(*width))
-                                    .flex_none()
-                                    .h_full()
-                                    .px(px(8.0))
-                                    .flex()
-                                    .items_center()
-                                    .when(numeric, |cell| cell.justify_end())
-                                    .border_r_1()
-                                    .border_color(theme.border)
-                                    .text_size(sp(12.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(
-                                        div()
-                                            .min_w_0()
-                                            .truncate()
-                                            .child(text.replace('\n', " ⏎ ")),
-                                    )
-                            }))
-                    })
-                    .collect()
-            },
-        )
+        let rows = uniform_list("file-preview-rows", shown_rows, move |range, _, cx| {
+            let theme = Theme::current(cx);
+            range
+                .map(|row_index| {
+                    let row = &rows_sheet.preview.rows[row_index];
+                    div()
+                        .flex()
+                        .h(px(ROW_HEIGHT))
+                        .border_b_1()
+                        .border_color(theme.border)
+                        .child(
+                            div()
+                                .w(px(ROW_NUMBER_WIDTH))
+                                .flex_none()
+                                .h_full()
+                                .flex()
+                                .items_center()
+                                .justify_end()
+                                .pr(px(8.0))
+                                .bg(theme.surface)
+                                .border_r_1()
+                                .border_color(theme.border)
+                                .text_size(sp(11.5))
+                                .text_color(theme.text_tertiary)
+                                .child((rows_sheet.preview.first_row + row_index + 1).to_string()),
+                        )
+                        .children(rows_sheet.widths.iter().enumerate().map(|(column, width)| {
+                            let text = row.get(column).map(String::as_str).unwrap_or_default();
+                            let numeric = !text.is_empty() && text.trim().parse::<f64>().is_ok();
+                            div()
+                                .w(px(*width))
+                                .flex_none()
+                                .h_full()
+                                .px(px(8.0))
+                                .flex()
+                                .items_center()
+                                .when(numeric, |cell| cell.justify_end())
+                                .border_r_1()
+                                .border_color(theme.border)
+                                .text_size(sp(12.0))
+                                .text_color(theme.text_secondary)
+                                .child(div().min_w_0().truncate().child(text.replace('\n', " ⏎ ")))
+                        }))
+                })
+                .collect()
+        })
         .flex_1()
         .w(px(sheet.total_width));
 
@@ -761,7 +786,12 @@ impl Waku {
             )
     }
 
-    fn render_document_preview(&self, paragraphs: &[String], truncated: bool, cx: &mut Context<Self>) -> Div {
+    fn render_document_preview(
+        &self,
+        paragraphs: &[String],
+        truncated: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let theme = Theme::current(cx);
         let cut = truncated || paragraphs.len() > DOCUMENT_PARAGRAPHS;
         div().flex_1().min_h_0().min_w_0().child(
@@ -774,14 +804,19 @@ impl Waku {
                 .flex()
                 .flex_col()
                 .gap(px(6.0))
-                .children(paragraphs.iter().take(DOCUMENT_PARAGRAPHS).map(|paragraph| {
-                    div()
-                        .min_h(px(8.0))
-                        .text_size(sp(13.0))
-                        .line_height(sp(20.0))
-                        .text_color(theme.text_secondary)
-                        .child(paragraph.clone())
-                }))
+                .children(
+                    paragraphs
+                        .iter()
+                        .take(DOCUMENT_PARAGRAPHS)
+                        .map(|paragraph| {
+                            div()
+                                .min_h(px(8.0))
+                                .text_size(sp(13.0))
+                                .line_height(sp(20.0))
+                                .text_color(theme.text_secondary)
+                                .child(paragraph.clone())
+                        }),
+                )
                 .when(cut, |document| {
                     document.child(
                         div()
@@ -856,7 +891,10 @@ mod tests {
         assert_eq!(sheet.widths.len(), 2);
         assert_eq!(sheet.widths[0], 56.0);
         assert!(sheet.widths[1] > 150.0);
-        assert_eq!(sheet.total_width, ROW_NUMBER_WIDTH + sheet.widths.iter().sum::<f32>());
+        assert_eq!(
+            sheet.total_width,
+            ROW_NUMBER_WIDTH + sheet.widths.iter().sum::<f32>()
+        );
     }
 
     #[test]
@@ -869,12 +907,14 @@ mod tests {
             }),
             Ok(Loaded::Image { size: 4, .. })
         ));
-        assert!(load(FilePreview::Image {
-            format: "heic".to_owned(),
-            data: String::new(),
-            size: 0,
-        })
-        .is_err());
+        assert!(
+            load(FilePreview::Image {
+                format: "heic".to_owned(),
+                data: String::new(),
+                size: 0,
+            })
+            .is_err()
+        );
         let Ok(Loaded::Document { paragraphs, .. }) = load(FilePreview::Document {
             text: "one\ntwo".to_owned(),
             truncated: false,

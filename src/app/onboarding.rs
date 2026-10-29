@@ -80,7 +80,10 @@ impl Waku {
         cx.spawn(async move |this, cx| {
             let state = this
                 .update(cx, |this, _| {
-                    let state = this.onboarding.persisted.get_or_insert_with(Default::default);
+                    let state = this
+                        .onboarding
+                        .persisted
+                        .get_or_insert_with(Default::default);
                     sub2api::onboarding::mark_completed(state, unix_time());
                     state.clone()
                 })
@@ -114,7 +117,10 @@ impl Waku {
 
     fn onboarding_step_label(step: Step) -> String {
         match step {
-            Step::SignIn => tr!("onboarding.step_sign_in", name = sub2api::brand::DISPLAY_NAME),
+            Step::SignIn => tr!(
+                "onboarding.step_sign_in",
+                name = sub2api::brand::DISPLAY_NAME
+            ),
             Step::FirstMessage => tr!("onboarding.step_first_message"),
         }
     }
@@ -241,7 +247,11 @@ impl Waku {
                             div()
                                 .text_size(sp(11.5))
                                 .font_weight(FontWeight::MEDIUM)
-                                .text_color(if is_next { theme.text } else { theme.text_ghost })
+                                .text_color(if is_next {
+                                    theme.text
+                                } else {
+                                    theme.text_ghost
+                                })
                                 .child(format!("{}", index + 1))
                                 .into_any_element()
                         }),
@@ -276,17 +286,15 @@ impl Waku {
             );
         }
 
-        card = card.child(
-            div().flex().justify_end().child(onboarding_button(
-                theme,
-                "onboarding-later",
-                tr!("onboarding.later"),
-                false,
-                false,
-                cx,
-                |this, _, cx| this.dismiss_onboarding(cx),
-            )),
-        );
+        card = card.child(div().flex().justify_end().child(onboarding_button(
+            theme,
+            "onboarding-later",
+            tr!("onboarding.later"),
+            false,
+            false,
+            cx,
+            |this, _, cx| this.dismiss_onboarding(cx),
+        )));
         Some(card)
     }
 

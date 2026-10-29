@@ -16,9 +16,7 @@
 //! The caller drives time from the pulse clock (≤30 Hz) only while the card
 //! is open, and passes a still frame when the system asks for reduced motion.
 
-use gpui::{
-    Bounds, BoxShadow, ContentMask, Hsla, Pixels, Rgba, Window, fill, point, px, size,
-};
+use gpui::{Bounds, BoxShadow, ContentMask, Hsla, Pixels, Rgba, Window, fill, point, px, size};
 
 use super::effort_scale::{fire_intensity, smoothstep};
 
@@ -135,7 +133,9 @@ fn cell_light(column: usize, row: usize, frame: &FireFrame) -> [f32; 3] {
     let flame = smoothstep(0.08, 0.92, (f1 + f2 * 0.5 + f3 * 0.25) * 0.35 + 0.5);
     let r1 = (dn * 16.0 - t * 5.0 * ts + h * 3.0).sin();
     let r2 = (dn * 8.0 - t * 2.5 * ts + h * 5.0).sin();
-    let rhythm = (smoothstep(-0.15, 0.55, r1) * (r2 * 0.5 + 0.5)).max(0.0).powf(1.2);
+    let rhythm = (smoothstep(-0.15, 0.55, r1) * (r2 * 0.5 + 0.5))
+        .max(0.0)
+        .powf(1.2);
     let average_speed = dist / cell_age.max(0.001);
     let age = (cell_age - (s - u).max(0.0) / average_speed.max(0.001)).max(0.0);
     let flash = step(0.0, age) * (-age * 3.2).exp();
@@ -229,8 +229,12 @@ pub(super) fn paint_fire(window: &mut Window, track: Bounds<Pixels>, frame: Fire
                     size: size(px(body_width), px(height * 0.4)),
                 },
                 px(4.0).into(),
-                &[BoxShadow::new(px(0.0), px(0.0), color(PURPLE, 0.25 * intensity * es * FIRE_OPACITY))
-                    .blur_radius(px(6.0))],
+                &[BoxShadow::new(
+                    px(0.0),
+                    px(0.0),
+                    color(PURPLE, 0.25 * intensity * es * FIRE_OPACITY),
+                )
+                .blur_radius(px(6.0))],
             );
         }
         for cell in &cells {
@@ -268,7 +272,10 @@ pub(super) fn paint_fire(window: &mut Window, track: Bounds<Pixels>, frame: Fire
                 &[BoxShadow::new(
                     px(0.0),
                     px(0.0),
-                    color(WHITE, (0.55 * pulse * intensity * es * FIRE_OPACITY).min(1.0)),
+                    color(
+                        WHITE,
+                        (0.55 * pulse * intensity * es * FIRE_OPACITY).min(1.0),
+                    ),
                 )
                 .blur_radius(px(8.0))],
             );
@@ -308,7 +315,10 @@ mod tests {
                     elapsed: 3.0,
                 };
                 let reach = lit_reach(&fire_cells(&frame));
-                assert!(reach <= reveal + REVEAL_FADE + 1e-4, "{reveal} @ {time}: {reach}");
+                assert!(
+                    reach <= reveal + REVEAL_FADE + 1e-4,
+                    "{reveal} @ {time}: {reach}"
+                );
             }
         }
     }
@@ -342,7 +352,11 @@ mod tests {
         };
         for cell in fire_cells(&frame) {
             assert!(cell.alpha > 0.0 && cell.alpha <= 1.0);
-            assert!(cell.color.iter().all(|channel| (0.0..=1.0).contains(channel)));
+            assert!(
+                cell.color
+                    .iter()
+                    .all(|channel| (0.0..=1.0).contains(channel))
+            );
         }
     }
 }

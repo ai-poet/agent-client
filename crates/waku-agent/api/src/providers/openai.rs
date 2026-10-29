@@ -14,7 +14,6 @@
 //  - Health check
 //  - ProviderCapabilities
 
-use std::pin::Pin;
 use async_stream::stream;
 use async_trait::async_trait;
 use claurst_core::provider_id::ProviderId;
@@ -23,16 +22,17 @@ use claurst_core::types::{
 };
 use futures::Stream;
 use serde_json::{json, Value};
+use std::pin::Pin;
 use tracing::debug;
 
 use crate::error_handling::parse_error_response;
 use crate::provider::LlmProvider;
 use crate::provider_error::ProviderError;
+use crate::provider_types::SystemPrompt;
 use crate::provider_types::{
     ProviderCapabilities, ProviderRequest, ProviderResponse, ProviderStatus, StopReason,
     StreamEvent, SystemPromptStyle,
 };
-use crate::provider_types::SystemPrompt;
 
 use super::request_options::merge_openai_compatible_options;
 
@@ -75,9 +75,7 @@ impl OpenAiProvider {
     /// Returns `true` if the model should use the Responses API instead of
     /// Chat Completions (gpt-5+, o3, o4-mini).
     fn use_responses_api(model: &str) -> bool {
-        model.starts_with("o3")
-            || model.starts_with("o4")
-            || model.starts_with("gpt-5")
+        model.starts_with("o3") || model.starts_with("o4") || model.starts_with("gpt-5")
     }
 
     // -----------------------------------------------------------------------
@@ -199,9 +197,7 @@ impl OpenAiProvider {
 
     fn user_block_to_openai_part(block: &ContentBlock) -> Option<Value> {
         match block {
-            ContentBlock::Text { text } => {
-                Some(json!({ "type": "text", "text": text }))
-            }
+            ContentBlock::Text { text } => Some(json!({ "type": "text", "text": text })),
             ContentBlock::Image { source } => {
                 let url = Self::image_source_to_url(source);
                 Some(json!({
@@ -209,7 +205,11 @@ impl OpenAiProvider {
                     "image_url": { "url": url }
                 }))
             }
-            ContentBlock::ToolResult { tool_use_id, content, is_error } => {
+            ContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            } => {
                 // Tool results become separate `role: tool` messages at the
                 // conversation level — handled in append_user_messages.
                 let _ = (tool_use_id, content, is_error);
@@ -225,18 +225,13 @@ impl OpenAiProvider {
             return url.clone();
         }
         // base64-encoded image
-        let media_type = source
-            .media_type
-            .as_deref()
-            .unwrap_or("image/png");
+        let media_type = source.media_type.as_deref().unwrap_or("image/png");
         let data = source.data.as_deref().unwrap_or("");
         format!("data:{};base64,{}", media_type, data)
     }
 
     /// Split assistant content blocks into (text_string, tool_calls_array).
-    fn assistant_content_to_openai(
-        content: &MessageContent,
-    ) -> (Option<String>, Vec<Value>) {
+    fn assistant_content_to_openai(content: &MessageContent) -> (Option<String>, Vec<Value>) {
         let blocks = match content {
             MessageContent::Text(t) => return (Some(t.clone()), vec![]),
             MessageContent::Blocks(b) => b,
@@ -250,7 +245,9 @@ impl OpenAiProvider {
                 ContentBlock::Text { text } => {
                     text_parts.push(text.as_str());
                 }
-                ContentBlock::ToolUse { id, name, input, .. } => {
+                ContentBlock::ToolUse {
+                    id, name, input, ..
+                } => {
                     let args = serde_json::to_string(input).unwrap_or_default();
                     tool_calls.push(json!({
                         "id": id,
@@ -321,9 +318,7 @@ impl OpenAiProvider {
     }
 
     /// Convert tool definitions to the OpenAI `tools` array format.
-    fn to_openai_tools(
-        tools: &[claurst_core::types::ToolDefinition],
-    ) -> Vec<Value> {
+    fn to_openai_tools(tools: &[claurst_core::types::ToolDefinition]) -> Vec<Value> {
         tools
             .iter()
             .map(|td| {
@@ -359,10 +354,7 @@ impl OpenAiProvider {
         &self,
         request: &ProviderRequest,
     ) -> Result<ProviderResponse, ProviderError> {
-        let messages = Self::to_openai_messages(
-            &request.messages,
-            request.system_prompt.as_ref(),
-        );
+        let messages = Self::to_openai_messages(&request.messages, request.system_prompt.as_ref());
         let tools = Self::to_openai_tools(&request.tools);
 
         let mut body = json!({
@@ -418,13 +410,12 @@ impl OpenAiProvider {
             return Err(self.map_http_error(status, &text));
         }
 
-        let json: Value =
-            serde_json::from_str(&text).map_err(|e| ProviderError::Other {
-                provider: self.id.clone(),
-                message: format!("Failed to parse response JSON: {}", e),
-                status: Some(status),
-                body: Some(text.clone()),
-            })?;
+        let json: Value = serde_json::from_str(&text).map_err(|e| ProviderError::Other {
+            provider: self.id.clone(),
+            message: format!("Failed to parse response JSON: {}", e),
+            status: Some(status),
+            body: Some(text.clone()),
+        })?;
 
         Self::parse_non_streaming_response(&json, &self.id)
     }
@@ -492,8 +483,7 @@ impl OpenAiProvider {
                     .and_then(|f| f.get("arguments"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("{}");
-                let input: Value =
-                    serde_json::from_str(args_str).unwrap_or(json!({}));
+                let input: Value = serde_json::from_str(args_str).unwrap_or(json!({}));
                 content_blocks.push(ContentBlock::ToolUse {
                     id,
                     name,
@@ -539,10 +529,7 @@ impl OpenAiProvider {
             Some(v) => v,
             None => return UsageInfo::default(),
         };
-        let prompt_tokens = u
-            .get("prompt_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
+        let prompt_tokens = u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
         // OpenAI-compatible servers report prompt-cache hits under
         // `prompt_tokens_details.cached_tokens` (OpenAI spec; llama.cpp >= b4600
         // mirrors it when prompt caching is enabled). Unlike Anthropic, whose
@@ -575,10 +562,7 @@ impl OpenAiProvider {
         &self,
         request: &ProviderRequest,
     ) -> Result<reqwest::Response, ProviderError> {
-        let messages = Self::to_openai_messages(
-            &request.messages,
-            request.system_prompt.as_ref(),
-        );
+        let messages = Self::to_openai_messages(&request.messages, request.system_prompt.as_ref());
         let tools = Self::to_openai_tools(&request.tools);
 
         let mut body = json!({
@@ -665,10 +649,19 @@ mod tests {
 
         let wire = OpenAiProvider::to_openai_messages(&messages, None);
         assert_eq!(wire.len(), 2);
-        assert_eq!(wire[0].get("role").and_then(|v| v.as_str()), Some("assistant"));
+        assert_eq!(
+            wire[0].get("role").and_then(|v| v.as_str()),
+            Some("assistant")
+        );
         assert_eq!(wire[1].get("role").and_then(|v| v.as_str()), Some("tool"));
-        assert_eq!(wire[1].get("tool_call_id").and_then(|v| v.as_str()), Some("call_1"));
-        assert_eq!(wire[1].get("content").and_then(|v| v.as_str()), Some("done"));
+        assert_eq!(
+            wire[1].get("tool_call_id").and_then(|v| v.as_str()),
+            Some("call_1")
+        );
+        assert_eq!(
+            wire[1].get("content").and_then(|v| v.as_str()),
+            Some("done")
+        );
     }
 
     #[test]
@@ -688,7 +681,10 @@ mod tests {
         assert_eq!(wire.len(), 2);
         assert_eq!(wire[0].get("role").and_then(|v| v.as_str()), Some("user"));
         assert_eq!(wire[1].get("role").and_then(|v| v.as_str()), Some("tool"));
-        assert_eq!(wire[1].get("tool_call_id").and_then(|v| v.as_str()), Some("call_2"));
+        assert_eq!(
+            wire[1].get("tool_call_id").and_then(|v| v.as_str()),
+            Some("call_2")
+        );
     }
 
     #[test]

@@ -400,7 +400,8 @@ mod tests {
         })
         .unwrap();
         assert_eq!(wire.kind, "tokenUsageUpdated");
-        let DriverEvent::TokenUsageUpdated { last, session } = event_from_wire(wire).unwrap() else {
+        let DriverEvent::TokenUsageUpdated { last, session } = event_from_wire(wire).unwrap()
+        else {
             panic!("expected a token split");
         };
         assert_eq!(last, totals);
@@ -417,16 +418,18 @@ mod tests {
         };
 
         let key = BackgroundWorkKey::new(BackgroundWorkKind::Subagent, "toolu_1");
-        let text = event_to_wire(DriverEvent::BackgroundWork(BackgroundWorkEvent::Transcript {
-            key: key.clone(),
-            entry: SubagentTranscriptEntry {
-                id: "text-1".into(),
-                body: SubagentTranscriptBody::Text {
-                    text: "Looking.".into(),
-                    append: true,
+        let text = event_to_wire(DriverEvent::BackgroundWork(
+            BackgroundWorkEvent::Transcript {
+                key: key.clone(),
+                entry: SubagentTranscriptEntry {
+                    id: "text-1".into(),
+                    body: SubagentTranscriptBody::Text {
+                        text: "Looking.".into(),
+                        append: true,
+                    },
                 },
             },
-        }))
+        ))
         .unwrap();
         let DriverEvent::BackgroundWork(BackgroundWorkEvent::Transcript { key: back, entry }) =
             event_from_wire(text).unwrap()
@@ -439,16 +442,24 @@ mod tests {
             SubagentTranscriptBody::Text { ref text, append: true } if text == "Looking."
         ));
 
-        let row = ActivityItem::new(Some("toolu_2".into()), ActivityKind::Search, "auth", None, true);
-        let activity = event_to_wire(DriverEvent::BackgroundWork(BackgroundWorkEvent::Transcript {
-            key,
-            entry: SubagentTranscriptEntry {
-                id: "toolu_2".into(),
-                body: SubagentTranscriptBody::Activity {
-                    activity: row.clone(),
+        let row = ActivityItem::new(
+            Some("toolu_2".into()),
+            ActivityKind::Search,
+            "auth",
+            None,
+            true,
+        );
+        let activity = event_to_wire(DriverEvent::BackgroundWork(
+            BackgroundWorkEvent::Transcript {
+                key,
+                entry: SubagentTranscriptEntry {
+                    id: "toolu_2".into(),
+                    body: SubagentTranscriptBody::Activity {
+                        activity: row.clone(),
+                    },
                 },
             },
-        }))
+        ))
         .unwrap();
         let DriverEvent::BackgroundWork(BackgroundWorkEvent::Transcript { entry, .. }) =
             event_from_wire(activity).unwrap()
@@ -461,11 +472,17 @@ mod tests {
         assert_eq!(activity.id, row.id);
         assert_eq!(activity.source_id.as_deref(), Some("toolu_2"));
 
-        let call = ActivityItem::new(Some("toolu_1".into()), ActivityKind::Tool, "Find it", None, false)
-            .with_subagent(Some(SubagentCall {
-                agent_type: Some("Explore".into()),
-                description: "Find it".into(),
-            }));
+        let call = ActivityItem::new(
+            Some("toolu_1".into()),
+            ActivityKind::Tool,
+            "Find it",
+            None,
+            false,
+        )
+        .with_subagent(Some(SubagentCall {
+            agent_type: Some("Explore".into()),
+            description: "Find it".into(),
+        }));
         let wire = event_to_wire(DriverEvent::RichActivity(call)).unwrap();
         let DriverEvent::RichActivity(back) = event_from_wire(wire).unwrap() else {
             panic!("expected an activity");
@@ -499,13 +516,15 @@ mod tests {
         assert_eq!(call.agent_type.as_deref(), Some("Explore"));
         assert!(SubagentCall::from_tool("Agent", Some(&json!({"description": "x"}))).is_some());
         assert!(SubagentCall::from_tool("Bash", Some(&input)).is_none());
-        assert!(SubagentCall::from_tool("Agent", Some(&json!({"prompt": "no description"}))).is_none());
+        assert!(
+            SubagentCall::from_tool("Agent", Some(&json!({"prompt": "no description"}))).is_none()
+        );
     }
 
     #[test]
     fn interaction_mode_update_round_trips_through_the_daemon_wire() {
-        let wire = event_to_wire(DriverEvent::InteractionModeUpdated(InteractionMode::Plan))
-            .unwrap();
+        let wire =
+            event_to_wire(DriverEvent::InteractionModeUpdated(InteractionMode::Plan)).unwrap();
         assert_eq!(wire.kind, "interactionModeUpdated");
         assert_eq!(wire.payload, Value::String("plan".into()));
 

@@ -153,9 +153,8 @@ fn scan_windows_environment() -> Vec<EnvConflict> {
         ("User", ConflictSource::WindowsUser),
         ("Machine", ConflictSource::WindowsMachine),
     ] {
-        let script = format!(
-            "[Environment]::GetEnvironmentVariables('{scope}') | ConvertTo-Json -Compress"
-        );
+        let script =
+            format!("[Environment]::GetEnvironmentVariables('{scope}') | ConvertTo-Json -Compress");
         let mut command = Command::new("powershell.exe");
         command.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
         let run = crate::cli_detect::run_with_timeout(command, std::time::Duration::from_secs(5));
@@ -188,7 +187,14 @@ fn scan_windows_environment() -> Vec<EnvConflict> {
 fn shell_startup_files(home: Option<&Path>) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Some(home) = home {
-        for name in [".bashrc", ".bash_profile", ".zshrc", ".zprofile", ".zshenv", ".profile"] {
+        for name in [
+            ".bashrc",
+            ".bash_profile",
+            ".zshrc",
+            ".zprofile",
+            ".zshenv",
+            ".profile",
+        ] {
             files.push(home.join(name));
         }
         files.push(home.join(".config/fish/config.fish"));
@@ -237,7 +243,9 @@ pub fn parse_shell_exports(contents: &str) -> Vec<(String, String, usize)> {
         }
         if let Some(rest) = line.strip_prefix("set ") {
             // fish: set -gx NAME value
-            let mut parts = rest.split_whitespace().skip_while(|part| part.starts_with('-'));
+            let mut parts = rest
+                .split_whitespace()
+                .skip_while(|part| part.starts_with('-'));
             if let (Some(name), Some(value)) = (parts.next(), parts.next())
                 && is_variable_name(name)
             {
@@ -268,11 +276,18 @@ fn is_variable_name(name: &str) -> bool {
 
 fn unquote(value: &str) -> String {
     let value = value.trim();
-    let value = value.split_once(" #").map(|(head, _)| head.trim()).unwrap_or(value);
+    let value = value
+        .split_once(" #")
+        .map(|(head, _)| head.trim())
+        .unwrap_or(value);
     value
         .strip_prefix('"')
         .and_then(|rest| rest.strip_suffix('"'))
-        .or_else(|| value.strip_prefix('\'').and_then(|rest| rest.strip_suffix('\'')))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|rest| rest.strip_suffix('\''))
+        })
         .unwrap_or(value)
         .to_owned()
 }
@@ -299,7 +314,10 @@ mod tests {
             mask("ANTHROPIC_BASE_URL", "https://gw.example.org"),
             "https://gw.example.org"
         );
-        assert_eq!(mask("ANTHROPIC_API_KEY", "sk-ant-1234567890abcdef"), "sk-ant…def");
+        assert_eq!(
+            mask("ANTHROPIC_API_KEY", "sk-ant-1234567890abcdef"),
+            "sk-ant…def"
+        );
         assert_eq!(mask("OPENAI_API_KEY", "short"), "***");
         let conflict = classify(
             "ANTHROPIC_AUTH_TOKEN",

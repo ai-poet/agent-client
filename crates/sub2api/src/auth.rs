@@ -140,7 +140,9 @@ impl std::error::Error for LoginCodeRejected {}
 
 /// Whether `error` carries the typed cause `T` anywhere in its chain.
 pub fn error_is<T: std::error::Error + Send + Sync + 'static>(error: &anyhow::Error) -> bool {
-    error.chain().any(|cause| cause.downcast_ref::<T>().is_some())
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<T>().is_some())
 }
 
 /// Stored session. Serialized to `~/.cheaprouter/cloud-account.json`.
@@ -283,7 +285,8 @@ impl Credentials {
                 .with_context(|| format!("could not create {}", parent.display()))?;
         }
         let body = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, body).with_context(|| format!("could not write {}", path.display()))?;
+        std::fs::write(&path, body)
+            .with_context(|| format!("could not write {}", path.display()))?;
         restrict_to_owner(&path);
         Ok(())
     }
@@ -577,17 +580,21 @@ impl LoginFlow {
             if let Some(origin) = request.origin.as_deref()
                 && !self.is_own_origin(origin)
             {
-                respond(&mut stream, "403 Forbidden", "text/plain; charset=utf-8", "forbidden");
+                respond(
+                    &mut stream,
+                    "403 Forbidden",
+                    "text/plain; charset=utf-8",
+                    "forbidden",
+                );
                 return Ok(None);
             }
-            let delivered = parse_delivery(&request.body, &self.endpoint).and_then(|delivery| {
-                match delivery {
+            let delivered =
+                parse_delivery(&request.body, &self.endpoint).and_then(|delivery| match delivery {
                     Delivery::Session(credentials) => Ok(credentials),
                     Delivery::Code(code) => {
                         exchange_login_code(&self.endpoint, &code, &self.pkce.verifier)
                     }
-                }
-            });
+                });
             match delivered {
                 Ok(credentials) => {
                     respond(&mut stream, "200 OK", "text/plain; charset=utf-8", "ok");
@@ -609,7 +616,12 @@ impl LoginFlow {
                 }
             }
         }
-        respond(&mut stream, "200 OK", "text/html; charset=utf-8", &self.relay_page);
+        respond(
+            &mut stream,
+            "200 OK",
+            "text/html; charset=utf-8",
+            &self.relay_page,
+        );
         Ok(None)
     }
 
@@ -680,7 +692,10 @@ fn session_from_params(
 /// against — a callback naming a different one means the browser was
 /// redirected somewhere we did not send it.
 fn checked_endpoint(params: &HashMap<String, String>, expected_endpoint: &str) -> Result<String> {
-    let endpoint = params.get("endpoint").map(|value| value.trim()).unwrap_or("");
+    let endpoint = params
+        .get("endpoint")
+        .map(|value| value.trim())
+        .unwrap_or("");
     if endpoint.is_empty() {
         return Ok(expected_endpoint.to_owned());
     }
@@ -789,7 +804,9 @@ pub fn normalize_endpoint(endpoint: &str) -> Result<String> {
         return Err(anyhow!("the service address is required"));
     }
     if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
-        return Err(anyhow!("the service address must start with http:// or https://"));
+        return Err(anyhow!(
+            "the service address must start with http:// or https://"
+        ));
     }
     let without_scheme = trimmed
         .trim_start_matches("https://")
@@ -923,7 +940,9 @@ fn read_request(stream: &mut TcpStream) -> Result<Option<HttpRequest>> {
     // Cap the body: the relay posts a fragment, never bulk data.
     let mut body = vec![0u8; content_length.min(64 * 1024)];
     if !body.is_empty() {
-        reader.read_exact(&mut body).context("could not read the request body")?;
+        reader
+            .read_exact(&mut body)
+            .context("could not read the request body")?;
     }
 
     Ok(Some(HttpRequest {
@@ -1009,8 +1028,14 @@ mod tests {
 
     #[test]
     fn normalizes_endpoints() {
-        assert_eq!(normalize_endpoint("https://a.org/").unwrap(), "https://a.org");
-        assert_eq!(normalize_endpoint("  http://a.org  ").unwrap(), "http://a.org");
+        assert_eq!(
+            normalize_endpoint("https://a.org/").unwrap(),
+            "https://a.org"
+        );
+        assert_eq!(
+            normalize_endpoint("  http://a.org  ").unwrap(),
+            "http://a.org"
+        );
         assert!(normalize_endpoint("").is_err());
         assert!(normalize_endpoint("a.org").is_err());
         assert!(normalize_endpoint("ftp://a.org").is_err());
@@ -1338,8 +1363,7 @@ mod tests {
         assert!(credentials.codex_api_key.is_none());
         assert!(!credentials.session_id.is_empty());
 
-        let error =
-            exchange_login_code(&endpoint, "K7QM3XPD", "someone-else").expect_err("wrong");
+        let error = exchange_login_code(&endpoint, "K7QM3XPD", "someone-else").expect_err("wrong");
         assert!(error_is::<LoginCodeRejected>(&error), "{error:#}");
     }
 
@@ -1366,8 +1390,7 @@ mod tests {
         let port = flow.port();
         let waiter = std::thread::spawn(move || flow.wait(Duration::from_secs(30)));
 
-        let response =
-            post_delivery(port, &format!("http://127.0.0.1:{port}"), "#code=K7QM-3XPD");
+        let response = post_delivery(port, &format!("http://127.0.0.1:{port}"), "#code=K7QM-3XPD");
         assert!(response.starts_with("HTTP/1.1 200"), "{response}");
         let credentials = waiter.join().unwrap().expect("delivered");
         assert_eq!(credentials.access_token, "at");

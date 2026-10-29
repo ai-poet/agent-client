@@ -45,6 +45,80 @@ pub enum SidebarGrouping {
     Updated,
 }
 
+/// Viewport-independent framing for the new-task wallpaper.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct WallpaperAdjustment {
+    pub focal_x: f32,
+    pub focal_y: f32,
+    pub zoom: f32,
+}
+
+impl WallpaperAdjustment {
+    pub const MIN_ZOOM: f32 = 1.0;
+    pub const MAX_ZOOM: f32 = 4.0;
+
+    pub fn normalized(mut self) -> Self {
+        fn clamp_or(value: f32, min: f32, max: f32, fallback: f32) -> f32 {
+            if value.is_finite() {
+                value.clamp(min, max)
+            } else {
+                fallback
+            }
+        }
+        let defaults = Self::default();
+        self.focal_x = clamp_or(self.focal_x, 0.0, 1.0, defaults.focal_x);
+        self.focal_y = clamp_or(self.focal_y, 0.0, 1.0, defaults.focal_y);
+        self.zoom = clamp_or(self.zoom, Self::MIN_ZOOM, Self::MAX_ZOOM, defaults.zoom);
+        self
+    }
+}
+
+impl Default for WallpaperAdjustment {
+    fn default() -> Self {
+        Self {
+            focal_x: 0.5,
+            focal_y: 0.5,
+            zoom: 1.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WallpaperEffect {
+    #[default]
+    None,
+    Dither,
+    Ascii,
+    Halftone,
+    Scanlines,
+}
+
+impl WallpaperEffect {
+    pub const ALL: [Self; 5] = [
+        Self::None,
+        Self::Dither,
+        Self::Ascii,
+        Self::Halftone,
+        Self::Scanlines,
+    ];
+}
+
+/// A device-local managed image and its presentation settings.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct WallpaperSettings {
+    pub path: PathBuf,
+    pub name: String,
+    #[serde(default)]
+    pub adjustment: WallpaperAdjustment,
+    #[serde(default)]
+    pub effect: WallpaperEffect,
+    #[serde(default)]
+    pub theme_colors: bool,
+}
+
 /// Direction of task history inside the sidebar's current grouping.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -395,6 +469,8 @@ pub struct PersistedState {
     pub markdown_preview: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_state: Option<PersistedWindowState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallpaper: Option<WallpaperSettings>,
     #[serde(default = "default_computer_use_enabled")]
     pub computer_use_enabled: bool,
     #[serde(default)]
@@ -456,6 +532,7 @@ impl PersistedState {
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             markdown_preview: false,
             window_state: None,
+            wallpaper: None,
             computer_use_enabled: false,
             computer_use_allowed_apps: Vec::new(),
             disabled_providers: Vec::new(),
@@ -729,6 +806,15 @@ fn default_app_settings_path() -> PathBuf {
     } else {
         configuration_directory().join("app.json")
     }
+}
+
+/// Managed copies of user-selected wallpapers live beside the app database,
+/// never at the mercy of the original file being moved or deleted.
+pub fn wallpaper_directory() -> PathBuf {
+    StateStore::default_path()
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("wallpapers")
 }
 
 fn default_app_state_path() -> PathBuf {

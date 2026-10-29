@@ -130,7 +130,10 @@ impl SidebarResort {
     }
 }
 
-fn keyed_positions(rows: &[SidebarRow], heights: &impl Fn(SidebarRow) -> f32) -> Vec<(RowKey, f32)> {
+fn keyed_positions(
+    rows: &[SidebarRow],
+    heights: &impl Fn(SidebarRow) -> f32,
+) -> Vec<(RowKey, f32)> {
     let mut y = 0.0;
     let mut positions = Vec::new();
     for &row in rows {
@@ -209,9 +212,15 @@ mod tests {
             1000.0,
         );
         let risen = resort.offset(key(3)).expect("the risen row glides");
-        assert!((risen - 60.0).abs() < 0.5, "starts 60px below its slot, got {risen}");
+        assert!(
+            (risen - 60.0).abs() < 0.5,
+            "starts 60px below its slot, got {risen}"
+        );
         let pushed = resort.offset(key(1)).expect("the rows it passed glide too");
-        assert!((pushed + 30.0).abs() < 0.5, "starts 30px above, got {pushed}");
+        assert!(
+            (pushed + 30.0).abs() < 0.5,
+            "starts 30px above, got {pushed}"
+        );
     }
 
     #[test]
@@ -237,8 +246,15 @@ mod tests {
         let last = new.pop().unwrap();
         new.insert(0, last);
         resort.rows_changed(&old, &new, height, 300.0);
-        assert_eq!(resort.offset(key(40)), None, "1170px is past a 300px viewport");
-        assert!(resort.offset(key(1)).is_some(), "its neighbours shift 30px and glide");
+        assert_eq!(
+            resort.offset(key(40)),
+            None,
+            "1170px is past a 300px viewport"
+        );
+        assert!(
+            resort.offset(key(1)).is_some(),
+            "its neighbours shift 30px and glide"
+        );
     }
 
     #[test]

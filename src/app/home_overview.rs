@@ -129,7 +129,10 @@ impl Waku {
     /// been read, and nothing for a history without a single message.
     pub(super) fn render_home_overview(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let state = &self.home_overview;
-        state.records.as_ref().filter(|records| !records.is_empty())?;
+        state
+            .records
+            .as_ref()
+            .filter(|records| !records.is_empty())?;
         let summary = state.summary.as_ref()?;
         let grid = state.grid.as_ref()?;
         let theme = Theme::current(cx);
@@ -168,14 +171,21 @@ impl Waku {
         let state = &self.home_overview;
         let mut tabs = div().flex().items_center().gap(px(2.0));
         for (tab, label, id) in [
-            (OverviewTab::Overview, tr!("home_overview.tab_overview"), "overview"),
-            (OverviewTab::Models, tr!("home_overview.tab_models"), "models"),
+            (
+                OverviewTab::Overview,
+                tr!("home_overview.tab_overview"),
+                "overview",
+            ),
+            (
+                OverviewTab::Models,
+                tr!("home_overview.tab_models"),
+                "models",
+            ),
         ] {
-            tabs = tabs.child(
-                overview_pill(id, label, state.tab == tab, theme).on_click(cx.listener(
-                    move |this, _, _, cx| this.set_home_overview_tab(tab, cx),
-                )),
-            );
+            tabs =
+                tabs.child(overview_pill(id, label, state.tab == tab, theme).on_click(
+                    cx.listener(move |this, _, _, cx| this.set_home_overview_tab(tab, cx)),
+                ));
         }
         let mut ranges = div().flex().items_center().gap(px(2.0));
         for (range, label, id) in [
@@ -184,9 +194,9 @@ impl Waku {
             (ActivityRange::Days7, tr!("home_overview.range_7d"), "7d"),
         ] {
             ranges = ranges.child(
-                overview_pill(id, label, state.range == range, theme).on_click(cx.listener(
-                    move |this, _, _, cx| this.set_home_overview_range(range, cx),
-                )),
+                overview_pill(id, label, state.range == range, theme).on_click(
+                    cx.listener(move |this, _, _, cx| this.set_home_overview_range(range, cx)),
+                ),
             );
         }
         div()
@@ -407,12 +417,7 @@ impl Waku {
     }
 }
 
-fn overview_pill(
-    id: &'static str,
-    label: String,
-    selected: bool,
-    theme: &Theme,
-) -> Stateful<Div> {
+fn overview_pill(id: &'static str, label: String, selected: bool, theme: &Theme) -> Stateful<Div> {
     div()
         .id(SharedString::from(format!("home-overview-{id}")))
         .tab_index(0)
@@ -458,7 +463,12 @@ fn render_heat_grid(grid: &HeatGrid, theme: &Theme) -> impl IntoElement {
         }
         columns = columns.child(column);
     }
-    let total: u64 = grid.cells.iter().flatten().map(|count| u64::from(*count)).sum();
+    let total: u64 = grid
+        .cells
+        .iter()
+        .flatten()
+        .map(|count| u64::from(*count))
+        .sum();
     let mut legend = div()
         .flex()
         .items_center()
@@ -485,7 +495,10 @@ fn render_heat_grid(grid: &HeatGrid, theme: &Theme) -> impl IntoElement {
                 .justify_between()
                 .text_size(sp(11.5))
                 .text_color(theme.text_tertiary)
-                .child(tr!("home_overview.heat_caption", count = group_digits(total)))
+                .child(tr!(
+                    "home_overview.heat_caption",
+                    count = group_digits(total)
+                ))
                 .child(legend),
         )
 }

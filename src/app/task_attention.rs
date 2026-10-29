@@ -89,7 +89,11 @@ pub(super) fn classify(
 /// The task after `current` in `order` that needs the person, wrapping
 /// around; the first such task when `current` is not one of them. `None`
 /// when no task needs the person, or only the current one does.
-pub(super) fn next_needs_you(order: &[Uuid], needs: &HashSet<Uuid>, current: Option<Uuid>) -> Option<Uuid> {
+pub(super) fn next_needs_you(
+    order: &[Uuid],
+    needs: &HashSet<Uuid>,
+    current: Option<Uuid>,
+) -> Option<Uuid> {
     let start = current
         .and_then(|current| order.iter().position(|id| *id == current))
         .map_or(0, |index| index + 1);
@@ -104,10 +108,13 @@ impl Waku {
     pub(super) fn task_attention(&self, session_id: Uuid) -> Option<Attention> {
         let runtime = self.runtimes.get(&session_id)?;
         classify(
-            runtime.pending_permissions.iter().map(|permission| PendingRequest {
-                teammate: agent_teams::requests::is_member_request(&permission.request_id),
-                plan: is_plan_approval(permission),
-            }),
+            runtime
+                .pending_permissions
+                .iter()
+                .map(|permission| PendingRequest {
+                    teammate: agent_teams::requests::is_member_request(&permission.request_id),
+                    plan: is_plan_approval(permission),
+                }),
             runtime.pending_user_input.is_some(),
             runtime.pending_computer_approval.is_some(),
         )
@@ -216,11 +223,13 @@ mod tests {
 
     #[test]
     fn the_most_pressing_kind_names_the_task_and_every_request_counts() {
-        let attention = classify([request(true, false), request(false, true)], true, false).unwrap();
+        let attention =
+            classify([request(true, false), request(false, true)], true, false).unwrap();
         assert_eq!(attention.kind, AttentionKind::Plan);
         assert_eq!(attention.count, 3);
 
-        let attention = classify([request(false, false), request(false, true)], false, false).unwrap();
+        let attention =
+            classify([request(false, false), request(false, true)], false, false).unwrap();
         assert_eq!(attention.kind, AttentionKind::Approval);
         assert_eq!(attention.count, 2);
     }
@@ -228,13 +237,25 @@ mod tests {
     #[test]
     fn a_teammate_request_alone_is_a_teammate_request() {
         let attention = classify([request(true, false)], false, false).unwrap();
-        assert_eq!(attention, Attention { kind: AttentionKind::Teammate, count: 1 });
+        assert_eq!(
+            attention,
+            Attention {
+                kind: AttentionKind::Teammate,
+                count: 1
+            }
+        );
     }
 
     #[test]
     fn a_question_or_a_desktop_approval_counts() {
-        assert_eq!(classify([], true, false).unwrap().kind, AttentionKind::Question);
-        assert_eq!(classify([], false, true).unwrap().kind, AttentionKind::Approval);
+        assert_eq!(
+            classify([], true, false).unwrap().kind,
+            AttentionKind::Question
+        );
+        assert_eq!(
+            classify([], false, true).unwrap().kind,
+            AttentionKind::Approval
+        );
     }
 
     #[test]

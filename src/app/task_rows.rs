@@ -334,7 +334,11 @@ impl Waku {
         // and a tooltip naming what for, not a colour alone.
         if let Some(attention) = self.task_attention(session.id) {
             let tooltip = if attention.count > 1 {
-                tr!("needs_you.tooltip_many", what = attention.label(), count = attention.count)
+                tr!(
+                    "needs_you.tooltip_many",
+                    what = attention.label(),
+                    count = attention.count
+                )
             } else {
                 tr!("needs_you.tooltip", what = attention.label())
             };

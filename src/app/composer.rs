@@ -239,91 +239,94 @@ impl Waku {
 
         div().flex_none().px(px(20.0)).pb(px(8.0)).child(
             // Fork: digits, Enter and Escape (question_panel.rs).
-            self.question_card_keys(div().id(SharedString::from(format!("user-input-{request_id}"))), cx)
-                .w_full()
-                .max_w(px(CONTENT_MAX_WIDTH))
-                .mx_auto()
-                .px(px(14.0))
-                .pt(px(12.0))
-                .pb(px(10.0))
-                .rounded(px(13.0))
-                .border_1()
-                .border_color(theme.border)
-                .bg(theme.composer)
-                .tab_index(0)
-                .tab_group()
-                .tab_stop(false)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .child(
-                            div()
-                                .text_size(sp(12.5))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme.text_tertiary)
-                                .child(SharedString::from(question.header.clone())),
-                        )
-                        .children(progress),
-                )
-                .child(
-                    div()
-                        .mt(px(5.0))
-                        .text_size(sp(13.0))
-                        .line_height(sp(18.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .whitespace_normal()
-                        .child(SharedString::from(question.question.clone())),
-                )
-                .children((!question.options.is_empty()).then_some(options))
-                .child(
-                    div()
-                        .mt(px(if question.options.is_empty() {
-                            9.0
+            self.question_card_keys(
+                div().id(SharedString::from(format!("user-input-{request_id}"))),
+                cx,
+            )
+            .w_full()
+            .max_w(px(CONTENT_MAX_WIDTH))
+            .mx_auto()
+            .px(px(14.0))
+            .pt(px(12.0))
+            .pb(px(10.0))
+            .rounded(px(13.0))
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.composer)
+            .tab_index(0)
+            .tab_group()
+            .tab_stop(false)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.text_tertiary)
+                            .child(SharedString::from(question.header.clone())),
+                    )
+                    .children(progress),
+            )
+            .child(
+                div()
+                    .mt(px(5.0))
+                    .text_size(sp(13.0))
+                    .line_height(sp(18.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .whitespace_normal()
+                    .child(SharedString::from(question.question.clone())),
+            )
+            .children((!question.options.is_empty()).then_some(options))
+            .child(
+                div()
+                    .mt(px(if question.options.is_empty() {
+                        9.0
+                    } else {
+                        4.0
+                    }))
+                    .h(px(34.0))
+                    .px(px(10.0))
+                    .rounded(px(8.0))
+                    .border_1()
+                    .border_color(if has_custom {
+                        theme.accent.opacity(0.34)
+                    } else {
+                        theme.border.opacity(0.0)
+                    })
+                    .bg(if has_custom {
+                        theme.accent.opacity(0.06)
+                    } else {
+                        theme.overlay
+                    })
+                    .flex()
+                    .items_center()
+                    .gap(px(7.0))
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .child(icon(
+                        "icons/pencil.svg",
+                        11.0,
+                        if has_custom {
+                            theme.accent
                         } else {
-                            4.0
-                        }))
-                        .h(px(34.0))
-                        .px(px(10.0))
-                        .rounded(px(8.0))
-                        .border_1()
-                        .border_color(if has_custom {
-                            theme.accent.opacity(0.34)
-                        } else {
-                            theme.border.opacity(0.0)
-                        })
-                        .bg(if has_custom {
-                            theme.accent.opacity(0.06)
-                        } else {
-                            theme.overlay
-                        })
-                        .flex()
-                        .items_center()
-                        .gap(px(7.0))
-                        .text_size(sp(12.5))
-                        .line_height(sp(16.0))
-                        .child(icon(
-                            "icons/pencil.svg",
-                            11.0,
-                            if has_custom {
-                                theme.accent
-                            } else {
-                                theme.text_ghost
-                            },
-                        ))
-                        .child(self.user_input_answer.clone()),
-                )
-                .child(
-                    div()
-                        .mt(px(8.0))
-                        .flex()
-                        .items_center()
-                        .children(back)
-                        .child(div().flex_1())
-                        .child(continue_button),
-                ),
+                            theme.text_ghost
+                        },
+                    ))
+                    .child(self.user_input_answer.clone()),
+            )
+            .child(
+                div()
+                    .mt(px(8.0))
+                    .flex()
+                    .items_center()
+                    .children(back)
+                    .child(div().flex_1())
+                    .child(continue_button),
+            ),
         )
     }
 
@@ -1049,9 +1052,9 @@ impl Waku {
 
                 // Which vendor of the built-in agent's list is open. Read
                 // before the rows so the empty state can name it.
-                let native_vendor = (selected_tab == ModelPickerTab::Provider(ProviderKind::Native)
-                    && !searching)
-                    .then(|| picker_vendor.clone());
+                let native_vendor =
+                    (selected_tab == ModelPickerTab::Provider(ProviderKind::Native) && !searching)
+                        .then(|| picker_vendor.clone());
 
                 let mut rows = div()
                     .id("model-picker-list")
@@ -1070,9 +1073,7 @@ impl Waku {
                             if pending_discoveries.contains(&provider)
                     ) {
                         tr!("models.loading")
-                    } else if native_vendor.as_deref()
-                        == Some(super::native_agent::CUSTOM_VENDOR)
-                    {
+                    } else if native_vendor.as_deref() == Some(super::native_agent::CUSTOM_VENDOR) {
                         // Nothing can discover what sits behind an endpoint
                         // of the user's own. Say where to declare them.
                         tr!("models.declare_your_own")
@@ -1336,8 +1337,7 @@ impl Waku {
                         let on_manage = confirm_manage.is_some()
                             && confirm_weak
                                 .read_with(cx, |this, _| {
-                                    this.model_picker_highlight.unwrap_or(0)
-                                        == confirm_models.len()
+                                    this.model_picker_highlight.unwrap_or(0) == confirm_models.len()
                                 })
                                 .unwrap_or(false);
                         if on_manage {
@@ -2375,11 +2375,7 @@ impl Waku {
         true
     }
 
-    fn execute_resume_composer_command(
-        &mut self,
-        prompt: &str,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    fn execute_resume_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
         if !crate::composer_complete::is_resume_submission(prompt) {
             return false;
         }
@@ -2397,14 +2393,16 @@ impl Waku {
     fn execute_goal_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
         use crate::composer_complete::GoalCommand;
         use crate::model::{GoalOperation, ThreadGoalStatus};
-        let Some((session_id, command, current_goal)) = self.selected_session().and_then(|session| {
-            let command = crate::composer_complete::parse_goal_submission(
-                session.provider,
-                prompt,
-                &self.slash_command_index,
-            )?;
-            Some((session.id, command, session.thread_goal.clone()))
-        }) else {
+        let Some((session_id, command, current_goal)) =
+            self.selected_session().and_then(|session| {
+                let command = crate::composer_complete::parse_goal_submission(
+                    session.provider,
+                    prompt,
+                    &self.slash_command_index,
+                )?;
+                Some((session.id, command, session.thread_goal.clone()))
+            })
+        else {
             return false;
         };
         match command {
@@ -2771,7 +2769,8 @@ impl Waku {
                     let edit_weak = weak.clone();
                     let remove_weak = weak.clone();
                     // Fork: send next, move up, move down (queue_rows.rs).
-                    let mut items = super::queue_rows::queue_menu_items(&weak, session_id, message_id, cx);
+                    let mut items =
+                        super::queue_rows::queue_menu_items(&weak, session_id, message_id, cx);
                     items.extend([
                         MenuItem::new(tr!("composer.edit_in_composer"), move |window, cx| {
                             let _ = edit_weak.update(cx, |this, cx| {
@@ -2791,83 +2790,84 @@ impl Waku {
             );
             list = list.child(
                 // Fork: Alt-↑ / Alt-↓ reorders (queue_rows.rs).
-                self.queue_row_keys(div().id(SharedString::from(format!("queued-message-{message_id}"))), session_id, message_id, cx)
-                    .h(px(30.0))
-                    .pl(px(12.0))
-                    .pr(px(6.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(9.0))
-                    .cursor_default()
-                    .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .hover(|element| element.bg(theme.overlay))
-                    .tooltip(Tooltip::text(tr!("composer.edit_in_composer")))
-                    .child(icon("icons/queue.svg", 12.0, theme.text_tertiary))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text)
-                            .child(SharedString::from(content)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(2.0))
-                            .children(steer_control)
-                            .child(
-                                div()
-                                    .id(SharedString::from(format!(
-                                        "queued-message-remove-{message_id}"
-                                    )))
-                                    .w(px(24.0))
-                                    .h(px(24.0))
-                                    .rounded(px(6.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .cursor_default()
-                                    .tab_index(0)
-                                    .focus_visible(|style| {
-                                        style.border_1().border_color(theme.accent)
-                                    })
-                                    .hover(|element| element.bg(theme.overlay_strong))
-                                    .active(|element| element.opacity(0.8))
-                                    .child(icon("icons/trash.svg", 12.0, theme.text_secondary))
-                                    .tooltip(Tooltip::text(tr!("composer.remove_followup")))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        cx.stop_propagation();
-                                        this.remove_queued_message(session_id, message_id, cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        move |this, event: &KeyDownEvent, _, cx| {
-                                            if matches!(
-                                                event.keystroke.key.as_str(),
-                                                "enter" | "space"
-                                            ) {
-                                                this.remove_queued_message(
-                                                    session_id, message_id, cx,
-                                                );
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    )),
-                            )
-                            .child(more_control),
-                    )
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.edit_queued_message(session_id, message_id, window, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                self.queue_row_keys(
+                    div().id(SharedString::from(format!("queued-message-{message_id}"))),
+                    session_id,
+                    message_id,
+                    cx,
+                )
+                .h(px(30.0))
+                .pl(px(12.0))
+                .pr(px(6.0))
+                .flex()
+                .items_center()
+                .gap(px(9.0))
+                .cursor_default()
+                .tab_index(0)
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .hover(|element| element.bg(theme.overlay))
+                .tooltip(Tooltip::text(tr!("composer.edit_in_composer")))
+                .child(icon("icons/queue.svg", 12.0, theme.text_tertiary))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text)
+                        .child(SharedString::from(content)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(2.0))
+                        .children(steer_control)
+                        .child(
+                            div()
+                                .id(SharedString::from(format!(
+                                    "queued-message-remove-{message_id}"
+                                )))
+                                .w(px(24.0))
+                                .h(px(24.0))
+                                .rounded(px(6.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .cursor_default()
+                                .tab_index(0)
+                                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                                .hover(|element| element.bg(theme.overlay_strong))
+                                .active(|element| element.opacity(0.8))
+                                .child(icon("icons/trash.svg", 12.0, theme.text_secondary))
+                                .tooltip(Tooltip::text(tr!("composer.remove_followup")))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.remove_queued_message(session_id, message_id, cx);
+                                }))
+                                .on_key_down(cx.listener(
+                                    move |this, event: &KeyDownEvent, _, cx| {
+                                        if matches!(event.keystroke.key.as_str(), "enter" | "space")
+                                        {
+                                            this.remove_queued_message(session_id, message_id, cx);
+                                            cx.stop_propagation();
+                                        }
+                                    },
+                                )),
+                        )
+                        .child(more_control),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.edit_queued_message(session_id, message_id, window, cx);
+                }))
+                .on_key_down(cx.listener(
+                    move |this, event: &KeyDownEvent, window, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                             this.edit_queued_message(session_id, message_id, window, cx);
                             cx.stop_propagation();
                         }
-                    })),
+                    },
+                )),
             );
         }
         Some(
@@ -2927,87 +2927,93 @@ impl Waku {
         // compositing over it.
         let drop_wash = theme.composer.blend(theme.overlay_strong);
         let drop_ring = theme.accent.opacity(0.7);
-        div().flex_none().px(px(20.0)).child(
-            div()
-                .w_full()
-                .max_w(px(CONTENT_MAX_WIDTH))
-                .mx_auto()
-                .rounded(px(13.0))
-                .border_1()
-                .border_color(theme.border)
-                .bg(theme.composer)
-                // Horizontal insets live on each row (and inside the field's
-                // scroll viewport, via `padding_x`) rather than on the card,
-                // so the field's overlay scrollbar can hug the card's edge.
-                .py(px(10.0))
-                .drag_over::<ExternalPaths>(move |style, _, _, _| {
-                    style.bg(drop_wash).border_color(drop_ring)
-                })
-                .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
-                    this.stage_dropped_files(paths, window, cx);
-                }))
-                // Anchor for the bounds probe the autocomplete popup aligns to.
-                .relative()
-                .child(super::autocomplete::composer_card_bounds_probe(
-                    self.composer_autocomplete.card_bounds_cell(),
-                ))
-                // Only while the popup has selectable rows: the key context
-                // routes arrows, `enter`, `tab` and `escape` here as actions,
-                // out from under the focused field. The loading state takes
-                // only Escape, so it can dismiss without swallowing input.
-                .when(autocomplete_actionable, |card| {
-                    card.key_context("ComposerAutocomplete")
-                        .on_action(cx.listener(|this, _: &SelectNextEntry, window, cx| {
-                            this.move_autocomplete_highlight("down", window, cx);
-                        }))
-                        .on_action(cx.listener(|this, _: &SelectPreviousEntry, window, cx| {
-                            this.move_autocomplete_highlight("up", window, cx);
-                        }))
-                        .on_action(cx.listener(|this, _: &ConfirmEntry, window, cx| {
-                            this.accept_autocomplete(None, window, cx);
-                        }))
-                        .on_action(cx.listener(|this, _: &DismissMenu, _, cx| {
-                            this.dismiss_autocomplete(cx);
-                        }))
-                })
-                .when(autocomplete_loading, |card| {
-                    card.key_context("ComposerAutocompleteLoading")
-                        .on_action(cx.listener(|this, _: &DismissMenu, _, cx| {
-                            this.dismiss_autocomplete(cx);
-                        }))
-                })
-                .children(autocomplete)
-                .when(!self.composer_attachments.is_empty(), |card| {
-                    card.child(self.render_composer_attachments(cx))
-                })
-                .child(div().pt(px(2.0)).child(self.composer.clone()))
-                .child(
-                    div()
-                        .mt(px(8.0))
-                        .px(px(10.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(4.0))
-                        .text_size(sp(12.5))
-                        .line_height(sp(14.0))
-                        .child(self.render_provider_model_control(cx))
-                        // Fork: the traits chip opens the Effort slider card (effort_panel.rs).
-                        .children(self.render_effort_card_control(cx))
-                        .children(self.render_agent_preset_control(cx))
-                        .child(self.render_access_control(cx))
-                        .child(self.render_interaction_mode_control(cx))
-                        .children(self.render_goal_control(cx))
-                        .child(div().flex_1())
-                        // Fork: moved to composer_submit.rs (keyboard focus).
-                        .child(self.render_submit_controls(
-                            submit_action,
-                            escape_stop_armed,
-                            can_send,
-                            no_providers,
-                            cx,
-                        )),
-                ),
-        )
+        let card = div()
+            .w_full()
+            .max_w(px(CONTENT_MAX_WIDTH))
+            .mx_auto()
+            .rounded(px(26.0))
+            .border_1()
+            .border_color(theme.composer_border())
+            .bg(theme.composer_surface())
+            // Horizontal insets live on each row (and inside the field's
+            // scroll viewport, via `padding_x`) rather than on the card,
+            // so the field's overlay scrollbar can hug the card's edge.
+            .py(px(10.0))
+            .drag_over::<ExternalPaths>(move |style, _, _, _| {
+                style.bg(drop_wash).border_color(drop_ring)
+            })
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                this.stage_dropped_files(paths, window, cx);
+            }))
+            // Anchor for the bounds probe the autocomplete popup aligns to.
+            .relative()
+            .child(super::autocomplete::composer_card_bounds_probe(
+                self.composer_autocomplete.card_bounds_cell(),
+            ))
+            // Only while the popup has selectable rows: the key context
+            // routes arrows, `enter`, `tab` and `escape` here as actions,
+            // out from under the focused field. The loading state takes
+            // only Escape, so it can dismiss without swallowing input.
+            .when(autocomplete_actionable, |card| {
+                card.key_context("ComposerAutocomplete")
+                    .on_action(cx.listener(|this, _: &SelectNextEntry, window, cx| {
+                        this.move_autocomplete_highlight("down", window, cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &SelectPreviousEntry, window, cx| {
+                        this.move_autocomplete_highlight("up", window, cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &ConfirmEntry, window, cx| {
+                        this.accept_autocomplete(None, window, cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &DismissMenu, _, cx| {
+                        this.dismiss_autocomplete(cx);
+                    }))
+            })
+            .when(autocomplete_loading, |card| {
+                card.key_context("ComposerAutocompleteLoading")
+                    .on_action(cx.listener(|this, _: &DismissMenu, _, cx| {
+                        this.dismiss_autocomplete(cx);
+                    }))
+            })
+            .children(autocomplete)
+            .when(!self.composer_attachments.is_empty(), |card| {
+                card.child(self.render_composer_attachments(cx))
+            })
+            .child(div().pt(px(2.0)).child(self.composer.clone()))
+            .child(
+                div()
+                    .mt(px(8.0))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_size(sp(12.5))
+                    .line_height(sp(14.0))
+                    .child(self.render_provider_model_control(cx))
+                    // Fork: the traits chip opens the Effort slider card (effort_panel.rs).
+                    .children(self.render_effort_card_control(cx))
+                    .children(self.render_agent_preset_control(cx))
+                    .child(self.render_access_control(cx))
+                    .child(self.render_interaction_mode_control(cx))
+                    .children(self.render_goal_control(cx))
+                    .child(div().flex_1())
+                    // Fork: moved to composer_submit.rs (keyboard focus).
+                    .child(self.render_submit_controls(
+                        submit_action,
+                        escape_stop_armed,
+                        can_send,
+                        no_providers,
+                        cx,
+                    )),
+            );
+        div()
+            .flex_none()
+            .px(px(20.0))
+            .child(crate::ui::frost::frosted(
+                26.0,
+                crate::ui::frost::MENU_BLUR,
+                card,
+            ))
     }
 
     fn render_branch_selector(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {

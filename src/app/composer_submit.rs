@@ -15,8 +15,8 @@
 //! keystroke with nowhere to go.
 
 use super::composer::ComposerSubmitAction;
-use crate::ui::ActivationExt as _;
 use super::*;
+use crate::ui::ActivationExt as _;
 
 impl Waku {
     pub(super) fn render_submit_controls(

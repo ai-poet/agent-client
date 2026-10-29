@@ -15,7 +15,7 @@
 
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
-use claurst_core::ps_classifier::{PsRiskLevel, classify_ps_command};
+use claurst_core::ps_classifier::{classify_ps_command, PsRiskLevel};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -36,7 +36,9 @@ struct PowerShellInput {
     require_confirmation: bool,
 }
 
-fn default_timeout() -> u64 { 120_000 }
+fn default_timeout() -> u64 {
+    120_000
+}
 
 // ---------------------------------------------------------------------------
 // Risk-label helpers (used in messages shown to the user)
@@ -45,9 +47,9 @@ fn default_timeout() -> u64 { 120_000 }
 fn risk_label(level: PsRiskLevel) -> &'static str {
     match level {
         PsRiskLevel::Critical => "Critical",
-        PsRiskLevel::High     => "High",
-        PsRiskLevel::Medium   => "Medium",
-        PsRiskLevel::Low      => "Low",
+        PsRiskLevel::High => "High",
+        PsRiskLevel::Medium => "Medium",
+        PsRiskLevel::Low => "Low",
     }
 }
 
@@ -76,16 +78,22 @@ fn risk_explanation(level: PsRiskLevel, command: &str) -> String {
 #[async_trait]
 impl Tool for PowerShellTool {
     // Gates itself: calls `ctx.check_permission*` in `execute()` (#210).
-    fn self_gates(&self) -> bool { true }
+    fn self_gates(&self) -> bool {
+        true
+    }
 
-    fn name(&self) -> &str { "PowerShell" }
+    fn name(&self) -> &str {
+        "PowerShell"
+    }
 
     fn description(&self) -> &str {
         "Execute a PowerShell command. Use for Windows-native operations, .NET APIs, \
          registry access, and Windows-specific system administration."
     }
 
-    fn permission_level(&self) -> PermissionLevel { PermissionLevel::Execute }
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Execute
+    }
 
     fn input_schema(&self) -> Value {
         json!({
@@ -228,18 +236,25 @@ impl Tool for PowerShellTool {
             Err(e) => return ToolResult::error(format!("Failed to spawn PowerShell: {}", e)),
         };
         if captured.timed_out {
-            return ToolResult::error(format!("PowerShell command timed out after {}ms", timeout_ms));
+            return ToolResult::error(format!(
+                "PowerShell command timed out after {}ms",
+                timeout_ms
+            ));
         }
 
         let exit_code = captured.exit_code.unwrap_or(-1);
         let mut output = captured.stdout.trim_end().to_string();
         let stderr = captured.stderr.trim_end();
         if !stderr.is_empty() {
-            if !output.is_empty() { output.push('\n'); }
+            if !output.is_empty() {
+                output.push('\n');
+            }
             output.push_str("STDERR:\n");
             output.push_str(stderr);
         }
-        if output.is_empty() { output = "(no output)".to_string(); }
+        if output.is_empty() {
+            output = "(no output)".to_string();
+        }
 
         // Truncate very long output (same limit as BashTool)
         const MAX_OUTPUT_LEN: usize = 100_000;
@@ -248,10 +263,7 @@ impl Tool for PowerShellTool {
             // offsets. See `pty_bash::truncate_output`.
             let half = MAX_OUTPUT_LEN / 2;
             let start = &output[..crate::pty_bash::floor_char_boundary(&output, half)];
-            let end = &output[crate::pty_bash::ceil_char_boundary(
-                &output,
-                output.len() - half,
-            )..];
+            let end = &output[crate::pty_bash::ceil_char_boundary(&output, output.len() - half)..];
             output = format!(
                 "{}\n\n... ({} characters truncated) ...\n\n{}",
                 start,
@@ -261,7 +273,10 @@ impl Tool for PowerShellTool {
         }
 
         if exit_code != 0 {
-            ToolResult::error(format!("PowerShell exited with code {}\n{}", exit_code, output))
+            ToolResult::error(format!(
+                "PowerShell exited with code {}\n{}",
+                exit_code, output
+            ))
         } else {
             ToolResult::success(output)
         }
@@ -338,7 +353,9 @@ mod process_tests {
     fn a_script_is_encoded_the_way_powershell_decodes_it() {
         use base64::Engine as _;
         let encoded = encode_command("Write-Output 'a\"b'");
-        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
         let units: Vec<u16> = bytes
             .chunks(2)
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
@@ -367,6 +384,11 @@ mod process_tests {
             .await
             .expect("spawn");
         assert!(!captured.timed_out);
-        assert_eq!(captured.stdout.trim(), "它说 'hi' \"there\" A", "{}", captured.stderr);
+        assert_eq!(
+            captured.stdout.trim(),
+            "它说 'hi' \"there\" A",
+            "{}",
+            captured.stderr
+        );
     }
 }

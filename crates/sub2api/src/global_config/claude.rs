@@ -78,12 +78,7 @@ pub fn restore(claude_dir: &Path, backups: &CliBackups) -> Result<()> {
         .existed
         .then(|| serde_json::from_str::<Value>(&backup.content).ok())
         .flatten()
-        .and_then(|value| {
-            value
-                .get("env")
-                .and_then(Value::as_object)
-                .cloned()
-        })
+        .and_then(|value| value.get("env").and_then(Value::as_object).cloned())
         .unwrap_or_default();
 
     if let Some(env) = object.get_mut("env").and_then(Value::as_object_mut) {
@@ -191,7 +186,10 @@ mod tests {
         let restored: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join(SETTINGS_FILE)).unwrap())
                 .unwrap();
-        assert_eq!(restored["env"]["ANTHROPIC_BASE_URL"], "https://old.example.org");
+        assert_eq!(
+            restored["env"]["ANTHROPIC_BASE_URL"],
+            "https://old.example.org"
+        );
         assert!(restored["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
         assert!(
             restored["env"]

@@ -163,16 +163,18 @@ fn detect_claude(paths: &Paths, backups: Option<&CliBackups>) -> Option<OwnSetup
         return setup(OwnSetupReason::SignedIn, None);
     }
 
-    let settings = effective_content(backups, "settings.json", &paths.claude_dir.join("settings.json"))
-        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())?;
+    let settings = effective_content(
+        backups,
+        "settings.json",
+        &paths.claude_dir.join("settings.json"),
+    )
+    .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())?;
     if non_empty_str(settings.get("apiKeyHelper")) {
         return setup(OwnSetupReason::ApiKey, None);
     }
     let env = settings.get("env").and_then(Value::as_object)?;
     let set = |name: &str| non_empty_str(env.get(name));
-    if set("ANTHROPIC_BASE_URL")
-        || set("CLAUDE_CODE_USE_BEDROCK")
-        || set("CLAUDE_CODE_USE_VERTEX")
+    if set("ANTHROPIC_BASE_URL") || set("CLAUDE_CODE_USE_BEDROCK") || set("CLAUDE_CODE_USE_VERTEX")
     {
         return setup(OwnSetupReason::CustomProvider, None);
     }
@@ -340,7 +342,10 @@ mod tests {
 
         let encoded = serde_json::to_string(&prefs).unwrap();
         assert!(encoded.contains(r#""claude":"own""#), "{encoded}");
-        assert_eq!(serde_json::from_str::<CliTakeoverPrefs>(&encoded).unwrap(), prefs);
+        assert_eq!(
+            serde_json::from_str::<CliTakeoverPrefs>(&encoded).unwrap(),
+            prefs
+        );
         assert_eq!(
             serde_json::from_str::<CliTakeoverPrefs>("{}").unwrap(),
             CliTakeoverPrefs::default()
@@ -352,9 +357,15 @@ mod tests {
         let paths = temp_paths("clean");
         assert!(detect_own_setup(&paths).is_empty());
         // Files without anything of the user's own count as nothing too.
-        write(&paths.claude_dir.join("settings.json"), r#"{"env":{"FOO":"1"}}"#);
+        write(
+            &paths.claude_dir.join("settings.json"),
+            r#"{"env":{"FOO":"1"}}"#,
+        );
         write(&paths.codex_dir.join("config.toml"), "model = \"gpt-5\"\n");
-        write(&paths.codex_dir.join("auth.json"), r#"{"OPENAI_API_KEY":null}"#);
+        write(
+            &paths.codex_dir.join("auth.json"),
+            r#"{"OPENAI_API_KEY":null}"#,
+        );
         assert!(detect_own_setup(&paths).is_empty());
         cleanup(&paths);
     }
@@ -368,13 +379,20 @@ mod tests {
         );
         assert_eq!(
             reasons(&paths),
-            [("claude", OwnSetupReason::SignedIn, Some("me@example.org".to_owned()))]
+            [(
+                "claude",
+                OwnSetupReason::SignedIn,
+                Some("me@example.org".to_owned())
+            )]
         );
         cleanup(&paths);
 
         let paths = temp_paths("claude-credentials");
         write(&paths.claude_dir.join(".credentials.json"), "{}");
-        assert_eq!(reasons(&paths), [("claude", OwnSetupReason::SignedIn, None)]);
+        assert_eq!(
+            reasons(&paths),
+            [("claude", OwnSetupReason::SignedIn, None)]
+        );
         cleanup(&paths);
     }
 
@@ -389,7 +407,10 @@ mod tests {
             reasons(&paths),
             [("claude", OwnSetupReason::CustomProvider, None)]
         );
-        write(&paths.claude_dir.join("settings.json"), r#"{"apiKeyHelper":"~/key.sh"}"#);
+        write(
+            &paths.claude_dir.join("settings.json"),
+            r#"{"apiKeyHelper":"~/key.sh"}"#,
+        );
         assert_eq!(reasons(&paths), [("claude", OwnSetupReason::ApiKey, None)]);
         write(
             &paths.claude_dir.join("settings.json"),
@@ -437,9 +458,16 @@ mod tests {
         );
         assert_eq!(
             reasons(&paths),
-            [("codex", OwnSetupReason::SignedIn, Some("me@example.org".to_owned()))]
+            [(
+                "codex",
+                OwnSetupReason::SignedIn,
+                Some("me@example.org".to_owned())
+            )]
         );
-        write(&paths.codex_dir.join("auth.json"), r#"{"OPENAI_API_KEY":"sk-mine"}"#);
+        write(
+            &paths.codex_dir.join("auth.json"),
+            r#"{"OPENAI_API_KEY":"sk-mine"}"#,
+        );
         assert_eq!(reasons(&paths), [("codex", OwnSetupReason::ApiKey, None)]);
         cleanup(&paths);
     }
@@ -456,7 +484,10 @@ mod tests {
             [("codex", OwnSetupReason::CustomProvider, None)]
         );
         // A provider name with no table behind it is Codex's built-in one.
-        write(&paths.codex_dir.join("config.toml"), "model_provider = \"openai\"\n");
+        write(
+            &paths.codex_dir.join("config.toml"),
+            "model_provider = \"openai\"\n",
+        );
         assert!(detect_own_setup(&paths).is_empty());
 
         // Taken over: the live file is ours, the backup had nothing.

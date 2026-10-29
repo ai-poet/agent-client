@@ -18,7 +18,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sub2api::pay::{OrderKind, OrderStatus, PayClient, PayConfig, PayFlow, PayOrder, SubscriptionPlan};
+use sub2api::pay::{
+    OrderKind, OrderStatus, PayClient, PayConfig, PayFlow, PayOrder, SubscriptionPlan,
+};
 use sub2api::promotion;
 
 use crate::ui::ActivationExt as _;
@@ -411,11 +413,10 @@ impl Waku {
                     }
                     // The plan the user picked is gone or changed: say so,
                     // reload the list, and put the sheet away.
-                    let stale_plan = this
-                        .cloud_pay
-                        .as_ref()
-                        .is_some_and(|state| state.epoch == epoch && state.intent.plan().is_some())
-                        && sub2api::pay::error_code(error)
+                    let stale_plan =
+                        this.cloud_pay.as_ref().is_some_and(|state| {
+                            state.epoch == epoch && state.intent.plan().is_some()
+                        }) && sub2api::pay::error_code(error)
                             .is_some_and(|code| STALE_PLAN_CODES.contains(&code));
                     if stale_plan {
                         this.show_toast(format!("{error:#}"));
@@ -481,21 +482,16 @@ impl Waku {
             let started = Instant::now();
             let mut tick = 0u64;
             loop {
-                cx.background_executor()
-                    .timer(Duration::from_secs(1))
-                    .await;
+                cx.background_executor().timer(Duration::from_secs(1)).await;
                 tick += 1;
 
                 // The countdown redraw; also verifies the modal still shows
                 // this very order.
                 let live = this
                     .update(cx, |this, cx| {
-                        let live = this
-                            .cloud_pay
-                            .as_ref()
-                            .is_some_and(|state| {
-                                state.epoch == epoch && state.stage == PayStage::Paying
-                            });
+                        let live = this.cloud_pay.as_ref().is_some_and(|state| {
+                            state.epoch == epoch && state.stage == PayStage::Paying
+                        });
                         if live {
                             cx.notify();
                         }
@@ -510,10 +506,8 @@ impl Waku {
                 }
                 if started.elapsed() > ORDER_POLL_TIMEOUT {
                     let _ = this.update(cx, |this, cx| {
-                        if let Some(state) = this
-                            .cloud_pay
-                            .as_mut()
-                            .filter(|state| state.epoch == epoch)
+                        if let Some(state) =
+                            this.cloud_pay.as_mut().filter(|state| state.epoch == epoch)
                         {
                             state.stage = PayStage::Result;
                             state.error = Some(tr!("pay.polling_timed_out"));
@@ -532,7 +526,9 @@ impl Waku {
                     .await;
 
                 let finished = this
-                    .update(cx, |this, cx| this.cloud_pay_apply_status(epoch, polled, cx))
+                    .update(cx, |this, cx| {
+                        this.cloud_pay_apply_status(epoch, polled, cx)
+                    })
                     .unwrap_or(true);
                 if finished {
                     return;
@@ -667,10 +663,7 @@ impl Waku {
                     return;
                 }
                 let finished = {
-                    let Some(state) = this
-                        .cloud_pay
-                        .as_mut()
-                        .filter(|state| state.epoch == epoch)
+                    let Some(state) = this.cloud_pay.as_mut().filter(|state| state.epoch == epoch)
                     else {
                         return;
                     };
@@ -967,7 +960,8 @@ impl Waku {
                 .map_or(0.0, |payment_type| config.fee_rate(payment_type));
             body = body.child(plan_summary(plan, self.tx(&plan.name), fee_rate, theme));
         } else {
-            body = body.child(self.render_top_up_amount(config, selected_type.as_deref(), theme, cx));
+            body =
+                body.child(self.render_top_up_amount(config, selected_type.as_deref(), theme, cx));
         }
         body = self.render_pay_methods(body, config, selected_type.as_deref(), theme, chinese, cx);
 
@@ -1049,7 +1043,10 @@ impl Waku {
             None => tr!("pay.stablecoin_network_unknown"),
         };
         let points = [
-            (tr!("pay.stablecoin_direct_label"), tr!("pay.stablecoin_direct", token = token)),
+            (
+                tr!("pay.stablecoin_direct_label"),
+                tr!("pay.stablecoin_direct", token = token),
+            ),
             (tr!("pay.stablecoin_network_label"), network_text),
         ];
 
@@ -1215,13 +1212,21 @@ impl Waku {
                     .px(px(12.0))
                     .rounded_full()
                     .border_1()
-                    .border_color(if selected { theme.accent } else { theme.border_strong })
+                    .border_color(if selected {
+                        theme.accent
+                    } else {
+                        theme.border_strong
+                    })
                     .when(selected, |chip| chip.bg(theme.overlay))
                     .flex()
                     .items_center()
                     .cursor_default()
                     .text_size(sp(12.0))
-                    .text_color(if selected { theme.text } else { theme.text_secondary })
+                    .text_color(if selected {
+                        theme.text
+                    } else {
+                        theme.text_secondary
+                    })
                     .child(format!("${}", promotion::format_amount(value)))
                     .when_some(chip_bonus, |chip, bonus| {
                         chip.child(
@@ -1248,9 +1253,9 @@ impl Waku {
                     })),
             );
         }
-        amount_section = amount_section.child(chips).child(
-            TextField::new("pay-amount-field", state.amount.clone()).w_full(),
-        );
+        amount_section = amount_section
+            .child(chips)
+            .child(TextField::new("pay-amount-field", state.amount.clone()).w_full());
 
         // "Top up $Z more to reach $T and get $B", under the field as on the
         // web page.
@@ -1344,7 +1349,9 @@ impl Waku {
             );
         }
         if let Some(amount) = parsed_amount {
-            let base = config.balance_credit_cny_per_usd.map_or(amount, |rate| amount * rate);
+            let base = config
+                .balance_credit_cny_per_usd
+                .map_or(amount, |rate| amount * rate);
             let estimated = base * (1.0 + fee_rate / 100.0);
             let formatted = if config.balance_credit_cny_per_usd.is_some() {
                 format!("\u{00a5}{estimated:.2}")
@@ -1404,13 +1411,21 @@ impl Waku {
                     .px(px(13.0))
                     .rounded_full()
                     .border_1()
-                    .border_color(if selected { theme.accent } else { theme.border_strong })
+                    .border_color(if selected {
+                        theme.accent
+                    } else {
+                        theme.border_strong
+                    })
                     .when(selected, |chip| chip.bg(theme.overlay))
                     .flex()
                     .items_center()
                     .cursor_default()
                     .text_size(sp(12.0))
-                    .text_color(if selected { theme.text } else { theme.text_secondary })
+                    .text_color(if selected {
+                        theme.text
+                    } else {
+                        theme.text_secondary
+                    })
                     .child(label)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(state) = this.cloud_pay.as_mut() {
@@ -1559,7 +1574,10 @@ impl Waku {
         let Some(order) = state.order.as_ref() else {
             return body;
         };
-        let status = state.order_status.clone().unwrap_or_else(|| OrderStatus::seed(order));
+        let status = state
+            .order_status
+            .clone()
+            .unwrap_or_else(|| OrderStatus::seed(order));
         let plan = state.intent.plan();
         let (title, message, tone) = describe_order_status(&status, plan.is_some());
         let tone_color = match tone {
@@ -1644,17 +1662,12 @@ impl Waku {
         match sub2api::pay::resolve_flow(order) {
             PayFlow::Qr => {
                 let label = sub2api::pay::payment_label(&order.payment_type, chinese);
-                let mut qr_card = div()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(px(10.0))
-                    .child(
-                        div()
-                            .text_size(sp(12.0))
-                            .text_color(theme.text_secondary)
-                            .child(tr!("pay.scan_with", method = label)),
-                    );
+                let mut qr_card = div().flex().flex_col().items_center().gap(px(10.0)).child(
+                    div()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("pay.scan_with", method = label)),
+                );
                 qr_card = qr_card.child(match state.qr.clone() {
                     Some(matrix) => qr_element(matrix).into_any_element(),
                     None => div()
@@ -1815,7 +1828,8 @@ impl Waku {
             return body;
         };
         if let Some(status) = state.order_status.as_ref() {
-            let (title, message, tone) = describe_order_status(status, state.intent.plan().is_some());
+            let (title, message, tone) =
+                describe_order_status(status, state.intent.plan().is_some());
             let tone_color = match tone {
                 StatusTone::Success => theme.success,
                 StatusTone::Warning => theme.warning,
@@ -2275,11 +2289,8 @@ fn settled_toast(order: Option<&PayOrder>) -> String {
 /// Encode `data` into a QR bit matrix. `None` when the payload cannot fit,
 /// which for payment URLs it always can.
 fn qr_matrix(data: &str) -> Option<QrMatrix> {
-    let code = qrcode::QrCode::with_error_correction_level(
-        data.as_bytes(),
-        qrcode::EcLevel::M,
-    )
-    .ok()?;
+    let code =
+        qrcode::QrCode::with_error_correction_level(data.as_bytes(), qrcode::EcLevel::M).ok()?;
     let width = code.width();
     let dark: Vec<bool> = code
         .to_colors()
@@ -2366,7 +2377,11 @@ mod tests {
         };
         assert_eq!(
             settled_toast(Some(&with_bonus)),
-            tr!("pay.success_toast_bonus", total = "$110.00", bonus = "$10.00")
+            tr!(
+                "pay.success_toast_bonus",
+                total = "$110.00",
+                bonus = "$10.00"
+            )
         );
         assert_ne!(settled_toast(Some(&with_bonus)), tr!("pay.success_toast"));
     }

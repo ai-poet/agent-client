@@ -141,9 +141,13 @@ impl Waku {
             provider: session.provider,
             options: self.session_options(session),
         };
-        self.runtime_prewarms
-            .in_flight
-            .insert(session_id, PrewarmInFlight { shape, waiter: None });
+        self.runtime_prewarms.in_flight.insert(
+            session_id,
+            PrewarmInFlight {
+                shape,
+                waiter: None,
+            },
+        );
         cx.spawn(async move |waku, cx| {
             let prepared = cx
                 .background_executor()
@@ -158,7 +162,11 @@ impl Waku {
 
     /// Park a landed warm start, or hand it to the submission waiting for it.
     /// Never notifies: a warm process is not a change the user can see.
-    fn finish_runtime_prewarm(&mut self, session_id: Uuid, prepared: anyhow::Result<PreparedDriver>) {
+    fn finish_runtime_prewarm(
+        &mut self,
+        session_id: Uuid,
+        prepared: anyhow::Result<PreparedDriver>,
+    ) {
         let Some(in_flight) = self.runtime_prewarms.in_flight.remove(&session_id) else {
             // The start was abandoned while it ran.
             if let Ok(prepared) = prepared {
@@ -384,12 +392,18 @@ mod tests {
         // Anchored on the definition's indentation so this test does not match
         // its own string literals.
         let start = source
-            .find("
-    fn finish_runtime_prewarm(")
+            .find(
+                "
+    fn finish_runtime_prewarm(",
+            )
             .expect("landing fn");
         let body = &source[start + 1..];
-        let end = body.find("
-    /// Whether a process warmed").unwrap_or(body.len());
+        let end = body
+            .find(
+                "
+    /// Whether a process warmed",
+            )
+            .unwrap_or(body.len());
         let body = &body[..end];
 
         for forbidden in ["install_prepared_driver", "runtimes.insert", "cx.notify"] {

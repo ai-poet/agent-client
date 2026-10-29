@@ -143,12 +143,8 @@ pub fn llama_cpp() -> OpenAiCompatProvider {
 pub fn custom_openai_with_url(base_url: impl Into<String>) -> OpenAiCompatProvider {
     let key = std::env::var("CUSTOM_OPENAI_API_KEY").unwrap_or_default();
 
-    OpenAiCompatProvider::new(
-        "custom-openai",
-        "Custom OpenAI-Compatible",
-        base_url.into(),
-    )
-    .with_api_key(key)
+    OpenAiCompatProvider::new("custom-openai", "Custom OpenAI-Compatible", base_url.into())
+        .with_api_key(key)
 }
 
 /// Custom OpenAI-compatible provider supplied by the user.
@@ -556,16 +552,12 @@ pub fn opencode_zen() -> OpenAiCompatProvider {
 /// Reads `CROF_API_KEY` for authentication.
 pub fn crof() -> OpenAiCompatProvider {
     let key = std::env::var("CROF_API_KEY").unwrap_or_default();
-    OpenAiCompatProvider::new(
-        ProviderId::CROF,
-        "Crof.ai",
-        "https://api.crof.ai/v1",
-    )
-    .with_api_key(key)
-    .with_quirks(ProviderQuirks {
-        include_usage_in_stream: true,
-        ..Default::default()
-    })
+    OpenAiCompatProvider::new(ProviderId::CROF, "Crof.ai", "https://api.crof.ai/v1")
+        .with_api_key(key)
+        .with_quirks(ProviderQuirks {
+            include_usage_in_stream: true,
+            ..Default::default()
+        })
 }
 
 /// Synthetic.dev — OpenAI-compatible endpoint with curated model selection.

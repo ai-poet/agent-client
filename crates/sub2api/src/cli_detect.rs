@@ -114,18 +114,30 @@ pub fn version_manager_dirs(
             }
         }
         push_existing(&mut dirs, env_dir("PNPM_HOME"));
-        push_existing(&mut dirs, env_dir("VOLTA_HOME").map(|volta| volta.join("bin")));
+        push_existing(
+            &mut dirs,
+            env_dir("VOLTA_HOME").map(|volta| volta.join("bin")),
+        );
         if let Some(local) = env_dir("LOCALAPPDATA") {
             push_existing(&mut dirs, Some(local.join("Volta").join("bin")));
             push_existing(&mut dirs, Some(local.join("pnpm")));
-            for install in version_subdirs(&local.join("fnm").join("node-versions"), Some("installation")) {
+            for install in version_subdirs(
+                &local.join("fnm").join("node-versions"),
+                Some("installation"),
+            ) {
                 push_existing(&mut dirs, Some(install));
             }
             // Official standalone installers that do not use npm at all.
             push_existing(&mut dirs, Some(local.join("Programs").join("claude")));
             push_existing(
                 &mut dirs,
-                Some(local.join("Programs").join("OpenAI").join("Codex").join("bin")),
+                Some(
+                    local
+                        .join("Programs")
+                        .join("OpenAI")
+                        .join("Codex")
+                        .join("bin"),
+                ),
             );
             push_existing(&mut dirs, Some(local.join("Programs").join("nodejs")));
         }
@@ -788,10 +800,8 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "sub2api-cli-detect-{name}-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("sub2api-cli-detect-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("scratch dir");
         dir
@@ -864,7 +874,10 @@ mod tests {
             std::fs::create_dir_all(home.join(".npm-global/bin")).unwrap();
             let dirs = version_manager_dirs(Some(&home), &env);
             let position = |needle: &Path| dirs.iter().position(|dir| dir == needle);
-            assert!(position(&new) < position(&old), "newest nvm version first: {dirs:?}");
+            assert!(
+                position(&new) < position(&old),
+                "newest nvm version first: {dirs:?}"
+            );
             assert!(position(&old) < position(&home.join(".npm-global/bin")));
             assert!(dirs.contains(&custom_pnpm));
             assert!(!dirs.iter().any(|dir| dir.ends_with(".volta/bin")));

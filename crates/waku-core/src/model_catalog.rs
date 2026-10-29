@@ -52,7 +52,10 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         })
         .collect(),
         ProviderKind::Claude => vec![
-            claude_long_context(claude_ultracode_model("claude-fable-5-1", "Claude Fable 5.1")),
+            claude_long_context(claude_ultracode_model(
+                "claude-fable-5-1",
+                "Claude Fable 5.1",
+            )),
             claude_long_context(claude_ultracode_model("claude-fable-5", "Claude Fable 5")),
             claude_long_context(claude_ultracode_model("claude-opus-5-5", "Claude Opus 5.5")),
             claude_long_context(claude_ultracode_model("claude-opus-5", "Claude Opus 5")),
@@ -1391,10 +1394,11 @@ mod tests {
         assert_eq!(defaults, ["gpt-5.6-sol"]);
         // Both catalogs, the daemon's and the client's pre-discovery one,
         // offer the same list.
-        let client: Vec<String> = waku_protocol::model_catalog::fallback_models(ProviderKind::Codex)
-            .into_iter()
-            .map(|model| model.id)
-            .collect();
+        let client: Vec<String> =
+            waku_protocol::model_catalog::fallback_models(ProviderKind::Codex)
+                .into_iter()
+                .map(|model| model.id)
+                .collect();
         assert_eq!(client, ids);
     }
 
@@ -1471,7 +1475,12 @@ mod tests {
         );
         assert!(efforts("claude-haiku-4-5").is_empty());
         assert_eq!(models[0].id, "claude-fable-5-1");
-        assert!(models[0].context_windows.iter().any(|option| option.id == "1m"));
+        assert!(
+            models[0]
+                .context_windows
+                .iter()
+                .any(|option| option.id == "1m")
+        );
     }
 
     /// The built-in agent starts on the newest Sonnet, in the daemon's list
@@ -1485,9 +1494,14 @@ mod tests {
                 .map(|model| model.id)
                 .collect()
         };
-        assert_eq!(default_of(fallback_models(ProviderKind::Native)), ["claude-sonnet-5-5"]);
         assert_eq!(
-            default_of(waku_protocol::model_catalog::fallback_models(ProviderKind::Native)),
+            default_of(fallback_models(ProviderKind::Native)),
+            ["claude-sonnet-5-5"]
+        );
+        assert_eq!(
+            default_of(waku_protocol::model_catalog::fallback_models(
+                ProviderKind::Native
+            )),
             ["claude-sonnet-5-5"]
         );
     }
@@ -1525,13 +1539,19 @@ mod tests {
         // Neither an alias nor its resolved model is duplicated.
         assert!(!ids.contains(&"claude-opus-5"));
         assert!(!ids.contains(&"claude-sonnet-5"));
-        assert_eq!(ids.iter().filter(|id| **id == "claude-fable-5-1").count(), 1);
+        assert_eq!(
+            ids.iter().filter(|id| **id == "claude-fable-5-1").count(),
+            1
+        );
     }
 
     #[test]
     fn curated_fallback_is_claude_only_and_keeps_an_empty_catalog_empty() {
         let grok = vec![ProviderModel::new("grok-4.6", "Grok 4.6")];
-        assert_eq!(with_curated_fallback(ProviderKind::Grok, grok.clone()), grok);
+        assert_eq!(
+            with_curated_fallback(ProviderKind::Grok, grok.clone()),
+            grok
+        );
         assert!(with_curated_fallback(ProviderKind::Claude, Vec::new()).is_empty());
 
         let cached = vec![ProviderModel::new("claude-sonnet-5", "Sonnet").default()];

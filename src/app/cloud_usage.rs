@@ -508,8 +508,14 @@ impl Waku {
                 .justify_center()
                 .cursor_default()
                 .text_size(sp(13.0))
-                .text_color(if enabled { theme.text_secondary } else { theme.text_ghost })
-                .when(enabled, |button| button.hover(|style| style.bg(theme.overlay)))
+                .text_color(if enabled {
+                    theme.text_secondary
+                } else {
+                    theme.text_ghost
+                })
+                .when(enabled, |button| {
+                    button.hover(|style| style.bg(theme.overlay))
+                })
                 .child(label)
         };
         div()
@@ -577,7 +583,11 @@ fn usage_log_card(
     if let Some(group_name) = group_name.filter(|name| !name.is_empty()) {
         badges = badges.child(usage_badge(theme, group_name, true));
     }
-    if let Some(request_type) = log.request_type.as_deref().filter(|value| !value.is_empty()) {
+    if let Some(request_type) = log
+        .request_type
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
         badges = badges.child(usage_badge(theme, request_type.to_owned(), false));
     } else if log.stream == Some(true) {
         badges = badges.child(usage_badge(theme, "stream".to_owned(), false));
@@ -698,7 +708,11 @@ fn usage_badge(theme: Theme, label: String, accent: bool) -> Div {
         .rounded(px(5.0))
         .bg(theme.overlay)
         .text_size(sp(10.5))
-        .text_color(if accent { theme.accent } else { theme.text_secondary })
+        .text_color(if accent {
+            theme.accent
+        } else {
+            theme.text_secondary
+        })
         .child(label)
 }
 

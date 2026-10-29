@@ -48,7 +48,10 @@ impl Waku {
         }
         state.loading.set(true);
         cx.spawn(async move |this, cx| {
-            let enabled = cx.background_executor().spawn(async move { read_enabled() }).await;
+            let enabled = cx
+                .background_executor()
+                .spawn(async move { read_enabled() })
+                .await;
             let _ = this.update(cx, |this, cx| {
                 let state = &mut this.agent_page.trajectory;
                 state.loading.set(false);
@@ -86,13 +89,20 @@ impl Waku {
         .detach();
     }
 
-    pub(super) fn render_agent_trajectory_section(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_agent_trajectory_section(
+        &self,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
         self.load_agent_trajectory_setting(cx);
         let state = &self.agent_page.trajectory;
         let enabled = state.enabled.unwrap_or(true);
         let busy = state.saving || state.enabled.is_none();
         super::agent_page::section_card(theme)
-            .child(super::agent_page::section_title(theme, tr!("trajectory.settings_title")))
+            .child(super::agent_page::section_title(
+                theme,
+                tr!("trajectory.settings_title"),
+            ))
             .child(super::agent_page::setting_row(
                 theme,
                 tr!("trajectory.settings_title"),

@@ -31,7 +31,10 @@ pub fn take_over(pi_agent_dir: &Path, target: &RouteTarget) -> Result<()> {
 
     let mut entry = Map::new();
     entry.insert("name".to_owned(), json!(brand::DISPLAY_NAME));
-    entry.insert("baseUrl".to_owned(), json!(openai_base_url(&target.base_url)));
+    entry.insert(
+        "baseUrl".to_owned(),
+        json!(openai_base_url(&target.base_url)),
+    );
     entry.insert("api".to_owned(), json!("openai-completions"));
     entry.insert("apiKey".to_owned(), json!(target.api_key));
     if !target.models.is_empty() {
@@ -113,12 +116,15 @@ mod tests {
         )
         .unwrap();
         std::fs::write(dir.join("auth.json"), r#"{"pi":"oauth-material"}"#).unwrap();
-        std::fs::write(dir.join("settings.json"), r#"{"defaultProvider":"anthropic"}"#).unwrap();
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"defaultProvider":"anthropic"}"#,
+        )
+        .unwrap();
 
         take_over(&dir, &target(&["gpt-a", "gpt-b"])).expect("take over");
         let live: Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.join(MODELS_FILE)).unwrap())
-                .unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join(MODELS_FILE)).unwrap()).unwrap();
         assert_eq!(live["providers"]["anthropic"]["apiKey"], "user-key");
         let ours = &live["providers"][PROVIDER_ID];
         assert_eq!(ours["baseUrl"], "https://gw.example.org/v1");
@@ -127,8 +133,7 @@ mod tests {
 
         remove(&dir).expect("remove");
         let after: Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.join(MODELS_FILE)).unwrap())
-                .unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join(MODELS_FILE)).unwrap()).unwrap();
         assert!(after["providers"].get(PROVIDER_ID).is_none());
         assert_eq!(after["providers"]["anthropic"]["apiKey"], "user-key");
 
@@ -150,8 +155,7 @@ mod tests {
         remove(&dir).expect("remove before create is fine");
         take_over(&dir, &target(&[])).expect("take over");
         let live: Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.join(MODELS_FILE)).unwrap())
-                .unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join(MODELS_FILE)).unwrap()).unwrap();
         assert!(live["providers"][PROVIDER_ID].get("models").is_none());
         remove(&dir).expect("remove");
         remove(&dir).expect("remove again");

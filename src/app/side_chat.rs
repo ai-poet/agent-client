@@ -13,7 +13,9 @@
 
 use std::cell::RefCell;
 
-use waku_client::side_chat::{DIGEST_BUDGET, SIDE_SYSTEM, SideExchange, build_digest, side_messages};
+use waku_client::side_chat::{
+    DIGEST_BUDGET, SIDE_SYSTEM, SideExchange, build_digest, side_messages,
+};
 
 use crate::input::{InputEvent, TextInput};
 
@@ -84,7 +86,10 @@ impl Waku {
 
     fn side_chat_open(&self) -> bool {
         self.right_panel_visible
-            && matches!(self.active_right_panel_surface(), Some(RightPanelSurface::SideChat))
+            && matches!(
+                self.active_right_panel_surface(),
+                Some(RightPanelSurface::SideChat)
+            )
     }
 
     /// ⌘;: open the side chat with the caret in it, or, when it already has
@@ -118,7 +123,11 @@ impl Waku {
     }
 
     /// Put away the surface when it is the one showing.
-    fn close_active_right_panel_surface_if(&mut self, surface: RightPanelSurface, cx: &mut Context<Self>) {
+    fn close_active_right_panel_surface_if(
+        &mut self,
+        surface: RightPanelSurface,
+        cx: &mut Context<Self>,
+    ) {
         if self.active_right_panel_surface() == Some(&surface) {
             self.right_panel_visible = false;
             cx.notify();
@@ -149,7 +158,11 @@ impl Waku {
 
     /// `/btw <question>` in the composer: ask it on the side, and leave the
     /// task alone. A bare `/btw` opens the side chat.
-    pub(super) fn execute_side_chat_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+    pub(super) fn execute_side_chat_command(
+        &mut self,
+        prompt: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(question) = waku_client::side_chat::btw_question(prompt) else {
             return false;
         };
@@ -162,7 +175,11 @@ impl Waku {
         true
     }
 
-    fn side_chat_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<TextInput> {
+    fn side_chat_input(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<TextInput> {
         if let Some(input) = &self.side_chat.input {
             return input.clone();
         }
@@ -173,17 +190,20 @@ impl Waku {
                 .auto_height()
                 .placeholder(tr!("side_chat.placeholder"))
         });
-        cx.subscribe(&input, |this: &mut Self, input, event: &InputEvent, cx| match event {
-            InputEvent::Submit(text) => {
-                let question = text.trim().to_owned();
-                if !question.is_empty() {
-                    input.update(cx, |input, cx| input.clear(cx));
-                    this.ask_side_question(question, cx);
+        cx.subscribe(
+            &input,
+            |this: &mut Self, input, event: &InputEvent, cx| match event {
+                InputEvent::Submit(text) => {
+                    let question = text.trim().to_owned();
+                    if !question.is_empty() {
+                        input.update(cx, |input, cx| input.clear(cx));
+                        this.ask_side_question(question, cx);
+                    }
                 }
-            }
-            InputEvent::Edited => cx.notify(),
-            _ => {}
-        })
+                InputEvent::Edited => cx.notify(),
+                _ => {}
+            },
+        )
         .detach();
         self.side_chat.input = Some(input.clone());
         input
@@ -196,7 +216,10 @@ impl Waku {
             return;
         };
         let session_id = session.id;
-        let Some(cwd) = self.workspace_path_for_session(session).map(Path::to_path_buf) else {
+        let Some(cwd) = self
+            .workspace_path_for_session(session)
+            .map(Path::to_path_buf)
+        else {
             return;
         };
         let model = self.side_chat_model(session);
@@ -250,7 +273,12 @@ impl Waku {
                 Ok(waku_client::WorkspaceResult::SideChatStarted { job }) => job,
                 Ok(_) => {
                     let _ = waku.update(cx, |this, cx| {
-                        this.finish_side_answer(session_id, generation, Some("unexpected answer".into()), cx)
+                        this.finish_side_answer(
+                            session_id,
+                            generation,
+                            Some("unexpected answer".into()),
+                            cx,
+                        )
                     });
                     return;
                 }
@@ -270,7 +298,8 @@ impl Waku {
                 .flatten()
                 .is_some();
             if !current {
-                let _ = workspace_client.request(waku_client::WorkspaceOperation::SideChatCancel { job });
+                let _ = workspace_client
+                    .request(waku_client::WorkspaceOperation::SideChatCancel { job });
                 return;
             }
             let mut from = 0;
@@ -382,7 +411,11 @@ impl Waku {
         cx.notify();
     }
 
-    pub(super) fn render_side_chat_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_side_chat_surface(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let input = self.side_chat_input(window, cx);
         if std::mem::take(&mut self.side_chat.focus_pending) {
@@ -411,7 +444,11 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(icon("icons/corner-down-right.svg", 13.0, theme.text_secondary))
+                    .child(icon(
+                        "icons/corner-down-right.svg",
+                        13.0,
+                        theme.text_secondary,
+                    ))
                     .child(
                         div()
                             .flex_1()
@@ -442,13 +479,21 @@ impl Waku {
 
         let palette = MarkdownPalette::from_theme(&theme);
         let metrics = MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size);
-        let mut body = div().flex().flex_col().gap(px(14.0)).px(px(14.0)).py(px(12.0));
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap(px(14.0))
+            .px(px(14.0))
+            .py(px(12.0));
         match thread {
             Some(thread) if !thread.exchanges.is_empty() => {
                 for (index, exchange) in thread.exchanges.iter().enumerate() {
                     let answer = {
                         let mut view = exchange.markdown.borrow_mut();
-                        view.set_text(&exchange.answer, exchange.status == ExchangeStatus::Streaming);
+                        view.set_text(
+                            &exchange.answer,
+                            exchange.status == ExchangeStatus::Streaming,
+                        );
                         let ctx = MarkdownCtx::new(
                             format!("side-chat-{}-{index}", session_id.unwrap_or_default()),
                             &palette,
@@ -462,7 +507,9 @@ impl Waku {
                         ExchangeStatus::Streaming if exchange.answer.is_empty() => {
                             Some((tr!("side_chat.thinking"), theme.text_tertiary))
                         }
-                        ExchangeStatus::Stopped => Some((tr!("side_chat.stopped"), theme.text_tertiary)),
+                        ExchangeStatus::Stopped => {
+                            Some((tr!("side_chat.stopped"), theme.text_tertiary))
+                        }
                         ExchangeStatus::Failed(error) => {
                             Some((tr!("side_chat.failed", error = error.clone()), theme.danger))
                         }
@@ -580,19 +627,15 @@ impl Waku {
             .bg(theme.surface)
             .child(header)
             .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .relative()
-                    .child(
-                        div()
-                            .id("side-chat-body")
-                            .size_full()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.side_chat.scroll)
-                            .child(md::render::frame_reset(self.side_chat.selection.clone()))
-                            .child(body),
-                    ),
+                div().flex_1().min_h_0().relative().child(
+                    div()
+                        .id("side-chat-body")
+                        .size_full()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.side_chat.scroll)
+                        .child(md::render::frame_reset(self.side_chat.selection.clone()))
+                        .child(body),
+                ),
             )
             .child(selection_input)
             .child(footer)

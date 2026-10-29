@@ -269,9 +269,11 @@ webview2-com = "0.38"
 # hands straight to `SetRootVisualTarget` with no ABI bridging. `windows-sys`
 # stays for the plain Win32 calls that do not need COM.
 windows = { version = "0.61", features = [
+    "Wdk_System_SystemServices",
     "Win32_Foundation",
     "Win32_Graphics_DirectComposition",
     "Win32_System_Com",
+    "Win32_System_SystemInformation",
     "Win32_UI_WindowsAndMessaging",
 ] }
 windows-core = "0.61"

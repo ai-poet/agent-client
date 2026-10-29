@@ -367,7 +367,10 @@ fn call_generate_image(arguments: &JsonValue) -> anyhow::Result<JsonValue> {
         quality: text("quality"),
         background: text("background"),
         output_format: text("output_format"),
-        count: arguments.get("n").and_then(JsonValue::as_u64).map(|n| n as u8),
+        count: arguments
+            .get("n")
+            .and_then(JsonValue::as_u64)
+            .map(|n| n as u8),
         output_dir: text("output_dir").map(std::path::PathBuf::from),
     };
     let images = crate::js_repl_image::generate(&gateway, &request)?;
@@ -382,7 +385,10 @@ fn call_generate_image(arguments: &JsonValue) -> anyhow::Result<JsonValue> {
         if images.len() == 1 { "" } else { "s" },
         paths.join(", ")
     );
-    if let Some(revised) = images.iter().find_map(|image| image.revised_prompt.as_deref()) {
+    if let Some(revised) = images
+        .iter()
+        .find_map(|image| image.revised_prompt.as_deref())
+    {
         summary.push_str(&format!(" The service rewrote the prompt as: {revised}"));
     }
 
@@ -1118,7 +1124,10 @@ mod tests {
         assert!(tool_offered_by(Some("generate_image"), "generate_image"));
         assert!(!tool_offered_by(Some("generate_image"), "js"));
         assert!(!tool_offered_by(Some("generate_image"), "js_reset"));
-        assert!(tool_offered_by(Some("js, generate_image"), "generate_image"));
+        assert!(tool_offered_by(
+            Some("js, generate_image"),
+            "generate_image"
+        ));
     }
 
     #[test]

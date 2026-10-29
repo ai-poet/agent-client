@@ -686,7 +686,11 @@ impl DriverControl for ClaudeDriver {
         // have changed.
         let plan = starts_in_plan_mode(options.mode, options.interaction_mode);
         if plan != self.plan_mode.load(Ordering::SeqCst) {
-            if self.commands.send(CommandMessage::SetPlanMode(plan)).is_err() {
+            if self
+                .commands
+                .send(CommandMessage::SetPlanMode(plan))
+                .is_err()
+            {
                 return false;
             }
             self.plan_mode.store(plan, Ordering::SeqCst);
@@ -1503,10 +1507,12 @@ fn handle_message(
                                 false,
                                 false,
                             )
-                            .with_subagent(crate::model::SubagentCall::from_tool(
-                                &wire_title,
-                                block.get("input"),
-                            )),
+                            .with_subagent(
+                                crate::model::SubagentCall::from_tool(
+                                    &wire_title,
+                                    block.get("input"),
+                                ),
+                            ),
                         ));
                     }
                     _ => {}
@@ -2474,7 +2480,11 @@ mod tests {
         assert_eq!(entries[2].id, "toolu-sub-1");
         assert!(done.complete);
         assert_eq!(done.output.as_deref(), Some("hits"));
-        assert!(done.arguments.as_deref().is_some_and(|args| args.contains("rg overlay src")));
+        assert!(
+            done.arguments
+                .as_deref()
+                .is_some_and(|args| args.contains("rg overlay src"))
+        );
 
         // The settle notification's summary is the final report, kept for
         // the clients that do not show the record.
@@ -2524,7 +2534,9 @@ mod tests {
             panic!("the call's row first");
         };
         assert_eq!(
-            row.subagent.as_ref().and_then(|call| call.agent_type.as_deref()),
+            row.subagent
+                .as_ref()
+                .and_then(|call| call.agent_type.as_deref()),
             Some("Explore")
         );
         let DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)) = &seen[1] else {
@@ -2658,12 +2670,24 @@ mod tests {
         assert_eq!(permission_mode(RuntimeMode::Ask), "default");
         assert_eq!(permission_mode(RuntimeMode::AutoAcceptEdits), "acceptEdits");
         assert_eq!(permission_mode(RuntimeMode::Auto), "auto");
-        assert_eq!(permission_mode(RuntimeMode::FullAccess), "bypassPermissions");
+        assert_eq!(
+            permission_mode(RuntimeMode::FullAccess),
+            "bypassPermissions"
+        );
         // The legacy "plan" access mode plans on top of asking.
         assert_eq!(permission_mode(RuntimeMode::Plan), "default");
-        assert!(starts_in_plan_mode(RuntimeMode::Plan, InteractionMode::Build));
-        assert!(starts_in_plan_mode(RuntimeMode::Auto, InteractionMode::Plan));
-        assert!(!starts_in_plan_mode(RuntimeMode::Auto, InteractionMode::Build));
+        assert!(starts_in_plan_mode(
+            RuntimeMode::Plan,
+            InteractionMode::Build
+        ));
+        assert!(starts_in_plan_mode(
+            RuntimeMode::Auto,
+            InteractionMode::Plan
+        ));
+        assert!(!starts_in_plan_mode(
+            RuntimeMode::Auto,
+            InteractionMode::Build
+        ));
     }
 
     fn launch_arguments(mode: RuntimeMode) -> Vec<String> {
@@ -2681,13 +2705,20 @@ mod tests {
     #[test]
     fn a_planning_session_launches_in_its_access_mode() {
         let auto = launch_arguments(RuntimeMode::Auto);
-        assert!(auto.windows(2).any(|pair| pair == ["--permission-mode", "auto"]), "{auto:?}");
+        assert!(
+            auto.windows(2)
+                .any(|pair| pair == ["--permission-mode", "auto"]),
+            "{auto:?}"
+        );
         assert!(!auto.iter().any(|argument| argument == "plan"), "{auto:?}");
 
         // Bypass has to be allowed at launch, or the CLI cannot return to it
         // once the plan is approved.
         let full = launch_arguments(RuntimeMode::FullAccess);
-        assert!(full.iter().any(|argument| argument == "--dangerously-skip-permissions"));
+        assert!(
+            full.iter()
+                .any(|argument| argument == "--dangerously-skip-permissions")
+        );
     }
 
     #[test]
@@ -2736,11 +2767,20 @@ mod tests {
     fn toggling_plan_mode_is_applied_in_place() {
         let (driver, commands) = plan_driver(RuntimeMode::Ask, false);
         assert!(driver.apply_options(options(RuntimeMode::Ask, InteractionMode::Plan)));
-        assert!(matches!(commands.try_recv(), Ok(CommandMessage::SetPlanMode(true))));
-        assert!(matches!(commands.try_recv(), Ok(CommandMessage::Options(_))));
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(CommandMessage::SetPlanMode(true))
+        ));
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(CommandMessage::Options(_))
+        ));
 
         assert!(driver.apply_options(options(RuntimeMode::Ask, InteractionMode::Build)));
-        assert!(matches!(commands.try_recv(), Ok(CommandMessage::SetPlanMode(false))));
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(CommandMessage::SetPlanMode(false))
+        ));
 
         assert!(!driver.apply_options(options(RuntimeMode::FullAccess, InteractionMode::Build)));
     }
@@ -2755,7 +2795,10 @@ mod tests {
         let mut changed = options(RuntimeMode::Ask, InteractionMode::Build);
         changed.reasoning_effort = Some("max".to_owned());
         assert!(driver.apply_options(changed));
-        assert!(matches!(commands.try_recv(), Ok(CommandMessage::Options(_))));
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(CommandMessage::Options(_))
+        ));
     }
 
     /// After an approved plan the CLI is already building. The composer
@@ -2767,28 +2810,40 @@ mod tests {
         state.plan_mode.store(true, Ordering::SeqCst);
         let status = json!({"type": "system", "subtype": "status", "status": null, "permissionMode": "acceptEdits"});
         handle_message(&status, "s", &events, &commands, &turn, true, &mut state);
-        let followed = event_rx
-            .try_iter()
-            .any(|event| matches!(event, DriverEvent::InteractionModeUpdated(InteractionMode::Build)));
+        let followed = event_rx.try_iter().any(|event| {
+            matches!(
+                event,
+                DriverEvent::InteractionModeUpdated(InteractionMode::Build)
+            )
+        });
         assert!(followed, "the composer should leave Plan");
         assert!(!state.plan_mode.load(Ordering::SeqCst));
 
         // The same report again changes nothing and says nothing.
         handle_message(&status, "s", &events, &commands, &turn, true, &mut state);
-        assert!(!event_rx.try_iter().any(|event| matches!(event, DriverEvent::InteractionModeUpdated(_))));
+        assert!(
+            !event_rx
+                .try_iter()
+                .any(|event| matches!(event, DriverEvent::InteractionModeUpdated(_)))
+        );
 
         // The model entering plan mode on its own is followed the same way.
         let planning = json!({"type": "system", "subtype": "status", "status": null, "permissionMode": "plan"});
         handle_message(&planning, "s", &events, &commands, &turn, true, &mut state);
-        assert!(event_rx
-            .try_iter()
-            .any(|event| matches!(event, DriverEvent::InteractionModeUpdated(InteractionMode::Plan))));
+        assert!(event_rx.try_iter().any(|event| matches!(
+            event,
+            DriverEvent::InteractionModeUpdated(InteractionMode::Plan)
+        )));
 
         // And the driver compares later options against that live mode.
         let (driver, sent) = plan_driver(RuntimeMode::Ask, true);
         driver.plan_mode.store(false, Ordering::SeqCst);
         assert!(driver.apply_options(options(RuntimeMode::Ask, InteractionMode::Build)));
-        assert!(!sent.try_iter().any(|message| matches!(message, CommandMessage::SetPlanMode(_))));
+        assert!(
+            !sent
+                .try_iter()
+                .any(|message| matches!(message, CommandMessage::SetPlanMode(_)))
+        );
     }
 
     fn exit_plan_request(plan: Option<&str>) -> Value {
@@ -2820,15 +2875,26 @@ mod tests {
             true,
             &mut state,
         );
-        assert!(command_rx.try_recv().is_err(), "nothing may be answered automatically");
-        let Some(DriverEvent::Permission { title, detail, options, .. }) = event_rx
+        assert!(
+            command_rx.try_recv().is_err(),
+            "nothing may be answered automatically"
+        );
+        let Some(DriverEvent::Permission {
+            title,
+            detail,
+            options,
+            ..
+        }) = event_rx
             .try_iter()
             .find(|event| matches!(event, DriverEvent::Permission { .. }))
         else {
             panic!("the plan should be put to the user");
         };
         assert_eq!(title, tr!("plan.ready_title"));
-        assert!(detail.ends_with("1. Split the parser.\n2. Add the tests."), "{detail}");
+        assert!(
+            detail.ends_with("1. Split the parser.\n2. Add the tests."),
+            "{detail}"
+        );
         let ids: Vec<&str> = options.iter().map(|option| option.id.as_str()).collect();
         assert_eq!(ids, ["allow", KEEP_PLANNING]);
         assert!(!options[1].allow);
@@ -2837,7 +2903,15 @@ mod tests {
     #[test]
     fn a_plan_without_its_text_still_asks() {
         let (events, event_rx, commands, command_rx, turn, mut state) = harness();
-        handle_message(&exit_plan_request(None), "s", &events, &commands, &turn, false, &mut state);
+        handle_message(
+            &exit_plan_request(None),
+            "s",
+            &events,
+            &commands,
+            &turn,
+            false,
+            &mut state,
+        );
         assert!(command_rx.try_recv().is_err());
         assert!(event_rx.try_iter().any(|event| matches!(
             event,
@@ -2863,9 +2937,16 @@ mod tests {
         let edit = can_use("Edit", json!({"file_path": "/repo/src/main.rs"}));
         handle_message(&edit, "s", &events, &commands, &turn, true, &mut state);
         assert!(command_rx.try_recv().is_err());
-        assert!(event_rx.try_iter().any(|event| matches!(event, DriverEvent::Permission { .. })));
+        assert!(
+            event_rx
+                .try_iter()
+                .any(|event| matches!(event, DriverEvent::Permission { .. }))
+        );
 
-        let plan = can_use("Write", json!({"file_path": "/home/me/.claude/plans/tidy-otter.md"}));
+        let plan = can_use(
+            "Write",
+            json!({"file_path": "/home/me/.claude/plans/tidy-otter.md"}),
+        );
         handle_message(&plan, "s", &events, &commands, &turn, true, &mut state);
         assert!(matches!(
             command_rx.try_recv(),
@@ -2875,17 +2956,26 @@ mod tests {
         // Out of plan mode the access mode answers as before.
         state.plan_mode.store(false, Ordering::SeqCst);
         handle_message(&edit, "s", &events, &commands, &turn, true, &mut state);
-        assert!(matches!(command_rx.try_recv(), Ok(CommandMessage::Respond { .. })));
+        assert!(matches!(
+            command_rx.try_recv(),
+            Ok(CommandMessage::Respond { .. })
+        ));
     }
 
     #[test]
     fn only_a_markdown_file_in_a_plans_directory_is_the_plan() {
         let write = |path: &str| json!({"input": {"file_path": path}});
-        assert!(writes_the_plan_file(&write("/home/me/.claude/plans/tidy-otter.md")));
-        assert!(writes_the_plan_file(&write(r"C:\Users\me\.claude\plans\tidy-otter.md")));
+        assert!(writes_the_plan_file(&write(
+            "/home/me/.claude/plans/tidy-otter.md"
+        )));
+        assert!(writes_the_plan_file(&write(
+            r"C:\Users\me\.claude\plans\tidy-otter.md"
+        )));
         assert!(!writes_the_plan_file(&write("/repo/plans/../src/main.rs")));
         assert!(!writes_the_plan_file(&write("/repo/docs/plan.md")));
-        assert!(!writes_the_plan_file(&json!({"input": {"command": "rm -rf /"}})));
+        assert!(!writes_the_plan_file(
+            &json!({"input": {"command": "rm -rf /"}})
+        ));
     }
 
     #[test]

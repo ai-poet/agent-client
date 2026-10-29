@@ -91,7 +91,9 @@ impl Offer {
             .iter()
             .map(|model| model.trim())
             .filter(|model| !model.is_empty())
-            .filter(|model| platform == "composite" || model_family(model) == Some(platform.as_str()))
+            .filter(|model| {
+                platform == "composite" || model_family(model) == Some(platform.as_str())
+            })
             .map(|model| Offer {
                 model: model.to_owned(),
                 group_id,
@@ -329,7 +331,10 @@ pub fn has_three_step_effort(model: &str) -> bool {
             .chars()
             .take_while(|character| character.is_ascii_digit() || *character == '.')
             .collect();
-        number.trim_end_matches('.').parse::<f64>().is_ok_and(|version| version >= 4.5)
+        number
+            .trim_end_matches('.')
+            .parse::<f64>()
+            .is_ok_and(|version| version >= 4.5)
     })
 }
 
@@ -360,7 +365,9 @@ fn slot_for(family: Option<&str>, bindings: &Bindings) -> Slot {
             _ => Slot::Unbound,
         },
         Some(family) => match bindings.general {
-            Some(group) if bindings.general_platform.as_deref() == Some(family) => Slot::Bound(group),
+            Some(group) if bindings.general_platform.as_deref() == Some(family) => {
+                Slot::Bound(group)
+            }
             // The general key is Grok's; left as the account default it
             // still routes Grok the way it always has.
             None if family == "grok" => Slot::AccountDefault,
@@ -384,7 +391,10 @@ pub fn resolve(
     let listing_groups: BTreeSet<i64> = offers.iter().map(|offer| offer.group_id).collect();
     let mut by_model: BTreeMap<&str, Vec<&Offer>> = BTreeMap::new();
     for offer in offers {
-        by_model.entry(offer.model.as_str()).or_default().push(offer);
+        by_model
+            .entry(offer.model.as_str())
+            .or_default()
+            .push(offer);
     }
 
     let mut routes = BTreeMap::new();
@@ -467,7 +477,10 @@ pub fn resolve(
             continue;
         }
         // Any subscription at all, spent or not: the last resort.
-        let held = candidates.iter().filter(|offer| subscribed(offer)).min_by_key(rank);
+        let held = candidates
+            .iter()
+            .filter(|offer| subscribed(offer))
+            .min_by_key(rank);
         if let Some(offer) = usable.or(pay_as_you_go).or(held) {
             routes.insert(model.to_owned(), offer.group_id);
         }
@@ -523,10 +536,18 @@ mod tests {
             ..bindings()
         };
         let routes = resolve(&offers, &silent, &BTreeSet::new(), &BTreeSet::new());
-        assert_eq!(routes.get("gemini-4-argon"), Some(&52), "the binding is trusted");
+        assert_eq!(
+            routes.get("gemini-4-argon"),
+            Some(&52),
+            "the binding is trusted"
+        );
 
         let routes = resolve(&offers, &bindings(), &BTreeSet::new(), &BTreeSet::new());
-        assert_eq!(routes.get("gemini-4-argon"), Some(&51), "own platform, then the rate");
+        assert_eq!(
+            routes.get("gemini-4-argon"),
+            Some(&51),
+            "own platform, then the rate"
+        );
 
         let legacy = Bindings {
             general: Some(50),
@@ -552,7 +573,12 @@ mod tests {
             offer("grok-4.6", 9, "grok", 1.0),
             offer("grok-4.6", 20, "composite", 0.5),
         ];
-        let routes = resolve(&offers, &bindings(), &BTreeSet::from([20]), &BTreeSet::new());
+        let routes = resolve(
+            &offers,
+            &bindings(),
+            &BTreeSet::from([20]),
+            &BTreeSet::new(),
+        );
         assert_eq!(routes.get("gpt-5.6-sol"), Some(&7));
         assert_eq!(routes.get("grok-4.6"), Some(&9));
         assert_eq!(routes.get("deepseek-v4.1-flash"), Some(&20));
@@ -587,7 +613,12 @@ mod tests {
             offer("claude-opus-5-5", 20, "composite", 0.5),
             offer("claude-sonnet-5", 3, "anthropic", 1.0),
         ];
-        let routes = resolve(&offers, &bindings(), &BTreeSet::from([20]), &BTreeSet::new());
+        let routes = resolve(
+            &offers,
+            &bindings(),
+            &BTreeSet::from([20]),
+            &BTreeSet::new(),
+        );
         // Codex group 7 lists nothing: GPT stays on the Codex key.
         assert_eq!(routes.get("gpt-5.6-sol"), None);
         // Claude group 3 lists Sonnet but not Opus 5.5: Opus moves.
@@ -613,7 +644,12 @@ mod tests {
             general_platform: Some("deepseek".into()),
             ..Bindings::default()
         };
-        let routes = resolve(&offers, &general_elsewhere, &BTreeSet::from([20]), &BTreeSet::new());
+        let routes = resolve(
+            &offers,
+            &general_elsewhere,
+            &BTreeSet::from([20]),
+            &BTreeSet::new(),
+        );
         assert_eq!(routes.get("grok-4.6"), Some(&20));
     }
 
@@ -697,7 +733,12 @@ mod tests {
             domestic: Some(15),
             ..bindings()
         };
-        let routes = resolve(&offers, &general_on_deepseek, &BTreeSet::new(), &BTreeSet::new());
+        let routes = resolve(
+            &offers,
+            &general_on_deepseek,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        );
         assert_eq!(routes.get("deepseek-v4.1-flash"), Some(&15));
         assert_eq!(routes.get("gpt-5.6-sol"), Some(&7));
     }
@@ -817,17 +858,36 @@ mod tests {
         assert_eq!(model_family("glm-5"), Some("zhipu"));
         assert_eq!(model_family("minimax-m3"), Some("minimax"));
         assert_eq!(model_family("gemini-3-pro"), Some("gemini"));
-        assert_eq!(model_family("openrouter/deepseek-v4.1-flash"), Some("deepseek"));
+        assert_eq!(
+            model_family("openrouter/deepseek-v4.1-flash"),
+            Some("deepseek")
+        );
         assert_eq!(model_family("qwen3-coder"), None);
         assert_eq!(model_family("o3x"), None);
     }
 
     #[test]
     fn the_three_step_effort_covers_deepseek_glm_and_kimi_k3() {
-        for model in ["deepseek-v4.1-flash", "glm-4.5-air", "glm-5", "glm-5.3", "kimi-k3", "k3", "k3-256k", "moonshot/kimi-k3"] {
+        for model in [
+            "deepseek-v4.1-flash",
+            "glm-4.5-air",
+            "glm-5",
+            "glm-5.3",
+            "kimi-k3",
+            "k3",
+            "k3-256k",
+            "moonshot/kimi-k3",
+        ] {
             assert!(has_three_step_effort(model), "{model}");
         }
-        for model in ["glm-4-plus", "glm-z1", "kimi-k2.6", "kimi-k2-thinking", "minimax-m3", "gpt-5.6-sol"] {
+        for model in [
+            "glm-4-plus",
+            "glm-z1",
+            "kimi-k2.6",
+            "kimi-k2-thinking",
+            "minimax-m3",
+            "gpt-5.6-sol",
+        ] {
             assert!(!has_three_step_effort(model), "{model}");
         }
     }
@@ -836,9 +896,15 @@ mod tests {
     /// platform default in disguise.
     #[test]
     fn a_group_listing_keeps_only_what_it_can_vouch_for() {
-        let listed = ["deepseek-v4.1-flash".to_owned(), "claude-sonnet-5".to_owned()];
+        let listed = [
+            "deepseek-v4.1-flash".to_owned(),
+            "claude-sonnet-5".to_owned(),
+        ];
         let deepseek = Offer::from_group_listing(&listed, 20, "deepseek", 0.5);
-        assert_eq!(deepseek, [offer("deepseek-v4.1-flash", 20, "deepseek", 0.5)]);
+        assert_eq!(
+            deepseek,
+            [offer("deepseek-v4.1-flash", 20, "deepseek", 0.5)]
+        );
         let composite = Offer::from_group_listing(&listed, 21, "Composite", 0.5);
         assert_eq!(composite.len(), 2);
     }

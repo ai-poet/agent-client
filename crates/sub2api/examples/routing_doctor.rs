@@ -42,15 +42,21 @@ fn main() {
 
     let credentials = sub2api::Credentials::load();
     let takeover = sub2api::cli_takeover::load();
-    let cloud = credentials.as_ref().map(|credentials| sub2api::GatewayConfig {
-        own_login_clis: takeover.own_set(),
-        ..sub2api::gateway_config_from(credentials, !credentials.routing_disabled)
-    });
+    let cloud = credentials
+        .as_ref()
+        .map(|credentials| sub2api::GatewayConfig {
+            own_login_clis: takeover.own_set(),
+            ..sub2api::gateway_config_from(credentials, !credentials.routing_disabled)
+        });
     match (&credentials, &cloud) {
         (Some(credentials), Some(config)) => println!(
             "cloud account: signed in to {} (routing {})",
             credentials.endpoint,
-            if config.is_usable() { "on" } else { "off / no keys" }
+            if config.is_usable() {
+                "on"
+            } else {
+                "off / no keys"
+            }
         ),
         _ => println!("cloud account: signed out"),
     }
@@ -93,7 +99,13 @@ fn main() {
     let state = global_config::load_state(&paths);
 
     println!("\n== desired vs ledger vs live ==");
-    let rows: [(&str, Option<&global_config::RouteTarget>, bool, std::path::PathBuf, &str); 5] = [
+    let rows: [(
+        &str,
+        Option<&global_config::RouteTarget>,
+        bool,
+        std::path::PathBuf,
+        &str,
+    ); 5] = [
         (
             "claude",
             desired.claude.as_ref(),
@@ -133,8 +145,15 @@ fn main() {
     for (cli, target, managed, path, marker) in rows {
         println!("  {cli}:");
         println!("    desired: {}", describe_target(target));
-        println!("    ledger:  {}", if managed { "managed" } else { "not managed" });
-        println!("    live:    {} — {}", path.display(), file_marker(&path, marker));
+        println!(
+            "    ledger:  {}",
+            if managed { "managed" } else { "not managed" }
+        );
+        println!(
+            "    live:    {} — {}",
+            path.display(),
+            file_marker(&path, marker)
+        );
     }
 
     println!("\nA mismatch between desired and live means reconcile has not run since");

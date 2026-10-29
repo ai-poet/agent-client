@@ -20,10 +20,8 @@ const LEGACY_DATA_DIR_NAME: &str = ".waku";
 
 /// Upstream's platform data/cache folder renames (release, debug). Keep the
 /// new names in sync with `waku_protocol::identity::DATA_DIRECTORY_NAME`.
-const PLATFORM_DIR_RENAMES: &[(&str, &str)] = &[
-    ("Waku", "CheapRouter"),
-    ("Waku Debug", "CheapRouter Debug"),
-];
+const PLATFORM_DIR_RENAMES: &[(&str, &str)] =
+    &[("Waku", "CheapRouter"), ("Waku Debug", "CheapRouter Debug")];
 
 /// Rename every legacy storage directory to its branded name. Returns
 /// human-readable warnings for renames that were needed but failed; callers
@@ -134,7 +132,11 @@ mod tests {
     fn absent_legacy_directory_is_a_no_op() {
         let root = temp_root("absent");
         let mut warnings = Vec::new();
-        rename_pair(&root.join(".waku"), &root.join(".cheaprouter"), &mut warnings);
+        rename_pair(
+            &root.join(".waku"),
+            &root.join(".cheaprouter"),
+            &mut warnings,
+        );
         assert!(warnings.is_empty(), "{warnings:?}");
         assert!(!root.join(".cheaprouter").exists());
         let _ = std::fs::remove_dir_all(&root);

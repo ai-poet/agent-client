@@ -117,7 +117,11 @@ fn derive_timed(snapshot: &Snapshot, compress_idle: bool) -> Option<Model> {
         .iter()
         .filter_map(|cell| {
             let start = cell.started_at?;
-            Some((cell.index, start, start + cell.duration_ms.unwrap_or(0).max(0)))
+            Some((
+                cell.index,
+                start,
+                start + cell.duration_ms.unwrap_or(0).max(0),
+            ))
         })
         .collect();
     if raw.is_empty() {
@@ -159,13 +163,22 @@ fn derive_timed(snapshot: &Snapshot, compress_idle: bool) -> Option<Model> {
         if let Some(turn) = cell.turn {
             match turns.iter_mut().find(|boundary| boundary.turn == turn) {
                 Some(boundary) => boundary.at = boundary.at.min(span.start),
-                None => turns.push(TurnBoundary { turn, at: span.start }),
+                None => turns.push(TurnBoundary {
+                    turn,
+                    at: span.start,
+                }),
             }
         }
         spans.push(span);
     }
-    let start = spans.iter().map(|span| span.start).fold(f64::INFINITY, f64::min);
-    let end = spans.iter().map(|span| span.end).fold(f64::NEG_INFINITY, f64::max);
+    let start = spans
+        .iter()
+        .map(|span| span.start)
+        .fold(f64::INFINITY, f64::min);
+    let end = spans
+        .iter()
+        .map(|span| span.end)
+        .fold(f64::NEG_INFINITY, f64::max);
     Some(Model {
         start,
         end: if end > start { end } else { start + 1.0 },
@@ -177,7 +190,11 @@ fn derive_timed(snapshot: &Snapshot, compress_idle: bool) -> Option<Model> {
 /// The cells active anywhere in `[start, end]`, for filtering the ledger to
 /// a dragged interval.
 pub fn focus_indexes(model: &Model, start: f64, end: f64) -> Vec<usize> {
-    let (start, end) = if start <= end { (start, end) } else { (end, start) };
+    let (start, end) = if start <= end {
+        (start, end)
+    } else {
+        (end, start)
+    };
     let mut indexes: Vec<usize> = model
         .spans
         .iter()
@@ -218,7 +235,11 @@ mod tests {
         assert!(compact.end < 10_000.0, "{}", compact.end);
         assert!(actual.end >= 63_000.0, "{}", actual.end);
         // The model span keeps where its first token came.
-        let first = compact.spans.iter().find(|span| span.kind == CellKind::Message).unwrap();
+        let first = compact
+            .spans
+            .iter()
+            .find(|span| span.kind == CellKind::Message)
+            .unwrap();
         assert_eq!(first.first_token.unwrap() - first.start, 400.0);
     }
 

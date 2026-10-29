@@ -13,14 +13,14 @@
 
 // Branded provider / model identifier newtypes.
 pub mod provider_id;
-pub use provider_id::{ProviderId, ModelId};
+pub use provider_id::{ModelId, ProviderId};
 
 // Session transcript persistence (JSONL, matches TS sessionStorage.ts schema).
 pub mod session_storage;
 
 // SQLite-backed session storage (faster alternative to JSONL).
 pub mod sqlite_storage;
-pub use sqlite_storage::{SqliteSessionStore, SessionSummary};
+pub use sqlite_storage::{SessionSummary, SqliteSessionStore};
 
 // Attachment pipeline — assembles per-turn context attachments (T1-6).
 pub mod attachments;
@@ -36,18 +36,20 @@ pub use auth_store::{AuthStore, StoredCredential};
 pub mod device_code;
 
 // Utility modules ported from src/utils/
+pub mod auto_mode;
+pub mod crypto_utils;
+pub mod format_utils;
+pub mod spinner;
+pub mod status_notices;
 pub mod token_budget;
 pub mod truncate;
-pub mod format_utils;
-pub mod crypto_utils;
-pub mod status_notices;
-pub mod auto_mode;
-pub mod spinner;
-pub use spinner::{SPINNER_VERBS, TURN_COMPLETION_VERBS, sample_spinner_verb, sample_completion_verb};
+pub use spinner::{
+    sample_completion_verb, sample_spinner_verb, SPINNER_VERBS, TURN_COMPLETION_VERBS,
+};
 
 // Remote session sync and cloud session API (T3-1, T3-2).
-pub mod remote_session;
 pub mod cloud_session;
+pub mod remote_session;
 
 // AGENTS.md hierarchical memory loading (T4-1).
 pub mod claudemd;
@@ -63,8 +65,10 @@ pub mod snapshot;
 
 // Per-session durable objectives (/goal feature).
 pub mod goal;
-pub use goal::{Goal, GoalError, GoalStatus, GoalStore, MAX_GOAL_TURNS, MAX_OBJECTIVE_CHARS,
-               goal_continuation_message, goal_kickoff_message, goal_system_prompt_addendum, goals_enabled};
+pub use goal::{
+    goal_continuation_message, goal_kickoff_message, goal_system_prompt_addendum, goals_enabled,
+    Goal, GoalError, GoalStatus, GoalStore, MAX_GOAL_TURNS, MAX_OBJECTIVE_CHARS,
+};
 
 // Feature flag management via GrowthBook.
 pub mod feature_flags;
@@ -74,7 +78,7 @@ pub mod mcp_templates;
 
 // IDE environment detection (VS Code, Cursor, JetBrains, …).
 pub mod ide;
-pub use ide::{IdeKind, detect_ide};
+pub use ide::{detect_ide, IdeKind};
 
 // Background update checker — compares running version against GitHub releases.
 pub mod update_check;
@@ -84,29 +88,36 @@ pub use update_check::{check_for_updates, UpdateInfo};
 pub mod share_export;
 
 // Re-export commonly used types at the crate root
+pub use config::{
+    builtin_managed_agent_presets, default_agents, strip_jsonc_comments, substitute_env_vars,
+    AgentDefinition, BudgetSplitPolicy, CommandTemplate, Config, FormatterConfig,
+    ManagedAgentConfig, ManagedAgentPreset, McpServerConfig, McpServerOrigin, OutputFormat,
+    PermissionMode, ProviderConfig, Settings, SkillsConfig, Theme,
+};
 pub use error::{ClaudeError, Result};
+pub use import_config::{
+    build_import_preview, execute_import, summarize_import_result, ClaudeMdPreview,
+    ImportExecutionResult, ImportPaths, ImportPreview, ImportSelection, PreviewAction,
+    PreviewField, SettingsPreview,
+};
 pub use types::{
-    ContentBlock, ImageSource, DocumentSource, CitationsConfig, Message, MessageContent,
+    CitationsConfig, ContentBlock, DocumentSource, ImageSource, Message, MessageContent,
     MessageCost, Role, ToolDefinition, ToolResultContent, UsageInfo,
 };
-pub use config::{AgentDefinition, BudgetSplitPolicy, Config, CommandTemplate, FormatterConfig, ManagedAgentConfig, ManagedAgentPreset, McpServerConfig, McpServerOrigin, OutputFormat, PermissionMode, ProviderConfig, Settings, SkillsConfig, Theme, builtin_managed_agent_presets, default_agents, strip_jsonc_comments, substitute_env_vars};
-pub use import_config::{ClaudeMdPreview, ImportExecutionResult, ImportPaths, ImportPreview, ImportSelection, PreviewAction, PreviewField, SettingsPreview, build_import_preview, execute_import, summarize_import_result};
 
 // Skill discovery: filesystem and git URL skill loading.
 pub mod skill_discovery;
-pub use skill_discovery::{DiscoveredSkill, discover_skills, parse_skill_file};
 pub use cost::CostTracker;
-pub use history::ConversationSession;
 pub use feature_flags::FeatureFlagManager;
+pub use history::ConversationSession;
 pub use paths::claurst_home;
 pub use permissions::{
-    AutoPermissionHandler, InteractivePermissionHandler,
-    ManagedAutoPermissionHandler, ManagedInteractivePermissionHandler,
-    PermissionAction, PermissionDecision, PermissionHandler,
-    PermissionLevel, PermissionManager, PermissionRequest,
+    format_permission_reason, AutoPermissionHandler, InteractivePermissionHandler,
+    ManagedAutoPermissionHandler, ManagedInteractivePermissionHandler, PermissionAction,
+    PermissionDecision, PermissionHandler, PermissionLevel, PermissionManager, PermissionRequest,
     PermissionRule, PermissionScope, SerializedPermissionRule,
-    format_permission_reason,
 };
+pub use skill_discovery::{discover_skills, parse_skill_file, DiscoveredSkill};
 
 // ---------------------------------------------------------------------------
 // error module
@@ -474,7 +485,10 @@ pub mod types {
         }
 
         /// Create a user message representing a `!`-prefixed local shell command with output.
-        pub fn user_local_command_output(command: impl Into<String>, output: impl Into<String>) -> Self {
+        pub fn user_local_command_output(
+            command: impl Into<String>,
+            output: impl Into<String>,
+        ) -> Self {
             Self {
                 role: Role::User,
                 content: MessageContent::Blocks(vec![ContentBlock::UserLocalCommandOutput {
@@ -670,7 +684,7 @@ pub mod config {
     }
 
     fn default_file_injection_max_size() -> usize {
-        100  // 100 KB
+        100 // 100 KB
     }
 
     /// Default total request timeout (seconds) when the user has not configured
@@ -809,8 +823,6 @@ pub mod config {
         FixedCaps { manager_usd: f64, executor_usd: f64 },
     }
 
-    
-
     /// Configuration for manager-executor agent architecture.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct ManagedAgentConfig {
@@ -833,8 +845,12 @@ pub mod config {
         pub executor_isolation: bool,
     }
 
-    fn default_executor_max_turns() -> u32 { 10 }
-    fn default_max_concurrent_executors() -> u32 { 4 }
+    fn default_executor_max_turns() -> u32 {
+        10
+    }
+    fn default_max_concurrent_executors() -> u32 {
+        4
+    }
 
     /// A named preset for common manager-executor configurations.
     pub struct ManagedAgentPreset {
@@ -1085,13 +1101,24 @@ pub mod config {
         pub managed_agents: Option<ManagedAgentConfig>,
         /// Shadow-git auto-commit snapshot system.  `Some(true)` = enabled.  `None` or `Some(false)` = disabled (default).
         /// Set via `--auto-commits` flag or `"autoCommits": true` in settings.json.
-        #[serde(default, rename = "autoCommits", skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            rename = "autoCommits",
+            skip_serializing_if = "Option::is_none"
+        )]
         pub auto_commits: Option<bool>,
         /// Enable cursor blinking in the chat prompt. Defaults to false (disabled).
-        #[serde(default, rename = "cursorBlinkEnabled", skip_serializing_if = "is_false")]
+        #[serde(
+            default,
+            rename = "cursorBlinkEnabled",
+            skip_serializing_if = "is_false"
+        )]
         pub cursor_blink_enabled: bool,
         /// Maximum number of file suggestions shown in autocomplete. Defaults to 15.
-        #[serde(default = "default_file_autocomplete_limit", rename = "fileAutocompleteLimit")]
+        #[serde(
+            default = "default_file_autocomplete_limit",
+            rename = "fileAutocompleteLimit"
+        )]
         pub file_autocomplete_limit: usize,
         /// Whether to show hidden files in file autocomplete. Defaults to false.
         #[serde(default, rename = "fileAutocompleteShowHiddenFiles")]
@@ -1105,7 +1132,10 @@ pub mod config {
         /// Maximum file size to auto-inject (in KB). Defaults to 100. Set to 0 for no limit.
         /// When a file exceeds this limit, users get a warning and can choose to override or cancel.
         /// Note: @include in CLAUDE.md/AGENTS.md always injects regardless of this limit.
-        #[serde(default = "default_file_injection_max_size", rename = "fileInjectionMaxSize")]
+        #[serde(
+            default = "default_file_injection_max_size",
+            rename = "fileInjectionMaxSize"
+        )]
         pub file_injection_max_size: usize,
         /// Total request timeout in seconds applied to provider HTTP clients.
         /// Slow local models (CPU inference, large MoE) can take several minutes
@@ -1125,7 +1155,11 @@ pub mod config {
         /// `"mouseCapture": false` to release the mouse to the terminal so native
         /// click-drag selection and copy/paste work without lag (issue #104).
         /// Keyboard scrolling (PageUp/PageDown, etc.) is unaffected either way.
-        #[serde(default, rename = "mouseCapture", skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            rename = "mouseCapture",
+            skip_serializing_if = "Option::is_none"
+        )]
         pub mouse_capture: Option<bool>,
     }
 
@@ -1314,7 +1348,10 @@ pub mod config {
         #[serde(default = "default_true", rename = "autoCompact")]
         pub auto_compact: bool,
         /// Maximum number of file suggestions shown in autocomplete. Defaults to 15.
-        #[serde(default = "default_file_autocomplete_limit", rename = "fileAutocompleteLimit")]
+        #[serde(
+            default = "default_file_autocomplete_limit",
+            rename = "fileAutocompleteLimit"
+        )]
         pub file_autocomplete_limit: usize,
         /// Whether to show hidden files in file autocomplete. Defaults to false.
         #[serde(default, rename = "fileAutocompleteShowHiddenFiles")]
@@ -1328,7 +1365,10 @@ pub mod config {
         /// Maximum file size to auto-inject (in KB). Defaults to 100. Set to 0 for no limit.
         /// When a file exceeds this limit, users get a warning and can choose to override or cancel.
         /// Note: @include in CLAUDE.md/AGENTS.md always injects regardless of this limit.
-        #[serde(default = "default_file_injection_max_size", rename = "fileInjectionMaxSize")]
+        #[serde(
+            default = "default_file_injection_max_size",
+            rename = "fileInjectionMaxSize"
+        )]
         pub file_injection_max_size: usize,
     }
 
@@ -1346,8 +1386,7 @@ pub mod config {
     }
 
     /// Configuration for a file formatter tool.
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    #[derive(Default)]
+    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
     pub struct FormatterConfig {
         /// Command to run, e.g. `["prettier", "--write"]`.
         pub command: Vec<String>,
@@ -1357,8 +1396,6 @@ pub mod config {
         #[serde(default)]
         pub disabled: bool,
     }
-
-    
 
     #[derive(Debug, Clone, Serialize, Deserialize, Default)]
     pub struct ProjectSettings {
@@ -1448,7 +1485,9 @@ pub mod config {
                 Some("mistral") => "mistral-large-latest",
                 Some("xai") => "grok-2",
                 Some("openrouter") => "anthropic/claude-sonnet-4",
-                Some("togetherai") | Some("together-ai") => "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                Some("togetherai") | Some("together-ai") => {
+                    "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+                }
                 Some("perplexity") => "sonar-pro",
                 Some("cohere") => "command-r-plus",
                 // DashScope runs as "qwen" at runtime but is "alibaba" in the
@@ -1467,7 +1506,6 @@ pub mod config {
                 _ => crate::constants::DEFAULT_MODEL, // Anthropic default
             }
         }
-
 
         /// Resolve the effective max-tokens.
         pub fn effective_max_tokens(&self) -> u32 {
@@ -1591,25 +1629,43 @@ pub mod config {
                     let refreshed = 'refresh: {
                         let Ok(client) = reqwest::Client::builder()
                             .timeout(std::time::Duration::from_secs(30))
-                            .build() else { break 'refresh None; };
+                            .build()
+                        else {
+                            break 'refresh None;
+                        };
                         let Ok(resp) = client
                             .post(crate::oauth::TOKEN_URL)
                             .header("content-type", "application/json")
                             .json(&body)
                             .send()
-                            .await else { break 'refresh None; };
-                        if !resp.status().is_success() { break 'refresh None; }
-                        let Ok(data) = resp.json::<serde_json::Value>().await else { break 'refresh None; };
+                            .await
+                        else {
+                            break 'refresh None;
+                        };
+                        if !resp.status().is_success() {
+                            break 'refresh None;
+                        }
+                        let Ok(data) = resp.json::<serde_json::Value>().await else {
+                            break 'refresh None;
+                        };
                         let new_at = data["access_token"].as_str().unwrap_or("").to_string();
-                        if new_at.is_empty() { break 'refresh None; }
+                        if new_at.is_empty() {
+                            break 'refresh None;
+                        }
                         let new_rt = data["refresh_token"].as_str().map(String::from);
                         let exp_in = data["expires_in"].as_u64().unwrap_or(3600);
                         let exp_ms = chrono::Utc::now().timestamp_millis() + (exp_in as i64 * 1000);
                         let scopes: Vec<String> = data["scope"]
-                            .as_str().unwrap_or("").split_whitespace().map(String::from).collect();
+                            .as_str()
+                            .unwrap_or("")
+                            .split_whitespace()
+                            .map(String::from)
+                            .collect();
                         let mut r = tokens.clone();
                         r.access_token = new_at;
-                        if let Some(nrt) = new_rt { r.refresh_token = Some(nrt); }
+                        if let Some(nrt) = new_rt {
+                            r.refresh_token = Some(nrt);
+                        }
                         r.expires_at_ms = Some(exp_ms);
                         r.scopes = scopes;
                         let _ = r.save().await;
@@ -1623,7 +1679,9 @@ pub mod config {
                 tokens
             };
 
-            tokens.effective_credential().map(|cred| (cred.to_string(), tokens.uses_bearer_auth()))
+            tokens
+                .effective_credential()
+                .map(|cred| (cred.to_string(), tokens.uses_bearer_auth()))
         }
 
         pub fn resolve_provider_api_base(&self, provider_id: &str) -> Option<String> {
@@ -1831,19 +1889,31 @@ pub mod config {
             }
             // Merge top-level `providers` map into config.provider_configs.
             for (id, pc) in &self.providers {
-                config.provider_configs.entry(id.clone()).or_insert_with(|| pc.clone());
+                config
+                    .provider_configs
+                    .entry(id.clone())
+                    .or_insert_with(|| pc.clone());
             }
             // Merge top-level `modelOverrides` into config.model_overrides
             // (nested `config` block wins for keys present in both).
             for (id, ov) in &self.model_overrides {
-                config.model_overrides.entry(id.clone()).or_insert_with(|| ov.clone());
+                config
+                    .model_overrides
+                    .entry(id.clone())
+                    .or_insert_with(|| ov.clone());
             }
             // Copy top-level formatters and commands into config.
             for (k, v) in &self.formatter {
-                config.formatter.entry(k.clone()).or_insert_with(|| v.clone());
+                config
+                    .formatter
+                    .entry(k.clone())
+                    .or_insert_with(|| v.clone());
             }
             for (k, v) in &self.commands {
-                config.commands.entry(k.clone()).or_insert_with(|| v.clone());
+                config
+                    .commands
+                    .entry(k.clone())
+                    .or_insert_with(|| v.clone());
             }
             // Copy top-level agent definitions into config.
             for (k, v) in &self.agents {
@@ -1941,7 +2011,9 @@ pub mod config {
                 mut base: HashMap<K, V>,
                 over: HashMap<K, V>,
             ) -> HashMap<K, V> {
-                for (k, v) in over { base.insert(k, v); }
+                for (k, v) in over {
+                    base.insert(k, v);
+                }
                 base
             }
             // Merge the embedded Config structs.
@@ -1960,47 +2032,112 @@ pub mod config {
                 },
                 verbose: over.config.verbose || base.config.verbose,
                 output_format: over.config.output_format,
-                mcp_servers: { let mut v = base.config.mcp_servers; v.extend(over.config.mcp_servers); v },
-                lsp_servers: { let mut v = base.config.lsp_servers; v.extend(over.config.lsp_servers); v },
-                allowed_tools: { let mut v = base.config.allowed_tools; v.extend(over.config.allowed_tools); v.dedup(); v },
-                disallowed_tools: { let mut v = base.config.disallowed_tools; v.extend(over.config.disallowed_tools); v.dedup(); v },
+                mcp_servers: {
+                    let mut v = base.config.mcp_servers;
+                    v.extend(over.config.mcp_servers);
+                    v
+                },
+                lsp_servers: {
+                    let mut v = base.config.lsp_servers;
+                    v.extend(over.config.lsp_servers);
+                    v
+                },
+                allowed_tools: {
+                    let mut v = base.config.allowed_tools;
+                    v.extend(over.config.allowed_tools);
+                    v.dedup();
+                    v
+                },
+                disallowed_tools: {
+                    let mut v = base.config.disallowed_tools;
+                    v.extend(over.config.disallowed_tools);
+                    v.dedup();
+                    v
+                },
                 env: merge_map(base.config.env, over.config.env),
-                enable_all_mcp_servers: over.config.enable_all_mcp_servers || base.config.enable_all_mcp_servers,
-                custom_system_prompt: over.config.custom_system_prompt.or(base.config.custom_system_prompt),
-                append_system_prompt: over.config.append_system_prompt.or(base.config.append_system_prompt),
-                disable_claude_mds: over.config.disable_claude_mds || base.config.disable_claude_mds,
+                enable_all_mcp_servers: over.config.enable_all_mcp_servers
+                    || base.config.enable_all_mcp_servers,
+                custom_system_prompt: over
+                    .config
+                    .custom_system_prompt
+                    .or(base.config.custom_system_prompt),
+                append_system_prompt: over
+                    .config
+                    .append_system_prompt
+                    .or(base.config.append_system_prompt),
+                disable_claude_mds: over.config.disable_claude_mds
+                    || base.config.disable_claude_mds,
                 project_dir: over.config.project_dir.or(base.config.project_dir),
-                workspace_paths: { let mut v = base.config.workspace_paths; v.extend(over.config.workspace_paths); v },
-                additional_dirs: { let mut v = base.config.additional_dirs; v.extend(over.config.additional_dirs); v },
+                workspace_paths: {
+                    let mut v = base.config.workspace_paths;
+                    v.extend(over.config.workspace_paths);
+                    v
+                },
+                additional_dirs: {
+                    let mut v = base.config.additional_dirs;
+                    v.extend(over.config.additional_dirs);
+                    v
+                },
                 hooks: merge_map(base.config.hooks, over.config.hooks),
                 provider: over.config.provider.or(base.config.provider),
-                provider_configs: merge_map(base.config.provider_configs, over.config.provider_configs),
-                model_overrides: merge_map(base.config.model_overrides, over.config.model_overrides),
+                provider_configs: merge_map(
+                    base.config.provider_configs,
+                    over.config.provider_configs,
+                ),
+                model_overrides: merge_map(
+                    base.config.model_overrides,
+                    over.config.model_overrides,
+                ),
                 formatter: merge_map(base.config.formatter, over.config.formatter),
                 commands: merge_map(base.config.commands, over.config.commands),
                 agents: merge_map(base.config.agents, over.config.agents),
                 skills: {
                     let mut paths = base.config.skills.paths;
-                    for p in over.config.skills.paths { if !paths.contains(&p) { paths.push(p); } }
+                    for p in over.config.skills.paths {
+                        if !paths.contains(&p) {
+                            paths.push(p);
+                        }
+                    }
                     let mut urls = base.config.skills.urls;
-                    for u in over.config.skills.urls { if !urls.contains(&u) { urls.push(u); } }
+                    for u in over.config.skills.urls {
+                        if !urls.contains(&u) {
+                            urls.push(u);
+                        }
+                    }
                     SkillsConfig { paths, urls }
                 },
                 managed_agents: over.config.managed_agents.or(base.config.managed_agents),
                 auto_commits: over.config.auto_commits.or(base.config.auto_commits),
                 mouse_capture: over.config.mouse_capture.or(base.config.mouse_capture),
-                cursor_blink_enabled: over.config.cursor_blink_enabled || base.config.cursor_blink_enabled,
-                file_autocomplete_limit: if over.config.file_autocomplete_limit != 0 { over.config.file_autocomplete_limit } else { base.config.file_autocomplete_limit },
-                file_autocomplete_show_hidden_files: over.config.file_autocomplete_show_hidden_files || base.config.file_autocomplete_show_hidden_files,
-                file_injection_enabled: over.config.file_injection_enabled || base.config.file_injection_enabled,
-                file_injection_max_size: if over.config.file_injection_max_size != 0 { over.config.file_injection_max_size } else { base.config.file_injection_max_size },
-                request_timeout_secs: over.config.request_timeout_secs.or(base.config.request_timeout_secs),
+                cursor_blink_enabled: over.config.cursor_blink_enabled
+                    || base.config.cursor_blink_enabled,
+                file_autocomplete_limit: if over.config.file_autocomplete_limit != 0 {
+                    over.config.file_autocomplete_limit
+                } else {
+                    base.config.file_autocomplete_limit
+                },
+                file_autocomplete_show_hidden_files: over
+                    .config
+                    .file_autocomplete_show_hidden_files
+                    || base.config.file_autocomplete_show_hidden_files,
+                file_injection_enabled: over.config.file_injection_enabled
+                    || base.config.file_injection_enabled,
+                file_injection_max_size: if over.config.file_injection_max_size != 0 {
+                    over.config.file_injection_max_size
+                } else {
+                    base.config.file_injection_max_size
+                },
+                request_timeout_secs: over
+                    .config
+                    .request_timeout_secs
+                    .or(base.config.request_timeout_secs),
             };
             Self {
                 config: merged_config,
                 version: over.version.or(base.version),
                 projects: merge_map(base.projects, over.projects),
-                remote_control_at_startup: over.remote_control_at_startup || base.remote_control_at_startup,
+                remote_control_at_startup: over.remote_control_at_startup
+                    || base.remote_control_at_startup,
                 // SECURITY: only the user's global settings may grant blanket
                 // trust to project MCP servers. A project's own settings file
                 // (`over`) must NOT be able to flip this on — otherwise a
@@ -2013,10 +2150,23 @@ pub mod config {
                 // pre-approve bash command prefixes.
                 skip_dangerous_mode_permission_prompt: base.skip_dangerous_mode_permission_prompt,
                 allowed_bash_prefixes: base.allowed_bash_prefixes,
-                permission_rules: { let mut v = base.permission_rules; v.extend(over.permission_rules); v },
-                enabled_plugins: { let mut s = base.enabled_plugins; s.extend(over.enabled_plugins); s },
-                disabled_plugins: { let mut s = base.disabled_plugins; s.extend(over.disabled_plugins); s },
-                has_completed_onboarding: over.has_completed_onboarding || base.has_completed_onboarding,
+                permission_rules: {
+                    let mut v = base.permission_rules;
+                    v.extend(over.permission_rules);
+                    v
+                },
+                enabled_plugins: {
+                    let mut s = base.enabled_plugins;
+                    s.extend(over.enabled_plugins);
+                    s
+                },
+                disabled_plugins: {
+                    let mut s = base.disabled_plugins;
+                    s.extend(over.disabled_plugins);
+                    s
+                },
+                has_completed_onboarding: over.has_completed_onboarding
+                    || base.has_completed_onboarding,
                 last_seen_version: over.last_seen_version.or(base.last_seen_version),
                 provider: over.provider.or(base.provider),
                 providers: merge_map(base.providers, over.providers),
@@ -2026,9 +2176,17 @@ pub mod config {
                 agents: merge_map(base.agents, over.agents),
                 skills: {
                     let mut paths = base.skills.paths;
-                    for p in over.skills.paths { if !paths.contains(&p) { paths.push(p); } }
+                    for p in over.skills.paths {
+                        if !paths.contains(&p) {
+                            paths.push(p);
+                        }
+                    }
                     let mut urls = base.skills.urls;
-                    for u in over.skills.urls { if !urls.contains(&u) { urls.push(u); } }
+                    for u in over.skills.urls {
+                        if !urls.contains(&u) {
+                            urls.push(u);
+                        }
+                    }
                     SkillsConfig { paths, urls }
                 },
                 managed_agents: over.managed_agents.or(base.managed_agents),
@@ -2040,10 +2198,19 @@ pub mod config {
                 show_cwd: over.show_cwd || base.show_cwd,
                 show_git_branch: over.show_git_branch || base.show_git_branch,
                 auto_compact: over.auto_compact || base.auto_compact,
-                file_autocomplete_limit: if over.file_autocomplete_limit != 0 { over.file_autocomplete_limit } else { base.file_autocomplete_limit },
-                file_autocomplete_show_hidden_files: over.file_autocomplete_show_hidden_files || base.file_autocomplete_show_hidden_files,
+                file_autocomplete_limit: if over.file_autocomplete_limit != 0 {
+                    over.file_autocomplete_limit
+                } else {
+                    base.file_autocomplete_limit
+                },
+                file_autocomplete_show_hidden_files: over.file_autocomplete_show_hidden_files
+                    || base.file_autocomplete_show_hidden_files,
                 file_injection_enabled: over.file_injection_enabled || base.file_injection_enabled,
-                file_injection_max_size: if over.file_injection_max_size != 0 { over.file_injection_max_size } else { base.file_injection_max_size },
+                file_injection_max_size: if over.file_injection_max_size != 0 {
+                    over.file_injection_max_size
+                } else {
+                    base.file_injection_max_size
+                },
             }
         }
     }
@@ -2058,7 +2225,9 @@ pub mod config {
 
         while let Some(ch) = chars.next() {
             if in_string {
-                if ch == '"' && prev_char != '\\' { in_string = false; }
+                if ch == '"' && prev_char != '\\' {
+                    in_string = false;
+                }
                 result.push(ch);
                 prev_char = ch;
                 continue;
@@ -2073,15 +2242,24 @@ pub mod config {
                 match chars.peek() {
                     Some('/') => {
                         // Line comment — skip to end of line.
-                        for c in chars.by_ref() { if c == '\n' { result.push('\n'); break; } }
+                        for c in chars.by_ref() {
+                            if c == '\n' {
+                                result.push('\n');
+                                break;
+                            }
+                        }
                     }
                     Some('*') => {
                         // Block comment — skip until `*/`.
                         chars.next();
                         let mut prev = '\0';
                         for c in chars.by_ref() {
-                            if prev == '*' && c == '/' { break; }
-                            if c == '\n' { result.push('\n'); }
+                            if prev == '*' && c == '/' {
+                                break;
+                            }
+                            if c == '\n' {
+                                result.push('\n');
+                            }
                             prev = c;
                         }
                     }
@@ -2103,16 +2281,14 @@ pub mod config {
         loop {
             match result.find("{env:") {
                 None => break,
-                Some(start) => {
-                    match result[start..].find('}') {
-                        None => break,
-                        Some(rel_end) => {
-                            let var_name = result[start + 5..start + rel_end].to_string();
-                            let value = std::env::var(&var_name).unwrap_or_default();
-                            result.replace_range(start..start + rel_end + 1, &value);
-                        }
+                Some(start) => match result[start..].find('}') {
+                    None => break,
+                    Some(rel_end) => {
+                        let var_name = result[start + 5..start + rel_end].to_string();
+                        let value = std::env::var(&var_name).unwrap_or_default();
+                        result.replace_range(start..start + rel_end + 1, &value);
                     }
-                }
+                },
             }
         }
         result
@@ -2148,11 +2324,9 @@ pub mod config {
 
             let error = replacement.save_to_path_sync(&path).unwrap_err();
 
-            assert!(
-                error
-                    .to_string()
-                    .contains("Refusing to overwrite malformed settings file")
-            );
+            assert!(error
+                .to_string()
+                .contains("Refusing to overwrite malformed settings file"));
             assert_eq!(std::fs::read_to_string(path).unwrap(), MALFORMED_SETTINGS);
         }
 
@@ -2163,14 +2337,14 @@ pub mod config {
             tokio::fs::write(&path, MALFORMED_SETTINGS).await.unwrap();
 
             let load_error = Settings::load_from_path(&path).await.unwrap_err();
-            assert!(load_error.to_string().contains("Failed to parse settings file"));
+            assert!(load_error
+                .to_string()
+                .contains("Failed to parse settings file"));
 
             let save_error = Settings::default().save_to_path(&path).await.unwrap_err();
-            assert!(
-                save_error
-                    .to_string()
-                    .contains("Refusing to overwrite malformed settings file")
-            );
+            assert!(save_error
+                .to_string()
+                .contains("Refusing to overwrite malformed settings file"));
             assert_eq!(
                 tokio::fs::read_to_string(path).await.unwrap(),
                 MALFORMED_SETTINGS
@@ -2195,7 +2369,10 @@ pub mod config {
 
         #[test]
         fn global_request_timeout_serde_roundtrips_with_camelcase_key() {
-            let config = Config { request_timeout_secs: Some(1800), ..Default::default() };
+            let config = Config {
+                request_timeout_secs: Some(1800),
+                ..Default::default()
+            };
             // Serialises with the documented camelCase key.
             let json = serde_json::to_string(&config).expect("serialise");
             assert!(
@@ -2212,23 +2389,24 @@ pub mod config {
         fn snake_case_alias_also_parses() {
             // Patch a fully-serialised config to use the snake_case alias and
             // confirm it still deserialises (back-compat with snake_case keys).
-            let mut value =
-                serde_json::to_value(Config::default()).expect("to_value");
+            let mut value = serde_json::to_value(Config::default()).expect("to_value");
             let obj = value.as_object_mut().unwrap();
             obj.remove("requestTimeoutSecs");
-            obj.insert(
-                "request_timeout_secs".to_string(),
-                serde_json::json!(900),
-            );
-            let parsed: Config =
-                serde_json::from_value(value).expect("alias should parse");
+            obj.insert("request_timeout_secs".to_string(), serde_json::json!(900));
+            let parsed: Config = serde_json::from_value(value).expect("alias should parse");
             assert_eq!(parsed.request_timeout_secs, Some(900));
         }
 
         #[test]
         fn per_provider_override_wins_over_global() {
-            let mut config = Config { request_timeout_secs: Some(1200), ..Default::default() };
-            let provider = ProviderConfig { request_timeout_secs: Some(3600), ..Default::default() };
+            let mut config = Config {
+                request_timeout_secs: Some(1200),
+                ..Default::default()
+            };
+            let provider = ProviderConfig {
+                request_timeout_secs: Some(3600),
+                ..Default::default()
+            };
             config
                 .provider_configs
                 .insert("ollama".to_string(), provider);
@@ -2242,7 +2420,10 @@ pub mod config {
         fn effective_config_merges_top_level_provider_timeout() {
             let mut settings = Settings::default();
             settings.config.request_timeout_secs = Some(1200);
-            let provider = ProviderConfig { request_timeout_secs: Some(3600), ..Default::default() };
+            let provider = ProviderConfig {
+                request_timeout_secs: Some(3600),
+                ..Default::default()
+            };
             settings.providers.insert("ollama".to_string(), provider);
             let config = settings.effective_config();
             assert_eq!(config.resolve_request_timeout_secs("ollama"), 3600);
@@ -2255,20 +2436,35 @@ pub mod config {
             // Nested `config` block wins for a key present in both.
             settings.config.model_overrides.insert(
                 "custom-openai/a".to_string(),
-                ModelOverride { context_window: Some(111), ..Default::default() },
+                ModelOverride {
+                    context_window: Some(111),
+                    ..Default::default()
+                },
             );
             settings.model_overrides.insert(
                 "custom-openai/a".to_string(),
-                ModelOverride { context_window: Some(999), ..Default::default() },
+                ModelOverride {
+                    context_window: Some(999),
+                    ..Default::default()
+                },
             );
             // Top-level-only key is folded in.
             settings.model_overrides.insert(
                 "custom-openai/b".to_string(),
-                ModelOverride { context_window: Some(222), ..Default::default() },
+                ModelOverride {
+                    context_window: Some(222),
+                    ..Default::default()
+                },
             );
             let config = settings.effective_config();
-            assert_eq!(config.model_overrides["custom-openai/a"].context_window, Some(111));
-            assert_eq!(config.model_overrides["custom-openai/b"].context_window, Some(222));
+            assert_eq!(
+                config.model_overrides["custom-openai/a"].context_window,
+                Some(111)
+            );
+            assert_eq!(
+                config.model_overrides["custom-openai/b"].context_window,
+                Some(222)
+            );
         }
 
         #[test]
@@ -2299,7 +2495,10 @@ pub mod config {
 
         #[test]
         fn zero_is_treated_as_unset() {
-            let config = Config { request_timeout_secs: Some(0), ..Default::default() };
+            let config = Config {
+                request_timeout_secs: Some(0),
+                ..Default::default()
+            };
             assert_eq!(
                 config.resolve_request_timeout_secs("openai"),
                 DEFAULT_REQUEST_TIMEOUT_SECS
@@ -2413,10 +2612,7 @@ pub mod context {
 
             // Platform information
             parts.push(format!("Platform: {}", std::env::consts::OS));
-            parts.push(format!(
-                "Working directory: {}",
-                self.cwd.display()
-            ));
+            parts.push(format!("Working directory: {}", self.cwd.display()));
 
             if let Some(git_context) = self.get_git_context().await {
                 parts.push(git_context);
@@ -2435,9 +2631,7 @@ pub mod context {
         pub async fn build_user_context(&self) -> String {
             let mut parts = vec![];
 
-            let date = chrono::Local::now()
-                .format("%A, %B %d, %Y")
-                .to_string();
+            let date = chrono::Local::now().format("%A, %B %d, %Y").to_string();
             parts.push(format!("Today's date is {}.", date));
 
             if !self.disable_claude_mds {
@@ -2743,10 +2937,7 @@ pub mod permissions {
                 } else {
                     "\nThis will write to the filesystem."
                 };
-                format!(
-                    "{} wants to write to `{}`{}",
-                    tool_name, target, extra
-                )
+                format!("{} wants to write to `{}`{}", tool_name, target, extra)
             }
             PermissionLevel::Network => {
                 let url = path.unwrap_or(description);
@@ -2772,8 +2963,8 @@ pub mod permissions {
         working_dir: Option<&std::path::Path>,
         allowed_roots: &[std::path::PathBuf],
     ) -> bool {
-        let canonical_path = std::fs::canonicalize(path)
-            .unwrap_or_else(|_| std::path::PathBuf::from(path));
+        let canonical_path =
+            std::fs::canonicalize(path).unwrap_or_else(|_| std::path::PathBuf::from(path));
 
         let mut roots: Vec<std::path::PathBuf> = Vec::new();
         if let Some(root) = working_dir {
@@ -2918,7 +3109,10 @@ pub mod permissions {
                         // what this says.
                         | crate::constants::TOOL_NAME_ENTER_PLAN_MODE
                         | crate::constants::TOOL_NAME_EXIT_PLAN_MODE
-                    ) => PermissionLevel::Execute,
+                    ) =>
+                {
+                    PermissionLevel::Execute
+                }
                 other => other,
             };
             let read_in_workspace = path.is_some_and(|target| {
@@ -2970,8 +3164,7 @@ pub mod permissions {
                 | PermissionLevel::Write
                 | PermissionLevel::Execute
                 | PermissionLevel::Network => {
-                    let reason =
-                        format_permission_reason(tool_name, description, path, level);
+                    let reason = format_permission_reason(tool_name, description, path, level);
                     PermissionDecision::Ask { reason }
                 }
             }
@@ -3151,13 +3344,13 @@ pub mod permissions {
             use crate::config::PermissionMode;
             match self.mode {
                 PermissionMode::BypassPermissions => PermissionDecision::Allow,
-                    PermissionMode::AcceptEdits => {
-                        if request.tool_name == "Edit" || request.is_read_only {
-                            PermissionDecision::Allow
-                        } else {
-                            PermissionDecision::Deny
-                        }
+                PermissionMode::AcceptEdits => {
+                    if request.tool_name == "Edit" || request.is_read_only {
+                        PermissionDecision::Allow
+                    } else {
+                        PermissionDecision::Deny
                     }
+                }
                 PermissionMode::Plan => {
                     if request.is_read_only {
                         PermissionDecision::Allow
@@ -3407,7 +3600,10 @@ pub mod permissions {
                 action: PermissionAction::Deny,
                 scope: PermissionScope::Session,
             });
-            assert_eq!(m.evaluate("Bash", "echo hi", None, None, &[], false), PermissionDecision::Deny);
+            assert_eq!(
+                m.evaluate("Bash", "echo hi", None, None, &[], false),
+                PermissionDecision::Deny
+            );
         }
 
         #[test]
@@ -3432,7 +3628,14 @@ pub mod permissions {
         fn accept_edits_only_allows_edit() {
             let m = mgr(PermissionMode::AcceptEdits);
             assert_eq!(
-                m.evaluate("Edit", "edit file", Some("/workspace/src/lib.rs"), None, &[], false),
+                m.evaluate(
+                    "Edit",
+                    "edit file",
+                    Some("/workspace/src/lib.rs"),
+                    None,
+                    &[],
+                    false
+                ),
                 PermissionDecision::Allow
             );
             match m.evaluate("Bash", "rm -rf /tmp", None, None, &[], false) {
@@ -3473,8 +3676,12 @@ pub mod permissions {
 
         #[test]
         fn format_reason_bash() {
-            let s =
-                format_permission_reason("Bash", "This will execute a shell command.", None, PermissionLevel::Execute);
+            let s = format_permission_reason(
+                "Bash",
+                "This will execute a shell command.",
+                None,
+                PermissionLevel::Execute,
+            );
             assert_eq!(s, "This will execute a shell command.");
         }
 
@@ -3486,7 +3693,10 @@ pub mod permissions {
                 None,
                 PermissionLevel::Execute,
             );
-            assert_eq!(s, "[High risk] This may modify system-wide security policy.");
+            assert_eq!(
+                s,
+                "[High risk] This may modify system-wide security policy."
+            );
         }
 
         #[test]
@@ -3690,9 +3900,7 @@ pub mod history {
                 let path = entry.path();
                 if path.extension().and_then(|s| s.to_str()) == Some("json") {
                     if let Ok(content) = tokio::fs::read_to_string(&path).await {
-                        if let Ok(session) =
-                            serde_json::from_str::<ConversationSession>(&content)
-                        {
+                        if let Ok(session) = serde_json::from_str::<ConversationSession>(&content) {
                             sessions.push(session);
                         }
                     }
@@ -3891,7 +4099,10 @@ pub mod cost {
         /// Pick pricing based on model name substring matching.
         pub fn for_model(model: &str) -> Self {
             // Check for free models first (those with "-free" suffix, "free/" prefix, or upstream-prefixed free model)
-            if model.ends_with("-free") || model.starts_with("free/") || is_free_upstream_model(model) {
+            if model.ends_with("-free")
+                || model.starts_with("free/")
+                || is_free_upstream_model(model)
+            {
                 Self::FREE
             } else if model.contains("opus") {
                 Self::OPUS
@@ -3940,13 +4151,7 @@ pub mod cost {
             *self.pricing.write() = ModelPricing::for_model(model);
         }
 
-        pub fn add_usage(
-            &self,
-            input: u64,
-            output: u64,
-            cache_creation: u64,
-            cache_read: u64,
-        ) {
+        pub fn add_usage(&self, input: u64, output: u64, cache_creation: u64, cache_read: u64) {
             self.input_tokens.fetch_add(input, Ordering::Relaxed);
             self.output_tokens.fetch_add(output, Ordering::Relaxed);
             self.cache_creation_tokens
@@ -4153,10 +4358,8 @@ pub mod oauth {
     pub const CONSOLE_AUTHORIZE_URL: &str = "https://platform.claude.com/oauth/authorize";
     pub const CLAUDE_AI_AUTHORIZE_URL: &str = "https://claude.com/cai/oauth/authorize";
     pub const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
-    pub const API_KEY_URL: &str =
-        "https://api.anthropic.com/api/oauth/claude_cli/create_api_key";
-    pub const MANUAL_REDIRECT_URL: &str =
-        "https://platform.claude.com/oauth/code/callback";
+    pub const API_KEY_URL: &str = "https://api.anthropic.com/api/oauth/claude_cli/create_api_key";
+    pub const MANUAL_REDIRECT_URL: &str = "https://platform.claude.com/oauth/code/callback";
     pub const CLAUDEAI_SUCCESS_URL: &str =
         "https://platform.claude.com/oauth/code/success?app=claude-code";
     pub const CONSOLE_SUCCESS_URL: &str = "https://platform.claude.com/buy_credits\
@@ -4212,7 +4415,11 @@ pub mod oauth {
         /// - Claude.ai flow: the `access_token` itself (Bearer)
         pub fn effective_credential(&self) -> Option<&str> {
             if self.uses_bearer_auth() {
-                if self.access_token.is_empty() { None } else { Some(&self.access_token) }
+                if self.access_token.is_empty() {
+                    None
+                } else {
+                    Some(&self.access_token)
+                }
             } else {
                 self.api_key.as_deref()
             }
@@ -4263,8 +4470,8 @@ pub mod oauth {
         /// If `label` is None, derives the id from email/account_uuid.
         pub async fn save_and_register(&self, label: Option<&str>) -> anyhow::Result<String> {
             use crate::accounts::{
-                AccountProfile, AccountRegistry, ensure_unique_profile_id,
-                slugify_profile_id, PROVIDER_ANTHROPIC,
+                ensure_unique_profile_id, slugify_profile_id, AccountProfile, AccountRegistry,
+                PROVIDER_ANTHROPIC,
             };
 
             let mut registry = AccountRegistry::load();
@@ -4277,8 +4484,7 @@ pub mod oauth {
                 .into_iter()
                 .find(|p| {
                     (self.email.is_some() && p.email == self.email)
-                        || (self.account_uuid.is_some()
-                            && p.account_id == self.account_uuid)
+                        || (self.account_uuid.is_some() && p.account_id == self.account_uuid)
                 })
                 .map(|p| p.id);
 
@@ -4356,7 +4562,10 @@ pub mod oauth {
         /// `purge_all` is true) and drop the profile from the registry.
         pub async fn clear() -> anyhow::Result<()> {
             let mut registry = crate::accounts::AccountRegistry::load();
-            if let Some(active) = registry.active(crate::accounts::PROVIDER_ANTHROPIC).map(String::from) {
+            if let Some(active) = registry
+                .active(crate::accounts::PROVIDER_ANTHROPIC)
+                .map(String::from)
+            {
                 registry.remove(crate::accounts::PROVIDER_ANTHROPIC, &active)?;
             }
             // Also remove any legacy file.
@@ -4410,8 +4619,7 @@ pub mod oauth {
         callback_port: u16,
         is_manual: bool,
     ) -> String {
-        let mut u = url::Url::parse(authorize_base)
-            .expect("valid OAuth authorize base URL");
+        let mut u = url::Url::parse(authorize_base).expect("valid OAuth authorize base URL");
         {
             let mut q = u.query_pairs_mut();
             q.append_pair("code", "true"); // tells the login page to show Claude Max upsell
@@ -4479,35 +4687,35 @@ pub use oauth::OAuthTokens;
 // New modules: keybindings, voice, analytics, lsp, team_memory_sync,
 //              system_prompt, memdir, oauth_config
 // ---------------------------------------------------------------------------
-pub mod keybindings;
-pub mod voice;
-pub mod analytics;
-pub mod lsp;
-pub mod session_tracing;
-pub mod context_collapse;
-pub mod team_memory_sync;
-pub mod system_prompt;
-pub mod memdir;
-pub mod oauth_config;
-pub mod codex_oauth;
 pub mod accounts;
-pub mod migrations;
-pub mod output_styles;
-pub mod feature_gates;
-pub mod tips;
-pub mod remote_settings;
-pub mod settings_sync;
-pub mod import_config;
-pub mod effort;
-pub mod keywords;
-pub mod prompt_history;
+pub mod analytics;
 pub mod bash_classifier;
+pub mod codex_oauth;
+pub mod context_collapse;
+pub mod effort;
+pub mod feature_gates;
+pub mod import_config;
+pub mod keybindings;
+pub mod keywords;
+pub mod lsp;
+pub mod mcp_trust;
+pub mod memdir;
+pub mod migrations;
+pub mod oauth_config;
+pub mod output_styles;
+pub mod paths;
+pub mod prompt_history;
+pub mod ps_classifier;
+pub mod remote_settings;
+pub mod session_tracing;
+pub mod settings_sync;
 /// Fork addition (Waku): which shell executes the Bash tool, for the tool and
 /// the prompt alike.
 pub mod shell;
-pub mod ps_classifier;
-pub mod mcp_trust;
-pub mod paths;
+pub mod system_prompt;
+pub mod team_memory_sync;
+pub mod tips;
+pub mod voice;
 
 // ---------------------------------------------------------------------------
 // tasks module — background task registry
@@ -4722,7 +4930,13 @@ mod tests {
         let manager = PermissionManager::new(PermissionMode::Plan, &settings);
         let decide = |tool: &str| manager.evaluate(tool, "", None, None, &[], false);
 
-        for tool in ["ExitPlanMode", "TodoWrite", "AskUserQuestion", "WebSearch", "WebFetch"] {
+        for tool in [
+            "ExitPlanMode",
+            "TodoWrite",
+            "AskUserQuestion",
+            "WebSearch",
+            "WebFetch",
+        ] {
             assert_eq!(decide(tool), PermissionDecision::Allow, "{tool}");
         }
         // Reading is what plan mode is for.
@@ -4814,7 +5028,11 @@ mod tests {
         use crate::permissions::{PermissionDecision, PermissionManager};
 
         let settings = Settings::default();
-        for mode in [PermissionMode::Default, PermissionMode::Plan, PermissionMode::AcceptEdits] {
+        for mode in [
+            PermissionMode::Default,
+            PermissionMode::Plan,
+            PermissionMode::AcceptEdits,
+        ] {
             let manager = PermissionManager::new(mode.clone(), &settings);
             assert_eq!(
                 manager.evaluate("EnterPlanMode", "", None, None, &[], false),
@@ -4989,7 +5207,10 @@ mod tests {
 
     #[test]
     fn test_config_mouse_capture_explicit_off() {
-        let mut cfg = crate::config::Config { mouse_capture: Some(false), ..Default::default() };
+        let mut cfg = crate::config::Config {
+            mouse_capture: Some(false),
+            ..Default::default()
+        };
         assert!(!cfg.mouse_capture_enabled());
         cfg.mouse_capture = Some(true);
         assert!(cfg.mouse_capture_enabled());
@@ -5007,7 +5228,10 @@ mod tests {
         assert!(back.mouse_capture_enabled());
 
         // Explicit off serializes the key and round-trips as disabled.
-        let cfg = crate::config::Config { mouse_capture: Some(false), ..Default::default() };
+        let cfg = crate::config::Config {
+            mouse_capture: Some(false),
+            ..Default::default()
+        };
         let json = serde_json::to_string(&cfg).unwrap();
         assert!(json.contains("\"mouseCapture\":false"));
         let back: crate::config::Config = serde_json::from_str(&json).unwrap();
@@ -5023,19 +5247,28 @@ mod tests {
 
     #[test]
     fn test_config_effective_model_override() {
-        let cfg = crate::config::Config { model: Some("claude-haiku-4-5-20251001".to_string()), ..Default::default() };
+        let cfg = crate::config::Config {
+            model: Some("claude-haiku-4-5-20251001".to_string()),
+            ..Default::default()
+        };
         assert_eq!(cfg.effective_model(), "claude-haiku-4-5-20251001");
     }
 
     #[test]
     fn test_config_effective_max_tokens_default() {
         let cfg = crate::config::Config::default();
-        assert_eq!(cfg.effective_max_tokens(), crate::constants::DEFAULT_MAX_TOKENS);
+        assert_eq!(
+            cfg.effective_max_tokens(),
+            crate::constants::DEFAULT_MAX_TOKENS
+        );
     }
 
     #[test]
     fn test_config_effective_max_tokens_override() {
-        let cfg = crate::config::Config { max_tokens: Some(8192), ..Default::default() };
+        let cfg = crate::config::Config {
+            max_tokens: Some(8192),
+            ..Default::default()
+        };
         assert_eq!(cfg.effective_max_tokens(), 8192);
     }
 
@@ -5046,7 +5279,10 @@ mod tests {
         let orig = std::env::var("ANTHROPIC_API_KEY").ok();
         std::env::remove_var("ANTHROPIC_API_KEY");
 
-        let cfg = crate::config::Config { api_key: Some("sk-ant-config-key".to_string()), ..Default::default() };
+        let cfg = crate::config::Config {
+            api_key: Some("sk-ant-config-key".to_string()),
+            ..Default::default()
+        };
         assert_eq!(cfg.resolve_api_key(), Some("sk-ant-config-key".to_string()));
 
         if let Some(k) = orig {
@@ -5093,7 +5329,10 @@ mod tests {
             expires_at_ms: None,
             ..Default::default()
         };
-        assert!(!tokens.is_expired(), "Token with no expiry should not be considered expired");
+        assert!(
+            !tokens.is_expired(),
+            "Token with no expiry should not be considered expired"
+        );
     }
 
     #[test]
@@ -5126,7 +5365,10 @@ mod tests {
             expires_at_ms: Some(chrono::Utc::now().timestamp_millis() + 3 * 60 * 1000),
             ..Default::default()
         };
-        assert!(tokens.is_expired(), "Token within 5-min buffer should be considered expired");
+        assert!(
+            tokens.is_expired(),
+            "Token within 5-min buffer should be considered expired"
+        );
     }
 
     #[test]
@@ -5196,9 +5438,15 @@ mod tests {
     fn test_pkce_code_verifier_length() {
         let verifier = crate::oauth::generate_code_verifier();
         // 32 bytes base64url-encoded (no padding) = ceil(32 * 4/3) = 43 chars
-        assert_eq!(verifier.len(), 43, "Code verifier should be 43 base64url chars (32 bytes)");
+        assert_eq!(
+            verifier.len(),
+            43,
+            "Code verifier should be 43 base64url chars (32 bytes)"
+        );
         // Must only contain URL-safe base64 chars
-        assert!(verifier.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(verifier
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
     }
 
     #[test]
@@ -5206,8 +5454,14 @@ mod tests {
         let verifier = crate::oauth::generate_code_verifier();
         let challenge = crate::oauth::generate_code_challenge(&verifier);
         // SHA256 = 32 bytes → 43 base64url chars
-        assert_eq!(challenge.len(), 43, "Code challenge should be 43 base64url chars (SHA256 = 32 bytes)");
-        assert!(challenge.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert_eq!(
+            challenge.len(),
+            43,
+            "Code challenge should be 43 base64url chars (SHA256 = 32 bytes)"
+        );
+        assert!(challenge
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
     }
 
     #[test]
@@ -5230,7 +5484,9 @@ mod tests {
     fn test_pkce_state_length_and_format() {
         let state = crate::oauth::generate_state();
         assert_eq!(state.len(), 43);
-        assert!(state.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(state
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
     }
 
     // ---- Auth URL building tests --------------------------------------------
@@ -5267,10 +5523,7 @@ mod tests {
             9999,
             true, // manual
         );
-        assert!(
-            url.contains("redirect_uri="),
-            "URL must have redirect_uri"
-        );
+        assert!(url.contains("redirect_uri="), "URL must have redirect_uri");
         // Manual redirect should NOT be localhost
         assert!(
             !url.contains("localhost"),
@@ -5391,8 +5644,12 @@ mod tests {
     #[test]
     fn test_message_get_all_text_multiple_blocks() {
         let msg = Message::assistant_blocks(vec![
-            ContentBlock::Text { text: "First ".into() },
-            ContentBlock::Text { text: "Second".into() },
+            ContentBlock::Text {
+                text: "First ".into(),
+            },
+            ContentBlock::Text {
+                text: "Second".into(),
+            },
         ]);
         assert_eq!(msg.get_all_text(), "First Second");
     }
@@ -5404,7 +5661,9 @@ mod tests {
                 thinking: "reasoning".into(),
                 signature: "sig".into(),
             },
-            ContentBlock::Text { text: "answer".into() },
+            ContentBlock::Text {
+                text: "answer".into(),
+            },
         ]);
         assert_eq!(msg.get_text(), Some("answer"));
     }
@@ -5443,30 +5702,84 @@ mod tests {
     #[test]
     fn test_model_pricing_free_variants() {
         // Test that models ending with -free use FREE pricing
-        assert_eq!(cost::ModelPricing::for_model("deepseek-v4-flash-free"), cost::ModelPricing::FREE);
-        assert_eq!(cost::ModelPricing::for_model("zen/minimax-m2.5-free"), cost::ModelPricing::FREE);
+        assert_eq!(
+            cost::ModelPricing::for_model("deepseek-v4-flash-free"),
+            cost::ModelPricing::FREE
+        );
+        assert_eq!(
+            cost::ModelPricing::for_model("zen/minimax-m2.5-free"),
+            cost::ModelPricing::FREE
+        );
 
         // Test that models starting with free/ use FREE pricing
-        assert_eq!(cost::ModelPricing::for_model("free/auto"), cost::ModelPricing::FREE);
-        assert_eq!(cost::ModelPricing::for_model("free/some-model"), cost::ModelPricing::FREE);
+        assert_eq!(
+            cost::ModelPricing::for_model("free/auto"),
+            cost::ModelPricing::FREE
+        );
+        assert_eq!(
+            cost::ModelPricing::for_model("free/some-model"),
+            cost::ModelPricing::FREE
+        );
 
         // Test that upstream-prefixed free models use FREE pricing
-        assert_eq!(cost::ModelPricing::for_model("groq/llama-3.3-70b-versatile"), cost::ModelPricing::FREE);
-        assert_eq!(cost::ModelPricing::for_model("cerebras/qwen-3-235b-a22b-instruct-2507"), cost::ModelPricing::FREE);
-        assert_eq!(cost::ModelPricing::for_model("google/gemini-2.5-flash"), cost::ModelPricing::FREE);
-        assert_eq!(cost::ModelPricing::for_model("mistral/mistral-large-latest"), cost::ModelPricing::FREE);
-        assert_eq!(cost::ModelPricing::for_model("sambanova/Meta-Llama-3.3-70B-Instruct"), cost::ModelPricing::FREE);
-        assert_eq!(cost::ModelPricing::for_model("nvidia/meta/llama-3.3-70b-instruct"), cost::ModelPricing::FREE);
-        assert_eq!(cost::ModelPricing::for_model("cohere/command-r-plus"), cost::ModelPricing::FREE);
-        assert_eq!(cost::ModelPricing::for_model("openrouter/free"), cost::ModelPricing::FREE);
-        assert_eq!(cost::ModelPricing::for_model("opencode-zen/minimax-m2.5-free"), cost::ModelPricing::FREE);
-        assert_eq!(cost::ModelPricing::for_model("zai/glm-4.6"), cost::ModelPricing::FREE);
-        assert_eq!(cost::ModelPricing::for_model("zhipuai/glm-4.5"), cost::ModelPricing::FREE);
+        assert_eq!(
+            cost::ModelPricing::for_model("groq/llama-3.3-70b-versatile"),
+            cost::ModelPricing::FREE
+        );
+        assert_eq!(
+            cost::ModelPricing::for_model("cerebras/qwen-3-235b-a22b-instruct-2507"),
+            cost::ModelPricing::FREE
+        );
+        assert_eq!(
+            cost::ModelPricing::for_model("google/gemini-2.5-flash"),
+            cost::ModelPricing::FREE
+        );
+        assert_eq!(
+            cost::ModelPricing::for_model("mistral/mistral-large-latest"),
+            cost::ModelPricing::FREE
+        );
+        assert_eq!(
+            cost::ModelPricing::for_model("sambanova/Meta-Llama-3.3-70B-Instruct"),
+            cost::ModelPricing::FREE
+        );
+        assert_eq!(
+            cost::ModelPricing::for_model("nvidia/meta/llama-3.3-70b-instruct"),
+            cost::ModelPricing::FREE
+        );
+        assert_eq!(
+            cost::ModelPricing::for_model("cohere/command-r-plus"),
+            cost::ModelPricing::FREE
+        );
+        assert_eq!(
+            cost::ModelPricing::for_model("openrouter/free"),
+            cost::ModelPricing::FREE
+        );
+        assert_eq!(
+            cost::ModelPricing::for_model("opencode-zen/minimax-m2.5-free"),
+            cost::ModelPricing::FREE
+        );
+        assert_eq!(
+            cost::ModelPricing::for_model("zai/glm-4.6"),
+            cost::ModelPricing::FREE
+        );
+        assert_eq!(
+            cost::ModelPricing::for_model("zhipuai/glm-4.5"),
+            cost::ModelPricing::FREE
+        );
 
         // Test that other models use their appropriate pricing
-        assert_eq!(cost::ModelPricing::for_model("claude-opus"), cost::ModelPricing::OPUS);
-        assert_eq!(cost::ModelPricing::for_model("claude-haiku"), cost::ModelPricing::HAIKU);
-        assert_eq!(cost::ModelPricing::for_model("claude-sonnet"), cost::ModelPricing::SONNET);
+        assert_eq!(
+            cost::ModelPricing::for_model("claude-opus"),
+            cost::ModelPricing::OPUS
+        );
+        assert_eq!(
+            cost::ModelPricing::for_model("claude-haiku"),
+            cost::ModelPricing::HAIKU
+        );
+        assert_eq!(
+            cost::ModelPricing::for_model("claude-sonnet"),
+            cost::ModelPricing::SONNET
+        );
     }
 
     #[test]
@@ -5499,10 +5812,16 @@ mod tests {
     #[test]
     fn builtin_presets_all_have_valid_model_format() {
         for preset in builtin_managed_agent_presets() {
-            assert!(preset.manager_model.contains('/'),
-                "Preset {} manager_model must be provider/model", preset.name);
-            assert!(preset.executor_model.contains('/'),
-                "Preset {} executor_model must be provider/model", preset.name);
+            assert!(
+                preset.manager_model.contains('/'),
+                "Preset {} manager_model must be provider/model",
+                preset.name
+            );
+            assert!(
+                preset.executor_model.contains('/'),
+                "Preset {} executor_model must be provider/model",
+                preset.name
+            );
         }
     }
 

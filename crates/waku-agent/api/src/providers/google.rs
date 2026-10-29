@@ -24,7 +24,9 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use bytes::Bytes;
 use claurst_core::provider_id::ProviderId;
-use claurst_core::types::{ContentBlock, Message, MessageContent, Role, ToolResultContent, UsageInfo};
+use claurst_core::types::{
+    ContentBlock, Message, MessageContent, Role, ToolResultContent, UsageInfo,
+};
 use futures::{Stream, StreamExt};
 use serde_json::{json, Value};
 use tracing::{debug, warn};
@@ -129,7 +131,11 @@ impl GoogleProvider {
                 }
             })
             .collect();
-        let base = if sanitized.is_empty() { "tool" } else { sanitized.as_str() };
+        let base = if sanitized.is_empty() {
+            "tool"
+        } else {
+            sanitized.as_str()
+        };
         if occurrence == 0 {
             format!("call_{}_{}", base, nonce)
         } else {
@@ -203,12 +209,16 @@ impl GoogleProvider {
                             "mimeType": mime
                         }
                     }))
-                } else { source.url.as_ref().map(|url| json!({
-                        "fileData": {
-                            "fileUri": url,
-                            "mimeType": source.media_type.as_deref().unwrap_or("image/jpeg")
-                        }
-                    })) }
+                } else {
+                    source.url.as_ref().map(|url| {
+                        json!({
+                            "fileData": {
+                                "fileUri": url,
+                                "mimeType": source.media_type.as_deref().unwrap_or("image/jpeg")
+                            }
+                        })
+                    })
+                }
             }
 
             ContentBlock::ToolUse {
@@ -246,12 +256,14 @@ impl GoogleProvider {
                             "mimeType": mime
                         }
                     }))
-                } else { source.url.as_ref().map(|url| json!({
+                } else {
+                    source.url.as_ref().map(|url| json!({
                         "fileData": {
                             "fileUri": url,
                             "mimeType": source.media_type.as_deref().unwrap_or("application/pdf")
                         }
-                    })) }
+                    }))
+                }
             }
 
             // Render UI-only / metadata blocks as text so context is not lost.
@@ -267,10 +279,16 @@ impl GoogleProvider {
             ContentBlock::SystemAPIError { message, .. } => Some(json!({
                 "text": format!("[error] {}", message)
             })),
-            ContentBlock::CollapsedReadSearch { tool_name, paths, .. } => Some(json!({
+            ContentBlock::CollapsedReadSearch {
+                tool_name, paths, ..
+            } => Some(json!({
                 "text": format!("[{}] {}", tool_name, paths.join(", "))
             })),
-            ContentBlock::TaskAssignment { id, subject, description } => Some(json!({
+            ContentBlock::TaskAssignment {
+                id,
+                subject,
+                description,
+            } => Some(json!({
                 "text": format!("[task:{}] {}: {}", id, subject, description)
             })),
 
@@ -362,11 +380,7 @@ impl GoogleProvider {
 
                         let filtered: Vec<Value> = req_arr
                             .into_iter()
-                            .filter(|v| {
-                                v.as_str()
-                                    .map(|s| prop_keys.contains(s))
-                                    .unwrap_or(false)
-                            })
+                            .filter(|v| v.as_str().map(|s| prop_keys.contains(s)).unwrap_or(false))
                             .collect();
                         map.insert("required".to_string(), Value::Array(filtered));
                     }
@@ -381,8 +395,10 @@ impl GoogleProvider {
                     if let Some(items) = map.get_mut("items") {
                         if let Value::Object(ref mut items_map) = items {
                             if !items_map.contains_key("type") {
-                                items_map
-                                    .insert("type".to_string(), Value::String("string".to_string()));
+                                items_map.insert(
+                                    "type".to_string(),
+                                    Value::String("string".to_string()),
+                                );
                             }
                             // Recurse sanitize into items.
                             let sanitized = Self::sanitize_schema(Value::Object(items_map.clone()));
@@ -489,18 +505,12 @@ impl GoogleProvider {
 
         // ---- Generation config ----
         let mut gen_config = serde_json::Map::new();
-        gen_config.insert(
-            "maxOutputTokens".to_string(),
-            json!(request.max_tokens),
-        );
+        gen_config.insert("maxOutputTokens".to_string(), json!(request.max_tokens));
         if let Some(temp) = request.temperature {
             gen_config.insert("temperature".to_string(), json!(temp));
         }
         if !request.stop_sequences.is_empty() {
-            gen_config.insert(
-                "stopSequences".to_string(),
-                json!(request.stop_sequences),
-            );
+            gen_config.insert("stopSequences".to_string(), json!(request.stop_sequences));
         }
         if let Some(top_p) = request.top_p {
             gen_config.insert("topP".to_string(), json!(top_p));
@@ -528,10 +538,7 @@ impl GoogleProvider {
         // ---- Assemble body ----
         let mut body = serde_json::Map::new();
         body.insert("contents".to_string(), Value::Array(contents));
-        body.insert(
-            "generationConfig".to_string(),
-            Value::Object(gen_config),
-        );
+        body.insert("generationConfig".to_string(), Value::Object(gen_config));
         if let Some(si) = system_instruction {
             body.insert("systemInstruction".to_string(), si);
         }
@@ -556,7 +563,10 @@ impl GoogleProvider {
         model: &str,
     ) -> Result<ProviderResponse, ProviderError> {
         if let Some(failure) = prompt_block_failure(body) {
-            return Err(ProviderError::Classified { provider: self.id.clone(), failure });
+            return Err(ProviderError::Classified {
+                provider: self.id.clone(),
+                failure,
+            });
         }
         let candidates = body
             .get("candidates")
@@ -673,7 +683,6 @@ impl GoogleProvider {
             failure: crate::retry_policy::classify_http(status, &headers, &body),
         }
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -730,10 +739,8 @@ impl LlmProvider for GoogleProvider {
     async fn create_message_stream(
         &self,
         request: ProviderRequest,
-    ) -> Result<
-        Pin<Box<dyn Stream<Item = Result<StreamEvent, ProviderError>> + Send>>,
-        ProviderError,
-    > {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, ProviderError>> + Send>>, ProviderError>
+    {
         let url = self.stream_url(&request.model);
         let model = request.model.clone();
         let body = self.build_request_body(&request);
@@ -993,12 +1000,10 @@ impl LlmProvider for GoogleProvider {
                 let status = r.status().as_u16();
                 let body = r.text().await.unwrap_or_default();
                 match self.parse_error_response(status, &body) {
-                    ProviderError::AuthFailed { message, .. } => {
-                        Err(ProviderError::AuthFailed {
-                            provider: self.id.clone(),
-                            message,
-                        })
-                    }
+                    ProviderError::AuthFailed { message, .. } => Err(ProviderError::AuthFailed {
+                        provider: self.id.clone(),
+                        message,
+                    }),
                     e => Ok(ProviderStatus::Unavailable {
                         reason: e.to_string(),
                     }),
@@ -1057,7 +1062,9 @@ fn thought_signature_from_part(part: &Value) -> Option<String> {
 
 /// Fork (Waku): whether a text part is a thought summary (`"thought": true`).
 fn is_thought_part(part: &Value) -> bool {
-    part.get("thought").and_then(Value::as_bool).unwrap_or(false)
+    part.get("thought")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 /// Fork (Waku): usage from a `usageMetadata` object. `promptTokenCount`
@@ -1189,7 +1196,10 @@ mod tests {
         assert_eq!(contents.len(), 3);
         assert_eq!(contents[0]["role"], json!("user"));
         assert_eq!(contents[0]["parts"][0]["text"], json!("before"));
-        assert_eq!(contents[1]["parts"][0]["functionResponse"]["name"], json!("search"));
+        assert_eq!(
+            contents[1]["parts"][0]["functionResponse"]["name"],
+            json!("search")
+        );
         assert_eq!(contents[2]["parts"][0]["text"], json!("after"));
     }
 
@@ -1227,7 +1237,10 @@ mod tests {
         assert!(ids[1].ends_with("_2"));
         // Either id still reads back as the function's name.
         for id in &ids {
-            assert_eq!(GoogleProvider::infer_tool_name_from_id(id).as_deref(), Some("search"));
+            assert_eq!(
+                GoogleProvider::infer_tool_name_from_id(id).as_deref(),
+                Some("search")
+            );
         }
     }
 
@@ -1236,10 +1249,19 @@ mod tests {
         let first = GoogleProvider::tool_use_id_for_name("web_fetch", "0a1b2c3d", 0);
         let second = GoogleProvider::tool_use_id_for_name("web_fetch", "12345678", 0);
         assert_ne!(first, second);
-        assert_eq!(GoogleProvider::infer_tool_name_from_id(&first).as_deref(), Some("web_fetch"));
-        assert_eq!(GoogleProvider::infer_tool_name_from_id(&second).as_deref(), Some("web_fetch"));
+        assert_eq!(
+            GoogleProvider::infer_tool_name_from_id(&first).as_deref(),
+            Some("web_fetch")
+        );
+        assert_eq!(
+            GoogleProvider::infer_tool_name_from_id(&second).as_deref(),
+            Some("web_fetch")
+        );
         let third = GoogleProvider::tool_use_id_for_name("web_fetch", "12345678", 2);
-        assert_eq!(GoogleProvider::infer_tool_name_from_id(&third).as_deref(), Some("web_fetch"));
+        assert_eq!(
+            GoogleProvider::infer_tool_name_from_id(&third).as_deref(),
+            Some("web_fetch")
+        );
     }
 
     #[test]
@@ -1252,7 +1274,8 @@ mod tests {
         );
         assert!(!url.contains("secret"));
 
-        let gateway = GoogleProvider::with_gateway("https://cheaprouter.cc/antigravity/", "k".into());
+        let gateway =
+            GoogleProvider::with_gateway("https://cheaprouter.cc/antigravity/", "k".into());
         assert_eq!(
             gateway.generate_url("gemini-4-argon"),
             "https://cheaprouter.cc/antigravity/v1beta/models/gemini-4-argon:generateContent"
@@ -1286,7 +1309,9 @@ mod tests {
             loop {
                 let read = socket.read(&mut buffer).await.unwrap();
                 request.extend_from_slice(&buffer[..read]);
-                let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
+                let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
+                    continue;
+                };
                 let headers = String::from_utf8_lossy(&request[..end]).to_ascii_lowercase();
                 let length = headers
                     .lines()
@@ -1316,11 +1341,17 @@ mod tests {
             match event.unwrap() {
                 StreamEvent::ContentBlockStart {
                     index,
-                    content_block: ContentBlock::ToolUse { id, thought_signature, .. },
+                    content_block:
+                        ContentBlock::ToolUse {
+                            id,
+                            thought_signature,
+                            ..
+                        },
                 } => starts.push((index, id, thought_signature)),
-                StreamEvent::InputJsonDelta { index, partial_json } => {
-                    args.entry(index).or_default().push_str(&partial_json)
-                }
+                StreamEvent::InputJsonDelta {
+                    index,
+                    partial_json,
+                } => args.entry(index).or_default().push_str(&partial_json),
                 _ => {}
             }
         }
@@ -1357,7 +1388,9 @@ mod tests {
         let parsed = provider
             .parse_response_body(&response, "gemini-4-argon")
             .expect("parsed response");
-        assert!(matches!(&parsed.content[0], ContentBlock::Thinking { thinking, .. } if thinking == "weighing options"));
+        assert!(
+            matches!(&parsed.content[0], ContentBlock::Thinking { thinking, .. } if thinking == "weighing options")
+        );
         assert!(matches!(&parsed.content[1], ContentBlock::Text { text } if text == "answer"));
         assert_eq!(parsed.usage.input_tokens, 60);
         assert_eq!(parsed.usage.cache_read_input_tokens, 40);

@@ -356,7 +356,12 @@ pub(super) fn render_message_footer(
 
     // Fork addition: edit-and-resend where rewind is unavailable.
     if let Some(action) = resend_action {
-        footer = footer.child(super::message_resend::footer_button(action, footer_color, &theme, waku.clone()));
+        footer = footer.child(super::message_resend::footer_button(
+            action,
+            footer_color,
+            &theme,
+            waku.clone(),
+        ));
     }
 
     if let Some(action) = user_message_action {

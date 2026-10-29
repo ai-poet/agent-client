@@ -837,17 +837,21 @@ impl Waku {
             ),
         ]);
         // Fork addition: one command per right-panel surface.
-        commands.extend(super::surface_bar::SurfaceKind::ALL.into_iter().map(|kind| {
-            CommandPaletteItem::command(
-                PaletteSection::Commands,
-                kind.palette_label(),
-                kind.icon_path(),
-                Some(kind.shortcut_label()),
-                PaletteAction::OpenSurface(kind),
-                kind.palette_keywords(),
-                next(),
-            )
-        }));
+        commands.extend(
+            super::surface_bar::SurfaceKind::ALL
+                .into_iter()
+                .map(|kind| {
+                    CommandPaletteItem::command(
+                        PaletteSection::Commands,
+                        kind.palette_label(),
+                        kind.icon_path(),
+                        Some(kind.shortcut_label()),
+                        PaletteAction::OpenSurface(kind),
+                        kind.palette_keywords(),
+                        next(),
+                    )
+                }),
+        );
         // Fork addition: the next task that needs the person (task_attention.rs).
         commands.push(CommandPaletteItem::command(
             PaletteSection::Commands,

@@ -246,8 +246,10 @@ pub fn merge_answers(
     if entries.len() <= cap {
         return;
     }
-    let fresh: std::collections::HashSet<&str> =
-        answers.iter().map(|(original, _)| original.as_str()).collect();
+    let fresh: std::collections::HashSet<&str> = answers
+        .iter()
+        .map(|(original, _)| original.as_str())
+        .collect();
     let mut excess = entries.len() - cap;
     let stale: Vec<String> = entries
         .keys()
@@ -325,11 +327,9 @@ mod tests {
 
     #[test]
     fn parses_the_lookup_envelope() {
-        let lookup = parse_lookup(&ok(
-            r#"{"code":0,"message":"success","data":{"lang":"en",
+        let lookup = parse_lookup(&ok(r#"{"code":0,"message":"success","data":{"lang":"en",
                 "translations":{"分组描述原文":"Group description","空":"  "},
-                "pending":true}}"#,
-        ))
+                "pending":true}}"#))
         .expect("parse");
         assert_eq!(
             lookup.translations.get("分组描述原文").map(String::as_str),

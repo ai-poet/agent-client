@@ -225,7 +225,9 @@ pub fn set_failure_override(rules: FailureOverride) {
 }
 
 fn overridden(status: Option<u16>, message: &str) -> Option<FailureClass> {
-    FAILURE_OVERRIDE.get().and_then(|rules| rules(status, message))
+    FAILURE_OVERRIDE
+        .get()
+        .and_then(|rules| rules(status, message))
 }
 
 /// `failure` with the product's verdict applied, when it has one.
@@ -242,7 +244,11 @@ fn with_override(mut failure: ModelFailure) -> ModelFailure {
 
 /// Classify an HTTP error response. Headers are read for `Retry-After`
 /// (`retry-after-ms`, seconds or an HTTP date) and `x-should-retry`.
-pub fn classify_http(status: u16, headers: &reqwest::header::HeaderMap, body: &str) -> ModelFailure {
+pub fn classify_http(
+    status: u16,
+    headers: &reqwest::header::HeaderMap,
+    body: &str,
+) -> ModelFailure {
     let retry_after = parse_retry_after(headers, SystemTime::now());
     let should_retry = headers
         .get("x-should-retry")
@@ -259,7 +265,9 @@ pub fn request_id_of(headers: &reqwest::header::HeaderMap) -> Option<String> {
         .iter()
         .filter_map(|name| headers.get(*name)?.to_str().ok())
         .map(str::trim)
-        .find(|id| !id.is_empty() && id.len() <= 128 && id.bytes().all(|byte| byte.is_ascii_graphic()))
+        .find(|id| {
+            !id.is_empty() && id.len() <= 128 && id.bytes().all(|byte| byte.is_ascii_graphic())
+        })
         .map(str::to_string)
 }
 
@@ -276,7 +284,9 @@ pub fn classify_status(
         _ => format!("the server answered HTTP {status}"),
     });
     let code = error_code_from_body(body);
-    if matches!(status, 400 | 413 | 422) && (names_context_overflow(&message) || names_context_overflow(body)) {
+    if matches!(status, 400 | 413 | 422)
+        && (names_context_overflow(&message) || names_context_overflow(body))
+    {
         return ModelFailure::context_overflow(Some(status), message).with_code(code);
     }
 
@@ -346,18 +356,30 @@ fn classify_transport_detail(detail: &str, is_timeout: bool) -> ModelFailure {
 pub fn classify_stream_error(kind: &str, message: &str) -> ModelFailure {
     let kind = kind.trim().to_ascii_lowercase();
     let code = Some(kind.clone());
-    if names_context_overflow(message) || kind.contains("context_length") || kind.contains("context_window") {
+    if names_context_overflow(message)
+        || kind.contains("context_length")
+        || kind.contains("context_window")
+    {
         return ModelFailure::context_overflow(None, message).with_code(code);
     }
     let lower = message.to_ascii_lowercase();
     let failure = match kind.as_str() {
-        "authentication_error" | "permission_error" | "billing_error" | "invalid_request_error"
-        | "not_found_error" | "insufficient_quota" | "invalid_prompt" | "content_filter"
-        | "content_policy_violation" | "request_too_large" => ModelFailure::fatal(None, message),
+        "authentication_error"
+        | "permission_error"
+        | "billing_error"
+        | "invalid_request_error"
+        | "not_found_error"
+        | "insufficient_quota"
+        | "invalid_prompt"
+        | "content_filter"
+        | "content_policy_violation"
+        | "request_too_large" => ModelFailure::fatal(None, message),
         "rate_limit_error" | "rate_limit_exceeded" | "rate_limited" => {
             ModelFailure::retryable(RetryReason::RateLimited, message)
         }
-        "overloaded_error" | "overloaded" => ModelFailure::retryable(RetryReason::Overloaded, message),
+        "overloaded_error" | "overloaded" => {
+            ModelFailure::retryable(RetryReason::Overloaded, message)
+        }
         _ if lower.contains("timed out") || lower.contains("timeout") => {
             ModelFailure::retryable(RetryReason::Timeout, message)
         }
@@ -426,18 +448,20 @@ pub fn from_provider_error(error: &crate::provider_error::ProviderError) -> Mode
             }
         }
         // The variant names the failure; the code says so to the client.
-        E::AuthFailed { message, .. } => {
-            with_override(ModelFailure::fatal(None, message.clone()).with_code(Some("authentication_error".into())))
-        }
-        E::QuotaExceeded { message, .. } => {
-            with_override(ModelFailure::fatal(None, message.clone()).with_code(Some("insufficient_quota".into())))
-        }
-        E::InvalidRequest { message, .. } => {
-            with_override(ModelFailure::fatal(None, message.clone()).with_code(Some("invalid_request_error".into())))
-        }
-        E::ContentFiltered { message, .. } => {
-            with_override(ModelFailure::fatal(None, message.clone()).with_code(Some("content_filter".into())))
-        }
+        E::AuthFailed { message, .. } => with_override(
+            ModelFailure::fatal(None, message.clone())
+                .with_code(Some("authentication_error".into())),
+        ),
+        E::QuotaExceeded { message, .. } => with_override(
+            ModelFailure::fatal(None, message.clone()).with_code(Some("insufficient_quota".into())),
+        ),
+        E::InvalidRequest { message, .. } => with_override(
+            ModelFailure::fatal(None, message.clone())
+                .with_code(Some("invalid_request_error".into())),
+        ),
+        E::ContentFiltered { message, .. } => with_override(
+            ModelFailure::fatal(None, message.clone()).with_code(Some("content_filter".into())),
+        ),
         E::ModelNotFound { .. } => ModelFailure::fatal(Some(404), error.to_string()),
     }
 }
@@ -454,7 +478,9 @@ pub fn classify_claude_error(error: &ClaudeError) -> FailureClass {
         ClaudeError::ContextWindowExceeded => FailureClass::ContextOverflow,
         ClaudeError::RateLimit => FailureClass::Retryable,
         ClaudeError::Http(error) => classify_transport(error).class,
-        ClaudeError::ApiStatus { status, message } => classify_status(*status, message, None, None).class,
+        ClaudeError::ApiStatus { status, message } => {
+            classify_status(*status, message, None, None).class
+        }
         ClaudeError::Api(message) | ClaudeError::Other(message) => {
             if let Some(class) = overridden(None, message) {
                 return class;
@@ -485,7 +511,10 @@ pub fn classify_claude_error(error: &ClaudeError) -> FailureClass {
 /// also produces: an HTML "413 Request Entity Too Large" says nothing about
 /// tokens, and compacting the conversation would not shrink an image.
 fn names_context_overflow(text: &str) -> bool {
-    is_context_overflow(text) && !text.to_ascii_lowercase().contains("request entity too large")
+    is_context_overflow(text)
+        && !text
+            .to_ascii_lowercase()
+            .contains("request entity too large")
 }
 
 /// The human-readable message out of an error body, wherever the provider
@@ -496,7 +525,13 @@ fn error_message_from_body(body: &str) -> Option<String> {
         return None;
     }
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
-        for path in ["/error/message", "/error/error/message", "/message", "/detail", "/error"] {
+        for path in [
+            "/error/message",
+            "/error/error/message",
+            "/message",
+            "/detail",
+            "/error",
+        ] {
             if let Some(message) = json.pointer(path).and_then(|value| value.as_str()) {
                 if !message.trim().is_empty() {
                     return Some(message.to_string());
@@ -518,12 +553,18 @@ fn error_message_from_body(body: &str) -> Option<String> {
 /// Gemini's `error.status`. Lower-cased; `None` without one.
 fn error_code_from_body(body: &str) -> Option<String> {
     let json = serde_json::from_str::<serde_json::Value>(body.trim()).ok()?;
-    ["/error/code", "/error/type", "/error/status", "/code", "/type"]
-        .iter()
-        .filter_map(|path| json.pointer(path)?.as_str())
-        .map(str::trim)
-        .find(|code| !code.is_empty())
-        .map(str::to_ascii_lowercase)
+    [
+        "/error/code",
+        "/error/type",
+        "/error/status",
+        "/code",
+        "/type",
+    ]
+    .iter()
+    .filter_map(|path| json.pointer(path)?.as_str())
+    .map(str::trim)
+    .find(|code| !code.is_empty())
+    .map(str::to_ascii_lowercase)
 }
 
 /// `text` with anything that looks like a credential replaced by
@@ -537,7 +578,8 @@ pub fn redact_secrets(text: &str) -> String {
     use regex::{Captures, Regex};
     use std::sync::LazyLock;
 
-    static OPENAI_KEY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bsk-[A-Za-z0-9_*\-]{8,}").unwrap());
+    static OPENAI_KEY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\bsk-[A-Za-z0-9_*\-]{8,}").unwrap());
     static BEARER: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=\-]{8,}").unwrap());
     static ASSIGNED: LazyLock<Regex> = LazyLock::new(|| {
@@ -546,13 +588,16 @@ pub fn redact_secrets(text: &str) -> String {
         )
         .unwrap()
     });
-    static QUERY: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"([?&](?:key|api_key|access_token|token)=)[^&\s"']+"#).unwrap());
-    static GOOGLE_KEY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"AIza[0-9A-Za-z_\-]{35}").unwrap());
+    static QUERY: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"([?&](?:key|api_key|access_token|token)=)[^&\s"']+"#).unwrap()
+    });
+    static GOOGLE_KEY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"AIza[0-9A-Za-z_\-]{35}").unwrap());
     static JWT: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}").unwrap()
     });
-    static LONG_RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z0-9_\-]{40,}").unwrap());
+    static LONG_RUN: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"[A-Za-z0-9_\-]{40,}").unwrap());
     const REDACTED: &str = "[redacted]";
 
     let text = OPENAI_KEY.replace_all(text, "sk-[redacted]");
@@ -574,7 +619,11 @@ pub fn redact_secrets(text: &str) -> String {
         let mixed = run.bytes().any(|byte| byte.is_ascii_uppercase())
             && run.bytes().any(|byte| byte.is_ascii_lowercase())
             && run.bytes().any(|byte| byte.is_ascii_digit());
-        if mixed { REDACTED.to_string() } else { run.to_string() }
+        if mixed {
+            REDACTED.to_string()
+        } else {
+            run.to_string()
+        }
     });
     text.into_owned()
 }
@@ -596,8 +645,16 @@ fn error_chain(error: &(dyn std::error::Error + 'static)) -> String {
 
 /// How long the server asked to wait: `retry-after-ms`, then `retry-after`
 /// as seconds or an HTTP date.
-pub fn parse_retry_after(headers: &reqwest::header::HeaderMap, now: SystemTime) -> Option<Duration> {
-    let header = |name: &str| headers.get(name).and_then(|value| value.to_str().ok()).map(str::trim);
+pub fn parse_retry_after(
+    headers: &reqwest::header::HeaderMap,
+    now: SystemTime,
+) -> Option<Duration> {
+    let header = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+    };
     if let Some(ms) = header("retry-after-ms").and_then(|value| value.parse::<f64>().ok()) {
         if ms.is_finite() && ms >= 0.0 {
             return Some(Duration::from_secs_f64(ms / 1000.0));
@@ -755,16 +812,25 @@ mod tests {
             assert_eq!(class(status, "{}"), FailureClass::Fatal, "{status}");
         }
         assert_eq!(
-            class(400, r#"{"error":{"message":"prompt is too long: 210000 tokens > 200000 maximum"}}"#),
+            class(
+                400,
+                r#"{"error":{"message":"prompt is too long: 210000 tokens > 200000 maximum"}}"#
+            ),
             FailureClass::ContextOverflow
         );
         assert_eq!(
-            class(400, r#"{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 128000 tokens"}}"#),
+            class(
+                400,
+                r#"{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 128000 tokens"}}"#
+            ),
             FailureClass::ContextOverflow
         );
         // A CDN's body limit is not a context window.
         assert_eq!(
-            class(413, "<html><title>413 Request Entity Too Large</title></html>"),
+            class(
+                413,
+                "<html><title>413 Request Entity Too Large</title></html>"
+            ),
             FailureClass::Fatal
         );
     }
@@ -796,10 +862,16 @@ mod tests {
         );
         // Tue, 14 Nov 2023 22:13:30 GMT is 10 s after `now`.
         assert_eq!(
-            parse_retry_after(&headers(&[("retry-after", "Tue, 14 Nov 2023 22:13:30 GMT")]), now),
+            parse_retry_after(
+                &headers(&[("retry-after", "Tue, 14 Nov 2023 22:13:30 GMT")]),
+                now
+            ),
             Some(Duration::from_secs(10))
         );
-        assert_eq!(parse_retry_after(&headers(&[("retry-after", "soon")]), now), None);
+        assert_eq!(
+            parse_retry_after(&headers(&[("retry-after", "soon")]), now),
+            None
+        );
         assert_eq!(parse_retry_after(&HeaderMap::new(), now), None);
     }
 
@@ -819,10 +891,16 @@ mod tests {
 
     #[test]
     fn stream_errors_classify_by_type() {
-        assert_eq!(classify_stream_error("overloaded_error", "Overloaded").reason, RetryReason::Overloaded);
+        assert_eq!(
+            classify_stream_error("overloaded_error", "Overloaded").reason,
+            RetryReason::Overloaded
+        );
         assert!(classify_stream_error("api_error", "Internal error").is_retryable());
         assert!(classify_stream_error("", "connection reset").is_retryable());
-        assert_eq!(classify_stream_error("billing_error", "no credit").class, FailureClass::Fatal);
+        assert_eq!(
+            classify_stream_error("billing_error", "no credit").class,
+            FailureClass::Fatal
+        );
         assert_eq!(
             classify_stream_error("invalid_request_error", "prompt is too long").class,
             FailureClass::ContextOverflow
@@ -842,7 +920,10 @@ mod tests {
             for _ in 0..20 {
                 let delay = backoff_delay(RetryBudget::Default, retry, None);
                 assert!(delay <= ceiling, "retry {retry}: {delay:?} > {ceiling:?}");
-                assert!(delay >= ceiling / 2, "retry {retry}: {delay:?} < half of {ceiling:?}");
+                assert!(
+                    delay >= ceiling / 2,
+                    "retry {retry}: {delay:?} < half of {ceiling:?}"
+                );
             }
         }
         assert!(backoff_delay(RetryBudget::Light, 10, None) <= Duration::from_secs(15));
@@ -852,7 +933,9 @@ mod tests {
             backoff_delay(RetryBudget::Default, 1, Some(Duration::from_secs(42))),
             Duration::from_secs(42)
         );
-        assert!(backoff_delay(RetryBudget::Default, 1, Some(Duration::from_secs(3600))) <= BASE_DELAY);
+        assert!(
+            backoff_delay(RetryBudget::Default, 1, Some(Duration::from_secs(3600))) <= BASE_DELAY
+        );
     }
 
     #[test]
@@ -880,7 +963,10 @@ mod tests {
             message: "too long".into(),
             max_tokens: None,
         };
-        assert_eq!(from_provider_error(&overflow).class, FailureClass::ContextOverflow);
+        assert_eq!(
+            from_provider_error(&overflow).class,
+            FailureClass::ContextOverflow
+        );
         let auth = ProviderError::AuthFailed {
             provider: id.clone(),
             message: "bad key".into(),
@@ -890,24 +976,38 @@ mod tests {
             provider: id,
             failure: ModelFailure::truncated("the stream"),
         };
-        assert_eq!(from_provider_error(&classified).reason, RetryReason::Truncated);
+        assert_eq!(
+            from_provider_error(&classified).reason,
+            RetryReason::Truncated
+        );
     }
 
     #[test]
     fn after_the_fact_classification_spots_transient_errors() {
         assert_eq!(
-            classify_claude_error(&ClaudeError::Api("network error: connection refused".into())),
+            classify_claude_error(&ClaudeError::Api(
+                "network error: connection refused".into()
+            )),
             FailureClass::Retryable
         );
         assert_eq!(
-            classify_claude_error(&ClaudeError::ApiStatus { status: 502, message: "Bad gateway".into() }),
+            classify_claude_error(&ClaudeError::ApiStatus {
+                status: 502,
+                message: "Bad gateway".into()
+            }),
             FailureClass::Retryable
         );
         assert_eq!(
-            classify_claude_error(&ClaudeError::ApiStatus { status: 403, message: "Insufficient balance".into() }),
+            classify_claude_error(&ClaudeError::ApiStatus {
+                status: 403,
+                message: "Insufficient balance".into()
+            }),
             FailureClass::Fatal
         );
-        assert_eq!(classify_claude_error(&ClaudeError::Cancelled), FailureClass::Fatal);
+        assert_eq!(
+            classify_claude_error(&ClaudeError::Cancelled),
+            FailureClass::Fatal
+        );
     }
 
     #[test]
@@ -924,16 +1024,32 @@ mod tests {
     fn the_request_id_comes_from_the_response_headers() {
         let gateway = classify_http(
             503,
-            &headers(&[("x-request-id", "a4293c1e-0d5f-4c9e-9b1a-2f6d8e7c1b20"), ("request-id", "req_other")]),
+            &headers(&[
+                ("x-request-id", "a4293c1e-0d5f-4c9e-9b1a-2f6d8e7c1b20"),
+                ("request-id", "req_other"),
+            ]),
             "{}",
         );
-        assert_eq!(gateway.request_id.as_deref(), Some("a4293c1e-0d5f-4c9e-9b1a-2f6d8e7c1b20"));
-        let anthropic = classify_http(529, &headers(&[("request-id", "req_011CSHoEeqs5C35K2UUqR7Fy")]), "{}");
-        assert_eq!(anthropic.request_id.as_deref(), Some("req_011CSHoEeqs5C35K2UUqR7Fy"));
+        assert_eq!(
+            gateway.request_id.as_deref(),
+            Some("a4293c1e-0d5f-4c9e-9b1a-2f6d8e7c1b20")
+        );
+        let anthropic = classify_http(
+            529,
+            &headers(&[("request-id", "req_011CSHoEeqs5C35K2UUqR7Fy")]),
+            "{}",
+        );
+        assert_eq!(
+            anthropic.request_id.as_deref(),
+            Some("req_011CSHoEeqs5C35K2UUqR7Fy")
+        );
         assert_eq!(classify_http(500, &HeaderMap::new(), "{}").request_id, None);
         // An id already known is not overwritten.
         let stamped = anthropic.clone().with_request_id(Some("later".into()));
-        assert_eq!(stamped.request_id.as_deref(), Some("req_011CSHoEeqs5C35K2UUqR7Fy"));
+        assert_eq!(
+            stamped.request_id.as_deref(),
+            Some("req_011CSHoEeqs5C35K2UUqR7Fy")
+        );
     }
 
     #[test]
@@ -945,11 +1061,24 @@ mod tests {
             r#"{"error":{"type":"invalid_request_error","code":"content_policy_violation","message":"blocked"}}"#,
         );
         assert_eq!(openai.code.as_deref(), Some("content_policy_violation"));
-        let anthropic = classify_http(403, &none, r#"{"type":"error","error":{"type":"permission_error","message":"no"}}"#);
+        let anthropic = classify_http(
+            403,
+            &none,
+            r#"{"type":"error","error":{"type":"permission_error","message":"no"}}"#,
+        );
         assert_eq!(anthropic.code.as_deref(), Some("permission_error"));
-        let gemini = classify_http(429, &none, r#"{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"slow"}}"#);
+        let gemini = classify_http(
+            429,
+            &none,
+            r#"{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"slow"}}"#,
+        );
         assert_eq!(gemini.code.as_deref(), Some("resource_exhausted"));
-        assert_eq!(classify_stream_error("overloaded_error", "busy").code.as_deref(), Some("overloaded_error"));
+        assert_eq!(
+            classify_stream_error("overloaded_error", "busy")
+                .code
+                .as_deref(),
+            Some("overloaded_error")
+        );
         assert_eq!(classify_stream_error("", "connection reset").code, None);
     }
 
@@ -963,7 +1092,11 @@ mod tests {
         assert_eq!(spent.class, FailureClass::Fatal);
         assert_eq!(spent.status, Some(429));
         // A plain rate limit still waits.
-        let busy = classify_http(429, &HeaderMap::new(), r#"{"error":{"code":"rate_limit_exceeded","message":"slow down"}}"#);
+        let busy = classify_http(
+            429,
+            &HeaderMap::new(),
+            r#"{"error":{"code":"rate_limit_exceeded","message":"slow down"}}"#,
+        );
         assert_eq!(busy.class, FailureClass::Retryable);
     }
 
@@ -989,10 +1122,22 @@ mod tests {
                 "dozjgNryP4J3jVmNHl0w5N",
                 "Zx81kQp0Lm2Nb7Vc4Xs9Ad3Fg6Hj1Kl5Qw8Er0Ty2Ui4Op",
             ] {
-                assert!(!failure.message.contains(secret), "{secret} survived in {}", failure.message);
+                assert!(
+                    !failure.message.contains(secret),
+                    "{secret} survived in {}",
+                    failure.message
+                );
             }
-            assert!(failure.message.contains("[redacted]"), "{}", failure.message);
-            assert_eq!(redact_secrets(&failure.message), failure.message, "redaction is idempotent");
+            assert!(
+                failure.message.contains("[redacted]"),
+                "{}",
+                failure.message
+            );
+            assert_eq!(
+                redact_secrets(&failure.message),
+                failure.message,
+                "redaction is idempotent"
+            );
         }
     }
 
@@ -1010,11 +1155,20 @@ mod tests {
 
     #[test]
     fn a_rejected_certificate_reads_as_a_network_failure() {
-        let tls = classify_transport_detail("error sending request: invalid peer certificate: UnknownIssuer", false);
+        let tls = classify_transport_detail(
+            "error sending request: invalid peer certificate: UnknownIssuer",
+            false,
+        );
         assert_eq!(tls.class, FailureClass::Fatal);
         assert_eq!(tls.reason, RetryReason::Network);
         let refused = classify_transport_detail("error sending request: connection refused", false);
-        assert_eq!((refused.class, refused.reason), (FailureClass::Retryable, RetryReason::Network));
-        assert_eq!(classify_transport_detail("operation", true).reason, RetryReason::Timeout);
+        assert_eq!(
+            (refused.class, refused.reason),
+            (FailureClass::Retryable, RetryReason::Network)
+        );
+        assert_eq!(
+            classify_transport_detail("operation", true).reason,
+            RetryReason::Timeout
+        );
     }
 }

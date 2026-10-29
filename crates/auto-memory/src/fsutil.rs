@@ -22,7 +22,9 @@ pub fn is_symlink(path: &Path) -> bool {
 fn is_retryable(error: &io::Error) -> bool {
     matches!(
         error.kind(),
-        io::ErrorKind::PermissionDenied | io::ErrorKind::AlreadyExists | io::ErrorKind::ResourceBusy
+        io::ErrorKind::PermissionDenied
+            | io::ErrorKind::AlreadyExists
+            | io::ErrorKind::ResourceBusy
     ) || (cfg!(windows) && matches!(error.raw_os_error(), Some(5 | 32 | 33)))
 }
 

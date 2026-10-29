@@ -55,8 +55,10 @@ impl DaemonSettings {
     }
 
     pub fn set_locale(&mut self, locale: &str) {
-        self.extra
-            .insert(Self::LOCALE_KEY.to_owned(), Value::String(locale.to_owned()));
+        self.extra.insert(
+            Self::LOCALE_KEY.to_owned(),
+            Value::String(locale.to_owned()),
+        );
     }
 
     pub fn discard_legacy_app_keys(&mut self) {

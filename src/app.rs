@@ -1195,7 +1195,8 @@ pub struct Waku {
     /// once probed and absent. Shared because the probe is scheduled from
     /// `render`, which holds `&self`, and answered on a background thread —
     /// the probe runs the driver, so it never happens on the UI thread.
-    cua_driver: std::sync::Arc<std::sync::Mutex<Option<Option<sub2api::cua_install::DriverDetection>>>>,
+    cua_driver:
+        std::sync::Arc<std::sync::Mutex<Option<Option<sub2api::cua_install::DriverDetection>>>>,
     /// Set once the probe has been scheduled, so re-rendering does not queue
     /// another.
     cua_probe_started: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -1359,6 +1360,8 @@ pub struct Waku {
     /// has no `Context` to rebuild the drawn index itself.
     composer_sources_stale: bool,
     composer_autocomplete: autocomplete::AutocompleteUi,
+    /// New-task artwork, prepared off-thread and retained across transitions.
+    wallpaper: wallpaper::WallpaperState,
     /// Files dropped onto the composer, drawn as chips above the input and
     /// drained into the next submission.
     composer_attachments: Vec<ComposerAttachment>,
@@ -1800,8 +1803,8 @@ mod autocomplete;
 mod background_work;
 mod branches;
 mod cli_setup;
-mod cloud_account;
 mod cli_takeover;
+mod cloud_account;
 mod cloud_failover;
 mod cloud_groups;
 mod cloud_menu;
@@ -1812,14 +1815,17 @@ mod cloud_subscriptions;
 mod cloud_usage;
 mod command_palette;
 mod commit_dialog;
-mod confirm_dialog;
-mod content_translations;
-mod goal_dialog;
 mod components;
 mod composer;
+mod confirm_dialog;
+mod content_translations;
 mod drafts;
+mod goal_dialog;
 // Fork: the Effort slider card (a dsh-effort-slider port) and Claude Code's
 // relaunch for a new effort.
+mod agent_memory_settings;
+mod agent_page;
+mod agent_teams_settings;
 mod effort_fire;
 mod effort_panel;
 mod effort_relaunch;
@@ -1830,19 +1836,16 @@ mod home_overview;
 mod image_preview;
 mod image_studio;
 mod image_studio_view;
+mod message_resend;
 mod model_plaza;
 mod model_providers_page;
 mod model_status;
 mod model_status_view;
 mod model_windows;
-mod plans_page;
-mod agent_page;
-mod agent_teams_settings;
-mod agent_memory_settings;
 mod native_agent;
 mod onboarding;
 mod permission_card;
-mod message_resend;
+mod plans_page;
 // Fork: external transcript links go through `link_policy`.
 mod external_links;
 // Fork: the reduce-motion preference.
@@ -1865,34 +1868,34 @@ mod queue_rows;
 // Fork addition: a built-in agent request being retried.
 mod model_retry;
 // Fork: the ZCode-style task sidebar (rows, sections, toolbar, task marks).
-mod sidebar_rows;
-mod sidebar_sections;
-mod sidebar_toolbar;
-mod review_comments;
-mod session_rail;
-mod side_chat;
-mod trajectory_panel;
 mod agent_trajectory_settings;
-mod task_attention;
-mod task_marks;
-mod task_rows;
-mod update_banner;
 mod daemon_banner;
-mod surface_bar;
-mod team_panel;
 mod plan_review;
 mod providers_page;
 mod render;
+mod review_comments;
 mod right_panel;
 mod runtime;
 mod runtime_prewarm;
+mod session_rail;
 mod sessions;
 mod settings;
 mod shortcuts;
+mod side_chat;
 mod sidebar;
+mod sidebar_rows;
+mod sidebar_sections;
+mod sidebar_toolbar;
 mod skills_page;
 mod status_capsule;
 mod streaming;
+mod surface_bar;
+mod task_attention;
+mod task_marks;
+mod task_rows;
+mod team_panel;
+mod trajectory_panel;
+mod update_banner;
 // Fork: sub-agent records (summary row, right-panel view, their store).
 mod subagent_panel;
 mod subagent_row;
@@ -1906,29 +1909,32 @@ mod turn_status;
 mod turn_undo;
 mod usage_meter;
 mod usage_page;
+mod wallpaper;
+mod wallpaper_settings;
+mod wallpaper_view;
 mod window_chrome;
 
 pub use autocomplete::init as init_composer_autocomplete;
 use background_work::{
     BackgroundWorkRegistry, work_kind_icon, work_status_color, work_status_label,
 };
+pub use cli_takeover::init as init_cli_takeover_keys;
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
-pub use goal_dialog::init as init_goal_dialog_keys;
-pub use confirm_dialog::init as init_confirm_dialog_keys;
-pub use cli_takeover::init as init_cli_takeover_keys;
-pub use permission_card::init as init_permission_card_keys;
-pub use shortcuts::init as init_shortcut_keys;
 use components::*;
+pub use confirm_dialog::init as init_confirm_dialog_keys;
+pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use motion_prefs::init as init_motion_prefs;
+pub use permission_card::init as init_permission_card_keys;
 pub use question_panel::init as init_question_panel_keys;
 pub use settings::init as init_settings_keys;
+pub use shortcuts::init as init_shortcut_keys;
 pub use sidebar::init as init_sidebar_keys;
 use sidebar::{SidebarGroup, SidebarRow};
 pub use skills_page::init as init_skills_keys;
-pub(crate) use surface_bar::{surface_key_bindings, surface_menu_items};
 use streaming::*;
+pub(crate) use surface_bar::{surface_key_bindings, surface_menu_items};
 use transcript::*;
 use transcript_view::ConversationNavigationRail;
 
@@ -2288,10 +2294,8 @@ impl Waku {
         });
 
         let composer = cx.new(|cx| ComposerInput::new(window, cx).padding_x(px(14.0), cx));
-        let user_input_answer = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .placeholder(tr!("user_input.other_placeholder"))
-        });
+        let user_input_answer = cx
+            .new(|cx| TextInput::new(window, cx).placeholder(tr!("user_input.other_placeholder")));
         let permission_feedback = cx.new(|cx| {
             TextInput::new(window, cx).placeholder(tr!("permission.feedback_placeholder"))
         });
@@ -2365,14 +2369,10 @@ impl Waku {
                 .select_all_on_focus_click()
                 .placeholder(tr!("input.detected_automatically"))
         });
-        let usage_project_filter = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .placeholder(tr!("input.filter_projects"))
-        });
-        let right_panel_diff_filter = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .placeholder(tr!("diff.filter_files"))
-        });
+        let usage_project_filter =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.filter_projects")));
+        let right_panel_diff_filter =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("diff.filter_files")));
         let navigation_rail = cx.new(|_| ConversationNavigationRail::new());
         let sidebar_pane = WakuPane::new(Waku::sidebar_pane_content, cx);
         let transcript_pane = WakuPane::new(Waku::transcript_pane_content, cx);
@@ -2421,7 +2421,6 @@ impl Waku {
             ));
         }
         crate::theme::apply_theme_preference(state.theme, window, cx);
-        crate::platform::set_sidebar_material_width(window, sidebar_width);
         let project_paths = state
             .projects
             .iter()
@@ -2682,6 +2681,7 @@ impl Waku {
             cx.observe_window_appearance(window, |this: &mut Self, window, cx| {
                 if this.state.theme == ThemePreference::System {
                     crate::theme::apply_theme_preference(this.state.theme, window, cx);
+                    this.prepare_wallpaper(cx);
                     cx.notify();
                 }
             })
@@ -2932,14 +2932,11 @@ impl Waku {
                 )
                 .detach();
             }
-            cx.subscribe(
-                &skills_search,
-                |_: &mut Self, _, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Edited) {
-                        cx.notify();
-                    }
-                },
-            )
+            cx.subscribe(&skills_search, |_: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    cx.notify();
+                }
+            })
             .detach();
             // Fork addition: Enter in the sign-in window redeems the code.
             cx.subscribe(
@@ -3274,6 +3271,7 @@ impl Waku {
                 mention_file_index_loading: false,
                 composer_sources_stale: false,
                 composer_autocomplete: autocomplete::AutocompleteUi::new(),
+                wallpaper: wallpaper::WallpaperState::default(),
                 composer_attachments,
                 image_preview: None,
                 image_preview_generation: 0,
@@ -3502,6 +3500,7 @@ impl Waku {
         // first frame.
         entity.update(cx, |this, cx| {
             this.restart_task_state_sync();
+            this.prepare_wallpaper(cx);
             for session_id in startup_live_session_ids {
                 this.start_runtime_attachment(session_id, cx);
             }

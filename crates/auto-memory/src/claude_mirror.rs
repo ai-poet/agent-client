@@ -238,7 +238,10 @@ mod tests {
             claude_project_slug(Path::new("C:\\Projects\\sub2api\\client")),
             "C--Projects-sub2api-client"
         );
-        assert_eq!(claude_project_slug(Path::new("/home/ada/my_app")), "-home-ada-my-app");
+        assert_eq!(
+            claude_project_slug(Path::new("/home/ada/my_app")),
+            "-home-ada-my-app"
+        );
     }
 
     #[test]
@@ -246,10 +249,17 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let mirror = ClaudeMirror::new(tmp.path());
         let cwd = Path::new("/work/app");
-        assert_eq!(mirror.write(cwd, &record("use-pnpm", "prefers pnpm")).unwrap(), MirrorOutcome::Written);
+        assert_eq!(
+            mirror
+                .write(cwd, &record("use-pnpm", "prefers pnpm"))
+                .unwrap(),
+            MirrorOutcome::Written
+        );
         let dir = mirror.memory_dir(cwd).unwrap();
         let raw = std::fs::read_to_string(dir.join("use-pnpm.md")).unwrap();
-        assert!(raw.contains("  type: feedback\n  origin: cheaprouter\n  modified: 2026-10-03T23:30:00.000Z"));
+        assert!(raw.contains(
+            "  type: feedback\n  origin: cheaprouter\n  modified: 2026-10-03T23:30:00.000Z"
+        ));
         let parsed = crate::store::parse_record(&raw, MemoryScope::Project).unwrap();
         assert_eq!(parsed.kind, MemoryType::Feedback);
         assert_eq!(
@@ -273,7 +283,10 @@ mod tests {
             mirror.write(cwd, &record("theirs", "overwrite?")).unwrap(),
             MirrorOutcome::SkippedForeign
         );
-        assert_eq!(std::fs::read_to_string(dir.join("theirs.md")).unwrap(), theirs);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("theirs.md")).unwrap(),
+            theirs
+        );
 
         mirror.write(cwd, &record("ours", "added")).unwrap();
         mirror.write(cwd, &record("ours", "replaced")).unwrap();
@@ -282,7 +295,12 @@ mod tests {
             "- [Theirs](theirs.md) — keep me\n- [Title ours](ours.md) — replaced\n"
         );
 
-        assert_eq!(mirror.remove(cwd, &["ours".into(), "theirs".into()]).unwrap(), 1);
+        assert_eq!(
+            mirror
+                .remove(cwd, &["ours".into(), "theirs".into()])
+                .unwrap(),
+            1
+        );
         assert!(dir.join("theirs.md").exists());
         assert_eq!(
             std::fs::read_to_string(dir.join(INDEX_FILE)).unwrap(),
@@ -305,13 +323,17 @@ mod tests {
             body: "b".into(),
             pinned: None,
         };
-        store.write(&store.project_dir(cwd), draft("project-fact")).unwrap();
+        store
+            .write(&store.project_dir(cwd), draft("project-fact"))
+            .unwrap();
         store.write(&store.user_dir(), draft("user-fact")).unwrap();
         let dir = mirror.memory_dir(cwd).unwrap();
         assert!(dir.join("project-fact.md").exists());
         assert!(!dir.join("user-fact.md").exists());
 
-        store.delete(&store.project_dir(cwd), "project-fact").unwrap();
+        store
+            .delete(&store.project_dir(cwd), "project-fact")
+            .unwrap();
         assert!(!dir.join("project-fact.md").exists());
         assert!(!dir.join(INDEX_FILE).exists());
     }

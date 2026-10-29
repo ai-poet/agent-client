@@ -53,9 +53,7 @@ fn has_any_word(id: &str, words: &[&str]) -> bool {
 /// `o1`, `o3-mini`, `o4`: OpenAI's o-series, which has no vendor word.
 fn is_o_series(id: &str) -> bool {
     segments(id).next().is_some_and(|first| {
-        first.len() >= 2
-            && first.starts_with('o')
-            && first[1..].chars().all(|c| c.is_ascii_digit())
+        first.len() >= 2 && first.starts_with('o') && first[1..].chars().all(|c| c.is_ascii_digit())
     })
 }
 
@@ -72,8 +70,9 @@ fn is_sized(id: &str) -> bool {
 fn is_moe(id: &str) -> bool {
     segments(id).any(|segment| {
         segment.strip_prefix('a').is_some_and(|rest| {
-            rest.strip_suffix('b')
-                .is_some_and(|digits| !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()))
+            rest.strip_suffix('b').is_some_and(|digits| {
+                !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+            })
         })
     })
 }
@@ -200,7 +199,15 @@ fn tier_key(id: &str) -> Option<&'static str> {
     if has_any_word(
         id,
         &[
-            "flash", "mini", "lite", "nano", "turbo", "air", "small", "fast", "instant",
+            "flash",
+            "mini",
+            "lite",
+            "nano",
+            "turbo",
+            "air",
+            "small",
+            "fast",
+            "instant",
             "highspeed",
         ],
     ) {

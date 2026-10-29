@@ -589,7 +589,10 @@ fn select_route(config: &mut Config, options: &AgentStartOptions) {
         .get_mut("anthropic")
         .and_then(|entry| entry.options.remove(ENDPOINTS_OPTION));
     if let Some(id) = options.endpoint_id() {
-        match endpoints.as_ref().and_then(|table| parse_endpoint(table.get(id)?)) {
+        match endpoints
+            .as_ref()
+            .and_then(|table| parse_endpoint(table.get(id)?))
+        {
             Some(route) => apply_endpoint_route(config, &route),
             None => scrub_routes(config),
         }
@@ -865,7 +868,10 @@ pub(crate) fn network_timeouts(config: &Config) -> (std::time::Duration, std::ti
             .map(std::time::Duration::from_secs)
             .unwrap_or_default()
     };
-    (seconds("connect_timeout_secs"), seconds("idle_timeout_secs"))
+    (
+        seconds("connect_timeout_secs"),
+        seconds("idle_timeout_secs"),
+    )
 }
 
 /// Hand the settings' network timeouts to the engine, for the clients built
@@ -1032,9 +1038,7 @@ pub(crate) fn declared_windows(config: &Config) -> BTreeMap<String, u64> {
         let windows: BTreeMap<String, u64> = table
             .iter()
             .filter_map(|(model, window)| Some((model.trim().to_owned(), window.as_u64()?)))
-            .filter(|(model, window)| {
-                !model.is_empty() && *window >= MIN_PLAUSIBLE_REGISTRY_WINDOW
-            })
+            .filter(|(model, window)| !model.is_empty() && *window >= MIN_PLAUSIBLE_REGISTRY_WINDOW)
             .collect();
         if !windows.is_empty() {
             return windows;
@@ -1063,7 +1067,12 @@ pub fn context_window_for(config: &Config, model: &str, route_provider: &str) ->
 /// catalog does.
 pub(crate) fn session_model_registry(config: &Config) -> Arc<claurst_api::ModelRegistry> {
     static OVERLAID: OnceLock<
-        parking_lot::Mutex<Option<(BTreeMap<String, ModelOverride>, Arc<claurst_api::ModelRegistry>)>>,
+        parking_lot::Mutex<
+            Option<(
+                BTreeMap<String, ModelOverride>,
+                Arc<claurst_api::ModelRegistry>,
+            )>,
+        >,
     > = OnceLock::new();
 
     let overrides = window_overrides(
@@ -1116,7 +1125,10 @@ fn window_overrides(
     if !windows.is_empty() {
         for entry in base.list_all() {
             if let Some(window) = windows.get(entry.info.id.to_string().as_str()) {
-                add(format!("{}/{}", entry.info.provider_id, entry.info.id), *window);
+                add(
+                    format!("{}/{}", entry.info.provider_id, entry.info.id),
+                    *window,
+                );
             }
         }
     }
@@ -1311,12 +1323,14 @@ pub(crate) fn refresh_session_rules(
     config: &Config,
     options: &AgentStartOptions,
 ) {
-    let files = crate::project_context::load(
-        &options.cwd,
-        &claurst_core::config::Settings::config_dir(),
-    );
+    let files =
+        crate::project_context::load(&options.cwd, &claurst_core::config::Settings::config_dir());
     let project = crate::project_context::render(&files);
-    let rules = session_rules(options, project.as_deref(), config.append_system_prompt.as_deref());
+    let rules = session_rules(
+        options,
+        project.as_deref(),
+        config.append_system_prompt.as_deref(),
+    );
     query.append_system_prompt = Some(match rules {
         Some(rules) => format!("{WORKING_STYLE}\n\n{rules}"),
         None => WORKING_STYLE.to_owned(),
@@ -1454,8 +1468,14 @@ fn session_rules(
         computer_use_rule(options),
         browser_rule(options),
         narration_rule(options),
-        project.map(str::trim).filter(|r| !r.is_empty()).map(str::to_owned),
-        house_rules.map(str::trim).filter(|r| !r.is_empty()).map(str::to_owned),
+        project
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+            .map(str::to_owned),
+        house_rules
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+            .map(str::to_owned),
     ]
     .into_iter()
     .flatten()
@@ -1504,7 +1524,10 @@ mod tests {
     fn the_routing_provider_is_translated_to_the_registrys_own() {
         assert_eq!(registry_provider_for("grok-4.6", "grok"), "xai");
         assert_eq!(registry_provider_for("gpt-5.6-sol", "codex"), "openai");
-        assert_eq!(registry_provider_for("claude-sonnet-5", "anthropic"), "anthropic");
+        assert_eq!(
+            registry_provider_for("claude-sonnet-5", "anthropic"),
+            "anthropic"
+        );
         // A model the registry has never heard of — one the user declared on
         // their own endpoint — keeps the caller's provider rather than
         // inventing one.
@@ -1544,13 +1567,19 @@ mod tests {
             "claude-sonnet-4-5": 1_000_000,
             "tiny": 4096,
         }));
-        assert_eq!(context_window_for(&config, "gpt-5.6-sol", "codex"), Some(400_000));
+        assert_eq!(
+            context_window_for(&config, "gpt-5.6-sol", "codex"),
+            Some(400_000)
+        );
         assert_eq!(
             context_window_for(&config, "claude-sonnet-4-5", "anthropic"),
             Some(1_000_000)
         );
         assert_eq!(context_window_for(&config, "tiny", "openai"), None);
-        assert_eq!(context_window_for(&Config::default(), "claude-sonnet-4-5", "anthropic"), Some(200_000));
+        assert_eq!(
+            context_window_for(&Config::default(), "claude-sonnet-4-5", "anthropic"),
+            Some(200_000)
+        );
     }
 
     /// The engine's compaction sizes itself against the declared window too,
@@ -1619,7 +1648,10 @@ mod tests {
             &BTreeMap::from([("gpt-5.6-sol".to_owned(), 400_000)]),
             &user,
         );
-        assert_eq!(overrides["openai/gpt-5.6-sol"].context_window, Some(123_456));
+        assert_eq!(
+            overrides["openai/gpt-5.6-sol"].context_window,
+            Some(123_456)
+        );
     }
     use super::*;
 
@@ -1653,7 +1685,11 @@ mod tests {
             origin: McpServerOrigin::User,
         });
         let options = wired(true);
-        install_repl_server(&mut config, options.computer_use.as_ref().unwrap(), &options.cwd);
+        install_repl_server(
+            &mut config,
+            options.computer_use.as_ref().unwrap(),
+            &options.cwd,
+        );
 
         let servers: Vec<&McpServerConfig> = config
             .mcp_servers
@@ -1665,11 +1701,21 @@ mod tests {
         assert_eq!(server.command.as_deref(), Some("/opt/waku_js_repl"));
         assert_eq!(server.server_type, "stdio");
         assert_eq!(
-            server.env.get("WAKU_COMPUTER_USE_SERVER").map(String::as_str),
+            server
+                .env
+                .get("WAKU_COMPUTER_USE_SERVER")
+                .map(String::as_str),
             Some("/opt/helper")
         );
-        assert_eq!(server.env.get("WAKU_SESSION_CWD").map(String::as_str), Some("/work"));
-        assert!(server.env.contains_key("WAKU_COMPUTER_USE_PROCESS_DIRECTORY"));
+        assert_eq!(
+            server.env.get("WAKU_SESSION_CWD").map(String::as_str),
+            Some("/work")
+        );
+        assert!(
+            server
+                .env
+                .contains_key("WAKU_COMPUTER_USE_PROCESS_DIRECTORY")
+        );
     }
 
     /// Without the helper the REPL still runs — image generation and plain
@@ -1679,11 +1725,19 @@ mod tests {
     fn a_missing_helper_registers_the_server_without_promising_desktop_control() {
         let mut config = Config::default();
         let options = wired(false);
-        install_repl_server(&mut config, options.computer_use.as_ref().unwrap(), &options.cwd);
+        install_repl_server(
+            &mut config,
+            options.computer_use.as_ref().unwrap(),
+            &options.cwd,
+        );
         let server = &config.mcp_servers[0];
         assert!(!server.env.contains_key("WAKU_COMPUTER_USE_SERVER"));
         // Nothing would write there without a helper.
-        assert!(!server.env.contains_key("WAKU_COMPUTER_USE_PROCESS_DIRECTORY"));
+        assert!(
+            !server
+                .env
+                .contains_key("WAKU_COMPUTER_USE_PROCESS_DIRECTORY")
+        );
         // The REPL itself still runs, so image generation survives.
         assert_eq!(server.command.as_deref(), Some("/opt/waku_js_repl"));
 
@@ -1723,12 +1777,21 @@ mod tests {
     /// names the tool the model must call to hand the plan back.
     #[test]
     fn plan_mode_is_explained_only_while_planning() {
-        let planning = AgentStartOptions { plan_mode: true, ..AgentStartOptions::default() };
+        let planning = AgentStartOptions {
+            plan_mode: true,
+            ..AgentStartOptions::default()
+        };
         let rule = session_rules(&planning, None, None).expect("a rule while planning");
         assert!(rule.contains("ExitPlanMode"), "{rule}");
-        assert!(rule.contains("the whole plan in its `plan` parameter"), "{rule}");
+        assert!(
+            rule.contains("the whole plan in its `plan` parameter"),
+            "{rule}"
+        );
 
-        let building = AgentStartOptions { plan_mode: false, ..AgentStartOptions::default() };
+        let building = AgentStartOptions {
+            plan_mode: false,
+            ..AgentStartOptions::default()
+        };
         assert_eq!(session_rules(&building, None, None), None);
     }
 
@@ -1760,7 +1823,10 @@ mod tests {
 
         options.plan_mode = false;
         refresh_session_rules(&mut query, &config, &options);
-        let rules = query.append_system_prompt.clone().expect("the working style is always there");
+        let rules = query
+            .append_system_prompt
+            .clone()
+            .expect("the working style is always there");
         assert!(!rules.contains("plan mode"), "{rules}");
         assert!(rules.starts_with("How to work:"), "{rules}");
 
@@ -1852,8 +1918,11 @@ mod tests {
     #[test]
     fn project_instructions_reach_the_prompt_before_the_users_rules() {
         let workspace = tempfile::tempdir().expect("tempdir");
-        std::fs::write(workspace.path().join("AGENTS.md"), "Run `make check` before finishing.")
-            .expect("write");
+        std::fs::write(
+            workspace.path().join("AGENTS.md"),
+            "Run `make check` before finishing.",
+        )
+        .expect("write");
         let options = AgentStartOptions {
             cwd: workspace.path().to_path_buf(),
             ..AgentStartOptions::default()
@@ -1903,7 +1972,10 @@ mod tests {
     /// seen this flow does not hand back a list of options.
     #[test]
     fn the_plan_rule_says_what_a_plan_contains() {
-        let options = AgentStartOptions { plan_mode: true, ..AgentStartOptions::default() };
+        let options = AgentStartOptions {
+            plan_mode: true,
+            ..AgentStartOptions::default()
+        };
         let rule = plan_mode_rule(&options).expect("a rule while planning");
         assert!(rule.contains("why the change is needed"), "{rule}");
         assert!(rule.contains("verify the result end to end"), "{rule}");
@@ -1914,10 +1986,19 @@ mod tests {
     /// told which commands still run, so it does not spend turns on refusals.
     #[test]
     fn the_plan_rule_settles_questions_first_and_names_what_still_runs() {
-        let options = AgentStartOptions { plan_mode: true, ..AgentStartOptions::default() };
+        let options = AgentStartOptions {
+            plan_mode: true,
+            ..AgentStartOptions::default()
+        };
         let rule = plan_mode_rule(&options).expect("a rule while planning");
-        assert!(rule.contains("Settle every question before you write the plan"), "{rule}");
-        assert!(rule.contains("The plan itself must not ask anything"), "{rule}");
+        assert!(
+            rule.contains("Settle every question before you write the plan"),
+            "{rule}"
+        );
+        assert!(
+            rule.contains("The plan itself must not ask anything"),
+            "{rule}"
+        );
         assert!(rule.contains("sed -n"), "{rule}");
         assert!(rule.contains("Do not retry a refused command"), "{rule}");
         assert!(!rule.contains("  "), "{rule}");
@@ -1949,9 +2030,15 @@ mod tests {
         assert!(combined.trim_end().ends_with("Prefer tabs."));
 
         // Either one alone is the whole thing.
-        assert_eq!(session_rules(&options, None, None), Some(combined[..combined.find("\n\n").unwrap()].to_owned()));
+        assert_eq!(
+            session_rules(&options, None, None),
+            Some(combined[..combined.find("\n\n").unwrap()].to_owned())
+        );
         let english = AgentStartOptions::default();
-        assert_eq!(session_rules(&english, None, Some("Prefer tabs.")), Some("Prefer tabs.".to_owned()));
+        assert_eq!(
+            session_rules(&english, None, Some("Prefer tabs.")),
+            Some("Prefer tabs.".to_owned())
+        );
         assert_eq!(session_rules(&english, None, None), None);
         // Blank house rules are not house rules.
         assert_eq!(session_rules(&english, None, Some("   ")), None);
@@ -2219,7 +2306,9 @@ mod tests {
                 "{platform}"
             );
             assert_eq!(
-                config.resolve_provider_api_key(config.selected_provider_id()).as_deref(),
+                config
+                    .resolve_provider_api_key(config.selected_provider_id())
+                    .as_deref(),
                 Some(key),
                 "{platform}"
             );
@@ -2291,7 +2380,13 @@ mod tests {
                 "{model}"
             );
         }
-        for model in ["gpt-5.6-sol", "o3-mini", "o4-mini", "codex-mini", "grok-4.6"] {
+        for model in [
+            "gpt-5.6-sol",
+            "o3-mini",
+            "o4-mini",
+            "codex-mini",
+            "grok-4.6",
+        ] {
             assert_eq!(
                 WireFormat::for_model(Some("openai"), model),
                 Some(WireFormat::Responses),
@@ -2329,18 +2424,36 @@ mod tests {
                 "{platform:?}"
             );
         }
-        assert_eq!(WireFormat::for_model(Some("gemini"), "gemini-4-argon-high"), None);
-        assert_eq!(WireFormat::for_model(Some("gemini"), "gemini-3.1-pro"), None);
+        assert_eq!(
+            WireFormat::for_model(Some("gemini"), "gemini-4-argon-high"),
+            None
+        );
+        assert_eq!(
+            WireFormat::for_model(Some("gemini"), "gemini-3.1-pro"),
+            None
+        );
         assert_eq!(WireFormat::from_id("gemini"), Some(WireFormat::Gemini));
         assert_eq!(WireFormat::Gemini.engine_provider(), "google");
-        assert_eq!(WireFormat::for_engine_provider("google"), Some(WireFormat::Gemini));
+        assert_eq!(
+            WireFormat::for_engine_provider("google"),
+            Some(WireFormat::Gemini)
+        );
     }
 
     #[test]
     fn gemini_requests_go_to_the_mount_their_groups_platform_needs() {
-        assert_eq!(gemini_base("https://gw.example/", Some("gemini")), "https://gw.example");
-        assert_eq!(gemini_base("https://gw.example", Some("composite")), "https://gw.example");
-        assert_eq!(gemini_base("https://gw.example", None), "https://gw.example");
+        assert_eq!(
+            gemini_base("https://gw.example/", Some("gemini")),
+            "https://gw.example"
+        );
+        assert_eq!(
+            gemini_base("https://gw.example", Some("composite")),
+            "https://gw.example"
+        );
+        assert_eq!(
+            gemini_base("https://gw.example", None),
+            "https://gw.example"
+        );
         assert_eq!(
             gemini_base("https://gw.example", Some("antigravity")),
             "https://gw.example/antigravity"
@@ -2383,7 +2496,9 @@ mod tests {
                     "model_platforms": {"gemini-4-argon": platform},
                 }),
             );
-            config.provider_configs.insert("anthropic".into(), anthropic);
+            config
+                .provider_configs
+                .insert("anthropic".into(), anthropic);
             let options = AgentStartOptions {
                 model: Some("gemini-4-argon".into()),
                 platform: Some("gemini".into()),
@@ -2408,12 +2523,31 @@ mod tests {
     /// session that stored the old `openai::` prefix for one.
     #[test]
     fn chat_families_go_over_chat_completions() {
-        for model in ["deepseek-v4.1-flash", "kimi-k3", "k3", "glm-5", "minimax-m3", "DeepSeek-V4"] {
-            assert_eq!(WireFormat::for_model(Some("deepseek"), model), Some(WireFormat::Chat), "{model}");
-            assert_eq!(WireFormat::for_model(Some("openai"), model), Some(WireFormat::Chat), "{model}");
+        for model in [
+            "deepseek-v4.1-flash",
+            "kimi-k3",
+            "k3",
+            "glm-5",
+            "minimax-m3",
+            "DeepSeek-V4",
+        ] {
+            assert_eq!(
+                WireFormat::for_model(Some("deepseek"), model),
+                Some(WireFormat::Chat),
+                "{model}"
+            );
+            assert_eq!(
+                WireFormat::for_model(Some("openai"), model),
+                Some(WireFormat::Chat),
+                "{model}"
+            );
         }
         assert_eq!(
-            WireFormat::resolve(Some(WireFormat::Responses), Some("openai"), "deepseek-v4.1-flash"),
+            WireFormat::resolve(
+                Some(WireFormat::Responses),
+                Some("openai"),
+                "deepseek-v4.1-flash"
+            ),
             WireFormat::Chat
         );
         // A name that says nothing, in a group of those platforms.
@@ -2443,7 +2577,9 @@ mod tests {
                 "models": {"deepseek-v4.1-flash": "sk-subscription"}
             }),
         );
-        config.provider_configs.insert("anthropic".into(), anthropic);
+        config
+            .provider_configs
+            .insert("anthropic".into(), anthropic);
 
         // A session from before the fix, still carrying `openai::`.
         let options = AgentStartOptions {
@@ -2479,7 +2615,9 @@ mod tests {
                 "models": {"deepseek-v4.1-flash": "sk-domestic"}
             }),
         );
-        config.provider_configs.insert("anthropic".into(), anthropic);
+        config
+            .provider_configs
+            .insert("anthropic".into(), anthropic);
 
         let (platform, model) = split_model("deepseek+payg::deepseek-v4.1-flash");
         let options = AgentStartOptions {
@@ -2504,7 +2642,11 @@ mod tests {
             WireFormat::Responses
         );
         assert_eq!(
-            WireFormat::resolve(Some(WireFormat::Responses), Some("anthropic"), "claude-sonnet-5"),
+            WireFormat::resolve(
+                Some(WireFormat::Responses),
+                Some("anthropic"),
+                "claude-sonnet-5"
+            ),
             WireFormat::Messages
         );
     }
@@ -2543,7 +2685,10 @@ mod tests {
             split_model("openai::gpt-5.6-sol"),
             (Some("openai".into()), "gpt-5.6-sol".into())
         );
-        assert_eq!(split_model("claude-sonnet-5"), (None, "claude-sonnet-5".into()));
+        assert_eq!(
+            split_model("claude-sonnet-5"),
+            (None, "claude-sonnet-5".into())
+        );
         // A model namespace with a single slash is not a platform prefix.
         assert_eq!(
             split_model("meta-llama/Llama-3.3"),
@@ -2567,7 +2712,9 @@ mod tests {
             GATEWAY_KEYS_OPTION.into(),
             serde_json::json!({"anthropic": "sk-claude", "openai": "sk-codex", "default": "sk-general"}),
         );
-        config.provider_configs.insert("anthropic".into(), anthropic);
+        config
+            .provider_configs
+            .insert("anthropic".into(), anthropic);
 
         let options = AgentStartOptions {
             platform: Some("openai".into()),
@@ -2656,5 +2803,4 @@ mod tests {
             Some(PermissionChoice::AllowOnce)
         );
     }
-
 }

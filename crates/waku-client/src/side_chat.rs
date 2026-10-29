@@ -103,7 +103,10 @@ pub fn build_digest(session: &AgentSession, budget: usize) -> Digest {
                 MessageRole::Assistant => "Agent",
                 MessageRole::System => "System",
             };
-            let text = message.display_content.as_deref().unwrap_or(&message.content);
+            let text = message
+                .display_content
+                .as_deref()
+                .unwrap_or(&message.content);
             let mut entry = format!("[{speaker}]\n{}", cap_text(text, MESSAGE_CAP));
             for attachment in &message.attachments {
                 entry.push_str(&format!("\n(attached: {})", attachment.name));
@@ -135,7 +138,9 @@ pub fn build_digest(session: &AgentSession, budget: usize) -> Digest {
     let omitted = entries.len() - kept.len();
     let mut text = String::new();
     if omitted > 0 {
-        text.push_str(&format!("[{omitted} earlier messages or steps left out]\n\n"));
+        text.push_str(&format!(
+            "[{omitted} earlier messages or steps left out]\n\n"
+        ));
     }
     for entry in kept.iter().rev() {
         text.push_str(entry);
@@ -151,7 +156,11 @@ pub fn build_digest(session: &AgentSession, budget: usize) -> Digest {
 /// The messages a side question is sent as: the digest and the first
 /// question together, then the earlier exchanges (the newest
 /// [`THREAD_EXCHANGES`] that fit), then the new question.
-pub fn side_messages(digest: &Digest, earlier: &[SideExchange], question: &str) -> Vec<SideChatMessage> {
+pub fn side_messages(
+    digest: &Digest,
+    earlier: &[SideExchange],
+    question: &str,
+) -> Vec<SideChatMessage> {
     let mut kept: Vec<&SideExchange> = Vec::new();
     let mut used = 0;
     for exchange in earlier
@@ -183,7 +192,10 @@ pub fn side_messages(digest: &Digest, earlier: &[SideExchange], question: &str) 
         } else {
             exchange.question.trim().to_owned()
         };
-        messages.push(SideChatMessage { assistant: false, text });
+        messages.push(SideChatMessage {
+            assistant: false,
+            text,
+        });
         messages.push(SideChatMessage {
             assistant: true,
             text: exchange.answer.clone().unwrap_or_default(),
@@ -194,7 +206,10 @@ pub fn side_messages(digest: &Digest, earlier: &[SideExchange], question: &str) 
     } else {
         question.trim().to_owned()
     };
-    messages.push(SideChatMessage { assistant: false, text });
+    messages.push(SideChatMessage {
+        assistant: false,
+        text,
+    });
     messages
 }
 
@@ -253,7 +268,12 @@ mod tests {
     #[test]
     fn the_budget_keeps_the_newest_and_says_what_it_left_out() {
         let messages = (0..50)
-            .map(|n| Message::new(MessageRole::User, format!("message {n} {}", "x".repeat(200))))
+            .map(|n| {
+                Message::new(
+                    MessageRole::User,
+                    format!("message {n} {}", "x".repeat(200)),
+                )
+            })
             .collect();
         let digest = build_digest(&session_with(messages, Vec::new()), 2_000);
         assert!(digest.omitted > 0);
@@ -284,8 +304,14 @@ mod tests {
         assert!(first[0].text.ends_with("My question: why?"));
 
         let earlier = [
-            SideExchange { question: "q1".into(), answer: Some("a1".into()) },
-            SideExchange { question: "lost".into(), answer: None },
+            SideExchange {
+                question: "q1".into(),
+                answer: Some("a1".into()),
+            },
+            SideExchange {
+                question: "lost".into(),
+                answer: None,
+            },
         ];
         let next = side_messages(&digest, &earlier, "q2");
         assert_eq!(next.len(), 3);

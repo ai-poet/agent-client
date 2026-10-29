@@ -110,12 +110,18 @@ mod tests {
 
     #[test]
     fn retry_reasons_fall_into_causes() {
-        assert_eq!(RetryCause::from_reason("rate_limited"), RetryCause::RateLimited);
+        assert_eq!(
+            RetryCause::from_reason("rate_limited"),
+            RetryCause::RateLimited
+        );
         assert_eq!(RetryCause::from_reason("overloaded"), RetryCause::Busy);
         assert_eq!(RetryCause::from_reason("server_error"), RetryCause::Busy);
         assert_eq!(RetryCause::from_reason("network"), RetryCause::Connection);
         assert_eq!(RetryCause::from_reason("timeout"), RetryCause::Connection);
-        assert_eq!(RetryCause::from_reason("stream_interrupted"), RetryCause::CutOff);
+        assert_eq!(
+            RetryCause::from_reason("stream_interrupted"),
+            RetryCause::CutOff
+        );
         assert_eq!(RetryCause::from_reason("truncated"), RetryCause::CutOff);
         assert_eq!(RetryCause::from_reason("empty_response"), RetryCause::Empty);
         assert_eq!(RetryCause::from_reason("turn_failed"), RetryCause::Other);
@@ -133,10 +139,12 @@ mod tests {
     #[test]
     fn an_unknown_failure_kind_still_reads() {
         let error: crate::model::TurnError =
-            serde_json::from_str(r#"{"message":"x","dismissed":false,"kind":"somethingNew"}"#).unwrap();
+            serde_json::from_str(r#"{"message":"x","dismissed":false,"kind":"somethingNew"}"#)
+                .unwrap();
         assert_eq!(error.kind, Some(TurnFailureKind::Unknown));
         let known: crate::model::TurnError =
-            serde_json::from_str(r#"{"message":"x","dismissed":false,"kind":"badRequest"}"#).unwrap();
+            serde_json::from_str(r#"{"message":"x","dismissed":false,"kind":"badRequest"}"#)
+                .unwrap();
         assert_eq!(known.kind, Some(TurnFailureKind::BadRequest));
     }
 }

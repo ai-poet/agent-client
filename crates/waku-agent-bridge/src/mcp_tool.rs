@@ -166,8 +166,13 @@ mod tests {
     fn an_image_in_the_result_becomes_transcript_metadata() {
         let result = CallToolResult {
             content: vec![
-                McpContent::Text { text: "done".into() },
-                McpContent::Image { data: "aGVsbG8=".into(), mime_type: "image/png".into() },
+                McpContent::Text {
+                    text: "done".into(),
+                },
+                McpContent::Image {
+                    data: "aGVsbG8=".into(),
+                    mime_type: "image/png".into(),
+                },
             ],
             is_error: false,
         };
@@ -184,7 +189,9 @@ mod tests {
     #[test]
     fn a_text_only_result_carries_no_metadata() {
         let result = CallToolResult {
-            content: vec![McpContent::Text { text: "just words".into() }],
+            content: vec![McpContent::Text {
+                text: "just words".into(),
+            }],
             is_error: false,
         };
         assert!(image_metadata(&result).is_none());

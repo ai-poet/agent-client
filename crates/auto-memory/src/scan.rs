@@ -105,8 +105,12 @@ mod tests {
             body: "b".into(),
             pinned: None,
         };
-        store.write(&store.project_dir(Path::new("/z/app")), draft("z")).unwrap();
-        store.write(&store.project_dir(Path::new("/a/app")), draft("a")).unwrap();
+        store
+            .write(&store.project_dir(Path::new("/z/app")), draft("z"))
+            .unwrap();
+        store
+            .write(&store.project_dir(Path::new("/a/app")), draft("a"))
+            .unwrap();
         store.write(&store.user_dir(), draft("me")).unwrap();
         let groups = scan_groups(&store);
         assert_eq!(groups.len(), 3);

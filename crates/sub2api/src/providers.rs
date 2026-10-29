@@ -556,7 +556,11 @@ mod tests {
             let format = format_for_slot(slot).expect("every slot has a format");
             assert!(slot_accepts(slot, format));
             for other in ApiFormat::ALL {
-                assert_eq!(other == format, slot_accepts(slot, other), "{slot}/{other:?}");
+                assert_eq!(
+                    other == format,
+                    slot_accepts(slot, other),
+                    "{slot}/{other:?}"
+                );
             }
         }
         assert_eq!(format_for_slot("not-a-slot"), None);
@@ -599,7 +603,10 @@ mod tests {
         assert_eq!(ids, ["messages", "responses", "chat"]);
         for format in ApiFormat::ALL {
             assert_eq!(ApiFormat::from_wire_id(format.wire_id()), Some(format));
-            assert_eq!(format.request_path(), format!("/v1/{}", format.endpoint_path()));
+            assert_eq!(
+                format.request_path(),
+                format!("/v1/{}", format.endpoint_path())
+            );
         }
         assert_eq!(ApiFormat::from_wire_id("anthropic"), None);
     }
@@ -608,13 +615,19 @@ mod tests {
     fn agent_model_ids_round_trip() {
         let id = agent_model_id("pr-1759200000000-0", " glm-5.1 ");
         assert_eq!(id, "custom:pr-1759200000000-0::glm-5.1");
-        assert_eq!(parse_agent_model_id(&id), Some(("pr-1759200000000-0", "glm-5.1")));
+        assert_eq!(
+            parse_agent_model_id(&id),
+            Some(("pr-1759200000000-0", "glm-5.1"))
+        );
         // Model names keep whatever they carry after the first `::`.
         assert_eq!(
             parse_agent_model_id("custom:pr-1::qwen3:32b"),
             Some(("pr-1", "qwen3:32b"))
         );
-        assert_eq!(parse_agent_model_id("custom:pr-1::a/b"), Some(("pr-1", "a/b")));
+        assert_eq!(
+            parse_agent_model_id("custom:pr-1::a/b"),
+            Some(("pr-1", "a/b"))
+        );
         // Gateway rows, bare ids and malformed ones are not endpoint ids.
         for other in [
             "anthropic::claude-sonnet-5",
@@ -646,7 +659,10 @@ mod tests {
         entry.api_key = "sk-relay".to_owned();
 
         entry.id = "hand edited::id".to_owned();
-        assert!(!entry.offers_models_to_agent(), "an id a picker id cannot carry");
+        assert!(
+            !entry.offers_models_to_agent(),
+            "an id a picker id cannot carry"
+        );
     }
 
     #[test]
@@ -707,7 +723,10 @@ mod tests {
             ..ModelEntry::new("  my-model  ")
         }));
         assert!(!entry.add_model(ModelEntry::new("my-model")));
-        assert_eq!(entry.model("my-model").unwrap().context_window, Some(128_000));
+        assert_eq!(
+            entry.model("my-model").unwrap().context_window,
+            Some(128_000)
+        );
         assert!(entry.remove_model("my-model"));
         assert!(!entry.remove_model("my-model"));
     }

@@ -4940,3 +4940,41 @@ memory.settings.edit_body_placeholder:
   en: "What to remember, and why"
 memory.settings.description_required:
   en: "The summary cannot be empty."
+wallpaper.title:
+  en: "New task wallpaper"
+wallpaper.description:
+  en: "Artwork for the new-task canvas. It fades away when the conversation starts."
+wallpaper.choose:
+  en: "Choose image…"
+wallpaper.replace:
+  en: "Replace…"
+wallpaper.loading:
+  en: "Preparing…"
+wallpaper.remove:
+  en: "Remove"
+wallpaper.effect:
+  en: "Effect"
+wallpaper.effect.none:
+  en: "Original"
+wallpaper.effect.dither:
+  en: "Dither"
+wallpaper.effect.ascii:
+  en: "ASCII"
+wallpaper.effect.halftone:
+  en: "Halftone"
+wallpaper.effect.scanlines:
+  en: "Scanlines"
+wallpaper.adjust:
+  en: "Adjust crop"
+wallpaper.theme_colors:
+  en: "Use wallpaper colors"
+wallpaper.theme_colors_description:
+  en: "Subtly tint window surfaces without changing brand or status colors."
+wallpaper.adjust_hint:
+  en: "Drag to reposition · Arrow keys to nudge · +/− to zoom"
+wallpaper.reset:
+  en: "Reset"
+wallpaper.cancel:
+  en: "Cancel"
+wallpaper.apply:
+  en: "Apply"

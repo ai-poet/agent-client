@@ -697,9 +697,7 @@ impl PiDriver {
                     stderr_thread,
                     super::support::PROCESS_EXIT_DRAIN_GRACE,
                     || match status {
-                        Ok(status)
-                            if !status.success() && last_visible_stderr.lock().is_none() =>
-                        {
+                        Ok(status) if !status.success() && last_visible_stderr.lock().is_none() => {
                             Some(DriverEvent::Error(tr!(
                                 "errors.provider_rpc_exited",
                                 provider = flavor.display_name(),

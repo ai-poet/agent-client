@@ -26,11 +26,12 @@ impl Waku {
     ) -> AnyElement {
         let id = activity.id;
         let session_id = self.state.selected_session;
-        let work = session_id
-            .zip(activity.source_id.as_deref())
-            .and_then(|(session_id, source_id)| {
-                self.background_work_for_activity(session_id, source_id)
-            });
+        let work =
+            session_id
+                .zip(activity.source_id.as_deref())
+                .and_then(|(session_id, source_id)| {
+                    self.background_work_for_activity(session_id, source_id)
+                });
         // Its own entry says when it is done: the call itself is answered
         // only once every call it was batched with is, so a sub-agent that
         // finished first would otherwise shimmer on until the slowest did.
@@ -38,12 +39,13 @@ impl Waku {
             Some(work) => work.status.is_live(),
             None => live_turn && super::components::activity_is_running(activity),
         };
-        let failed = activity.failed
-            || work.is_some_and(|work| work.status == BackgroundWorkStatus::Failed);
+        let failed =
+            activity.failed || work.is_some_and(|work| work.status == BackgroundWorkStatus::Failed);
         let stopped = !failed
             && (activity.stopped
                 || work.is_some_and(|work| work.status == BackgroundWorkStatus::Stopped));
-        let can_open = session_id.is_some() && (work.is_some() || activity.complete || activity.stopped);
+        let can_open =
+            session_id.is_some() && (work.is_some() || activity.complete || activity.stopped);
 
         let label = tr!("subagent.label");
         let label = if running {
@@ -249,7 +251,10 @@ mod tests {
     /// hue that exists.
     #[test]
     fn an_agent_kind_keeps_its_colour() {
-        assert_eq!(agent_type_hue_index("Explore"), agent_type_hue_index("explore "));
+        assert_eq!(
+            agent_type_hue_index("Explore"),
+            agent_type_hue_index("explore ")
+        );
         for name in ["general-purpose", "Explore", "Plan", "", "代码审查"] {
             assert!(agent_type_hue_index(name) < AGENT_TYPE_HUES.len());
         }
@@ -259,15 +264,26 @@ mod tests {
     /// task, its prompt and its answer.
     #[test]
     fn a_finished_call_stands_for_its_own_entry() {
-        let activity = ActivityItem::new(Some("toolu_1".into()), ActivityKind::Tool, "Find it", None, true)
-            .with_arguments(Some(r#"{"description":"Find it","prompt":"Look for it"}"#.into()))
-            .with_output(Some("It is in auth.rs".into()))
-            .with_subagent(Some(SubagentCall {
-                agent_type: Some("Explore".into()),
-                description: "Find it".into(),
-            }));
+        let activity = ActivityItem::new(
+            Some("toolu_1".into()),
+            ActivityKind::Tool,
+            "Find it",
+            None,
+            true,
+        )
+        .with_arguments(Some(
+            r#"{"description":"Find it","prompt":"Look for it"}"#.into(),
+        ))
+        .with_output(Some("It is in auth.rs".into()))
+        .with_subagent(Some(SubagentCall {
+            agent_type: Some("Explore".into()),
+            description: "Find it".into(),
+        }));
         let item = settled_item_from_call(&activity).unwrap();
-        assert_eq!(item.key, BackgroundWorkKey::new(BackgroundWorkKind::Subagent, "toolu_1"));
+        assert_eq!(
+            item.key,
+            BackgroundWorkKey::new(BackgroundWorkKind::Subagent, "toolu_1")
+        );
         assert_eq!(item.status, BackgroundWorkStatus::Completed);
         assert_eq!(item.command.as_deref(), Some("Look for it"));
         assert_eq!(item.output.as_deref(), Some("It is in auth.rs"));

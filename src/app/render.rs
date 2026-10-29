@@ -409,7 +409,7 @@ impl Render for Waku {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .bg(theme.surface)
+                    .bg(theme.window_surface())
                     .when(panels.sidebar > 0.0, |element| {
                         element.border_l_1().border_color(theme.sidebar_border)
                     })
@@ -432,6 +432,13 @@ impl Render for Waku {
                                     .h_full()
                                     .flex()
                                     .flex_col()
+                                    .relative()
+                                    // Zeron-style artwork belongs only to the
+                                    // new-task canvas and stays below its controls.
+                                    .when(!self.main_page_open(), |element| {
+                                        element
+                                            .children(self.render_wallpaper_hero(empty, window, cx))
+                                    })
                                     // Fork addition: the image studio takes the column in
                                     // place of the task.
                                     .when(self.image_studio.open, |element| {
@@ -452,9 +459,14 @@ impl Render for Waku {
                                                     .flex()
                                                     .flex_col()
                                                     .relative()
-                                                    .child(self.transcript_pane.clone().cached(
-                                                        StyleRefinement::default().flex_1().min_h(px(0.0)).w_full(),
-                                                    ))
+                                                    .child(
+                                                        self.transcript_pane.clone().cached(
+                                                            StyleRefinement::default()
+                                                                .flex_1()
+                                                                .min_h(px(0.0))
+                                                                .w_full(),
+                                                        ),
+                                                    )
                                                     .children(self.render_status_capsule(cx))
                                                     .into_any_element()
                                             })
@@ -467,7 +479,7 @@ impl Render for Waku {
                                                     .child(self.render_composer(window, cx))
                                                     .child(self.render_workspace_footer(cx))
                                             })
-                                    })
+                                    }),
                             )
                             .children(session_rail),
                     )

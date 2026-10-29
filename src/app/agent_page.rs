@@ -232,8 +232,7 @@ impl Waku {
             return;
         }
         let name = cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("agent.mcp_name")));
-        let target =
-            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("agent.mcp_command")));
+        let target = cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("agent.mcp_command")));
         for input in [&name, &target] {
             cx.subscribe(input, |_: &mut Self, _, _: &InputEvent, cx| cx.notify())
                 .detach();
@@ -275,11 +274,12 @@ impl Waku {
                 url: Some(target),
             }
         };
-        let duplicate = self
-            .agent_page
-            .settings
-            .as_ref()
-            .is_some_and(|settings| settings.mcp_servers.iter().any(|existing| existing.name == name));
+        let duplicate = self.agent_page.settings.as_ref().is_some_and(|settings| {
+            settings
+                .mcp_servers
+                .iter()
+                .any(|existing| existing.name == name)
+        });
         if !server.is_usable() || duplicate {
             if let Some(form) = self.agent_page.mcp_form.as_mut() {
                 form.error = Some(if duplicate {
@@ -409,7 +409,10 @@ impl Waku {
             let custom = stored.routed_endpoint(endpoint.id()).is_some();
             list = list.child(
                 div()
-                    .id(SharedString::from(format!("agent-endpoint-{}", endpoint.id())))
+                    .id(SharedString::from(format!(
+                        "agent-endpoint-{}",
+                        endpoint.id()
+                    )))
                     .tab_index(0)
                     .focus_visible(|style| style.border_1().border_color(theme.accent))
                     .px(px(10.0))
@@ -420,20 +423,22 @@ impl Waku {
                     .gap(px(7.0))
                     .cursor_default()
                     .when(active, |row| row.bg(theme.surface))
-                    .child(
-                        div()
-                            .w(px(5.0))
-                            .h(px(5.0))
-                            .rounded_full()
-                            .bg(if custom { theme.accent } else { theme.border_strong }),
-                    )
+                    .child(div().w(px(5.0)).h(px(5.0)).rounded_full().bg(if custom {
+                        theme.accent
+                    } else {
+                        theme.border_strong
+                    }))
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
                             .truncate()
                             .text_size(sp(12.5))
-                            .text_color(if active { theme.text } else { theme.text_secondary })
+                            .text_color(if active {
+                                theme.text
+                            } else {
+                                theme.text_secondary
+                            })
                             .child(SharedString::from(endpoint.label())),
                     )
                     .on_activation(cx, move |this, _, cx| {
@@ -453,7 +458,10 @@ impl Waku {
 
         section_card(theme)
             .child(section_title(theme, tr!("agent.endpoints_title")))
-            .child(section_description(theme, tr!("agent.endpoints_description")))
+            .child(section_description(
+                theme,
+                tr!("agent.endpoints_description"),
+            ))
             .child(self.render_agent_picker_sources(&stored, theme, cx))
             .child(
                 div()
@@ -588,7 +596,10 @@ impl Waku {
             .map(|path| abbreviate_home_path(&path, self.home_directory.as_deref()))
             .unwrap_or_default();
         let status = if let Some(error) = &self.agent_page.error {
-            Some((tr!("agent.save_failed", error = error.clone()), theme.warning))
+            Some((
+                tr!("agent.save_failed", error = error.clone()),
+                theme.warning,
+            ))
         } else if self.agent_page.saving {
             Some((tr!("common.saving"), theme.text_tertiary))
         } else if self
@@ -730,17 +741,15 @@ impl Waku {
                         })
                         .child(prompt_preview.unwrap_or_else(|| tr!("agent.system_prompt_empty"))),
                 )
-                .child(
-                    div().child(card_button(
-                        theme,
-                        SharedString::from("agent-prompt-edit"),
-                        tr!("common.edit"),
-                        false,
-                        false,
-                        cx,
-                        |this, window, cx| this.open_agent_prompt_editor(window, cx),
-                    )),
-                );
+                .child(div().child(card_button(
+                    theme,
+                    SharedString::from("agent-prompt-edit"),
+                    tr!("common.edit"),
+                    false,
+                    false,
+                    cx,
+                    |this, window, cx| this.open_agent_prompt_editor(window, cx),
+                )));
         }
 
         let auto_compact = settings.auto_compact.unwrap_or(true);
@@ -1243,7 +1252,12 @@ pub(super) fn section_description(theme: Theme, text: String) -> Div {
 
 /// A labelled setting: name and explanation on the left, the control on the
 /// right — or below, for controls that need the width.
-pub(super) fn setting_row(theme: Theme, label: String, description: String, control: AnyElement) -> Div {
+pub(super) fn setting_row(
+    theme: Theme,
+    label: String,
+    description: String,
+    control: AnyElement,
+) -> Div {
     div()
         .mt(px(14.0))
         .flex()
@@ -1292,12 +1306,20 @@ pub(super) fn preset_button(
         } else {
             theme.border_strong
         })
-        .bg(if selected { theme.accent.opacity(0.12) } else { theme.raised })
+        .bg(if selected {
+            theme.accent.opacity(0.12)
+        } else {
+            theme.raised
+        })
         .flex()
         .items_center()
         .cursor_default()
         .text_size(sp(12.0))
-        .text_color(if selected { theme.text } else { theme.text_secondary })
+        .text_color(if selected {
+            theme.text
+        } else {
+            theme.text_secondary
+        })
         .focus_visible(|style| style.border_color(theme.accent))
         .hover(|element| element.bg(theme.overlay))
         .child(label)

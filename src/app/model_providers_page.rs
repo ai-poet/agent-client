@@ -163,7 +163,9 @@ impl Waku {
             _ => ProviderSelection::Cloud,
         };
         let detail: AnyElement = match &selected {
-            ProviderSelection::Cloud => self.render_cloud_route_detail(theme, cx).into_any_element(),
+            ProviderSelection::Cloud => {
+                self.render_cloud_route_detail(theme, cx).into_any_element()
+            }
             ProviderSelection::Custom(id) => match registry.get(id) {
                 Some(entry) => self
                     .render_provider_detail(entry, theme, cx)
@@ -355,7 +357,11 @@ impl Waku {
                         div()
                             .truncate()
                             .text_size(sp(12.5))
-                            .text_color(if selected { theme.text } else { theme.text_secondary })
+                            .text_color(if selected {
+                                theme.text
+                            } else {
+                                theme.text_secondary
+                            })
                             .child(label),
                     )
                     .children(caption.map(|caption| {
@@ -402,20 +408,18 @@ impl Waku {
                     tr!("model_providers.cloud_off")
                 },
             ));
-        body = body.child(
-            div().pt(px(4.0)).child(card_button(
-                theme,
-                SharedString::from("model-provider-open-cloud"),
-                tr!("model_providers.cloud_open"),
-                false,
-                false,
-                cx,
-                |this, _, cx| {
-                    this.settings_page = Some(SettingsPage::CloudAccount);
-                    cx.notify();
-                },
-            )),
-        );
+        body = body.child(div().pt(px(4.0)).child(card_button(
+            theme,
+            SharedString::from("model-provider-open-cloud"),
+            tr!("model_providers.cloud_open"),
+            false,
+            false,
+            cx,
+            |this, _, cx| {
+                this.settings_page = Some(SettingsPage::CloudAccount);
+                cx.notify();
+            },
+        )));
 
         detail_pane(theme)
             .child(detail_heading(
@@ -482,7 +486,10 @@ impl Waku {
                     .flex_col()
                     .gap(px(5.0))
                     .child(field_label(theme, tr!("model_providers.base_url")))
-                    .child(TextField::new(SharedString::from("model-provider-url"), url))
+                    .child(TextField::new(
+                        SharedString::from("model-provider-url"),
+                        url,
+                    ))
                     .child(
                         div()
                             .text_size(sp(10.5))
@@ -756,9 +763,7 @@ impl Waku {
                         false,
                         false,
                         cx,
-                        move |this, window, cx| {
-                            this.begin_edit_model(edit_id.clone(), window, cx)
-                        },
+                        move |this, window, cx| this.begin_edit_model(edit_id.clone(), window, cx),
                     ))
                     .child(card_button(
                         theme,
@@ -1024,7 +1029,9 @@ impl Waku {
             name.update(cx, |input, cx| input.set_content(entry.name.clone(), cx));
         }
         if let Some(url) = inputs.1 {
-            url.update(cx, |input, cx| input.set_content(entry.base_url.clone(), cx));
+            url.update(cx, |input, cx| {
+                input.set_content(entry.base_url.clone(), cx)
+            });
         }
         if let Some(key) = inputs.2 {
             // Back behind the mask on every open: revealing was a decision
@@ -1570,31 +1577,27 @@ impl Waku {
             .map(|speed| speed.results.clone())
             .unwrap_or_default();
 
-        let mut section = div()
-            .flex()
-            .flex_col()
-            .gap(px(6.0))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(8.0))
-                    .child(field_label(theme, tr!("model_providers.candidates")))
-                    .child(card_button(
-                        theme,
-                        SharedString::from("model-provider-speedtest"),
-                        if running {
-                            tr!("cli_setup.speed_testing")
-                        } else {
-                            tr!("cli_setup.speed_test_all")
-                        },
-                        false,
-                        running || self.model_providers.saving,
-                        cx,
-                        |this, _, cx| this.run_provider_speed_test(cx),
-                    )),
-            );
+        let mut section = div().flex().flex_col().gap(px(6.0)).child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(8.0))
+                .child(field_label(theme, tr!("model_providers.candidates")))
+                .child(card_button(
+                    theme,
+                    SharedString::from("model-provider-speedtest"),
+                    if running {
+                        tr!("cli_setup.speed_testing")
+                    } else {
+                        tr!("cli_setup.speed_test_all")
+                    },
+                    false,
+                    running || self.model_providers.saving,
+                    cx,
+                    |this, _, cx| this.run_provider_speed_test(cx),
+                )),
+        );
 
         for url in &entry.candidate_urls {
             let in_use = &entry.base_url == url;
@@ -1621,7 +1624,11 @@ impl Waku {
                             .min_w_0()
                             .truncate()
                             .text_size(sp(12.0))
-                            .text_color(if in_use { theme.text } else { theme.text_secondary })
+                            .text_color(if in_use {
+                                theme.text
+                            } else {
+                                theme.text_secondary
+                            })
                             .child(url.clone()),
                     )
                     .children(latency.map(|ms| {
@@ -1831,9 +1838,7 @@ impl Waku {
                 }
                 let fastest = sub2api::speedtest::fastest_ok(&results)
                     .and_then(|index| results.get(index))
-                    .and_then(|result| {
-                        result.latency_ms().map(|ms| (result.url.clone(), ms))
-                    });
+                    .and_then(|result| result.latency_ms().map(|ms| (result.url.clone(), ms)));
                 this.model_providers.speed = Some(super::providers_page::SpeedTest {
                     running: false,
                     results,
@@ -1980,13 +1985,13 @@ impl Waku {
         });
 
         let options: Vec<(Option<String>, String)> = std::iter::once((None, unbound))
-        .chain(
-            stored
-                .registry
-                .candidates_for_slot(slot)
-                .map(|entry| (Some(entry.id.clone()), entry_label(entry))),
-        )
-        .collect();
+            .chain(
+                stored
+                    .registry
+                    .candidates_for_slot(slot)
+                    .map(|entry| (Some(entry.id.clone()), entry_label(entry))),
+            )
+            .collect();
 
         let trigger = div()
             .id(SharedString::from(format!("route-binding-{slot}")))
@@ -2166,9 +2171,7 @@ impl Waku {
                         theme,
                         tr!("model_providers.model_display_name"),
                     )))
-                    .child(
-                        TextField::new(SharedString::from("model-edit-name"), input).flex_1(),
-                    ),
+                    .child(TextField::new(SharedString::from("model-edit-name"), input).flex_1()),
             );
         }
         if let Some(input) = self.model_providers.inputs.model_window.clone() {
@@ -2177,13 +2180,13 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(div().w(px(112.0)).flex_none().child(field_label(
-                        theme,
-                        tr!("model_providers.model_context"),
-                    )))
                     .child(
-                        TextField::new(SharedString::from("model-edit-window"), input).flex_1(),
-                    ),
+                        div()
+                            .w(px(112.0))
+                            .flex_none()
+                            .child(field_label(theme, tr!("model_providers.model_context"))),
+                    )
+                    .child(TextField::new(SharedString::from("model-edit-window"), input).flex_1()),
             );
         }
         if let Some(input) = self.model_providers.inputs.model_efforts.clone() {
@@ -2192,10 +2195,12 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(div().w(px(112.0)).flex_none().child(field_label(
-                        theme,
-                        tr!("model_providers.model_efforts"),
-                    )))
+                    .child(
+                        div()
+                            .w(px(112.0))
+                            .flex_none()
+                            .child(field_label(theme, tr!("model_providers.model_efforts"))),
+                    )
                     .child(
                         TextField::new(SharedString::from("model-edit-efforts"), input).flex_1(),
                     ),
@@ -2231,12 +2236,7 @@ impl Waku {
     }
 
     /// Build (once) the model editor's fields and seed them from the model.
-    fn begin_edit_model(
-        &mut self,
-        model_id: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn begin_edit_model(&mut self, model_id: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(entry) = self.selected_provider() else {
             return;
         };

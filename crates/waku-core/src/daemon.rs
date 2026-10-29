@@ -2200,7 +2200,10 @@ mod tests {
         assert_eq!(wire.kind, "turnFailure");
         assert!(matches!(
             event_from_wire(wire).unwrap(),
-            DriverEvent::TurnFailure(TurnFailure { kind: TurnFailureKind::Auth, request_id: None })
+            DriverEvent::TurnFailure(TurnFailure {
+                kind: TurnFailureKind::Auth,
+                request_id: None
+            })
         ));
     }
 }

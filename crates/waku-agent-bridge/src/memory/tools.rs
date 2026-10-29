@@ -30,7 +30,14 @@ enum Op {
     DeleteAll,
 }
 
-const OPS: [Op; 6] = [Op::Write, Op::Read, Op::List, Op::Delete, Op::Prune, Op::DeleteAll];
+const OPS: [Op; 6] = [
+    Op::Write,
+    Op::Read,
+    Op::List,
+    Op::Delete,
+    Op::Prune,
+    Op::DeleteAll,
+];
 
 pub(super) fn all(host: &Arc<MemoryHost>) -> Vec<Box<dyn Tool>> {
     OPS.into_iter()
@@ -202,14 +209,16 @@ fn text<'a>(input: &'a Value, key: &str) -> Option<&'a str> {
 /// session reaches (user first). Naming the user scope while it is
 /// switched off is an error, as in the reference.
 fn target_scopes(host: &MemoryHost, input: &Value) -> Result<Vec<ScopeDir>, String> {
-    match text(input, "scope").map(str::trim).filter(|scope| !scope.is_empty()) {
+    match text(input, "scope")
+        .map(str::trim)
+        .filter(|scope| !scope.is_empty())
+    {
         None => Ok(host.scopes()),
         Some(raw) => match MemoryScope::parse(raw) {
             Some(MemoryScope::Project) => Ok(vec![host.project_dir()]),
-            Some(MemoryScope::User) => host
-                .user_dir()
-                .map(|dir| vec![dir])
-                .ok_or_else(|| "user scope is disabled in the memory settings; use 'project'".to_owned()),
+            Some(MemoryScope::User) => host.user_dir().map(|dir| vec![dir]).ok_or_else(|| {
+                "user scope is disabled in the memory settings; use 'project'".to_owned()
+            }),
             None => Err(format!(
                 "invalid scope: {} (expected 'project' or 'user')",
                 serde_json::to_string(raw).unwrap_or_default()
@@ -223,7 +232,10 @@ fn write(host: &MemoryHost, input: &Value, scopes: &[ScopeDir]) -> Result<String
     let kind = text(input, "type")
         .and_then(MemoryType::parse)
         .ok_or("invalid memory type (expected one of user/feedback/project/reference)")?;
-    let description = text(input, "description").unwrap_or_default().trim().to_owned();
+    let description = text(input, "description")
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
     if description.is_empty() {
         return Err("description must not be empty".to_owned());
     }
@@ -378,7 +390,11 @@ async fn prune(
         let head = format!(
             "Prune dry-run: {} candidate(s) older than {days} days{}",
             candidates.len(),
-            if candidates.is_empty() { "" } else { " — re-run with dryRun=false to delete" }
+            if candidates.is_empty() {
+                ""
+            } else {
+                " — re-run with dryRun=false to delete"
+            }
         );
         return Ok(if lines.is_empty() {
             format!("{head}.")
@@ -386,8 +402,13 @@ async fn prune(
             format!("{head}\n{}", lines.join("\n"))
         });
     }
-    let summary = format!("Delete {} memories older than {days} days", candidates.len());
-    if let Err(refused) = ctx.check_permission_with_details(PRUNE_TOOL, &summary, &lines.join("\n"), false) {
+    let summary = format!(
+        "Delete {} memories older than {days} days",
+        candidates.len()
+    );
+    if let Err(refused) =
+        ctx.check_permission_with_details(PRUNE_TOOL, &summary, &lines.join("\n"), false)
+    {
         return Err(refused.to_string());
     }
     let deleted = tokio::task::spawn_blocking(move || {
@@ -438,7 +459,11 @@ async fn delete_all(
                         "{} ({}): {}",
                         dir.scope.as_str(),
                         names.len(),
-                        if names.is_empty() { "—".to_owned() } else { names.join(", ") }
+                        if names.is_empty() {
+                            "—".to_owned()
+                        } else {
+                            names.join(", ")
+                        }
                     )
                 })
                 .collect::<Vec<_>>()
@@ -449,9 +474,15 @@ async fn delete_all(
     };
     let summary = format!(
         "Delete every memory in {}",
-        scopes.iter().map(|dir| dir.scope.as_str()).collect::<Vec<_>>().join(" and ")
+        scopes
+            .iter()
+            .map(|dir| dir.scope.as_str())
+            .collect::<Vec<_>>()
+            .join(" and ")
     );
-    if let Err(refused) = ctx.check_permission_with_details(DELETE_ALL_TOOL, &summary, &detail, false) {
+    if let Err(refused) =
+        ctx.check_permission_with_details(DELETE_ALL_TOOL, &summary, &detail, false)
+    {
         return Err(refused.to_string());
     }
     let results = tokio::task::spawn_blocking(move || {
@@ -560,7 +591,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(list(&host, &scopes), "- a 📌 (project/feedback) — d");
-        assert_eq!(delete(&host, &json!({"name": "a"}), &scopes).unwrap(), "Deleted memory: a (project)");
+        assert_eq!(
+            delete(&host, &json!({"name": "a"}), &scopes).unwrap(),
+            "Deleted memory: a (project)"
+        );
         assert!(delete(&host, &json!({"name": "a"}), &scopes).is_err());
     }
 

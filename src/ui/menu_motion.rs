@@ -27,7 +27,7 @@
 
 use std::time::{Duration, Instant};
 
-use gpui::{AppContext as _, Div, DispatchPhase, MouseMoveEvent, Stateful};
+use gpui::{AppContext as _, DispatchPhase, Div, MouseMoveEvent, Stateful};
 
 use super::*;
 use crate::ui::motion_kit::{MENU_OUT, menu_in_from, menu_out_toward};

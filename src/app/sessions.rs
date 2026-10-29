@@ -388,9 +388,10 @@ impl Waku {
             let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
             cx.background_executor()
                 .spawn(async move {
-                    let _ = workspace.request(
-                        waku_client::WorkspaceOperation::DeleteAgentTranscript { transcript_id },
-                    );
+                    let _ =
+                        workspace.request(waku_client::WorkspaceOperation::DeleteAgentTranscript {
+                            transcript_id,
+                        });
                 })
                 .detach();
         }
@@ -616,7 +617,6 @@ impl Waku {
             PanelResizeTarget::Sidebar => {
                 self.sidebar_slide = None;
                 self.sidebar_width = sidebar_width;
-                crate::platform::set_sidebar_material_width(window, sidebar_width);
                 sidebar_width
             }
             PanelResizeTarget::RightPanel => {
@@ -662,7 +662,6 @@ impl Waku {
                     return;
                 }
                 self.sidebar_width = width;
-                crate::platform::set_sidebar_material_width(window, width);
             }
             PanelResizeTarget::RightPanel => {
                 let maximum = RIGHT_PANEL_MAX_WIDTH
@@ -1317,7 +1316,9 @@ impl Waku {
         if let Some(runtime) = runtime.as_mut() {
             runtime.stream_phase = None;
             runtime.model_retry = None;
-            runtime.pending_permissions.retain(|permission| agent_teams::requests::is_member_request(&permission.request_id));
+            runtime.pending_permissions.retain(|permission| {
+                agent_teams::requests::is_member_request(&permission.request_id)
+            });
             runtime.pending_user_input = None;
             runtime.pending_computer_approval = None;
             runtime.computer_use_previews.clear();

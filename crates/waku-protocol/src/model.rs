@@ -876,7 +876,9 @@ impl AgentTurn {
 
     /// Whether the turn is waiting right now.
     pub fn is_paused(&self) -> bool {
-        self.pauses.last().is_some_and(|pause| pause.ended_at.is_none())
+        self.pauses
+            .last()
+            .is_some_and(|pause| pause.ended_at.is_none())
     }
 }
 
@@ -992,7 +994,11 @@ pub struct ThreadGoal {
 /// come back asynchronously as [`DriverEvent::GoalUpdated`]; failures surface
 /// through [`DriverEvent::Error`].
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum GoalOperation {
     /// Re-read the provider's current goal without changing it.
     Refresh,
@@ -1552,7 +1558,11 @@ impl AgentSession {
         turn.status = status;
         turn.completed_at = Some(completed_at);
         // A turn that ends while waiting stops waiting with it.
-        if let Some(pause) = turn.pauses.last_mut().filter(|pause| pause.ended_at.is_none()) {
+        if let Some(pause) = turn
+            .pauses
+            .last_mut()
+            .filter(|pause| pause.ended_at.is_none())
+        {
             pause.ended_at = Some(completed_at);
         }
         let result = (turn.id, turn.turn_count);
@@ -1600,7 +1610,11 @@ impl AgentSession {
 
     /// [`Self::set_latest_turn_error`], with the kind of failure when the
     /// agent named it.
-    pub fn set_latest_turn_failure(&mut self, message: impl Into<String>, kind: Option<TurnFailureKind>) {
+    pub fn set_latest_turn_failure(
+        &mut self,
+        message: impl Into<String>,
+        kind: Option<TurnFailureKind>,
+    ) {
         if let Some(turn) = self.turns.last_mut() {
             turn.error = Some(TurnError {
                 message: message.into(),
@@ -4918,7 +4932,10 @@ mod tests {
         assert!(!session.resume_active_turn(started + 41));
         assert_eq!(session.turns[0].active_seconds(started, started + 50), 20);
         // Only the overlap with the window counts.
-        assert_eq!(session.turns[0].active_seconds(started + 35, started + 50), 10);
+        assert_eq!(
+            session.turns[0].active_seconds(started + 35, started + 50),
+            10
+        );
 
         session.pause_active_turn(started + 50);
         session.finish_active_turn(TurnStatus::Completed);
@@ -4926,7 +4943,10 @@ mod tests {
 
         session.set_latest_turn_error("the provider exited");
         assert_eq!(
-            session.turns[0].error.as_ref().map(|error| error.message.as_str()),
+            session.turns[0]
+                .error
+                .as_ref()
+                .map(|error| error.message.as_str()),
             Some("the provider exited")
         );
     }

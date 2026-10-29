@@ -13,8 +13,7 @@ use anyhow::{Context, Result, anyhow};
 use toml_edit::{Array, DocumentMut, Item, Table, value};
 
 use super::{
-    CliBackups, RouteTarget, atomic_write_private, capture_backup, remove_if_exists,
-    set_toml_value,
+    CliBackups, RouteTarget, atomic_write_private, capture_backup, remove_if_exists, set_toml_value,
 };
 use crate::gateway::openai_base_url;
 
@@ -269,7 +268,10 @@ mod tests {
         assert!(live.contains(r#"[model."grok-4.7"]"#));
         assert!(live.contains(r#"[model."grok-4.6"]"#));
         assert!(live.contains(r#"[model."grok-4.5"]"#));
-        assert!(live.contains(r#"[model."my-model"]"#), "user profile kept: {live}");
+        assert!(
+            live.contains(r#"[model."my-model"]"#),
+            "user profile kept: {live}"
+        );
         // The newest profile is listed, the CLI's own default stays the default.
         assert!(live.contains(r#"default = "grok-4.6""#));
         assert!(live.contains(r#"base_url = "https://gw.example.org/v1""#));

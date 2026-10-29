@@ -135,7 +135,10 @@ mod tests {
     #[test]
     fn missing_blank_and_bom_files_load() {
         let tmp = tempfile::tempdir().unwrap();
-        assert_eq!(load(&tmp.path().join("none.json")).unwrap(), MemoryConfig::default());
+        assert_eq!(
+            load(&tmp.path().join("none.json")).unwrap(),
+            MemoryConfig::default()
+        );
         assert_eq!(parse("\u{feff}  ").unwrap(), MemoryConfig::default());
         assert!(!parse("{\"autoSummarize\": false}").unwrap().auto_summarize);
         assert!(parse("{").is_err());
@@ -145,7 +148,8 @@ mod tests {
     fn unknown_keys_round_trip_and_values_are_clamped() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join(CONFIG_FILE);
-        let mut config = parse("{\"futureKey\": 1, \"maxBytes\": 10, \"autoSummarizeEveryTurns\": 0}").unwrap();
+        let mut config =
+            parse("{\"futureKey\": 1, \"maxBytes\": 10, \"autoSummarizeEveryTurns\": 0}").unwrap();
         assert_eq!(config.max_bytes(), 1024);
         assert_eq!(config.auto_summarize_every_turns(), 2);
         config.enabled = false;

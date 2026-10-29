@@ -262,7 +262,10 @@ impl GatewayOriginConfig {
         let from = self.fallback_from.as_ref()?;
         let current = self.origin();
         (current.as_deref() != Some(from.as_str())
-            && self.effective_candidates().iter().any(|known| known == from))
+            && self
+                .effective_candidates()
+                .iter()
+                .any(|known| known == from))
         .then(|| from.clone())
     }
 
@@ -270,7 +273,11 @@ impl GatewayOriginConfig {
     pub fn add(&mut self, origin: &str) -> Result<bool> {
         let origin = normalize_base_url(origin)
             .map_err(|error| anyhow!("{origin} is not a usable URL: {error:?}"))?;
-        if self.effective_candidates().iter().any(|known| *known == origin) {
+        if self
+            .effective_candidates()
+            .iter()
+            .any(|known| *known == origin)
+        {
             return Ok(false);
         }
         self.candidates.push(origin);
@@ -360,7 +367,11 @@ pub fn test_origins(
 mod tests {
     use super::*;
 
-    fn credentials(claude: Option<&str>, codex: Option<&str>, general: Option<&str>) -> Credentials {
+    fn credentials(
+        claude: Option<&str>,
+        codex: Option<&str>,
+        general: Option<&str>,
+    ) -> Credentials {
         Credentials {
             claude_api_key: claude.map(str::to_owned),
             codex_api_key: codex.map(str::to_owned),
@@ -383,11 +394,13 @@ mod tests {
     fn listed(entries: &[(&str, &str, &str)]) -> Vec<crate::client::PublicEndpoint> {
         entries
             .iter()
-            .map(|(name, endpoint, description)| crate::client::PublicEndpoint {
-                name: (*name).to_owned(),
-                endpoint: (*endpoint).to_owned(),
-                description: (*description).to_owned(),
-            })
+            .map(
+                |(name, endpoint, description)| crate::client::PublicEndpoint {
+                    name: (*name).to_owned(),
+                    endpoint: (*endpoint).to_owned(),
+                    description: (*description).to_owned(),
+                },
+            )
             .collect()
     }
 
@@ -416,7 +429,10 @@ mod tests {
         assert_eq!(config.origin().as_deref(), Some(primary.as_str()));
 
         config.select("mirror.example.org").expect("select");
-        assert_eq!(config.origin().as_deref(), Some("https://mirror.example.org"));
+        assert_eq!(
+            config.origin().as_deref(),
+            Some("https://mirror.example.org")
+        );
         assert!(config.is_removable("https://mirror.example.org"));
         assert!(!config.is_removable(&primary));
 
@@ -577,7 +593,10 @@ mod tests {
         let primary = normalize_base_url(brand::MANAGED_SERVICE_URL).expect("primary");
         let mut config = GatewayOriginConfig::default();
         assert_eq!(config.node_label(&primary), NodeLabel::Primary);
-        assert_eq!(config.node_label("https://mine.example.org"), NodeLabel::Other);
+        assert_eq!(
+            config.node_label("https://mine.example.org"),
+            NodeLabel::Other
+        );
         let cdn = normalize_base_url(brand::MANAGED_SERVICE_CDN_URL).ok();
         if let Some(cdn) = cdn.as_ref().filter(|cdn| **cdn != primary) {
             assert_eq!(config.node_label(cdn), NodeLabel::BuiltInCdn);
@@ -600,11 +619,18 @@ mod tests {
         let mut config = GatewayOriginConfig::default();
         assert_eq!(config.restore_target(), None);
 
-        config.fall_back("https://mirror.example.org").expect("fall back");
-        assert_eq!(config.origin().as_deref(), Some("https://mirror.example.org"));
+        config
+            .fall_back("https://mirror.example.org")
+            .expect("fall back");
+        assert_eq!(
+            config.origin().as_deref(),
+            Some("https://mirror.example.org")
+        );
         assert_eq!(config.restore_target().as_deref(), Some(primary.as_str()));
         // A second fallback still remembers the first origin.
-        config.fall_back("https://other.example.org").expect("fall back again");
+        config
+            .fall_back("https://other.example.org")
+            .expect("fall back again");
         assert_eq!(config.restore_target().as_deref(), Some(primary.as_str()));
 
         // Going back is a plain selection and clears the mark.
@@ -613,13 +639,17 @@ mod tests {
         assert_eq!(config.restore_target(), None);
 
         // A deliberate choice made while fallen back cancels the return.
-        config.fall_back("https://mirror.example.org").expect("fall back");
+        config
+            .fall_back("https://mirror.example.org")
+            .expect("fall back");
         config.select("https://other.example.org").expect("choose");
         assert_eq!(config.restore_target(), None);
 
         // Removing the origin a fallback left also cancels it.
         config.select("https://mirror.example.org").expect("choose");
-        config.fall_back("https://other.example.org").expect("fall back");
+        config
+            .fall_back("https://other.example.org")
+            .expect("fall back");
         config.remove("https://mirror.example.org");
         assert_eq!(config.restore_target(), None);
     }

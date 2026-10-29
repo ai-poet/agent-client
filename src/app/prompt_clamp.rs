@@ -47,11 +47,10 @@ impl Waku {
         if message.role != MessageRole::User {
             return None;
         }
-        let width = f32::from(self.transcript_layout_width.get())
-            .min(BUBBLE_MAX_WIDTH)
-            - BUBBLE_PADDING_X;
-        let font = f32::from(window.rem_size()) * FONT_SP
-            / waku_client::persistence::DEFAULT_UI_FONT_SIZE;
+        let width =
+            f32::from(self.transcript_layout_width.get()).min(BUBBLE_MAX_WIDTH) - BUBBLE_PADDING_X;
+        let font =
+            f32::from(window.rem_size()) * FONT_SP / waku_client::persistence::DEFAULT_UI_FONT_SIZE;
         if !self.prompt_is_long(message, width, font) {
             return None;
         }
@@ -238,7 +237,10 @@ mod tests {
     #[test]
     fn short_prompts_stay_whole() {
         assert_eq!(estimated_lines("fix the build", 516.0, 14.0), 1);
-        assert!(estimated_lines("one\ntwo\nthree\nfour\nfive\nsix\nseven", 516.0, 14.0) <= COLLAPSE_ABOVE_LINES);
+        assert!(
+            estimated_lines("one\ntwo\nthree\nfour\nfive\nsix\nseven", 516.0, 14.0)
+                <= COLLAPSE_ABOVE_LINES
+        );
     }
 
     #[test]
@@ -253,7 +255,10 @@ mod tests {
 
     #[test]
     fn a_pasted_log_folds() {
-        let log = (0..40).map(|n| format!("line {n}")).collect::<Vec<_>>().join("\n");
+        let log = (0..40)
+            .map(|n| format!("line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(estimated_lines(&log, 516.0, 14.0) > COLLAPSE_ABOVE_LINES);
     }
 

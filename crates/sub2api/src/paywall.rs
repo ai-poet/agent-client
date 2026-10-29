@@ -73,12 +73,16 @@ pub fn classify(message: &str, state: &PaywallState) -> Option<Paywall> {
     }
 
     // The drivers that lost the code: judge by the account.
-    if state.exhausted_subscription && (mentions_status(&text, "429") || text.contains("rate limit")) {
+    if state.exhausted_subscription
+        && (mentions_status(&text, "429") || text.contains("rate limit"))
+    {
         return Some(Paywall::PlanLimit);
     }
     if !state.has_active_subscription
         && state.balance.is_some_and(|balance| balance <= 0.0)
-        && (mentions_status(&text, "403") || text.contains("forbidden") || text.contains("authentication failed"))
+        && (mentions_status(&text, "403")
+            || text.contains("forbidden")
+            || text.contains("authentication failed"))
     {
         return Some(Paywall::Balance);
     }
@@ -114,7 +118,11 @@ mod tests {
             "[openai] Authentication failed: Insufficient account balance",
         ];
         for message in balance {
-            assert_eq!(classify(message, &FUNDED), Some(Paywall::Balance), "{message}");
+            assert_eq!(
+                classify(message, &FUNDED),
+                Some(Paywall::Balance),
+                "{message}"
+            );
         }
 
         let limit = [
@@ -122,7 +130,11 @@ mod tests {
             r#"API error 403: {"error":{"type":"billing_error","message":"weekly usage limit exceeded"}}"#,
         ];
         for message in limit {
-            assert_eq!(classify(message, &FUNDED), Some(Paywall::PlanLimit), "{message}");
+            assert_eq!(
+                classify(message, &FUNDED),
+                Some(Paywall::PlanLimit),
+                "{message}"
+            );
         }
 
         let inactive = [
@@ -130,7 +142,11 @@ mod tests {
             r#"unexpected status 403 Forbidden: {"code":"SUBSCRIPTION_INVALID","message":"subscription is invalid or expired"}"#,
         ];
         for message in inactive {
-            assert_eq!(classify(message, &FUNDED), Some(Paywall::PlanInactive), "{message}");
+            assert_eq!(
+                classify(message, &FUNDED),
+                Some(Paywall::PlanInactive),
+                "{message}"
+            );
         }
     }
 
@@ -145,7 +161,10 @@ mod tests {
         let message = r#"API Error: 429 {"code":"USER_PLATFORM_DAILY_QUOTA_EXHAUSTED"}"#;
         assert_eq!(classify(message, &FUNDED), None);
         assert_eq!(
-            classify("exceeded retry limit, last status: 429 Too Many Requests", &FUNDED),
+            classify(
+                "exceeded retry limit, last status: 429 Too Many Requests",
+                &FUNDED
+            ),
             None
         );
         assert_eq!(classify("[openai] Rate limited", &FUNDED), None);
@@ -159,10 +178,16 @@ mod tests {
             exhausted_subscription: true,
         };
         assert_eq!(
-            classify("exceeded retry limit, last status: 429 Too Many Requests", &spent),
+            classify(
+                "exceeded retry limit, last status: 429 Too Many Requests",
+                &spent
+            ),
             Some(Paywall::PlanLimit)
         );
-        assert_eq!(classify("[openai] Rate limited", &spent), Some(Paywall::PlanLimit));
+        assert_eq!(
+            classify("[openai] Rate limited", &spent),
+            Some(Paywall::PlanLimit)
+        );
 
         let broke = PaywallState {
             balance: Some(0.0),
@@ -174,12 +199,12 @@ mod tests {
             Some(Paywall::Balance)
         );
         // A 403 with money on the account is something else entirely.
-        assert_eq!(classify("[openai] Authentication failed: Forbidden", &FUNDED), None);
-        // Unknown balance never guesses.
         assert_eq!(
-            classify("403 Forbidden", &PaywallState::default()),
+            classify("[openai] Authentication failed: Forbidden", &FUNDED),
             None
         );
+        // Unknown balance never guesses.
+        assert_eq!(classify("403 Forbidden", &PaywallState::default()), None);
     }
 
     #[test]
@@ -190,15 +215,24 @@ mod tests {
             exhausted_subscription: true,
         };
         assert_eq!(
-            classify("The model's API kept failing.\nRequest ID: a4293c1e-0d5f-4c9e-4031-2f6d8e7c1b20", &broke),
+            classify(
+                "The model's API kept failing.\nRequest ID: a4293c1e-0d5f-4c9e-4031-2f6d8e7c1b20",
+                &broke
+            ),
             None
         );
-        assert_eq!(classify("API error 429: slow down", &broke), Some(Paywall::PlanLimit));
+        assert_eq!(
+            classify("API error 429: slow down", &broke),
+            Some(Paywall::PlanLimit)
+        );
         let unpaid = PaywallState {
             exhausted_subscription: false,
             ..broke
         };
-        assert_eq!(classify("unexpected status 403 Forbidden", &unpaid), Some(Paywall::Balance));
+        assert_eq!(
+            classify("unexpected status 403 Forbidden", &unpaid),
+            Some(Paywall::Balance)
+        );
         assert_eq!(classify("request x403y failed", &unpaid), None);
     }
 }

@@ -134,7 +134,10 @@ impl WindowsLookup {
 ///
 /// Never the WSL launcher in `System32`: it runs commands inside a Linux VM
 /// that cannot see the Windows paths this session is working in.
-pub fn find_windows_bash(lookup: &WindowsLookup, exists: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+pub fn find_windows_bash(
+    lookup: &WindowsLookup,
+    exists: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
     if let Some(explicit) = lookup.explicit.as_ref().filter(|path| exists(path)) {
         return Some(explicit.clone());
     }
@@ -167,7 +170,10 @@ pub fn find_windows_bash(lookup: &WindowsLookup, exists: impl Fn(&Path) -> bool)
 /// The WSL `bash.exe` Windows puts in `System32` (or its 32-bit view), and the
 /// Store alias under `WindowsApps`.
 fn is_wsl_launcher(path: &Path) -> bool {
-    let normalized = path.to_string_lossy().replace('/', "\\").to_ascii_lowercase();
+    let normalized = path
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase();
     normalized.contains("\\windows\\system32\\")
         || normalized.contains("\\windows\\sysnative\\")
         || normalized.contains("\\windowsapps\\")
@@ -197,7 +203,10 @@ mod tests {
             &lookup(None, &["C:/Program Files"], &[]),
             exists_in(&["C:/Program Files/Git/bin/bash.exe"]),
         );
-        assert_eq!(found, Some(PathBuf::from("C:/Program Files/Git/bin/bash.exe")));
+        assert_eq!(
+            found,
+            Some(PathBuf::from("C:/Program Files/Git/bin/bash.exe"))
+        );
     }
 
     #[test]
@@ -213,7 +222,10 @@ mod tests {
             &lookup(Some("D:/gone/bash.exe"), &["C:/Program Files"], &[]),
             exists_in(&files),
         );
-        assert_eq!(stale, Some(PathBuf::from("C:/Program Files/Git/bin/bash.exe")));
+        assert_eq!(
+            stale,
+            Some(PathBuf::from("C:/Program Files/Git/bin/bash.exe"))
+        );
     }
 
     /// Git installed somewhere unusual is found through its `git.exe`.
@@ -252,7 +264,10 @@ mod tests {
     #[test]
     fn nothing_installed_finds_nothing() {
         assert_eq!(
-            find_windows_bash(&lookup(None, &["C:/Program Files"], &["C:/bin"]), exists_in(&[])),
+            find_windows_bash(
+                &lookup(None, &["C:/Program Files"], &["C:/bin"]),
+                exists_in(&[])
+            ),
             None
         );
     }

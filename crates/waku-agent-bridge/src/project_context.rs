@@ -41,7 +41,10 @@ pub(crate) fn load(cwd: &Path, global_dir: &Path) -> Vec<ContextFile> {
     let mut push = |file: ContextFile| {
         // A git worktree nested inside its own repository carries a copy of
         // the same file, and loading both would apply it twice.
-        if !files.iter().any(|known| known.path == file.path || known.content == file.content) {
+        if !files
+            .iter()
+            .any(|known| known.path == file.path || known.content == file.content)
+        {
             files.push(file);
         }
     };
@@ -186,6 +189,8 @@ mod tests {
             content: "Use tabs.\n".into(),
         }])
         .unwrap();
-        assert!(rendered.contains("<project_instructions path=\"/repo/AGENTS.md\">\nUse tabs.\n</project_instructions>"));
+        assert!(rendered.contains(
+            "<project_instructions path=\"/repo/AGENTS.md\">\nUse tabs.\n</project_instructions>"
+        ));
     }
 }

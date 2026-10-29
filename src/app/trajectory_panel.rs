@@ -80,9 +80,21 @@ fn tabs_for(kind: CellKind, has_previous: bool) -> Vec<Tab> {
         CellKind::System if has_previous => vec![Tab::Diff, Tab::SystemPrompt, Tab::Tools],
         CellKind::System => vec![Tab::SystemPrompt, Tab::Tools],
         CellKind::User => vec![Tab::Summary, Tab::Raw],
-        CellKind::Message => vec![Tab::Summary, Tab::Options, Tab::Usage, Tab::Timing, Tab::Raw],
+        CellKind::Message => vec![
+            Tab::Summary,
+            Tab::Options,
+            Tab::Usage,
+            Tab::Timing,
+            Tab::Raw,
+        ],
         CellKind::Tool | CellKind::Subtool => {
-            vec![Tab::Summary, Tab::Payload, Tab::Result, Tab::Schema, Tab::Timing]
+            vec![
+                Tab::Summary,
+                Tab::Payload,
+                Tab::Result,
+                Tab::Schema,
+                Tab::Timing,
+            ]
         }
         CellKind::Compacted => vec![Tab::Summary],
     }
@@ -120,7 +132,11 @@ fn lane_color(lane: u8, theme: &Theme) -> Hsla {
 
 fn local_time(ms: i64) -> String {
     chrono::DateTime::from_timestamp_millis(ms)
-        .map(|time| time.with_timezone(&chrono::Local).format("%H:%M:%S%.3f").to_string())
+        .map(|time| {
+            time.with_timezone(&chrono::Local)
+                .format("%H:%M:%S%.3f")
+                .to_string()
+        })
         .unwrap_or_default()
 }
 
@@ -150,7 +166,11 @@ enum Row {
 /// The ledger's rows: a header per turn, then its cells unless folded, with
 /// cells outside any turn (a `/compact`) where they happened. With an
 /// interval picked on the timeline, only the cells in it.
-fn ledger_rows(snapshot: &Snapshot, folded: &HashSet<usize>, focus: Option<&HashSet<usize>>) -> Vec<Row> {
+fn ledger_rows(
+    snapshot: &Snapshot,
+    folded: &HashSet<usize>,
+    focus: Option<&HashSet<usize>>,
+) -> Vec<Row> {
     let mut rows = Vec::new();
     let mut turn_at: BTreeMap<usize, usize> = BTreeMap::new();
     for (position, turn) in snapshot.turns.iter().enumerate() {
@@ -163,7 +183,9 @@ fn ledger_rows(snapshot: &Snapshot, folded: &HashSet<usize>, focus: Option<&Hash
             rows.push(Row::Turn(*position));
             current = Some((*position, turn.first_cell + turn.cell_count));
         }
-        let in_turn = current.filter(|(_, end)| cell.index < *end).map(|(position, _)| position);
+        let in_turn = current
+            .filter(|(_, end)| cell.index < *end)
+            .map(|(position, _)| position);
         if in_turn.is_some_and(|position| folded.contains(&position)) {
             continue;
         }
@@ -227,9 +249,11 @@ impl Default for View {
 impl View {
     fn rebuild_rows(&mut self) {
         let focus: Option<HashSet<usize>> = match (self.focus, self.timeline.as_ref()) {
-            (Some((start, end)), Some(model)) => {
-                Some(timeline::focus_indexes(model, start, end).into_iter().collect())
-            }
+            (Some((start, end)), Some(model)) => Some(
+                timeline::focus_indexes(model, start, end)
+                    .into_iter()
+                    .collect(),
+            ),
             _ => None,
         };
         let rows = ledger_rows(&self.snapshot, &self.folded, focus.as_ref());
@@ -237,7 +261,8 @@ impl View {
         if rows.len() != self.rows.len() {
             self.list.reset(rows.len());
             if follow && self.selected.is_none() {
-                self.list.scroll_to_reveal_item(rows.len().saturating_sub(1));
+                self.list
+                    .scroll_to_reveal_item(rows.len().saturating_sub(1));
             }
         } else {
             self.list.remeasure();
@@ -278,9 +303,9 @@ fn read_trajectory(
     records: Arc<Vec<Record>>,
 ) -> Result<Read, String> {
     let dir = root.join(&dir_name);
-    let segments: Vec<u32> = match workspace.request(waku_client::WorkspaceOperation::BrowseDirectory {
-        path: Some(dir),
-    }) {
+    let segments: Vec<u32> = match workspace
+        .request(waku_client::WorkspaceOperation::BrowseDirectory { path: Some(dir) })
+    {
         Ok(waku_client::WorkspaceResult::Directory { entries, .. }) => {
             let mut numbers: Vec<u32> = entries
                 .into_iter()
@@ -300,7 +325,8 @@ fn read_trajectory(
         if from.is_some() && Some(segment) != last {
             continue;
         }
-        let relative = PathBuf::from(&dir_name).join(agent_trajectory::writer::segment_name(segment));
+        let relative =
+            PathBuf::from(&dir_name).join(agent_trajectory::writer::segment_name(segment));
         let text = match workspace.request(waku_client::WorkspaceOperation::ReadTextFile {
             root: root.clone(),
             relative_path: relative,
@@ -332,12 +358,20 @@ impl Waku {
 
     fn trajectory_showing(&self) -> bool {
         self.right_panel_visible
-            && matches!(self.active_right_panel_surface(), Some(RightPanelSurface::Trajectory))
+            && matches!(
+                self.active_right_panel_surface(),
+                Some(RightPanelSurface::Trajectory)
+            )
     }
 
     /// Read the session's trajectory again, off the UI thread.
     fn refresh_trajectory(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        let Some(session) = self.state.sessions.iter().find(|session| session.id == session_id) else {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
             return;
         };
         let Some(transcript) = session.provider_native_id().map(str::to_owned) else {
@@ -353,13 +387,16 @@ impl Waku {
         let generation = view.generation;
         let consumed = view.consumed.clone();
         let records = view.records.clone();
-        let root = waku_client::persistence::StateStore::default_path().with_file_name("agent-sessions");
+        let root =
+            waku_client::persistence::StateStore::default_path().with_file_name("agent-sessions");
         let dir_name = format!("{transcript}.trajectory");
         let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |this, cx| {
             let read = cx
                 .background_executor()
-                .spawn(async move { read_trajectory(&workspace, root, dir_name, consumed, records) })
+                .spawn(
+                    async move { read_trajectory(&workspace, root, dir_name, consumed, records) },
+                )
                 .await;
             let _ = this.update(cx, |this, cx| {
                 let busy = this
@@ -384,7 +421,8 @@ impl Waku {
                         view.loaded = true;
                         if changed {
                             view.snapshot = read.snapshot;
-                            view.timeline = timeline::derive(&view.snapshot, view.mode).map(Arc::new);
+                            view.timeline =
+                                timeline::derive(&view.snapshot, view.mode).map(Arc::new);
                             view.rebuild_rows();
                         }
                         if let Some(call) = view.pending_call.clone()
@@ -402,7 +440,11 @@ impl Waku {
                 }
                 // A live turn is read again in a moment; so is a turn whose
                 // end is not on record yet.
-                let open_turn = view.snapshot.turns.last().is_some_and(|turn| turn.ended_at.is_none());
+                let open_turn = view
+                    .snapshot
+                    .turns
+                    .last()
+                    .is_some_and(|turn| turn.ended_at.is_none());
                 if (busy || open_turn || view.pending_call.is_some()) && !view.poll_scheduled {
                     view.poll_scheduled = true;
                     cx.spawn(async move |this, cx| {
@@ -411,7 +453,9 @@ impl Waku {
                             if let Some(view) = this.trajectory_panel.views.get_mut(&session_id) {
                                 view.poll_scheduled = false;
                             }
-                            if this.trajectory_showing() && this.state.selected_session == Some(session_id) {
+                            if this.trajectory_showing()
+                                && this.state.selected_session == Some(session_id)
+                            {
                                 this.refresh_trajectory(session_id, cx);
                             }
                         });
@@ -459,7 +503,13 @@ impl Waku {
             if view.selected != Some(cell) {
                 let kind = view.snapshot.cells.get(cell).map(|cell| cell.kind);
                 let has_previous = view.snapshot.cells.get(cell).is_some_and(|cell| {
-                    matches!(&cell.detail, CellDetail::System { previous_system_fp: Some(_), .. })
+                    matches!(
+                        &cell.detail,
+                        CellDetail::System {
+                            previous_system_fp: Some(_),
+                            ..
+                        }
+                    )
                 });
                 if let Some(kind) = kind
                     && !tabs_for(kind, has_previous).contains(&view.tab)
@@ -541,7 +591,9 @@ impl Waku {
                     0
                 }
             }
-            Some(position) => (position as isize).saturating_add(delta).clamp(0, cells.len() as isize - 1) as usize,
+            Some(position) => (position as isize)
+                .saturating_add(delta)
+                .clamp(0, cells.len() as isize - 1) as usize,
         };
         self.select_trajectory_cell(cells[target], cx);
         cx.stop_propagation();
@@ -571,7 +623,8 @@ impl Waku {
     }
 
     fn timeline_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
-        let (Some(from), Some(model)) = (self.trajectory_panel.drag_from, self.current_timeline()) else {
+        let (Some(from), Some(model)) = (self.trajectory_panel.drag_from, self.current_timeline())
+        else {
             return;
         };
         if event.pressed_button != Some(MouseButton::Left) {
@@ -712,7 +765,8 @@ impl Waku {
             );
         }
         let snapshot = view.snapshot.clone();
-        let header = self.render_trajectory_header(&snapshot, view.mode, view.focus.is_some(), theme, cx);
+        let header =
+            self.render_trajectory_header(&snapshot, view.mode, view.focus.is_some(), theme, cx);
         let overview = self.render_trajectory_timeline(view, theme, cx);
         let ledger = self.render_trajectory_ledger(view, cx);
         let inspector = view
@@ -726,7 +780,9 @@ impl Waku {
             .key_context(TRAJECTORY_CONTEXT)
             .track_focus(&focus)
             .tab_index(0)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.trajectory_key(event, cx)))
+            .on_key_down(
+                cx.listener(|this, event: &KeyDownEvent, _, cx| this.trajectory_key(event, cx)),
+            )
             .flex_1()
             .min_h_0()
             .flex()
@@ -755,31 +811,39 @@ impl Waku {
             input = metrics::format_tokens(usage.input + usage.cache_read),
             output = metrics::format_tokens(usage.output)
         );
-        let mode_button = |mode_value: Mode, id: &'static str, label: String, cx: &mut Context<Self>| {
-            let selected = mode == mode_value;
-            div()
-                .id(id)
-                .tab_index(0)
-                .h(px(22.0))
-                .px(px(8.0))
-                .rounded(px(6.0))
-                .flex()
-                .items_center()
-                .text_size(sp(11.5))
-                .text_color(if selected { theme.text } else { theme.text_tertiary })
-                .when(selected, |button| button.bg(theme.overlay).font_weight(FontWeight::MEDIUM))
-                .hover(|button| button.bg(theme.overlay))
-                .focus_visible(|button| button.border_1().border_color(theme.accent))
-                .on_activation(cx, move |this, _, cx| {
-                    this.with_trajectory_view(cx, |view| {
-                        view.mode = mode_value;
-                        view.focus = None;
-                        view.timeline = timeline::derive(&view.snapshot, mode_value).map(Arc::new);
-                        view.rebuild_rows();
-                    });
-                })
-                .child(label)
-        };
+        let mode_button =
+            |mode_value: Mode, id: &'static str, label: String, cx: &mut Context<Self>| {
+                let selected = mode == mode_value;
+                div()
+                    .id(id)
+                    .tab_index(0)
+                    .h(px(22.0))
+                    .px(px(8.0))
+                    .rounded(px(6.0))
+                    .flex()
+                    .items_center()
+                    .text_size(sp(11.5))
+                    .text_color(if selected {
+                        theme.text
+                    } else {
+                        theme.text_tertiary
+                    })
+                    .when(selected, |button| {
+                        button.bg(theme.overlay).font_weight(FontWeight::MEDIUM)
+                    })
+                    .hover(|button| button.bg(theme.overlay))
+                    .focus_visible(|button| button.border_1().border_color(theme.accent))
+                    .on_activation(cx, move |this, _, cx| {
+                        this.with_trajectory_view(cx, |view| {
+                            view.mode = mode_value;
+                            view.focus = None;
+                            view.timeline =
+                                timeline::derive(&view.snapshot, mode_value).map(Arc::new);
+                            view.rebuild_rows();
+                        });
+                    })
+                    .child(label)
+            };
         div()
             .flex_none()
             .px(px(12.0))
@@ -817,9 +881,24 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(4.0))
-                    .child(mode_button(Mode::Sequence, "trajectory-mode-sequence", tr!("trajectory.mode.sequence"), cx))
-                    .child(mode_button(Mode::Duration, "trajectory-mode-duration", tr!("trajectory.mode.duration"), cx))
-                    .child(mode_button(Mode::Actual, "trajectory-mode-actual", tr!("trajectory.mode.actual"), cx))
+                    .child(mode_button(
+                        Mode::Sequence,
+                        "trajectory-mode-sequence",
+                        tr!("trajectory.mode.sequence"),
+                        cx,
+                    ))
+                    .child(mode_button(
+                        Mode::Duration,
+                        "trajectory-mode-duration",
+                        tr!("trajectory.mode.duration"),
+                        cx,
+                    ))
+                    .child(mode_button(
+                        Mode::Actual,
+                        "trajectory-mode-actual",
+                        tr!("trajectory.mode.actual"),
+                        cx,
+                    ))
                     .child(div().flex_1())
                     .when(focused, |row| {
                         row.child(card_button(
@@ -840,7 +919,12 @@ impl Waku {
             )
     }
 
-    fn render_trajectory_timeline(&self, view: &View, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_trajectory_timeline(
+        &self,
+        view: &View,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let model = view.timeline.clone()?;
         let selected = view.selected;
         let focus = view.focus;
@@ -883,16 +967,27 @@ impl Waku {
                 .mx(px(4.0))
                 .border_b_1()
                 .border_color(theme.border)
-                .on_mouse_down(MouseButton::Left, cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                    this.timeline_mouse_down(event, cx)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                        this.timeline_mouse_down(event, cx)
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                        this.timeline_mouse_down(event, cx)
+                    }),
+                )
+                .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                    this.timeline_mouse_move(event, cx)
                 }))
-                .on_mouse_down(MouseButton::Right, cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                    this.timeline_mouse_down(event, cx)
-                }))
-                .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| this.timeline_mouse_move(event, cx)))
-                .on_mouse_up(MouseButton::Left, cx.listener(|this, event: &MouseUpEvent, _, cx| {
-                    this.timeline_mouse_up(event, cx)
-                }))
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(|this, event: &MouseUpEvent, _, cx| {
+                        this.timeline_mouse_up(event, cx)
+                    }),
+                )
                 .tooltip(Tooltip::text(tr!("trajectory.timeline_hint")))
                 .child(painter)
                 .child(labels)
@@ -910,7 +1005,9 @@ impl Waku {
                 list(view.list.clone(), move |index, _, cx| {
                     entity
                         .upgrade()
-                        .map(|entity| entity.update(cx, |this, cx| this.render_trajectory_row(index, cx)))
+                        .map(|entity| {
+                            entity.update(cx, |this, cx| this.render_trajectory_row(index, cx))
+                        })
                         .unwrap_or_else(|| div().into_any_element())
                 })
                 .size_full(),
@@ -937,9 +1034,21 @@ impl Waku {
                 let turn = &snapshot.turns[position];
                 let folded = view.folded.contains(&position);
                 let (status_icon, status_color, status_text) = match turn.success {
-                    Some(true) => ("icons/check.svg", theme.success, tr!("trajectory.status.completed")),
-                    Some(false) => ("icons/circle-x.svg", theme.danger, tr!("trajectory.status.failed")),
-                    None => ("icons/loader-circle.svg", theme.text_tertiary, tr!("trajectory.status.running")),
+                    Some(true) => (
+                        "icons/check.svg",
+                        theme.success,
+                        tr!("trajectory.status.completed"),
+                    ),
+                    Some(false) => (
+                        "icons/circle-x.svg",
+                        theme.danger,
+                        tr!("trajectory.status.failed"),
+                    ),
+                    None => (
+                        "icons/loader-circle.svg",
+                        theme.text_tertiary,
+                        tr!("trajectory.status.running"),
+                    ),
                 };
                 let duration = turn
                     .ended_at
@@ -958,7 +1067,10 @@ impl Waku {
                         "trajectory.goal_resume",
                         delay = metrics::format_duration(resume.delay_ms as i64),
                         attempt = resume.attempt,
-                        max = resume.max_attempts.map(|max| max.to_string()).unwrap_or_else(|| "∞".into())
+                        max = resume
+                            .max_attempts
+                            .map(|max| max.to_string())
+                            .unwrap_or_else(|| "∞".into())
                     ));
                 }
                 div()
@@ -984,7 +1096,11 @@ impl Waku {
                         });
                     })
                     .child(icon(
-                        if folded { "icons/chevron-right.svg" } else { "icons/chevron-down.svg" },
+                        if folded {
+                            "icons/chevron-right.svg"
+                        } else {
+                            "icons/chevron-down.svg"
+                        },
                         11.0,
                         theme.text_tertiary,
                     ))
@@ -997,7 +1113,9 @@ impl Waku {
                     )
                     .child(
                         div()
-                            .id(SharedString::from(format!("trajectory-turn-status-{position}")))
+                            .id(SharedString::from(format!(
+                                "trajectory-turn-status-{position}"
+                            )))
                             .tooltip(Tooltip::text(status_text))
                             .child(icon(status_icon, 11.0, status_color)),
                     )
@@ -1021,7 +1139,12 @@ impl Waku {
                             .text_color(theme.text_tertiary)
                             .child(detail),
                     )
-                    .child(div().text_size(sp(11.0)).text_color(theme.text_tertiary).child(duration))
+                    .child(
+                        div()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .child(duration),
+                    )
                     .into_any_element()
             }
             Row::Cell(cell_index) => {
@@ -1034,14 +1157,19 @@ impl Waku {
                         .usage
                         .map(|usage| {
                             (
-                                metrics::format_tokens(usage.input + usage.cache_read + usage.cache_write),
+                                metrics::format_tokens(
+                                    usage.input + usage.cache_read + usage.cache_write,
+                                ),
                                 metrics::format_tokens(usage.output),
                             )
                         })
                         .unwrap_or_default(),
                     _ => (String::new(), String::new()),
                 };
-                let time = cell.duration_ms.map(metrics::format_duration).unwrap_or_default();
+                let time = cell
+                    .duration_ms
+                    .map(metrics::format_duration)
+                    .unwrap_or_default();
                 let mut text = cell.text.clone();
                 if let CellDetail::System { change, .. } = &cell.detail {
                     text = match change {
@@ -1053,9 +1181,19 @@ impl Waku {
                 }
                 if let CellDetail::Request(request) = &cell.detail {
                     let label = tr!("trajectory.request", number = request.number);
-                    text = if text.is_empty() { label } else { format!("{label} · {text}") };
+                    text = if text.is_empty() {
+                        label
+                    } else {
+                        format!("{label} · {text}")
+                    };
                 }
-                if let CellDetail::Compaction { phase, tokens_before, tokens_after, .. } = &cell.detail {
+                if let CellDetail::Compaction {
+                    phase,
+                    tokens_before,
+                    tokens_after,
+                    ..
+                } = &cell.detail
+                {
                     text = match phase {
                         CompactionPhase::Started => tr!("trajectory.compacting"),
                         CompactionPhase::Failed => tr!("trajectory.compaction_failed"),
@@ -1071,17 +1209,27 @@ impl Waku {
                     .id(SharedString::from(format!("trajectory-cell-{cell_index}")))
                     .w_full()
                     .min_h(px(26.0))
-                    .pl(px(if cell.kind == CellKind::Subtool { 26.0 } else { 14.0 }))
+                    .pl(px(if cell.kind == CellKind::Subtool {
+                        26.0
+                    } else {
+                        14.0
+                    }))
                     .pr(px(10.0))
                     .flex()
                     .items_center()
                     .gap(px(6.0))
                     .border_l_2()
-                    .border_color(if selected { theme.accent } else { gpui::transparent_black() })
+                    .border_color(if selected {
+                        theme.accent
+                    } else {
+                        gpui::transparent_black()
+                    })
                     .when(selected, |row| row.bg(theme.overlay))
                     .hover(|row| row.bg(theme.overlay))
                     .cursor_pointer()
-                    .on_click(cx.listener(move |this, _, _, cx| this.select_trajectory_cell(cell_index, cx)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.select_trajectory_cell(cell_index, cx)
+                    }))
                     .child(icon(kind_icon(cell.kind), 11.0, lane_color(lane, &theme)))
                     .child(
                         div()
@@ -1091,7 +1239,9 @@ impl Waku {
                             .text_color(theme.text_tertiary)
                             .child(kind_label(cell.kind)),
                     )
-                    .when(cell.is_error, |row| row.child(icon("icons/alert.svg", 11.0, theme.danger)))
+                    .when(cell.is_error, |row| {
+                        row.child(icon("icons/alert.svg", 11.0, theme.danger))
+                    })
                     .when(cell.running, |row| {
                         row.child(icon("icons/loader-circle.svg", 11.0, theme.text_tertiary))
                     })
@@ -1144,7 +1294,13 @@ impl Waku {
         theme: Theme,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let has_previous = matches!(&cell.detail, CellDetail::System { previous_system_fp: Some(_), .. });
+        let has_previous = matches!(
+            &cell.detail,
+            CellDetail::System {
+                previous_system_fp: Some(_),
+                ..
+            }
+        );
         let tabs = tabs_for(cell.kind, has_previous);
         let tab = if tabs.contains(&tab) { tab } else { tabs[0] };
         let tab_bar = div()
@@ -1163,8 +1319,14 @@ impl Waku {
                     .flex()
                     .items_center()
                     .text_size(sp(11.5))
-                    .text_color(if selected { theme.text } else { theme.text_tertiary })
-                    .when(selected, |button| button.bg(theme.overlay).font_weight(FontWeight::MEDIUM))
+                    .text_color(if selected {
+                        theme.text
+                    } else {
+                        theme.text_tertiary
+                    })
+                    .when(selected, |button| {
+                        button.bg(theme.overlay).font_weight(FontWeight::MEDIUM)
+                    })
                     .hover(|button| button.bg(theme.overlay))
                     .focus_visible(|button| button.border_1().border_color(theme.accent))
                     .on_activation(cx, move |this, _, cx| {
@@ -1249,7 +1411,10 @@ fn retry_line(retry: &agent_trajectory::record::RetryInfo) -> String {
     let mut parts = vec![format!(
         "{}/{}",
         retry.attempt,
-        retry.max_attempts.map(|max| max.to_string()).unwrap_or_else(|| "∞".into())
+        retry
+            .max_attempts
+            .map(|max| max.to_string())
+            .unwrap_or_else(|| "∞".into())
     )];
     if !retry.reason.is_empty() {
         parts.push(RetryCause::from_reason(&retry.reason).label());
@@ -1273,7 +1438,13 @@ fn fact(theme: &Theme, label: String, value: String) -> Div {
         .gap(px(10.0))
         .py(px(2.0))
         .text_size(sp(12.0))
-        .child(div().w(px(128.0)).flex_none().text_color(theme.text_tertiary).child(label))
+        .child(
+            div()
+                .w(px(128.0))
+                .flex_none()
+                .text_color(theme.text_tertiary)
+                .child(label),
+        )
         .child(div().flex_1().min_w_0().text_color(theme.text).child(value))
 }
 
@@ -1287,15 +1458,39 @@ fn code_block(theme: &Theme, text: String) -> Div {
         .text_size(sp(11.5))
         .text_color(theme.text)
         .whitespace_normal()
-        .child(if text.is_empty() { tr!("trajectory.nothing") } else { text })
+        .child(if text.is_empty() {
+            tr!("trajectory.nothing")
+        } else {
+            text
+        })
 }
 
-fn inspector_body(snapshot: &Snapshot, cell: &agent_trajectory::Cell, tab: Tab, theme: &Theme) -> Div {
+fn inspector_body(
+    snapshot: &Snapshot,
+    cell: &agent_trajectory::Cell,
+    tab: Tab,
+    theme: &Theme,
+) -> Div {
     let body = div().flex().flex_col().gap(px(2.0));
     match (&cell.detail, tab) {
-        (CellDetail::User { prompt, bytes, images }, Tab::Summary) => body
-            .child(fact(theme, tr!("trajectory.fact.size"), tr!("trajectory.bytes", bytes = bytes)))
-            .child(fact(theme, tr!("trajectory.fact.images"), images.to_string()))
+        (
+            CellDetail::User {
+                prompt,
+                bytes,
+                images,
+            },
+            Tab::Summary,
+        ) => body
+            .child(fact(
+                theme,
+                tr!("trajectory.fact.size"),
+                tr!("trajectory.bytes", bytes = bytes),
+            ))
+            .child(fact(
+                theme,
+                tr!("trajectory.fact.images"),
+                images.to_string(),
+            ))
             .child(fact(
                 theme,
                 tr!("trajectory.fact.started"),
@@ -1315,14 +1510,38 @@ fn inspector_body(snapshot: &Snapshot, cell: &agent_trajectory::Cell, tab: Tab, 
                 Purpose::Subagent => tr!("trajectory.purpose.subagent"),
             };
             let mut body = body
-                .child(fact(theme, tr!("trajectory.fact.request"), tr!("trajectory.request", number = request.number)))
+                .child(fact(
+                    theme,
+                    tr!("trajectory.fact.request"),
+                    tr!("trajectory.request", number = request.number),
+                ))
                 .child(fact(theme, tr!("trajectory.fact.status"), status))
                 .child(fact(theme, tr!("trajectory.fact.purpose"), purpose))
-                .child(fact(theme, tr!("trajectory.fact.provider"), request.provider.clone()))
-                .child(fact(theme, tr!("trajectory.fact.model"), request.model.clone()))
-                .child(fact(theme, tr!("trajectory.fact.wire_format"), request.wire_format.clone()))
-                .child(fact(theme, tr!("trajectory.fact.stop_reason"), request.stop_reason.clone()))
-                .child(fact(theme, tr!("trajectory.fact.tool_calls"), request.tool_calls.to_string()));
+                .child(fact(
+                    theme,
+                    tr!("trajectory.fact.provider"),
+                    request.provider.clone(),
+                ))
+                .child(fact(
+                    theme,
+                    tr!("trajectory.fact.model"),
+                    request.model.clone(),
+                ))
+                .child(fact(
+                    theme,
+                    tr!("trajectory.fact.wire_format"),
+                    request.wire_format.clone(),
+                ))
+                .child(fact(
+                    theme,
+                    tr!("trajectory.fact.stop_reason"),
+                    request.stop_reason.clone(),
+                ))
+                .child(fact(
+                    theme,
+                    tr!("trajectory.fact.tool_calls"),
+                    request.tool_calls.to_string(),
+                ));
             for retry in &request.retries {
                 body = body.child(fact(theme, tr!("trajectory.fact.retry"), retry_line(retry)));
             }
@@ -1338,13 +1557,20 @@ fn inspector_body(snapshot: &Snapshot, cell: &agent_trajectory::Cell, tab: Tab, 
                     other => other.to_owned(),
                 };
                 let class = if failure.class == "retryable" && !failure.reason.is_empty() {
-                    format!("{class} · {}", RetryCause::from_reason(&failure.reason).label())
+                    format!(
+                        "{class} · {}",
+                        RetryCause::from_reason(&failure.reason).label()
+                    )
                 } else {
                     class
                 };
                 body = body.child(fact(theme, tr!("trajectory.fact.failure"), class));
                 if let Some(status) = failure.status {
-                    body = body.child(fact(theme, tr!("trajectory.fact.http_status"), status.to_string()));
+                    body = body.child(fact(
+                        theme,
+                        tr!("trajectory.fact.http_status"),
+                        status.to_string(),
+                    ));
                 }
                 if let Some(code) = &failure.code {
                     body = body.child(fact(theme, tr!("trajectory.fact.error_code"), code.clone()));
@@ -1356,7 +1582,11 @@ fn inspector_body(snapshot: &Snapshot, cell: &agent_trajectory::Cell, tab: Tab, 
             body
         }
         (CellDetail::Request(request), Tab::Options) => body
-            .child(fact(theme, tr!("trajectory.fact.api_base"), request.api_base.clone()))
+            .child(fact(
+                theme,
+                tr!("trajectory.fact.api_base"),
+                request.api_base.clone(),
+            ))
             .child(code_block(
                 theme,
                 serde_json::to_string_pretty(&request.options).unwrap_or_default(),
@@ -1377,7 +1607,10 @@ fn inspector_body(snapshot: &Snapshot, cell: &agent_trajectory::Cell, tab: Tab, 
                 fact(theme, label, value)
             };
             body.child(row(tr!("trajectory.usage.this_request"), request.usage))
-                .child(row(tr!("trajectory.usage.session"), Some(request.cumulative)))
+                .child(row(
+                    tr!("trajectory.usage.session"),
+                    Some(request.cumulative),
+                ))
                 .child(fact(
                     theme,
                     tr!("trajectory.usage.thinking"),
@@ -1386,23 +1619,41 @@ fn inspector_body(snapshot: &Snapshot, cell: &agent_trajectory::Cell, tab: Tab, 
         }
         (CellDetail::Request(request), Tab::Timing) => {
             let throughput = match metrics::throughput(request) {
-                Timing::Value(rate) => tr!("trajectory.tokens_per_second", rate = format!("{rate:.1}")),
+                Timing::Value(rate) => {
+                    tr!("trajectory.tokens_per_second", rate = format!("{rate:.1}"))
+                }
                 Timing::FirstTokenUnavailable => tr!("trajectory.timing.first_token_unavailable"),
                 Timing::UsageUnavailable => tr!("trajectory.timing.usage_unavailable"),
                 Timing::TooShort => tr!("trajectory.timing.too_short"),
             };
-            body.child(fact(theme, tr!("trajectory.fact.started"), local_time(request.started_at)))
-                .child(fact(theme, tr!("trajectory.timing.total"), metrics::format_duration(metrics::total(request))))
-                .child(fact(theme, tr!("trajectory.timing.ttft"), timing_text(metrics::ttft(request))))
-                .child(fact(theme, tr!("trajectory.timing.generation"), timing_text(metrics::generation(request))))
-                .child(fact(theme, tr!("trajectory.timing.throughput"), throughput))
-                .child(
-                    div()
-                        .pt(px(6.0))
-                        .text_size(sp(11.0))
-                        .text_color(theme.text_tertiary)
-                        .child(tr!("trajectory.timing.inferred_start")),
-                )
+            body.child(fact(
+                theme,
+                tr!("trajectory.fact.started"),
+                local_time(request.started_at),
+            ))
+            .child(fact(
+                theme,
+                tr!("trajectory.timing.total"),
+                metrics::format_duration(metrics::total(request)),
+            ))
+            .child(fact(
+                theme,
+                tr!("trajectory.timing.ttft"),
+                timing_text(metrics::ttft(request)),
+            ))
+            .child(fact(
+                theme,
+                tr!("trajectory.timing.generation"),
+                timing_text(metrics::generation(request)),
+            ))
+            .child(fact(theme, tr!("trajectory.timing.throughput"), throughput))
+            .child(
+                div()
+                    .pt(px(6.0))
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("trajectory.timing.inferred_start")),
+            )
         }
         (CellDetail::Request(request), _) => {
             let mut body = body;
@@ -1415,7 +1666,11 @@ fn inspector_body(snapshot: &Snapshot, cell: &agent_trajectory::Cell, tab: Tab, 
         }
         (CellDetail::Tool(tool), Tab::Summary) => body
             .child(fact(theme, tr!("trajectory.fact.tool"), tool.name.clone()))
-            .child(fact(theme, tr!("trajectory.fact.call_id"), tool.call_id.clone()))
+            .child(fact(
+                theme,
+                tr!("trajectory.fact.call_id"),
+                tool.call_id.clone(),
+            ))
             .child(fact(
                 theme,
                 tr!("trajectory.fact.status"),
@@ -1427,14 +1682,26 @@ fn inspector_body(snapshot: &Snapshot, cell: &agent_trajectory::Cell, tab: Tab, 
                     tr!("trajectory.status.completed")
                 },
             ))
-            .child(fact(theme, tr!("trajectory.fact.size"), tr!("trajectory.payload_sizes", args = tool.args_bytes, result = tool.result_bytes)))
+            .child(fact(
+                theme,
+                tr!("trajectory.fact.size"),
+                tr!(
+                    "trajectory.payload_sizes",
+                    args = tool.args_bytes,
+                    result = tool.result_bytes
+                ),
+            ))
             .when_some(tool.parent_call_id.clone(), |body, parent| {
                 body.child(fact(theme, tr!("trajectory.fact.parent"), parent))
             }),
-        (CellDetail::Tool(tool), Tab::Payload) => body.child(code_block(theme, pretty_json(&tool.args))),
+        (CellDetail::Tool(tool), Tab::Payload) => {
+            body.child(code_block(theme, pretty_json(&tool.args)))
+        }
         (CellDetail::Tool(tool), Tab::Result) => body.child(code_block(
             theme,
-            tool.result.clone().unwrap_or_else(|| tr!("trajectory.no_result")),
+            tool.result
+                .clone()
+                .unwrap_or_else(|| tr!("trajectory.no_result")),
         )),
         (CellDetail::Tool(tool), Tab::Schema) => body.child(code_block(
             theme,
@@ -1444,7 +1711,11 @@ fn inspector_body(snapshot: &Snapshot, cell: &agent_trajectory::Cell, tab: Tab, 
                 .unwrap_or_else(|| tr!("trajectory.schema_unavailable")),
         )),
         (CellDetail::Tool(tool), _) => body
-            .child(fact(theme, tr!("trajectory.fact.started"), local_time(tool.started_at)))
+            .child(fact(
+                theme,
+                tr!("trajectory.fact.started"),
+                local_time(tool.started_at),
+            ))
             .child(fact(
                 theme,
                 tr!("trajectory.timing.total"),
@@ -1452,14 +1723,34 @@ fn inspector_body(snapshot: &Snapshot, cell: &agent_trajectory::Cell, tab: Tab, 
                     .map(|end| metrics::format_duration(end - tool.started_at))
                     .unwrap_or_else(|| tr!("trajectory.status.running")),
             )),
-        (CellDetail::Compaction { automatic, phase, tokens_before, tokens_after }, _) => body
+        (
+            CellDetail::Compaction {
+                automatic,
+                phase,
+                tokens_before,
+                tokens_after,
+            },
+            _,
+        ) => body
             .child(fact(
                 theme,
                 tr!("trajectory.fact.trigger"),
-                if *automatic { tr!("trajectory.automatic") } else { tr!("trajectory.manual") },
+                if *automatic {
+                    tr!("trajectory.automatic")
+                } else {
+                    tr!("trajectory.manual")
+                },
             ))
-            .child(fact(theme, tr!("trajectory.fact.status"), format!("{phase:?}")))
-            .child(fact(theme, tr!("trajectory.fact.before"), metrics::format_tokens(*tokens_before)))
+            .child(fact(
+                theme,
+                tr!("trajectory.fact.status"),
+                format!("{phase:?}"),
+            ))
+            .child(fact(
+                theme,
+                tr!("trajectory.fact.before"),
+                metrics::format_tokens(*tokens_before),
+            ))
             .child(fact(
                 theme,
                 tr!("trajectory.fact.after"),
@@ -1468,16 +1759,22 @@ fn inspector_body(snapshot: &Snapshot, cell: &agent_trajectory::Cell, tab: Tab, 
             .child(fact(
                 theme,
                 tr!("trajectory.timing.total"),
-                cell.duration_ms.map(metrics::format_duration).unwrap_or_default(),
+                cell.duration_ms
+                    .map(metrics::format_duration)
+                    .unwrap_or_default(),
             )),
         (CellDetail::System { .. }, _) => {
-            let Some((system, previous_system, tools, previous_tools)) = snapshot.prompt_of(cell) else {
+            let Some((system, previous_system, tools, previous_tools)) = snapshot.prompt_of(cell)
+            else {
                 return body;
             };
             match tab {
                 Tab::Diff => {
                     let mut body = body;
-                    let changes = tool_changes(previous_tools.unwrap_or_default(), tools.unwrap_or_default());
+                    let changes = tool_changes(
+                        previous_tools.unwrap_or_default(),
+                        tools.unwrap_or_default(),
+                    );
                     if !changes.is_empty() {
                         body = body.child(fact(
                             theme,
@@ -1490,8 +1787,14 @@ fn inspector_body(snapshot: &Snapshot, cell: &agent_trajectory::Cell, tab: Tab, 
                             ),
                         ));
                     }
-                    let lines = line_diff(previous_system.unwrap_or_default(), system.unwrap_or_default());
-                    let changed: Vec<_> = lines.into_iter().filter(|line| line.tag != LineTag::Same).collect();
+                    let lines = line_diff(
+                        previous_system.unwrap_or_default(),
+                        system.unwrap_or_default(),
+                    );
+                    let changed: Vec<_> = lines
+                        .into_iter()
+                        .filter(|line| line.tag != LineTag::Same)
+                        .collect();
                     body.child(
                         div()
                             .mt(px(4.0))
@@ -1511,7 +1814,15 @@ fn inspector_body(snapshot: &Snapshot, cell: &agent_trajectory::Cell, tab: Tab, 
                     )
                 }
                 Tab::Tools => body.children(tools.unwrap_or_default().iter().map(|tool| {
-                    fact(theme, tool.name.clone(), tool.description.lines().next().unwrap_or_default().to_owned())
+                    fact(
+                        theme,
+                        tool.name.clone(),
+                        tool.description
+                            .lines()
+                            .next()
+                            .unwrap_or_default()
+                            .to_owned(),
+                    )
                 })),
                 _ => body
                     .child(
@@ -1669,7 +1980,11 @@ mod tests {
         assert_eq!(rows.len(), 1 + snapshot.cells.len());
         let folded: HashSet<usize> = [0].into_iter().collect();
         let rows = ledger_rows(&snapshot, &folded, None);
-        assert!(rows.iter().all(|row| !matches!(row, Row::Cell(index) if *index < snapshot.turns[0].cell_count)));
+        assert!(
+            rows.iter().all(
+                |row| !matches!(row, Row::Cell(index) if *index < snapshot.turns[0].cell_count)
+            )
+        );
         let focus: HashSet<usize> = [1].into_iter().collect();
         let rows = ledger_rows(&snapshot, &HashSet::new(), Some(&focus));
         assert_eq!(rows, vec![Row::Turn(0), Row::Cell(1)]);

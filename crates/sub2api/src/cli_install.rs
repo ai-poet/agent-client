@@ -119,7 +119,11 @@ pub fn find_executable(name: &str) -> Option<PathBuf> {
 
 /// The npm launcher's file name on this platform.
 pub fn npm_binary_name() -> &'static str {
-    if cfg!(target_os = "windows") { "npm.cmd" } else { "npm" }
+    if cfg!(target_os = "windows") {
+        "npm.cmd"
+    } else {
+        "npm"
+    }
 }
 
 /// `npm install -g <package>`, optionally pinned to a registry mirror.
@@ -292,9 +296,15 @@ pub enum InstallHint {
 /// Read npm's failure for the two causes with a known fix.
 pub fn classify_failure(output: &str) -> Option<InstallHint> {
     let upper = output.to_ascii_uppercase();
-    if ["EACCES", "EPERM", "PERMISSION DENIED", "ACCESS IS DENIED", "OPERATION NOT PERMITTED"]
-        .iter()
-        .any(|marker| upper.contains(marker))
+    if [
+        "EACCES",
+        "EPERM",
+        "PERMISSION DENIED",
+        "ACCESS IS DENIED",
+        "OPERATION NOT PERMITTED",
+    ]
+    .iter()
+    .any(|marker| upper.contains(marker))
     {
         return Some(InstallHint::Permission);
     }
@@ -469,7 +479,10 @@ fn verify_install(
             InstallVerdict::InstalledNotRunnable { path, diagnostic }
         }
         Probe::NotFound => InstallVerdict::Failed {
-            output: format!("`{}` vanished between install and verification", path.display()),
+            output: format!(
+                "`{}` vanished between install and verification",
+                path.display()
+            ),
             hint: None,
         },
     }
@@ -485,7 +498,11 @@ fn npm_global_bin(attempt: &InstallAttempt) -> Option<PathBuf> {
         return None;
     }
     // The prefix is the last non-empty line; npm may print notices first.
-    let prefix = run.output.lines().rev().find(|line| !line.trim().is_empty())?;
+    let prefix = run
+        .output
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())?;
     npm_global_bin_from_prefix(prefix)
 }
 
@@ -570,7 +587,11 @@ pub fn missing_path_entries(current_path: &str, needed: &[String]) -> Vec<String
     missing_entries_with(
         current_path,
         needed,
-        if cfg!(target_os = "windows") { ';' } else { ':' },
+        if cfg!(target_os = "windows") {
+            ';'
+        } else {
+            ':'
+        },
         cfg!(target_os = "windows"),
     )
 }
@@ -692,7 +713,10 @@ pub fn node_runtime_dirs() -> Vec<PathBuf> {
 }
 
 /// `current` with `extra` prepended, skipping entries already present.
-pub(crate) fn augment_path(current: Option<std::ffi::OsString>, extra: &[PathBuf]) -> std::ffi::OsString {
+pub(crate) fn augment_path(
+    current: Option<std::ffi::OsString>,
+    extra: &[PathBuf],
+) -> std::ffi::OsString {
     let existing: Vec<PathBuf> = current
         .as_deref()
         .map(|path| std::env::split_paths(path).collect())
@@ -701,13 +725,8 @@ pub(crate) fn augment_path(current: Option<std::ffi::OsString>, extra: &[PathBuf
         .iter()
         .filter(|candidate| !existing.contains(candidate))
         .collect();
-    std::env::join_paths(
-        additions
-            .into_iter()
-            .cloned()
-            .chain(existing),
-    )
-    .unwrap_or_else(|_| current.unwrap_or_default())
+    std::env::join_paths(additions.into_iter().cloned().chain(existing))
+        .unwrap_or_else(|_| current.unwrap_or_default())
 }
 
 /// Prepend the managed toolchains to a command's `PATH`, and point Claude
@@ -721,13 +740,13 @@ pub fn apply_node_runtime(command: &mut std::process::Command) {
         let configured = command
             .get_envs()
             .find(|(name, _)| {
-                name.to_str().is_some_and(|name| name.eq_ignore_ascii_case("path"))
+                name.to_str()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("path"))
             })
             .and_then(|(_, value)| value.map(std::ffi::OsStr::to_os_string))
             .or_else(|| std::env::var_os("PATH"));
         command.env("PATH", augment_path(configured, &dirs));
     }
-
 }
 
 /// Switches that keep Claude Code's startup off the network. The CLI
@@ -747,10 +766,11 @@ pub fn apply_provider_launch_env(command: &mut std::process::Command, provider_i
         return;
     }
     for (name, value) in CLAUDE_STARTUP_ENV {
-        let already_set = command
-            .get_envs()
-            .any(|(candidate, _)| candidate.to_str().is_some_and(|c| c.eq_ignore_ascii_case(name)))
-            || std::env::var_os(name).is_some();
+        let already_set = command.get_envs().any(|(candidate, _)| {
+            candidate
+                .to_str()
+                .is_some_and(|c| c.eq_ignore_ascii_case(name))
+        }) || std::env::var_os(name).is_some();
         if !already_set {
             command.env(name, value);
         }
@@ -764,7 +784,13 @@ pub fn apply_provider_launch_env(command: &mut std::process::Command, provider_i
 pub fn run_program(program: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> InstallOutcome {
     let mut process = std::process::Command::new(program.as_ref());
     process.args(args);
-    process.env("PATH", augment_path(std::env::var_os("PATH"), &crate::cli_detect::detection_dirs()));
+    process.env(
+        "PATH",
+        augment_path(
+            std::env::var_os("PATH"),
+            &crate::cli_detect::detection_dirs(),
+        ),
+    );
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -786,7 +812,13 @@ pub fn run_command(command: &str) -> InstallOutcome {
     process.args(args);
     // The freshly installed managed runtime must be visible to `npm` runs that
     // happen in this same app session.
-    process.env("PATH", augment_path(std::env::var_os("PATH"), &crate::cli_detect::detection_dirs()));
+    process.env(
+        "PATH",
+        augment_path(
+            std::env::var_os("PATH"),
+            &crate::cli_detect::detection_dirs(),
+        ),
+    );
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -958,14 +990,16 @@ mod tests {
         } else {
             assert_eq!(labels, ["official", "mirror"]);
         }
-        assert!(attempts.iter().all(|attempt| attempt.display().starts_with("npm")));
+        assert!(
+            attempts
+                .iter()
+                .all(|attempt| attempt.display().starts_with("npm"))
+        );
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "sub2api-cli-install-{name}-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("sub2api-cli-install-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("scratch dir");
         dir
@@ -996,9 +1030,17 @@ mod tests {
         let attempts = install_attempts(&ctx, "@anthropic-ai/claude-code");
         for attempt in &attempts {
             assert_eq!(attempt.program, npm, "npm beside the detected node");
-            assert_eq!(attempt.dirs.first(), Some(&node_dir), "node dir first on PATH");
+            assert_eq!(
+                attempt.dirs.first(),
+                Some(&node_dir),
+                "node dir first on PATH"
+            );
             assert!(attempt.dirs.contains(&elsewhere));
-            assert!(attempt.args.contains(&"@anthropic-ai/claude-code@latest".to_owned()));
+            assert!(
+                attempt
+                    .args
+                    .contains(&"@anthropic-ai/claude-code@latest".to_owned())
+            );
         }
         assert!(attempts[0].display().starts_with("npm"));
         let _ = std::fs::remove_dir_all(node_dir);
@@ -1256,12 +1298,19 @@ mod tests {
     fn run_command_captures_stderr_because_npm_fails_there() {
         let outcome = run_command("echo boom 1>&2 && exit 1");
         assert!(!outcome.success);
-        assert!(outcome.output.contains("boom"), "output: {}", outcome.output);
+        assert!(
+            outcome.output.contains("boom"),
+            "output: {}",
+            outcome.output
+        );
     }
 
     #[test]
     fn output_is_trimmed_to_the_tail_where_the_reason_lives() {
-        let text = (1..=20).map(|n| n.to_string()).collect::<Vec<_>>().join("\n");
+        let text = (1..=20)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         let tail = last_meaningful_lines(&text, 3);
         assert_eq!(tail, "18\n19\n20");
         // Blank lines must not consume the budget.
@@ -1288,7 +1337,10 @@ mod tests {
         apply_provider_launch_env(&mut claude, "claude");
         // The test process itself may carry the variable; either way the
         // child ends up with it set.
-        assert!(value(&claude).is_some() || std::env::var_os("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC").is_some());
+        assert!(
+            value(&claude).is_some()
+                || std::env::var_os("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC").is_some()
+        );
 
         let mut opted_in = std::process::Command::new("claude");
         opted_in.env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "0");

@@ -91,9 +91,7 @@ impl Waku {
             return;
         }
         for setup in &found {
-            self.cloud_account
-                .cli_takeover
-                .set(setup.cli, CliMode::Own);
+            self.cloud_account.cli_takeover.set(setup.cli, CliMode::Own);
         }
         self.save_cli_takeover();
         self.cloud_account.takeover_prompt = Some(CliTakeoverPrompt {
@@ -301,7 +299,9 @@ impl Waku {
             .text_color(theme.text_secondary)
             .hover(|style| style.bg(theme.overlay))
             .child(tr!("cloud.cli_takeover.keep_all"))
-            .on_activation(cx, |this, window, cx| this.dismiss_cli_takeover_prompt(window, cx));
+            .on_activation(cx, |this, window, cx| {
+                this.dismiss_cli_takeover_prompt(window, cx)
+            });
 
         let confirm = div()
             .id("cli-takeover-prompt-confirm")
@@ -321,17 +321,23 @@ impl Waku {
             .text_color(theme.on_inverse)
             .hover(|style| style.opacity(0.9))
             .child(tr!("cloud.cli_takeover.confirm"))
-            .on_activation(cx, |this, window, cx| this.accept_cli_takeover_prompt(window, cx));
+            .on_activation(cx, |this, window, cx| {
+                this.accept_cli_takeover_prompt(window, cx)
+            });
 
         let card = div()
             .id("cli-takeover-prompt-card")
             .key_context(PROMPT_CONTEXT)
-            .on_action(cx.listener(|this, _: &AcceptCliTakeoverPrompt, window, cx| {
-                this.accept_cli_takeover_prompt(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &DismissCliTakeoverPrompt, window, cx| {
-                this.dismiss_cli_takeover_prompt(window, cx);
-            }))
+            .on_action(
+                cx.listener(|this, _: &AcceptCliTakeoverPrompt, window, cx| {
+                    this.accept_cli_takeover_prompt(window, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &DismissCliTakeoverPrompt, window, cx| {
+                    this.dismiss_cli_takeover_prompt(window, cx);
+                }),
+            )
             .tab_group()
             .tab_stop(false)
             .w_full()
@@ -449,7 +455,11 @@ impl Waku {
                         move |this, _, cx| {
                             this.set_cli_takeover(
                                 cli,
-                                if managed { CliMode::Own } else { CliMode::Managed },
+                                if managed {
+                                    CliMode::Own
+                                } else {
+                                    CliMode::Managed
+                                },
                                 cx,
                             );
                         },

@@ -363,7 +363,12 @@ impl BackgroundWorkRegistry {
         for (key, record) in &mut self.transcripts {
             // Follow a live record to its newest step, the way a live
             // output log follows its tail.
-            if record.refresh() && self.items.get(key).is_some_and(|item| item.status.is_live()) {
+            if record.refresh()
+                && self
+                    .items
+                    .get(key)
+                    .is_some_and(|item| item.status.is_live())
+            {
                 record.scroll.scroll_to_bottom();
             }
         }
@@ -475,7 +480,11 @@ fn background_summary_process_status_icon(
     }
 }
 
-pub(super) fn rendered_work_status_icon(status: BackgroundWorkStatus, size: f32, color: Hsla) -> AnyElement {
+pub(super) fn rendered_work_status_icon(
+    status: BackgroundWorkStatus,
+    size: f32,
+    color: Hsla,
+) -> AnyElement {
     let icon = icon(work_status_icon(status), size, color);
     if matches!(
         status,
@@ -2129,7 +2138,12 @@ mod tests {
         // A foreground sub-agent that settles is kept, record and all.
         agent.status = BackgroundWorkStatus::Completed;
         registry.apply(BackgroundWorkEvent::Upsert(agent));
-        assert!(registry.transcripts.get(&key).is_some_and(|record| !record.is_empty()));
+        assert!(
+            registry
+                .transcripts
+                .get(&key)
+                .is_some_and(|record| !record.is_empty())
+        );
 
         registry.remove(&key);
         assert!(registry.transcripts.is_empty());

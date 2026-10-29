@@ -147,7 +147,7 @@ impl Waku {
             .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
             .size_full()
             .flex()
-            .bg(theme.canvas)
+            .bg(theme.window_surface())
             .text_color(theme.text)
             .font_family(".SystemUIFont")
             .child(self.render_settings_sidebar(window, cx))
@@ -216,7 +216,7 @@ impl Waku {
             .flex_none()
             .flex()
             .flex_col()
-            .bg(theme.sidebar)
+            .bg(theme.sidebar_surface())
             .child(self.render_settings_sidebar_titlebar(window, cx))
             .child(
                 div().px(px(12.0)).child(
@@ -346,7 +346,7 @@ impl Waku {
                 .flex_col()
                 .border_l_1()
                 .border_color(theme.sidebar_border)
-                .bg(theme.surface)
+                .bg(theme.window_surface())
                 .children(right_window_controls.map(|controls| {
                     self.render_settings_drag_region("settings-skills-titlebar", cx)
                         .flex()
@@ -355,13 +355,14 @@ impl Waku {
                         .child(controls)
                 }))
                 .child(
-                    div().flex_1().min_h_0().child(
-                        if page == SettingsPage::ModelProviders {
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .child(if page == SettingsPage::ModelProviders {
                             self.render_model_providers_page(cx)
                         } else {
                             self.render_skills_settings(cx)
-                        },
-                    ),
+                        }),
                 );
         }
         // The Monthly and Projects list views own their own scrolling, so
@@ -436,7 +437,7 @@ impl Waku {
             .flex_col()
             .border_l_1()
             .border_color(theme.sidebar_border)
-            .bg(theme.surface)
+            .bg(theme.window_surface())
             .child(
                 self.render_settings_drag_region("settings-content-titlebar", cx)
                     .flex()
@@ -1553,6 +1554,7 @@ impl Waku {
                     )
                     .child(code_font_size_selector),
             )
+            .children(self.render_wallpaper_settings_rows(cx))
             .children(self.render_motion_settings_rows(cx))
             .into_any_element()
     }
@@ -2363,13 +2365,15 @@ impl Waku {
             );
 
         if remote {
-            return Some(card.child(
-                div()
-                    .mt(px(9.0))
-                    .text_size(sp(12.5))
-                    .text_color(theme.warning)
-                    .child(tr!("computer_use.remote_note")),
-            ));
+            return Some(
+                card.child(
+                    div()
+                        .mt(px(9.0))
+                        .text_size(sp(12.5))
+                        .text_color(theme.warning)
+                        .child(tr!("computer_use.remote_note")),
+                ),
+            );
         }
 
         if !up_to_date {
@@ -2606,6 +2610,7 @@ impl Waku {
         }
         self.state.theme = preference;
         crate::theme::apply_theme_preference(preference, window, cx);
+        self.prepare_wallpaper(cx);
         self.save();
         cx.notify();
     }

@@ -267,7 +267,11 @@ impl MemoryStore {
 
     /// Create or update a memory, rebuild the index, mirror a project
     /// memory into Claude Code. Returns the record and whether it was new.
-    pub fn write(&self, dir: &ScopeDir, draft: MemoryDraft) -> anyhow::Result<(MemoryRecord, bool)> {
+    pub fn write(
+        &self,
+        dir: &ScopeDir,
+        draft: MemoryDraft,
+    ) -> anyhow::Result<(MemoryRecord, bool)> {
         let name = normalize_name(&draft.name).map_err(anyhow::Error::msg)?;
         let description = one_line(&draft.description);
         if description.is_empty() {
@@ -357,7 +361,8 @@ impl MemoryStore {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
                 Err(error) => {
-                    return Err(error).with_context(|| format!("failed to delete {}", file.display()));
+                    return Err(error)
+                        .with_context(|| format!("failed to delete {}", file.display()));
                 }
             }
             self.rebuild_index(dir)?;
@@ -584,7 +589,8 @@ mod tests {
             assert!(parse_record(raw, MemoryScope::Project).is_none(), "{raw}");
         }
         // Missing type reads as reference; Claude Code's nested type counts.
-        let plain = parse_record("---\nname: a\ndescription: x\n---\n", MemoryScope::Project).unwrap();
+        let plain =
+            parse_record("---\nname: a\ndescription: x\n---\n", MemoryScope::Project).unwrap();
         assert_eq!(plain.kind, MemoryType::Reference);
         let nested = parse_record(
             "---\nname: a\ndescription: x\nmetadata:\n  type: feedback\n---\n",
@@ -600,7 +606,9 @@ mod tests {
         let (_, created) = store.write(&project, draft("b-fact", "second")).unwrap();
         assert!(created);
         store.write(&project, draft("a-fact", "first")).unwrap();
-        let (record, created) = store.write(&project, draft("b-fact", "second, revised")).unwrap();
+        let (record, created) = store
+            .write(&project, draft("b-fact", "second, revised"))
+            .unwrap();
         assert!(!created);
         assert_eq!(record.description, "second, revised");
         assert_eq!(store.list(&project).len(), 2);
@@ -617,12 +625,21 @@ mod tests {
         let (_tmp, store, project) = store();
         store.write(&project, draft("a-fact", "a")).unwrap();
         store
-            .write(&project, MemoryDraft { pinned: Some(true), ..draft("z-fact", "z") })
+            .write(
+                &project,
+                MemoryDraft {
+                    pinned: Some(true),
+                    ..draft("z-fact", "z")
+                },
+            )
             .unwrap();
         // An update that does not mention the pin keeps it.
         store.write(&project, draft("z-fact", "z2")).unwrap();
         let index = store.read_index(&project).unwrap();
-        assert!(index.starts_with("- [z-fact](z-fact.md) 📌 — z2\n"), "{index}");
+        assert!(
+            index.starts_with("- [z-fact](z-fact.md) 📌 — z2\n"),
+            "{index}"
+        );
     }
 
     #[test]
@@ -729,7 +746,11 @@ mod tests {
             reads: (reads > 0).then_some(reads),
         };
         std::fs::create_dir_all(&dir.dir).unwrap();
-        std::fs::write(dir.dir.join(format!("{name}.md")), serialize_record(&record)).unwrap();
+        std::fs::write(
+            dir.dir.join(format!("{name}.md")),
+            serialize_record(&record),
+        )
+        .unwrap();
         let _ = store;
     }
 
@@ -762,7 +783,11 @@ mod tests {
         aged(&store, &project, "old", 40, 0, false);
         aged(&store, &project, "old-pinned", 40, 0, true);
         aged(&store, &project, "new", 2, 0, false);
-        std::fs::write(project.dir.join("legacy.md"), "---\nname: legacy\ndescription: x\n---\n").unwrap();
+        std::fs::write(
+            project.dir.join("legacy.md"),
+            "---\nname: legacy\ndescription: x\n---\n",
+        )
+        .unwrap();
         let names = store
             .prune_candidates(std::slice::from_ref(&project), 30, crate::now_ms())
             .into_iter()

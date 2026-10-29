@@ -291,7 +291,9 @@ impl PayError {
         Self {
             status: response.status,
             code: field("code").unwrap_or_default(),
-            message: field("error").or_else(|| field("message")).unwrap_or_default(),
+            message: field("error")
+                .or_else(|| field("message"))
+                .unwrap_or_default(),
         }
     }
 }
@@ -299,7 +301,11 @@ impl PayError {
 impl std::fmt::Display for PayError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.message.is_empty() {
-            write!(f, "the payment service answered with status {}", self.status)
+            write!(
+                f,
+                "the payment service answered with status {}",
+                self.status
+            )
         } else {
             f.write_str(&self.message)
         }
@@ -499,7 +505,12 @@ pub fn payment_label(payment_type: &str, chinese: bool) -> String {
         return if chinese { "支付宝" } else { "Alipay" }.to_owned();
     }
     if normalized.starts_with("wxpay") {
-        return if chinese { "微信支付" } else { "WeChat Pay" }.to_owned();
+        return if chinese {
+            "微信支付"
+        } else {
+            "WeChat Pay"
+        }
+        .to_owned();
     }
     if let Some(token) = stablecoin_token(payment_type) {
         // Two USDT methods differ only by chain, so the chain is part of the
@@ -569,7 +580,11 @@ impl PayClient {
     }
 
     fn url(&self, path_and_query: &str) -> String {
-        let separator = if path_and_query.contains('?') { '&' } else { '?' };
+        let separator = if path_and_query.contains('?') {
+            '&'
+        } else {
+            '?'
+        };
         format!(
             "{}/pay{path_and_query}{separator}lang={}",
             self.endpoint,
@@ -591,7 +606,11 @@ impl PayClient {
         if !matches!(response.status, 400 | 401) {
             return Ok(response);
         }
-        let separator = if path_and_query.contains('?') { '&' } else { '?' };
+        let separator = if path_and_query.contains('?') {
+            '&'
+        } else {
+            '?'
+        };
         Request::new()
             .header("Accept-Language", &self.lang)
             .send(&self.url(&format!(
@@ -989,20 +1008,36 @@ mod tests {
         // clientSecret always wins; wxpay/bank with a pay URL redirect even
         // with a QR payload; anything else with a QR renders it; the rest
         // redirect.
-        assert_eq!(resolve_flow(&order("alipay", None, Some("cs"))), PayFlow::Stripe);
+        assert_eq!(
+            resolve_flow(&order("alipay", None, Some("cs"))),
+            PayFlow::Stripe
+        );
         let mut easypay_wx = order("wxpay", Some("qr"), None);
         easypay_wx.pay_url = Some("https://pay.example.com/submit".into());
         assert_eq!(resolve_flow(&easypay_wx), PayFlow::Redirect);
-        assert_eq!(resolve_flow(&order("bank_transfer", None, None)), PayFlow::Redirect);
-        assert_eq!(resolve_flow(&order("alipay", Some("qr-data"), None)), PayFlow::Qr);
-        assert_eq!(resolve_flow(&order("alipay", None, None)), PayFlow::Redirect);
+        assert_eq!(
+            resolve_flow(&order("bank_transfer", None, None)),
+            PayFlow::Redirect
+        );
+        assert_eq!(
+            resolve_flow(&order("alipay", Some("qr-data"), None)),
+            PayFlow::Qr
+        );
+        assert_eq!(
+            resolve_flow(&order("alipay", None, None)),
+            PayFlow::Redirect
+        );
     }
 
     #[test]
     fn wechat_direct_with_only_a_qr_payload_renders_it() {
         // wxpay_direct on a PC answers with a weixin:// code and no pay URL.
         assert_eq!(
-            resolve_flow(&order("wxpay_direct", Some("weixin://wxpay/bizpayurl?pr=x"), None)),
+            resolve_flow(&order(
+                "wxpay_direct",
+                Some("weixin://wxpay/bizpayurl?pr=x"),
+                None
+            )),
             PayFlow::Qr
         );
     }
@@ -1131,10 +1166,16 @@ mod tests {
             "https://openapi.alipay.com/gateway.do?x=1"
         );
         assert_eq!(client.absolute_url("weixin://wxpay/x"), "weixin://wxpay/x");
-        assert_eq!(client.absolute_url("//cdn.example.org/a"), "https://cdn.example.org/a");
+        assert_eq!(
+            client.absolute_url("//cdn.example.org/a"),
+            "https://cdn.example.org/a"
+        );
         // An endpoint with a path still resolves against its origin.
         let client = PayClient::new("https://cloud.example.org/base", "zh");
-        assert_eq!(client.absolute_url("/pay/x"), "https://cloud.example.org/pay/x");
+        assert_eq!(
+            client.absolute_url("/pay/x"),
+            "https://cloud.example.org/pay/x"
+        );
 
         let mut order = PayOrder {
             order_id: "ord_1".into(),
@@ -1144,8 +1185,14 @@ mod tests {
             ..Default::default()
         };
         PayClient::new("https://cloud.example.org", "zh").normalize_order_urls(&mut order);
-        assert_eq!(order.qr_code.as_deref(), Some("https://cloud.example.org/pay/ord_1"));
-        assert_eq!(order.pay_url.as_deref(), Some("https://cloud.example.org/pay/ord_1"));
+        assert_eq!(
+            order.qr_code.as_deref(),
+            Some("https://cloud.example.org/pay/ord_1")
+        );
+        assert_eq!(
+            order.pay_url.as_deref(),
+            Some("https://cloud.example.org/pay/ord_1")
+        );
         assert_eq!(resolve_flow(&order), PayFlow::Qr);
     }
 
@@ -1174,14 +1221,13 @@ mod tests {
 
     #[test]
     fn missing_pay_service_reads_as_unavailable() {
-        let bad_gateway = pay_json::<serde_json::Value>(&response(
-            502,
-            r#"{"error":"pay service unavailable"}"#,
-        ))
-        .expect_err("refused");
+        let bad_gateway =
+            pay_json::<serde_json::Value>(&response(502, r#"{"error":"pay service unavailable"}"#))
+                .expect_err("refused");
         assert!(plans_unavailable(&bad_gateway));
 
-        let not_found = pay_json::<serde_json::Value>(&response(404, "Not Found")).expect_err("404");
+        let not_found =
+            pay_json::<serde_json::Value>(&response(404, "Not Found")).expect_err("404");
         assert!(plans_unavailable(&not_found));
 
         // A single-page app answering every path with its index page.
@@ -1189,11 +1235,9 @@ mod tests {
             .expect_err("html");
         assert!(plans_unavailable(&html));
 
-        let unauthorized = pay_json::<serde_json::Value>(&response(
-            401,
-            r#"{"error":"无效的 token"}"#,
-        ))
-        .expect_err("401");
+        let unauthorized =
+            pay_json::<serde_json::Value>(&response(401, r#"{"error":"无效的 token"}"#))
+                .expect_err("401");
         assert!(!plans_unavailable(&unauthorized));
 
         let other = anyhow!("curl: (6) Could not resolve host");
@@ -1223,7 +1267,10 @@ mod tests {
         assert_eq!(stablecoin_token("stripe"), None);
 
         assert_eq!(stablecoin_network("usdt.plasma").as_deref(), Some("Plasma"));
-        assert_eq!(stablecoin_network("usdt.polygon").as_deref(), Some("Polygon"));
+        assert_eq!(
+            stablecoin_network("usdt.polygon").as_deref(),
+            Some("Polygon")
+        );
         assert_eq!(stablecoin_network("usdc.solana").as_deref(), Some("Solana"));
         assert_eq!(stablecoin_network("usdt.trc20").as_deref(), Some("TRC20"));
         assert_eq!(stablecoin_network("usdt_trc20"), None);
@@ -1319,7 +1366,10 @@ mod tests {
     #[test]
     fn rfc3339_parsing_handles_the_service_formats() {
         // 2026-08-27T00:00:00Z == 1787788800 (verified against `date -d`).
-        assert_eq!(rfc3339_to_epoch("2026-08-27T00:00:00Z"), Some(1_787_788_800));
+        assert_eq!(
+            rfc3339_to_epoch("2026-08-27T00:00:00Z"),
+            Some(1_787_788_800)
+        );
         assert_eq!(
             rfc3339_to_epoch("2026-08-27T00:00:00.123Z"),
             Some(1_787_788_800)

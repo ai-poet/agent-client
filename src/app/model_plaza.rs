@@ -370,7 +370,10 @@ impl Waku {
                     div()
                         .text_size(sp(12.5))
                         .text_color(theme.text_secondary)
-                        .child(tr!("plaza.sign_in_hint", name = sub2api::brand::DISPLAY_NAME)),
+                        .child(tr!(
+                            "plaza.sign_in_hint",
+                            name = sub2api::brand::DISPLAY_NAME
+                        )),
                 )
                 .into_any_element();
         }
@@ -390,7 +393,10 @@ impl Waku {
                     .text_color(theme.text_ghost)
                     .child(tr!("plaza.summary_models", count = summary.total_models))
                     .child(tr!("plaza.summary_token", count = summary.token_models))
-                    .child(tr!("plaza.summary_non_token", count = summary.non_token_models))
+                    .child(tr!(
+                        "plaza.summary_non_token",
+                        count = summary.non_token_models
+                    ))
                     .child(tr!(
                         "plaza.summary_best_savings",
                         percent = format!("{:.1}", summary.max_savings_percent)
@@ -598,7 +604,11 @@ impl Waku {
             .items_center()
             .cursor_default()
             .text_size(sp(12.0))
-            .text_color(if selected { theme.text } else { theme.text_secondary })
+            .text_color(if selected {
+                theme.text
+            } else {
+                theme.text_secondary
+            })
             .child(label)
             .on_click(on_click)
     }
@@ -878,7 +888,11 @@ impl Waku {
                         item.effective_pricing_usd.output_per_mtok_usd,
                     ),
                 ];
-                if item.effective_pricing_usd.cache_write_per_mtok_usd.is_some() {
+                if item
+                    .effective_pricing_usd
+                    .cache_write_per_mtok_usd
+                    .is_some()
+                {
                     rows.push((
                         tr!("plaza.cache_write"),
                         item.official_pricing.cache_write_per_mtok_usd,
@@ -896,7 +910,14 @@ impl Waku {
             }
         };
         for (label, official, effective) in rows {
-            pricing = pricing.child(price_row(label, official, effective, cheaper, &theme, font.clone()));
+            pricing = pricing.child(price_row(
+                label,
+                official,
+                effective,
+                cheaper,
+                &theme,
+                font.clone(),
+            ));
         }
         if let Some(savings) = item.comparison.savings_percent {
             pricing = pricing.child(
@@ -914,7 +935,11 @@ impl Waku {
                         div()
                             .text_size(sp(11.5))
                             .font_weight(FontWeight::MEDIUM)
-                            .text_color(if cheaper { theme.success } else { theme.text_ghost })
+                            .text_color(if cheaper {
+                                theme.success
+                            } else {
+                                theme.text_ghost
+                            })
                             .child(format!("{savings:.1}%")),
                     ),
             );
@@ -925,14 +950,19 @@ impl Waku {
         let mut badges = div().flex().flex_wrap().gap(px(6.0));
         let mut any_badge = false;
         if item.pricing_details.supports_prompt_caching {
-            badges = badges.child(plaza_tag(tr!("plaza.prompt_caching"), theme.success, &theme));
+            badges = badges.child(plaza_tag(
+                tr!("plaza.prompt_caching"),
+                theme.success,
+                &theme,
+            ));
             any_badge = true;
         }
         if item.pricing_details.has_long_context_multiplier {
             badges = badges.child(plaza_tag(
                 tr!(
                     "plaza.long_context",
-                    threshold = format_token_count(item.pricing_details.long_context_input_threshold)
+                    threshold =
+                        format_token_count(item.pricing_details.long_context_input_threshold)
                 ),
                 theme.warning,
                 &theme,
@@ -951,7 +981,11 @@ impl Waku {
             any_badge = true;
         }
         if item.official_pricing.has_reference {
-            badges = badges.child(plaza_tag(tr!("plaza.official_reference"), theme.accent, &theme));
+            badges = badges.child(plaza_tag(
+                tr!("plaza.official_reference"),
+                theme.accent,
+                &theme,
+            ));
             any_badge = true;
         }
         if any_badge {
@@ -977,9 +1011,9 @@ impl Waku {
                         tr!("plaza.expand_details")
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.model_plaza.expanded =
-                            (this.model_plaza.expanded.as_deref() != Some(toggle_key.as_str()))
-                                .then(|| toggle_key.clone());
+                        this.model_plaza.expanded = (this.model_plaza.expanded.as_deref()
+                            != Some(toggle_key.as_str()))
+                        .then(|| toggle_key.clone());
                         cx.notify();
                     })),
             );

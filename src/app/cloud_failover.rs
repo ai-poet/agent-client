@@ -149,12 +149,10 @@ impl Waku {
             };
             let message = match decision {
                 Decision::FailOver { from, to } => {
-                    let message = tr!(
-                        "cloud.failover_switched",
-                        from = name(from),
-                        to = name(to)
-                    );
-                    self.cloud_account.failed_over.insert(platform.clone(), from);
+                    let message = tr!("cloud.failover_switched", from = name(from), to = name(to));
+                    self.cloud_account
+                        .failed_over
+                        .insert(platform.clone(), from);
                     message
                 }
                 Decision::FailBack { to, .. } => {

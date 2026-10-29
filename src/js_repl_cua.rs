@@ -571,8 +571,12 @@ impl CuaAdapter {
                 .and_then(JsonValue::as_array)
                 .cloned()
                 .unwrap_or_default();
-            this.snapshots
-                .insert(target.window_id, Snapshot { tokens: element_tokens(&elements) });
+            this.snapshots.insert(
+                target.window_id,
+                Snapshot {
+                    tokens: element_tokens(&elements),
+                },
+            );
 
             let tree = structured
                 .get("tree_markdown")
@@ -588,7 +592,11 @@ impl CuaAdapter {
                 target.pid,
                 tree.trim_end()
             );
-            if structured.get("elements_complete").and_then(JsonValue::as_bool) == Some(false) {
+            if structured
+                .get("elements_complete")
+                .and_then(JsonValue::as_bool)
+                == Some(false)
+            {
                 let returned = structured
                     .get("returned_element_count")
                     .and_then(JsonValue::as_u64)
@@ -716,7 +724,9 @@ impl CuaAdapter {
             bail!("{}", refusal_text(&result));
         }
         self.last_action.insert(target.window_id, Instant::now());
-        if result.pointer("/structuredContent/effect").and_then(JsonValue::as_str)
+        if result
+            .pointer("/structuredContent/effect")
+            .and_then(JsonValue::as_str)
             == Some("suspected_noop")
         {
             self.notes.push(format!(
@@ -746,7 +756,11 @@ impl CuaAdapter {
         }
     }
 
-    fn click(&mut self, arguments: &JsonValue, deadline: Option<Instant>) -> anyhow::Result<JsonValue> {
+    fn click(
+        &mut self,
+        arguments: &JsonValue,
+        deadline: Option<Instant>,
+    ) -> anyhow::Result<JsonValue> {
         let app = required_string(arguments, "app")?;
         let button = mouse_button(arguments.get("mouse_button"))?;
         let count = click_count(arguments.get("click_count"))?;
@@ -771,7 +785,11 @@ impl CuaAdapter {
         })
     }
 
-    fn drag(&mut self, arguments: &JsonValue, deadline: Option<Instant>) -> anyhow::Result<JsonValue> {
+    fn drag(
+        &mut self,
+        arguments: &JsonValue,
+        deadline: Option<Instant>,
+    ) -> anyhow::Result<JsonValue> {
         let app = required_string(arguments, "app")?;
         let (from_x, from_y) = coordinates(arguments, "from_x", "from_y")
             .ok_or_else(|| anyhow!("drag requires from_x and from_y"))?;
@@ -797,7 +815,11 @@ impl CuaAdapter {
         })
     }
 
-    fn scroll(&mut self, arguments: &JsonValue, deadline: Option<Instant>) -> anyhow::Result<JsonValue> {
+    fn scroll(
+        &mut self,
+        arguments: &JsonValue,
+        deadline: Option<Instant>,
+    ) -> anyhow::Result<JsonValue> {
         let app = required_string(arguments, "app")?;
         let direction = scroll_direction(arguments.get("direction"))?;
         let (by, amount) = scroll_amount(arguments.get("pages"))?;
@@ -817,7 +839,11 @@ impl CuaAdapter {
         })
     }
 
-    fn press_key(&mut self, arguments: &JsonValue, deadline: Option<Instant>) -> anyhow::Result<JsonValue> {
+    fn press_key(
+        &mut self,
+        arguments: &JsonValue,
+        deadline: Option<Instant>,
+    ) -> anyhow::Result<JsonValue> {
         let app = required_string(arguments, "app")?;
         let spec = required_string(arguments, "key")?;
         let (key, modifiers) = translate_key(&spec)?;
@@ -852,7 +878,11 @@ impl CuaAdapter {
         })
     }
 
-    fn type_text(&mut self, arguments: &JsonValue, deadline: Option<Instant>) -> anyhow::Result<JsonValue> {
+    fn type_text(
+        &mut self,
+        arguments: &JsonValue,
+        deadline: Option<Instant>,
+    ) -> anyhow::Result<JsonValue> {
         let app = required_string(arguments, "app")?;
         let text = arguments
             .get("text")
@@ -898,7 +928,11 @@ impl CuaAdapter {
         })
     }
 
-    fn set_value(&mut self, arguments: &JsonValue, deadline: Option<Instant>) -> anyhow::Result<JsonValue> {
+    fn set_value(
+        &mut self,
+        arguments: &JsonValue,
+        deadline: Option<Instant>,
+    ) -> anyhow::Result<JsonValue> {
         let app = required_string(arguments, "app")?;
         let value = arguments
             .get("value")
@@ -983,26 +1017,31 @@ fn element_index(value: &JsonValue) -> Option<u64> {
 }
 
 fn coordinates(arguments: &JsonValue, x: &str, y: &str) -> Option<(f64, f64)> {
-    Some((
-        arguments.get(x)?.as_f64()?,
-        arguments.get(y)?.as_f64()?,
-    ))
+    Some((arguments.get(x)?.as_f64()?, arguments.get(y)?.as_f64()?))
 }
 
 fn mouse_button(value: Option<&JsonValue>) -> anyhow::Result<&'static str> {
-    Ok(match value.and_then(JsonValue::as_str).map(str::to_lowercase).as_deref() {
-        None | Some("left" | "l") => "left",
-        Some("right" | "r") => "right",
-        Some("middle" | "m") => "middle",
-        Some(other) => bail!("mouse_button must be left, right or middle (got \"{other}\")"),
-    })
+    Ok(
+        match value
+            .and_then(JsonValue::as_str)
+            .map(str::to_lowercase)
+            .as_deref()
+        {
+            None | Some("left" | "l") => "left",
+            Some("right" | "r") => "right",
+            Some("middle" | "m") => "middle",
+            Some(other) => bail!("mouse_button must be left, right or middle (got \"{other}\")"),
+        },
+    )
 }
 
 fn click_count(value: Option<&JsonValue>) -> anyhow::Result<u64> {
     let Some(value) = value else {
         return Ok(1);
     };
-    let count = value.as_f64().ok_or_else(|| anyhow!("click_count must be a number"))?;
+    let count = value
+        .as_f64()
+        .ok_or_else(|| anyhow!("click_count must be a number"))?;
     if !count.is_finite() || count.fract() != 0.0 || !(1.0..=3.0).contains(&count) {
         bail!("click_count must be 1, 2 or 3 on Windows");
     }
@@ -1010,13 +1049,19 @@ fn click_count(value: Option<&JsonValue>) -> anyhow::Result<u64> {
 }
 
 fn scroll_direction(value: Option<&JsonValue>) -> anyhow::Result<&'static str> {
-    Ok(match value.and_then(JsonValue::as_str).map(str::to_lowercase).as_deref() {
-        Some("up" | "u") => "up",
-        Some("down" | "d") => "down",
-        Some("left" | "l") => "left",
-        Some("right" | "r") => "right",
-        _ => bail!("direction must be up, down, left or right"),
-    })
+    Ok(
+        match value
+            .and_then(JsonValue::as_str)
+            .map(str::to_lowercase)
+            .as_deref()
+        {
+            Some("up" | "u") => "up",
+            Some("down" | "d") => "down",
+            Some("left" | "l") => "left",
+            Some("right" | "r") => "right",
+            _ => bail!("direction must be up, down, left or right"),
+        },
+    )
 }
 
 /// `pages` → the driver's `(by, amount)`: whole pages scroll by page, a
@@ -1025,7 +1070,9 @@ fn scroll_amount(value: Option<&JsonValue>) -> anyhow::Result<(&'static str, u64
     let Some(value) = value else {
         return Ok(("page", 1));
     };
-    let pages = value.as_f64().ok_or_else(|| anyhow!("pages must be a number"))?;
+    let pages = value
+        .as_f64()
+        .ok_or_else(|| anyhow!("pages must be a number"))?;
     if !pages.is_finite() || pages <= 0.0 {
         bail!("pages must be a positive number");
     }
@@ -1090,8 +1137,9 @@ fn translate_keysym(key: &str) -> String {
         "end" => "end",
         "insert" => "insert",
         "up" | "down" | "left" | "right" => lower.as_str(),
-        "kp_0" | "kp_1" | "kp_2" | "kp_3" | "kp_4" | "kp_5" | "kp_6" | "kp_7" | "kp_8"
-        | "kp_9" => return format!("numpad{}", &lower[3..]),
+        "kp_0" | "kp_1" | "kp_2" | "kp_3" | "kp_4" | "kp_5" | "kp_6" | "kp_7" | "kp_8" | "kp_9" => {
+            return format!("numpad{}", &lower[3..]);
+        }
         "kp_add" | "kp_plus" => "numpadadd",
         "kp_subtract" | "kp_minus" => "numpadsubtract",
         "kp_multiply" => "numpadmultiply",
@@ -1297,9 +1345,9 @@ fn match_windows_by_title<'a>(query: &str, windows: &'a [WindowRow]) -> Vec<&'a 
 fn launch_argument(query: &str, app: &str, apps: &[AppRow]) -> Option<JsonValue> {
     if let Some(installed) = apps.iter().filter(|app| !app.running).find(|installed| {
         installed.name.to_lowercase() == query
-            || installed.executable_name().is_some_and(|exe| {
-                exe == query || executable_stem(&exe) == executable_stem(query)
-            })
+            || installed
+                .executable_name()
+                .is_some_and(|exe| exe == query || executable_stem(&exe) == executable_stem(query))
     }) {
         if installed
             .executable_name()
@@ -1329,16 +1377,13 @@ fn launch_argument(query: &str, app: &str, apps: &[AppRow]) -> Option<JsonValue>
 /// The window the model most likely means: visible over minimized, then
 /// frontmost, then the biggest.
 fn pick_window<'a>(candidates: &[&'a WindowRow]) -> Option<&'a WindowRow> {
-    candidates
-        .iter()
-        .copied()
-        .max_by_key(|window| {
-            (
-                window.is_on_screen && !window.minimized,
-                window.z_index,
-                window.area,
-            )
-        })
+    candidates.iter().copied().max_by_key(|window| {
+        (
+            window.is_on_screen && !window.minimized,
+            window.z_index,
+            window.area,
+        )
+    })
 }
 
 /// The `sky.list_apps()` payload: every driveable window's app, then the
@@ -1400,7 +1445,10 @@ fn element_tokens(elements: &[JsonValue]) -> HashMap<u64, String> {
 
 /// The title from the tree's `- Window "…"` root line.
 fn window_title(tree: &str) -> Option<String> {
-    let line = tree.lines().map(str::trim).find(|line| line.starts_with("- Window "))?;
+    let line = tree
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("- Window "))?;
     let rest = line.strip_prefix("- Window ")?.trim();
     let quoted = rest.strip_prefix('"')?;
     let end = quoted.find('"')?;
@@ -1505,7 +1553,10 @@ fn render_tree_diff(previous: &str, current: &str) -> String {
             _ => changes.push(format!("+ {line}")),
         }
     }
-    format!("<accessibility_diff>\n{}\n</accessibility_diff>", changes.join("\n"))
+    format!(
+        "<accessibility_diff>\n{}\n</accessibility_diff>",
+        changes.join("\n")
+    )
 }
 
 /// The screenshot as a PNG data URL: the inline image block when the driver
@@ -1617,11 +1668,17 @@ mod tests {
             translate_key("ctrl+shift+t").unwrap(),
             ("t".into(), vec!["ctrl".into(), "shift".into()])
         );
-        assert_eq!(translate_key("super+d").unwrap(), ("d".into(), vec!["win".into()]));
+        assert_eq!(
+            translate_key("super+d").unwrap(),
+            ("d".into(), vec!["win".into()])
+        );
         assert_eq!(translate_key("KP_0").unwrap().0, "numpad0");
         assert_eq!(translate_key("Prior").unwrap().0, "pageup");
         assert_eq!(translate_key("BackSpace").unwrap().0, "backspace");
-        assert_eq!(translate_key("ctrl++").unwrap(), ("+".into(), vec!["ctrl".into()]));
+        assert_eq!(
+            translate_key("ctrl++").unwrap(),
+            ("+".into(), vec!["ctrl".into()])
+        );
         assert!(translate_key("hyper+x").is_err());
         assert!(translate_key("").is_err());
     }
@@ -1728,7 +1785,12 @@ mod tests {
             app("Google Chrome", 1, true, Some("C:\\Chrome\\chrome.exe")),
             app("Microsoft Edge", 0, false, Some("C:\\Edge\\msedge.exe")),
             app("1Password", 0, false, Some("C:\\1P\\1Password.exe")),
-            app("Some Store App", 0, false, Some("shell:appsFolder\\Pkg!App")),
+            app(
+                "Some Store App",
+                0,
+                false,
+                Some("shell:appsFolder\\Pkg!App"),
+            ),
         ];
         let list = app_list(&windows, &apps);
         assert_eq!(list.len(), 2);
@@ -1763,9 +1825,14 @@ mod tests {
 
     #[test]
     fn the_diff_reports_no_change_or_the_lines_that_moved() {
-        let first = "Window: \"A\"\n- Window \"A\"\n  - [0] Edit \"Text\" [value=\"\"]\n  - Text \"Ln 1\"";
+        let first =
+            "Window: \"A\"\n- Window \"A\"\n  - [0] Edit \"Text\" [value=\"\"]\n  - Text \"Ln 1\"";
         let same = render_tree_diff(first, first);
-        assert!(same.starts_with("There has been no change in the accessibility tree for Window: \"A\""));
+        assert!(
+            same.starts_with(
+                "There has been no change in the accessibility tree for Window: \"A\""
+            )
+        );
 
         let second = "Window: \"A\"\n- Window \"A\"\n  - [0] Edit \"Text\" [value=\"hi\"]\n  - Text \"Ln 2\"";
         let diff = render_tree_diff(first, second);
@@ -1797,7 +1864,10 @@ mod tests {
     /// on macOS too, where `Path` would not split them.
     #[test]
     fn driver_paths_split_on_either_separator_on_any_host() {
-        assert_eq!(windows_file_name("%windir%\\system32\\notepad.exe"), "notepad.exe");
+        assert_eq!(
+            windows_file_name("%windir%\\system32\\notepad.exe"),
+            "notepad.exe"
+        );
         assert_eq!(windows_file_name("C:/Tools/app.exe"), "app.exe");
         assert_eq!(windows_file_name("chrome"), "chrome");
         assert_eq!(windows_file_name("C:\\Tools\\"), "");
@@ -1810,8 +1880,13 @@ mod tests {
             Some("notepad.exe".into())
         );
         assert_eq!(
-            app("Edge", 0, false, Some("\"C:\\Program Files\\Edge\\msedge.exe\" --flag"))
-                .executable_name(),
+            app(
+                "Edge",
+                0,
+                false,
+                Some("\"C:\\Program Files\\Edge\\msedge.exe\" --flag")
+            )
+            .executable_name(),
             None
         );
         assert_eq!(

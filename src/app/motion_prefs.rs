@@ -27,7 +27,11 @@ pub fn init(cx: &mut App) {
 /// Put the preference into GPUI's flag. "System" re-reads the operating
 /// system, which on Linux answers off the UI thread.
 fn apply(window_active: bool, cx: &mut App) {
-    match cx.global::<MotionPrefs>().0.fixed_reduce_motion(window_active) {
+    match cx
+        .global::<MotionPrefs>()
+        .0
+        .fixed_reduce_motion(window_active)
+    {
         Some(reduce) => cx.set_reduce_motion(reduce),
         None => crate::platform::init_reduce_motion(cx),
     }

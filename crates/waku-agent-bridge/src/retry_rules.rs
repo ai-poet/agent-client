@@ -162,7 +162,9 @@ mod tests {
             Some(GatewayVerdict::ContentPolicy)
         );
         assert_eq!(
-            gateway_verdict("Prompt security audit rejected this request. Please adjust your input and try again."),
+            gateway_verdict(
+                "Prompt security audit rejected this request. Please adjust your input and try again."
+            ),
             Some(GatewayVerdict::ContentPolicy)
         );
         assert_eq!(

@@ -143,10 +143,7 @@ fn session_computer_use(
 }
 
 impl NativeDriver {
-    pub fn start(
-        options: DriverStartOptions,
-        events: DriverEventSender,
-    ) -> anyhow::Result<Self> {
+    pub fn start(options: DriverStartOptions, events: DriverEventSender) -> anyhow::Result<Self> {
         // A cursor from another provider means the session changed provider.
         // That transcript is in the other provider's format and names tools
         // this engine does not have, so it starts a fresh conversation rather
@@ -337,7 +334,9 @@ impl DriverControl for NativeDriver {
             &SessionStore::directory(),
             &branch_id.to_string(),
             &self.session_id.to_string(),
-            waku_agent_bridge::history::turn_count(&waku_agent_bridge::history::deserialize(&branched)) as u32,
+            waku_agent_bridge::history::turn_count(&waku_agent_bridge::history::deserialize(
+                &branched,
+            )) as u32,
         );
         Ok(ProviderResumeCursor::Native {
             session_id: branch_id.to_string(),
@@ -544,7 +543,9 @@ pub(crate) fn delete_agent_transcript(transcript_id: &str) -> anyhow::Result<()>
     match std::fs::remove_file(&store.path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).with_context(|| format!("could not delete {}", store.path.display())),
+        Err(error) => {
+            Err(error).with_context(|| format!("could not delete {}", store.path.display()))
+        }
     }
 }
 
@@ -573,10 +574,9 @@ impl SessionStore {
             return bytes;
         }
         if let Err(error) = waku_agent_bridge::history::parse(&bytes) {
-            let aside = self.path.with_extension(format!(
-                "json.unreadable-{}",
-                unix_time_millis()
-            ));
+            let aside = self
+                .path
+                .with_extension(format!("json.unreadable-{}", unix_time_millis()));
             let moved = std::fs::rename(&self.path, &aside);
             report_warning(&format!(
                 "the built-in agent's transcript {} could not be read ({error}); {}",
@@ -607,9 +607,8 @@ impl SessionStore {
             .path
             .parent()
             .ok_or_else(|| anyhow!("transcript path has no directory"))?;
-        std::fs::create_dir_all(parent).with_context(|| {
-            format!("could not create {}", parent.display())
-        })?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("could not create {}", parent.display()))?;
         let temporary = self.path.with_extension("json.tmp");
         // Fork: flushed before the rename. Written mid-turn now as well as at
         // its end, and a rename that outruns the data leaves an empty file
@@ -782,7 +781,11 @@ fn subagent_retry_line(attempt: u32, max_attempts: Option<u32>, reason: &str) ->
             attempt = attempt,
             max = max
         ),
-        (cause, None) => tr!("subagent.retried_unbounded", cause = cause.label(), attempt = attempt),
+        (cause, None) => tr!(
+            "subagent.retried_unbounded",
+            cause = cause.label(),
+            attempt = attempt
+        ),
     };
     format!("*{line}*")
 }
@@ -843,7 +846,11 @@ impl EventTranslator {
                 // Fork: handing a plan over reads as that, not as the plan's
                 // Markdown dumped into the row as escaped JSON; the plan
                 // itself is read in the Plan panel.
-                let input = if name == "ExitPlanMode" { Value::Null } else { input };
+                let input = if name == "ExitPlanMode" {
+                    Value::Null
+                } else {
+                    input
+                };
                 let kind = activity_kind(&name);
                 let title = if name == "ExitPlanMode" {
                     tr!("plan.handed_over")
@@ -1247,12 +1254,15 @@ impl EventTranslator {
                 result,
                 duration_ms,
             } => {
-                let Some(RunningSubagent { mut item, mut feed }) = running.remove(&parent_tool_id) else {
+                let Some(RunningSubagent { mut item, mut feed }) = running.remove(&parent_tool_id)
+                else {
                     return;
                 };
                 if parent_tool_id.contains("::team:") {
                     feed.close_text();
-                    self.member_feeds.lock().insert(parent_tool_id.clone(), feed);
+                    self.member_feeds
+                        .lock()
+                        .insert(parent_tool_id.clone(), feed);
                 }
                 item.status = match status {
                     SubagentStatus::Completed => BackgroundWorkStatus::Completed,
@@ -1266,7 +1276,9 @@ impl EventTranslator {
                 // The final report, for any client that shows the entry but
                 // not the record.
                 item.output = result;
-                self.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)));
+                self.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
+                    item,
+                )));
             }
         }
     }
@@ -1310,7 +1322,9 @@ fn background_item(entry: BackgroundEntry) -> BackgroundWorkItem {
     if kind == BackgroundWorkKind::Subagent {
         item.origin_activity_id = Some(entry.id.clone());
     }
-    item.detail = entry.detail.or_else(|| entry.pid.map(|pid| format!("PID {pid}")));
+    item.detail = entry
+        .detail
+        .or_else(|| entry.pid.map(|pid| format!("PID {pid}")));
     item.output = entry.output;
     item.started_at_ms = entry.started_at_ms;
     item.updated_at_ms = entry.finished_at_ms.unwrap_or_else(unix_time_millis);
@@ -1342,7 +1356,15 @@ fn tool_title(name: &str, input: &Value) -> String {
     }
     // Fork: `prompt` last — a picture is named by what was asked for, not by
     // the tool's prefixed name ("Waku js repl generate image").
-    for key in ["command", "query", "pattern", "file_path", "path", "url", "prompt"] {
+    for key in [
+        "command",
+        "query",
+        "pattern",
+        "file_path",
+        "path",
+        "url",
+        "prompt",
+    ] {
         if let Some(value) = input.get(key).and_then(Value::as_str) {
             let value = value.trim();
             if !value.is_empty() {
@@ -1393,12 +1415,19 @@ mod tests {
     fn a_missing_helper_turns_desktop_control_off_and_keeps_the_repl() {
         let (runtime, wiring) = super::session_computer_use(
             true,
-            || Err(anyhow::anyhow!("Computer Use driver (cua-driver) is not installed")),
+            || {
+                Err(anyhow::anyhow!(
+                    "Computer Use driver (cua-driver) is not installed"
+                ))
+            },
             || Ok("/opt/waku_js_repl".into()),
         );
         assert!(runtime.is_none());
         let wiring = wiring.expect("the REPL still carries image generation");
-        assert_eq!(wiring.repl_server, std::path::PathBuf::from("/opt/waku_js_repl"));
+        assert_eq!(
+            wiring.repl_server,
+            std::path::PathBuf::from("/opt/waku_js_repl")
+        );
         assert_eq!(wiring.native_helper, None);
         assert_eq!(wiring.process_directory, None);
         assert_eq!(wiring.skill_markdown, None);
@@ -1406,8 +1435,16 @@ mod tests {
         // A build without the REPL has nothing to wire at all.
         let (runtime, wiring) = super::session_computer_use(
             true,
-            || Err(anyhow::anyhow!("Computer Use driver (cua-driver) is not installed")),
-            || Err(anyhow::anyhow!("Waku JavaScript REPL is missing from this Waku build")),
+            || {
+                Err(anyhow::anyhow!(
+                    "Computer Use driver (cua-driver) is not installed"
+                ))
+            },
+            || {
+                Err(anyhow::anyhow!(
+                    "Waku JavaScript REPL is missing from this Waku build"
+                ))
+            },
         );
         assert!(runtime.is_none() && wiring.is_none());
     }
@@ -1430,7 +1467,11 @@ mod tests {
         let (runtime, wiring) = super::session_computer_use(
             false,
             || panic!("the helper must not be resolved when Computer Use is off"),
-            || Err(anyhow::anyhow!("Waku JavaScript REPL is missing from this Waku build")),
+            || {
+                Err(anyhow::anyhow!(
+                    "Waku JavaScript REPL is missing from this Waku build"
+                ))
+            },
         );
         assert!(runtime.is_none() && wiring.is_none());
     }
@@ -1456,7 +1497,10 @@ mod tests {
         assert_eq!(wiring.repl_server, PathBuf::from("/opt/waku_js_repl"));
         assert_eq!(wiring.native_helper, Some(PathBuf::from("/opt/helper")));
         assert_eq!(wiring.process_directory, Some(dir.clone()));
-        assert_eq!(wiring.skill_markdown.as_deref(), Some("# how to drive the desktop"));
+        assert_eq!(
+            wiring.skill_markdown.as_deref(),
+            Some("# how to drive the desktop")
+        );
 
         // An unreadable skill costs the manual, not the session.
         std::fs::remove_file(&skill_path).expect("remove skill");
@@ -1467,7 +1511,10 @@ mod tests {
 
     fn translator() -> (EventTranslator, crossbeam_channel::Receiver<DriverEvent>) {
         let (events, received) = crate::driver::test_event_channel();
-        (EventTranslator::new(events, SessionStore::new(Uuid::new_v4())), received)
+        (
+            EventTranslator::new(events, SessionStore::new(Uuid::new_v4())),
+            received,
+        )
     }
 
     /// An `Agent` call reads as the task it hands over, and carries the mark
@@ -1476,7 +1523,8 @@ mod tests {
     #[test]
     fn an_agent_call_is_titled_by_its_task_and_marked_as_a_sub_agent() {
         let (translator, received) = translator();
-        let input = serde_json::json!({"description": "Find the login code", "prompt": "Look for it"});
+        let input =
+            serde_json::json!({"description": "Find the login code", "prompt": "Look for it"});
         translator.handle(AgentEvent::ToolStarted {
             id: "toolu_1".into(),
             name: "Agent".into(),
@@ -1556,7 +1604,10 @@ mod tests {
         let BackgroundWorkEvent::Upsert(started) = &work[0] else {
             panic!("expected the entry first");
         };
-        assert_eq!(started.key, BackgroundWorkKey::new(BackgroundWorkKind::Subagent, "toolu_1"));
+        assert_eq!(
+            started.key,
+            BackgroundWorkKey::new(BackgroundWorkKind::Subagent, "toolu_1")
+        );
         assert_eq!(started.origin_activity_id.as_deref(), Some("toolu_1"));
         assert_eq!(started.control_id.as_deref(), Some("toolu_1"));
         assert_eq!(started.command.as_deref(), Some("Look for the login code"));
@@ -1611,8 +1662,14 @@ mod tests {
     /// generic tool row the name would otherwise fall through to.
     #[test]
     fn the_repl_tools_classify_as_commands() {
-        assert!(matches!(activity_kind("waku_js_repl_js"), ActivityKind::Command));
-        assert!(matches!(activity_kind("waku_js_repl_js_reset"), ActivityKind::Command));
+        assert!(matches!(
+            activity_kind("waku_js_repl_js"),
+            ActivityKind::Command
+        ));
+        assert!(matches!(
+            activity_kind("waku_js_repl_js_reset"),
+            ActivityKind::Command
+        ));
     }
 
     /// The generic line is translated as a whole; a plan summary is kept
@@ -1624,17 +1681,31 @@ mod tests {
     /// that only the summary gets a lead-in prepended.
     #[test]
     fn the_plan_summary_survives_localization_and_the_generic_line_does_not() {
-        let generic = localize_exit_plan_detail(waku_agent_bridge::EXIT_PLAN_MODE_DETAIL.to_owned());
-        assert!(!generic.contains("
+        let generic =
+            localize_exit_plan_detail(waku_agent_bridge::EXIT_PLAN_MODE_DETAIL.to_owned());
+        assert!(
+            !generic.contains(
+                "
 
-"), "generic line must not get a lead-in: {generic}");
+"
+            ),
+            "generic line must not get a lead-in: {generic}"
+        );
 
         let summary = "1. Add the field. 2. Wire the picker.";
         let kept = localize_exit_plan_detail(summary.to_owned());
-        assert!(kept.contains("
+        assert!(
+            kept.contains(
+                "
 
-"), "summary must sit under a lead-in: {kept}");
-        assert!(kept.ends_with(summary), "the plan itself must be intact: {kept}");
+"
+            ),
+            "summary must sit under a lead-in: {kept}"
+        );
+        assert!(
+            kept.ends_with(summary),
+            "the plan itself must be intact: {kept}"
+        );
     }
 
     /// The dialog shows the plan the tool carried and nothing else: the
@@ -1644,7 +1715,10 @@ mod tests {
         let plan = "## Plan\n\n1. Add the field.\n2. Wire the picker.";
         let detail = localize_exit_plan_detail(format!("  {plan}\n"));
         assert!(detail.ends_with(plan), "the plan, whole: {detail}");
-        assert_eq!(localize_exit_plan_detail("   ".to_owned()), tr!("plan.ready_detail"));
+        assert_eq!(
+            localize_exit_plan_detail("   ".to_owned()),
+            tr!("plan.ready_detail")
+        );
     }
 
     /// A call with no plan reaches the transcript in the user's language,
@@ -1706,7 +1780,10 @@ mod tests {
             route_of(Some("openai::gpt-5.6-sol")),
             (Some("openai".into()), Some("gpt-5.6-sol".into()))
         );
-        assert_eq!(route_of(Some("claude-sonnet-5")), (None, Some("claude-sonnet-5".into())));
+        assert_eq!(
+            route_of(Some("claude-sonnet-5")),
+            (None, Some("claude-sonnet-5".into()))
+        );
         // A model on an endpoint of the user's own carries that endpoint as
         // its platform, and its model id intact.
         assert_eq!(
@@ -1717,7 +1794,10 @@ mod tests {
             route_of(Some("custom:pr-1::qwen3:32b")),
             (Some("custom:pr-1".into()), Some("qwen3:32b".into()))
         );
-        assert_eq!(wire_format_of(Some("responses")), Some(WireFormat::Responses));
+        assert_eq!(
+            wire_format_of(Some("responses")),
+            Some(WireFormat::Responses)
+        );
         assert_eq!(wire_format_of(Some("default")), None);
         assert_eq!(wire_format_of(None), None);
     }
@@ -1852,7 +1932,11 @@ mod tests {
         assert_eq!(kept, Some(tr!("session.stopped")));
     }
 
-    fn failed(translator: &EventTranslator, kind: Option<waku_agent_bridge::FailureKind>, request_id: Option<&str>) {
+    fn failed(
+        translator: &EventTranslator,
+        kind: Option<waku_agent_bridge::FailureKind>,
+        request_id: Option<&str>,
+    ) {
         translator.handle(AgentEvent::TurnStarted);
         translator.handle(AgentEvent::TurnFailed {
             kind,
@@ -1864,7 +1948,11 @@ mod tests {
     #[test]
     fn a_named_failure_reaches_the_desktop_before_its_message() {
         let (translator, received) = translator();
-        failed(&translator, Some(waku_agent_bridge::FailureKind::BadRequest), Some("req_9"));
+        failed(
+            &translator,
+            Some(waku_agent_bridge::FailureKind::BadRequest),
+            Some("req_9"),
+        );
         let events: Vec<_> = received.try_iter().collect();
         let kind_at = events
             .iter()
@@ -1888,7 +1976,11 @@ mod tests {
     #[test]
     fn a_failure_ends_with_its_request_id() {
         let (translator, received) = translator();
-        failed(&translator, Some(waku_agent_bridge::FailureKind::BadRequest), Some("req_9"));
+        failed(
+            &translator,
+            Some(waku_agent_bridge::FailureKind::BadRequest),
+            Some("req_9"),
+        );
         let message = received
             .try_iter()
             .find_map(|event| match event {
@@ -1903,7 +1995,10 @@ mod tests {
             )),
             "{message}"
         );
-        assert!(message.ends_with(&tr!("native.failure.request_id", id = "req_9")), "{message}");
+        assert!(
+            message.ends_with(&tr!("native.failure.request_id", id = "req_9")),
+            "{message}"
+        );
         // A long failure is cut so the id is never what falls off.
         let long = turn_failure_message(None, &"x".repeat(5_000), Some("req_long"));
         assert!(long.chars().count() < FAILURE_DETAIL_CHARS + 100);
@@ -1919,7 +2014,11 @@ mod tests {
             summary: Some("API error 400: unsupported parameter: reasoning".into()),
         });
         let events: Vec<_> = received.try_iter().collect();
-        assert!(!events.iter().any(|event| matches!(event, DriverEvent::TurnFailure(_))));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, DriverEvent::TurnFailure(_)))
+        );
         let shown = events
             .iter()
             .find_map(|event| match event {
@@ -1927,8 +2026,14 @@ mod tests {
                 _ => None,
             })
             .unwrap();
-        assert!(shown.starts_with("HTTP 400: unsupported parameter: reasoning"), "{shown}");
-        assert!(shown.ends_with(&tr!("native.failure.request_id", id = "req_gw")), "{shown}");
+        assert!(
+            shown.starts_with("HTTP 400: unsupported parameter: reasoning"),
+            "{shown}"
+        );
+        assert!(
+            shown.ends_with(&tr!("native.failure.request_id", id = "req_gw")),
+            "{shown}"
+        );
         let kept = events.iter().find_map(|event| match event {
             DriverEvent::TurnFinished { summary, .. } => summary.clone(),
             _ => None,
@@ -1962,10 +2067,14 @@ mod tests {
         let texts: Vec<(String, String)> = received
             .try_iter()
             .filter_map(|event| match event {
-                DriverEvent::BackgroundWork(BackgroundWorkEvent::Transcript { entry, .. }) => match entry.body {
-                    crate::model::SubagentTranscriptBody::Text { text, .. } => Some((entry.id, text)),
-                    _ => None,
-                },
+                DriverEvent::BackgroundWork(BackgroundWorkEvent::Transcript { entry, .. }) => {
+                    match entry.body {
+                        crate::model::SubagentTranscriptBody::Text { text, .. } => {
+                            Some((entry.id, text))
+                        }
+                        _ => None,
+                    }
+                }
                 _ => None,
             })
             .collect();
@@ -1975,7 +2084,9 @@ mod tests {
             Some(subagent_retry_line(1, Some(10), "stream_interrupted"))
         );
         assert!(
-            texts.iter().any(|(id, text)| id == "text-1" && text.is_empty()),
+            texts
+                .iter()
+                .any(|(id, text)| id == "text-1" && text.is_empty()),
             "the half answer is taken back: {texts:?}"
         );
     }

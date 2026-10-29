@@ -295,7 +295,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(doc.fields["name"].as_text(), Some("a-b"));
-        assert_eq!(doc.fields["description"].as_text(), Some("says: \"hi\" — ok"));
+        assert_eq!(
+            doc.fields["description"].as_text(),
+            Some("says: \"hi\" — ok")
+        );
         assert_eq!(doc.fields["title"].as_text(), Some("it's"));
         assert_eq!(doc.fields["reads"].as_int(), Some(3));
         assert_eq!(doc.fields["pinned"].as_bool(), Some(true));
@@ -304,7 +307,9 @@ mod tests {
 
     #[test]
     fn tolerates_crlf_bom_comments_and_continuations() {
-        let doc = parse("\u{feff}---\r\nname: x # note\r\ndescription: first\r\n  second\r\n---\r\nbody").unwrap();
+        let doc =
+            parse("\u{feff}---\r\nname: x # note\r\ndescription: first\r\n  second\r\n---\r\nbody")
+                .unwrap();
         assert_eq!(doc.fields["name"].as_text(), Some("x"));
         assert_eq!(doc.fields["description"].as_text(), Some("first second"));
         assert_eq!(doc.body, "body");
@@ -318,7 +323,10 @@ mod tests {
         .unwrap();
         let metadata = doc.fields["metadata"].as_map().unwrap();
         assert_eq!(metadata["type"].as_text(), Some("project"));
-        assert_eq!(metadata["modified"].as_text(), Some("2026-09-26T16:00:24.015Z"));
+        assert_eq!(
+            metadata["modified"].as_text(),
+            Some("2026-09-26T16:00:24.015Z")
+        );
     }
 
     #[test]
@@ -336,7 +344,15 @@ mod tests {
 
     #[test]
     fn scalars_round_trip() {
-        for text in ["plain-token", "has: colon", "\"quotes\"", "true", "42", "", "多语言 — ok"] {
+        for text in [
+            "plain-token",
+            "has: colon",
+            "\"quotes\"",
+            "true",
+            "42",
+            "",
+            "多语言 — ok",
+        ] {
             let line = format!("---\nk: {}\n---\n", scalar(text));
             let doc = parse(&line).unwrap();
             assert_eq!(doc.fields["k"].as_text(), Some(text), "{text}");

@@ -196,12 +196,18 @@ pub(super) fn settle_parent(
     };
     let mut item = BackgroundWorkItem::new(BackgroundWorkKind::Subagent, id, "", status);
     item.output = output.and_then(result_text);
-    let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)));
+    let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
+        item,
+    )));
 }
 
 /// The key a sub-agent's record goes under, creating its entry when this is
 /// the first anyone has heard of it.
-fn record_key(parent: &str, events: &impl DriverEventSink, state: &mut ClaudeStreamState) -> String {
+fn record_key(
+    parent: &str,
+    events: &impl DriverEventSink,
+    state: &mut ClaudeStreamState,
+) -> String {
     if let Some(key) = state.subagent_tasks.get(parent) {
         return key.clone();
     }
@@ -222,7 +228,9 @@ fn record_key(parent: &str, events: &impl DriverEventSink, state: &mut ClaudeStr
     item.origin_activity_id = Some(parent.to_owned());
     item.role = call.and_then(|call| call.agent_type);
     item.command = prompt;
-    let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)));
+    let _ = events.send(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
+        item,
+    )));
     state
         .subagent_tasks
         .insert(parent.to_owned(), parent.to_owned());
@@ -230,9 +238,12 @@ fn record_key(parent: &str, events: &impl DriverEventSink, state: &mut ClaudeStr
 }
 
 fn feed<'a>(state: &'a mut ClaudeStreamState, key: &str) -> &'a mut SubagentFeed {
-    state.subagent_feeds.entry(key.to_owned()).or_insert_with(|| {
-        SubagentFeed::new(BackgroundWorkKey::new(BackgroundWorkKind::Subagent, key))
-    })
+    state
+        .subagent_feeds
+        .entry(key.to_owned())
+        .or_insert_with(|| {
+            SubagentFeed::new(BackgroundWorkKey::new(BackgroundWorkKind::Subagent, key))
+        })
 }
 
 /// A tool result's text: a plain string, or the text blocks of a content

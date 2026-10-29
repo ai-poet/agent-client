@@ -248,16 +248,17 @@ impl Waku {
             }
         }
         // Fork: the button appears late and leaves late (transcript_follow.rs).
-        let scroll_to_bottom_visible = self.transcript_jump_visibility(
-            self.transcript_is_scrolled.get(),
-            self.transcript_anchor_following.get(),
-            transcript_scrollable,
-            viewport_bottom,
-            tail_bottom,
-            anchor_end_space,
-            &transcript_rows,
-        )
-        .unwrap_or_else(|| self.transcript_scroll_to_bottom_visible.get());
+        let scroll_to_bottom_visible = self
+            .transcript_jump_visibility(
+                self.transcript_is_scrolled.get(),
+                self.transcript_anchor_following.get(),
+                transcript_scrollable,
+                viewport_bottom,
+                tail_bottom,
+                anchor_end_space,
+                &transcript_rows,
+            )
+            .unwrap_or_else(|| self.transcript_scroll_to_bottom_visible.get());
         self.transcript_scroll_to_bottom_visible
             .set(scroll_to_bottom_visible);
         let scroll_to_bottom = scroll_to_bottom_visible.then(|| {
@@ -1319,12 +1320,12 @@ impl Waku {
                         .collect();
                     let attachments_can_reveal = !self.daemon.is_remote();
                     let menu = self.menu_handle(format!("message-{}", message.id), cx);
-                    let metrics = self.scaled_markdown_metrics(if message.role == MessageRole::User
-                    {
-                        MarkdownMetrics::USER_MESSAGE
-                    } else {
-                        MarkdownMetrics::BODY
-                    });
+                    let metrics =
+                        self.scaled_markdown_metrics(if message.role == MessageRole::User {
+                            MarkdownMetrics::USER_MESSAGE
+                        } else {
+                            MarkdownMetrics::BODY
+                        });
                     let animate_streaming = message.streaming && !cx.reduce_motion();
                     let mut ctx = self.markdown_ctx(
                         format!("message-{}", message.id),
@@ -2341,7 +2342,12 @@ impl Waku {
             .children(background_badge)
             .children(open_file_button)
             // Fork: Inspect, the call's record in the trajectory.
-            .children(self.render_trajectory_inspect_pill(activity.source_id.as_deref(), &hover_group, theme, cx))
+            .children(self.render_trajectory_inspect_pill(
+                activity.source_id.as_deref(),
+                &hover_group,
+                theme,
+                cx,
+            ))
             .when(has_detail, |row| {
                 row.child(disclosure_chevron(
                     item_expanded,

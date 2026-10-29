@@ -55,9 +55,12 @@ impl NodeMenu {
         );
         items.push(MenuItem::Separator);
         let test_weak = weak.clone();
-        items.push(MenuItem::new(tr!("cli_setup.speed_test_all"), move |_, cx| {
-            let _ = test_weak.update(cx, |this, cx| this.run_gateway_origin_test(false, cx));
-        }));
+        items.push(MenuItem::new(
+            tr!("cli_setup.speed_test_all"),
+            move |_, cx| {
+                let _ = test_weak.update(cx, |this, cx| this.run_gateway_origin_test(false, cx));
+            },
+        ));
         let manage_weak = weak.clone();
         items.push(MenuItem::new(tr!("cloud.node_manage"), move |_, cx| {
             let _ = manage_weak.update(cx, |this, cx| {
@@ -171,8 +174,7 @@ impl Waku {
         self.cloud_account.origin_test = None;
         if routed.as_deref() == Some(origin.as_str()) {
             self.persist_gateway_origin(cx);
-        } else if let Err(error) =
-            sub2api::gateway_origin::save(&self.cloud_account.gateway_origin)
+        } else if let Err(error) = sub2api::gateway_origin::save(&self.cloud_account.gateway_origin)
         {
             self.show_toast(format!("{error:#}"));
         }
@@ -183,7 +185,12 @@ impl Waku {
         if self.cloud_account.gateway_origin.origin().as_deref() == Some(origin.as_str()) {
             // Re-picking the node in use still cancels a pending return
             // from a fallback: the user has now chosen it.
-            if self.cloud_account.gateway_origin.fallback_from.take().is_some()
+            if self
+                .cloud_account
+                .gateway_origin
+                .fallback_from
+                .take()
+                .is_some()
                 && let Err(error) =
                     sub2api::gateway_origin::save(&self.cloud_account.gateway_origin)
             {
@@ -294,14 +301,17 @@ impl Waku {
         if self.cloud_account.origin_checked {
             return;
         }
-        let nothing_to_check = self.cloud_account.gateway_origin.effective_candidates().len() < 2;
+        let nothing_to_check = self
+            .cloud_account
+            .gateway_origin
+            .effective_candidates()
+            .len()
+            < 2;
         let no_key = self
             .cloud_account
             .credentials
             .as_ref()
-            .is_none_or(|credentials| {
-                sub2api::gateway_origin::probe_target(credentials).is_none()
-            });
+            .is_none_or(|credentials| sub2api::gateway_origin::probe_target(credentials).is_none());
         if nothing_to_check || no_key {
             return;
         }
@@ -411,7 +421,9 @@ impl Waku {
             .unwrap_or_default();
         let short = |url: &str| -> String {
             self.gateway_node_label(url).0.unwrap_or_else(|| {
-                url.split_once("://").map_or(url, |(_, host)| host).to_owned()
+                url.split_once("://")
+                    .map_or(url, |(_, host)| host)
+                    .to_owned()
             })
         };
         let nodes = self
@@ -520,7 +532,12 @@ impl Waku {
         let test = self.cloud_account.origin_test.as_ref();
         let testing = test.is_some_and(|test| test.running);
         let results = test.map(|test| test.results.clone()).unwrap_or_default();
-        let outcome = |url: &str| results.iter().find(|candidate| candidate.url == url).cloned();
+        let outcome = |url: &str| {
+            results
+                .iter()
+                .find(|candidate| candidate.url == url)
+                .cloned()
+        };
 
         let mut ordered = candidates.clone();
         if !results.is_empty() {

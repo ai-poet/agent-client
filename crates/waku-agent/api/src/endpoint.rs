@@ -97,14 +97,19 @@ mod tests {
             "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         );
         assert_eq!(
-            versioned_url("https://ark.cn-beijing.volces.com/api/v3", "chat/completions"),
+            versioned_url(
+                "https://ark.cn-beijing.volces.com/api/v3",
+                "chat/completions"
+            ),
             "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
         );
         assert_eq!(
             versioned_url("https://example.org/V1BETA", "models"),
             "https://example.org/V1BETA/models"
         );
-        assert!(ends_with_version_segment("https://example.org/api/v2alpha1"));
+        assert!(ends_with_version_segment(
+            "https://example.org/api/v2alpha1"
+        ));
     }
 
     #[test]

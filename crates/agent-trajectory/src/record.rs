@@ -136,7 +136,11 @@ pub enum CompactionPhase {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Record {
     /// A segment file's first line.
-    Segment { schema: u32, session: String, at: i64 },
+    Segment {
+        schema: u32,
+        session: String,
+        at: i64,
+    },
     /// The full system prompt, written when its fingerprint is new to the
     /// segment.
     System { fp: String, text: String },
@@ -240,7 +244,11 @@ pub enum Record {
     /// The conversation was rewound to its first `keep_turns` turns.
     Rewind { keep_turns: u32, at: i64 },
     /// This session was branched off `from` after its turn `through_turn`.
-    Branched { from: String, through_turn: u32, at: i64 },
+    Branched {
+        from: String,
+        through_turn: u32,
+        at: i64,
+    },
     /// Older segments were deleted to stay within the size cap.
     Dropped { segments: u32, at: i64 },
     /// Fork: turn `turn` failed and the goal it worked on resumes on its
@@ -303,7 +311,10 @@ mod tests {
     #[test]
     fn records_written_before_failures_were_recorded_still_read() {
         let line = r#"{"type":"request","turn":1,"step":1,"started_at":0,"ended_at":5,"status":"error","retries":[{"attempt":1,"max_attempts":10,"delay_ms":2000,"error":"HTTP 529: Overloaded"}],"error":"boom"}"#;
-        let Record::Request { retries, failure, .. } = serde_json::from_str::<Record>(line).unwrap() else {
+        let Record::Request {
+            retries, failure, ..
+        } = serde_json::from_str::<Record>(line).unwrap()
+        else {
             panic!("a request record");
         };
         assert_eq!(failure, None);
@@ -312,7 +323,11 @@ mod tests {
         assert_eq!(retries[0].request_id, None);
         // And the new fields stay out of a record that has none.
         let written = serde_json::to_string(&retries[0]).unwrap();
-        assert!(!written.contains("reason") && !written.contains("discarded") && !written.contains("request_id"));
+        assert!(
+            !written.contains("reason")
+                && !written.contains("discarded")
+                && !written.contains("request_id")
+        );
     }
 
     #[test]

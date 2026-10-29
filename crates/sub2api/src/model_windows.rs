@@ -160,7 +160,12 @@ pub fn parse_openrouter(body: &str) -> Result<BTreeMap<String, u64>> {
 fn as_window(value: &Value) -> Option<u64> {
     value
         .as_u64()
-        .or_else(|| value.as_f64().filter(|number| *number > 0.0).map(|number| number as u64))
+        .or_else(|| {
+            value
+                .as_f64()
+                .filter(|number| *number > 0.0)
+                .map(|number| number as u64)
+        })
         .filter(|window| *window >= MIN_WINDOW)
 }
 
@@ -198,9 +203,7 @@ pub fn loose_key(model: &str) -> Option<String> {
         .map(|(index, &character)| {
             let between_digits = index > 0
                 && characters[index - 1].is_ascii_digit()
-                && characters
-                    .get(index + 1)
-                    .is_some_and(char::is_ascii_digit);
+                && characters.get(index + 1).is_some_and(char::is_ascii_digit);
             if character == '.' && between_digits {
                 '-'
             } else {
@@ -291,11 +294,27 @@ mod tests {
     #[test]
     fn the_listing_reduces_to_one_window_per_name() {
         let windows = parse_openrouter(SAMPLE).unwrap();
-        assert_eq!(windows.get("gpt-5-6-sol"), Some(&1_050_000), "the variant is skipped");
+        assert_eq!(
+            windows.get("gpt-5-6-sol"),
+            Some(&1_050_000),
+            "the variant is skipped"
+        );
         assert_eq!(windows.get("gpt-5-6-sol-pro"), Some(&1_050_000));
-        assert_eq!(windows.get("claude-opus-5-5"), Some(&1_000_000), "first party wins");
-        assert_eq!(windows.get("claude-haiku-4-5"), Some(&200_000), "top provider fallback");
-        assert_eq!(windows.get("kimi-k3"), Some(&1_048_576), "the larger of equals");
+        assert_eq!(
+            windows.get("claude-opus-5-5"),
+            Some(&1_000_000),
+            "first party wins"
+        );
+        assert_eq!(
+            windows.get("claude-haiku-4-5"),
+            Some(&200_000),
+            "top provider fallback"
+        );
+        assert_eq!(
+            windows.get("kimi-k3"),
+            Some(&1_048_576),
+            "the larger of equals"
+        );
         assert!(!windows.contains_key("model-x"), "too small to be a window");
         assert!(!windows.contains_key("no-window"));
         assert!(parse_openrouter("{}").is_err());
@@ -331,10 +350,22 @@ mod tests {
 
     #[test]
     fn a_picked_window_is_read_as_given() {
-        assert_eq!(explicit_window(Some("200k"), "claude-opus-5-5"), Some(200_000));
-        assert_eq!(explicit_window(Some("1m"), "claude-opus-5-5"), Some(1_000_000));
-        assert_eq!(explicit_window(None, "claude-opus-5-5[1m]"), Some(1_000_000));
-        assert_eq!(explicit_window(Some("200k"), "claude-opus-5-5[1M]"), Some(1_000_000));
+        assert_eq!(
+            explicit_window(Some("200k"), "claude-opus-5-5"),
+            Some(200_000)
+        );
+        assert_eq!(
+            explicit_window(Some("1m"), "claude-opus-5-5"),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            explicit_window(None, "claude-opus-5-5[1m]"),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            explicit_window(Some("200k"), "claude-opus-5-5[1M]"),
+            Some(1_000_000)
+        );
         assert_eq!(explicit_window(None, "claude-opus-5-5"), None);
         assert_eq!(explicit_window(Some("auto"), "claude-opus-5-5"), None);
         assert_eq!(explicit_window(Some("0k"), "claude-opus-5-5"), None);
@@ -345,9 +376,15 @@ mod tests {
         let windows = sample();
         assert!(!windows.is_stale(1 + TTL_SECONDS - 1));
         assert!(windows.is_stale(1 + TTL_SECONDS));
-        assert!(ModelWindows::default().is_stale(0), "nothing fetched is stale");
+        assert!(
+            ModelWindows::default().is_stale(0),
+            "nothing fetched is stale"
+        );
         let encoded = serde_json::to_string(&windows).unwrap();
-        assert_eq!(serde_json::from_str::<ModelWindows>(&encoded).unwrap(), windows);
+        assert_eq!(
+            serde_json::from_str::<ModelWindows>(&encoded).unwrap(),
+            windows
+        );
         assert_eq!(
             serde_json::from_str::<ModelWindows>("{}").unwrap(),
             ModelWindows::default()

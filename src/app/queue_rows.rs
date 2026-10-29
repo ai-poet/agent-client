@@ -103,13 +103,25 @@ pub(super) fn queue_menu_items(
     };
     let mut items = Vec::new();
     if index > 1 {
-        items.push(item(tr!("composer.send_next"), "icons/corner-down-right.svg", isize::MIN));
+        items.push(item(
+            tr!("composer.send_next"),
+            "icons/corner-down-right.svg",
+            isize::MIN,
+        ));
     }
     if index > 0 {
-        items.push(item(tr!("composer.queue_move_up"), "icons/arrow-up.svg", -1));
+        items.push(item(
+            tr!("composer.queue_move_up"),
+            "icons/arrow-up.svg",
+            -1,
+        ));
     }
     if index + 1 < len {
-        items.push(item(tr!("composer.queue_move_down"), "icons/arrow-down.svg", 1));
+        items.push(item(
+            tr!("composer.queue_move_down"),
+            "icons/arrow-down.svg",
+            1,
+        ));
     }
     items
 }

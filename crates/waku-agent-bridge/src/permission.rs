@@ -98,7 +98,11 @@ impl PermissionBridge {
     /// on, and so should not raise a dialog of its own.
     fn is_consented(&self, request: &PermissionRequest) -> bool {
         let consented = self.consented.lock();
-        if consented.tools.iter().any(|tool| *tool == request.tool_name) {
+        if consented
+            .tools
+            .iter()
+            .any(|tool| *tool == request.tool_name)
+        {
             return true;
         }
         consented.skill.as_ref().is_some_and(|skill| {
@@ -133,11 +137,7 @@ impl PermissionBridge {
     pub fn release_where(&self, matches: impl Fn(&str) -> bool) {
         let pending: Vec<_> = {
             let mut pending = self.pending.lock();
-            let ids: Vec<String> = pending
-                .keys()
-                .filter(|id| matches(id))
-                .cloned()
-                .collect();
+            let ids: Vec<String> = pending.keys().filter(|id| matches(id)).cloned().collect();
             ids.into_iter()
                 .filter_map(|id| pending.remove(&id))
                 .collect()
@@ -154,7 +154,12 @@ impl PermissionBridge {
     }
 
     /// Ask the user, or apply the standing answer.
-    fn ask(&self, request: &PermissionRequest, reason: &str, member: Option<&str>) -> PermissionChoice {
+    fn ask(
+        &self,
+        request: &PermissionRequest,
+        reason: &str,
+        member: Option<&str>,
+    ) -> PermissionChoice {
         if let Some(auto) = *self.auto.lock() {
             return auto;
         }
@@ -378,8 +383,7 @@ pub(crate) struct MemberScope {
 /// skips that translation would show. The bridge has no i18n of its own on
 /// purpose — it depends on neither `waku-core` nor `waku-protocol`.
 pub const EXIT_PLAN_MODE_TITLE: &str = "Finished planning";
-pub const EXIT_PLAN_MODE_DETAIL: &str =
-    "The agent says the plan is ready and wants to start applying it. Switch to Build, or keep planning.";
+pub const EXIT_PLAN_MODE_DETAIL: &str = "The agent says the plan is ready and wants to start applying it. Switch to Build, or keep planning.";
 
 impl GuiPermissionHandler {
     pub fn new(bridge: Arc<PermissionBridge>) -> Self {
@@ -593,10 +597,14 @@ mod tests {
         }
     }
 
-    fn recording_bridge(mode: PermissionMode) -> (Arc<PermissionBridge>, Arc<Mutex<Vec<AgentEvent>>>) {
+    fn recording_bridge(
+        mode: PermissionMode,
+    ) -> (Arc<PermissionBridge>, Arc<Mutex<Vec<AgentEvent>>>) {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let settings = Settings::default();
-        let manager = Arc::new(std::sync::Mutex::new(PermissionManager::new(mode, &settings)));
+        let manager = Arc::new(std::sync::Mutex::new(PermissionManager::new(
+            mode, &settings,
+        )));
         let sink = {
             let seen = seen.clone();
             EventSink::new(move |event: AgentEvent| seen.lock().push(event))
@@ -622,7 +630,10 @@ mod tests {
         bridge.set_consented(vec!["waku_js_repl_js".into()], None);
         let handler = GuiPermissionHandler::new(bridge);
 
-        assert_eq!(handler.request_permission(&repl_request()), PermissionDecision::Allow);
+        assert_eq!(
+            handler.request_permission(&repl_request()),
+            PermissionDecision::Allow
+        );
         assert!(seen.lock().is_empty(), "consent must not raise a dialog");
     }
 
@@ -634,7 +645,10 @@ mod tests {
         let handler = GuiPermissionHandler::new(bridge.clone());
 
         let answering = answer_one_dialog(bridge, PermissionChoice::RejectOnce);
-        assert_eq!(handler.request_permission(&request()), PermissionDecision::Deny);
+        assert_eq!(
+            handler.request_permission(&request()),
+            PermissionDecision::Deny
+        );
         answering.join().unwrap();
     }
 
@@ -647,7 +661,10 @@ mod tests {
         bridge.set_consented(vec!["waku_js_repl_js".into()], None);
         let handler = GuiPermissionHandler::new(bridge);
 
-        assert_eq!(handler.request_permission(&repl_request()), PermissionDecision::Deny);
+        assert_eq!(
+            handler.request_permission(&repl_request()),
+            PermissionDecision::Deny
+        );
         assert!(seen.lock().is_empty());
     }
 
@@ -676,7 +693,10 @@ mod tests {
         bridge.set_consented(vec!["waku_js_repl_js".into()], None);
         let handler = GuiPermissionHandler::new(bridge);
 
-        assert_eq!(handler.request_permission(&repl_request()), PermissionDecision::Deny);
+        assert_eq!(
+            handler.request_permission(&repl_request()),
+            PermissionDecision::Deny
+        );
     }
 
     /// The skill sits in the engine's config directory, outside the
@@ -780,12 +800,17 @@ mod tests {
         };
 
         let answering = answer_one_dialog(bridge.clone(), PermissionChoice::RejectOnce);
-        assert_eq!(handler.request_permission(&request), PermissionDecision::Deny);
+        assert_eq!(
+            handler.request_permission(&request),
+            PermissionDecision::Deny
+        );
         answering.join().unwrap();
         let events = seen.lock();
         assert_eq!(events.len(), 1, "exactly one dialog");
         match &events[0] {
-            AgentEvent::Permission { options, detail, .. } => {
+            AgentEvent::Permission {
+                options, detail, ..
+            } => {
                 assert_eq!(
                     options,
                     &vec![PermissionChoice::AllowOnce, PermissionChoice::RejectOnce]
@@ -842,7 +867,10 @@ mod tests {
             .collect();
         assert_eq!(
             details,
-            vec!["1. Add the field. 2. Wire the picker.", EXIT_PLAN_MODE_DETAIL]
+            vec![
+                "1. Add the field. 2. Wire the picker.",
+                EXIT_PLAN_MODE_DETAIL
+            ]
         );
     }
 
@@ -964,7 +992,10 @@ mod tests {
     fn the_detail_falls_back_to_the_managers_reason() {
         let mut req = request();
         req.context_description = None;
-        assert_eq!(detail_for(&req, "Bash wants to run a command"), "Bash wants to run a command");
+        assert_eq!(
+            detail_for(&req, "Bash wants to run a command"),
+            "Bash wants to run a command"
+        );
     }
 
     /// Fork: "always" on the shell is kept for the one command it answered,

@@ -74,7 +74,11 @@ impl Waku {
         {
             self.state.mark_session_dirty(session_id);
         }
-        let Some(session) = self.state.sessions.iter().find(|session| session.id == session_id)
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
         else {
             return;
         };
@@ -101,7 +105,10 @@ impl Waku {
 
     /// The model the session runs, as the provider's catalog describes it
     /// when it does: the picked one, or the provider's default.
-    fn ring_model<'a>(&'a self, session: &'a AgentSession) -> Option<(&'a str, Option<&'a ProviderModel>)> {
+    fn ring_model<'a>(
+        &'a self,
+        session: &'a AgentSession,
+    ) -> Option<(&'a str, Option<&'a ProviderModel>)> {
         match session.model.as_deref() {
             Some(model) => Some((model, self.probe_model(session.provider, model))),
             None => {

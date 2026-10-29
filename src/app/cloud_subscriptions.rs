@@ -100,76 +100,79 @@ impl Waku {
                 .background_executor()
                 .spawn(async move {
                     let mut credentials = credentials;
-                    let refresh =
-                        sub2api::refresh_model_routes(&mut credentials, &catalog, &groups, &origin)?;
+                    let refresh = sub2api::refresh_model_routes(
+                        &mut credentials,
+                        &catalog,
+                        &groups,
+                        &origin,
+                    )?;
                     anyhow::Ok((credentials, refresh))
                 })
                 .await;
-            let _ = this.update(cx, |this, cx| {
-                // Signed out meanwhile: the sign-out cleared the route state
-                // and sent what was waiting on it.
-                if !this.cloud_session_is(&session) {
-                    return;
-                }
-                this.cloud_account.routes_refreshing = false;
-                match result {
-                    Ok((renewed, refresh)) => {
-                        this.adopt_cloud_tokens(renewed);
-                        if let Some(subscriptions) = refresh.subscriptions.clone() {
-                            this.cloud_account.subscriptions = Some(subscriptions);
-                        }
-                        let changed = this
-                            .cloud_account
-                            .credentials
-                            .as_mut()
-                            .is_some_and(|credentials| {
-                                let before = (
-                                    credentials.group_keys.clone(),
-                                    credentials.model_routes.clone(),
-                                    credentials.model_windows.clone(),
-                                );
-                                refresh.apply_to(credentials);
-                                before
-                                    != (
+            let _ =
+                this.update(cx, |this, cx| {
+                    // Signed out meanwhile: the sign-out cleared the route state
+                    // and sent what was waiting on it.
+                    if !this.cloud_session_is(&session) {
+                        return;
+                    }
+                    this.cloud_account.routes_refreshing = false;
+                    match result {
+                        Ok((renewed, refresh)) => {
+                            this.adopt_cloud_tokens(renewed);
+                            if let Some(subscriptions) = refresh.subscriptions.clone() {
+                                this.cloud_account.subscriptions = Some(subscriptions);
+                            }
+                            let changed = this.cloud_account.credentials.as_mut().is_some_and(
+                                |credentials| {
+                                    let before = (
                                         credentials.group_keys.clone(),
                                         credentials.model_routes.clone(),
                                         credentials.model_windows.clone(),
-                                    )
-                            });
-                        if changed {
-                            if let Some(credentials) = this.cloud_account.credentials.as_ref()
-                                && let Err(error) = credentials.save()
-                            {
-                                this.show_toast(format!("{error:#}"));
+                                    );
+                                    refresh.apply_to(credentials);
+                                    before
+                                        != (
+                                            credentials.group_keys.clone(),
+                                            credentials.model_routes.clone(),
+                                            credentials.model_windows.clone(),
+                                        )
+                                },
+                            );
+                            if changed {
+                                if let Some(credentials) = this.cloud_account.credentials.as_ref()
+                                    && let Err(error) = credentials.save()
+                                {
+                                    this.show_toast(format!("{error:#}"));
+                                }
+                                // The built-in agent reads its keys from the
+                                // routing the CLIs share; rewrite it.
+                                this.apply_cloud_routing();
+                                // A live session read its key when it started;
+                                // re-applying its options makes it read the new
+                                // table, so a subscription that ran out hands
+                                // over from the next turn rather than the next
+                                // session.
+                                this.reapply_built_in_session_options(cx);
                             }
-                            // The built-in agent reads its keys from the
-                            // routing the CLIs share; rewrite it.
-                            this.apply_cloud_routing();
-                            // A live session read its key when it started;
-                            // re-applying its options makes it read the new
-                            // table, so a subscription that ran out hands
-                            // over from the next turn rather than the next
-                            // session.
-                            this.reapply_built_in_session_options(cx);
+                            // Every model was routed afresh; one a lookup found
+                            // nothing for may have a group now.
+                            this.cloud_account.route_misses.clear();
+                            this.sync_native_models();
                         }
-                        // Every model was routed afresh; one a lookup found
-                        // nothing for may have a group now.
-                        this.cloud_account.route_misses.clear();
-                        this.sync_native_models();
+                        Err(error) if sub2api::session_ended(&error) => this.end_cloud_session(cx),
+                        // No toast: nothing was user-initiated, and the previous
+                        // routes stay in force. The next catalog load retries.
+                        Err(error) => eprintln!("warning: model routing not refreshed: {error:#}"),
                     }
-                    Err(error) if sub2api::session_ended(&error) => this.end_cloud_session(cx),
-                    // No toast: nothing was user-initiated, and the previous
-                    // routes stay in force. The next catalog load retries.
-                    Err(error) => eprintln!("warning: model routing not refreshed: {error:#}"),
-                }
-                if std::mem::take(&mut this.cloud_account.routes_stale) {
-                    this.refresh_model_routes(cx);
-                }
-                // Messages that waited for this refresh go out now — routed,
-                // or looked up one by one where it could not route them.
-                this.drain_route_sends(cx);
-                cx.notify();
-            });
+                    if std::mem::take(&mut this.cloud_account.routes_stale) {
+                        this.refresh_model_routes(cx);
+                    }
+                    // Messages that waited for this refresh go out now — routed,
+                    // or looked up one by one where it could not route them.
+                    this.drain_route_sends(cx);
+                    cx.notify();
+                });
         })
         .detach();
     }
@@ -250,14 +253,10 @@ impl Waku {
                 match result {
                     Ok((found, Some(group))) => {
                         this.adopt_cloud_tokens(found.clone());
-                        let saved = this
-                            .cloud_account
-                            .credentials
-                            .as_mut()
-                            .map(|live| {
-                                sub2api::merge_model_route(&found, &model, group, live);
-                                live.save()
-                            });
+                        let saved = this.cloud_account.credentials.as_mut().map(|live| {
+                            sub2api::merge_model_route(&found, &model, group, live);
+                            live.save()
+                        });
                         if let Some(Err(error)) = saved {
                             this.show_toast(format!("{error:#}"));
                         }
@@ -313,8 +312,7 @@ impl Waku {
     /// none starts (or waits on) another lookup; one that found nothing is
     /// in `route_misses` and goes out as it is.
     pub(super) fn drain_route_sends(&mut self, cx: &mut Context<Self>) {
-        for (session_id, submission) in
-            std::mem::take(&mut self.cloud_account.pending_route_sends)
+        for (session_id, submission) in std::mem::take(&mut self.cloud_account.pending_route_sends)
         {
             self.submit_submission_for_session(session_id, submission, cx);
         }
@@ -413,11 +411,16 @@ impl Waku {
             .map(|credentials| credentials.model_routes.clone())
             .unwrap_or_default();
 
-        let mut section = div().flex().flex_col().gap(px(8.0)).child(super::cloud_account::section_title(
-            theme,
-            &tr!("cloud.subscriptions_title"),
-            &tr!("cloud.subscriptions_detail"),
-        ));
+        let mut section =
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(super::cloud_account::section_title(
+                    theme,
+                    &tr!("cloud.subscriptions_title"),
+                    &tr!("cloud.subscriptions_detail"),
+                ));
         for subscription in subscriptions {
             let mut card = subscription_card(
                 theme,
@@ -433,17 +436,15 @@ impl Waku {
                     .progress
                     .as_ref()
                     .is_some_and(|progress| progress.expires_in_days <= 3);
-                card = card.child(
-                    div().flex().child(super::providers_page::card_button(
-                        theme,
-                        SharedString::from(format!("cloud-subscription-renew-{group_id}")),
-                        tr!("cloud.subscription_renew"),
-                        lapsing,
-                        false,
-                        cx,
-                        move |this, _, cx| this.renew_group(group_id, cx),
-                    )),
-                );
+                card = card.child(div().flex().child(super::providers_page::card_button(
+                    theme,
+                    SharedString::from(format!("cloud-subscription-renew-{group_id}")),
+                    tr!("cloud.subscription_renew"),
+                    lapsing,
+                    false,
+                    cx,
+                    move |this, _, cx| this.renew_group(group_id, cx),
+                )));
             }
             section = section.child(card);
         }
@@ -505,7 +506,11 @@ pub(super) fn subscription_menu_line(
     group_name: &str,
 ) -> String {
     let mut parts = vec![tr!("cloud.subscription_menu", group = group_name)];
-    if let Some(days) = subscription.progress.as_ref().map(|progress| progress.expires_in_days) {
+    if let Some(days) = subscription
+        .progress
+        .as_ref()
+        .map(|progress| progress.expires_in_days)
+    {
         parts.push(expiry_label(days));
     }
     if let Some((label, window)) = subscription_windows(subscription).into_iter().next() {
@@ -561,7 +566,11 @@ pub(super) fn subscription_windows(
         ),
     ]
     .into_iter()
-    .filter_map(|(label, window, limit)| window.or_else(|| unused(limit)).map(|window| (label, window)))
+    .filter_map(|(label, window, limit)| {
+        window
+            .or_else(|| unused(limit))
+            .map(|window| (label, window))
+    })
     .collect()
 }
 
@@ -576,20 +585,16 @@ fn subscription_card(
         .as_ref()
         .map(|progress| progress.expires_in_days);
     let platform = subscription.platform();
-    let mut title = div()
-        .flex()
-        .items_center()
-        .gap(px(8.0))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_size(sp(13.0))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(theme.text)
-                .child(group_name),
-        );
+    let mut title = div().flex().items_center().gap(px(8.0)).child(
+        div()
+            .flex_1()
+            .min_w_0()
+            .truncate()
+            .text_size(sp(13.0))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(theme.text)
+            .child(group_name),
+    );
     if !platform.is_empty() {
         title = title.child(
             div()
@@ -606,7 +611,11 @@ fn subscription_card(
                 .text_size(sp(12.0))
                 // A subscription about to lapse is the one thing on this card
                 // worth acting on; never colour alone, the words say it too.
-                .text_color(if days <= 3 { theme.warning } else { theme.text_secondary })
+                .text_color(if days <= 3 {
+                    theme.warning
+                } else {
+                    theme.text_secondary
+                })
                 .child(expiry_label(days)),
         );
     }
@@ -757,14 +766,25 @@ mod tests {
         assert_eq!(native_route_need(id, &routed, &catalog, &none), None);
 
         // An id 0.2.3 saved on its pay-as-you-go row is the same model.
-        assert!(native_route_need("deepseek+payg::deepseek-v4.1-flash", &fresh, &catalog, &none).is_some());
+        assert!(
+            native_route_need(
+                "deepseek+payg::deepseek-v4.1-flash",
+                &fresh,
+                &catalog,
+                &none
+            )
+            .is_some()
+        );
 
         // A lookup that already came up empty is not repeated per message.
         let missed: HashSet<String> = ["deepseek-v4.1-flash".to_owned()].into();
         assert_eq!(native_route_need(id, &fresh, &catalog, &missed), None);
 
         // The user's own endpoint: no `::`, no gateway key involved.
-        assert_eq!(native_route_need("deepseek-v4.1-flash", &fresh, &catalog, &none), None);
+        assert_eq!(
+            native_route_need("deepseek-v4.1-flash", &fresh, &catalog, &none),
+            None
+        );
         // Nor on one named in the id: that endpoint routes it, whatever the
         // catalog lists under the same name.
         assert_eq!(
@@ -782,9 +802,15 @@ mod tests {
             ..ModelCatalogItem::default()
         }];
         // GPT and Claude may ride their CLI slot's key on purpose.
-        assert_eq!(native_route_need("openai::gpt-5.6-sol", &fresh, &gpt, &none), None);
+        assert_eq!(
+            native_route_need("openai::gpt-5.6-sol", &fresh, &gpt, &none),
+            None
+        );
         // Not in the catalog: there is no group to look up.
-        assert_eq!(native_route_need("deepseek::deepseek-v4.1-flash", &fresh, &gpt, &none), None);
+        assert_eq!(
+            native_route_need("deepseek::deepseek-v4.1-flash", &fresh, &gpt, &none),
+            None
+        );
         // Gemini's key is its group's own, never a CLI slot's.
         let gemini = [ModelCatalogItem {
             model: "gemini-4-argon".into(),

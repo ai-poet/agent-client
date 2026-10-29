@@ -12,12 +12,12 @@
 //             `cmd /C`. ConPTY is available in portable_pty but adds
 //             complexity for minimal gain on Windows.
 
-use crate::{PermissionLevel, Tool, ToolContext, ToolResult, session_shell_state};
+use crate::{session_shell_state, PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use claurst_core::bash_classifier::{
-    BashRiskLevel, classify_bash_command, is_read_only_bash_command,
+    classify_bash_command, is_read_only_bash_command, BashRiskLevel,
 };
-use claurst_core::tasks::{BackgroundTask, global_registry};
+use claurst_core::tasks::{global_registry, BackgroundTask};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -75,8 +75,15 @@ fn parse_shell_state_block(lines: &[String]) -> Option<(PathBuf, HashMap<String,
             let key = line[..eq].to_string();
             let val = line[eq + 1..].to_string();
             if !key.starts_with('_')
-                && !["SHLVL", "BASH_LINENO", "BASH_SOURCE", "FUNCNAME", "PIPESTATUS", "OLDPWD"]
-                    .contains(&key.as_str())
+                && ![
+                    "SHLVL",
+                    "BASH_LINENO",
+                    "BASH_SOURCE",
+                    "FUNCNAME",
+                    "PIPESTATUS",
+                    "OLDPWD",
+                ]
+                .contains(&key.as_str())
             {
                 env_vars.insert(key, val);
             }
@@ -88,10 +95,9 @@ fn parse_shell_state_block(lines: &[String]) -> Option<(PathBuf, HashMap<String,
 
 #[cfg(unix)]
 fn extract_exports_from_command(command: &str) -> HashMap<String, String> {
-    let re = Regex::new(
-        r#"(?m)^\s*export\s+([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"]*)"|'([^']*)'|(\S*))"#,
-    )
-    .unwrap();
+    let re =
+        Regex::new(r#"(?m)^\s*export\s+([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"]*)"|'([^']*)'|(\S*))"#)
+            .unwrap();
     let mut map = HashMap::new();
     for cap in re.captures_iter(command) {
         let key = cap[1].to_string();
@@ -240,8 +246,10 @@ async fn run_in_background(
                         async {
                             if let Some(err) = stderr {
                                 crate::capture::for_each_line(err, |line| {
-                                    global_registry()
-                                        .append_output(&task_id_clone, &format!("STDERR: {}", line));
+                                    global_registry().append_output(
+                                        &task_id_clone,
+                                        &format!("STDERR: {}", line),
+                                    );
                                 })
                                 .await;
                             }
@@ -283,7 +291,11 @@ async fn run_in_background(
         // which either polled `monitor` or never learned a build had failed.
         if let Some(notifier) = notifier {
             if let Some(task) = global_registry().get(&task_id_clone) {
-                notifier.notify(background_completion_notice(&task_id_clone, &command_clone, &task));
+                notifier.notify(background_completion_notice(
+                    &task_id_clone,
+                    &command_clone,
+                    &task,
+                ));
             }
         }
     });
@@ -300,11 +312,7 @@ pub const BACKGROUND_NOTICE_OPEN: &str = "<system-reminder>The background comman
 
 /// Fork (Waku): what the agent is told when a background command ends — how
 /// it ended and its last lines, so a short result needs no `monitor` call.
-pub fn background_completion_notice(
-    task_id: &str,
-    command: &str,
-    task: &BackgroundTask,
-) -> String {
+pub fn background_completion_notice(task_id: &str, command: &str, task: &BackgroundTask) -> String {
     use claurst_core::tasks::TaskStatus;
     let outcome = match &task.status {
         TaskStatus::Completed => "finished successfully".to_string(),
@@ -343,7 +351,7 @@ fn strip_ansi(s: &str) -> String {
             match chars.peek() {
                 Some('[') => {
                     chars.next(); // consume '['
-                    // CSI: consume parameter + intermediate bytes, stop at final byte
+                                  // CSI: consume parameter + intermediate bytes, stop at final byte
                     for c in &mut chars {
                         if c.is_ascii_alphabetic() || c == '@' {
                             break;
@@ -414,7 +422,10 @@ struct PtyKillGuard {
 #[cfg(unix)]
 impl PtyKillGuard {
     fn new(killer: Box<dyn portable_pty::ChildKiller + Send + Sync>) -> Self {
-        Self { killer, armed: true }
+        Self {
+            killer,
+            armed: true,
+        }
     }
 
     /// The command finished on its own — there is nothing left to kill.
@@ -448,7 +459,7 @@ async fn run_in_pty(
     env_vars: &HashMap<String, String>,
     timeout: Duration,
 ) -> PtyOutcome {
-    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
     let pty_system = native_pty_system();
 
@@ -731,7 +742,10 @@ async fn run_windows(
 /// a native process breaks every Windows program the next command runs.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn windows_bash_script(command: &str, cwd: &std::path::Path) -> String {
-    let cwd = cwd.to_string_lossy().replace('\\', "/").replace('\'', "'\\''");
+    let cwd = cwd
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace('\'', "'\\''");
     format!(
         "cd '{cwd}' || exit 1\n{command}\n__CC_EXIT_CODE=$?\necho '{sentinel}'\npwd -W\nexit $__CC_EXIT_CODE\n",
         sentinel = SHELL_STATE_SENTINEL,
@@ -761,7 +775,10 @@ fn windows_powershell_script(command: &str, cwd: &std::path::Path) -> String {
 #[cfg_attr(not(windows), allow(dead_code))]
 fn split_windows_state(stdout: &str) -> (String, Option<PathBuf>) {
     let lines: Vec<&str> = stdout.lines().collect();
-    let Some(position) = lines.iter().rposition(|line| line.trim() == SHELL_STATE_SENTINEL) else {
+    let Some(position) = lines
+        .iter()
+        .rposition(|line| line.trim() == SHELL_STATE_SENTINEL)
+    else {
         return (stdout.to_string(), None);
     };
     let cwd = lines
@@ -823,7 +840,10 @@ fn truncate_output(mut output: String, exit_code: i32) -> ToolResult {
     }
 
     if exit_code != 0 {
-        ToolResult::error(format!("Command exited with code {}\n{}", exit_code, output))
+        ToolResult::error(format!(
+            "Command exited with code {}\n{}",
+            exit_code, output
+        ))
     } else {
         ToolResult::success(output)
     }
@@ -836,7 +856,9 @@ fn truncate_output(mut output: String, exit_code: i32) -> ToolResult {
 #[async_trait]
 impl Tool for PtyBashTool {
     // Gates itself: calls `ctx.check_permission*` in `execute()` (#210).
-    fn self_gates(&self) -> bool { true }
+    fn self_gates(&self) -> bool {
+        true
+    }
 
     fn name(&self) -> &str {
         claurst_core::constants::TOOL_NAME_BASH
@@ -1004,8 +1026,7 @@ impl Tool for PtyBashTool {
                     let cleaned = strip_ansi(&raw_output);
 
                     // Split into user-visible lines and state block
-                    let all_lines: Vec<String> =
-                        cleaned.lines().map(|l| l.to_string()).collect();
+                    let all_lines: Vec<String> = cleaned.lines().map(|l| l.to_string()).collect();
 
                     let sentinel_pos = all_lines
                         .iter()
@@ -1018,9 +1039,7 @@ impl Tool for PtyBashTool {
 
                     // Update persistent shell state
                     if !state_lines.is_empty() {
-                        if let Some((new_cwd, env_delta)) =
-                            parse_shell_state_block(state_lines)
-                        {
+                        if let Some((new_cwd, env_delta)) = parse_shell_state_block(state_lines) {
                             let mut state = shell_state_arc.lock();
                             state.cwd = Some(new_cwd);
                             for (k, v) in env_delta {
@@ -1047,9 +1066,7 @@ impl Tool for PtyBashTool {
 
                     truncate_output(output, exit_code)
                 }
-                PtyOutcome::Failed(e) => {
-                    ToolResult::error(format!("PTY execution failed: {}", e))
-                }
+                PtyOutcome::Failed(e) => ToolResult::error(format!("PTY execution failed: {}", e)),
                 PtyOutcome::TimedOut => {
                     ToolResult::error(format!("Command timed out after {}ms", timeout_ms))
                 }
@@ -1076,9 +1093,10 @@ mod tests {
         state
             .env_vars
             .insert("SECRET".to_string(), "topsecret".to_string());
-        state
-            .env_vars
-            .insert("AWS_SECRET_ACCESS_KEY".to_string(), "aws-argv-leak".to_string());
+        state.env_vars.insert(
+            "AWS_SECRET_ACCESS_KEY".to_string(),
+            "aws-argv-leak".to_string(),
+        );
 
         let base = PathBuf::from("/tmp");
         let script = build_wrapper_script("echo hi", &state, &base);
@@ -1247,13 +1265,11 @@ mod tests {
         });
 
         let started = std::time::Instant::now();
-        let result =
-            tokio::time::timeout(Duration::from_secs(10), tool.execute(input, &ctx)).await;
+        let result = tokio::time::timeout(Duration::from_secs(10), tool.execute(input, &ctx)).await;
         let elapsed = started.elapsed();
 
-        let result = result.expect(
-            "execute hung waiting on the detached grandchild's pty (regression of #184)",
-        );
+        let result = result
+            .expect("execute hung waiting on the detached grandchild's pty (regression of #184)");
         assert!(
             !result.is_error,
             "command should have succeeded, got: {}",
@@ -1300,7 +1316,9 @@ mod tests {
 
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         loop {
-            let task = global_registry().get(&task_id).expect("the task is tracked");
+            let task = global_registry()
+                .get(&task_id)
+                .expect("the task is tracked");
             if !task.is_running() {
                 assert!(
                     matches!(task.status, claurst_core::tasks::TaskStatus::Completed),
@@ -1336,15 +1354,22 @@ mod windows_path_tests {
         assert!(script.starts_with("cd 'C:/Users/me/it'"), "{script}");
         assert!(script.contains("npm test"));
         assert!(script.contains(SHELL_STATE_SENTINEL));
-        assert!(script.contains("pwd -W"), "a Windows path is what current_dir needs");
+        assert!(
+            script.contains("pwd -W"),
+            "a Windows path is what current_dir needs"
+        );
         // The exit code of the user's command is the one reported.
         assert!(script.trim_end().ends_with("exit $__CC_EXIT_CODE"));
     }
 
     #[test]
     fn the_powershell_wrapper_tracks_the_directory_and_the_outcome() {
-        let script = windows_powershell_script("npm test", std::path::Path::new(r"C:\Users\me\it's here"));
-        assert!(script.starts_with("Set-Location -LiteralPath 'C:\\Users\\me\\it''s here'"), "{script}");
+        let script =
+            windows_powershell_script("npm test", std::path::Path::new(r"C:\Users\me\it's here"));
+        assert!(
+            script.starts_with("Set-Location -LiteralPath 'C:\\Users\\me\\it''s here'"),
+            "{script}"
+        );
         assert!(script.contains("npm test"));
         assert!(script.contains("$__cc_ok = $?"));
         assert!(script.contains(SHELL_STATE_SENTINEL));
@@ -1408,7 +1433,11 @@ mod windows_path_tests {
             60_000,
         )
         .await;
-        assert!(!second.is_error, "the next call should start in sub/: {}", text(&second));
+        assert!(
+            !second.is_error,
+            "the next call should start in sub/: {}",
+            text(&second)
+        );
         assert!(text(&second).contains('3'), "{}", text(&second));
     }
 
@@ -1443,7 +1472,11 @@ mod windows_path_tests {
             90_000,
         )
         .await;
-        assert!(text(&second).contains("一 sub"), "the next call should start in sub/: {}", text(&second));
+        assert!(
+            text(&second).contains("一 sub"),
+            "the next call should start in sub/: {}",
+            text(&second)
+        );
 
         let failed = run_windows(
             WindowsShell::PowerShell,
@@ -1465,7 +1498,11 @@ mod windows_path_tests {
             90_000,
         )
         .await;
-        assert!(native.is_error, "a native exit code is a failure: {}", text(&native));
+        assert!(
+            native.is_error,
+            "a native exit code is a failure: {}",
+            text(&native)
+        );
     }
 
     /// The output that used to stop the reader: a line in a language other

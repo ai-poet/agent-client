@@ -138,12 +138,10 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(
-                        div().flex_1().min_w_0().child(TextField::new(
-                            "cloud-sign-in-code",
-                            self.cloud_sign_in_input.clone(),
-                        )),
-                    )
+                    .child(div().flex_1().min_w_0().child(TextField::new(
+                        "cloud-sign-in-code",
+                        self.cloud_sign_in_input.clone(),
+                    )))
                     .child(submit),
             );
         if let Some(error) = error {
@@ -156,13 +154,16 @@ impl Waku {
             );
         }
         body = body.child(
-            div().flex().justify_end().child(self.sign_in_secondary_button(
-                "cloud-sign-in-cancel",
-                tr!("cloud.sign_in_dialog.cancel"),
-                theme,
-                cx,
-                |this, cx| this.cancel_cloud_sign_in(cx),
-            )),
+            div()
+                .flex()
+                .justify_end()
+                .child(self.sign_in_secondary_button(
+                    "cloud-sign-in-cancel",
+                    tr!("cloud.sign_in_dialog.cancel"),
+                    theme,
+                    cx,
+                    |this, cx| this.cancel_cloud_sign_in(cx),
+                )),
         );
 
         let card = div()
@@ -183,15 +184,10 @@ impl Waku {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(
-                        div()
-                            .text_size(sp(14.0))
-                            .text_color(theme.text)
-                            .child(tr!(
-                                "cloud.sign_in_dialog.title",
-                                name = sub2api::brand::DISPLAY_NAME
-                            )),
-                    )
+                    .child(div().text_size(sp(14.0)).text_color(theme.text).child(tr!(
+                        "cloud.sign_in_dialog.title",
+                        name = sub2api::brand::DISPLAY_NAME
+                    )))
                     .child(
                         div()
                             .id("cloud-sign-in-close")

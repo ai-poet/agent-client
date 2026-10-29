@@ -50,7 +50,10 @@ pub const STEP_COUNT: usize = Step::ALL.len();
 
 /// Which steps are done, from what the app already knows.
 pub fn steps(signed_in: bool, message_sent: bool) -> [(Step, bool); STEP_COUNT] {
-    [(Step::SignIn, signed_in), (Step::FirstMessage, message_sent)]
+    [
+        (Step::SignIn, signed_in),
+        (Step::FirstMessage, message_sent),
+    ]
 }
 
 pub fn all_done(steps: &[(Step, bool); STEP_COUNT]) -> bool {

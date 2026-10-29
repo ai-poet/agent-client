@@ -23,7 +23,9 @@ const SUPPORTED: bool = cfg!(any(
 /// show through. Opaque platforms keep the exact original color.
 pub fn background(theme: &Theme) -> Hsla {
     if SUPPORTED {
-        theme.raised.opacity(if theme.is_dark { 0.86 } else { 0.88 })
+        theme
+            .raised
+            .opacity(if theme.is_dark { 0.86 } else { 0.88 })
     } else {
         theme.raised
     }

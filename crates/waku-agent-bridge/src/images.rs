@@ -57,7 +57,11 @@ fn mentions(prompt: &str) -> Vec<&str> {
     let starts: Vec<usize> = prompt
         .char_indices()
         .filter(|&(index, ch)| {
-            ch == '@' && prompt[..index].chars().next_back().is_none_or(char::is_whitespace)
+            ch == '@'
+                && prompt[..index]
+                    .chars()
+                    .next_back()
+                    .is_none_or(char::is_whitespace)
         })
         .map(|(index, _)| index)
         .collect();
@@ -79,9 +83,9 @@ fn mentions(prompt: &str) -> Vec<&str> {
 fn picture_path(mention: &str, cwd: &Path) -> Option<PathBuf> {
     let mut candidate = mention;
     for _ in 0..MAX_CUTS {
-        let name = candidate
-            .trim_matches('"')
-            .trim_end_matches([',', '.', ';', ':', ')', '!', '?', '，', '。', '；', '：', '）', '！', '？']);
+        let name = candidate.trim_matches('"').trim_end_matches([
+            ',', '.', ';', ':', ')', '!', '?', '，', '。', '；', '：', '）', '！', '？',
+        ]);
         if has_picture_extension(name) {
             let path = Path::new(name);
             let path = if path.is_absolute() {
@@ -215,9 +219,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("notes.txt"), "hi").unwrap();
         std::fs::write(dir.path().join("fake.png"), "not a picture").unwrap();
-        for prompt in ["look at @notes.txt", "look at @missing.png", "look at @fake.png"] {
+        for prompt in [
+            "look at @notes.txt",
+            "look at @missing.png",
+            "look at @fake.png",
+        ] {
             let message = user_message(prompt.into(), dir.path());
-            assert!(matches!(message.content, MessageContent::Text(_)), "{prompt}");
+            assert!(
+                matches!(message.content, MessageContent::Text(_)),
+                "{prompt}"
+            );
         }
     }
 

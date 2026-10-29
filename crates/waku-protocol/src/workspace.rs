@@ -353,10 +353,10 @@ pub fn preview_kind(path: &str) -> Option<PreviewKind> {
         "docx" | "pptx" | "odt" | "odp" => PreviewKind::Document,
         "pdf" | "doc" | "ppt" | "zip" | "7z" | "rar" | "gz" | "tgz" | "xz" | "bz2" | "tar"
         | "exe" | "dll" | "so" | "dylib" | "bin" | "msi" | "dmg" | "pkg" | "deb" | "rpm"
-        | "apk" | "jar" | "class" | "wasm" | "o" | "a" | "lib" | "pdb" | "mp3" | "wav"
-        | "flac" | "ogg" | "m4a" | "aac" | "mp4" | "mov" | "avi" | "mkv" | "webm" | "wmv"
-        | "ttf" | "otf" | "woff" | "woff2" | "psd" | "ai" | "sketch" | "fig" | "heic"
-        | "avif" | "sqlite" | "db" | "parquet" | "pyc" => PreviewKind::Binary,
+        | "apk" | "jar" | "class" | "wasm" | "o" | "a" | "lib" | "pdb" | "mp3" | "wav" | "flac"
+        | "ogg" | "m4a" | "aac" | "mp4" | "mov" | "avi" | "mkv" | "webm" | "wmv" | "ttf"
+        | "otf" | "woff" | "woff2" | "psd" | "ai" | "sketch" | "fig" | "heic" | "avif"
+        | "sqlite" | "db" | "parquet" | "pyc" => PreviewKind::Binary,
         _ => return None,
     })
 }
@@ -384,10 +384,7 @@ pub enum FilePreview {
     },
     /// Nothing to draw: too large, a format the app cannot show, or one it
     /// could not read. `reason` is for the person.
-    Unavailable {
-        size: u64,
-        reason: Option<String>,
-    },
+    Unavailable { size: u64, reason: Option<String> },
 }
 
 /// One sheet of a spreadsheet, as much of it as a preview shows.

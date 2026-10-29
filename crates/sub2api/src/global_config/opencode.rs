@@ -87,7 +87,8 @@ fn read_config(path: &Path) -> Result<Value> {
 }
 
 fn write_config(path: &Path, root: &Value) -> Result<()> {
-    let mut encoded = serde_json::to_string_pretty(root).context("could not encode opencode.json")?;
+    let mut encoded =
+        serde_json::to_string_pretty(root).context("could not encode opencode.json")?;
     encoded.push('\n');
     atomic_write_private(path, encoded.as_bytes())
 }
@@ -131,8 +132,7 @@ mod tests {
         take_over(&dir, &target(&["gpt-x"])).expect("take over");
 
         let live: Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap())
-                .unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap()).unwrap();
         assert_eq!(live["theme"], "dark");
         assert_eq!(live["provider"]["mine"]["options"]["apiKey"], "user-key");
         let ours = &live["provider"][PROVIDER_ID];
@@ -143,8 +143,7 @@ mod tests {
 
         remove(&dir).expect("remove");
         let after: Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap())
-                .unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap()).unwrap();
         assert!(after["provider"].get(PROVIDER_ID).is_none());
         assert_eq!(after["provider"]["mine"]["options"]["apiKey"], "user-key");
         assert_eq!(after["theme"], "dark");
@@ -158,8 +157,7 @@ mod tests {
         let dir = temp_dir("fresh");
         take_over(&dir, &target(&[])).expect("take over");
         let live: Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap())
-                .unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap()).unwrap();
         assert_eq!(live["$schema"], SCHEMA_URL);
         // No models key when none were given — an empty map would render as
         // a provider with zero models rather than "unspecified".
@@ -172,7 +170,10 @@ mod tests {
         let dir = temp_dir("corrupt");
         std::fs::write(dir.join(CONFIG_FILE), "[1,2,3]").unwrap();
         assert!(take_over(&dir, &target(&[])).is_err());
-        assert_eq!(std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap(), "[1,2,3]");
+        assert_eq!(
+            std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap(),
+            "[1,2,3]"
+        );
         std::fs::write(dir.join(CONFIG_FILE), "{ nope").unwrap();
         assert!(take_over(&dir, &target(&[])).is_err());
         let _ = std::fs::remove_dir_all(&dir);

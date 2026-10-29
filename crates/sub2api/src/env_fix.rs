@@ -270,9 +270,7 @@ pub fn remove_with(
                     continue;
                 }
                 Err(error) => {
-                    report
-                        .errors
-                        .push(format!("{}: {error:#}", conflict.name));
+                    report.errors.push(format!("{}: {error:#}", conflict.name));
                     continue;
                 }
             },
@@ -287,9 +285,7 @@ pub fn remove_with(
                         original_line: Some(original_line),
                     }),
                     Err(error) => {
-                        report
-                            .errors
-                            .push(format!("{}: {error:#}", conflict.name));
+                        report.errors.push(format!("{}: {error:#}", conflict.name));
                         continue;
                     }
                 }
@@ -329,9 +325,7 @@ pub fn remove_with(
         };
         match outcome {
             Ok(()) => report.removed.push(conflict.name.clone()),
-            Err(error) => report
-                .errors
-                .push(format!("{}: {error:#}", conflict.name)),
+            Err(error) => report.errors.push(format!("{}: {error:#}", conflict.name)),
         }
     }
     Ok(report)
@@ -370,8 +364,8 @@ pub fn restore(path: &Path) -> Result<FixReport> {
 pub fn restore_with(path: &Path, env: &mut dyn EnvStore) -> Result<FixReport> {
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("could not read {}", path.display()))?;
-    let backup: Backup =
-        serde_json::from_str(&raw).with_context(|| format!("could not parse {}", path.display()))?;
+    let backup: Backup = serde_json::from_str(&raw)
+        .with_context(|| format!("could not parse {}", path.display()))?;
     let mut report = FixReport {
         backup_path: Some(path.to_owned()),
         ..FixReport::default()
@@ -452,8 +446,8 @@ pub fn comment_out_line(
     name: &str,
     now: i64,
 ) -> Result<(String, String)> {
-    let (start, end) = line_span(contents, line)
-        .ok_or_else(|| anyhow!("the file has no line {line} any more"))?;
+    let (start, end) =
+        line_span(contents, line).ok_or_else(|| anyhow!("the file has no line {line} any more"))?;
     let original = &contents[start..end];
     let assigns = crate::env_conflicts::parse_shell_exports(original)
         .into_iter()
@@ -593,15 +587,14 @@ mod tests {
             if self.fail_unset {
                 return Err(anyhow!("access denied"));
             }
-            self.values.remove(&(name.to_owned(), scope.as_powershell()));
+            self.values
+                .remove(&(name.to_owned(), scope.as_powershell()));
             Ok(())
         }
 
         fn set(&mut self, name: &str, value: &str, scope: EnvScope) -> Result<()> {
-            self.values.insert(
-                (name.to_owned(), scope.as_powershell()),
-                value.to_owned(),
-            );
+            self.values
+                .insert((name.to_owned(), scope.as_powershell()), value.to_owned());
             Ok(())
         }
     }
@@ -640,7 +633,10 @@ mod tests {
 
     #[test]
     fn plans_match_the_source() {
-        assert_eq!(plan(&user_conflict("ANTHROPIC_BASE_URL")), FixPlan::RemoveUserVar);
+        assert_eq!(
+            plan(&user_conflict("ANTHROPIC_BASE_URL")),
+            FixPlan::RemoveUserVar
+        );
         assert!(matches!(
             plan(&EnvConflict {
                 source: ConflictSource::WindowsMachine,
@@ -681,7 +677,10 @@ mod tests {
                 comment_out_line(&contents, 3, "ANTHROPIC_BASE_URL", 1700).expect(label);
             assert_eq!(seen, original, "{label}");
             assert!(updated.contains(&marker_for(&original, 1700)), "{label}");
-            assert!(!updated.contains(&format!("{newline}{original}{newline}")), "{label}");
+            assert!(
+                !updated.contains(&format!("{newline}{original}{newline}")),
+                "{label}"
+            );
             // Every other byte, the line endings and the trailing newline
             // included, is untouched.
             assert!(updated.contains("alias k=kubectl"), "{label}");
@@ -757,7 +756,11 @@ mod tests {
         assert_eq!(report.errors.len(), 1);
         // The value survived in the backup even though the removal failed.
         let path = report.backup_path.expect("backup path");
-        assert!(std::fs::read_to_string(path).unwrap().contains("sk-secret-value"));
+        assert!(
+            std::fs::read_to_string(path)
+                .unwrap()
+                .contains("sk-secret-value")
+        );
     }
 
     #[test]
@@ -787,7 +790,8 @@ mod tests {
     fn comments_out_a_shell_line_and_restores_it() {
         let dir = temp_dir("shell");
         let profile = dir.join(".zshrc");
-        let contents = "# setup\nexport ANTHROPIC_BASE_URL=\"https://a.example.org\"\nexport PATH=$PATH:/x\n";
+        let contents =
+            "# setup\nexport ANTHROPIC_BASE_URL=\"https://a.example.org\"\nexport PATH=$PATH:/x\n";
         std::fs::write(&profile, contents).expect("write profile");
         let mut store = MemoryStore::default();
         let report = remove_with(

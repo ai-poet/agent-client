@@ -16,8 +16,8 @@ use super::{
     TranscriptRowKind::*, active_navigation_turn_index, append_text_delta_to_session,
     assistant_response_footer, assistant_response_footer_index, assistant_response_footer_time,
     compact_driver_error, disclosure_leading_space, fenced_code, fitted_file_tree_width,
-    fitted_panel_widths, folded_transcript_row_kinds, format_worked_duration, insert_todo_row,
-    format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
+    fitted_panel_widths, folded_transcript_row_kinds, format_worked_duration,
+    format_working_elapsed, insert_todo_row, maintain_transcript_anchor, message_opens_turn,
     message_starts_followup_turn, navigation_preview_snippet, navigation_rail_fade_visibility,
     navigation_rail_height, navigation_rail_scale, paused_toast_duration, pop_stream_batch,
     push_transcript_activity, response_footer_message_index, response_row_turn_id,
@@ -1199,12 +1199,7 @@ fn a_steer_splits_the_turns_work_into_two_folds() {
     // with no heading of its own.
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new()),
-        vec![
-            Message(0),
-            TurnFold(turn_id, 0),
-            Message(1),
-            TurnBlock(1),
-        ]
+        vec![Message(0), TurnFold(turn_id, 0), Message(1), TurnBlock(1),]
     );
 
     session.push_message(MessageRole::Assistant, "Done.");
@@ -1233,7 +1228,13 @@ fn a_failed_turn_keeps_its_work_open() {
     session.transcript_blocks.push(TranscriptBlock {
         after_message: 1,
         turn_id: Some(turn_id),
-        activities: vec![ActivityItem::new(None, ActivityKind::Command, "cargo build", None, true)],
+        activities: vec![ActivityItem::new(
+            None,
+            ActivityKind::Command,
+            "cargo build",
+            None,
+            true,
+        )],
     });
     session.finish_active_turn(TurnStatus::Failed);
     assert_eq!(
@@ -2133,12 +2134,21 @@ fn the_todo_row_sits_right_above_the_working_row() {
     insert_todo_row(&mut rows);
     assert_eq!(
         rows,
-        vec![Message(0), Message(1), TodoList, WorkingIndicator, PendingSteer(0)]
+        vec![
+            Message(0),
+            Message(1),
+            TodoList,
+            WorkingIndicator,
+            PendingSteer(0)
+        ]
     );
 
     let mut waiting = vec![Message(0), Message(1), PendingSteer(0)];
     insert_todo_row(&mut waiting);
-    assert_eq!(waiting, vec![Message(0), Message(1), TodoList, PendingSteer(0)]);
+    assert_eq!(
+        waiting,
+        vec![Message(0), Message(1), TodoList, PendingSteer(0)]
+    );
 
     let mut plain = vec![Message(0), Message(1)];
     insert_todo_row(&mut plain);
@@ -2352,7 +2362,10 @@ fn the_built_in_agents_api_is_decided_by_the_model() {
     );
     // The one that used to default to Messages and get hijacked to the
     // engine's own xai provider.
-    assert_eq!(native_wire_format(None, Some("grok::grok-4.6")), "responses");
+    assert_eq!(
+        native_wire_format(None, Some("grok::grok-4.6")),
+        "responses"
+    );
     assert_eq!(
         native_wire_format(Some("messages"), Some("grok::grok-4.6")),
         "responses"
@@ -2428,7 +2441,10 @@ fn the_signed_out_fallback_is_filed_under_anthropic() {
         .collect();
     assert_eq!(
         column,
-        [("anthropic".to_owned(), fallback.len()), ("custom".to_owned(), 0)]
+        [
+            ("anthropic".to_owned(), fallback.len()),
+            ("custom".to_owned(), 0)
+        ]
     );
 }
 
@@ -2475,7 +2491,11 @@ fn the_built_in_agents_list_is_filed_by_vendor() {
     // The user's own endpoint keeps its models, whatever they are called,
     // under the endpoint itself.
     assert_eq!(list("custom:pr-1", ""), ["custom:pr-1::deepseek-local"]);
-    assert!(list("deepseek", "").iter().all(|id| !id.starts_with("custom:")));
+    assert!(
+        list("deepseek", "")
+            .iter()
+            .all(|id| !id.starts_with("custom:"))
+    );
     // A search crosses vendors, and finds an endpoint's models by its name.
     assert_eq!(
         list("zhipu", "deepseek"),
@@ -2747,7 +2767,10 @@ fn an_unknown_model_falls_back_to_its_bare_name() {
 
     let models = vec![ProviderModel::new("claude-sonnet-5", "Claude Sonnet 5")];
     assert!(find_model(&models, "anthropic::something-else").is_none());
-    assert_eq!(bare_model_name("anthropic::something-else"), "something-else");
+    assert_eq!(
+        bare_model_name("anthropic::something-else"),
+        "something-else"
+    );
     assert_eq!(bare_model_name("my-own-model"), "my-own-model");
 }
 
@@ -2785,7 +2808,10 @@ fn each_route_names_the_path_its_adapter_requests() {
     assert_eq!(NativeEndpoint::Chat.request_path(), "/v1/chat/completions");
 
     // Distinct, and each one absolute — they are appended to an origin.
-    let paths: Vec<&str> = NativeEndpoint::ALL.iter().map(|e| e.request_path()).collect();
+    let paths: Vec<&str> = NativeEndpoint::ALL
+        .iter()
+        .map(|e| e.request_path())
+        .collect();
     assert!(paths.iter().all(|path| path.starts_with('/')));
     let mut unique = paths.clone();
     unique.sort_unstable();

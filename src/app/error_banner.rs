@@ -41,10 +41,19 @@ pub(super) fn remedy(kind: Option<TurnFailureKind>) -> Remedy {
         Some(Kind::ContextOverflow) => (false, Some(Fix::Compact)),
         Some(Kind::Auth | Kind::Quota | Kind::Forbidden) => (false, Some(Fix::Credentials)),
         Some(Kind::ContentPolicy | Kind::BadRequest) => (false, None),
-        Some(Kind::RateLimited | Kind::Network | Kind::Unavailable | Kind::Interrupted | Kind::Unknown)
+        Some(
+            Kind::RateLimited
+            | Kind::Network
+            | Kind::Unavailable
+            | Kind::Interrupted
+            | Kind::Unknown,
+        )
         | None => (true, None),
     };
-    Remedy { continue_allowed, fix }
+    Remedy {
+        continue_allowed,
+        fix,
+    }
 }
 
 impl Waku {
@@ -134,22 +143,28 @@ impl Waku {
         match fix {
             Some(Fix::Compact) => {
                 actions = actions.child(
-                    button("compact", tr!("error_banner.compact"), true).on_activation(
-                        cx,
-                        move |this, _, cx| this.compact_failed_turn(session_id, cx),
-                    ),
+                    button("compact", tr!("error_banner.compact"), true)
+                        .on_activation(cx, move |this, _, cx| {
+                            this.compact_failed_turn(session_id, cx)
+                        }),
                 );
             }
             Some(Fix::Credentials) => {
                 let (label, page) = if custom_endpoint {
-                    (tr!("error_banner.model_providers"), SettingsPage::ModelProviders)
+                    (
+                        tr!("error_banner.model_providers"),
+                        SettingsPage::ModelProviders,
+                    )
                 } else {
-                    (tr!("error_banner.account_settings"), SettingsPage::CloudAccount)
+                    (
+                        tr!("error_banner.account_settings"),
+                        SettingsPage::CloudAccount,
+                    )
                 };
-                actions = actions.child(button("credentials", label, true).on_activation(
-                    cx,
-                    move |this, _, cx| this.open_settings_page(page, cx),
-                ));
+                actions = actions.child(
+                    button("credentials", label, true)
+                        .on_activation(cx, move |this, _, cx| this.open_settings_page(page, cx)),
+                );
             }
             None => {}
         }
@@ -174,16 +189,14 @@ impl Waku {
                     this.retry_failed_turn(session_id, cx);
                 }),
             )
-            .child(
-                button("copy", tr!("common.copy"), false).on_activation(
-                    cx,
-                    move |this, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
-                        this.show_toast(tr!("common.copied"));
-                        cx.notify();
-                    },
-                ),
-            );
+            .child(button("copy", tr!("common.copy"), false).on_activation(
+                cx,
+                move |this, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
+                    this.show_toast(tr!("common.copied"));
+                    cx.notify();
+                },
+            ));
         if long {
             let label = if details_open {
                 tr!("error_banner.hide_details")
@@ -290,7 +303,9 @@ impl Waku {
             exhausted_subscription: subscriptions.iter().any(|subscription| {
                 super::cloud_subscriptions::subscription_windows(subscription)
                     .iter()
-                    .any(|(_, window)| window.limit_usd > 0.0 && window.used_usd >= window.limit_usd)
+                    .any(|(_, window)| {
+                        window.limit_usd > 0.0 && window.used_usd >= window.limit_usd
+                    })
             }),
         };
         let paywall = sub2api::paywall::classify(message, &state)?;
@@ -320,7 +335,9 @@ impl Waku {
             return true;
         }
         let config = self.custom_api_snapshot();
-        slots.iter().any(|slot| config.routed_endpoint(slot).is_some())
+        slots
+            .iter()
+            .any(|slot| config.routed_endpoint(slot).is_some())
     }
 
     /// Put the banner away for this turn. The choice is kept on the turn, so
@@ -355,21 +372,30 @@ mod tests {
     #[test]
     fn remedies_follow_the_failure_kind() {
         use TurnFailureKind as Kind;
-        assert_eq!(remedy(Some(Kind::ContextOverflow)), Remedy {
-            continue_allowed: false,
-            fix: Some(Fix::Compact)
-        });
-        for kind in [Kind::Auth, Kind::Quota, Kind::Forbidden] {
-            assert_eq!(remedy(Some(kind)), Remedy {
+        assert_eq!(
+            remedy(Some(Kind::ContextOverflow)),
+            Remedy {
                 continue_allowed: false,
-                fix: Some(Fix::Credentials)
-            });
+                fix: Some(Fix::Compact)
+            }
+        );
+        for kind in [Kind::Auth, Kind::Quota, Kind::Forbidden] {
+            assert_eq!(
+                remedy(Some(kind)),
+                Remedy {
+                    continue_allowed: false,
+                    fix: Some(Fix::Credentials)
+                }
+            );
         }
         for kind in [Kind::ContentPolicy, Kind::BadRequest] {
-            assert_eq!(remedy(Some(kind)), Remedy {
-                continue_allowed: false,
-                fix: None
-            });
+            assert_eq!(
+                remedy(Some(kind)),
+                Remedy {
+                    continue_allowed: false,
+                    fix: None
+                }
+            );
         }
         // Transient failures, unnamed ones and kinds from a newer build keep
         // the actions every failure had.
@@ -381,10 +407,13 @@ mod tests {
             Some(Kind::Unknown),
             None,
         ] {
-            assert_eq!(remedy(kind), Remedy {
-                continue_allowed: true,
-                fix: None
-            });
+            assert_eq!(
+                remedy(kind),
+                Remedy {
+                    continue_allowed: true,
+                    fix: None
+                }
+            );
         }
     }
 }

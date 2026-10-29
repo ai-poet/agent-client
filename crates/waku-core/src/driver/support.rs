@@ -184,9 +184,7 @@ fn build_claude_computer_use_config(
     if let Err(error) = built {
         // The server is the capability; the skill is its manual. Losing the
         // manual is worth a warning, not a failed session.
-        eprintln!(
-            "warning: the Computer Use plugin directory could not be built: {error}"
-        );
+        eprintln!("warning: the Computer Use plugin directory could not be built: {error}");
         return Ok(HeadlessComputerUseConfig::Claude {
             mcp_config,
             plugin_dir: None,
@@ -803,9 +801,8 @@ mod tests {
         let root = std::env::temp_dir().join("waku-acp-servers");
         let base = sample_base(&root);
 
-        let servers = acp_computer_use_servers(Some(&HeadlessComputerUseConfig::Acp {
-            base: base.clone(),
-        }));
+        let servers =
+            acp_computer_use_servers(Some(&HeadlessComputerUseConfig::Acp { base: base.clone() }));
         assert_eq!(servers.len(), 1);
         let agent_client_protocol::schema::v1::McpServer::Stdio(stdio) = &servers[0] else {
             panic!("the stdio transport is the one every agent must support");

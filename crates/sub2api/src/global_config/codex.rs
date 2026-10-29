@@ -97,9 +97,12 @@ pub fn take_over(codex_dir: &Path, target: &RouteTarget, backups: &mut CliBackup
     let providers = root
         .entry("model_providers")
         .or_insert(Item::Table(Table::new()));
-    let providers = providers
-        .as_table_mut()
-        .ok_or_else(|| anyhow!("`model_providers` in {} is not a table", config_path.display()))?;
+    let providers = providers.as_table_mut().ok_or_else(|| {
+        anyhow!(
+            "`model_providers` in {} is not a table",
+            config_path.display()
+        )
+    })?;
     // Implicit: render only [model_providers.OpenAI], no bare header.
     providers.set_implicit(true);
     providers.remove(LEGACY_PROVIDER);
@@ -318,7 +321,11 @@ mod tests {
             "# keep this comment\nmodel = \"my-own\"\n\n[mcp_servers.files]\ncommand = \"fs\"\n\n[model_providers.mine]\nname = \"Mine\"\nbase_url = \"https://mine.example.org/v1\"\n",
         )
         .unwrap();
-        std::fs::write(dir.join(AUTH_FILE), r#"{"tokens":{"access_token":"oauth"}}"#).unwrap();
+        std::fs::write(
+            dir.join(AUTH_FILE),
+            r#"{"tokens":{"access_token":"oauth"}}"#,
+        )
+        .unwrap();
 
         let mut backups = BTreeMap::new();
         take_over(&dir, &target("sk-gw"), &mut backups).expect("take over");
@@ -326,7 +333,10 @@ mod tests {
         let live = std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap();
         assert!(live.contains("# keep this comment"));
         assert!(live.contains("[mcp_servers.files]"));
-        assert!(live.contains("[model_providers.mine]"), "user table kept: {live}");
+        assert!(
+            live.contains("[model_providers.mine]"),
+            "user table kept: {live}"
+        );
         assert!(live.contains("[model_providers.OpenAI]"));
         // Somebody else's endpoint keeps the versioned path.
         assert!(live.contains(r#"base_url = "https://gw.example.org/v1""#));
@@ -421,11 +431,7 @@ mod tests {
     #[test]
     fn the_gateway_gets_the_documented_shape() {
         let dir = temp_dir("documented");
-        std::fs::write(
-            dir.join(CONFIG_FILE),
-            "[features]\nweb_search = true\n",
-        )
-        .unwrap();
+        std::fs::write(dir.join(CONFIG_FILE), "[features]\nweb_search = true\n").unwrap();
         let mut backups = BTreeMap::new();
         take_over(&dir, &gateway("sk-gw"), &mut backups).expect("take over");
 
@@ -437,20 +443,38 @@ mod tests {
         assert_eq!(document["model"].as_str(), Some("gpt-5.6-sol"));
         assert_eq!(document["review_model"].as_str(), Some("gpt-5.6-terra"));
         assert_eq!(document["model_reasoning_effort"].as_str(), Some("xhigh"));
-        assert_eq!(document["model_context_window"].as_integer(), Some(1_000_000));
-        assert_eq!(document["model_auto_compact_token_limit"].as_integer(), Some(900_000));
+        assert_eq!(
+            document["model_context_window"].as_integer(),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            document["model_auto_compact_token_limit"].as_integer(),
+            Some(900_000)
+        );
         let provider = &document["model_providers"]["OpenAI"];
         assert_eq!(provider["name"].as_str(), Some("OpenAI"));
-        assert_eq!(provider["base_url"].as_str(), Some("https://gw.example.org"));
+        assert_eq!(
+            provider["base_url"].as_str(),
+            Some("https://gw.example.org")
+        );
         assert_eq!(provider["wire_api"].as_str(), Some("responses"));
         assert_eq!(provider["requires_openai_auth"].as_bool(), Some(false));
-        assert_eq!(provider["experimental_bearer_token"].as_str(), Some("sk-gw"));
+        assert_eq!(
+            provider["experimental_bearer_token"].as_str(),
+            Some("sk-gw")
+        );
         assert_eq!(
             provider["http_headers"]["x-openai-actor-authorization"].as_str(),
             Some("local-image-extension")
         );
-        assert_eq!(document["features"]["image_generation"].as_bool(), Some(true));
-        assert_eq!(document["features"]["remote_compaction_v2"].as_bool(), Some(true));
+        assert_eq!(
+            document["features"]["image_generation"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            document["features"]["remote_compaction_v2"].as_bool(),
+            Some(true)
+        );
         assert_eq!(document["features"]["web_search"].as_bool(), Some(true));
         assert!(!dir.join(AUTH_FILE).exists());
 
@@ -482,9 +506,18 @@ mod tests {
             .parse()
             .unwrap();
         let provider = &document["model_providers"]["OpenAI"];
-        assert_eq!(provider["experimental_bearer_token"].as_str(), Some("sk-mine"));
-        assert_eq!(provider["base_url"].as_str(), Some("https://mine.example.org"));
-        assert_eq!(document["features"]["image_generation"].as_bool(), Some(false));
+        assert_eq!(
+            provider["experimental_bearer_token"].as_str(),
+            Some("sk-mine")
+        );
+        assert_eq!(
+            provider["base_url"].as_str(),
+            Some("https://mine.example.org")
+        );
+        assert_eq!(
+            document["features"]["image_generation"].as_bool(),
+            Some(false)
+        );
         assert!(document["features"].get("remote_compaction_v2").is_none());
         assert_eq!(document["model_provider"].as_str(), Some("OpenAI"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -517,11 +550,18 @@ mod tests {
         );
         assert!(!backups.contains_key(AUTH_FILE));
         let live = std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap();
-        assert!(!live.contains(&format!("[model_providers.{PROVIDER_ID}]")), "{live}");
+        assert!(
+            !live.contains(&format!("[model_providers.{PROVIDER_ID}]")),
+            "{live}"
+        );
 
         // Signed in over since: the backup is dropped, the file kept.
         let dir2 = temp_dir("legacy-signed-in");
-        std::fs::write(dir2.join(AUTH_FILE), r#"{"tokens":{"access_token":"newer"}}"#).unwrap();
+        std::fs::write(
+            dir2.join(AUTH_FILE),
+            r#"{"tokens":{"access_token":"newer"}}"#,
+        )
+        .unwrap();
         let mut backups = BTreeMap::from([(
             AUTH_FILE.to_owned(),
             super::super::FileBackup {

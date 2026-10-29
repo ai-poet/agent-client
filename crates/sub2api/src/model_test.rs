@@ -174,8 +174,18 @@ mod tests {
             5,
         );
         assert_eq!(url, "https://relay.example.org/v1/messages");
-        assert!(request.header_lines().iter().any(|line| line == "x-api-key: sk-a"));
-        assert!(request.header_lines().iter().any(|line| line.starts_with("anthropic-version")));
+        assert!(
+            request
+                .header_lines()
+                .iter()
+                .any(|line| line == "x-api-key: sk-a")
+        );
+        assert!(
+            request
+                .header_lines()
+                .iter()
+                .any(|line| line.starts_with("anthropic-version"))
+        );
         let body = body_of(&request);
         assert_eq!(body["model"], "claude-sonnet-5-5");
         assert_eq!(body["max_tokens"], 1);
@@ -267,7 +277,12 @@ mod tests {
         assert_eq!(result.detail, "no available channel for model x");
         assert!(result.body.is_empty());
 
-        let ok = read_answer(answered(200, ProbeVerdict::Ok, "", r#"{"id":"x","error":null}"#));
+        let ok = read_answer(answered(
+            200,
+            ProbeVerdict::Ok,
+            "",
+            r#"{"id":"x","error":null}"#,
+        ));
         assert_eq!(ok.verdict, ProbeVerdict::Ok);
         assert!(ok.body.is_empty(), "the answer itself is not kept");
     }

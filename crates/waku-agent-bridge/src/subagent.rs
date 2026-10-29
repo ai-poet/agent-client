@@ -600,10 +600,13 @@ impl Tool for SubagentTool {
                     Some(claurst_core::tasks::TaskStatus::Cancelled)
                 );
                 if !cancelled {
-                    registry.update_status(&id, match status_of(&outcome, stopped) {
-                        SubagentStatus::Completed => claurst_core::tasks::TaskStatus::Completed,
-                        _ => claurst_core::tasks::TaskStatus::Failed(text.clone()),
-                    });
+                    registry.update_status(
+                        &id,
+                        match status_of(&outcome, stopped) {
+                            SubagentStatus::Completed => claurst_core::tasks::TaskStatus::Completed,
+                            _ => claurst_core::tasks::TaskStatus::Failed(text.clone()),
+                        },
+                    );
                 }
                 finish(&host, &id, &outcome, stopped, started);
             });
@@ -669,11 +672,7 @@ struct ChildRun {
 impl ChildRun {
     async fn run(self) -> QueryOutcome {
         let (tx, rx) = mpsc::unbounded_channel::<QueryEvent>();
-        let forwarder = tokio::spawn(forward_child(
-            self.host.clone(),
-            self.parent_id.clone(),
-            rx,
-        ));
+        let forwarder = tokio::spawn(forward_child(self.host.clone(), self.parent_id.clone(), rx));
         let mut messages = vec![Message::user(self.prompt)];
         let outcome = claurst_query::run_query_loop(
             self.client.as_ref(),
@@ -948,10 +947,8 @@ pub(crate) fn child_template(
 /// left on, the same MCP tools, minus [`CHILD_EXCLUDED_TOOLS`], narrowed to
 /// `allowed` when the call names a list.
 pub(crate) fn child_tool_set(ctx: &ToolContext, allowed: Option<&[String]>) -> Vec<Box<dyn Tool>> {
-    let mut tools = crate::session::engine_tools(
-        &ctx.config.disallowed_tools,
-        ctx.mcp_manager.as_ref(),
-    );
+    let mut tools =
+        crate::session::engine_tools(&ctx.config.disallowed_tools, ctx.mcp_manager.as_ref());
     tools.retain(|tool| !CHILD_EXCLUDED_TOOLS.contains(&tool.name()));
     if let Some(allowed) = allowed.filter(|allowed| !allowed.is_empty()) {
         tools.retain(|tool| allowed.iter().any(|name| name == tool.name()));
@@ -1050,8 +1047,7 @@ mod tests {
     #[test]
     fn a_claim_nothing_answers_gives_up() {
         let (host, _) = host();
-        let claimed =
-            runtime().block_on(host.claim("Nobody", "p", Duration::from_millis(20)));
+        let claimed = runtime().block_on(host.claim("Nobody", "p", Duration::from_millis(20)));
         assert!(claimed.is_none());
     }
 
@@ -1063,7 +1059,10 @@ mod tests {
         host.announce("first", &call("Same", "same"));
         host.announce("second", &call("Same", "same"));
         assert_eq!(host.take_match("Same", "same").as_deref(), Some("first"));
-        assert_eq!(host.take_match("Rewritten", "by a hook").as_deref(), Some("second"));
+        assert_eq!(
+            host.take_match("Rewritten", "by a hook").as_deref(),
+            Some("second")
+        );
         assert_eq!(host.take_match("Same", "same"), None);
     }
 
@@ -1115,7 +1114,11 @@ mod tests {
                 detail: "HTTP 529: Overloaded".into(),
                 between_turns: false,
             }),
-            Some(SubagentEvent::Retry { attempt: 2, discarded_output: true, .. })
+            Some(SubagentEvent::Retry {
+                attempt: 2,
+                discarded_output: true,
+                ..
+            })
         ));
         assert!(child_event(AgentEvent::Error("boom".into())).is_none());
     }
@@ -1145,8 +1148,14 @@ mod tests {
                 true
             )
         );
-        assert_eq!(format_outcome(&QueryOutcome::Cancelled), "[Agent was cancelled]");
-        assert_eq!(status_of(&QueryOutcome::Cancelled, false), SubagentStatus::Stopped);
+        assert_eq!(
+            format_outcome(&QueryOutcome::Cancelled),
+            "[Agent was cancelled]"
+        );
+        assert_eq!(
+            status_of(&QueryOutcome::Cancelled, false),
+            SubagentStatus::Stopped
+        );
         assert_eq!(
             status_of(
                 &QueryOutcome::BudgetExceeded {
@@ -1159,7 +1168,10 @@ mod tests {
         );
         // Whatever the loop answered, a child the user stopped was stopped.
         assert_eq!(
-            status_of(&QueryOutcome::Error(claurst_core::error::ClaudeError::Other("x".into())), true),
+            status_of(
+                &QueryOutcome::Error(claurst_core::error::ClaudeError::Other("x".into())),
+                true
+            ),
             SubagentStatus::Stopped
         );
     }
@@ -1177,7 +1189,10 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(input.description, "Find it");
-        assert_eq!(input.tools.as_deref(), Some(&["Read".to_owned(), "Grep".to_owned()][..]));
+        assert_eq!(
+            input.tools.as_deref(),
+            Some(&["Read".to_owned(), "Grep".to_owned()][..])
+        );
         assert_eq!(input.max_turns, Some(4));
         assert!(input.run_in_background);
     }
@@ -1427,7 +1442,10 @@ mod tests {
         parent.continuation = claurst_query::ContinuationMode::Goal;
         let child = child_template(&parent, &Config::default(), &options);
         assert!(child.command_queue.is_none());
-        assert!(matches!(child.continuation, claurst_query::ContinuationMode::Default));
+        assert!(matches!(
+            child.continuation,
+            claurst_query::ContinuationMode::Default
+        ));
         let rules = child.append_system_prompt.unwrap();
         assert!(rules.contains("You are a sub-agent"));
         assert!(rules.contains("plan mode: research and report only"));
@@ -1439,8 +1457,14 @@ mod tests {
     /// reply, not a file, is the report.
     #[test]
     fn the_child_is_told_what_to_do_with_a_step_that_needs_approval() {
-        assert!(SUBAGENT_RULE.contains("need the user's approval"), "{SUBAGENT_RULE}");
-        assert!(SUBAGENT_RULE.contains("do not write it to a file"), "{SUBAGENT_RULE}");
+        assert!(
+            SUBAGENT_RULE.contains("need the user's approval"),
+            "{SUBAGENT_RULE}"
+        );
+        assert!(
+            SUBAGENT_RULE.contains("do not write it to a file"),
+            "{SUBAGENT_RULE}"
+        );
     }
 
     /// Lost line continuations would leave runs of spaces in text the model
@@ -1465,10 +1489,11 @@ mod tests {
             assert!(!names.iter().any(|name| name == excluded), "{excluded}");
         }
         assert!(names.iter().any(|name| name == "Read"));
-        let narrowed: Vec<String> = child_tool_set(&ctx, Some(&["Read".to_owned(), "Agent".to_owned()]))
-            .iter()
-            .map(|tool| tool.name().to_owned())
-            .collect();
+        let narrowed: Vec<String> =
+            child_tool_set(&ctx, Some(&["Read".to_owned(), "Agent".to_owned()]))
+                .iter()
+                .map(|tool| tool.name().to_owned())
+                .collect();
         assert_eq!(narrowed, ["Read"]);
     }
 

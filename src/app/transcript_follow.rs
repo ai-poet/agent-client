@@ -112,15 +112,30 @@ mod tests {
 
     #[test]
     fn the_button_appears_late_and_leaves_late() {
-        assert_eq!(jump_visibility(false, Some(true), Some(100.0), 100.0), Some(false));
-        assert_eq!(jump_visibility(false, Some(true), Some(400.0), 400.0), Some(true));
-        assert_eq!(jump_visibility(true, Some(true), Some(100.0), 100.0), Some(true));
-        assert_eq!(jump_visibility(true, Some(true), Some(1.0), 1.0), Some(false));
+        assert_eq!(
+            jump_visibility(false, Some(true), Some(100.0), 100.0),
+            Some(false)
+        );
+        assert_eq!(
+            jump_visibility(false, Some(true), Some(400.0), 400.0),
+            Some(true)
+        );
+        assert_eq!(
+            jump_visibility(true, Some(true), Some(100.0), 100.0),
+            Some(true)
+        );
+        assert_eq!(
+            jump_visibility(true, Some(true), Some(1.0), 1.0),
+            Some(false)
+        );
     }
 
     #[test]
     fn upstream_reasons_to_hide_win() {
-        assert_eq!(jump_visibility(true, Some(false), Some(900.0), 900.0), Some(false));
+        assert_eq!(
+            jump_visibility(true, Some(false), Some(900.0), 900.0),
+            Some(false)
+        );
     }
 
     #[test]

@@ -29,9 +29,9 @@ use std::rc::Rc;
 use gpui::{
     AnyElement, App, Bounds, Display, Element, ElementId, FocusHandle, FontWeight, GlobalElementId,
     InspectorElementId, InteractiveElement, IntoElement, KeyDownEvent, LayoutId, MouseButton,
-    MouseDownEvent, ParentElement, Pixels, Point, Position, RenderOnce, SharedString, Size, Style,
-    StatefulInteractiveElement, Styled, Window, actions, anchored, canvas, deferred, div, img,
-    prelude::FluentBuilder, px,
+    MouseDownEvent, ParentElement, Pixels, Point, Position, RenderOnce, SharedString, Size,
+    StatefulInteractiveElement, Style, Styled, Window, actions, anchored, canvas, deferred, div,
+    img, prelude::FluentBuilder, px,
 };
 
 // Fork: entrance/exit motion, dismiss-only outside presses, submenu hover intent.
@@ -1152,36 +1152,45 @@ fn render_menu_item(
             let hover_handle = handle.clone();
             let click_handle = handle.clone();
             let origin_handle = handle.clone();
-            menu_motion::track_submenu_origin(row(index, highlighted, theme, handle, None), origin_handle, index)
-                .cursor_default()
-                .hover(move |element| element.bg(hover))
-                .text_color(theme.text_secondary)
-                .on_hover(move |hovered, window, cx| {
-                    if *hovered {
-                        if menu_motion::defer_hover(&hover_handle, menu_motion::PendingHover::Submenu(index), window, cx) {
-                            return;
-                        }
-                        open_submenu(&hover_handle, index, false);
-                        menu_motion::submenu_entered(&hover_handle, window);
-                        window.refresh();
+            menu_motion::track_submenu_origin(
+                row(index, highlighted, theme, handle, None),
+                origin_handle,
+                index,
+            )
+            .cursor_default()
+            .hover(move |element| element.bg(hover))
+            .text_color(theme.text_secondary)
+            .on_hover(move |hovered, window, cx| {
+                if *hovered {
+                    if menu_motion::defer_hover(
+                        &hover_handle,
+                        menu_motion::PendingHover::Submenu(index),
+                        window,
+                        cx,
+                    ) {
+                        return;
                     }
-                })
-                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                    open_submenu(&click_handle, index, false);
+                    open_submenu(&hover_handle, index, false);
+                    menu_motion::submenu_entered(&hover_handle, window);
                     window.refresh();
-                    cx.stop_propagation();
-                })
-                .child(div().flex_1().min_w_0().truncate().child(label))
-                .when_some(value, |element, value| {
-                    element.child(
-                        div()
-                            .flex_none()
-                            .text_color(theme.text_tertiary)
-                            .child(value),
-                    )
-                })
-                .child(icon("icons/chevron-right.svg", 10.0, theme.text_tertiary))
-                .into_any_element()
+                }
+            })
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                open_submenu(&click_handle, index, false);
+                window.refresh();
+                cx.stop_propagation();
+            })
+            .child(div().flex_1().min_w_0().truncate().child(label))
+            .when_some(value, |element, value| {
+                element.child(
+                    div()
+                        .flex_none()
+                        .text_color(theme.text_tertiary)
+                        .child(value),
+                )
+            })
+            .child(icon("icons/chevron-right.svg", 10.0, theme.text_tertiary))
+            .into_any_element()
         }
         MenuItem::Custom { render, on_click } => {
             let body = render(window, cx);
@@ -1222,7 +1231,14 @@ fn track_pointer_highlight(
             if !*hovered {
                 return;
             }
-            if !in_submenu && menu_motion::defer_hover(&handle, menu_motion::PendingHover::Highlight(index), window, cx) {
+            if !in_submenu
+                && menu_motion::defer_hover(
+                    &handle,
+                    menu_motion::PendingHover::Highlight(index),
+                    window,
+                    cx,
+                )
+            {
                 return;
             }
             let mut state = handle.state.borrow_mut();
@@ -1753,11 +1769,9 @@ mod tests {
 
     #[test]
     fn submenus_are_focusable() {
-        let items = vec![MenuItem::submenu_with_value(
-            "Grouping",
-            "Updated",
-            |_| Vec::new(),
-        )];
+        let items = vec![MenuItem::submenu_with_value("Grouping", "Updated", |_| {
+            Vec::new()
+        })];
         assert_eq!(*focusable_indexes(&items), vec![0]);
     }
 

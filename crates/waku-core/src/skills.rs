@@ -453,7 +453,10 @@ pub fn install_bundled_skill(name: &str, roots: &[PathBuf]) -> Result<(), String
         .join(BUNDLED_SKILL_NAME)
         .join(SKILL_FILE);
     let contents = std::fs::read_to_string(&source).map_err(|error| {
-        format!("the bundled skill at {} could not be read: {error}", source.display())
+        format!(
+            "the bundled skill at {} could not be read: {error}",
+            source.display()
+        )
     })?;
 
     let allowed: Vec<PathBuf> = bundled_skill_targets()

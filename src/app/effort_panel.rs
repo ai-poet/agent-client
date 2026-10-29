@@ -24,10 +24,9 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    Bounds, BoxShadow, ContentMask, CursorStyle, Div, DispatchPhase, HitboxBehavior, Hsla,
+    Bounds, BoxShadow, ContentMask, CursorStyle, DispatchPhase, Div, HitboxBehavior, Hsla,
     KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Role,
-    Stateful,
-    canvas, fill, linear_color_stop, linear_gradient, point, rgb, rgba, size,
+    Stateful, canvas, fill, linear_color_stop, linear_gradient, point, rgb, rgba, size,
 };
 
 use super::effort_fire::{FireFrame, paint_fire};
@@ -119,7 +118,8 @@ struct Glide {
 
 impl Glide {
     fn at(&self, now: Instant) -> Option<f32> {
-        let progress = now.saturating_duration_since(self.started).as_secs_f32() / GLIDE.as_secs_f32();
+        let progress =
+            now.saturating_duration_since(self.started).as_secs_f32() / GLIDE.as_secs_f32();
         if progress >= 1.0 {
             return None;
         }
@@ -311,7 +311,8 @@ impl EffortCard {
     }
 
     fn apply_row(&mut self, stop: usize, cx: &mut Context<Self>) {
-        let (Some(row), Some(session_id)) = (self.spec.row_at_stop(stop).cloned(), self.spec.session_id)
+        let (Some(row), Some(session_id)) =
+            (self.spec.row_at_stop(stop).cloned(), self.spec.session_id)
         else {
             return;
         };
@@ -416,13 +417,11 @@ impl EffortCard {
                     // gpui has no text-shadow: the glow is a soft blurred
                     // box behind the name.
                     .when_some(glow, |element, glow| {
-                        element.child(
-                            div().absolute().inset_0().rounded(px(6.0)).shadow(vec![
+                        element.child(div().absolute().inset_0().rounded(px(6.0)).shadow(vec![
                                 BoxShadow::new(px(0.0), px(0.0), glow.color.opacity(0.45))
                                     .blur_radius(px(glow.blur))
                                     .spread_radius(px(-2.0)),
-                            ]),
-                        )
+                            ]))
                     })
                     .child(
                         div()
@@ -810,13 +809,11 @@ fn paint_track(window: &mut Window, bounds: Bounds<Pixels>, paint: &TrackPaint) 
             origin: point(thumb_center - px(THUMB / 2.0), middle - px(THUMB / 2.0)),
             size: size(px(THUMB), px(THUMB)),
         };
-        let mut shadows = vec![
-            BoxShadow::new(px(0.0), px(2.0), rgba(0x00000080).into()).blur_radius(px(8.0)),
-        ];
+        let mut shadows =
+            vec![BoxShadow::new(px(0.0), px(2.0), rgba(0x00000080).into()).blur_radius(px(8.0))];
         if paint.dragging {
-            shadows.push(
-                BoxShadow::new(px(0.0), px(0.0), scale::purple(0.35)).blur_radius(px(20.0)),
-            );
+            shadows
+                .push(BoxShadow::new(px(0.0), px(0.0), scale::purple(0.35)).blur_radius(px(20.0)));
         }
         if let Some(ring) = paint.focus_ring {
             shadows.push(BoxShadow::new(px(0.0), px(0.0), ring).spread_radius(px(2.0)));
@@ -1019,11 +1016,16 @@ impl Waku {
             card.update(cx, |card, _| card.sync(spec));
         }
         let card = self.effort_card.clone();
-        Some(popover(chip, &handle, MenuAlign::AboveLeft, move |_, _, _| {
-            card.clone()
-                .map(|card| card.into_any_element())
-                .unwrap_or_else(|| div().into_any_element())
-        }))
+        Some(popover(
+            chip,
+            &handle,
+            MenuAlign::AboveLeft,
+            move |_, _, _| {
+                card.clone()
+                    .map(|card| card.into_any_element())
+                    .unwrap_or_else(|| div().into_any_element())
+            },
+        ))
     }
 }
 
@@ -1093,7 +1095,9 @@ mod tests {
         if tiers > 0 {
             sections.push(ChoiceSection {
                 header: "Tier".into(),
-                rows: (0..tiers).map(|i| row(ChoiceKind::Tier, &format!("t{i}"))).collect(),
+                rows: (0..tiers)
+                    .map(|i| row(ChoiceKind::Tier, &format!("t{i}")))
+                    .collect(),
             });
         }
         if windows > 0 {
@@ -1120,14 +1124,23 @@ mod tests {
         assert!(with_slider.has_slider());
         assert_eq!(with_slider.stop_count(), 5);
         assert_eq!(with_slider.row_at_stop(0), None);
-        assert_eq!(with_slider.row_at_stop(1).map(|row| row.id.as_str()), Some("t0"));
-        assert_eq!(with_slider.row_at_stop(4).map(|row| row.id.as_str()), Some("w1"));
+        assert_eq!(
+            with_slider.row_at_stop(1).map(|row| row.id.as_str()),
+            Some("t0")
+        );
+        assert_eq!(
+            with_slider.row_at_stop(4).map(|row| row.id.as_str()),
+            Some("w1")
+        );
         assert_eq!(with_slider.row_at_stop(5), None);
 
         let rows_only = spec(1, 2, 0);
         assert!(!rows_only.has_slider());
         assert_eq!(rows_only.stop_count(), 2);
-        assert_eq!(rows_only.row_at_stop(0).map(|row| row.id.as_str()), Some("t0"));
+        assert_eq!(
+            rows_only.row_at_stop(0).map(|row| row.id.as_str()),
+            Some("t0")
+        );
     }
 
     #[test]
@@ -1146,8 +1159,12 @@ mod tests {
             to: 1.0,
             started,
         };
-        let early = glide.at(started + Duration::from_millis(40)).expect("moving");
-        let late = glide.at(started + Duration::from_millis(160)).expect("moving");
+        let early = glide
+            .at(started + Duration::from_millis(40))
+            .expect("moving");
+        let late = glide
+            .at(started + Duration::from_millis(160))
+            .expect("moving");
         assert!(early > 0.0 && early < late && late < 1.0);
         assert_eq!(glide.at(started + GLIDE), None);
     }

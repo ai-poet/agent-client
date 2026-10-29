@@ -44,8 +44,7 @@ use anyhow::{Context, Result, anyhow};
 use serde_json::{Map, Value, json};
 
 use super::{
-    CliBackups, FileBackup, NativeRoutes, atomic_write_private, capture_backup,
-    remove_if_exists,
+    CliBackups, FileBackup, NativeRoutes, atomic_write_private, capture_backup, remove_if_exists,
 };
 use crate::gateway::anthropic_base_url;
 
@@ -108,7 +107,10 @@ fn write_network(
     network: Option<Value>,
     previous_providers: &Map<String, Value>,
 ) {
-    let Some(entry) = providers.get_mut("anthropic").and_then(Value::as_object_mut) else {
+    let Some(entry) = providers
+        .get_mut("anthropic")
+        .and_then(Value::as_object_mut)
+    else {
         return;
     };
     match network {
@@ -151,7 +153,10 @@ fn gateway_keys_value(routes: &NativeRoutes) -> Value {
         table.insert(MODEL_KEYS_MEMBER.to_owned(), json!(routes.model_keys));
     }
     if !routes.model_platforms.is_empty() {
-        table.insert(MODEL_PLATFORMS_MEMBER.to_owned(), json!(routes.model_platforms));
+        table.insert(
+            MODEL_PLATFORMS_MEMBER.to_owned(),
+            json!(routes.model_platforms),
+        );
     }
     Value::Object(table)
 }
@@ -187,11 +192,7 @@ pub fn settings_path(config_dir: &Path) -> PathBuf {
     config_dir.join(SETTINGS_FILE)
 }
 
-pub fn take_over(
-    config_dir: &Path,
-    routes: &NativeRoutes,
-    backups: &mut CliBackups,
-) -> Result<()> {
+pub fn take_over(config_dir: &Path, routes: &NativeRoutes, backups: &mut CliBackups) -> Result<()> {
     let path = settings_path(config_dir);
     capture_backup(backups, SETTINGS_FILE, &path)?;
     let previous = previous_config(backups.get(SETTINGS_FILE));
@@ -238,7 +239,10 @@ pub fn take_over(
             .entry(provider)
             .or_insert_with(|| Value::Object(Map::new()));
         let entry = entry.as_object_mut().ok_or_else(|| {
-            anyhow!("the {provider} provider entry in {} is not an object", path.display())
+            anyhow!(
+                "the {provider} provider entry in {} is not an object",
+                path.display()
+            )
         })?;
         entry.insert("api_key".to_owned(), json!(target.api_key));
         // The adapters append their own paths (`/v1/messages`,
@@ -250,7 +254,10 @@ pub fn take_over(
         );
         entry.insert("enabled".to_owned(), json!(true));
         write_context_windows(entry, routes, &previous_providers, provider).map_err(|_| {
-            anyhow!("the {provider} provider options in {} are not an object", path.display())
+            anyhow!(
+                "the {provider} provider options in {} are not an object",
+                path.display()
+            )
         })?;
     }
 
@@ -264,7 +271,10 @@ pub fn take_over(
             .entry("anthropic")
             .or_insert_with(|| Value::Object(Map::new()));
         let entry = entry.as_object_mut().ok_or_else(|| {
-            anyhow!("the anthropic provider entry in {} is not an object", path.display())
+            anyhow!(
+                "the anthropic provider entry in {} is not an object",
+                path.display()
+            )
         })?;
         if routes.platform_keys.is_empty() {
             let previous_options = previous_providers
@@ -285,7 +295,10 @@ pub fn take_over(
                 .entry("options")
                 .or_insert_with(|| Value::Object(Map::new()));
             let options = options.as_object_mut().ok_or_else(|| {
-                anyhow!("the anthropic provider options in {} are not an object", path.display())
+                anyhow!(
+                    "the anthropic provider options in {} are not an object",
+                    path.display()
+                )
             })?;
             options.insert(GATEWAY_KEYS_OPTION.to_owned(), gateway_keys_value(routes));
         }
@@ -294,7 +307,10 @@ pub fn take_over(
         }
     }
     write_endpoints(providers, routes, &previous_providers).map_err(|_| {
-        anyhow!("the anthropic provider entry in {} is not an object", path.display())
+        anyhow!(
+            "the anthropic provider entry in {} is not an object",
+            path.display()
+        )
     })?;
     write_network(
         providers,
@@ -328,7 +344,10 @@ fn write_endpoints(
             .and_then(Value::as_object)
             .cloned()
             .unwrap_or_default();
-        let Some(entry) = providers.get_mut("anthropic").and_then(Value::as_object_mut) else {
+        let Some(entry) = providers
+            .get_mut("anthropic")
+            .and_then(Value::as_object_mut)
+        else {
             return Ok(());
         };
         if let Some(options) = entry.get_mut("options").and_then(Value::as_object_mut) {
@@ -608,7 +627,10 @@ mod tests {
             let entry = config
                 .pointer(&format!("/provider_configs/{provider}"))
                 .unwrap_or_else(|| panic!("{provider} entry"));
-            assert_eq!(entry.get("api_base").unwrap(), "https://gateway.example.org");
+            assert_eq!(
+                entry.get("api_base").unwrap(),
+                "https://gateway.example.org"
+            );
             assert_eq!(entry.get("enabled").unwrap(), &json!(true));
         }
         assert_eq!(
@@ -634,7 +656,11 @@ mod tests {
         let root = read(&settings_path(&dir));
         assert_eq!(root.pointer("/config/model").unwrap(), "claude-opus-5");
         assert_eq!(root.pointer("/config/auto_compact").unwrap(), &json!(true));
-        assert_eq!(root.pointer("/config/provider_configs/google/api_key").unwrap(), "g");
+        assert_eq!(
+            root.pointer("/config/provider_configs/google/api_key")
+                .unwrap(),
+            "g"
+        );
         assert!(root.get("permissionRules").is_some());
     }
 
@@ -730,7 +756,8 @@ mod tests {
             "sk-codex"
         );
         assert_eq!(
-            root.pointer("/config/provider_configs/openai/api_base").unwrap(),
+            root.pointer("/config/provider_configs/openai/api_base")
+                .unwrap(),
             "https://gateway.example.org"
         );
     }
@@ -834,7 +861,10 @@ mod tests {
                 ("deepseek-v4.1-flash".to_owned(), "sk-sub".to_owned()),
                 ("gemini-4-argon".to_owned(), "sk-argon".to_owned()),
             ]),
-            model_platforms: BTreeMap::from([("gemini-4-argon".to_owned(), "antigravity".to_owned())]),
+            model_platforms: BTreeMap::from([(
+                "gemini-4-argon".to_owned(),
+                "antigravity".to_owned(),
+            )]),
             ..routes()
         };
         take_over(&dir, &routes, &mut backups).unwrap();
@@ -842,8 +872,14 @@ mod tests {
             .pointer("/config/provider_configs/anthropic/options/gateway_keys")
             .cloned()
             .expect("key table");
-        assert_eq!(table.pointer("/models/deepseek-v4.1-flash").unwrap(), "sk-sub");
-        assert_eq!(table.pointer("/model_platforms/gemini-4-argon").unwrap(), "antigravity");
+        assert_eq!(
+            table.pointer("/models/deepseek-v4.1-flash").unwrap(),
+            "sk-sub"
+        );
+        assert_eq!(
+            table.pointer("/model_platforms/gemini-4-argon").unwrap(),
+            "antigravity"
+        );
         assert_eq!(table.get("openai").unwrap(), "sk-codex");
 
         let custom = NativeRoutes {
@@ -958,7 +994,8 @@ mod tests {
         assert!(root.pointer("/config/provider_configs/openai").is_none());
         // The other two are untouched.
         assert_eq!(
-            root.pointer("/config/provider_configs/codex/api_key").unwrap(),
+            root.pointer("/config/provider_configs/codex/api_key")
+                .unwrap(),
             "sk-claude"
         );
         assert_eq!(
@@ -1017,7 +1054,10 @@ mod tests {
             idle_secs: 90,
         };
         let value = network_option(custom).expect("custom timeouts");
-        assert_eq!(value, json!({"connect_timeout_secs": 5, "idle_timeout_secs": 90}));
+        assert_eq!(
+            value,
+            json!({"connect_timeout_secs": 5, "idle_timeout_secs": 90})
+        );
 
         let mut providers = Map::new();
         providers.insert("anthropic".to_owned(), json!({"api_key": "sk"}));

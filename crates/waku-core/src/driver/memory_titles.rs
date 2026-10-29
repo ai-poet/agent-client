@@ -15,7 +15,11 @@ fn text<'a>(input: &'a Value, key: &str) -> Option<&'a str> {
 
 /// The row title of a memory tool call; `None` for any other tool.
 pub(super) fn tool_title(name: &str, input: &Value) -> Option<String> {
-    let memory = || text(input, "title").or_else(|| text(input, "name")).unwrap_or("…");
+    let memory = || {
+        text(input, "title")
+            .or_else(|| text(input, "name"))
+            .unwrap_or("…")
+    };
     Some(match name {
         "memory_write" => tr!("memory.tool.write", name = memory()),
         "memory_read" => tr!("memory.tool.read", name = memory()),

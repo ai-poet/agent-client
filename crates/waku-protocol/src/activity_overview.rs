@@ -132,7 +132,11 @@ pub fn summarize(
             model_messages[slot(bucket.model)] += messages;
         }
     }
-    for session in records.sessions.iter().filter(|session| inside(session.day)) {
+    for session in records
+        .sessions
+        .iter()
+        .filter(|session| inside(session.day))
+    {
         summary.sessions += 1;
         if model_count > 0 {
             model_sessions[slot(session.model)] += 1;
@@ -254,9 +258,7 @@ pub fn heat_level(count: u32, peak: u32) -> u8 {
     if count == 0 || peak == 0 {
         return 0;
     }
-    (u64::from(count) * 4)
-        .div_ceil(u64::from(peak))
-        .clamp(1, 4) as u8
+    (u64::from(count) * 4).div_ceil(u64::from(peak)).clamp(1, 4) as u8
 }
 
 #[cfg(test)]
@@ -287,11 +289,26 @@ mod tests {
                 bucket(day(2026, 10, 4), 15, 2, 2),
             ],
             sessions: vec![
-                SessionRecord { day: day(2026, 3, 1), model: 2 },
-                SessionRecord { day: day(2026, 9, 30), model: 1 },
-                SessionRecord { day: day(2026, 10, 1), model: 1 },
-                SessionRecord { day: day(2026, 10, 2), model: 0 },
-                SessionRecord { day: day(2026, 10, 4), model: 2 },
+                SessionRecord {
+                    day: day(2026, 3, 1),
+                    model: 2,
+                },
+                SessionRecord {
+                    day: day(2026, 9, 30),
+                    model: 1,
+                },
+                SessionRecord {
+                    day: day(2026, 10, 1),
+                    model: 1,
+                },
+                SessionRecord {
+                    day: day(2026, 10, 2),
+                    model: 0,
+                },
+                SessionRecord {
+                    day: day(2026, 10, 4),
+                    model: 2,
+                },
             ],
         }
     }
@@ -323,7 +340,10 @@ mod tests {
         let records = ActivityRecords {
             models: vec!["".into()],
             buckets: vec![bucket(today, 1, 0, 9)],
-            sessions: vec![SessionRecord { day: today, model: 0 }],
+            sessions: vec![SessionRecord {
+                day: today,
+                model: 0,
+            }],
         };
         assert_eq!(
             summarize(&records, ActivityRange::All, today).favorite_model,
@@ -351,7 +371,10 @@ mod tests {
         let records = ActivityRecords {
             models: vec!["m".into()],
             buckets: vec![bucket(today, 30, 7, 1)],
-            sessions: vec![SessionRecord { day: today, model: 9 }],
+            sessions: vec![SessionRecord {
+                day: today,
+                model: 9,
+            }],
         };
         let summary = summarize(&records, ActivityRange::All, today);
         assert_eq!(summary.messages, 1);

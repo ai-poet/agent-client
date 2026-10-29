@@ -25,8 +25,8 @@ impl Waku {
         let status_color = super::background_work::work_status_color(item.status, theme);
         let live = item.status.is_live();
         // A made-up entry for a call from before a restart has no clock.
-        let elapsed = (item.duration_ms != Some(0))
-            .then(|| super::background_work::work_elapsed(item));
+        let elapsed =
+            (item.duration_ms != Some(0)).then(|| super::background_work::work_elapsed(item));
 
         let header = div()
             .flex_none()
@@ -122,7 +122,11 @@ impl Waku {
             .px(px(12.0))
             .py(px(10.0));
 
-        if let Some(prompt) = item.command.as_ref().filter(|prompt| !prompt.trim().is_empty()) {
+        if let Some(prompt) = item
+            .command
+            .as_ref()
+            .filter(|prompt| !prompt.trim().is_empty())
+        {
             body = body.child(self.render_subagent_prompt(
                 item,
                 prompt,
@@ -176,17 +180,15 @@ impl Waku {
                 }
             }
         } else if live {
-            body = body.child(
-                div()
-                    .py(px(6.0))
-                    .text_size(sp(12.5))
-                    .child(motion::shimmer(
-                        tr!("subagent.waiting"),
-                        theme.text_tertiary,
-                        theme.text,
-                    )),
-            );
-        } else if let Some(output) = item.output.as_ref().filter(|output| !output.trim().is_empty())
+            body = body.child(div().py(px(6.0)).text_size(sp(12.5)).child(motion::shimmer(
+                tr!("subagent.waiting"),
+                theme.text_tertiary,
+                theme.text,
+            )));
+        } else if let Some(output) = item
+            .output
+            .as_ref()
+            .filter(|output| !output.trim().is_empty())
         {
             // No record — a session restored after a restart, or a client
             // that never had one — but the sub-agent's answer is known.
@@ -209,7 +211,10 @@ impl Waku {
         }
 
         if item.status == BackgroundWorkStatus::Failed
-            && let Some(reason) = item.detail.as_ref().filter(|reason| !reason.trim().is_empty())
+            && let Some(reason) = item
+                .detail
+                .as_ref()
+                .filter(|reason| !reason.trim().is_empty())
         {
             body = body.child(
                 div()
@@ -257,7 +262,9 @@ impl Waku {
                     .when_some(scroll, |area, (handle, scrollbar)| {
                         area.child(scrollbar::vertical(&handle, &scrollbar))
                     })
-                    .child(super::background_work::background_work_selection_input(selection)),
+                    .child(super::background_work::background_work_selection_input(
+                        selection,
+                    )),
             )
     }
 

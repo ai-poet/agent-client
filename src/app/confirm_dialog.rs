@@ -14,7 +14,10 @@ use crate::ui::ActivationExt as _;
 
 use super::*;
 
-actions!(waku_confirm_dialog, [AcceptConfirmDialog, DismissConfirmDialog]);
+actions!(
+    waku_confirm_dialog,
+    [AcceptConfirmDialog, DismissConfirmDialog]
+);
 
 const DIALOG_CONTEXT: &str = "ConfirmDialog";
 
@@ -226,7 +229,9 @@ impl Waku {
             .text_color(theme.text_secondary)
             .hover(|style| style.bg(theme.overlay))
             .child(tr!("common.cancel"))
-            .on_activation(cx, |this, window, cx| this.dismiss_confirm_dialog(window, cx));
+            .on_activation(cx, |this, window, cx| {
+                this.dismiss_confirm_dialog(window, cx)
+            });
 
         let confirm = div()
             .id("confirm-dialog-confirm")
@@ -254,7 +259,9 @@ impl Waku {
             })
             .hover(|style| style.opacity(0.9))
             .child(confirm_label)
-            .on_activation(cx, |this, window, cx| this.accept_confirm_dialog(window, cx));
+            .on_activation(cx, |this, window, cx| {
+                this.accept_confirm_dialog(window, cx)
+            });
 
         let card = div()
             .id("confirm-dialog-card")

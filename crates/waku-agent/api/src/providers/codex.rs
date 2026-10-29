@@ -405,11 +405,16 @@ impl CodexProvider {
 
     /// The error's type or code, wherever the event carries it.
     fn extract_stream_error_code(json_val: &Value) -> String {
-        ["/error/code", "/response/error/code", "/code", "/error/type"]
-            .iter()
-            .find_map(|path| json_val.pointer(path).and_then(|value| value.as_str()))
-            .unwrap_or_default()
-            .to_string()
+        [
+            "/error/code",
+            "/response/error/code",
+            "/code",
+            "/error/type",
+        ]
+        .iter()
+        .find_map(|path| json_val.pointer(path).and_then(|value| value.as_str()))
+        .unwrap_or_default()
+        .to_string()
     }
 
     fn extract_stream_error_message(json_val: &Value) -> String {
@@ -657,7 +662,6 @@ impl CodexProvider {
             model,
         })
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -1116,7 +1120,9 @@ impl LlmProvider for CodexProvider {
             });
         };
 
-        Ok(Box::pin(s.map(move |item| item.map_err(|error| error.with_request_id(request_id.as_deref())))))
+        Ok(Box::pin(s.map(move |item| {
+            item.map_err(|error| error.with_request_id(request_id.as_deref()))
+        })))
     }
 
     async fn discover_models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
@@ -1278,7 +1284,9 @@ mod fork_argument_decoding_tests {
     #[tokio::test]
     async fn an_in_stream_failure_carries_the_responses_request_id() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
         let address = listener.local_addr().expect("address");
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.expect("connect");
@@ -1308,7 +1316,10 @@ mod fork_argument_decoding_tests {
                 .await
                 .expect("write");
         });
-        let provider = CodexProvider::with_gateway(format!("http://{address}/v1/responses"), "test-key".into());
+        let provider = CodexProvider::with_gateway(
+            format!("http://{address}/v1/responses"),
+            "test-key".into(),
+        );
         let request = ProviderRequest {
             model: "gpt-5.6-sol".into(),
             messages: vec![claurst_core::types::Message::user("hi")],
@@ -1322,7 +1333,10 @@ mod fork_argument_decoding_tests {
             thinking: None,
             provider_options: json!({}),
         };
-        let mut stream = provider.create_message_stream(request).await.expect("the stream opens");
+        let mut stream = provider
+            .create_message_stream(request)
+            .await
+            .expect("the stream opens");
         let mut failure = None;
         while let Some(item) = stream.next().await {
             if let Err(error) = item {

@@ -212,12 +212,14 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
         })
     };
     let custom_target = |provider_id: &str| {
-        custom.routed_endpoint(provider_id).map(|endpoint| RouteTarget {
-            base_url: endpoint.base_url.trim().to_owned(),
-            api_key: endpoint.api_key.trim().to_owned(),
-            models: endpoint.models.clone(),
-            managed_gateway: false,
-        })
+        custom
+            .routed_endpoint(provider_id)
+            .map(|endpoint| RouteTarget {
+                base_url: endpoint.base_url.trim().to_owned(),
+                api_key: endpoint.api_key.trim().to_owned(),
+                models: endpoint.models.clone(),
+                managed_gateway: false,
+            })
     };
     let native = {
         let any_custom = NATIVE_SLOTS
@@ -374,11 +376,14 @@ pub fn active_route_kind(
             return RouteKind::Custom;
         }
         let cloud_only = desired_routes(cloud, &CustomApiConfig::default());
-        let covered = cloud_only.native.as_ref().is_some_and(|routes| match provider_id {
-            "native_messages" => routes.messages.is_some(),
-            "native_responses" => routes.responses.is_some(),
-            _ => routes.chat.is_some(),
-        });
+        let covered = cloud_only
+            .native
+            .as_ref()
+            .is_some_and(|routes| match provider_id {
+                "native_messages" => routes.messages.is_some(),
+                "native_responses" => routes.responses.is_some(),
+                _ => routes.chat.is_some(),
+            });
         return if covered {
             RouteKind::Cloud
         } else {
@@ -711,7 +716,10 @@ mod tests {
             .native
             .expect("the built-in agent is routed");
         assert_eq!(
-            native.messages.as_ref().map(|route| route.base_url.as_str()),
+            native
+                .messages
+                .as_ref()
+                .map(|route| route.base_url.as_str()),
             Some("https://mine.example.org")
         );
         // Untouched lines still reach the gateway, and the per-platform key
@@ -727,7 +735,10 @@ mod tests {
             .native
             .expect("the gateway still covers it");
         assert_eq!(
-            native.messages.as_ref().map(|route| route.base_url.as_str()),
+            native
+                .messages
+                .as_ref()
+                .map(|route| route.base_url.as_str()),
             Some("https://cloud.example.org")
         );
         // Nothing is the user's own any more, so the table comes back.
@@ -761,10 +772,13 @@ mod tests {
         let mut messages = relay("kimi", ApiFormat::Anthropic, &["kimi-k3"]);
         messages.models[0].context_window = Some(256_000);
         let messages = custom.registry.add(messages);
-        let responses = custom
+        let responses =
+            custom
+                .registry
+                .add(relay("ark", ApiFormat::OpenAiResponses, &["doubao-seed"]));
+        let chat = custom
             .registry
-            .add(relay("ark", ApiFormat::OpenAiResponses, &["doubao-seed"]));
-        let chat = custom.registry.add(relay("glm", ApiFormat::OpenAiChat, &["glm-5.1"]));
+            .add(relay("glm", ApiFormat::OpenAiChat, &["glm-5.1"]));
 
         let native = desired_routes(Some(&signed_in()), &custom).native.unwrap();
         let ids: Vec<&str> = native.endpoints.keys().map(String::as_str).collect();
@@ -775,7 +789,10 @@ mod tests {
         assert_eq!(kimi.format, ApiFormat::Anthropic);
         assert_eq!(kimi.base_url, "https://kimi.example.org");
         assert_eq!(kimi.api_key, "sk-kimi");
-        assert_eq!(kimi.context_windows, BTreeMap::from([("kimi-k3".to_owned(), 256_000)]));
+        assert_eq!(
+            kimi.context_windows,
+            BTreeMap::from([("kimi-k3".to_owned(), 256_000)])
+        );
         // Undeclared windows stay undeclared.
         assert!(native.endpoints[&chat].context_windows.is_empty());
     }
@@ -789,7 +806,9 @@ mod tests {
         let mut keyless = relay("keyless", ApiFormat::OpenAiChat, &["m"]);
         keyless.api_key.clear();
         custom.registry.add(keyless);
-        custom.registry.add(relay("empty", ApiFormat::OpenAiChat, &[]));
+        custom
+            .registry
+            .add(relay("empty", ApiFormat::OpenAiChat, &[]));
 
         let native = desired_routes(Some(&signed_in()), &custom).native.unwrap();
         assert!(native.endpoints.is_empty());
@@ -801,7 +820,9 @@ mod tests {
     #[test]
     fn offering_providers_keeps_the_gateway_key_tables() {
         let mut custom = CustomApiConfig::default();
-        let id = custom.registry.add(relay("glm", ApiFormat::OpenAiChat, &["glm-5.1"]));
+        let id = custom
+            .registry
+            .add(relay("glm", ApiFormat::OpenAiChat, &["glm-5.1"]));
 
         let native = desired_routes(Some(&signed_in()), &custom).native.unwrap();
         assert!(!native.endpoints.is_empty());
@@ -813,7 +834,10 @@ mod tests {
 
         assert!(custom.bind_provider("native_chat", Some(&id)));
         let native = desired_routes(Some(&signed_in()), &custom).native.unwrap();
-        assert!(native.platform_keys.is_empty(), "a bound line still empties them");
+        assert!(
+            native.platform_keys.is_empty(),
+            "a bound line still empties them"
+        );
     }
 
     /// Signed out with nothing bound, an endpoint of their own is still a
@@ -821,7 +845,9 @@ mod tests {
     #[test]
     fn providers_alone_take_the_agent_over() {
         let mut custom = CustomApiConfig::default();
-        custom.registry.add(relay("glm", ApiFormat::OpenAiChat, &["glm-5.1"]));
+        custom
+            .registry
+            .add(relay("glm", ApiFormat::OpenAiChat, &["glm-5.1"]));
         let native = desired_routes(None, &custom).native.expect("routed");
         assert!(native.messages.is_none() && native.responses.is_none() && native.chat.is_none());
         assert_eq!(native.endpoints.len(), 1);
@@ -961,14 +987,25 @@ mod tests {
         assert!(desired.claude.is_none());
         assert_eq!(desired.codex.as_ref().unwrap().api_key, "sk-general");
         assert_eq!(desired.grok.as_ref().unwrap().api_key, "sk-general");
-        let native = desired.native.expect("the built-in agent keeps the account");
+        let native = desired
+            .native
+            .expect("the built-in agent keeps the account");
         assert_eq!(
             native.messages.as_ref().map(|route| route.api_key.as_str()),
             Some("sk-claude")
         );
-        assert_eq!(native.platform_keys.get("anthropic").map(String::as_str), Some("sk-claude"));
-        assert_eq!(active_route_kind("claude", Some(&cloud), &custom), RouteKind::CliOwn);
-        assert_eq!(active_route_kind("codex", Some(&cloud), &custom), RouteKind::Cloud);
+        assert_eq!(
+            native.platform_keys.get("anthropic").map(String::as_str),
+            Some("sk-claude")
+        );
+        assert_eq!(
+            active_route_kind("claude", Some(&cloud), &custom),
+            RouteKind::CliOwn
+        );
+        assert_eq!(
+            active_route_kind("codex", Some(&cloud), &custom),
+            RouteKind::Cloud
+        );
 
         let mut custom = CustomApiConfig::default();
         custom.set(
@@ -981,7 +1018,10 @@ mod tests {
         );
         let desired = desired_routes(Some(&cloud), &custom);
         assert_eq!(desired.claude.as_ref().unwrap().api_key, "sk-mine");
-        assert_eq!(active_route_kind("claude", Some(&cloud), &custom), RouteKind::Custom);
+        assert_eq!(
+            active_route_kind("claude", Some(&cloud), &custom),
+            RouteKind::Custom
+        );
     }
 
     /// Choosing "keep my own" while signed in hands the files back exactly
@@ -1015,7 +1055,10 @@ mod tests {
             &std::fs::read_to_string(paths.claude_dir.join("settings.json")).unwrap(),
         )
         .unwrap();
-        assert_eq!(restored, serde_json::from_str::<serde_json::Value>(settings).unwrap());
+        assert_eq!(
+            restored,
+            serde_json::from_str::<serde_json::Value>(settings).unwrap()
+        );
         assert_eq!(
             std::fs::read_to_string(paths.codex_dir.join("config.toml")).unwrap(),
             config
@@ -1168,8 +1211,7 @@ mod tests {
         assert!(warnings.is_empty());
 
         // Spot-check each file is managed.
-        let claude_raw =
-            std::fs::read_to_string(paths.claude_dir.join("settings.json")).unwrap();
+        let claude_raw = std::fs::read_to_string(paths.claude_dir.join("settings.json")).unwrap();
         assert!(claude_raw.contains("https://gw.example.org"));
         assert!(claude_raw.contains(r#""FOO": "bar""#));
         let codex_raw = std::fs::read_to_string(paths.codex_dir.join("config.toml")).unwrap();
@@ -1201,8 +1243,7 @@ mod tests {
         .unwrap();
         assert_eq!(claude_restored["env"]["FOO"], "bar");
         assert!(claude_restored["env"].get("ANTHROPIC_BASE_URL").is_none());
-        let codex_restored =
-            std::fs::read_to_string(paths.codex_dir.join("config.toml")).unwrap();
+        let codex_restored = std::fs::read_to_string(paths.codex_dir.join("config.toml")).unwrap();
         assert!(codex_restored.contains("# my note"));
         assert!(codex_restored.contains("model = \"my-model\""));
         assert!(!codex_restored.contains("[model_providers.OpenAI]"));

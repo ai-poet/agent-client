@@ -95,7 +95,10 @@ impl Waku {
                 crate::updater::UpdateStatus::Updating => tr!("updater.updating"),
                 crate::updater::UpdateStatus::Idle if checking => tr!("updater.checking"),
                 crate::updater::UpdateStatus::Idle => {
-                    tr!("updater.current_version", version = env!("CARGO_PKG_VERSION"))
+                    tr!(
+                        "updater.current_version",
+                        version = env!("CARGO_PKG_VERSION")
+                    )
                 }
             }
         };
@@ -223,7 +226,8 @@ impl Waku {
             .items_center()
             .gap(px(10.0))
             .child(if installing {
-                motion::spin_slow(icon("icons/loader-circle.svg", 13.0, foreground)).into_any_element()
+                motion::spin_slow(icon("icons/loader-circle.svg", 13.0, foreground))
+                    .into_any_element()
             } else {
                 icon("icons/arrow-down.svg", 13.0, foreground).into_any_element()
             })

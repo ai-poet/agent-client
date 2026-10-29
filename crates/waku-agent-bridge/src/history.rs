@@ -339,7 +339,11 @@ mod tests {
     fn a_turn_that_only_ran_tools_counts_as_having_said_nothing() {
         // The shape a swallowed upstream failure takes, and the shape of a
         // turn that stopped mid-work: neither left the user an answer.
-        let messages = vec![Message::user("go"), tool_use("call-1"), tool_result("call-1")];
+        let messages = vec![
+            Message::user("go"),
+            tool_use("call-1"),
+            tool_result("call-1"),
+        ];
         assert!(!produced_visible_output(&messages, 1));
     }
 
@@ -386,11 +390,13 @@ mod tests {
         assert_eq!(loaded.len(), 3);
         match &loaded[2].content {
             MessageContent::Blocks(blocks) => match blocks.as_slice() {
-                [ContentBlock::ToolResult {
-                    tool_use_id,
-                    content: ToolResultContent::Text(text),
-                    is_error: Some(true),
-                }] => {
+                [
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        content: ToolResultContent::Text(text),
+                        is_error: Some(true),
+                    },
+                ] => {
                     assert_eq!(tool_use_id, "call-1");
                     assert_eq!(text, INTERRUPTED_CALL_RESULT);
                 }

@@ -83,7 +83,10 @@ pub(crate) fn open_checked(input: &str, cx: &mut App) -> Result<(), LinkRejectio
 /// no place to say why (documents without a link handler, the terminal).
 pub(crate) fn open_checked_or_log(input: &str, cx: &mut App) {
     if let Err(reason) = open_checked(input, cx) {
-        eprintln!("refused to open link ({reason:?}): {}", input.escape_debug());
+        eprintln!(
+            "refused to open link ({reason:?}): {}",
+            input.escape_debug()
+        );
     }
 }
 

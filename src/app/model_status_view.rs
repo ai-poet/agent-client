@@ -1245,7 +1245,12 @@ impl Waku {
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
                     .child(icon("icons/server.svg", 15.0, theme.text))
-                    .child(div().min_w_0().truncate().child(self.tx(&entry.display_name()))),
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .child(self.tx(&entry.display_name())),
+                    ),
             )
             .child(
                 div()

@@ -156,9 +156,7 @@ pub fn is_up(status: &str) -> bool {
 }
 
 fn status_for(statuses: &[GroupStatusItem], group_id: i64) -> Option<&GroupStatusItem> {
-    statuses
-        .iter()
-        .find(|status| status.group_id == group_id)
+    statuses.iter().find(|status| status.group_id == group_id)
 }
 
 /// A group is a candidate when the account may use it, it belongs to the
@@ -225,8 +223,8 @@ pub fn decide(input: &Input) -> (Option<Decision>, History) {
     let preferred = input.preferred.unwrap_or(bound);
 
     // An outage on the group in use outranks everything else.
-    let bound_down = status_for(input.statuses, bound)
-        .is_some_and(|status| is_down(status.effective_status()));
+    let bound_down =
+        status_for(input.statuses, bound).is_some_and(|status| is_down(status.effective_status()));
     if bound_down {
         return match best_alternative(input.platform, bound, input.groups, input.statuses) {
             Some(to) => (
@@ -357,7 +355,11 @@ mod tests {
 
     #[test]
     fn availability_then_latency_break_ties() {
-        let groups = vec![group(1, "anthropic"), group(2, "anthropic"), group(3, "anthropic")];
+        let groups = vec![
+            group(1, "anthropic"),
+            group(2, "anthropic"),
+            group(3, "anthropic"),
+        ];
         let statuses = vec![
             status(1, "down"),
             GroupStatusItem {
@@ -421,7 +423,14 @@ mod tests {
         let groups = vec![group(1, "anthropic"), disabled, group(3, "anthropic")];
         let statuses = vec![status(1, "down"), status(2, "up"), status(3, "up")];
         assert_eq!(
-            decide(&input(Some(1), None, &groups, &statuses, &History::default())).0,
+            decide(&input(
+                Some(1),
+                None,
+                &groups,
+                &statuses,
+                &History::default()
+            ))
+            .0,
             Some(Decision::FailOver { from: 1, to: 3 })
         );
     }
@@ -452,7 +461,13 @@ mod tests {
         let flapping = vec![status(1, "degraded"), status(2, "up")];
         let unmeasured = vec![status(2, "up")];
 
-        let (_, history) = decide(&input(Some(2), Some(1), &groups, &healthy, &History::default()));
+        let (_, history) = decide(&input(
+            Some(2),
+            Some(1),
+            &groups,
+            &healthy,
+            &History::default(),
+        ));
         assert_eq!(history.preferred_up_streak, 1);
         let (decision, history) = decide(&input(Some(2), Some(1), &groups, &flapping, &history));
         assert_eq!(decision, None);
@@ -467,10 +482,21 @@ mod tests {
 
     #[test]
     fn a_fallback_that_also_goes_down_moves_again() {
-        let groups = vec![group(1, "anthropic"), group(2, "anthropic"), group(3, "anthropic")];
+        let groups = vec![
+            group(1, "anthropic"),
+            group(2, "anthropic"),
+            group(3, "anthropic"),
+        ];
         let statuses = vec![status(1, "down"), status(2, "down"), status(3, "up")];
         assert_eq!(
-            decide(&input(Some(2), Some(1), &groups, &statuses, &History::default())).0,
+            decide(&input(
+                Some(2),
+                Some(1),
+                &groups,
+                &statuses,
+                &History::default()
+            ))
+            .0,
             Some(Decision::FailOver { from: 2, to: 3 })
         );
     }

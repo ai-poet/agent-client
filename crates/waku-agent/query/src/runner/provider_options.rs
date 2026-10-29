@@ -15,7 +15,11 @@ use crate::*;
 /// The Responses adapter copies unrecognised provider options into the
 /// request body, so the key travels as the top-level field the API defines.
 /// A key the options already carry is left as it is.
-pub(crate) fn with_prompt_cache_key(mut options: Value, provider_id: &str, session_id: &str) -> Value {
+pub(crate) fn with_prompt_cache_key(
+    mut options: Value,
+    provider_id: &str,
+    session_id: &str,
+) -> Value {
     let session_id = session_id.trim();
     if session_id.is_empty() || !matches!(provider_id, "codex" | "openai-codex") {
         return options;
@@ -117,7 +121,10 @@ pub(crate) fn is_glm_thinking_model(model_id: &str) -> bool {
         .chars()
         .take_while(|character| character.is_ascii_digit() || *character == '.')
         .collect();
-    number.trim_end_matches('.').parse::<f64>().is_ok_and(|version| version >= 4.5)
+    number
+        .trim_end_matches('.')
+        .parse::<f64>()
+        .is_ok_and(|version| version >= 4.5)
 }
 
 /// Fork (Waku): Kimi's K3 family — `kimi-k3…`, or the bare `k3` / `k3-256k`
@@ -196,10 +203,7 @@ pub(crate) fn build_provider_options(
                 "reasoningEffort".to_string(),
                 serde_json::json!(reasoning_effort),
             );
-            options.insert(
-                "reasoningSummary".to_string(),
-                serde_json::json!("auto"),
-            );
+            options.insert("reasoningSummary".to_string(), serde_json::json!("auto"));
             options.insert(
                 "include".to_string(),
                 serde_json::json!(["reasoning.encrypted_content"]),
@@ -209,10 +213,7 @@ pub(crate) fn build_provider_options(
                 && !model_id.contains("codex")
                 && !model_id.contains("-chat")
             {
-                options.insert(
-                    "textVerbosity".to_string(),
-                    serde_json::json!("low"),
-                );
+                options.insert("textVerbosity".to_string(), serde_json::json!("low"));
             }
         }
     }
@@ -313,10 +314,7 @@ pub(crate) fn build_provider_options(
             && !model_id.contains("-chat")
             && provider_id != "azure"
         {
-            options.insert(
-                "textVerbosity".to_string(),
-                serde_json::json!("low"),
-            );
+            options.insert("textVerbosity".to_string(), serde_json::json!("low"));
         }
     }
 
@@ -392,9 +390,7 @@ pub(crate) fn build_provider_options(
         }
     }
 
-    if provider_id == "qwen"
-        && thinking_budget.is_some()
-        && !model_id.contains("kimi-k2-thinking")
+    if provider_id == "qwen" && thinking_budget.is_some() && !model_id.contains("kimi-k2-thinking")
     {
         options.insert("enable_thinking".to_string(), serde_json::json!(true));
     }

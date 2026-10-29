@@ -24,8 +24,7 @@ pub(super) struct CliSetupState {
     pub last_error: Option<String>,
     /// How each CLI's last install ended, by provider id — verified against
     /// the binary, not npm's exit status. Cleared when that CLI is retried.
-    pub install_results:
-        std::collections::HashMap<String, sub2api::cli_install::InstallVerdict>,
+    pub install_results: std::collections::HashMap<String, sub2api::cli_install::InstallVerdict>,
     /// Stage label for the Node install, written by the background installer
     /// and read by a UI poll loop while it runs.
     pub node_stage: std::sync::Arc<std::sync::Mutex<Option<String>>>,
@@ -66,7 +65,6 @@ impl CliSetupState {
     pub fn snapshot_pending(&self) -> bool {
         self.snapshot_pending.get()
     }
-
 }
 
 /// How long a detection result stays good before render schedules another
@@ -165,7 +163,6 @@ fn stage_label(reported: sub2api::node_install::NodeStage) -> String {
         sub2api::node_install::NodeStage::Verifying => tr!("cli_setup.stage_verifying"),
     }
 }
-
 
 impl Waku {
     /// Schedule a detection pass unless one is running or the current
@@ -509,8 +506,8 @@ impl Waku {
             let context = cx
                 .background_executor()
                 .spawn(async move {
-                    let managed = sub2api::node_install::managed_node_bin_dir()
-                        .filter(|dir| dir.is_dir());
+                    let managed =
+                        sub2api::node_install::managed_node_bin_dir().filter(|dir| dir.is_dir());
                     let node_bin_dir = if needs_node {
                         managed.or(detected_node_dir)
                     } else {
@@ -548,7 +545,9 @@ impl Waku {
                 });
                 match verdict {
                     sub2api::cli_install::InstallVerdict::Installed { .. } => installed += 1,
-                    sub2api::cli_install::InstallVerdict::InstalledNotOnPath { bin_dir, .. } => {
+                    sub2api::cli_install::InstallVerdict::InstalledNotOnPath {
+                        bin_dir, ..
+                    } => {
                         installed += 1;
                         notes.push(tr!(
                             "cli_setup.installed_not_on_path",
@@ -598,5 +597,4 @@ impl Waku {
         *self.cli_setup.custom_cache.borrow_mut() = Some(config.clone());
         config
     }
-
 }

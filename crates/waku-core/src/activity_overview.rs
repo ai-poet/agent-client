@@ -146,7 +146,12 @@ pub fn load(path: &Path) -> io::Result<ActivityRecords> {
 /// The part of a stored model id a person would recognise: the built-in
 /// agent stores `platform::model` and `custom:<endpoint>::model`.
 fn display_model(stored: &str) -> String {
-    stored.rsplit("::").next().unwrap_or(stored).trim().to_owned()
+    stored
+        .rsplit("::")
+        .next()
+        .unwrap_or(stored)
+        .trim()
+        .to_owned()
 }
 
 #[derive(Default)]
@@ -358,7 +363,12 @@ mod tests {
             .unwrap();
         let records = load_from(&connection, &zone()).unwrap();
         assert_eq!(totals(&records), (4, 2));
-        assert!(records.models.iter().any(|model| model == "deepseek-v4-flash"));
+        assert!(
+            records
+                .models
+                .iter()
+                .any(|model| model == "deepseek-v4-flash")
+        );
     }
 
     fn temporary_store() -> (PathBuf, StateStore, PersistedState) {

@@ -93,9 +93,13 @@ impl McpServer {
             return false;
         }
         if self.is_stdio() {
-            self.command.as_deref().is_some_and(|command| !command.trim().is_empty())
+            self.command
+                .as_deref()
+                .is_some_and(|command| !command.trim().is_empty())
         } else {
-            self.url.as_deref().is_some_and(|url| !url.trim().is_empty())
+            self.url
+                .as_deref()
+                .is_some_and(|url| !url.trim().is_empty())
         }
     }
 }
@@ -160,19 +164,57 @@ pub struct AgentSettings {
 /// and the engine's agree, so the page cannot drift from what the model is
 /// actually offered — and this crate stays free of the engine crates.
 pub const BUILTIN_TOOLS: [&str; 37] = [
-    "Agent", "ApplyPatch", "AskUserQuestion", "Bash", "BatchEdit", "Brief", "Config",
-    "Edit", "EnterPlanMode", "EnterWorktree", "ExitPlanMode", "ExitWorktree", "Glob",
-    "Grep", "LSP", "ListMcpResources", "NotebookEdit", "PowerShell", "REPL", "Read",
-    "ReadMcpResource", "Skill", "Sleep", "StructuredOutput", "TaskCreate", "TaskGet",
-    "TaskList", "TaskOutput", "TaskStop", "TaskUpdate", "TodoWrite", "ToolSearch",
-    "WebFetch", "WebSearch", "Write", "mcp__auth", "monitor",
+    "Agent",
+    "ApplyPatch",
+    "AskUserQuestion",
+    "Bash",
+    "BatchEdit",
+    "Brief",
+    "Config",
+    "Edit",
+    "EnterPlanMode",
+    "EnterWorktree",
+    "ExitPlanMode",
+    "ExitWorktree",
+    "Glob",
+    "Grep",
+    "LSP",
+    "ListMcpResources",
+    "NotebookEdit",
+    "PowerShell",
+    "REPL",
+    "Read",
+    "ReadMcpResource",
+    "Skill",
+    "Sleep",
+    "StructuredOutput",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskOutput",
+    "TaskStop",
+    "TaskUpdate",
+    "TodoWrite",
+    "ToolSearch",
+    "WebFetch",
+    "WebSearch",
+    "Write",
+    "mcp__auth",
+    "monitor",
 ];
 
 /// Tools the page does not offer to disable: without them the agent cannot
 /// read, edit, run, or search, and a session with them off would look broken
 /// rather than restricted.
-pub const ESSENTIAL_TOOLS: [&str; 7] =
-    ["Read", "Edit", "Write", "Bash", "Glob", "Grep", "PowerShell"];
+pub const ESSENTIAL_TOOLS: [&str; 7] = [
+    "Read",
+    "Edit",
+    "Write",
+    "Bash",
+    "Glob",
+    "Grep",
+    "PowerShell",
+];
 
 /// Where the engine's settings live.
 pub fn settings_path() -> Option<PathBuf> {
@@ -197,7 +239,9 @@ pub fn save(settings: &AgentSettings) -> Result<()> {
             .with_context(|| format!("{} is not valid JSON", path.display()))?,
         Ok(_) => json!({}),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => json!({}),
-        Err(error) => return Err(error).with_context(|| format!("could not read {}", path.display())),
+        Err(error) => {
+            return Err(error).with_context(|| format!("could not read {}", path.display()));
+        }
     };
     apply(&mut root, settings)?;
     let mut rendered = serde_json::to_string_pretty(&root)?;
@@ -260,14 +304,24 @@ fn apply(root: &mut Value, settings: &AgentSettings) -> Result<()> {
         .as_object_mut()
         .ok_or_else(|| anyhow!("`config` in the settings file is not an object"))?;
 
-    set_optional(config, "append_system_prompt", settings.append_system_prompt.as_deref()
-        .filter(|prompt| !prompt.trim().is_empty())
-        .map(|prompt| json!(prompt)));
+    set_optional(
+        config,
+        "append_system_prompt",
+        settings
+            .append_system_prompt
+            .as_deref()
+            .filter(|prompt| !prompt.trim().is_empty())
+            .map(|prompt| json!(prompt)),
+    );
     // Earlier builds offered a per-turn step cap here and wrote it under this
     // key. The engine never read it, and a message is no longer capped at
     // all, so the key goes on the next save.
     config.remove("max_turns");
-    set_optional(config, "auto_compact", settings.auto_compact.map(|value| json!(value)));
+    set_optional(
+        config,
+        "auto_compact",
+        settings.auto_compact.map(|value| json!(value)),
+    );
     set_optional(
         config,
         "compact_threshold",
@@ -352,7 +406,10 @@ mod tests {
             "Answer in Chinese."
         );
         assert_eq!(root.pointer("/config/mcp_servers/0/type").unwrap(), "stdio");
-        assert_eq!(root.pointer("/config/mcp_servers/0/command").unwrap(), "npx");
+        assert_eq!(
+            root.pointer("/config/mcp_servers/0/command").unwrap(),
+            "npx"
+        );
         assert_eq!(root.pointer("/permissionRules").unwrap(), &json!([]));
 
         let reread = from_document(&root);
@@ -391,11 +448,26 @@ mod tests {
     /// URL's `/sse` path decides.
     #[test]
     fn an_sse_url_is_filed_as_sse() {
-        assert_eq!(McpServer::url_transport("https://mcp.example.com/sse"), "sse");
-        assert_eq!(McpServer::url_transport(" https://mcp.example.com/SSE/ "), "sse");
-        assert_eq!(McpServer::url_transport("https://mcp.example.com/sse?key=1"), "sse");
-        assert_eq!(McpServer::url_transport("https://mcp.example.com/mcp"), "http");
-        assert_eq!(McpServer::url_transport("https://sse.example.com/mcp"), "http");
+        assert_eq!(
+            McpServer::url_transport("https://mcp.example.com/sse"),
+            "sse"
+        );
+        assert_eq!(
+            McpServer::url_transport(" https://mcp.example.com/SSE/ "),
+            "sse"
+        );
+        assert_eq!(
+            McpServer::url_transport("https://mcp.example.com/sse?key=1"),
+            "sse"
+        );
+        assert_eq!(
+            McpServer::url_transport("https://mcp.example.com/mcp"),
+            "http"
+        );
+        assert_eq!(
+            McpServer::url_transport("https://sse.example.com/mcp"),
+            "http"
+        );
     }
 
     #[test]

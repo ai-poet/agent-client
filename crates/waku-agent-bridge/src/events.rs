@@ -159,9 +159,7 @@ pub enum AgentEvent {
     /// Fork: the turn's task panicked. The turn is settled as failed right
     /// after; this carries the panic's message so the desktop can say what
     /// happened in the user's language.
-    TurnCrashed {
-        detail: String,
-    },
+    TurnCrashed { detail: String },
     /// Fork: the turn failed on a model request. `kind` names the failure
     /// when the person can do something about it, so the desktop can say
     /// what in their language; `None` shows `detail` as it came. `detail` is
@@ -589,7 +587,11 @@ mod tests {
         let meta = serde_json::json!({
             "content": [{"type": "image", "mime": "image/png", "data": "aGVsbG8="}]
         });
-        let events = decoder.push(tool_end("waku_js_repl_generate_image", false, Some(meta.clone())));
+        let events = decoder.push(tool_end(
+            "waku_js_repl_generate_image",
+            false,
+            Some(meta.clone()),
+        ));
         let AgentEvent::ToolFinished { image_source, .. } = &events[0] else {
             panic!("expected ToolFinished");
         };

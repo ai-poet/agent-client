@@ -282,7 +282,10 @@ mod tests {
         assert_eq!(state.translate("Claude Max"), None);
         assert_eq!(state.translate("   "), None);
         assert_eq!(pending(&state), vec!["国模分组".to_owned()]);
-        assert_eq!(ContentTranslationsState::default().translate("国模分组"), None);
+        assert_eq!(
+            ContentTranslationsState::default().translate("国模分组"),
+            None
+        );
     }
 
     #[test]

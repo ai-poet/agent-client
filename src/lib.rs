@@ -54,8 +54,8 @@ pub use waku_client::{
 };
 
 use gpui::{
-    App, Application, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions,
-    WindowBackgroundAppearance, WindowBounds, WindowOptions, actions, point, px, size,
+    App, Application, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions, WindowBounds,
+    WindowOptions, actions, point, px, size,
 };
 
 use crate::app::Waku;
@@ -361,11 +361,7 @@ pub fn run() {
                         // tiling remain enabled.
                         is_movable: true,
                         app_owns_titlebar_drag: cfg!(target_os = "macos"),
-                        window_background: if cfg!(target_os = "macos") {
-                            WindowBackgroundAppearance::Blurred
-                        } else {
-                            WindowBackgroundAppearance::Opaque
-                        },
+                        window_background: crate::platform::preferred_window_background(),
                         app_id: Some(APP_ID.to_owned()),
                         // GPUI defaults to compositor/server decorations. If a
                         // Wayland compositor declines them, it reports the
@@ -407,7 +403,7 @@ pub fn run() {
 
             window
                 .update(cx, |_, window, cx| {
-                    crate::platform::configure_sidebar_material(
+                    crate::platform::configure_window_material(
                         window,
                         crate::theme::Theme::current(cx).is_dark,
                     );

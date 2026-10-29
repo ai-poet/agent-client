@@ -2697,7 +2697,9 @@ impl Waku {
                 .retain(|event| matches!(event, DriverEvent::BackgroundWork(_)));
             runtime.stream_remeasure_pending = false;
             runtime.stream_phase = None;
-            runtime.pending_permissions.retain(|permission| agent_teams::requests::is_member_request(&permission.request_id));
+            runtime.pending_permissions.retain(|permission| {
+                agent_teams::requests::is_member_request(&permission.request_id)
+            });
             runtime.pending_user_input = None;
             runtime.pending_computer_approval = None;
         }
@@ -2760,14 +2762,20 @@ impl Waku {
         // default as selected, and the engine would otherwise send no effort
         // at all to Claude and a fixed "medium" to GPT. A CLI keeps `None`,
         // which means "whatever the CLI itself is configured with".
-        let reasoning_effort = session.reasoning_effort.clone().filter(offered).or_else(|| {
-            session
-                .provider
-                .is_builtin()
-                .then(|| model_metadata.and_then(|model| model.default_reasoning_effort.clone()))
-                .flatten()
-                .filter(offered)
-        });
+        let reasoning_effort = session
+            .reasoning_effort
+            .clone()
+            .filter(offered)
+            .or_else(|| {
+                session
+                    .provider
+                    .is_builtin()
+                    .then(|| {
+                        model_metadata.and_then(|model| model.default_reasoning_effort.clone())
+                    })
+                    .flatten()
+                    .filter(offered)
+            });
         let service_tier = session.service_tier.clone().filter(|tier| {
             tier == "default"
                 || model_metadata.is_some_and(|model| {
@@ -3668,7 +3676,9 @@ impl Waku {
             runtime.pending_steers.clear();
             runtime.stream_remeasure_pending = false;
             runtime.stream_phase = None;
-            runtime.pending_permissions.retain(|permission| agent_teams::requests::is_member_request(&permission.request_id));
+            runtime.pending_permissions.retain(|permission| {
+                agent_teams::requests::is_member_request(&permission.request_id)
+            });
             runtime.pending_user_input = None;
             runtime.pending_computer_approval = None;
             runtime.last_active_at = Instant::now();
@@ -4003,7 +4013,10 @@ pub(super) fn bare_model_name(model: &str) -> &str {
 
 /// Find `model` among `models`, tolerating a `platform::` prefix on either
 /// side. See [`Waku::probe_model`] for why the tolerance is needed.
-pub(super) fn find_model<'a>(models: &'a [ProviderModel], model: &str) -> Option<&'a ProviderModel> {
+pub(super) fn find_model<'a>(
+    models: &'a [ProviderModel],
+    model: &str,
+) -> Option<&'a ProviderModel> {
     // Exact first, so two platforms offering the same model name cannot
     // shadow one another.
     if let Some(found) = models.iter().find(|candidate| candidate.id == model) {

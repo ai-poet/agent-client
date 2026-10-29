@@ -21,7 +21,9 @@ use std::sync::Mutex;
 /// can be installed from the Skills page instead.
 pub fn supports_plugin_dir(binary: &Path) -> bool {
     static CACHE: Mutex<Option<HashMap<PathBuf, bool>>> = Mutex::new(None);
-    let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut cache = CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let cache = cache.get_or_insert_with(HashMap::new);
     if let Some(&known) = cache.get(binary) {
         return known;

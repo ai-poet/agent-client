@@ -33,8 +33,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::background;
 use crate::config::{
-    AgentStartOptions, TurnOptions, WireFormat, build_config, build_config_from, build_query_config,
-    load_settings, missing_route_key, route_fingerprint,
+    AgentStartOptions, TurnOptions, WireFormat, build_config, build_config_from,
+    build_query_config, load_settings, missing_route_key, route_fingerprint,
 };
 use crate::events::{AgentEvent, EventSink, PermissionChoice, StreamDecoder};
 use crate::history;
@@ -233,7 +233,10 @@ impl AgentSession {
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let team = crate::team::TeamHost::new(&options, &id, events.clone());
         let memory = crate::memory::MemoryHost::new(&options.cwd, &id);
-        let trajectory = Arc::new(crate::trajectory::Recorder::new(options.trajectory_dir.clone(), &id));
+        let trajectory = Arc::new(crate::trajectory::Recorder::new(
+            options.trajectory_dir.clone(),
+            &id,
+        ));
         subagents.set_trajectory(trajectory.clone());
         let tools = ToolSets::build(
             &config.disallowed_tools,
@@ -250,9 +253,7 @@ impl AgentSession {
             client: Mutex::new(client),
             tools: Mutex::new(tools),
             cost_tracker: CostTracker::new(),
-            file_history: Arc::new(Mutex::new(
-                claurst_core::file_history::FileHistory::new(),
-            )),
+            file_history: Arc::new(Mutex::new(claurst_core::file_history::FileHistory::new())),
             manager,
             bridge,
             settings,
@@ -296,9 +297,9 @@ impl AgentSession {
         self.inner.goal_resume.cancel(false);
         let inner = self.inner.clone();
         let Ok(rt) = runtime::shared() else {
-            inner
-                .events
-                .emit(AgentEvent::Error("the agent runtime is unavailable".to_string()));
+            inner.events.emit(AgentEvent::Error(
+                "the agent runtime is unavailable".to_string(),
+            ));
             return;
         };
 
@@ -323,7 +324,14 @@ impl AgentSession {
             (cancel, queue)
         };
 
-        spawn_turn(rt, inner, text, team_seam::PromptOrigin::User, cancel, queue);
+        spawn_turn(
+            rt,
+            inner,
+            text,
+            team_seam::PromptOrigin::User,
+            cancel,
+            queue,
+        );
     }
 
     /// Inject a message into the running turn. It reaches the conversation at
@@ -384,10 +392,12 @@ impl AgentSession {
             Ok(effect) => {
                 // Fork: a changed goal supersedes a resume of the old one.
                 self.inner.goal_resume.cancel(true);
-                self.inner.events.emit(AgentEvent::GoalUpdated(crate::goal::snapshot(
-                    &store,
-                    &self.inner.id,
-                )));
+                self.inner
+                    .events
+                    .emit(AgentEvent::GoalUpdated(crate::goal::snapshot(
+                        &store,
+                        &self.inner.id,
+                    )));
                 match effect {
                     crate::goal::GoalEffect::Kickoff(prompt)
                     | crate::goal::GoalEffect::Resume(prompt)
@@ -411,9 +421,9 @@ impl AgentSession {
     pub fn compact(&self, instructions: Option<String>) {
         let inner = self.inner.clone();
         let Ok(rt) = runtime::shared() else {
-            inner
-                .events
-                .emit(AgentEvent::Error("the agent runtime is unavailable".to_string()));
+            inner.events.emit(AgentEvent::Error(
+                "the agent runtime is unavailable".to_string(),
+            ));
             return;
         };
         let cancel = {
@@ -546,7 +556,9 @@ impl AgentSession {
                 }
             }
         }
-        self.inner.bridge.set_auto(options.access_mode.auto_answer());
+        self.inner
+            .bridge
+            .set_auto(options.access_mode.auto_answer());
         if let Ok(mut manager) = self.inner.manager.lock() {
             // The manager caches the mode it evaluates against; rebuild it so
             // a switch to Full Access stops asking immediately rather than at
@@ -597,7 +609,9 @@ impl AgentSession {
         }
         let removed = history::rollback(&mut self.inner.history.lock(), turns)?;
         // Fork: the trajectory marks the turns this took away.
-        self.inner.trajectory.rewind(history::turn_count(&self.inner.history.lock()) as u32);
+        self.inner
+            .trajectory
+            .rewind(history::turn_count(&self.inner.history.lock()) as u32);
         Ok(removed)
     }
 
@@ -664,7 +678,10 @@ pub(crate) fn build_clients(
         ..Default::default()
     };
     let client = Arc::new(AnthropicClient::new(client_config.clone())?);
-    let registry = Arc::new(claurst_api::ProviderRegistry::from_config(config, client_config));
+    let registry = Arc::new(claurst_api::ProviderRegistry::from_config(
+        config,
+        client_config,
+    ));
     Ok((client, registry))
 }
 
@@ -705,7 +722,10 @@ fn builtin_tools_with(
         );
     }
     // Ours, not the engine's `claurst_query::AgentTool`: see `crate::subagent`.
-    if !disallowed.iter().any(|name| name == crate::subagent::AGENT_TOOL_NAME) {
+    if !disallowed
+        .iter()
+        .any(|name| name == crate::subagent::AGENT_TOOL_NAME)
+    {
         tools.push(Box::new(SubagentTool::new(subagents.clone())));
     }
     // Fork: the team tools, once the session leads a team (`crate::team`).
@@ -970,8 +990,10 @@ fn background_notifier(inner: &Arc<Inner>) -> claurst_tools::CompletionNotifier 
             let guard = inner.turn.lock();
             match guard.as_ref() {
                 Some(turn) if !turn.compacting => {
-                    turn.queue
-                        .push(QueuedCommand::InjectUserMessage(notice), CommandPriority::Normal);
+                    turn.queue.push(
+                        QueuedCommand::InjectUserMessage(notice),
+                        CommandPriority::Normal,
+                    );
                     None
                 }
                 _ => Some(notice),
@@ -1051,7 +1073,10 @@ async fn run_turn(
     // Fork: what background commands said while nothing was running goes in
     // right after the prompt (the queue is read before the first request).
     for notice in inner.background_notices.lock().drain(..) {
-        queue.push(QueuedCommand::InjectUserMessage(notice), CommandPriority::Normal);
+        queue.push(
+            QueuedCommand::InjectUserMessage(notice),
+            CommandPriority::Normal,
+        );
     }
     // A session with an active goal keeps going after each answer until the
     // model closes it with `GoalComplete` — the one tool set that has it.
@@ -1091,7 +1116,15 @@ async fn run_turn(
     // taken: a child may run another model.
     query.context_window = context_window;
     // Fork: the turn's start in the trajectory (`crate::trajectory`).
-    inner.trajectory.begin_turn(weight_before as u32, messages.last(), &route.provider, &route.api_base, options.wire_format().id(), &query, &tools);
+    inner.trajectory.begin_turn(
+        weight_before as u32,
+        messages.last(),
+        &route.provider,
+        &route.api_base,
+        options.wire_format().id(),
+        &query,
+        &tools,
+    );
 
     let client = inner.client.lock().clone();
     inner.subagents.begin_turn(TurnScope {
@@ -1202,7 +1235,9 @@ async fn run_turn(
     );
     let not_found = match &outcome {
         QueryOutcome::Error(error)
-            if request_failure.as_ref().is_some_and(|failure| failure.status == Some(404))
+            if request_failure
+                .as_ref()
+                .is_some_and(|failure| failure.status == Some(404))
                 || is_not_found(error) =>
         {
             Some(error.to_string())
@@ -1222,7 +1257,10 @@ async fn run_turn(
     // person pressed Stop, so an `Error` arriving after it was shown on its
     // own, as a toast reading "Stopped." in English; the summary below still
     // says it, for a client that did not stop the turn itself.
-    if !success && !cancelled && let Some(reason) = summary.clone() {
+    if !success
+        && !cancelled
+        && let Some(reason) = summary.clone()
+    {
         // The empty turn and the 404 get events of their own so the desktop
         // can say them in the user's language; the sentence in `summary` is
         // the fallback for any client that does not.
@@ -1242,7 +1280,11 @@ async fn run_turn(
         } else if failed_request {
             inner.events.emit(AgentEvent::TurnFailed {
                 kind: failure_kind,
-                detail: crate::failure::shown_detail(failure_kind, request_failure.as_ref(), &reason),
+                detail: crate::failure::shown_detail(
+                    failure_kind,
+                    request_failure.as_ref(),
+                    &reason,
+                ),
                 request_id: request_failure.and_then(|failure| failure.request_id),
             });
         } else {
@@ -1250,11 +1292,19 @@ async fn run_turn(
         }
     }
     // Fork: the turn's end in the trajectory (`crate::trajectory`).
-    inner.trajectory.end_turn(success, summary.clone(), crate::trajectory::session_usage(&inner.cost_tracker));
-    inner.events.emit(AgentEvent::TurnFinished { success, summary });
-    inner.events.emit(AgentEvent::HistoryCommitted(history::serialize(
-        &inner.history.lock(),
-    )));
+    inner.trajectory.end_turn(
+        success,
+        summary.clone(),
+        crate::trajectory::session_usage(&inner.cost_tracker),
+    );
+    inner
+        .events
+        .emit(AgentEvent::TurnFinished { success, summary });
+    inner
+        .events
+        .emit(AgentEvent::HistoryCommitted(history::serialize(
+            &inner.history.lock(),
+        )));
     // A turn is the only thing that creates background work, so this is the
     // moment the panel needs a fresh level signal.
     inner
@@ -1287,9 +1337,7 @@ async fn run_turn(
     // captain's idle edge returns its takeovers to the pool. Background
     // notices the turn never took wait for the next one.
     let leftovers = keep_background_notices(&inner, remaining);
-    inner
-        .team
-        .after_turn(leftovers, goal_follow_up.is_some());
+    inner.team.after_turn(leftovers, goal_follow_up.is_some());
     // Fork (auto-memory): every few turns, a consolidation pass on this
     // session's own route.
     inner
@@ -1318,7 +1366,11 @@ async fn compact_now(inner: Arc<Inner>, instructions: Option<String>, cancel: Ca
     let tokens_before = claurst_query::estimate_context_tokens(&messages, None);
     let report = |phase, tokens_after| {
         // Fork: `/compact` in the trajectory (`crate::trajectory`).
-        inner.trajectory.compaction(crate::trajectory::compaction_phase(&phase), tokens_before, tokens_after);
+        inner.trajectory.compaction(
+            crate::trajectory::compaction_phase(&phase),
+            tokens_before,
+            tokens_after,
+        );
         inner.events.emit(AgentEvent::Compaction {
             phase,
             automatic: false,
@@ -1373,7 +1425,11 @@ async fn compact_now(inner: Arc<Inner>, instructions: Option<String>, cancel: Ca
             report(CompactionPhase::Finished, Some(tokens_after));
             inner.events.emit(AgentEvent::Usage {
                 context_tokens: Some(tokens_after),
-                context_window: crate::config::context_window_for(&config, &query.model, &provider_id),
+                context_window: crate::config::context_window_for(
+                    &config,
+                    &query.model,
+                    &provider_id,
+                ),
             });
             (true, None)
         }
@@ -1395,10 +1451,14 @@ async fn compact_now(inner: Arc<Inner>, instructions: Option<String>, cancel: Ca
         .take()
         .map(|turn| turn.steers.lock().drain(..).collect::<Vec<_>>())
         .unwrap_or_default();
-    inner.events.emit(AgentEvent::TurnFinished { success, summary });
-    inner.events.emit(AgentEvent::HistoryCommitted(history::serialize(
-        &inner.history.lock(),
-    )));
+    inner
+        .events
+        .emit(AgentEvent::TurnFinished { success, summary });
+    inner
+        .events
+        .emit(AgentEvent::HistoryCommitted(history::serialize(
+            &inner.history.lock(),
+        )));
     for message in leftover {
         inner.events.emit(AgentEvent::SteerRejected {
             message,
@@ -1447,7 +1507,10 @@ fn settle_goal(
     let store = crate::goal::open_store()?;
     let goal = store.get_goal(&inner.id);
     if let Some(goal) = &goal {
-        let spent = inner.cost_tracker.total_tokens().saturating_sub(tokens_before);
+        let spent = inner
+            .cost_tracker
+            .total_tokens()
+            .saturating_sub(tokens_before);
         if spent > 0 {
             let _ = store.add_tokens(&inner.id, spent);
         }
@@ -1458,7 +1521,9 @@ fn settle_goal(
     if goal.is_some() || had_goal {
         inner
             .events
-            .emit(AgentEvent::GoalUpdated(crate::goal::snapshot(&store, &inner.id)));
+            .emit(AgentEvent::GoalUpdated(crate::goal::snapshot(
+                &store, &inner.id,
+            )));
     }
     if goal_mode || cancelled {
         return None;
@@ -1525,11 +1590,7 @@ async fn forward_events(
                 // turn; left as it was, the turn after an approved plan
                 // would be told it is still planning while its tools say
                 // otherwise. Locked last and alone, matching `run_turn`.
-                crate::config::refresh_session_rules(
-                    &mut inner.query.lock(),
-                    &config,
-                    &options,
-                );
+                crate::config::refresh_session_rules(&mut inner.query.lock(), &config, &options);
                 if let Ok(mut manager) = inner.manager.lock() {
                     // Same reasoning as apply_options: the manager caches the
                     // mode it evaluates against, so rebuild it rather than
@@ -1576,7 +1637,9 @@ async fn forward_events(
             if closed_goal && let Some(store) = crate::goal::open_store() {
                 inner
                     .events
-                    .emit(AgentEvent::GoalUpdated(crate::goal::snapshot(&store, &inner.id)));
+                    .emit(AgentEvent::GoalUpdated(crate::goal::snapshot(
+                        &store, &inner.id,
+                    )));
             }
         }
     }
@@ -1638,11 +1701,7 @@ pub const STOPPED_SUMMARY: &str = "Stopped.";
 /// reason said. It names the route it tried, because the thing that went
 /// wrong is upstream of here and that is the only handle the user has on it.
 /// A 404 names it too, with the full URL, for the same reason.
-fn describe(
-    outcome: QueryOutcome,
-    produced_output: bool,
-    route: &Route,
-) -> (bool, Option<String>) {
+fn describe(outcome: QueryOutcome, produced_output: bool, route: &Route) -> (bool, Option<String>) {
     match outcome {
         QueryOutcome::EndTurn { .. } if !produced_output => (
             false,
@@ -1658,7 +1717,10 @@ fn describe(
             Some("The model reached its output limit for this turn.".to_string()),
         ),
         QueryOutcome::Cancelled => (false, Some(STOPPED_SUMMARY.to_string())),
-        QueryOutcome::BudgetExceeded { cost_usd, limit_usd } => (
+        QueryOutcome::BudgetExceeded {
+            cost_usd,
+            limit_usd,
+        } => (
             false,
             Some(format!(
                 "This session has spent ${cost_usd:.2}, past its ${limit_usd:.2} cap."
@@ -1675,7 +1737,9 @@ fn describe(
         // Fork: a provider may echo the key it refused.
         QueryOutcome::Error(error) => (
             false,
-            Some(claurst_api::retry_policy::redact_secrets(&error.to_string())),
+            Some(claurst_api::retry_policy::redact_secrets(
+                &error.to_string(),
+            )),
         ),
     }
 }
@@ -1725,7 +1789,10 @@ mod tests {
         assert!(is_not_found(&error));
         let (_, summary) = describe(QueryOutcome::Error(error), false, &route());
         let summary = summary.unwrap();
-        assert!(summary.contains("https://gateway.example.org/v1/messages"), "{summary}");
+        assert!(
+            summary.contains("https://gateway.example.org/v1/messages"),
+            "{summary}"
+        );
         assert!(summary.contains("not_found_error"), "{summary}");
     }
 
@@ -1762,7 +1829,10 @@ mod tests {
         let route = Route::of(&config, "glm-5.1");
         assert_eq!(route.provider, "openai");
         assert_eq!(route.api_base, "https://open.bigmodel.cn/api/paas/v4");
-        assert_eq!(route.url, "https://open.bigmodel.cn/api/paas/v4/chat/completions");
+        assert_eq!(
+            route.url,
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        );
     }
 
     #[test]
@@ -1844,7 +1914,10 @@ mod tests {
             &route(),
         );
         assert!(success);
-        assert!(summary.is_some(), "the user should still be told why it stopped");
+        assert!(
+            summary.is_some(),
+            "the user should still be told why it stopped"
+        );
     }
 
     fn host() -> Arc<SubagentHost> {
@@ -1857,7 +1930,10 @@ mod tests {
         assert!(tools.iter().any(|tool| tool.name() == "Agent"));
         assert!(tools.iter().any(|tool| tool.name() == "Read"));
         // Exactly one: ours, not the engine's beside it.
-        assert_eq!(tools.iter().filter(|tool| tool.name() == "Agent").count(), 1);
+        assert_eq!(
+            tools.iter().filter(|tool| tool.name() == "Agent").count(),
+            1
+        );
     }
 
     /// Tools whose runner is not in this process would report success at
@@ -1876,7 +1952,12 @@ mod tests {
 
     #[test]
     fn a_disallowed_tool_is_not_offered_at_all() {
-        let tools = builtin_tools(&["WebSearch".to_string(), "Agent".to_string()], None, false, &host());
+        let tools = builtin_tools(
+            &["WebSearch".to_string(), "Agent".to_string()],
+            None,
+            false,
+            &host(),
+        );
         assert!(!tools.iter().any(|tool| tool.name() == "WebSearch"));
         assert!(!tools.iter().any(|tool| tool.name() == "Agent"));
         assert!(tools.iter().any(|tool| tool.name() == "Read"));
@@ -1891,9 +1972,11 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(searches.len(), 1);
         // The gateway tool's own description, then the bridge's guidance.
-        assert!(searches[0]
-            .description()
-            .starts_with("Search the web for current information."));
+        assert!(
+            searches[0]
+                .description()
+                .starts_with("Search the web for current information.")
+        );
         assert!(searches[0].input_schema()["properties"]["domains"].is_object());
     }
 }

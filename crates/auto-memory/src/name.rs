@@ -130,9 +130,15 @@ mod tests {
 
     #[test]
     fn names_are_squeezed_to_kebab_case() {
-        assert_eq!(normalize_name("User Prefers Python").unwrap(), "user-prefers-python");
+        assert_eq!(
+            normalize_name("User Prefers Python").unwrap(),
+            "user-prefers-python"
+        );
         assert_eq!(normalize_name("  --a__b--  ").unwrap(), "a-b");
-        assert_eq!(normalize_name("压测 PostgreSQL 2026").unwrap(), "postgresql-2026");
+        assert_eq!(
+            normalize_name("压测 PostgreSQL 2026").unwrap(),
+            "postgresql-2026"
+        );
         assert!(normalize_name("中文").is_err());
         assert!(normalize_name("").is_err());
     }
@@ -168,7 +174,10 @@ mod tests {
             project_key_for("C:\\Projects\\app\\", true),
             project_key_for("c:\\Projects\\app", true)
         );
-        assert_eq!(project_key_for("C:\\Projects\\app", true), "--c-Projects-app--");
+        assert_eq!(
+            project_key_for("C:\\Projects\\app", true),
+            "--c-Projects-app--"
+        );
     }
 
     #[test]

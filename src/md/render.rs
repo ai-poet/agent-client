@@ -212,8 +212,11 @@ impl Palette {
             code_wash: theme.code_wash,
             selection: theme.selection,
             search_match: search_yellow.opacity(if theme.is_dark { 0.18 } else { 0.20 }),
-            active_search_match: active_search_orange
-                .opacity(if theme.is_dark { 0.78 } else { 0.70 }),
+            active_search_match: active_search_orange.opacity(if theme.is_dark {
+                0.78
+            } else {
+                0.70
+            }),
             accent: theme.accent,
             added: theme.success,
             removed: theme.danger,
@@ -1515,9 +1518,10 @@ fn local_image_path(url: &str) -> Option<std::path::PathBuf> {
     let url = url.trim();
     if let Some(rest) = url.strip_prefix("file://") {
         // `file:///C:/x.png` keeps a leading slash before the drive.
-        let rest = rest.strip_prefix('/').filter(|rest| {
-            rest.as_bytes().get(1) == Some(&b':')
-        }).unwrap_or(rest);
+        let rest = rest
+            .strip_prefix('/')
+            .filter(|rest| rest.as_bytes().get(1) == Some(&b':'))
+            .unwrap_or(rest);
         let path = std::path::PathBuf::from(rest.replace("%20", " "));
         return path.is_absolute().then_some(path);
     }

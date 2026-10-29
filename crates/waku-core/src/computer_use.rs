@@ -466,7 +466,10 @@ mod tests {
 
         // The name is what `Skill` and every CLI's loader resolve on.
         for document in [MAC, WINDOWS] {
-            assert!(document.contains("name: waku-computer-use"), "frontmatter name");
+            assert!(
+                document.contains("name: waku-computer-use"),
+                "frontmatter name"
+            );
         }
         assert!(MAC.contains(r#"target: "mac""#));
         assert!(WINDOWS.contains(r#"target: "windows""#));

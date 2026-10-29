@@ -33,9 +33,9 @@ use crate::session::build_clients;
 /// otherwise commit with no message.
 pub fn one_shot(cwd: &Path, model: Option<&str>, prompt: &str) -> anyhow::Result<String> {
     let rt = runtime::shared()?;
-    let (platform, model) = model.map(split_model).map_or((None, None), |(platform, model)| {
-        (platform, Some(model))
-    });
+    let (platform, model) = model
+        .map(split_model)
+        .map_or((None, None), |(platform, model)| (platform, Some(model)));
     let options = AgentStartOptions {
         cwd: cwd.to_path_buf(),
         // Irrelevant with no tools, but the most restrictive reading is the
@@ -135,7 +135,8 @@ pub(crate) async fn ask_once(
     .await;
 
     let message = match outcome {
-        QueryOutcome::EndTurn { message, .. } | QueryOutcome::MaxTokens {
+        QueryOutcome::EndTurn { message, .. }
+        | QueryOutcome::MaxTokens {
             partial_message: message,
             ..
         } => message,

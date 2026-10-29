@@ -318,8 +318,11 @@ work, and not to ask whether a plan is ready.\n\
 mod tests {
     use super::*;
 
-    const SHELLS: [BashToolShell; 3] =
-        [BashToolShell::Bash, BashToolShell::GitBash, BashToolShell::PowerShell];
+    const SHELLS: [BashToolShell; 3] = [
+        BashToolShell::Bash,
+        BashToolShell::GitBash,
+        BashToolShell::PowerShell,
+    ];
 
     fn every_guidance() -> Vec<(String, String)> {
         let mut all = Vec::new();
@@ -339,14 +342,28 @@ mod tests {
     /// engine renaming a tool would silently drop it.
     #[test]
     fn every_guided_name_is_an_engine_tool() {
-        let names: Vec<String> =
-            claurst_tools::all_tools().iter().map(|tool| tool.name().to_owned()).collect();
+        let names: Vec<String> = claurst_tools::all_tools()
+            .iter()
+            .map(|tool| tool.name().to_owned())
+            .collect();
         for guided in [
-            "Bash", "PowerShell", "Read", "Edit", "Write", "Glob", "Grep", "TodoWrite",
-            "WebFetch", "WebSearch", "AskUserQuestion",
+            "Bash",
+            "PowerShell",
+            "Read",
+            "Edit",
+            "Write",
+            "Glob",
+            "Grep",
+            "TodoWrite",
+            "WebFetch",
+            "WebSearch",
+            "AskUserQuestion",
         ] {
             assert!(names.iter().any(|name| name == guided), "{guided}");
-            assert!(guidance(guided, BashToolShell::Bash, true).is_some(), "{guided}");
+            assert!(
+                guidance(guided, BashToolShell::Bash, true).is_some(),
+                "{guided}"
+            );
         }
     }
 
@@ -360,17 +377,43 @@ mod tests {
         assert_eq!(before.len(), after.len());
         for (engine, guided) in before.iter().zip(&after) {
             assert_eq!(engine.name(), guided.name());
-            assert_eq!(engine.permission_level(), guided.permission_level(), "{}", engine.name());
-            assert_eq!(engine.self_gates(), guided.self_gates(), "{}", engine.name());
+            assert_eq!(
+                engine.permission_level(),
+                guided.permission_level(),
+                "{}",
+                engine.name()
+            );
+            assert_eq!(
+                engine.self_gates(),
+                guided.self_gates(),
+                "{}",
+                engine.name()
+            );
             assert_eq!(engine.advanced(), guided.advanced(), "{}", engine.name());
-            assert_eq!(engine.input_schema(), guided.input_schema(), "{}", engine.name());
-            assert!(guided.description().starts_with(engine.description().trim_end()));
+            assert_eq!(
+                engine.input_schema(),
+                guided.input_schema(),
+                "{}",
+                engine.name()
+            );
+            assert!(
+                guided
+                    .description()
+                    .starts_with(engine.description().trim_end())
+            );
             let definition = guided.to_definition();
             assert_eq!(definition.name, engine.name());
             assert_eq!(definition.description, guided.description());
         }
-        let edit = after.iter().find(|tool| tool.name() == "Edit").expect("Edit");
-        assert!(edit.description().contains("line number"), "{}", edit.description());
+        let edit = after
+            .iter()
+            .find(|tool| tool.name() == "Edit")
+            .expect("Edit");
+        assert!(
+            edit.description().contains("line number"),
+            "{}",
+            edit.description()
+        );
     }
 
     /// The Bash tool's guidance is written in the syntax of the shell that

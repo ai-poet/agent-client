@@ -73,9 +73,11 @@ impl BrowserHost {
             Ok(Err(_)) => Err("the browser request was cancelled".to_owned()),
             Err(_) => {
                 self.pending.lock().remove(&request_id);
-                Err("the app did not answer the browser request — the in-app browser is \
+                Err(
+                    "the app did not answer the browser request — the in-app browser is \
                      only available while the desktop app is open on this task"
-                    .to_owned())
+                        .to_owned(),
+                )
             }
         }
     }
@@ -189,7 +191,10 @@ const SPECS: &[Spec] = &[
         read_only: false,
         schema: || {
             let mut properties = target_properties();
-            properties.insert("value".to_owned(), json!({ "type": "string", "description": "The text to type." }));
+            properties.insert(
+                "value".to_owned(),
+                json!({ "type": "string", "description": "The text to type." }),
+            );
             properties.insert("append".to_owned(), json!({ "type": "boolean", "description": "Add to the field's current text instead of replacing it." }));
             properties.insert("submit".to_owned(), json!({ "type": "boolean", "description": "Press Enter after typing, submitting the field's form." }));
             json!({
@@ -335,7 +340,10 @@ impl BrowserTool {
     /// `browser_tabs` reads unless it is asked to change something.
     fn reads(&self, input: &Value) -> bool {
         if self.spec.op == "tabs" {
-            return matches!(input.get("action").and_then(Value::as_str), None | Some("list"));
+            return matches!(
+                input.get("action").and_then(Value::as_str),
+                None | Some("list")
+            );
         }
         self.spec.read_only
     }
@@ -370,7 +378,9 @@ impl Tool for BrowserTool {
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let reads = self.reads(&input);
-        if let Err(error) = ctx.check_permission(self.name(), &describe(self.spec.op, &input), reads) {
+        if let Err(error) =
+            ctx.check_permission(self.name(), &describe(self.spec.op, &input), reads)
+        {
             return ToolResult::error(error.to_string());
         }
         let mut operation = match input {
@@ -396,17 +406,23 @@ fn describe(op: &str, input: &Value) -> String {
         "navigate" => format!("Open {} in the in-app browser", text("url")),
         "click" => format!("Click {target} in the in-app browser"),
         "type" => format!("Type into {target} in the in-app browser"),
-        "select" => format!("Choose \"{}\" in {target} in the in-app browser", text("option")),
+        "select" => format!(
+            "Choose \"{}\" in {target} in the in-app browser",
+            text("option")
+        ),
         "press_key" => format!("Press {} in the in-app browser", text("key")),
         "evaluate" => "Run JavaScript in the in-app browser's page".to_owned(),
         "back" => "Go back in the in-app browser".to_owned(),
         "reload" => "Reload the in-app browser's page".to_owned(),
-        "tabs" => format!("{} an in-app browser tab", match text("action") {
-            "new" => "Open",
-            "select" => "Switch to",
-            "close" => "Close",
-            _ => "List",
-        }),
+        "tabs" => format!(
+            "{} an in-app browser tab",
+            match text("action") {
+                "new" => "Open",
+                "select" => "Switch to",
+                "close" => "Close",
+                _ => "List",
+            }
+        ),
         _ => "Read the in-app browser's page".to_owned(),
     }
 }
@@ -518,13 +534,27 @@ mod tests {
                 .map(|tool| tool.permission_level())
                 .unwrap()
         };
-        for name in ["browser_snapshot", "browser_screenshot", "browser_console", "browser_wait_for"] {
+        for name in [
+            "browser_snapshot",
+            "browser_screenshot",
+            "browser_console",
+            "browser_wait_for",
+        ] {
             assert_eq!(level(name), PermissionLevel::ReadOnly, "{name}");
         }
-        for name in ["browser_navigate", "browser_click", "browser_type", "browser_evaluate"] {
+        for name in [
+            "browser_navigate",
+            "browser_click",
+            "browser_type",
+            "browser_evaluate",
+        ] {
             assert_eq!(level(name), PermissionLevel::Execute, "{name}");
         }
-        assert!(tools.iter().all(|tool| tool.name().starts_with(TOOL_PREFIX)));
+        assert!(
+            tools
+                .iter()
+                .all(|tool| tool.name().starts_with(TOOL_PREFIX))
+        );
         let tabs = BrowserTool {
             spec: SPECS.iter().find(|spec| spec.op == "tabs").unwrap(),
             host,

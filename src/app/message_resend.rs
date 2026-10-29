@@ -60,7 +60,9 @@ impl Waku {
     pub(super) fn resend_action_for_message(&self, message_index: usize) -> Option<ResendAction> {
         let session = self.selected_session()?;
         let message = session.messages.get(message_index)?;
-        let rewind_available = self.user_message_action_for_message(message_index).is_some();
+        let rewind_available = self
+            .user_message_action_for_message(message_index)
+            .is_some();
         resend_eligible(message.role, session.status, rewind_available).then_some(ResendAction {
             session_id: session.id,
             message_id: message.id,
@@ -171,14 +173,42 @@ mod tests {
 
     #[test]
     fn resend_is_offered_only_where_rewind_is_not() {
-        assert!(resend_eligible(MessageRole::User, SessionStatus::Idle, false));
-        assert!(resend_eligible(MessageRole::User, SessionStatus::Failed, false));
+        assert!(resend_eligible(
+            MessageRole::User,
+            SessionStatus::Idle,
+            false
+        ));
+        assert!(resend_eligible(
+            MessageRole::User,
+            SessionStatus::Failed,
+            false
+        ));
         // Rewind wins where it exists — one affordance per message.
-        assert!(!resend_eligible(MessageRole::User, SessionStatus::Idle, true));
+        assert!(!resend_eligible(
+            MessageRole::User,
+            SessionStatus::Idle,
+            true
+        ));
         // Never for the assistant's messages, never mid-turn.
-        assert!(!resend_eligible(MessageRole::Assistant, SessionStatus::Idle, false));
-        assert!(!resend_eligible(MessageRole::User, SessionStatus::Working, false));
-        assert!(!resend_eligible(MessageRole::User, SessionStatus::Waiting, false));
-        assert!(!resend_eligible(MessageRole::User, SessionStatus::Connecting, false));
+        assert!(!resend_eligible(
+            MessageRole::Assistant,
+            SessionStatus::Idle,
+            false
+        ));
+        assert!(!resend_eligible(
+            MessageRole::User,
+            SessionStatus::Working,
+            false
+        ));
+        assert!(!resend_eligible(
+            MessageRole::User,
+            SessionStatus::Waiting,
+            false
+        ));
+        assert!(!resend_eligible(
+            MessageRole::User,
+            SessionStatus::Connecting,
+            false
+        ));
     }
 }

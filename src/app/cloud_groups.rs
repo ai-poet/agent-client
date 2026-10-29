@@ -127,7 +127,9 @@ impl Waku {
             self.cloud_account.failed_over.remove(&platform);
             self.cloud_account.failover_history.remove(&platform);
             if self.cloud_account.failover.enabled(&platform) {
-                self.cloud_account.failover.set_preferred(&platform, group_id);
+                self.cloud_account
+                    .failover
+                    .set_preferred(&platform, group_id);
                 if let Err(error) = sub2api::failover::save(&self.cloud_account.failover) {
                     self.show_toast(format!("{error:#}"));
                 }
@@ -226,29 +228,22 @@ impl Waku {
                 .cloud_account
                 .credentials
                 .as_ref()
-                .and_then(|credentials| {
-                    sub2api::bound_group_for_platform(credentials, &platform)
-                });
+                .and_then(|credentials| sub2api::bound_group_for_platform(credentials, &platform));
             // The Chinese models' lane binds no CLI and falls back on its
             // own — a spent subscription hands over to pay-as-you-go — so it
             // has no failover switch, and says what picking a group means.
             let domestic = platform == DOMESTIC_LANE;
             let failover_on = !domestic && self.cloud_account.failover.enabled(&platform);
             let toggle_platform = platform.clone();
-            let mut header = div()
-                .mt(px(8.0))
-                .flex()
-                .items_center()
-                .gap(px(8.0))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_size(sp(12.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text_secondary)
-                        .child(platform_display_name(&platform)),
-                );
+            let mut header = div().mt(px(8.0)).flex().items_center().gap(px(8.0)).child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(platform_display_name(&platform)),
+            );
             if !domestic {
                 header = header
                     .child(
@@ -265,11 +260,7 @@ impl Waku {
                         theme,
                         cx,
                         move |this, _, cx| {
-                            this.set_cloud_failover(
-                                toggle_platform.clone(),
-                                !failover_on,
-                                cx,
-                            );
+                            this.set_cloud_failover(toggle_platform.clone(), !failover_on, cx);
                         },
                     ));
             }
@@ -373,12 +364,7 @@ impl Waku {
                                 .min_w_0()
                                 .flex()
                                 .flex_col()
-                                .child(
-                                    div()
-                                        .text_size(sp(12.8))
-                                        .text_color(theme.text)
-                                        .child(name),
-                                )
+                                .child(div().text_size(sp(12.8)).text_color(theme.text).child(name))
                                 .when(!detail.is_empty(), |element| {
                                     element.child(
                                         div()
@@ -521,7 +507,10 @@ pub(super) fn pending_group_bindings(
         if bound.is_some() && !holds_domestic {
             continue;
         }
-        if let Some(group) = groups.iter().find(|group| cloud_lane(group, catalog) == lane) {
+        if let Some(group) = groups
+            .iter()
+            .find(|group| cloud_lane(group, catalog) == lane)
+        {
             pending.push((lane, group.id));
         }
     }
@@ -593,7 +582,12 @@ mod tests {
             id,
             name: format!("group {id}"),
             platform: platform.into(),
-            subscription_type: if subscription { "subscription" } else { "standard" }.into(),
+            subscription_type: if subscription {
+                "subscription"
+            } else {
+                "standard"
+            }
+            .into(),
             ..Group::default()
         }
     }
@@ -633,8 +627,14 @@ mod tests {
     #[test]
     fn the_chinese_models_groups_leave_the_codex_lane() {
         let (groups, catalog) = live();
-        assert_eq!(cloud_lanes(&groups, &catalog), ["anthropic", "openai", DOMESTIC_LANE]);
-        let lanes: Vec<String> = groups.iter().map(|group| cloud_lane(group, &catalog)).collect();
+        assert_eq!(
+            cloud_lanes(&groups, &catalog),
+            ["anthropic", "openai", DOMESTIC_LANE]
+        );
+        let lanes: Vec<String> = groups
+            .iter()
+            .map(|group| cloud_lane(group, &catalog))
+            .collect();
         assert_eq!(lanes, ["anthropic", "openai", DOMESTIC_LANE, DOMESTIC_LANE]);
     }
 

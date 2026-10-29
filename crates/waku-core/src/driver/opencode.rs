@@ -332,9 +332,8 @@ impl OpenCodeDriver {
                                 &state.permissions,
                             );
                         }
-                        for line in
-                            super::support::read_lossy_lines(BufReader::new(stream))
-                                .map_while(Result::ok)
+                        for line in super::support::read_lossy_lines(BufReader::new(stream))
+                            .map_while(Result::ok)
                         {
                             if stream_control.is_cancelled() {
                                 break;

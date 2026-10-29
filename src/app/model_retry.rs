@@ -70,7 +70,10 @@ impl OutputBoundary {
 
 /// Remove from the active turn the assistant text and reasoning that
 /// streamed after `boundary`. Returns whether anything was removed.
-pub(super) fn take_back_streamed_output(session: &mut AgentSession, boundary: &OutputBoundary) -> bool {
+pub(super) fn take_back_streamed_output(
+    session: &mut AgentSession,
+    boundary: &OutputBoundary,
+) -> bool {
     let turn = session.active_turn_id();
     let mut changed = false;
 
@@ -104,7 +107,10 @@ pub(super) fn take_back_streamed_output(session: &mut AgentSession, boundary: &O
     if !removed.is_empty() {
         changed = true;
         for block in &mut session.transcript_blocks {
-            let shift = removed.iter().filter(|&&index| index < block.after_message).count();
+            let shift = removed
+                .iter()
+                .filter(|&&index| index < block.after_message)
+                .count();
             block.after_message -= shift;
         }
     }
@@ -142,10 +148,15 @@ pub(super) fn take_back_streamed_output(session: &mut AgentSession, boundary: &O
     }
     let first_new = boundary.blocks.min(session.transcript_blocks.len());
     let mut kept = Vec::with_capacity(session.transcript_blocks.len());
-    for (index, mut block) in std::mem::take(&mut session.transcript_blocks).into_iter().enumerate() {
+    for (index, mut block) in std::mem::take(&mut session.transcript_blocks)
+        .into_iter()
+        .enumerate()
+    {
         if index >= first_new && block.turn_id == turn {
             let before = block.activities.len();
-            block.activities.retain(|activity| activity.reasoning.is_none());
+            block
+                .activities
+                .retain(|activity| activity.reasoning.is_none());
             changed |= block.activities.len() != before;
             if block.activities.is_empty() {
                 continue;
@@ -209,8 +220,15 @@ impl RetryStatus {
                 seconds = self.seconds_left(),
                 attempt = self.attempt
             ),
-            (false, Some(max)) => tr!("turn_status.retry_sending", attempt = self.attempt, max = max),
-            (false, None) => tr!("turn_status.retry_sending_unbounded", attempt = self.attempt),
+            (false, Some(max)) => tr!(
+                "turn_status.retry_sending",
+                attempt = self.attempt,
+                max = max
+            ),
+            (false, None) => tr!(
+                "turn_status.retry_sending_unbounded",
+                attempt = self.attempt
+            ),
         }
     }
 
@@ -382,15 +400,24 @@ mod tests {
             )
         );
         let sent = retry(RetryCause::RateLimited, Some(10), Duration::ZERO);
-        assert_eq!(sent.working_label(), tr!("turn_status.retry_sending", attempt = 2, max = 10));
+        assert_eq!(
+            sent.working_label(),
+            tr!("turn_status.retry_sending", attempt = 2, max = 10)
+        );
         let unbounded = retry(RetryCause::Busy, None, Duration::ZERO);
-        assert_eq!(unbounded.working_label(), tr!("turn_status.retry_sending_unbounded", attempt = 2));
+        assert_eq!(
+            unbounded.working_label(),
+            tr!("turn_status.retry_sending_unbounded", attempt = 2)
+        );
     }
 
     #[test]
     fn an_empty_answer_is_asked_again_without_a_count() {
         let waiting = retry(RetryCause::Empty, Some(1), Duration::from_secs(2));
-        assert_eq!(waiting.working_label(), tr!("turn_status.empty_retry", seconds = 2));
+        assert_eq!(
+            waiting.working_label(),
+            tr!("turn_status.empty_retry", seconds = 2)
+        );
         let sent = retry(RetryCause::Empty, Some(1), Duration::ZERO);
         assert_eq!(sent.working_label(), tr!("turn_status.empty_sending"));
         assert!(!sent.working_label().contains("1/1"));
@@ -436,7 +463,11 @@ mod tests {
         session.push_message(MessageRole::User, "also check the tests");
 
         assert!(take_back_streamed_output(&mut session, &boundary));
-        let texts: Vec<&str> = session.messages.iter().map(|m| m.content.as_str()).collect();
+        let texts: Vec<&str> = session
+            .messages
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect();
         assert_eq!(texts, vec!["fix the bug", "also check the tests"]);
         assert_eq!(session.transcript_blocks.len(), 1);
         assert_eq!(
@@ -454,9 +485,11 @@ mod tests {
     #[test]
     fn text_and_reasoning_grown_past_the_boundary_are_cut_back() {
         let (mut session, turn) = session_with_turn();
-        session
-            .messages
-            .push(Message::new_for_turn(MessageRole::Assistant, "Part one. ", turn));
+        session.messages.push(Message::new_for_turn(
+            MessageRole::Assistant,
+            "Part one. ",
+            turn,
+        ));
         session.transcript_blocks.push(TranscriptBlock {
             after_message: 0,
             turn_id: Some(turn),
@@ -501,7 +534,11 @@ mod tests {
         assert!(take_back_streamed_output(&mut session, &boundary));
         assert_eq!(session.transcript_blocks.len(), 2);
         assert_eq!(session.transcript_blocks[0].activities.len(), 1);
-        assert!(session.transcript_blocks[0].activities[0].reasoning.is_none());
+        assert!(
+            session.transcript_blocks[0].activities[0]
+                .reasoning
+                .is_none()
+        );
         assert_eq!(session.transcript_blocks[1].activities.len(), 1);
     }
 }

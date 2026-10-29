@@ -88,7 +88,11 @@ impl Waku {
     /// The session's browser tab, by id. For the task on screen: the active
     /// tab when it is a browser, else its first browser tab, else a new one
     /// — and the panel is shown, so the page is drawn and has a size.
-    fn agent_browser_tab(&mut self, session_id: Uuid, cx: &mut Context<Self>) -> Result<Uuid, String> {
+    fn agent_browser_tab(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> Result<Uuid, String> {
         if self.state.selected_session != Some(session_id) {
             let state = self
                 .right_panel_session_states
@@ -100,7 +104,12 @@ impl Waku {
                 .and_then(RightPanelSurface::browser_id);
             return active
                 .into_iter()
-                .chain(state.surfaces.iter().filter_map(RightPanelSurface::browser_id))
+                .chain(
+                    state
+                        .surfaces
+                        .iter()
+                        .filter_map(RightPanelSurface::browser_id),
+                )
                 .find(|id| self.right_panel_browsers.contains_key(id))
                 .ok_or_else(|| NOT_SHOWN.to_owned());
         }
@@ -178,8 +187,7 @@ async fn run(
                 .get("url")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            let url = browser
-                .update(cx, |view, cx| view.agent_navigate(raw, cx))?;
+            let url = browser.update(cx, |view, cx| view.agent_navigate(raw, cx))?;
             let page = settle(&browser, cx, false).await;
             Ok(text(format!("Opened {url}.\n{}", describe_page(&page))))
         }
@@ -220,7 +228,10 @@ async fn run(
         "wait_for" => {
             let value = evaluate(&browser, automation::wait_script(operation), cx).await?;
             let found = value.get("found").and_then(Value::as_bool) == Some(true);
-            let waited = value.get("waited_ms").and_then(Value::as_u64).unwrap_or_default();
+            let waited = value
+                .get("waited_ms")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
             Ok(text(if found {
                 format!("It happened after {waited} ms.")
             } else {
@@ -233,14 +244,13 @@ async fn run(
         }
         "screenshot" => screenshot(&browser, cx).await,
         "back" | "reload" => {
-            browser
-                .update(cx, |view, cx| {
-                    if op == "back" {
-                        view.agent_back(cx);
-                    } else {
-                        view.agent_reload(cx);
-                    }
-                });
+            browser.update(cx, |view, cx| {
+                if op == "back" {
+                    view.agent_back(cx);
+                } else {
+                    view.agent_reload(cx);
+                }
+            });
             let page = settle(&browser, cx, true).await;
             Ok(text(describe_page(&page)))
         }
@@ -304,8 +314,7 @@ async fn evaluate(
     script: String,
     cx: &mut AsyncApp,
 ) -> Result<Value, String> {
-    let receiver = browser
-        .read_with(cx, |view, _| view.agent_evaluate(script));
+    let receiver = browser.read_with(cx, |view, _| view.agent_evaluate(script));
     let timer = cx.background_executor().timer(SCRIPT_LIMIT);
     let answer = futures_lite::future::or(async { Some(receiver.await) }, async {
         timer.await;
@@ -332,8 +341,7 @@ async fn settle(browser: &Entity<BrowserView>, cx: &mut AsyncApp, after_action: 
     }
     let deadline = Instant::now() + LOAD_LIMIT;
     loop {
-        let page = browser
-            .read_with(cx, |view, _| view.agent_page());
+        let page = browser.read_with(cx, |view, _| view.agent_page());
         if !page.loading || Instant::now() > deadline {
             return page;
         }
@@ -356,11 +364,9 @@ fn describe_page(page: &AgentPage) -> String {
 }
 
 async fn screenshot(browser: &Entity<BrowserView>, cx: &mut AsyncApp) -> Result<Value, String> {
-    let receiver = browser
-        .read_with(cx, |view, _| view.agent_screenshot());
+    let receiver = browser.read_with(cx, |view, _| view.agent_screenshot());
     let data = receiver.await.map_err(|_| GONE.to_owned())??;
-    let page = browser
-        .read_with(cx, |view, _| view.agent_page());
+    let page = browser.read_with(cx, |view, _| view.agent_page());
     let bytes = {
         use base64::Engine as _;
         base64::engine::general_purpose::STANDARD
@@ -431,7 +437,10 @@ fn format_console(value: &Value) -> String {
             format!(
                 "[{}] {}",
                 entry.get("level").and_then(Value::as_str).unwrap_or("log"),
-                entry.get("text").and_then(Value::as_str).unwrap_or_default()
+                entry
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
             )
         })
         .collect::<Vec<_>>()
@@ -470,8 +479,7 @@ async fn tabs(
                 .map_err(|_| GONE.to_owned())??;
             let browser = wait_for_browser(waku, id, cx).await?;
             if let Some(url) = operation.get("url").and_then(Value::as_str) {
-                browser
-                    .update(cx, |view, cx| view.agent_navigate(url, cx))?;
+                browser.update(cx, |view, cx| view.agent_navigate(url, cx))?;
                 settle(&browser, cx, false).await;
             }
         }
@@ -512,7 +520,11 @@ async fn tabs(
                         .get(id)
                         .map(|browser| browser.read(cx).agent_page())
                         .unwrap_or_default();
-                    let marker = if active == Some(*surface) { " (selected)" } else { "" };
+                    let marker = if active == Some(*surface) {
+                        " (selected)"
+                    } else {
+                        ""
+                    };
                     format!("{number}: {}{marker}", describe_page(&page))
                 })
                 .collect::<Vec<_>>()
@@ -552,7 +564,10 @@ mod tests {
             loading,
         };
         assert_eq!(describe_page(&page("", "", false)), "The page is blank.");
-        assert_eq!(describe_page(&page("http://a", "", false)), "Now at http://a.");
+        assert_eq!(
+            describe_page(&page("http://a", "", false)),
+            "Now at http://a."
+        );
         assert_eq!(
             describe_page(&page("http://a", "A", true)),
             "Now at \"A\" — http://a. It is still loading."

@@ -158,7 +158,10 @@ pub fn reasoning_ticker_line(content: &str, max_chars: usize) -> Option<String> 
     if count <= max_chars || max_chars == 0 {
         return Some(line);
     }
-    let tail: String = line.chars().skip(count - max_chars.saturating_sub(1)).collect();
+    let tail: String = line
+        .chars()
+        .skip(count - max_chars.saturating_sub(1))
+        .collect();
     Some(format!("…{tail}"))
 }
 

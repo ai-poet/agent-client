@@ -105,7 +105,10 @@ fn marker_of(kind: &LineKind) -> char {
 }
 
 fn is_code_row(kind: &LineKind) -> bool {
-    matches!(kind, LineKind::Context | LineKind::Addition | LineKind::Deletion)
+    matches!(
+        kind,
+        LineKind::Context | LineKind::Addition | LineKind::Deletion
+    )
 }
 
 /// The commented line and up to two code lines before it in the same file,
@@ -140,7 +143,9 @@ pub(super) fn step_code_row(lines: &[Line], from: Option<usize>, delta: isize) -
     let code: Vec<usize> = lines
         .iter()
         .enumerate()
-        .filter(|(_, line)| is_code_row(&line.kind) && (line.new_line.is_some() || line.old_line.is_some()))
+        .filter(|(_, line)| {
+            is_code_row(&line.kind) && (line.new_line.is_some() || line.old_line.is_some())
+        })
         .map(|(index, _)| index)
         .collect();
     if code.is_empty() {
@@ -149,7 +154,10 @@ pub(super) fn step_code_row(lines: &[Line], from: Option<usize>, delta: isize) -
     let Some(from) = from else {
         return Some(code[0]);
     };
-    let position = code.iter().position(|index| *index >= from).unwrap_or(code.len() - 1);
+    let position = code
+        .iter()
+        .position(|index| *index >= from)
+        .unwrap_or(code.len() - 1);
     let target = (position as isize + delta).clamp(0, code.len() as isize - 1) as usize;
     Some(code[target])
 }
@@ -159,7 +167,11 @@ pub(super) fn step_code_row(lines: &[Line], from: Option<usize>, delta: isize) -
 pub(super) fn format_review_message(comments: &[ReviewComment]) -> String {
     let mut sorted: Vec<&ReviewComment> = comments.iter().collect();
     sorted.sort_by(|a, b| {
-        (&a.anchor.path, a.anchor.line, a.anchor.side).cmp(&(&b.anchor.path, b.anchor.line, b.anchor.side))
+        (&a.anchor.path, a.anchor.line, a.anchor.side).cmp(&(
+            &b.anchor.path,
+            b.anchor.line,
+            b.anchor.side,
+        ))
     });
     let mut message = String::from(
         "Please address these review comments on the current changes. \
@@ -214,7 +226,8 @@ impl Waku {
 
     fn remeasure_review_anchor(&self, anchor: &Anchor) {
         if let Some(index) = self.review_row_of(anchor) {
-            self.right_panel_diff_list_state.remeasure_items(index..index + 1);
+            self.right_panel_diff_list_state
+                .remeasure_items(index..index + 1);
         }
     }
 
@@ -235,7 +248,12 @@ impl Waku {
     }
 
     /// Open the editor on row `index` — for a new comment there.
-    pub(super) fn open_review_comment(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_review_comment(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(session) = self.review_comment_session() else {
             return;
         };
@@ -252,7 +270,16 @@ impl Waku {
             return;
         };
         let quote = quote_for(&snapshot.lines, index);
-        self.start_review_editor(session, anchor, line.content.clone(), quote, None, String::new(), window, cx);
+        self.start_review_editor(
+            session,
+            anchor,
+            line.content.clone(),
+            quote,
+            None,
+            String::new(),
+            window,
+            cx,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -280,11 +307,14 @@ impl Waku {
         if !text.is_empty() {
             input.update(cx, |input, cx| input.set_content(text, cx));
         }
-        cx.subscribe(&input, |this: &mut Self, _, event: &InputEvent, cx| match event {
-            InputEvent::Submit(_) => this.save_review_comment(cx),
-            InputEvent::Edited => cx.notify(),
-            _ => {}
-        })
+        cx.subscribe(
+            &input,
+            |this: &mut Self, _, event: &InputEvent, cx| match event {
+                InputEvent::Submit(_) => this.save_review_comment(cx),
+                InputEvent::Edited => cx.notify(),
+                _ => {}
+            },
+        )
         .detach();
         window.focus(&input.read(cx).focus_handle(cx), cx);
         self.review_comments.cursor = Some(anchor.clone());
@@ -307,7 +337,11 @@ impl Waku {
             return;
         };
         let body = editor.input.read(cx).content().trim().to_owned();
-        let comments = self.review_comments.by_session.entry(editor.session).or_default();
+        let comments = self
+            .review_comments
+            .by_session
+            .entry(editor.session)
+            .or_default();
         match editor.editing {
             Some(id) => {
                 if body.is_empty() {
@@ -466,7 +500,12 @@ impl Waku {
 
     /// Arrow keys over the code rows, Enter or `c` to comment on the one the
     /// cursor is on. Resolved on the key press, never per frame.
-    fn review_diff_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn review_diff_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.review_comments.editor.is_some() {
             return;
         }
@@ -483,7 +522,11 @@ impl Waku {
             .as_ref()
             .and_then(|anchor| self.review_row_of(anchor));
         let target = match event.keystroke.key.as_str() {
-            "down" => step_code_row(&snapshot.lines, current, if current.is_some() { 1 } else { 0 }),
+            "down" => step_code_row(
+                &snapshot.lines,
+                current,
+                if current.is_some() { 1 } else { 0 },
+            ),
             "up" => step_code_row(&snapshot.lines, current, -1),
             "pagedown" => step_code_row(&snapshot.lines, current, 20),
             "pageup" => step_code_row(&snapshot.lines, current, -20),
@@ -505,17 +548,22 @@ impl Waku {
             .lines
             .get(target)
             .and_then(|line| Anchor::of(line, &snapshot.files.get(line.file_index)?.path));
-        if let Some(previous) = self.review_comments.cursor.replace(anchor.clone().unwrap_or_else(|| Anchor {
-            path: String::new(),
-            side: Side::New,
-            line: 0,
-        })) {
+        if let Some(previous) = self
+            .review_comments
+            .cursor
+            .replace(anchor.clone().unwrap_or_else(|| Anchor {
+                path: String::new(),
+                side: Side::New,
+                line: 0,
+            }))
+        {
             self.remeasure_review_anchor(&previous);
         }
         if let Some(anchor) = &anchor {
             self.remeasure_review_anchor(anchor);
         }
-        self.right_panel_diff_list_state.scroll_to_reveal_item(target);
+        self.right_panel_diff_list_state
+            .scroll_to_reveal_item(target);
         cx.stop_propagation();
         cx.notify();
     }
@@ -594,57 +642,59 @@ impl Waku {
             .child(icon("icons/plus.svg", 11.0, theme.on_inverse));
 
         let gutter = style.gutter_width();
-        let cards = comments.into_iter().map(|comment| {
-            let id = comment.id;
-            div()
-                .ml(px(gutter))
-                .mr(px(10.0))
-                .my(px(4.0))
-                .px(px(10.0))
-                .py(px(8.0))
-                .rounded(px(8.0))
-                .border_1()
-                .border_color(theme.border)
-                .bg(theme.surface)
-                .flex()
-                .flex_col()
-                .gap(px(6.0))
-                .text_size(sp(12.5))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .text_color(theme.text_tertiary)
-                        .child(icon("icons/pencil.svg", 12.0, theme.text_tertiary))
-                        .child(tr!("review_comments.yours")),
-                )
-                .child(div().text_color(theme.text).child(comment.body.clone()))
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(6.0))
-                        .child(card_button(
-                            theme,
-                            SharedString::from(format!("review-comment-edit-{id}")),
-                            tr!("review_comments.edit"),
-                            false,
-                            false,
-                            cx,
-                            move |this, window, cx| this.edit_review_comment(id, window, cx),
-                        ))
-                        .child(card_button(
-                            theme,
-                            SharedString::from(format!("review-comment-delete-{id}")),
-                            tr!("review_comments.delete"),
-                            false,
-                            false,
-                            cx,
-                            move |this, _, cx| this.delete_review_comment(id, cx),
-                        )),
-                )
-        })
-        .collect::<Vec<_>>();
+        let cards = comments
+            .into_iter()
+            .map(|comment| {
+                let id = comment.id;
+                div()
+                    .ml(px(gutter))
+                    .mr(px(10.0))
+                    .my(px(4.0))
+                    .px(px(10.0))
+                    .py(px(8.0))
+                    .rounded(px(8.0))
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.surface)
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.0))
+                    .text_size(sp(12.5))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .text_color(theme.text_tertiary)
+                            .child(icon("icons/pencil.svg", 12.0, theme.text_tertiary))
+                            .child(tr!("review_comments.yours")),
+                    )
+                    .child(div().text_color(theme.text).child(comment.body.clone()))
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(6.0))
+                            .child(card_button(
+                                theme,
+                                SharedString::from(format!("review-comment-edit-{id}")),
+                                tr!("review_comments.edit"),
+                                false,
+                                false,
+                                cx,
+                                move |this, window, cx| this.edit_review_comment(id, window, cx),
+                            ))
+                            .child(card_button(
+                                theme,
+                                SharedString::from(format!("review-comment-delete-{id}")),
+                                tr!("review_comments.delete"),
+                                false,
+                                false,
+                                cx,
+                                move |this, _, cx| this.delete_review_comment(id, cx),
+                            )),
+                    )
+            })
+            .collect::<Vec<_>>();
         let editor = editor.map(|editor| {
             let input = editor.input.clone();
             div()
@@ -813,13 +863,23 @@ mod tests {
         let context = line(LineKind::Context, Some(8), Some(11), "fn f() {");
         assert_eq!(
             Anchor::of(&added, "src/a.rs"),
-            Some(Anchor { path: "src/a.rs".into(), side: Side::New, line: 12 })
+            Some(Anchor {
+                path: "src/a.rs".into(),
+                side: Side::New,
+                line: 12
+            })
         );
         assert_eq!(Anchor::of(&removed, "src/a.rs").unwrap().side, Side::Old);
         assert_eq!(Anchor::of(&context, "src/a.rs").unwrap().line, 11);
-        assert_eq!(Anchor::of(&line(LineKind::FileHeader, None, None, ""), "x"), None);
+        assert_eq!(
+            Anchor::of(&line(LineKind::FileHeader, None, None, ""), "x"),
+            None
+        );
         // A synthesized diff without numbers cannot be anchored.
-        assert_eq!(Anchor::of(&line(LineKind::Addition, None, None, "x"), "x"), None);
+        assert_eq!(
+            Anchor::of(&line(LineKind::Addition, None, None, "x"), "x"),
+            None
+        );
     }
 
     #[test]
@@ -834,9 +894,18 @@ mod tests {
         assert_eq!(
             quote,
             vec![
-                QuoteLine { marker: ' ', text: "b".into() },
-                QuoteLine { marker: '-', text: "c".into() },
-                QuoteLine { marker: '+', text: "C".into() },
+                QuoteLine {
+                    marker: ' ',
+                    text: "b".into()
+                },
+                QuoteLine {
+                    marker: '-',
+                    text: "c".into()
+                },
+                QuoteLine {
+                    marker: '+',
+                    text: "C".into()
+                },
             ]
         );
         assert_eq!(quote_for(&lines, 0).len(), 1);
@@ -863,9 +932,16 @@ mod tests {
     fn the_message_orders_comments_and_quotes_each() {
         let comment = |path: &str, side: Side, line: u32, body: &str| ReviewComment {
             id: 0,
-            anchor: Anchor { path: path.into(), side, line },
+            anchor: Anchor {
+                path: path.into(),
+                side,
+                line,
+            },
             line_text: String::new(),
-            quote: vec![QuoteLine { marker: '+', text: "x".into() }],
+            quote: vec![QuoteLine {
+                marker: '+',
+                text: "x".into(),
+            }],
             body: body.into(),
         };
         let message = format_review_message(&[

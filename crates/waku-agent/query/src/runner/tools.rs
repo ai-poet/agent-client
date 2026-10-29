@@ -77,9 +77,7 @@ fn whole_floats_to_integers(value: Value) -> Value {
             // wrote. Out of range keeps its spelling and fails downstream,
             // which is the honest outcome.
             Some(float)
-                if float.fract() == 0.0
-                    && float >= i64::MIN as f64
-                    && float <= i64::MAX as f64 =>
+                if float.fract() == 0.0 && float >= i64::MIN as f64 && float <= i64::MAX as f64 =>
             {
                 Value::Number(serde_json::Number::from(float as i64))
             }
@@ -123,7 +121,9 @@ pub(crate) async fn execute_tool(
                     return ToolResult::error(e.to_string());
                 }
             }
-            let mut result = tool.execute(whole_floats_to_integers(input.clone()), ctx).await;
+            let mut result = tool
+                .execute(whole_floats_to_integers(input.clone()), ctx)
+                .await;
             // Fork (Waku): an oversized result keeps its two ends and the
             // path of the whole (`claurst_tools::spill`).
             result.content = claurst_tools::spill::spill_if_large(
@@ -244,7 +244,10 @@ mod fork_concurrency_tests {
     #[test]
     fn sub_agents_and_reads_overlap_and_writes_do_not() {
         let tools = claurst_tools::all_tools();
-        assert!(runs_concurrently(claurst_core::constants::TOOL_NAME_AGENT, &tools));
+        assert!(runs_concurrently(
+            claurst_core::constants::TOOL_NAME_AGENT,
+            &tools
+        ));
         assert!(runs_concurrently("Read", &tools));
         assert!(runs_concurrently("Grep", &tools));
         assert!(!runs_concurrently("Bash", &tools));

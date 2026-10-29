@@ -183,7 +183,13 @@ mod tests {
         let more = feed.text("around.").unwrap();
         assert_eq!(text_of(&more), ("text-1", "around.", true));
 
-        let call = ActivityItem::new(Some("toolu_9".into()), ActivityKind::Search, "auth", None, false);
+        let call = ActivityItem::new(
+            Some("toolu_9".into()),
+            ActivityKind::Search,
+            "auth",
+            None,
+            false,
+        );
         let BackgroundWorkEvent::Transcript { entry, .. } = feed.activity(call) else {
             panic!("expected a transcript entry");
         };
@@ -201,7 +207,11 @@ mod tests {
         feed.text("Half an ans").unwrap();
         let first = feed.retry(true, "*retry 1*".into());
         assert_eq!(first.len(), 2);
-        assert_eq!(text_of(&first[0]), ("text-1", "", false), "the half answer is emptied");
+        assert_eq!(
+            text_of(&first[0]),
+            ("text-1", "", false),
+            "the half answer is emptied"
+        );
         assert_eq!(text_of(&first[1]), ("retry-0", "*retry 1*", false));
         // The second attempt's text goes after the line, and its own retry
         // updates the same line.
@@ -220,7 +230,14 @@ mod tests {
         feed.settle();
         feed.text("Now st").unwrap();
         let events = feed.retry(true, "*retry*".into());
-        assert_eq!(text_of(&events[0]), ("text-1", "Done with step one. ", false));
-        assert_eq!(text_of(&events[1]).0, "retry-1", "the line belongs to the second request");
+        assert_eq!(
+            text_of(&events[0]),
+            ("text-1", "Done with step one. ", false)
+        );
+        assert_eq!(
+            text_of(&events[1]).0,
+            "retry-1",
+            "the line belongs to the second request"
+        );
     }
 }

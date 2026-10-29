@@ -4,7 +4,7 @@
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tracing::debug;
 
 pub struct FileEditTool;
@@ -21,7 +21,9 @@ struct FileEditInput {
 #[async_trait]
 impl Tool for FileEditTool {
     // Gates itself: calls `ctx.check_permission_for_path` in `execute()` (#210).
-    fn self_gates(&self) -> bool { true }
+    fn self_gates(&self) -> bool {
+        true
+    }
 
     fn name(&self) -> &str {
         claurst_core::constants::TOOL_NAME_FILE_EDIT
@@ -193,18 +195,24 @@ mod tests {
         let mut ctx = allow_all_context(dir.path().to_path_buf());
         ctx.session_id = "edits-need-a-current-read".to_string();
         let file = path.to_string_lossy().to_string();
-        let edit = |old: &str, new: &str| {
-            json!({"file_path": file.clone(), "old_string": old, "new_string": new})
-        };
+        let edit = |old: &str, new: &str| json!({"file_path": file.clone(), "old_string": old, "new_string": new});
         let read = || json!({"file_path": file.clone()});
 
         let res = FileEditTool.execute(edit("alpha", "beta"), &ctx).await;
-        assert!(res.is_error && res.content.contains("has not been read"), "{}", res.content);
+        assert!(
+            res.is_error && res.content.contains("has not been read"),
+            "{}",
+            res.content
+        );
 
         crate::file_read::FileReadTool.execute(read(), &ctx).await;
         std::fs::write(&path, "alpha, changed by the person\n").unwrap();
         let res = FileEditTool.execute(edit("alpha", "beta"), &ctx).await;
-        assert!(res.is_error && res.content.contains("has changed"), "{}", res.content);
+        assert!(
+            res.is_error && res.content.contains("has changed"),
+            "{}",
+            res.content
+        );
 
         crate::file_read::FileReadTool.execute(read(), &ctx).await;
         let res = FileEditTool.execute(edit("alpha", "beta"), &ctx).await;

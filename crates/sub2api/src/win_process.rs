@@ -8,8 +8,8 @@ use std::path::PathBuf;
 
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, GetLastError};
 use windows_sys::Win32::System::Threading::{
-    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_INFORMATION,
-    PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
+    QueryFullProcessImageNameW,
 };
 
 /// The full path of `pid`'s executable image, or `None` when the process is
@@ -68,7 +68,11 @@ mod tests {
         let expected = std::env::current_exe().expect("current_exe");
         assert_eq!(
             path.file_name().unwrap().to_string_lossy().to_lowercase(),
-            expected.file_name().unwrap().to_string_lossy().to_lowercase()
+            expected
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_lowercase()
         );
         assert!(!is_protected(std::process::id()));
     }

@@ -182,7 +182,9 @@ pub(crate) fn host_of(base_url: &str) -> Option<String> {
         .split_once("://")
         .map_or(base_url, |(_, rest)| rest);
     let authority = rest.split(['/', '?', '#']).next()?;
-    let authority = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
     // An IPv6 literal carries colons of its own, so the port is whatever
     // follows the closing bracket rather than the first colon.
     let host = match authority.strip_prefix('[') {
@@ -623,9 +625,7 @@ impl CustomApiConfig {
                 if slot.active_profile().is_none() {
                     slot.add("");
                 }
-                let profile = slot
-                    .active_profile_mut()
-                    .expect("a profile was just added");
+                let profile = slot.active_profile_mut().expect("a profile was just added");
                 profile.endpoint = endpoint.clone();
                 profile.normalize();
                 write_through = profile
@@ -655,7 +655,8 @@ impl CustomApiConfig {
 
     /// The endpoint that should route `provider_id`, if a usable one is set.
     pub fn endpoint_for(&self, provider_id: &str) -> Option<&CustomEndpoint> {
-        self.get(provider_id).filter(|endpoint| endpoint.is_usable())
+        self.get(provider_id)
+            .filter(|endpoint| endpoint.is_usable())
     }
 }
 
@@ -827,10 +828,8 @@ pub fn probe_request_for_format(
     if format.is_anthropic() {
         // Where the built-in agent's Messages client will ask: `/v1` on the
         // root, unless the address already carries a version of its own.
-        let url = crate::gateway::versioned_url(
-            &crate::gateway::anthropic_base_url(base_url),
-            "models",
-        );
+        let url =
+            crate::gateway::versioned_url(&crate::gateway::anthropic_base_url(base_url), "models");
         request = request.header("anthropic-version", "2023-06-01");
         if !key.is_empty() {
             request = request.header("x-api-key", key);
@@ -1108,12 +1107,7 @@ mod tests {
                   "models":["m1"]}}],"active":"p-{name}"}}"#
             )
         };
-        let raw = format!(
-            "{{{},{},{}}}",
-            slot("grok"),
-            slot("opencode"),
-            slot("pi")
-        );
+        let raw = format!("{{{},{},{}}}", slot("grok"), slot("opencode"), slot("pi"));
         let mut config: CustomApiConfig = serde_json::from_str(&raw).expect("decodes");
         assert!(config.normalize());
 
@@ -1152,7 +1146,10 @@ mod tests {
         assert!(config.routed_endpoint("grok").is_some());
         // The slot's own copy is still there, which is what makes a
         // downgrade safe.
-        assert_eq!(config.get("grok").unwrap().base_url, "https://relay.example.org");
+        assert_eq!(
+            config.get("grok").unwrap().base_url,
+            "https://relay.example.org"
+        );
 
         config.registry.get_mut(&id).unwrap().enabled = false;
         assert!(config.routed_endpoint("grok").is_none());
@@ -1207,7 +1204,11 @@ mod tests {
         assert_eq!(entry.model("keeper").unwrap().context_window, Some(128_000));
         assert!(entry.model("goner").is_none());
         // The old origin stays listed, so a speed test can still reach it.
-        assert!(entry.candidate_urls.contains(&"https://old.example.org".to_owned()));
+        assert!(
+            entry
+                .candidate_urls
+                .contains(&"https://old.example.org".to_owned())
+        );
     }
 
     /// Both halves have to survive the file: the binding, and the copy that
@@ -1253,7 +1254,10 @@ mod tests {
         assert!(config.routed_endpoint("grok").is_none());
         assert!(config.bound_provider("grok").is_none());
         // Still stored, and still the thing a downgrade would read.
-        assert_eq!(config.get("grok").unwrap().base_url, "https://relay.example.org");
+        assert_eq!(
+            config.get("grok").unwrap().base_url,
+            "https://relay.example.org"
+        );
     }
 
     /// A slot the user already filled in is not overwritten by the old one.
@@ -1266,8 +1270,14 @@ mod tests {
         )
         .unwrap();
         assert!(config.normalize());
-        assert_eq!(config.get("native_chat").unwrap().base_url, "https://new.example.org");
-        assert_eq!(config.get("native_messages").unwrap().base_url, "https://old.example.org");
+        assert_eq!(
+            config.get("native_chat").unwrap().base_url,
+            "https://new.example.org"
+        );
+        assert_eq!(
+            config.get("native_messages").unwrap().base_url,
+            "https://old.example.org"
+        );
     }
 
     /// A file holding only the pre-split slot is not empty — calling it that
@@ -1296,10 +1306,9 @@ mod tests {
         let decoded: CustomApiConfig = serde_json::from_str(&encoded).expect("decode");
         assert_eq!(decoded, config);
         // Legacy payloads without `models` still parse.
-        let legacy: CustomApiConfig = serde_json::from_str(
-            r#"{"claude":{"base_url":"https://a.org","api_key":"k"}}"#,
-        )
-        .expect("legacy decode");
+        let legacy: CustomApiConfig =
+            serde_json::from_str(r#"{"claude":{"base_url":"https://a.org","api_key":"k"}}"#)
+                .expect("legacy decode");
         assert_eq!(legacy.get("claude").unwrap().models, Vec::<String>::new());
     }
 
@@ -1328,11 +1337,17 @@ mod tests {
         let profile = claude.active_profile().unwrap();
         assert_eq!(profile.endpoint.base_url, "https://a.example.org");
         assert_eq!(profile.endpoint.api_key, "sk-a");
-        assert_eq!(profile.candidate_urls, vec!["https://a.example.org".to_owned()]);
+        assert_eq!(
+            profile.candidate_urls,
+            vec!["https://a.example.org".to_owned()]
+        );
         assert!(!profile.auto_select);
         assert!(config.profiles("codex").unwrap().is_empty());
         assert!(config.get("codex").is_none());
-        assert_eq!(config.get("opencode").unwrap().models, vec!["m1".to_owned()]);
+        assert_eq!(
+            config.get("opencode").unwrap().models,
+            vec!["m1".to_owned()]
+        );
         // An all-empty legacy entry is not worth a profile.
         let config: CustomApiConfig =
             serde_json::from_str(r#"{"pi":{"base_url":"","api_key":""}}"#).expect("decode");
@@ -1345,7 +1360,10 @@ mod tests {
             serde_json::from_str(r#"{"claude":{"base_url":"https://a.org","api_key":"k"}}"#)
                 .expect("decode");
         let encoded = serde_json::to_string(&config).expect("encode");
-        assert!(encoded.contains(r#""profiles":[{"id":"legacy""#), "{encoded}");
+        assert!(
+            encoded.contains(r#""profiles":[{"id":"legacy""#),
+            "{encoded}"
+        );
         assert!(encoded.contains(r#""active":"legacy""#), "{encoded}");
         let again: CustomApiConfig = serde_json::from_str(&encoded).expect("re-decode");
         assert_eq!(again, config);
@@ -1362,7 +1380,10 @@ mod tests {
         let codex = config.profiles("codex").unwrap();
         // An `active` that points nowhere falls back to the first profile.
         assert_eq!(codex.active.as_deref(), Some("one"));
-        assert_eq!(codex.find("one").unwrap().candidate_urls, vec!["https://1.org".to_owned()]);
+        assert_eq!(
+            codex.find("one").unwrap().candidate_urls,
+            vec!["https://1.org".to_owned()]
+        );
         assert!(codex.find("two").unwrap().auto_select);
         let encoded = serde_json::to_string(&config).expect("encode");
         let decoded: CustomApiConfig = serde_json::from_str(&encoded).expect("decode");
