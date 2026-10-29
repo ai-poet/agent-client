@@ -29,6 +29,16 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.3.2]
+
+- 新任务页支持自定义壁纸：可在「设置 → 外观」选择本地图片，调整焦点与缩放，应用抖动、ASCII、半色调或扫描线效果；切换壁纸时平滑交叉淡化，界面表面可随壁纸取色。窗口、侧栏与输入框采用更统一的半透明材质，macOS 支持整窗模糊
+
+  Custom wallpapers for the new-task page: choose a local image under Settings → Appearance, adjust its focal point and zoom, and apply Dither, ASCII, Halftone or Scanlines effects; wallpaper changes crossfade smoothly, and surfaces can take their tint from the artwork. The window, sidebar and composer now share a more consistent translucent treatment, with whole-window vibrancy on macOS
+
+- 窗口最大化按钮现在可在最大化与还原之间切换，并修复 Windows 最大化后无法恢复窗口大小的问题
+
+  The window maximize button now toggles between maximized and restored states, fixing Windows windows that could not return to their previous size after being maximized
+
 ## [0.3.1]
 
 - 界面更清爽、更有层次：菜单、命令面板和状态胶囊采用半透明毛玻璃，退出时模糊与内容一起淡出；标题栏低频面板入口收进「三个点」菜单；Agent 工作行改为安静的点阵活动提示，时间、token 和状态文字不再整行闪烁
