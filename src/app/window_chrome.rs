@@ -282,7 +282,7 @@ fn client_window_button(
 fn activate_window_button(button: WindowButton, window: &mut Window) {
     match button {
         WindowButton::Minimize => window.minimize_window(),
-        WindowButton::Maximize => window.zoom_window(),
+        WindowButton::Maximize => crate::platform::toggle_window_maximized(window),
         WindowButton::Close => crate::platform::hide_window(window),
     }
 }

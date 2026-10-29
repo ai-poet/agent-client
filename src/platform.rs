@@ -463,6 +463,50 @@ pub fn start_window_move(window: &Window) {
     window.start_window_move();
 }
 
+/// Toggle the window between maximized and restored.
+///
+/// macOS and Linux both give us a toggle: `zoom_` flips the zoom state, and
+/// Wayland / X11 flip `_NET_WM_STATE_MAXIMIZED`. Windows does not — GPUI's
+/// `zoom_window` there only ever calls `ShowWindowAsync(SW_MAXIMIZE)`, which
+/// is a no-op once the window is already zoomed, so a restore button would do
+/// nothing. Ask the window manager directly instead: `SW_MAXIMIZE` to grow,
+/// `SW_RESTORE` to fall back to the pre-maximize frame.
+pub fn toggle_window_maximized(window: &mut Window) {
+    #[cfg(target_os = "windows")]
+    {
+        if window.is_maximized() {
+            restore_window(window);
+        } else {
+            window.zoom_window();
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    window.zoom_window();
+}
+
+/// Windows-only: put a maximized window back to the size it had before it was
+/// maximized. `ShowWindowAsync(SW_RESTORE)` is the documented way to do this;
+/// it restores the window's "normal" placement, which the window manager
+/// kept for us.
+#[cfg(target_os = "windows")]
+fn restore_window(window: &mut Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{SW_RESTORE, ShowWindowAsync};
+
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = HWND(handle.hwnd.get());
+    // `ShowWindowAsync` reports the previous visibility, not success, so the
+    // return value says nothing useful here.
+    let _ = unsafe { ShowWindowAsync(hwnd, SW_RESTORE) };
+}
+
 /// Perform the platform's titlebar double-click action. GPUI delegates this
 /// to the user's system preference on macOS, while Linux client decorations
 /// must toggle maximize explicitly.
