@@ -12,6 +12,7 @@ zcode-main/
 zeron-main/
 deepseek-harness-master/
 dsh-claude-style-master/
+orca/
 
 .DS_Store
 *.log
