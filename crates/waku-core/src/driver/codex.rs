@@ -215,6 +215,7 @@ impl CodexDriver {
             service_tier,
             context_window: _,
             agent_preset: _,
+            fusion: _,
             computer_use_enabled,
             provider_cursor,
         } = options;

@@ -1026,6 +1026,18 @@ pub struct RuntimeEventCursor {
     pub sequence: u64,
 }
 
+/// Fork: a built-in agent Fusion pairing. The lead keeps using the session's
+/// model / effort / service-tier fields; only the sidekick needs a second set.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FusionPair {
+    pub sidekick_model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidekick_reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidekick_service_tier: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct AgentSession {
     pub id: Uuid,
@@ -1058,6 +1070,8 @@ pub struct AgentSession {
     /// locks this value once conversation history exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_preset: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fusion: Option<FusionPair>,
     pub status: SessionStatus,
     pub created_at: u64,
     /// Any mutation, including title edits and truncation. Use
@@ -1138,6 +1152,7 @@ impl AgentSession {
             service_tier: None,
             context_window: None,
             agent_preset: None,
+            fusion: None,
             status: SessionStatus::Idle,
             created_at: now,
             updated_at: now,
@@ -1177,6 +1192,7 @@ impl AgentSession {
             service_tier: None,
             context_window: None,
             agent_preset: None,
+            fusion: self.fusion.clone(),
             status: self.status,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -2420,11 +2436,11 @@ pub struct SubagentCall {
 }
 
 impl SubagentCall {
-    /// The sub-agent a tool call starts, when it is one: `Agent` or `Task`
-    /// (the name differs between Claude Code versions and engines) with a
-    /// description to show.
+    /// The sub-agent a tool call starts, when it is one: `Agent`, `Task` or
+    /// the built-in agent's Fusion `SidekickBrief`.
     pub fn from_tool(name: &str, input: Option<&serde_json::Value>) -> Option<Self> {
-        if !name.eq_ignore_ascii_case("agent") && !name.eq_ignore_ascii_case("task") {
+        let sidekick = name.eq_ignore_ascii_case("sidekickbrief");
+        if !sidekick && !name.eq_ignore_ascii_case("agent") && !name.eq_ignore_ascii_case("task") {
             return None;
         }
         let input = input?;
@@ -2437,7 +2453,9 @@ impl SubagentCall {
                 .map(str::to_owned)
         };
         Some(Self {
-            agent_type: text("subagent_type"),
+            agent_type: sidekick
+                .then(|| "Sidekick".to_owned())
+                .or_else(|| text("subagent_type")),
             description: text("description")?,
         })
     }
@@ -4361,6 +4379,27 @@ mod tests {
 
         session.status = SessionStatus::Idle;
         assert!(session.can_choose_model(ProviderKind::Codex));
+    }
+
+    #[test]
+    fn fusion_is_additive_for_old_sessions() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        let session = AgentSession::new(project.id, ProviderKind::Native);
+        let mut value = serde_json::to_value(&session).unwrap();
+        value.as_object_mut().unwrap().remove("fusion");
+        let restored: AgentSession = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.fusion, None);
+
+        let pair = FusionPair {
+            sidekick_model: "openai::gpt-6-luna".into(),
+            sidekick_reasoning_effort: Some("medium".into()),
+            sidekick_service_tier: Some("responses".into()),
+        };
+        let value = serde_json::to_value(&pair).unwrap();
+        assert_eq!(value["sidekickModel"], "openai::gpt-6-luna");
+        assert_eq!(value["sidekickReasoningEffort"], "medium");
+        assert_eq!(value["sidekickServiceTier"], "responses");
+        assert_eq!(serde_json::from_value::<FusionPair>(value).unwrap(), pair);
     }
 
     #[test]

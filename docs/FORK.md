@@ -299,6 +299,7 @@ lines below.
 | `src/app.rs`, `src/app/render.rs`, `src/app/settings.rs` (wallpaper hooks) | `WallpaperState`, startup/theme prewarming, the new-task hero below the empty-state controls, and the Appearance-page wallpaper rows | ~20 |
 | `src/app/background_work.rs` | `session_background_work` (live and finished items, for the rail) | 8 |
 | new `crates/waku-agent/query/src/e2e_tests.rs`, `lib.rs` (`mod e2e_tests`) | test-only: the loop end to end — a scripted provider, `claurst_tools::all_tools()` against a temporary workspace, files read back after the run (write then edit, read before edit, the repeat reminder) | test |
+| `crates/waku-agent-bridge/src/{fusion,config,session,permission,subagent,oneshot,side_chat}.rs`, `crates/waku-{protocol,client,core}/**` (Fusion hooks), `src/app/{fusion,composer,sessions,runtime,cloud_subscriptions}.rs`, `src/driver/mod.rs` | built-in-agent-only Fusion: per-session Lead / Sidekick pair; a persistent independently-routed sidekick behind `SidekickBrief`; lead review, failure takeover and undecided-permission escalation; additive `AgentSession.fusion` / `WireDriverStartOptions.fusion`; the model picker's pair editor and `/fusion` / `/model`. Never substitute the vendored `ManagedAgentConfig` / engine `AgentTool`; see `docs/fusion.md` | ~900 + new files |
 
 Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `CheapRouter` in `locales/` and the two i18n test expectations.
@@ -319,7 +320,7 @@ Rebranding later: change `brand.rs`/`SUB2API_BRAND_NAME` **and** sweep
 `crates/waku-core/src/driver/turn_diagnosis.rs`,
 `crates/waku-core/src/driver/{subagent,claude_subagent}.rs`,
 `crates/waku-agent-bridge/src/subagent.rs`, `crates/waku-agent-bridge/src/gateway_search.rs`,
-`crates/waku-agent-bridge/src/subagent_progress.rs`,
+`crates/waku-agent-bridge/src/{fusion,subagent_progress}.rs`, `src/app/fusion.rs`, `docs/fusion.md`,
 `src/app/{subagent_row,subagent_panel,subagent_transcript}.rs`,
 `src/app/cloud_usage.rs`, `src/app/model_plaza.rs`, `src/app/cloud_pay.rs`,
 `src/app/announcements.rs`, `assets/icons/{bell,circle-x,store,users,wallet}.svg`,

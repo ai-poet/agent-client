@@ -1512,6 +1512,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         service_tier: None,
         context_window: None,
         agent_preset: None,
+        fusion: None,
         status: serde_json::from_value(serde_json::Value::String(status)).ok()?,
         created_at: created_at as u64,
         updated_at: updated_at as u64,

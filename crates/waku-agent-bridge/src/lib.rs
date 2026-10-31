@@ -46,6 +46,8 @@ mod config;
 mod events;
 // Fork addition: naming the failure a turn ended with.
 mod failure;
+// Fork: Fusion lead / sidekick pairing.
+mod fusion;
 // Fork: `WebSearch` through the gateway's Codex search endpoint.
 mod gateway_search;
 mod goal;
@@ -75,7 +77,8 @@ mod tool_guidance;
 pub use background::{BackgroundEntry, BackgroundKind, BackgroundStatus};
 pub use config::{
     AccessMode, AgentStartOptions, COMPUTER_USE_TOOLS, ComputerUseWiring, ENDPOINT_PLATFORM_PREFIX,
-    MissingApiKey, TurnOptions, UnknownEndpoint, WireFormat, endpoint_id, split_model,
+    FusionOptions, MissingApiKey, TurnOptions, UnknownEndpoint, WireFormat, endpoint_id,
+    split_model,
 };
 pub use events::{
     AgentEvent, CompactionPhase, EventSink, FailureKind, PermissionChoice, SubagentEvent,

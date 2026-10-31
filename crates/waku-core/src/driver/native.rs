@@ -27,8 +27,9 @@ use serde_json::Value;
 use uuid::Uuid;
 use waku_agent_bridge::{
     AccessMode, AgentEvent, AgentSession, AgentStartOptions, BackgroundEntry, BackgroundKind,
-    BackgroundStatus, ComputerUseWiring, GoalOp, GoalSnapshot, GoalState, MissingApiKey,
-    SubagentEvent, SubagentStatus, TurnOptions, UnknownEndpoint, WireFormat, split_model,
+    BackgroundStatus, ComputerUseWiring, FusionOptions, GoalOp, GoalSnapshot, GoalState,
+    MissingApiKey, SubagentEvent, SubagentStatus, TurnOptions, UnknownEndpoint, WireFormat,
+    split_model,
 };
 
 use super::activity;
@@ -185,6 +186,19 @@ impl NativeDriver {
                 &SessionStore::directory(),
                 &session_id.to_string(),
             )),
+            fusion: options.fusion.as_ref().map(|pair| {
+                let (platform, model) = route_of(Some(pair.sidekick_model.as_str()));
+                FusionOptions {
+                    sidekick_model: model.unwrap_or_default(),
+                    sidekick_platform: platform,
+                    sidekick_wire_format: wire_format_of(pair.sidekick_service_tier.as_deref()),
+                    sidekick_reasoning_effort: pair.sidekick_reasoning_effort.clone(),
+                }
+            }),
+            fusion_history_dir: options
+                .fusion
+                .is_some()
+                .then(|| SessionStore::directory().join("sidekick")),
         };
 
         let sink = EventTranslator::new(events.clone(), store.clone());

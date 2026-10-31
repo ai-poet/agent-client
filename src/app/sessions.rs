@@ -941,14 +941,22 @@ impl Waku {
         model: String,
         cx: &mut Context<Self>,
     ) {
-        let Some((session_id, provider_changed)) = self
+        let preserve_fusion = provider.is_builtin() && self.fusion_picker_open;
+        let Some((session_id, provider_changed, clear_fusion)) = self
             .selected_session()
             .filter(|session| {
                 session.can_choose_model(provider)
                     && (session.provider != provider
-                        || session.model.as_deref() != Some(model.as_str()))
+                        || session.model.as_deref() != Some(model.as_str())
+                        || (session.fusion.is_some() && !preserve_fusion))
             })
-            .map(|session| (session.id, session.provider != provider))
+            .map(|session| {
+                (
+                    session.id,
+                    session.provider != provider,
+                    session.fusion.is_some() && !preserve_fusion,
+                )
+            })
         else {
             return;
         };
@@ -977,6 +985,9 @@ impl Waku {
         if let Some(session) = self.selected_session_mut() {
             session.provider = provider;
             session.model = Some(model.clone());
+            if clear_fusion {
+                session.fusion = None;
+            }
             if provider_changed {
                 session.agent_preset = None;
             }
@@ -989,9 +1000,9 @@ impl Waku {
             self.state.last_service_tier = service_tier;
             self.state.last_context_window = context_window;
             self.model_picker_tab = ModelPickerTab::Provider(provider);
-            // A different provider is a different binary and protocol; only a
-            // model change within one provider can be applied in session.
-            if provider_changed {
+            // A different provider or a Fusion on/off transition replaces the
+            // runtime; a lead-only model change can be applied in session.
+            if provider_changed || clear_fusion {
                 self.reset_session_runtime(session_id);
                 // A different provider is also a different command registry.
                 self.refresh_composer_sources(cx);
@@ -1006,6 +1017,9 @@ impl Waku {
             // so its key is usually in place before the message is typed.
             self.ensure_native_model_route(session_id, cx);
             cx.notify();
+        }
+        if clear_fusion {
+            self.fusion_picker_open = false;
         }
     }
 
@@ -1098,6 +1112,9 @@ impl Waku {
     pub(super) fn select_model_picker_tab(&mut self, tab: ModelPickerTab, cx: &mut Context<Self>) {
         if self.model_picker_tab != tab {
             self.model_picker_tab = tab;
+            if tab != ModelPickerTab::Provider(ProviderKind::Native) {
+                self.fusion_picker_open = false;
+            }
             if let ModelPickerTab::Provider(provider) = tab {
                 // Selecting a rail re-runs that provider's catalog discovery,
                 // so each tab is fresh when viewed without probing every

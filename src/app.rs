@@ -1285,6 +1285,10 @@ pub struct Waku {
     /// normally that is the filter field — which the empty state does not
     /// draw, so its one button holds focus instead.
     model_picker_empty_focus: FocusHandle,
+    /// Fork (Fusion): pair-editor state inside the native model picker.
+    fusion_picker_open: bool,
+    fusion_picker_role: fusion::FusionPickerRole,
+    fusion_draft: Option<crate::model::FusionPair>,
     branch_search: Entity<TextInput>,
     branch_create_input: Entity<TextInput>,
     branch_picker_mode: BranchPickerMode,
@@ -1821,6 +1825,8 @@ mod confirm_dialog;
 mod content_translations;
 mod drafts;
 mod goal_dialog;
+// Fork: Fusion pair selection in the built-in model picker.
+mod fusion;
 // Fork: the Effort slider card (a dsh-effort-slider port) and Claude Code's
 // relaunch for a new effort.
 mod agent_memory_settings;
@@ -3237,6 +3243,9 @@ impl Waku {
                 model_picker_scroll: ScrollHandle::new(),
                 model_picker_scrollbar: ScrollbarState::new(),
                 model_picker_empty_focus,
+                fusion_picker_open: false,
+                fusion_picker_role: fusion::FusionPickerRole::Sidekick,
+                fusion_draft: None,
                 branch_picker_mode: BranchPickerMode::Browse,
                 branch_picker_highlight: None,
                 branch_picker_list_state,

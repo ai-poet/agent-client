@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Doc"
+  short_description: "Build and maintain engineering docs for people and agents"
+  default_prompt: "Use $project-doc to build, maintain, or audit the engineering documentation library for the current codebase."

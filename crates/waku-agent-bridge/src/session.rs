@@ -224,6 +224,9 @@ impl AgentSession {
         }
 
         let subagents = SubagentHost::new(events.clone());
+        // Fork (Fusion): the sidekick gets a separately resolved client and
+        // key; the lead's client is never reused for its model.
+        subagents.set_fusion(crate::fusion::FusionHost::new(&options, bridge.clone())?);
         let browser = options
             .browser_tools
             .then(|| crate::browser::BrowserHost::new(events.clone()));
@@ -559,6 +562,9 @@ impl AgentSession {
         self.inner
             .bridge
             .set_auto(options.access_mode.auto_answer());
+        if let Some(fusion) = self.inner.subagents.fusion() {
+            fusion.apply_access(options.access_mode, options.plan_mode);
+        }
         if let Ok(mut manager) = self.inner.manager.lock() {
             // The manager caches the mode it evaluates against; rebuild it so
             // a switch to Full Access stops asking immediately rather than at
@@ -608,6 +614,11 @@ impl AgentSession {
             anyhow::bail!("cannot rewind while a turn is running");
         }
         let removed = history::rollback(&mut self.inner.history.lock(), turns)?;
+        if removed > 0
+            && let Some(fusion) = self.inner.subagents.fusion()
+        {
+            fusion.reset_after_rewind();
+        }
         // Fork: the trajectory marks the turns this took away.
         self.inner
             .trajectory
@@ -632,6 +643,9 @@ impl Drop for Inner {
         self.bridge.release_all();
         self.questions.lock().clear();
         self.subagents.cancel_all();
+        if let Some(fusion) = self.subagents.fusion() {
+            fusion.shutdown();
+        }
         self.team.shutdown();
         // Fork (auto-memory): what was said since the last pass gets one.
         self.memory
@@ -727,6 +741,18 @@ fn builtin_tools_with(
         .any(|name| name == crate::subagent::AGENT_TOOL_NAME)
     {
         tools.push(Box::new(SubagentTool::new(subagents.clone())));
+    }
+    // Fork (Fusion): a separate brief tool keeps the lead / sidekick state
+    // machine explicit, while reusing the ordinary sub-agent record.
+    if let Some(fusion) = subagents.fusion()
+        && !disallowed
+            .iter()
+            .any(|name| name == crate::fusion::SIDEKICK_TOOL_NAME)
+    {
+        tools.push(Box::new(crate::fusion::SidekickBriefTool::new(
+            fusion,
+            subagents.clone(),
+        )));
     }
     // Fork: the team tools, once the session leads a team (`crate::team`).
     if let Some(team) = team {
@@ -1067,6 +1093,11 @@ async fn run_turn(
     query.checkpoint_history = true;
     // Fork: the captain protocol, once active; sub-agents never get it.
     inner.team.extend_rules(&mut query);
+    // Fork (Fusion): the lead protocol is stable for the whole session, so
+    // adding it does not create per-step prompt-cache churn.
+    if let Some(fusion) = inner.subagents.fusion() {
+        fusion.extend_lead_rules(&mut query);
+    }
     // Fork: the memory index, root session only (`crate::memory`).
     inner.memory.extend_rules(&mut query);
     query.command_queue = Some(queue.clone());
@@ -1611,23 +1642,25 @@ async fn forward_events(
             // has a row to hang off.
             let agent_call = match &translated {
                 AgentEvent::ToolStarted { id, name, input }
-                    if name == crate::subagent::AGENT_TOOL_NAME =>
+                    if name == crate::subagent::AGENT_TOOL_NAME
+                        || name == crate::fusion::SIDEKICK_TOOL_NAME =>
                 {
-                    Some((id.clone(), input.clone()))
+                    Some((id.clone(), name.clone(), input.clone()))
                 }
                 _ => None,
             };
             let agent_done = match &translated {
                 AgentEvent::ToolFinished { id, name, .. }
-                    if name == crate::subagent::AGENT_TOOL_NAME =>
+                    if name == crate::subagent::AGENT_TOOL_NAME
+                        || name == crate::fusion::SIDEKICK_TOOL_NAME =>
                 {
                     Some(id.clone())
                 }
                 _ => None,
             };
             inner.events.emit(translated);
-            if let Some((id, input)) = agent_call {
-                inner.subagents.announce(&id, &input);
+            if let Some((id, name, input)) = agent_call {
+                inner.subagents.announce_for(&name, &id, &input);
             }
             if let Some(id) = agent_done {
                 inner.subagents.forget(&id);

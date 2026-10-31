@@ -67,6 +67,8 @@ pub fn ask_streaming(
         session_id: None,
         browser_tools: false,
         trajectory_dir: None,
+        fusion: None,
+        fusion_history_dir: None,
     };
     let config = build_config(&options)?;
     let mut query = build_query_config(&config, &options);

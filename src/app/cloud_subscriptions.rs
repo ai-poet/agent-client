@@ -193,8 +193,28 @@ impl Waku {
             return None;
         }
         let id = self.model_for_session(session)?;
-        native_route_need(
+        if let Some(needed) = native_route_need(
             id,
+            credentials,
+            &self.model_plaza.items,
+            &self.cloud_account.route_misses,
+        ) {
+            return Some(needed);
+        }
+        // Fork (Fusion): the second model needs its own group key too. While
+        // the pair editor is open, prepare the draft before Apply is clicked.
+        let sidekick = if self.fusion_picker_open {
+            self.fusion_draft
+                .as_ref()
+                .map(|pair| pair.sidekick_model.as_str())
+        } else {
+            session
+                .fusion
+                .as_ref()
+                .map(|pair| pair.sidekick_model.as_str())
+        }?;
+        native_route_need(
+            sidekick,
             credentials,
             &self.model_plaza.items,
             &self.cloud_account.route_misses,

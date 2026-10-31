@@ -36,6 +36,7 @@ export type { DaemonSettings } from "./DaemonSettings";
 export type { DaySlice } from "./DaySlice";
 export type { FileEntry } from "./FileEntry";
 export type { FilePreview } from "./FilePreview";
+export type { FusionPair } from "./FusionPair";
 export type { GoalOperation } from "./GoalOperation";
 export type { InteractionMode } from "./InteractionMode";
 export type { Message } from "./Message";

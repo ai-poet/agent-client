@@ -717,7 +717,9 @@ impl Waku {
         let session = self.selected_session();
         let provider = session.map(|session| session.provider).unwrap_or_default();
         let selected_model = session.and_then(|session| self.model_for_session(session));
-        let selected_model_name = self.model_display_name(provider, selected_model);
+        let selected_model_name = session
+            .and_then(|session| self.fusion_summary(session))
+            .unwrap_or_else(|| self.model_display_name(provider, selected_model));
         let locked_provider = session
             .filter(|session| !session.messages.is_empty())
             .map(|session| session.provider);
@@ -880,12 +882,19 @@ impl Waku {
         // Settings → Model providers — on that endpoint when one is open —
         // the way ZCode's picker ends in "manage models". It counts as a row
         // for the keyboard cursor, after the models.
+        // Fork (Fusion): the family row opens a pair editor above this same
+        // model list. It is a real keyboard stop before the ordinary rows.
+        let fusion_row = handle.is_open() && !searching && self.fusion_tab_selected();
+        let fusion_editing = fusion_row && self.fusion_picker_open;
         let manage_models = (handle.is_open()
             && selected_tab == ModelPickerTab::Provider(ProviderKind::Native)
             && !searching
+            && !fusion_editing
             && super::native_agent::is_endpoint_vendor(&picker_vendor))
         .then(|| super::native_agent::endpoint_of_vendor(&picker_vendor).map(str::to_owned));
-        let row_count = available_models.len() + usize::from(manage_models.is_some());
+        let fusion_offset = usize::from(fusion_row);
+        let row_count =
+            available_models.len() + usize::from(manage_models.is_some()) + fusion_offset;
         let highlight = self
             .model_picker_highlight
             .filter(|index| *index < row_count);
@@ -1098,7 +1107,18 @@ impl Waku {
                     );
                 }
 
+                if fusion_row {
+                    let entry = weak
+                        .update(_cx, |this, cx| {
+                            this.render_fusion_entry(highlight == Some(0), cx)
+                                .into_any_element()
+                        })
+                        .ok();
+                    rows = rows.children(entry);
+                }
+
                 for (row_index, (kind, model)) in available_models.iter().enumerate() {
+                    let row_index = row_index + fusion_offset;
                     let kind = *kind;
                     let is_selected =
                         kind == provider && selected_model.as_deref() == Some(model.id.as_str());
@@ -1233,18 +1253,24 @@ impl Waku {
                             )
                             .on_click(move |_, window, cx| {
                                 let _ = select_weak.update(cx, |this, cx| {
-                                    // The format rides with the model:
-                                    // `choose_model` restores what this model
-                                    // was last used with and reconciles it
-                                    // against what this model can speak.
-                                    this.choose_model(kind, model_id.clone(), cx);
+                                    if fusion_editing {
+                                        this.choose_fusion_model(kind, model_id.clone(), cx);
+                                    } else {
+                                        // The format rides with the model:
+                                        // `choose_model` restores what this model
+                                        // was last used with and reconciles it
+                                        // against what this model can speak.
+                                        this.choose_model(kind, model_id.clone(), cx);
+                                    }
                                 });
-                                select_popover.close(window, cx);
+                                if !fusion_editing {
+                                    select_popover.close(window, cx);
+                                }
                             }),
                     );
                 }
                 if let Some(target) = manage_models.clone() {
-                    let is_highlighted = highlight == Some(available_models.len());
+                    let is_highlighted = highlight == Some(available_models.len() + fusion_offset);
                     let manage_weak = weak.clone();
                     let manage_popover = popover.clone();
                     rows = rows.child(
@@ -1297,7 +1323,7 @@ impl Waku {
                     .w(px(560.0))
                     // Fork: taller than upstream's 390 so rows carrying a
                     // description line still show five at a time.
-                    .h(px(440.0))
+                    .h(px(if fusion_editing { 512.0 } else { 440.0 }))
                     .rounded(px(13.0))
                     .overflow_hidden()
                     .border_1()
@@ -1337,7 +1363,8 @@ impl Waku {
                         let on_manage = confirm_manage.is_some()
                             && confirm_weak
                                 .read_with(cx, |this, _| {
-                                    this.model_picker_highlight.unwrap_or(0) == confirm_models.len()
+                                    this.model_picker_highlight.unwrap_or(0)
+                                        == confirm_models.len() + fusion_offset
                                 })
                                 .unwrap_or(false);
                         if on_manage {
@@ -1350,10 +1377,14 @@ impl Waku {
                             );
                             return;
                         }
-                        let _ = confirm_weak.update(cx, |this, cx| {
-                            this.choose_highlighted_model(&confirm_models, cx);
-                        });
-                        confirm_popover.close(window, cx);
+                        let keep_open = confirm_weak
+                            .update(cx, |this, cx| {
+                                this.choose_highlighted_model(&confirm_models, cx)
+                            })
+                            .unwrap_or(false);
+                        if !keep_open {
+                            confirm_popover.close(window, cx);
+                        }
                         window.refresh();
                     })
                     .child(sidebar)
@@ -1367,6 +1398,15 @@ impl Waku {
                             .rounded_br(px(12.0))
                             .bg(theme.surface)
                             .child(search_input)
+                            .children(if fusion_editing {
+                                weak.update(_cx, |this, cx| {
+                                    this.render_fusion_pair_header(&popover, cx)
+                                        .into_any_element()
+                                })
+                                .ok()
+                            } else {
+                                None
+                            })
                             .child(
                                 div()
                                     .flex_1()
@@ -1483,22 +1523,36 @@ impl Waku {
         )
         .iter()
         .position(|(kind, model)| *kind == provider && selected_model == Some(model.id.as_str()))
+        .map(|index| index + usize::from(self.fusion_tab_selected()))
         .unwrap_or(0);
         self.model_picker_scroll.scroll_to_item(index);
     }
 
     /// Take the row the selection is on, defaulting to the first so `enter`
-    /// works the moment the panel opens.
+    /// works the moment the panel opens. Returns whether the picker stays open.
     fn choose_highlighted_model(
         &mut self,
         models: &[(ProviderKind, ProviderModel)],
         cx: &mut Context<Self>,
-    ) {
-        let Some((kind, model)) = models.get(self.model_picker_highlight.unwrap_or(0)) else {
-            return;
+    ) -> bool {
+        let fusion_row =
+            self.fusion_tab_selected() && self.model_search.read(cx).content().trim().is_empty();
+        let index = self.model_picker_highlight.unwrap_or(0);
+        if fusion_row && index == 0 {
+            self.open_fusion_picker(cx);
+            return true;
+        }
+        let Some((kind, model)) = models.get(index - usize::from(fusion_row)) else {
+            return false;
         };
         let (kind, model_id) = (*kind, model.id.clone());
-        self.choose_model(kind, model_id, cx);
+        if self.fusion_picker_open {
+            self.choose_fusion_model(kind, model_id, cx);
+            true
+        } else {
+            self.choose_model(kind, model_id, cx);
+            false
+        }
     }
 
     // Fork: superseded by `render_effort_card_control` (effort_panel.rs); the
@@ -2300,6 +2354,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> bool {
         self.execute_resume_composer_command(prompt, cx)
+            || self.execute_fusion_command(prompt, cx)
             || self.execute_plan_mode_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
             || self.execute_goal_composer_command(prompt, cx)

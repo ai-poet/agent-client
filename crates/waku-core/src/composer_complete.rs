@@ -176,6 +176,9 @@ fn native_builtin_commands() -> Vec<SlashCommand> {
         ),
         builtin("context", "commands.context_description", None),
         builtin("cost", "commands.cost_description", None),
+        // Fork (Fusion): the same entry and exit as Devin's Fusion mode.
+        builtin("fusion", "commands.fusion_description", None),
+        builtin("model", "commands.model_description", None),
         prompt("init", "commands.init_description", NATIVE_INIT_PROMPT),
         prompt(
             "review",

@@ -2945,6 +2945,11 @@ impl Waku {
                 service_tier,
                 context_window,
                 agent_preset,
+                fusion: session
+                    .provider
+                    .is_builtin()
+                    .then(|| session.fusion.clone())
+                    .flatten(),
                 // Fork: upstream pinned this to macOS while Computer Use was
                 // macOS-only. The Windows backend (`cua-driver`) landed after
                 // it, and without this the daemon never heard the toggle, so

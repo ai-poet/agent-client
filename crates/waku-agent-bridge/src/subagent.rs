@@ -61,8 +61,9 @@ pub(crate) const AGENT_TOOL_NAME: &str = claurst_core::constants::TOOL_NAME_AGEN
 /// no sign of who is asking. The plan-mode and worktree switches and
 /// `GoalComplete` change the *session's* state, which is not the child's to
 /// change.
-pub(crate) const CHILD_EXCLUDED_TOOLS: [&str; 7] = [
+pub(crate) const CHILD_EXCLUDED_TOOLS: [&str; 8] = [
     AGENT_TOOL_NAME,
+    crate::fusion::SIDEKICK_TOOL_NAME,
     "AskUserQuestion",
     "EnterPlanMode",
     "ExitPlanMode",
@@ -72,7 +73,7 @@ pub(crate) const CHILD_EXCLUDED_TOOLS: [&str; 7] = [
 ];
 
 /// How long `execute` waits for the announcement of its own call.
-const CLAIM_TIMEOUT: Duration = Duration::from_secs(3);
+pub(crate) const CLAIM_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// What a sub-agent is told about its situation, after the session's own
 /// rules.
@@ -137,6 +138,7 @@ pub(crate) struct TurnScope {
 #[derive(Clone, Debug)]
 struct PendingCall {
     tool_id: String,
+    tool_name: String,
     description: String,
     prompt: String,
 }
@@ -170,6 +172,8 @@ pub(crate) struct SubagentHost {
     /// Fork: the parent session's trajectory, where children's requests and
     /// tool calls are recorded under the call that started them.
     trajectory: Mutex<Option<Arc<crate::trajectory::Recorder>>>,
+    /// Fork (Fusion): present only when this session has a configured pair.
+    fusion: Mutex<Option<Arc<crate::fusion::FusionHost>>>,
 }
 
 impl SubagentHost {
@@ -184,7 +188,17 @@ impl SubagentHost {
             progress: Mutex::new(HashMap::new()),
             answers: Mutex::new(HashMap::new()),
             trajectory: Mutex::new(None),
+            fusion: Mutex::new(None),
         })
+    }
+
+    /// Fork (Fusion): install the pair before the tool set is built.
+    pub fn set_fusion(&self, fusion: Option<Arc<crate::fusion::FusionHost>>) {
+        *self.fusion.lock() = fusion;
+    }
+
+    pub(crate) fn fusion(&self) -> Option<Arc<crate::fusion::FusionHost>> {
+        self.fusion.lock().clone()
     }
 
     /// Fork: record children into the session's trajectory.
@@ -251,19 +265,26 @@ impl SubagentHost {
         }
     }
 
-    fn remember_answer(&self, parent_id: &str, result: &ToolResult) {
+    pub(crate) fn remember_answer(&self, parent_id: &str, result: &ToolResult) {
         self.answers.lock().insert(
             parent_id.to_owned(),
             (result.content.clone(), result.is_error),
         );
     }
 
-    fn take_progress(&self, parent_id: &str) -> Option<Progress> {
+    pub(crate) fn take_progress(&self, parent_id: &str) -> Option<Progress> {
         self.progress.lock().remove(parent_id)
     }
 
     /// The engine is about to run `Agent` call `tool_id` with `input`.
+    #[cfg(test)]
     pub fn announce(&self, tool_id: &str, input: &Value) {
+        self.announce_for(AGENT_TOOL_NAME, tool_id, input);
+    }
+
+    /// Fork (Fusion): keep two delegation tools' otherwise-identical briefs
+    /// attached to the call that actually started them.
+    pub(crate) fn announce_for(&self, tool_name: &str, tool_id: &str, input: &Value) {
         let text = |key: &str| {
             input
                 .get(key)
@@ -273,6 +294,7 @@ impl SubagentHost {
         };
         self.pending.lock().push_back(PendingCall {
             tool_id: tool_id.to_owned(),
+            tool_name: tool_name.to_owned(),
             description: text("description").trim().to_owned(),
             prompt: text("prompt"),
         });
@@ -287,34 +309,60 @@ impl SubagentHost {
     /// The id of the announced call a run with this input serves. Waits up
     /// to `within` for the announcement.
     async fn claim(&self, description: &str, prompt: &str, within: Duration) -> Option<String> {
+        self.claim_for(AGENT_TOOL_NAME, description, prompt, within)
+            .await
+    }
+
+    pub(crate) async fn claim_for(
+        &self,
+        tool_name: &str,
+        description: &str,
+        prompt: &str,
+        within: Duration,
+    ) -> Option<String> {
         let deadline = tokio::time::Instant::now() + within;
         loop {
             // Created before looking, so an announcement landing between the
             // look and the wait still wakes this.
             let announced = self.announced.notified();
-            if let Some(id) = self.take_match(description, prompt) {
+            if let Some(id) = self.take_match(tool_name, description, prompt) {
                 return Some(id);
             }
             if tokio::time::timeout_at(deadline, announced).await.is_err() {
-                return self.take_match(description, prompt);
+                return self.take_match(tool_name, description, prompt);
             }
         }
     }
 
     /// The first pending call with this exact text; failing that, the only
-    /// pending call, if there is exactly one.
-    fn take_match(&self, description: &str, prompt: &str) -> Option<String> {
+    /// pending call for this tool, if there is exactly one.
+    fn take_match(&self, tool_name: &str, description: &str, prompt: &str) -> Option<String> {
         let mut pending = self.pending.lock();
         let description = description.trim();
         let index = pending
             .iter()
-            .position(|call| call.description == description && call.prompt == prompt)
-            .or_else(|| (pending.len() == 1).then_some(0))?;
+            .position(|call| {
+                call.tool_name == tool_name
+                    && call.description == description
+                    && call.prompt == prompt
+            })
+            .or_else(|| {
+                let mut matches = pending
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, call)| call.tool_name == tool_name);
+                let (index, _) = matches.next()?;
+                matches.next().is_none().then_some(index)
+            })?;
         pending.remove(index).map(|call| call.tool_id)
     }
 
     fn scope(&self) -> Option<Arc<TurnScope>> {
         self.scope.lock().clone()
+    }
+
+    pub(crate) fn in_turn(&self) -> bool {
+        self.scope.lock().is_some()
     }
 
     /// Stop one child the user pointed at. `false` when no running child has
@@ -344,7 +392,27 @@ impl SubagentHost {
         }
     }
 
-    fn emit(&self, parent_tool_id: &str, event: SubagentEvent) {
+    pub(crate) fn track_foreground(
+        &self,
+        parent_id: &str,
+        cancel: CancellationToken,
+        stopped_by_user: Arc<AtomicBool>,
+    ) {
+        self.children.lock().insert(
+            parent_id.to_owned(),
+            ChildHandle {
+                cancel,
+                background: false,
+                stopped_by_user,
+            },
+        );
+    }
+
+    pub(crate) fn untrack(&self, parent_id: &str) {
+        self.children.lock().remove(parent_id);
+    }
+
+    pub(crate) fn emit(&self, parent_tool_id: &str, event: SubagentEvent) {
         {
             let mut progress = self.progress.lock();
             match &event {
@@ -372,17 +440,17 @@ impl SubagentHost {
 
 /// The input, read by hand: the fields are few, and a typo in one is better
 /// answered with the field's name than with a serde path.
-struct AgentInput {
-    description: String,
-    prompt: String,
-    tools: Option<Vec<String>>,
-    system_prompt: Option<String>,
-    max_turns: Option<u32>,
-    run_in_background: bool,
+pub(crate) struct AgentInput {
+    pub description: String,
+    pub prompt: String,
+    pub tools: Option<Vec<String>>,
+    pub system_prompt: Option<String>,
+    pub max_turns: Option<u32>,
+    pub run_in_background: bool,
 }
 
 impl AgentInput {
-    fn parse(input: &Value) -> Result<Self, String> {
+    pub(crate) fn parse(input: &Value) -> Result<Self, String> {
         let required = |key: &str| {
             input
                 .get(key)
@@ -696,7 +764,7 @@ impl ChildRun {
 /// Carry what the child does to the session's sink, as [`SubagentEvent`]s.
 /// Text arriving together is sent together: the stream is a delta per
 /// token, and each one is a message across the daemon wire.
-async fn forward_child(
+pub(crate) async fn forward_child(
     host: Arc<SubagentHost>,
     parent_id: String,
     mut rx: mpsc::UnboundedReceiver<QueryEvent>,
@@ -777,14 +845,14 @@ pub(crate) fn child_event(event: AgentEvent) -> Option<SubagentEvent> {
 
 /// Sends `Finished { Stopped }` if dropped while armed — the one way a
 /// foreground child ends without reaching its own ending.
-struct FinishGuard {
-    host: Arc<SubagentHost>,
-    parent_id: String,
-    started: Instant,
+pub(crate) struct FinishGuard {
+    pub host: Arc<SubagentHost>,
+    pub parent_id: String,
+    pub started: Instant,
     /// The child's token: its run is a task of its own, which would
     /// otherwise outlive the call it answers.
-    cancel: CancellationToken,
-    armed: bool,
+    pub cancel: CancellationToken,
+    pub armed: bool,
 }
 
 impl Drop for FinishGuard {
@@ -868,7 +936,7 @@ fn ran_to_an_end(outcome: &QueryOutcome) -> bool {
 /// engine's own tool words it. A run that did not finish carries what it got
 /// done (`crate::subagent_progress`), so the parent can continue it rather
 /// than start it over.
-fn tool_result(
+pub(crate) fn tool_result(
     outcome: QueryOutcome,
     stopped_by_user: bool,
     progress: Option<&Progress>,
@@ -963,11 +1031,11 @@ pub(crate) fn join_prompts(first: Option<String>, second: Option<String>) -> Opt
     }
 }
 
-fn elapsed_ms(started: Instant) -> u64 {
+pub(crate) fn elapsed_ms(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
-fn unix_millis() -> u64 {
+pub(crate) fn unix_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
@@ -1058,12 +1126,35 @@ mod tests {
         let (host, _) = host();
         host.announce("first", &call("Same", "same"));
         host.announce("second", &call("Same", "same"));
-        assert_eq!(host.take_match("Same", "same").as_deref(), Some("first"));
         assert_eq!(
-            host.take_match("Rewritten", "by a hook").as_deref(),
+            host.take_match(AGENT_TOOL_NAME, "Same", "same").as_deref(),
+            Some("first")
+        );
+        assert_eq!(
+            host.take_match(AGENT_TOOL_NAME, "Rewritten", "by a hook")
+                .as_deref(),
             Some("second")
         );
-        assert_eq!(host.take_match("Same", "same"), None);
+        assert_eq!(host.take_match(AGENT_TOOL_NAME, "Same", "same"), None);
+    }
+
+    /// Fusion briefs and ordinary Agent calls can have the same text without
+    /// attaching either run to the other's transcript row.
+    #[test]
+    fn delegation_claims_are_scoped_by_tool_name() {
+        let (host, _) = host();
+        let input = call("Same", "same");
+        host.announce_for(crate::fusion::SIDEKICK_TOOL_NAME, "sidekick", &input);
+        host.announce("agent", &input);
+        assert_eq!(
+            host.take_match(AGENT_TOOL_NAME, "Same", "same").as_deref(),
+            Some("agent")
+        );
+        assert_eq!(
+            host.take_match(crate::fusion::SIDEKICK_TOOL_NAME, "Same", "same")
+                .as_deref(),
+            Some("sidekick")
+        );
     }
 
     /// A call that finished without running, and every call left pending
@@ -1073,10 +1164,10 @@ mod tests {
         let (host, _) = host();
         host.announce("refused", &call("A", "a"));
         host.forget("refused");
-        assert_eq!(host.take_match("A", "a"), None);
+        assert_eq!(host.take_match(AGENT_TOOL_NAME, "A", "a"), None);
         host.announce("stale", &call("B", "b"));
         host.end_turn();
-        assert_eq!(host.take_match("B", "b"), None);
+        assert_eq!(host.take_match(AGENT_TOOL_NAME, "B", "b"), None);
     }
 
     /// The record shows what the child wrote, the tools it called and its

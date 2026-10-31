@@ -36,6 +36,7 @@ pub(crate) fn start_remote(
             service_tier: options.service_tier,
             context_window: options.context_window,
             agent_preset: options.agent_preset,
+            fusion: options.fusion,
             computer_use_enabled: options.computer_use_enabled,
             provider_cursor: options
                 .provider_cursor

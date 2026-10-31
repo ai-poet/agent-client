@@ -122,6 +122,7 @@ impl OpenCodeDriver {
             service_tier: _,
             context_window: _,
             agent_preset: _,
+            fusion: _,
             computer_use_enabled,
             provider_cursor,
         } = options;
@@ -1453,6 +1454,7 @@ mod tests {
                 service_tier: None,
                 context_window: None,
                 agent_preset: None,
+                fusion: None,
                 computer_use_enabled: false,
                 provider_cursor: None,
             },
@@ -1542,6 +1544,7 @@ mod tests {
                 service_tier: None,
                 context_window: None,
                 agent_preset: None,
+                fusion: None,
                 computer_use_enabled: false,
                 provider_cursor: None,
             },

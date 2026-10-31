@@ -1,5 +1,22 @@
 # Waku development guidance
 
+## Project Doc gate
+
+- Before any repository task, use the `project-doc` skill. If the current
+  session cannot invoke it, do not stop work: read
+  `.agents/skills/project-doc/SKILL.md` directly and follow it.
+- On the session's first task in this repository, read all of `docs/index.md`,
+  then follow its routing to the relevant sections.
+- Reuse skill instructions, indexes, and sections already read in the same
+  session while enough of their content remains in context. This also applies
+  when editing files, continuing subtasks, and finishing work. If content is
+  missing, relevant files change, or routing conflicts with actual files,
+  reread the affected material under the skill's "Reading and context reuse"
+  rules.
+- When a change affects cross-module behavior, domain rules, public
+  interfaces, configuration, migrations, or upstream-merge rules, update the
+  affected `docs/` documents and indexes in the same change.
+
 ## Development runtime
 
 - Assume `bun ./scripts/dev.ts` is already running and owns the current

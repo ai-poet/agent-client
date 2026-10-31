@@ -94,6 +94,7 @@ impl AmpDriver {
             service_tier,
             context_window: _,
             agent_preset: _,
+            fusion: _,
             computer_use_enabled: _,
             provider_cursor,
         } = options;
@@ -590,6 +591,7 @@ mod tests {
                 service_tier: None,
                 context_window: None,
                 agent_preset: None,
+                fusion: None,
                 computer_use_enabled: false,
                 provider_cursor: None,
             },
@@ -649,6 +651,7 @@ mod tests {
                 service_tier: Some("fast".into()),
                 context_window: None,
                 agent_preset: None,
+                fusion: None,
                 computer_use_enabled: false,
                 provider_cursor: None,
             },

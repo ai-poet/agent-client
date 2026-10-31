@@ -108,6 +108,7 @@ impl DeepSeekDriver {
             service_tier,
             context_window: _,
             agent_preset,
+            fusion: _,
             computer_use_enabled: _,
             provider_cursor,
         } = options;

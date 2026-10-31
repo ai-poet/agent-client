@@ -283,6 +283,16 @@ impl AccessMode {
     }
 }
 
+/// Fork: the second route in a Fusion session. The lead remains in the
+/// session's ordinary model fields; these are bare, already-split route parts.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FusionOptions {
+    pub sidekick_model: String,
+    pub sidekick_platform: Option<String>,
+    pub sidekick_wire_format: Option<WireFormat>,
+    pub sidekick_reasoning_effort: Option<String>,
+}
+
 /// Everything a session needs at start.
 #[derive(Clone, Debug)]
 pub struct AgentStartOptions {
@@ -323,6 +333,10 @@ pub struct AgentStartOptions {
     /// Fork addition: where the session's trajectory is recorded
     /// (`crate::trajectory`); `None` records nothing.
     pub trajectory_dir: Option<PathBuf>,
+    /// Fork addition: a Fusion sidekick route and where its independent
+    /// transcript is stored. Neither is sent to the lead model.
+    pub fusion: Option<FusionOptions>,
+    pub fusion_history_dir: Option<PathBuf>,
 }
 
 /// What the session needs to reach the Computer Use REPL.
@@ -383,6 +397,8 @@ impl Default for AgentStartOptions {
             session_id: None,
             browser_tools: false,
             trajectory_dir: None,
+            fusion: None,
+            fusion_history_dir: None,
         }
     }
 }

@@ -738,6 +738,7 @@ impl Backend for WakuBackend {
                     service_tier: options.service_tier,
                     context_window: options.context_window,
                     agent_preset: options.agent_preset,
+                    fusion: options.fusion,
                     computer_use_enabled: options.computer_use_enabled,
                     provider_cursor: options
                         .provider_cursor
@@ -1289,6 +1290,7 @@ impl WakuBackend {
                 service_tier: source.service_tier.clone(),
                 context_window: source.context_window.clone(),
                 agent_preset: source.agent_preset.clone(),
+                fusion: source.fusion.clone(),
                 computer_use_enabled: false,
                 provider_cursor: source.provider_cursor.clone(),
             },
@@ -1452,6 +1454,7 @@ impl WakuBackend {
                 service_tier: source.service_tier.clone(),
                 context_window: source.context_window.clone(),
                 agent_preset: source.agent_preset.clone(),
+                fusion: source.fusion.clone(),
                 computer_use_enabled: false,
                 provider_cursor: source.provider_cursor.clone(),
             },

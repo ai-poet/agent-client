@@ -288,6 +288,8 @@ pub struct WireDriverStartOptions {
     pub service_tier: Option<String>,
     pub context_window: Option<String>,
     pub agent_preset: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fusion: Option<crate::model::FusionPair>,
     pub computer_use_enabled: bool,
     pub provider_cursor: Option<Value>,
 }

@@ -366,6 +366,24 @@ pub struct GuiPermissionHandler {
     bridge: Arc<PermissionBridge>,
     /// Fork (AgentTeams): set for a team member's tools.
     member: Option<MemberScope>,
+    /// Fork (Fusion): undecided requests become a lead escalation, never a
+    /// second user-facing permission dialog from the sidekick.
+    sidekick: Option<SidekickScope>,
+}
+
+/// Fork (Fusion): a sidekick has its own rule manager and a record of the
+/// requests the lead has to take back through the ordinary permission path.
+pub(crate) struct SidekickScope {
+    pub manager: Arc<std::sync::Mutex<PermissionManager>>,
+    pub escalations: Arc<Mutex<Vec<SidekickEscalation>>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SidekickEscalation {
+    pub tool_name: String,
+    pub description: String,
+    pub reason: String,
+    pub path: Option<String>,
 }
 
 /// A team member's side of the captain's dialogs: its own manager (members
@@ -390,6 +408,7 @@ impl GuiPermissionHandler {
         Self {
             bridge,
             member: None,
+            sidekick: None,
         }
     }
 
@@ -398,6 +417,17 @@ impl GuiPermissionHandler {
         Self {
             bridge,
             member: Some(scope),
+            sidekick: None,
+        }
+    }
+
+    /// Fork (Fusion): a sidekick may do everything already settled by the
+    /// user's rules. Only an otherwise-undecided request comes back to the lead.
+    pub(crate) fn for_sidekick(bridge: Arc<PermissionBridge>, scope: SidekickScope) -> Self {
+        Self {
+            bridge,
+            member: None,
+            sidekick: Some(scope),
         }
     }
 
@@ -465,9 +495,11 @@ impl GuiPermissionHandler {
         }
 
         let manager = self
-            .member
+            .sidekick
             .as_ref()
-            .map_or(&self.bridge.manager, |member| &member.manager);
+            .map(|sidekick| &sidekick.manager)
+            .or_else(|| self.member.as_ref().map(|member| &member.manager))
+            .unwrap_or(&self.bridge.manager);
         let evaluated = {
             let Ok(manager) = manager.lock() else {
                 // A poisoned manager means another thread panicked while
@@ -500,6 +532,19 @@ impl GuiPermissionHandler {
             }
             PermissionDecision::Ask { reason } => reason,
         };
+
+        // Fork (Fusion): an undecided sidekick action is not approved and does
+        // not open a dialog. The lead receives the exact request and may run it
+        // itself, where this same manager evaluation can ask the user normally.
+        if let Some(sidekick) = &self.sidekick {
+            sidekick.escalations.lock().push(SidekickEscalation {
+                tool_name: request.tool_name.clone(),
+                description: request.description.clone(),
+                reason,
+                path: request.path.clone(),
+            });
+            return PermissionDecision::Deny;
+        }
 
         let member = self.member.as_ref().map(|member| member.name.as_str());
         match self.bridge.ask(request, &reason, member) {
@@ -1031,5 +1076,76 @@ mod tests {
             ..request()
         };
         assert_eq!(rule_pattern(&edit), Some(None));
+    }
+
+    #[test]
+    fn a_sidekick_escalates_an_undecided_request_without_a_dialog() {
+        let (bridge, seen) = recording_bridge(PermissionMode::Default);
+        let escalations = Arc::new(Mutex::new(Vec::new()));
+        let handler = GuiPermissionHandler::for_sidekick(
+            bridge.clone(),
+            SidekickScope {
+                manager: bridge.manager.clone(),
+                escalations: escalations.clone(),
+            },
+        );
+
+        assert_eq!(
+            handler.request_permission(&request()),
+            PermissionDecision::Deny
+        );
+        assert!(seen.lock().is_empty(), "the sidekick must not ask the user");
+        let recorded = escalations.lock();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].tool_name, "Bash");
+        assert_eq!(recorded[0].description, "run a command");
+    }
+
+    #[test]
+    fn a_sidekick_keeps_settled_allow_and_deny_decisions() {
+        let (allowed, seen) = recording_bridge(PermissionMode::BypassPermissions);
+        let escalations = Arc::new(Mutex::new(Vec::new()));
+        let handler = GuiPermissionHandler::for_sidekick(
+            allowed.clone(),
+            SidekickScope {
+                manager: allowed.manager.clone(),
+                escalations: escalations.clone(),
+            },
+        );
+        assert_eq!(
+            handler.request_permission(&request()),
+            PermissionDecision::Allow
+        );
+        assert!(escalations.lock().is_empty());
+        assert!(seen.lock().is_empty());
+
+        use claurst_core::permissions::{PermissionAction, SerializedPermissionRule};
+        let mut settings = Settings::default();
+        settings.permission_rules.push(SerializedPermissionRule {
+            tool_name: Some("Bash".into()),
+            path_pattern: None,
+            action: PermissionAction::Deny,
+        });
+        let (bridge, seen) = recording_bridge(PermissionMode::Default);
+        let escalations = Arc::new(Mutex::new(Vec::new()));
+        let handler = GuiPermissionHandler::for_sidekick(
+            bridge,
+            SidekickScope {
+                manager: Arc::new(std::sync::Mutex::new(PermissionManager::new(
+                    PermissionMode::Default,
+                    &settings,
+                ))),
+                escalations: escalations.clone(),
+            },
+        );
+        assert_eq!(
+            handler.request_permission(&request()),
+            PermissionDecision::Deny
+        );
+        assert!(
+            escalations.lock().is_empty(),
+            "a written deny is not an escalation"
+        );
+        assert!(seen.lock().is_empty());
     }
 }
