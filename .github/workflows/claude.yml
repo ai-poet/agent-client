@@ -6,7 +6,7 @@ on:
   pull_request_review_comment:
     types: [created]
   issues:
-    types: [opened, assigned]
+    types: [opened]
   pull_request_review:
     types: [submitted]
 
@@ -25,19 +25,14 @@ jobs:
           (github.event.review.user.login == 'ai-poet' || github.event.review.user.login == 'haaahhhis')) ||
         (github.event_name == 'issues' &&
           (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) &&
-          (
-            (github.event.action == 'opened' &&
-              (github.event.issue.user.login == 'ai-poet' || github.event.issue.user.login == 'haaahhhis')) ||
-            (github.event.action == 'assigned' &&
-              (github.actor == 'ai-poet' || github.actor == 'haaahhhis'))
-          ))
+          (github.event.issue.user.login == 'ai-poet' || github.event.issue.user.login == 'haaahhhis'))
       )
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
-      id-token: write
+      pull-requests: write
+      issues: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -50,4 +45,7 @@ jobs:
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          timeout_minutes: "60"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          include_comments_by_actor: "ai-poet,haaahhhis"
+          claude_args: |
+            --disallowedTools "Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git rm:*),Bash(*git-push.sh*),Edit,MultiEdit,Write,NotebookEdit,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
