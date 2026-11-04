@@ -29,6 +29,20 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.3.4]
+
+- 内置 Agent 的轨迹面板新增诊断报告：在本地汇总失败请求、重试、慢响应和缓存读取异常，按严重程度展示每条线索，并可切换详细视图，便于定位运行问题
+
+  The built-in agent's trajectory panel now includes diagnostics: failed requests, retries, slow responses and cache-read anomalies are summarized locally, with severity for each finding and a toggleable detailed view to make runtime issues easier to investigate
+
+- 优化主页、侧栏与输入框的窄宽度布局，限制内容宽度并支持必要的换行，避免文本与控件溢出
+
+  Improved narrow layouts across the home page, sidebar and composer, constraining content width and wrapping where needed to prevent text and controls from overflowing
+
+- 修复 Windows 内置浏览器的 DirectComposition 视觉对象创建与显隐处理，提升 WebView2 显示稳定性
+
+  Fixed DirectComposition visual creation and visibility handling for the built-in browser on Windows, improving WebView2 rendering reliability
+
 ## [0.3.3]
 
 - Review 面板支持全文搜索：可以查找折叠文件和尚未展开的上下文，命中后自动展开并定位；文件可标记为已读并折叠，内容再次变化时会自动恢复为未读
