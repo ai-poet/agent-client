@@ -1206,6 +1206,46 @@ trajectory.settings_title:
   en: "Trajectory"
 trajectory.settings_detail:
   en: "Record every model request and tool call with its timing, usage and payload, next to the task's transcript. Shown in the right panel's Trajectory."
+trajectory.diagnostics.toggle:
+  en: "Diagnostic aid"
+trajectory.diagnostics.toggle_count:
+  en: "Diagnostic aid · %{count}"
+trajectory.diagnostics.title:
+  en: "Issue analysis aid"
+trajectory.diagnostics.copy:
+  en: "Copy diagnostic report"
+trajectory.diagnostics.summary:
+  en: "%{failed} failed · %{retries} requests retried · %{slow} slow first tokens · %{cache} cache read"
+trajectory.diagnostics.cache_unavailable:
+  en: "cache n/a"
+trajectory.diagnostics.limits:
+  en: "Local clues from the trajectory, not root-cause verdicts. Select a clue to inspect its record; use raw captures and backend records to confirm network or cache causes."
+trajectory.diagnostics.empty:
+  en: "No diagnostic clues in the current trajectory. You can still copy the factual summary."
+trajectory.diagnostics.omitted:
+  en: "%{count} further clues are counted in the copied report but not listed here."
+trajectory.diagnostics.severity.info:
+  en: "Info"
+trajectory.diagnostics.severity.warning:
+  en: "Warning"
+trajectory.diagnostics.severity.error:
+  en: "Error"
+trajectory.diagnostics.finding.request_failed:
+  en: "Request #%{request} failed · turn %{turn}, step %{step}"
+trajectory.diagnostics.finding.retried:
+  en: "Request #%{request} retried %{retries} times"
+trajectory.diagnostics.finding.slow:
+  en: "Request #%{request} waited slowly for its first token"
+trajectory.diagnostics.finding.cache_drop:
+  en: "Request #%{request} read zero cache after a hit"
+trajectory.diagnostics.recovered:
+  en: "Recovered"
+trajectory.diagnostics.not_recovered:
+  en: "Did not recover"
+trajectory.diagnostics.without_output:
+  en: "No token arrived; this is the whole wait before failure"
+trajectory.diagnostics.cache_detail:
+  en: "Previous request #%{previous} read %{read} cache · current input %{input} · gap %{since}"
 sidebar.delete:
   en: Delete
 sidebar.delete_confirm_title:

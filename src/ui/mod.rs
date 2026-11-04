@@ -296,9 +296,11 @@ impl RenderOnce for ProjectNameSelector {
         self.base
             .relative()
             .flex_none()
+            .max_w_full()
+            .overflow_hidden()
             .cursor_default()
             .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .child(self.label)
+            .child(div().min_w_0().truncate().child(self.label))
             .child(
                 canvas(
                     |_, _, _| {},
