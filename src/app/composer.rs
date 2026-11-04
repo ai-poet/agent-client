@@ -2989,14 +2989,22 @@ impl Waku {
                     .gap(px(4.0))
                     .text_size(sp(12.5))
                     .line_height(sp(14.0))
-                    .child(self.render_provider_model_control(cx))
-                    // Fork: the traits chip opens the Effort slider card (effort_panel.rs).
-                    .children(self.render_effort_card_control(cx))
-                    .children(self.render_agent_preset_control(cx))
-                    .child(self.render_access_control(cx))
-                    .child(self.render_interaction_mode_control(cx))
-                    .children(self.render_goal_control(cx))
-                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap(px(4.0))
+                            .child(self.render_provider_model_control(cx))
+                            // Fork: the traits chip opens the Effort slider card (effort_panel.rs).
+                            .children(self.render_effort_card_control(cx))
+                            .children(self.render_agent_preset_control(cx))
+                            .child(self.render_access_control(cx))
+                            .child(self.render_interaction_mode_control(cx))
+                            .children(self.render_goal_control(cx)),
+                    )
                     // Fork: moved to composer_submit.rs (keyboard focus).
                     .child(self.render_submit_controls(
                         submit_action,
@@ -3607,12 +3615,13 @@ impl Waku {
                     .w_full()
                     .max_w(px(CONTENT_MAX_WIDTH))
                     .mx_auto()
-                    .h(px(28.0))
+                    .min_h(px(28.0))
                     // The chip contributes 7px, lining its icon up with the
                     // composer's 10px padding plus the controls' 7px inset.
                     .pl(px(10.0))
                     .pr(px(10.0))
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap(px(2.0))
                     .tab_index(0)
@@ -3623,7 +3632,7 @@ impl Waku {
                     .child(project_selector)
                     .child(worktree_selector)
                     .children(branch_selector)
-                    .child(div().flex_1())
+                    .child(div().flex_1().min_w_0())
                     .children(gateway_node)
                     .children(cloud_balance)
                     .children(usage_meter),

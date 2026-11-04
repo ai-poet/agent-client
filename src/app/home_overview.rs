@@ -201,8 +201,10 @@ impl Waku {
         }
         div()
             .flex()
+            .flex_wrap()
             .items_center()
             .justify_between()
+            .gap(px(6.0))
             .child(tabs)
             .child(ranges)
     }
@@ -442,12 +444,17 @@ fn overview_pill(id: &'static str, label: String, selected: bool, theme: &Theme)
 }
 
 fn render_heat_grid(grid: &HeatGrid, theme: &Theme) -> impl IntoElement {
-    let mut columns = div().flex().gap(px(HEAT_GAP));
+    let mut columns = div().w_full().flex().gap(px(HEAT_GAP));
     for week in 0..grid.weeks {
-        let mut column = div().flex().flex_col().gap(px(HEAT_GAP));
+        let mut column = div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(px(HEAT_GAP));
         for weekday in 0..7 {
             let index = week * 7 + weekday;
-            let cell = div().size(px(HEAT_CELL)).rounded(px(3.0));
+            let cell = div().w_full().h(px(HEAT_CELL)).rounded(px(3.0));
             column = column.child(match grid.cells[index] {
                 // A day still to come this week.
                 None => cell.into_any_element(),
@@ -487,19 +494,27 @@ fn render_heat_grid(grid: &HeatGrid, theme: &Theme) -> impl IntoElement {
         .flex()
         .flex_col()
         .gap(px(8.0))
-        .child(div().w_full().flex().justify_center().child(columns))
+        .child(columns)
         .child(
             div()
+                .w_full()
                 .flex()
                 .items_center()
                 .justify_between()
+                .gap(px(8.0))
                 .text_size(sp(11.5))
                 .text_color(theme.text_tertiary)
-                .child(tr!(
-                    "home_overview.heat_caption",
-                    count = group_digits(total)
-                ))
-                .child(legend),
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(tr!(
+                            "home_overview.heat_caption",
+                            count = group_digits(total)
+                        )),
+                )
+                .child(legend.flex_none()),
         )
 }
 

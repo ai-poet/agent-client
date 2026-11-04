@@ -1703,9 +1703,15 @@ impl Waku {
             .child(
                 div()
                     .mt(px(14.0))
+                    .w_full()
+                    .max_w(px(560.0))
                     .flex()
+                    .flex_wrap()
                     .items_baseline()
+                    .justify_center()
+                    .text_center()
                     .text_size(sp(20.0))
+                    .line_height(sp(28.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
                     .when(projectless_selected, |element| {
