@@ -618,6 +618,39 @@ pub enum WindowControlArea {
     Min,
 }
 
+/// Whether a non-client mouse-up may be consumed before `DefWindowProc` sees it.
+/// This is a small, platform-neutral seam for testing the Windows caption
+/// move-loop decision without constructing a native window.
+#[doc(hidden)]
+pub fn nc_mouse_up_is_consumed(hit_code: u32, propagate: bool) -> bool {
+    const HTCAPTION: u32 = 2;
+    // Caption release is also what ends the native move loop. Even when GPUI
+    // consumes its own click/drag event, DefWindowProc must still see this one.
+    hit_code != HTCAPTION && !propagate
+}
+
+#[cfg(test)]
+mod nc_mouse_up_tests {
+    use super::*;
+
+    #[test]
+    fn caption_mouse_up_still_reaches_the_default_proc_when_gpui_consumes_it() {
+        const HTCAPTION: u32 = 2;
+        assert!(
+            !nc_mouse_up_is_consumed(HTCAPTION, false),
+            "swallowing caption release leaves the native move loop active"
+        );
+    }
+
+    #[test]
+    fn button_mouse_up_keeps_the_existing_consumed_behavior() {
+        const HTCAPTION: u32 = 2;
+        const HTCLOSE: u32 = 20;
+        assert!(nc_mouse_up_is_consumed(HTCLOSE, false));
+        assert!(!nc_mouse_up_is_consumed(HTCAPTION, true));
+    }
+}
+
 /// An identifier for a [Hitbox] which also includes [HitboxBehavior].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct HitboxId(u64);

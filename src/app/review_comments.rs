@@ -139,6 +139,7 @@ pub(super) fn quote_for(lines: &[Line], index: usize) -> Vec<QuoteLine> {
 
 /// The code row `delta` code rows away from `from`, clamped to the first or
 /// last one; the first code row when `from` is `None`.
+#[cfg(test)]
 pub(super) fn step_code_row(lines: &[Line], from: Option<usize>, delta: isize) -> Option<usize> {
     let code: Vec<usize> = lines
         .iter()
@@ -148,6 +149,32 @@ pub(super) fn step_code_row(lines: &[Line], from: Option<usize>, delta: isize) -
         })
         .map(|(index, _)| index)
         .collect();
+    step_code_row_candidates(code, from, delta)
+}
+
+fn step_visible_code_row(
+    lines: &[Line],
+    visible_rows: &[usize],
+    from: Option<usize>,
+    delta: isize,
+) -> Option<usize> {
+    let code: Vec<usize> = visible_rows
+        .iter()
+        .copied()
+        .filter(|index| {
+            lines.get(*index).is_some_and(|line| {
+                is_code_row(&line.kind) && (line.new_line.is_some() || line.old_line.is_some())
+            })
+        })
+        .collect();
+    step_code_row_candidates(code, from, delta)
+}
+
+fn step_code_row_candidates(
+    code: Vec<usize>,
+    from: Option<usize>,
+    delta: isize,
+) -> Option<usize> {
     if code.is_empty() {
         return None;
     }
@@ -225,9 +252,15 @@ impl Waku {
     }
 
     fn remeasure_review_anchor(&self, anchor: &Anchor) {
-        if let Some(index) = self.review_row_of(anchor) {
+        if let Some(index) = self.review_row_of(anchor)
+            && let Some(row) = self
+                .right_panel_diff_visible_rows
+                .borrow()
+                .iter()
+                .position(|candidate| *candidate == index)
+        {
             self.right_panel_diff_list_state
-                .remeasure_items(index..index + 1);
+                .remeasure_items(row..row + 1);
         }
     }
 
@@ -491,6 +524,10 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.right_panel_diff_search_open {
+            self.close_right_panel_diff_search(window, cx);
+            return;
+        }
         if self.review_comments.editor.is_some() {
             self.cancel_review_comment(window, cx);
         } else if self.review_comments.cursor.take().is_some() {
@@ -516,22 +553,29 @@ impl Waku {
         let Some(snapshot) = self.right_panel_diff_snapshot.clone() else {
             return;
         };
+        let visible_rows = self.right_panel_diff_visible_rows.borrow().clone();
         let current = self
             .review_comments
             .cursor
             .as_ref()
             .and_then(|anchor| self.review_row_of(anchor));
         let target = match event.keystroke.key.as_str() {
-            "down" => step_code_row(
+            "down" => step_visible_code_row(
                 &snapshot.lines,
+                &visible_rows,
                 current,
                 if current.is_some() { 1 } else { 0 },
             ),
-            "up" => step_code_row(&snapshot.lines, current, -1),
-            "pagedown" => step_code_row(&snapshot.lines, current, 20),
-            "pageup" => step_code_row(&snapshot.lines, current, -20),
-            "home" => step_code_row(&snapshot.lines, None, 0),
-            "end" => step_code_row(&snapshot.lines, Some(snapshot.lines.len()), isize::MAX / 2),
+            "up" => step_visible_code_row(&snapshot.lines, &visible_rows, current, -1),
+            "pagedown" => step_visible_code_row(&snapshot.lines, &visible_rows, current, 20),
+            "pageup" => step_visible_code_row(&snapshot.lines, &visible_rows, current, -20),
+            "home" => step_visible_code_row(&snapshot.lines, &visible_rows, None, 0),
+            "end" => step_visible_code_row(
+                &snapshot.lines,
+                &visible_rows,
+                Some(snapshot.lines.len()),
+                isize::MAX / 2,
+            ),
             "enter" | "c" => {
                 if let Some(index) = current {
                     self.open_review_comment(index, window, cx);
@@ -562,8 +606,9 @@ impl Waku {
         if let Some(anchor) = &anchor {
             self.remeasure_review_anchor(anchor);
         }
-        self.right_panel_diff_list_state
-            .scroll_to_reveal_item(target);
+        if let Some(row) = visible_rows.iter().position(|index| *index == target) {
+            self.right_panel_diff_list_state.scroll_to_reveal_item(row);
+        }
         cx.stop_propagation();
         cx.notify();
     }

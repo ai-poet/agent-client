@@ -18,6 +18,10 @@ pub struct UiTheme {
     pub text_tertiary: Hsla,
     pub text_ghost: Hsla,
     pub accent: Hsla,
+    pub gauge: Hsla,
+    pub warning: Hsla,
+    pub success: Hsla,
+    pub danger: Hsla,
     pub inverse: Hsla,
     pub on_inverse: Hsla,
 }
@@ -38,6 +42,10 @@ impl UiTheme {
             text_tertiary: rgb(0x7D7D7D).into(),
             text_ghost: rgb(0x575757).into(),
             accent: rgb(0xE2795B).into(),
+            gauge: rgb(0x3B82F6).into(),
+            warning: rgb(0xE0B36A).into(),
+            success: rgb(0x62C987).into(),
+            danger: rgb(0xE2726A).into(),
             inverse: rgb(0xE7E9EC).into(),
             on_inverse: rgb(0x17181C).into(),
         }

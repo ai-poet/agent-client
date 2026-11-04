@@ -34,6 +34,10 @@ pub(crate) fn ui_theme(theme: Theme) -> UiTheme {
         text_tertiary: theme.text_tertiary,
         text_ghost: theme.text_ghost,
         accent: theme.accent,
+        gauge: theme.gauge,
+        warning: theme.warning,
+        success: theme.success,
+        danger: theme.danger,
         inverse: theme.inverse,
         on_inverse: theme.on_inverse,
     }

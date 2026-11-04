@@ -1340,6 +1340,13 @@ file_picker.typed_file: "%{type} ファイル"
 diff.no_changes: 変更はありません
 diff.no_changes_description: このソースにはレビューするファイル変更がありません
 diff.filter_files: ファイルを絞り込む…
+diff.search_placeholder: 変更を検索…
+diff.search_previous: 前の一致
+diff.search_next: 次の一致
+diff.search_close: 検索を閉じる
+diff.mark_viewed: ファイルを確認済みにする
+diff.mark_unread: ファイルを未確認にする
+diff.viewed_count: 確認済み %{viewed}/%{total}
 diff.source_last_turn: 前回のターン
 diff.source_turn: ターン %{turn}
 diff.source_uncommitted: 未コミット

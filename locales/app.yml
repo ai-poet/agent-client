@@ -2638,6 +2638,20 @@ diff.no_changes_description:
   en: This source has no file changes to review
 diff.filter_files:
   en: Filter files…
+diff.search_placeholder:
+  en: Search changes…
+diff.search_previous:
+  en: Previous match
+diff.search_next:
+  en: Next match
+diff.search_close:
+  en: Close search
+diff.mark_viewed:
+  en: Mark file as viewed
+diff.mark_unread:
+  en: Mark file as unread
+diff.viewed_count:
+  en: "%{viewed}/%{total} viewed"
 diff.source_last_turn:
   en: Last Turn
 diff.source_turn:

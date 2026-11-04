@@ -118,6 +118,11 @@ moment any scrollbar became visible.
 - `MarkdownView::set_text` derives the mended display tail only when content
   or the streaming flag changed — the derivation re-parses the final block and
   runs for every visible row every frame.
+- Review keeps its source snapshot independent from visible-row mapping
+  (`src/app/diff_review.rs`). Search entries rebuild only on query/snapshot
+  changes, and file fingerprints are computed only when a file is marked viewed
+  or a refreshed snapshot arrives; row rendering and the viewed counter read
+  the validated in-memory set, never rescan the diff.
 
 ## Measuring
 

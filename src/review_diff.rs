@@ -4,6 +4,7 @@
 //! that returned data off the UI thread; a frame only indexes stored rows.
 
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 
 use uuid::Uuid;
@@ -89,6 +90,22 @@ impl Gap {
     pub fn is_expandable(&self) -> bool {
         self.count > 0 && self.hidden.len() == self.count as usize
     }
+
+    /// Hidden source lines remain searchable while their gap is collapsed.
+    pub fn hidden_lines(&self) -> &[Line] {
+        &self.hidden
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_test(id: u64, hidden: Vec<Line>, position: GapPosition) -> Self {
+        let count = hidden.len() as u32;
+        Self {
+            id,
+            count,
+            hidden,
+            position,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -133,6 +150,35 @@ pub struct GapExpansion {
 }
 
 impl Snapshot {
+    /// Content identity used by reviewed marks. Row positions and cached layout
+    /// are deliberately excluded; every source line, including gap-hidden
+    /// context, participates so a changed file becomes unread automatically.
+    pub fn file_fingerprint(&self, file_index: usize) -> Option<u64> {
+        fn hash_line(line: &Line, hasher: &mut DefaultHasher) {
+            std::mem::discriminant(&line.kind).hash(hasher);
+            line.old_line.hash(hasher);
+            line.new_line.hash(hasher);
+            line.content.hash(hasher);
+        }
+
+        let file = self.files.get(file_index)?;
+        let mut hasher = DefaultHasher::new();
+        file.path.hash(&mut hasher);
+        file.additions.hash(&mut hasher);
+        file.deletions.hash(&mut hasher);
+        std::mem::discriminant(&file.status).hash(&mut hasher);
+        for line in self.lines.iter().filter(|line| line.file_index == file_index) {
+            if let LineKind::Gap(gap) = &line.kind {
+                for hidden in gap.hidden_lines() {
+                    hash_line(hidden, &mut hasher);
+                }
+            } else {
+                hash_line(line, &mut hasher);
+            }
+        }
+        Some(hasher.finish())
+    }
+
     /// Reveal retained context without touching Git or the filesystem. The
     /// returned replacement count feeds `ListState::splice`, which keeps the
     /// viewport anchored while the separator turns into ordinary code rows.

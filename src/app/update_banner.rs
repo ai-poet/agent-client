@@ -14,7 +14,8 @@
 //! `install_available_update` calls the menu and the pill use, and learn the
 //! outcome from the same `UpdaterEvent`s.
 
-use crate::ui::ActivationExt as _;
+use crate::ui::{ActivationExt as _, ui_theme};
+use waku_ui::{Banner, BannerSurface, BannerTone};
 
 use super::*;
 
@@ -194,7 +195,7 @@ impl Waku {
     /// The strip across the top of the content while an update is on offer
     /// (or installing). Click the strip or its button to install; the close
     /// control puts it away until the next update.
-    pub(super) fn render_update_banner(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    pub(super) fn render_update_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let status = self.updater_status;
         let installing = status == crate::updater::UpdateStatus::Updating;
         if status == crate::updater::UpdateStatus::Idle
@@ -213,32 +214,16 @@ impl Waku {
             }
         };
 
-        let mut banner = div()
-            .id("update-banner")
-            .w_full()
-            .flex_none()
-            .h(px(34.0))
-            .px(px(14.0))
-            .bg(theme.gauge)
-            .text_color(foreground)
-            .text_size(sp(12.5))
-            .flex()
-            .items_center()
-            .gap(px(10.0))
+        let mut banner = Banner::new("update-banner", ui_theme(theme))
+            .surface(BannerSurface::Strip)
+            .tone(BannerTone::Info)
             .child(if installing {
                 motion::spin_slow(icon("icons/loader-circle.svg", 13.0, foreground))
                     .into_any_element()
             } else {
                 icon("icons/arrow-down.svg", 13.0, foreground).into_any_element()
             })
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(text),
-            );
+            .child(Banner::content().font_weight(FontWeight::MEDIUM).child(text));
 
         if !installing {
             banner = banner
@@ -246,42 +231,22 @@ impl Waku {
                 .hover(|style| style.opacity(0.94))
                 .on_click(cx.listener(|this, _, _, cx| this.start_available_update(cx)))
                 .child(
-                    div()
-                        .id("update-banner-install")
-                        .tab_index(0)
-                        .focus_visible(|style| style.border_1().border_color(foreground))
-                        .h(px(24.0))
-                        .px(px(10.0))
-                        .rounded_full()
-                        .flex()
-                        .flex_none()
-                        .items_center()
-                        .cursor_default()
-                        .bg(foreground.opacity(0.18))
-                        .hover(|style| style.bg(foreground.opacity(0.28)))
-                        .child(tr!("updater.install_now"))
+                    Banner::strip_action("update-banner-install", tr!("updater.install_now"))
                         .on_activation(cx, |this, _, cx| this.start_available_update(cx)),
                 )
                 .child(
-                    div()
-                        .id("update-banner-dismiss")
-                        .tab_index(0)
-                        .focus_visible(|style| style.border_1().border_color(foreground))
-                        .w(px(22.0))
-                        .h(px(22.0))
-                        .rounded(px(6.0))
-                        .flex()
-                        .flex_none()
-                        .items_center()
-                        .justify_center()
-                        .cursor_default()
-                        .hover(|style| style.bg(foreground.opacity(0.18)))
-                        .tooltip(Tooltip::text(tr_cow!("updater.later")))
-                        .child(icon("icons/x.svg", 12.0, foreground))
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_activation(cx, |this, _, cx| this.dismiss_update_banner(cx)),
+                    Banner::dismiss(
+                        "update-banner-dismiss",
+                        BannerSurface::Strip,
+                        ui_theme(theme),
+                        cx,
+                        |this, _, cx| this.dismiss_update_banner(cx),
+                    )
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .tooltip(Tooltip::text(tr_cow!("updater.later")))
+                    .child(icon("icons/x.svg", 12.0, foreground)),
                 );
         }
-        Some(banner)
+        Some(banner.into_any_element())
     }
 }

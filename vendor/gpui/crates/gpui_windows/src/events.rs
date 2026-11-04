@@ -1049,7 +1049,7 @@ impl WindowsWindowInner {
                 modifiers: current_modifiers(),
                 click_count: 1,
             });
-            let handled = !func(input).propagate;
+            let handled = nc_mouse_up_is_consumed(wparam.0 as u32, !func(input).propagate);
             self.state.callbacks.input.set(Some(func));
 
             if handled {

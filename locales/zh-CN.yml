@@ -1297,6 +1297,13 @@ file_picker.typed_file: "%{type} 文件"
 diff.no_changes: 没有更改
 diff.no_changes_description: 此来源没有可审阅的文件更改
 diff.filter_files: 筛选文件…
+diff.search_placeholder: 搜索更改…
+diff.search_previous: 上一个匹配
+diff.search_next: 下一个匹配
+diff.search_close: 关闭搜索
+diff.mark_viewed: 标记文件为已读
+diff.mark_unread: 标记文件为未读
+diff.viewed_count: 已读 %{viewed}/%{total}
 diff.source_last_turn: 上一轮
 diff.source_turn: 第 %{turn} 轮
 diff.source_uncommitted: 未提交

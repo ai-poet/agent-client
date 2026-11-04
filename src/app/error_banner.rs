@@ -9,7 +9,8 @@ use sub2api::paywall::{Paywall, PaywallState};
 
 use super::*;
 use crate::model::TurnFailureKind;
-use crate::ui::ActivationExt as _;
+use crate::ui::{ActivationExt as _, ui_theme};
+use waku_ui::{Banner, BannerSurface, BannerTone};
 
 /// Past this the message is clipped to two lines until its details open.
 const COLLAPSED_CHARS: usize = 160;
@@ -57,7 +58,7 @@ pub(super) fn remedy(kind: Option<TurnFailureKind>) -> Remedy {
 }
 
 impl Waku {
-    pub(super) fn render_error_banner(&self, cx: &mut Context<Self>) -> Option<Div> {
+    pub(super) fn render_error_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.selected_session()?;
         if session.is_busy() || self.submission_preparations.contains(&session.id) {
             return None;
@@ -91,37 +92,15 @@ impl Waku {
         // ring, and Enter/Space activate it (`ActivationExt`). This banner is
         // the way out of a failed turn and was reachable by mouse only.
         let button = |id: &str, label: String, primary: bool| {
-            div()
-                .id(SharedString::from(format!("error-banner-{id}-{turn_id}")))
-                .tab_index(0)
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
-                .h(px(26.0))
-                .px(px(10.0))
-                .rounded(px(7.0))
-                .flex()
-                .items_center()
-                .gap(px(5.0))
-                .cursor_default()
-                .text_size(sp(12.5))
-                .font_weight(FontWeight::MEDIUM)
-                .when(primary, |button| {
-                    button
-                        .bg(theme.inverse)
-                        .text_color(theme.on_inverse)
-                        .hover(|button| button.opacity(0.9))
-                })
-                .when(!primary, |button| {
-                    button
-                        .border_1()
-                        .border_color(theme.border_strong)
-                        .text_color(theme.text_secondary)
-                        .hover(|button| button.bg(theme.overlay).text_color(theme.text))
-                })
-                .active(|button| button.opacity(0.8))
-                .child(label)
+            Banner::button(
+                SharedString::from(format!("error-banner-{id}-{turn_id}")),
+                label,
+                primary,
+                ui_theme(theme),
+            )
         };
 
-        let mut actions = div().flex().items_center().gap(px(8.0)).mt(px(10.0));
+        let mut actions = Banner::actions().mt(px(10.0));
         // A turn the account could not pay for: the purchase that fixes it
         // leads, and retrying — pointless until then — steps back.
         if let Some(paywall) = paywall {
@@ -227,24 +206,15 @@ impl Waku {
                     .child(tr!("error_banner.title")),
             )
             .child(
-                div()
-                    .id(SharedString::from(format!(
-                        "error-banner-dismiss-{turn_id}"
-                    )))
-                    .tab_index(0)
-                    .focus_visible(|style| style.bg(theme.overlay_strong))
-                    .size(px(22.0))
-                    .rounded(px(6.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_default()
-                    .hover(|button| button.bg(theme.overlay_strong))
-                    .child(icon("icons/x.svg", 12.0, theme.text_tertiary))
-                    .tooltip(Tooltip::text(tr!("error_banner.dismiss")))
-                    .on_activation(cx, move |this, _, cx| {
-                        this.dismiss_turn_error(session_id, turn_id, cx);
-                    }),
+                Banner::dismiss(
+                    SharedString::from(format!("error-banner-dismiss-{turn_id}")),
+                    BannerSurface::Card,
+                    ui_theme(theme),
+                    cx,
+                    move |this, _, cx| this.dismiss_turn_error(session_id, turn_id, cx),
+                )
+                .child(icon("icons/x.svg", 12.0, theme.text_tertiary))
+                .tooltip(Tooltip::text(tr!("error_banner.dismiss"))),
             );
         let body = div()
             .id(SharedString::from(format!(
@@ -272,21 +242,19 @@ impl Waku {
 
         Some(
             div().px(px(20.0)).pb(px(8.0)).child(
-                div()
-                    .w_full()
-                    .max_w(px(CONTENT_MAX_WIDTH))
-                    .mx_auto()
-                    .p(px(12.0))
-                    .rounded(px(12.0))
-                    .border_1()
-                    .border_color(theme.danger.opacity(0.35))
-                    .bg(theme.raised)
-                    .shadow_md()
-                    .child(header)
-                    .child(body)
-                    .children(goal_note)
-                    .child(actions),
-            ),
+                Banner::new(
+                    SharedString::from(format!("error-banner-{turn_id}")),
+                    ui_theme(theme),
+                )
+                .tone(BannerTone::Error)
+                .max_w(px(CONTENT_MAX_WIDTH))
+                .mx_auto()
+                .child(header)
+                .child(body)
+                .children(goal_note)
+                .child(actions),
+            )
+            .into_any_element(),
         )
     }
 

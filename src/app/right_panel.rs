@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use super::*;
+use crate::ui::ActivationExt as _;
 
 // Fork: the Files panel's context menu, keyboard and edits.
 #[path = "file_tree_menu.rs"]
@@ -1937,6 +1938,8 @@ impl Waku {
             diff_snapshot: self.right_panel_diff_snapshot.take(),
             diff_selected_file: self.right_panel_diff_selected_file.take(),
             diff_expanded_paths: std::mem::take(&mut self.right_panel_diff_expanded_paths),
+            diff_viewed_files: std::mem::take(&mut self.right_panel_diff_viewed_files),
+            diff_collapsed_files: std::mem::take(&mut self.right_panel_diff_collapsed_files),
         }
     }
 
@@ -1958,14 +1961,13 @@ impl Waku {
         self.right_panel_diff_error = None;
         self.right_panel_diff_selected_file = state.diff_selected_file;
         self.right_panel_diff_expanded_paths = state.diff_expanded_paths;
+        self.right_panel_diff_viewed_files = state.diff_viewed_files;
+        self.right_panel_diff_collapsed_files = state.diff_collapsed_files;
         self.right_panel_diff_tree_cursor = None;
         self.right_panel_diff_tree_rows.borrow_mut().clear();
         self.right_panel_diff_tree_list_state.reset(0);
-        let line_count = self
-            .right_panel_diff_snapshot
-            .as_ref()
-            .map_or(0, |snapshot| snapshot.lines.len());
-        self.right_panel_diff_list_state.reset(line_count);
+        self.reset_right_panel_diff_search_state();
+        self.sync_right_panel_diff_visible_rows_state();
     }
 
     fn reveal_right_panel_tab(&mut self, index: usize) {
@@ -3581,6 +3583,9 @@ impl Waku {
     ) -> Div {
         let theme = Theme::current(cx);
         let toolbar = self.render_right_panel_diff_toolbar(cx);
+        let search_bar = self
+            .right_panel_diff_search_open
+            .then(|| self.render_right_panel_diff_search_bar(cx));
         let content = match self.right_panel_diff_snapshot.clone() {
             Some(snapshot) => {
                 let tree_width = fitted_file_tree_width(
@@ -3645,6 +3650,7 @@ impl Waku {
                 self.right_panel_diff_selection.clone(),
             ))
             .child(toolbar)
+            .children(search_bar)
             .child(content)
             // Fork: the comments written on this diff, and their send button.
             .children(self.render_review_comment_bar(cx))
@@ -3724,6 +3730,11 @@ impl Waku {
             .map_or((0, 0, false), |snapshot| {
                 (snapshot.additions, snapshot.deletions, snapshot.truncated)
             });
+        let viewed = self.right_panel_diff_viewed_count();
+        let total = self
+            .right_panel_diff_snapshot
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.files.len());
         let refresh_focus = self.transcript_control_focus("right-panel-diff-refresh", cx);
         let refresh_icon: AnyElement = if self.right_panel_diff_loading {
             motion::spin(icon("icons/loader-circle.svg", 12.0, theme.text_tertiary))
@@ -3777,6 +3788,14 @@ impl Waku {
                     .text_color(theme.danger)
                     .child(format!("-{deletions}")),
             )
+            .when(total > 0, |row| {
+                row.child(
+                    div()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("diff.viewed_count", viewed = viewed, total = total)),
+                )
+            })
             .when(truncated, |row| {
                 row.child(
                     div()
@@ -3838,6 +3857,14 @@ impl Waku {
         let Some(snapshot) = self.right_panel_diff_snapshot.as_ref() else {
             return div().into_any_element();
         };
+        // List rows are visible positions; comments, search and gap expansion
+        // continue to use stable source-line indexes.
+        let index = self
+            .right_panel_diff_visible_rows
+            .borrow()
+            .get(index)
+            .copied()
+            .unwrap_or(index);
         let Some(line) = snapshot.lines.get(index) else {
             return div().into_any_element();
         };
@@ -3845,6 +3872,8 @@ impl Waku {
             return div().into_any_element();
         };
         let theme = Theme::current(cx);
+        let viewed = self.right_panel_diff_file_is_viewed(line.file_index);
+        let file_index = line.file_index;
         let style = DiffRowStyle::review(self.state.code_font_size);
         // Chrome rows keep their gutters flush with the code rows'.
         let gutter_width = style.gutter_width();
@@ -3874,6 +3903,24 @@ impl Waku {
                         .text_color(theme.text_secondary)
                         .tooltip(Tooltip::text(file.path.clone()))
                         .child(file.path.clone()),
+                )
+                .child(
+                    icon_button(
+                        SharedString::from(format!("review-diff-file-viewed-{index}")),
+                        "icons/check.svg",
+                        theme,
+                    )
+                    .tab_index(0)
+                    .when(viewed, |button| button.bg(theme.overlay))
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .tooltip(Tooltip::text(if viewed {
+                        tr!("diff.mark_unread")
+                    } else {
+                        tr!("diff.mark_viewed")
+                    }))
+                    .on_activation(cx, move |this, _, cx| {
+                        this.toggle_right_panel_diff_file_viewed(file_index, cx);
+                    }),
                 )
                 .child(
                     div()
@@ -4044,19 +4091,30 @@ impl Waku {
                 .into_any_element(),
             crate::review_diff::LineKind::Context
             | crate::review_diff::LineKind::Addition
-            | crate::review_diff::LineKind::Deletion => self.review_comment_row(
-                line,
-                index,
-                render_diff_code_row(
+            | crate::review_diff::LineKind::Deletion => {
+                let row = self.review_comment_row(
                     line,
                     index,
-                    "review-diff",
-                    &self.right_panel_diff_selection,
-                    style,
-                    &theme,
-                ),
-                cx,
-            ),
+                    render_diff_code_row(
+                        line,
+                        index,
+                        "review-diff",
+                        &self.right_panel_diff_selection,
+                        style,
+                        &theme,
+                    ),
+                    cx,
+                );
+                if self.right_panel_diff_search_line == Some(index) {
+                    div()
+                        .w_full()
+                        .bg(theme.overlay)
+                        .child(row)
+                        .into_any_element()
+                } else {
+                    row
+                }
+            }
         }
     }
 
@@ -4128,7 +4186,7 @@ impl Waku {
             }))
     }
 
-    fn expand_right_panel_diff_gap(
+    pub(super) fn expand_right_panel_diff_gap(
         &mut self,
         line_index: usize,
         direction: crate::review_diff::ExpansionDirection,
@@ -4141,8 +4199,33 @@ impl Waku {
         let Some(expansion) = expansion else {
             return;
         };
-        self.right_panel_diff_list_state
-            .splice(line_index..line_index + 1, expansion.replacement_count);
+        let added_rows = expansion.replacement_count.saturating_sub(1);
+        if let Some(current) = self.right_panel_diff_search_line.as_mut()
+            && *current > line_index
+        {
+            *current = current.saturating_add(added_rows);
+        }
+        let visible_row = self
+            .right_panel_diff_visible_rows
+            .borrow()
+            .iter()
+            .position(|candidate| *candidate == line_index);
+        if let Some(row) = visible_row {
+            let mut rows = self.right_panel_diff_visible_rows.borrow_mut();
+            let replacement_count = expansion.replacement_count;
+            rows.splice(
+                row..row + 1,
+                (line_index..line_index + replacement_count).collect::<Vec<_>>(),
+            );
+            for original in &mut rows[row + replacement_count..] {
+                *original = original.saturating_add(replacement_count.saturating_sub(1));
+            }
+            drop(rows);
+            self.right_panel_diff_list_state
+                .splice(row..row + 1, replacement_count);
+        } else {
+            self.sync_right_panel_diff_visible_rows(cx);
+        }
         cx.notify();
     }
 
@@ -4352,6 +4435,9 @@ impl Waku {
                                     .tooltip(Tooltip::text(path.clone()))
                                     .child(name),
                             )
+                            .when(self.right_panel_diff_file_is_viewed(file_index), |row| {
+                                row.child(icon("icons/check.svg", 10.0, theme.success))
+                            })
                             .child(
                                 div()
                                     .w(px(18.0))
@@ -4546,9 +4632,13 @@ impl Waku {
             self.right_panel_diff_error = None;
             self.right_panel_diff_selected_file = None;
             self.right_panel_diff_expanded_paths.clear();
+            self.right_panel_diff_viewed_files.clear();
+            self.right_panel_diff_collapsed_files.clear();
             self.right_panel_diff_tree_cursor = None;
             self.right_panel_diff_tree_rows.borrow_mut().clear();
             self.right_panel_diff_tree_list_state.reset(0);
+            self.reset_right_panel_diff_search_state();
+            self.right_panel_diff_visible_rows.borrow_mut().clear();
             self.right_panel_diff_list_state.reset(0);
         }
         self.open_right_panel_surface(RightPanelSurface::Diff, cx);
@@ -4659,10 +4749,11 @@ impl Waku {
                                 })
                             })
                             .or_else(|| (!snapshot.files.is_empty()).then_some(0));
-                        let line_count = snapshot.lines.len();
+                        waku.retain_right_panel_diff_viewed(&snapshot);
                         waku.right_panel_diff_snapshot = Some(Arc::new(snapshot));
                         waku.right_panel_diff_error = None;
-                        waku.right_panel_diff_list_state.reset(line_count);
+                        waku.sync_right_panel_diff_visible_rows(cx);
+                        waku.sync_right_panel_diff_search(cx);
                         waku.sync_right_panel_diff_tree_rows(cx);
                         if let Some(file_index) = jump_to {
                             waku.select_right_panel_diff_file(file_index, cx);
@@ -4746,24 +4837,7 @@ impl Waku {
     }
 
     fn select_right_panel_diff_file(&mut self, file_index: usize, cx: &mut Context<Self>) {
-        self.right_panel_diff_selected_file = Some(file_index);
-        if let Some(line) = self
-            .right_panel_diff_snapshot
-            .as_ref()
-            .and_then(|snapshot| snapshot.files.get(file_index))
-            .and_then(|file| file.diff_line)
-        {
-            // `scroll_to_reveal_item` bottom-aligns targets below the viewport,
-            // which can reveal only the file header and leave its diff body
-            // off-screen. A tree selection is an explicit jump, so top-anchor
-            // the header and expose the content immediately below it.
-            self.right_panel_diff_list_state
-                .scroll_to(gpui::ListOffset {
-                    item_ix: line,
-                    offset_in_item: px(0.0),
-                });
-        }
-        cx.notify();
+        self.reveal_right_panel_diff_file(file_index, cx);
     }
 
     fn right_panel_diff_tree_key_down(

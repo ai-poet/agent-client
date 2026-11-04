@@ -793,6 +793,8 @@ struct RightPanelSessionState {
     diff_snapshot: Option<Arc<ReviewDiffSnapshot>>,
     diff_selected_file: Option<usize>,
     diff_expanded_paths: HashSet<String>,
+    diff_viewed_files: HashMap<String, u64>,
+    diff_collapsed_files: HashSet<String>,
 }
 
 impl RightPanelSessionState {
@@ -811,6 +813,8 @@ impl RightPanelSessionState {
             diff_snapshot: None,
             diff_selected_file: None,
             diff_expanded_paths: HashSet::new(),
+            diff_viewed_files: HashMap::new(),
+            diff_collapsed_files: HashSet::new(),
         }
     }
 
@@ -1480,10 +1484,16 @@ pub struct Waku {
     right_panel_files_scroll_handle: ScrollHandle,
     right_panel_files_scrollbar: Rc<ScrollbarState>,
     right_panel_diff_filter: Entity<TextInput>,
+    right_panel_diff_search: Entity<TextInput>,
+    right_panel_diff_search_open: bool,
+    right_panel_diff_search_matches: Vec<usize>,
+    right_panel_diff_search_current: Option<usize>,
+    right_panel_diff_search_line: Option<usize>,
     /// Unified diff rows and changed-file tree rows are independently
     /// virtualized. Large generated patches stay proportional to what is on
     /// screen rather than the size of the repository change.
     right_panel_diff_list_state: ListState,
+    right_panel_diff_visible_rows: RefCell<Vec<usize>>,
     right_panel_diff_scrollbar: Rc<ScrollbarState>,
     /// Selection spans and visible glyph geometry for the Review surface.
     /// Kept separate from the transcript because both surfaces paint at once.
@@ -1526,6 +1536,8 @@ pub struct Waku {
     /// for it by name before the diff existed.
     right_panel_diff_pending_path: Option<String>,
     right_panel_diff_expanded_paths: HashSet<String>,
+    right_panel_diff_viewed_files: HashMap<String, u64>,
+    right_panel_diff_collapsed_files: HashSet<String>,
     right_panel_diff_tree_rows: RefCell<Vec<right_panel::ReviewDiffTreeRow>>,
     right_panel_diff_tree_cursor: Option<usize>,
     /// The working tree as currently drawn. Held so a refresh can redraw the
@@ -1870,6 +1882,7 @@ mod model_retry;
 // Fork: the ZCode-style task sidebar (rows, sections, toolbar, task marks).
 mod agent_trajectory_settings;
 mod daemon_banner;
+mod diff_review;
 mod plan_review;
 mod providers_page;
 mod render;
@@ -2373,6 +2386,11 @@ impl Waku {
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.filter_projects")));
         let right_panel_diff_filter =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("diff.filter_files")));
+        let right_panel_diff_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("diff.search_placeholder"))
+        });
         let navigation_rail = cx.new(|_| ConversationNavigationRail::new());
         let sidebar_pane = WakuPane::new(Waku::sidebar_pane_content, cx);
         let transcript_pane = WakuPane::new(Waku::transcript_pane_content, cx);
@@ -2982,6 +3000,15 @@ impl Waku {
             )
             .detach();
             cx.subscribe(
+                &right_panel_diff_search,
+                |this: &mut Self, _, event: &InputEvent, cx| match event {
+                    InputEvent::Edited => this.sync_right_panel_diff_search(cx),
+                    InputEvent::Submit(_) => this.navigate_right_panel_diff_search(false, cx),
+                    _ => {}
+                },
+            )
+            .detach();
+            cx.subscribe(
                 &provider_path_input,
                 |this: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Submit(_)) {
@@ -3331,7 +3358,13 @@ impl Waku {
                 right_panel_files_scroll_handle: ScrollHandle::new(),
                 right_panel_files_scrollbar: ScrollbarState::new(),
                 right_panel_diff_filter,
+                right_panel_diff_search,
+                right_panel_diff_search_open: false,
+                right_panel_diff_search_matches: Vec::new(),
+                right_panel_diff_search_current: None,
+                right_panel_diff_search_line: None,
                 right_panel_diff_list_state: ListState::new(0, ListAlignment::Top, px(512.0)),
+                right_panel_diff_visible_rows: RefCell::new(Vec::new()),
                 right_panel_diff_scrollbar: ScrollbarState::new(),
                 right_panel_diff_selection: TranscriptSelection::default(),
                 right_panel_diff_tree_list_state: ListState::new(0, ListAlignment::Top, px(180.0))
@@ -3362,6 +3395,8 @@ impl Waku {
                 right_panel_diff_selected_file: None,
                 right_panel_diff_pending_path: None,
                 right_panel_diff_expanded_paths: HashSet::new(),
+                right_panel_diff_viewed_files: HashMap::new(),
+                right_panel_diff_collapsed_files: HashSet::new(),
                 right_panel_diff_tree_rows: RefCell::new(Vec::new()),
                 right_panel_diff_tree_cursor: None,
                 right_panel_working_tree: Vec::new(),

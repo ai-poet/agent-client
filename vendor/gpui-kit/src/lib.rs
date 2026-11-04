@@ -4,6 +4,7 @@
 //! models, persistence and platform policy stay in the caller.
 
 pub mod activation;
+pub mod banner;
 pub mod command;
 pub mod diff;
 pub mod frost;
@@ -22,6 +23,7 @@ pub mod toggle_switch;
 pub mod tooltip;
 
 pub use activation::ActivationExt;
+pub use banner::{Banner, BannerSurface, BannerTone};
 pub use menu_chip::MenuChip;
 pub use text_field::TextField;
 pub use theme::UiTheme;

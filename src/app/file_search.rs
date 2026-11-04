@@ -680,6 +680,18 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.right_panel_visible
+            && self.active_right_panel_surface() == Some(&RightPanelSurface::Diff)
+        {
+            if self.transcript_search_open() {
+                self.close_transcript_search(false, window, cx);
+            }
+            if self.file_search_open() {
+                self.close_file_search_with_focus(false, window, cx);
+            }
+            self.open_right_panel_diff_search(window, cx);
+            return;
+        }
         if self.file_search_target_focused(window, cx) {
             if self.transcript_search_open() {
                 self.close_transcript_search(false, window, cx);
@@ -711,7 +723,9 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.transcript_search_open() {
+        if self.right_panel_diff_search_open {
+            self.close_right_panel_diff_search(window, cx);
+        } else if self.transcript_search_open() {
             self.close_transcript_search(true, window, cx);
         } else if self.file_search_open() {
             self.close_file_search(window, cx);
@@ -728,7 +742,9 @@ impl Waku {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.transcript_search_open() {
+        if self.right_panel_diff_search_open {
+            self.navigate_right_panel_diff_search(false, cx);
+        } else if self.transcript_search_open() {
             self.navigate_transcript_search(false, cx);
         } else if self.file_search_open() {
             self.file_search_navigate(false, cx);
@@ -743,7 +759,9 @@ impl Waku {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.transcript_search_open() {
+        if self.right_panel_diff_search_open {
+            self.navigate_right_panel_diff_search(true, cx);
+        } else if self.transcript_search_open() {
             self.navigate_transcript_search(true, cx);
         } else if self.file_search_open() {
             self.file_search_navigate(true, cx);

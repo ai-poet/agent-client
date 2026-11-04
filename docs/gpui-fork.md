@@ -24,6 +24,11 @@ resolve `gpui` and `gpui_platform` to that directory.
     - `crates/gpui/src/elements/uniform_list.rs`: dropped the `std::usize`
       module import, whose constants are deprecated in favour of the
       associated `usize::MAX`. The call site itself is unchanged.
+    - `crates/gpui/src/window.rs` and
+      `crates/gpui_windows/src/events.rs`: non-client caption mouse-up is
+      forwarded to `DefWindowProc` even when GPUI consumed its own event, so
+      the native caption move loop can end. A platform-neutral regression
+      covers `HTCAPTION` versus ordinary window buttons.
 
     Windows' `zoom()` in `crates/gpui_windows/src/window.rs` is *not*
     patched. It only ever calls `ShowWindowAsync(SW_MAXIMIZE)`, which is a
