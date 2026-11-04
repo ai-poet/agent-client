@@ -241,20 +241,23 @@ impl Waku {
         });
 
         Some(
-            div().px(px(20.0)).pb(px(8.0)).child(
-                Banner::new(
-                    SharedString::from(format!("error-banner-{turn_id}")),
-                    ui_theme(theme),
+            div()
+                .px(px(20.0))
+                .pb(px(8.0))
+                .child(
+                    Banner::new(
+                        SharedString::from(format!("error-banner-{turn_id}")),
+                        ui_theme(theme),
+                    )
+                    .tone(BannerTone::Error)
+                    .max_w(px(CONTENT_MAX_WIDTH))
+                    .mx_auto()
+                    .child(header)
+                    .child(body)
+                    .children(goal_note)
+                    .child(actions),
                 )
-                .tone(BannerTone::Error)
-                .max_w(px(CONTENT_MAX_WIDTH))
-                .mx_auto()
-                .child(header)
-                .child(body)
-                .children(goal_note)
-                .child(actions),
-            )
-            .into_any_element(),
+                .into_any_element(),
         )
     }
 

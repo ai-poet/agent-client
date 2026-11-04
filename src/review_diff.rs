@@ -167,7 +167,11 @@ impl Snapshot {
         file.additions.hash(&mut hasher);
         file.deletions.hash(&mut hasher);
         std::mem::discriminant(&file.status).hash(&mut hasher);
-        for line in self.lines.iter().filter(|line| line.file_index == file_index) {
+        for line in self
+            .lines
+            .iter()
+            .filter(|line| line.file_index == file_index)
+        {
             if let LineKind::Gap(gap) = &line.kind {
                 for hidden in gap.hidden_lines() {
                     hash_line(hidden, &mut hasher);

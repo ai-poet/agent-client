@@ -921,6 +921,97 @@ fn stream_batches_commit_full_adjacent_text_and_preserve_event_order() {
 }
 
 #[test]
+fn stream_batches_stop_at_reasoning_and_tool_identity_boundaries() {
+    let tool = |id: &str| DriverEvent::Activity {
+        id: Some(id.into()),
+        kind: ActivityKind::Command,
+        title: id.into(),
+        detail: None,
+        complete: true,
+    };
+    let mut events = VecDeque::from([
+        DriverEvent::TextDelta("answer".into()),
+        DriverEvent::ReasoningDelta("thinking".into()),
+        DriverEvent::TextDelta(" after".into()),
+        tool("tool-1"),
+        DriverEvent::TextDelta("after tool".into()),
+    ]);
+
+    assert!(matches!(
+        pop_stream_batch(&mut events, StreamDeltaKind::Text),
+        Some(DriverEvent::TextDelta(text)) if text == "answer"
+    ));
+    assert!(matches!(
+        pop_stream_batch(&mut events, StreamDeltaKind::Reasoning),
+        Some(DriverEvent::ReasoningDelta(text)) if text == "thinking"
+    ));
+    assert!(matches!(
+        pop_stream_batch(&mut events, StreamDeltaKind::Text),
+        Some(DriverEvent::TextDelta(text)) if text == " after"
+    ));
+    assert!(matches!(
+        events.pop_front(),
+        Some(DriverEvent::Activity { id: Some(id), .. }) if id == "tool-1"
+    ));
+    assert!(matches!(
+        pop_stream_batch(&mut events, StreamDeltaKind::Text),
+        Some(DriverEvent::TextDelta(text)) if text == "after tool"
+    ));
+}
+
+#[test]
+fn new_answer_parts_and_tool_blocks_keep_their_identity() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Native);
+    let session_id = session.id;
+    session.begin_turn("Build it");
+
+    append_text_delta_to_session(
+        std::slice::from_mut(&mut session),
+        session_id,
+        false,
+        "first".into(),
+    );
+    append_text_delta_to_session(
+        std::slice::from_mut(&mut session),
+        session_id,
+        true,
+        " continues".into(),
+    );
+    append_text_delta_to_session(
+        std::slice::from_mut(&mut session),
+        session_id,
+        false,
+        "second".into(),
+    );
+
+    assert_eq!(session.messages[1].content, "first continues");
+    assert!(!session.messages[1].streaming);
+    assert_eq!(session.messages[2].content, "second");
+    assert!(session.messages[2].streaming);
+
+    for (id, continuing) in [("tool-1", false), ("tool-2", false)] {
+        push_transcript_activity(
+            &mut session,
+            ActivityItem::new(Some(id.into()), ActivityKind::Command, id, None, true),
+            continuing,
+        );
+    }
+    assert_eq!(session.transcript_blocks.len(), 2);
+    assert_eq!(
+        session.transcript_blocks[0].activities[0]
+            .source_id
+            .as_deref(),
+        Some("tool-1")
+    );
+    assert_eq!(
+        session.transcript_blocks[1].activities[0]
+            .source_id
+            .as_deref(),
+        Some("tool-2")
+    );
+}
+
+#[test]
 fn stream_parts_keep_targeting_the_running_session_after_selection_changes() {
     let project_id = uuid::Uuid::new_v4();
     let mut running = AgentSession::new(project_id, ProviderKind::Codex);

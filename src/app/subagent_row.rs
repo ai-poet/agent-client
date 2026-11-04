@@ -61,7 +61,11 @@ impl Waku {
         };
         let hover_group = SharedString::from(format!("subagent-row-{id}"));
         let focus = self.transcript_control_focus(format!("subagent-row-{id}"), cx);
+        let tooltip = subagent_tooltip(call, work, activity, running);
         let description = call.description.clone();
+        let model = work
+            .and_then(|work| work.model.clone())
+            .filter(|model| !model.trim().is_empty());
         let open_activity = activity.clone();
         let key_activity = activity.clone();
 
@@ -95,6 +99,17 @@ impl Waku {
                         .child(agent_type),
                 )
             })
+            .when_some(model, |row, model| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .max_w(px(120.0))
+                        .truncate()
+                        .font_family(md::render::MONO_FAMILY)
+                        .text_color(theme.text_ghost)
+                        .child(model),
+                )
+            })
             .child(div().flex_none().text_color(theme.text_ghost).child("·"))
             .child(
                 div()
@@ -108,7 +123,7 @@ impl Waku {
                             style.text_color(theme.text_secondary)
                         })
                     })
-                    .tooltip(Tooltip::text(description.clone()))
+                    .tooltip(Tooltip::text(tooltip))
                     .child(SharedString::from(single_line_label(&description))),
             )
             .when(failed, |row| {
@@ -181,6 +196,78 @@ impl Waku {
         self.handle_background_work_event(session_id, BackgroundWorkEvent::Upsert(item));
         self.open_background_work_surface(session_id, key, cx);
     }
+}
+
+fn subagent_result_preview(text: &str) -> Option<String> {
+    const MAX_CHARS: usize = 180;
+    let mut compact = String::new();
+    let mut pending_space = false;
+    let mut truncated = false;
+    for character in text.chars() {
+        if compact.chars().count() >= MAX_CHARS {
+            truncated = true;
+            break;
+        }
+        if character.is_whitespace() {
+            pending_space = !compact.is_empty();
+            continue;
+        }
+        if pending_space {
+            compact.push(' ');
+            pending_space = false;
+        }
+        compact.push(character);
+    }
+    if compact.is_empty() {
+        return None;
+    }
+    if truncated {
+        compact = compact.chars().take(MAX_CHARS - 1).collect();
+        compact.push('…');
+    }
+    Some(compact.trim_end().to_owned())
+}
+
+fn subagent_tooltip(
+    call: &SubagentCall,
+    work: Option<&BackgroundWorkItem>,
+    activity: &ActivityItem,
+    running: bool,
+) -> String {
+    let mut parts = vec![single_line_label(&call.description)];
+    if let Some(role) = call
+        .agent_type
+        .as_deref()
+        .filter(|role| !role.trim().is_empty())
+    {
+        parts.push(role.to_owned());
+    }
+    if let Some(model) = work
+        .and_then(|work| work.model.as_deref())
+        .filter(|model| !model.trim().is_empty())
+    {
+        parts.push(model.to_owned());
+    }
+    let status = work.map(|work| work.status).unwrap_or_else(|| {
+        if activity.failed {
+            BackgroundWorkStatus::Failed
+        } else if running {
+            BackgroundWorkStatus::Running
+        } else if activity.complete {
+            BackgroundWorkStatus::Completed
+        } else {
+            BackgroundWorkStatus::Stopped
+        }
+    });
+    parts.push(super::background_work::work_status_label(status));
+    if let Some(output) = work
+        .and_then(|work| work.output.as_deref())
+        .or(activity.output.as_deref())
+        .and_then(subagent_result_preview)
+    {
+        parts.push(output);
+    }
+    parts.join(" · ")
 }
 
 /// The entry a finished sub-agent call stands for, when nothing else left
@@ -258,6 +345,38 @@ mod tests {
         for name in ["general-purpose", "Explore", "Plan", "", "代码审查"] {
             assert!(agent_type_hue_index(name) < AGENT_TYPE_HUES.len());
         }
+    }
+
+    #[test]
+    fn metadata_tooltip_includes_model_status_and_a_bounded_result() {
+        let call = SubagentCall {
+            agent_type: Some("Explore".into()),
+            description: "Find the route".into(),
+        };
+        let activity = ActivityItem::new(
+            Some("tool-1".into()),
+            ActivityKind::Tool,
+            "Agent",
+            None,
+            true,
+        );
+        let mut work = BackgroundWorkItem::new(
+            BackgroundWorkKind::Subagent,
+            "tool-1",
+            "Find it",
+            BackgroundWorkStatus::Running,
+        );
+        work.model = Some("claude-fable-5-1".into());
+        work.status = BackgroundWorkStatus::Completed;
+        work.output = Some("src/app/mod.rs\nready".into());
+
+        let tooltip = subagent_tooltip(&call, Some(&work), &activity, false);
+        assert!(tooltip.contains("Explore"));
+        assert!(tooltip.contains("claude-fable-5-1"));
+        assert!(tooltip.contains("src/app/mod.rs ready"));
+        let preview = subagent_result_preview(&"界".repeat(400)).unwrap();
+        assert_eq!(preview.chars().count(), 180);
+        assert!(preview.ends_with('…'));
     }
 
     /// With nothing else left of it, a finished call still opens onto its

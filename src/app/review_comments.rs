@@ -170,11 +170,7 @@ fn step_visible_code_row(
     step_code_row_candidates(code, from, delta)
 }
 
-fn step_code_row_candidates(
-    code: Vec<usize>,
-    from: Option<usize>,
-    delta: isize,
-) -> Option<usize> {
+fn step_code_row_candidates(code: Vec<usize>, from: Option<usize>, delta: isize) -> Option<usize> {
     if code.is_empty() {
         return None;
     }

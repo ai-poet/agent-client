@@ -149,6 +149,10 @@ This fork remains licensed under GPL-3.0-only.
 
 | 2026-11-04 | Added the reusable `waku-ui` Banner component (tone/surface/slots) and migrated the error, daemon and update notices to it. Review now searches visible and gap-hidden diff lines, reveals matches without losing their logical order, and supports per-file viewed/collapsed state with content fingerprints that invalidate on real changes. T3 Code's ComposerBanner and diff review supplied behavioral reference only; no React, CSS or other source was copied. |
 
+| 2026-11-04 | Enhanced subagent presentation using T3 Code as behavioral reference only: consecutive child-agent calls form one expandable group with live/failure counts, while each member row keeps its existing detail view and adds reported model, role, authoritative status and a bounded result preview. No T3 source or new orchestration protocol was copied. |
+
+| 2026-11-04 | Added stream-identity regression coverage inspired by T3 Code's coalescing boundaries (behavioral reference only): text batches stop at reasoning and tool identities, new assistant parts and tool blocks cannot overwrite one another, and daemon replay cursors dedupe by epoch/runtime without dropping unrelated runtimes. The daemon's sequence decision was extracted unchanged into a testable pure helper. |
+
 ## Upstream attribution
 
 Waku is developed by egoist and contributors. Upstream source, issue tracker,

@@ -1056,6 +1056,11 @@ pub(super) fn activity_group_title(
             "activity.bucket_command_one",
             "activity.bucket_command_other",
         )),
+        GroupKind::Subagent => parts.push(counted(
+            calls().count(),
+            "background.agent_count_one",
+            "background.agent_count",
+        )),
     }
     let failed = calls().filter(|(activity, _)| activity.failed).count();
     if failed > 0 {
@@ -1073,6 +1078,8 @@ pub(super) fn activity_group_title(
         (GroupKind::Explore, true) => tr!("activity.group_exploring", parts = parts),
         (GroupKind::Terminal, false) => tr!("activity.group_terminal", parts = parts),
         (GroupKind::Terminal, true) => tr!("activity.group_terminal_running", parts = parts),
+        (GroupKind::Subagent, false) => tr!("activity.group_subagent", parts = parts),
+        (GroupKind::Subagent, true) => tr!("activity.group_subagent_running", parts = parts),
     }
 }
 
@@ -1916,6 +1923,18 @@ mod message_time_tests {
             "Terminal · 3 commands, 1 failed, 1 stopped"
         );
         assert_eq!(activity_verb(&activities[2], false), "Ran");
+    }
+
+    #[test]
+    fn a_subagent_group_counts_members_and_failures() {
+        let mut failed = command("review", true);
+        failed.failed = true;
+        let activities = vec![command("research", true), failed];
+        let phases = vec![ActivityPhase::Subagent; activities.len()];
+        assert_eq!(
+            activity_group_title(GroupKind::Subagent, &activities, &phases, false),
+            "Subagents · 2 subagents, 1 failed"
+        );
     }
 
     #[test]

@@ -123,6 +123,9 @@ moment any scrollbar became visible.
   changes, and file fingerprints are computed only when a file is marked viewed
   or a refreshed snapshot arrives; row rendering and the viewed counter read
   the validated in-memory set, never rescan the diff.
+- Subagent grouping reads the existing background-work state, and result
+  previews in `src/app/subagent_row.rs` stop after 180 characters; tooltip
+  construction never normalizes the full output log.
 
 ## Measuring
 

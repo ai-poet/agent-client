@@ -308,6 +308,25 @@ fn daemon_url(address: &str) -> anyhow::Result<String> {
     Ok(url.into())
 }
 
+fn accept_event_sequence(
+    sequences: &mut HashMap<(Uuid, Uuid), LastSequence>,
+    event: &SequencedEvent,
+) -> bool {
+    let previous = sequences
+        .entry((event.session_id, event.runtime_id))
+        .or_insert(LastSequence {
+            epoch: event.epoch,
+            sequence: 0,
+        });
+    if previous.epoch == event.epoch && event.sequence <= previous.sequence {
+        false
+    } else {
+        previous.epoch = event.epoch;
+        previous.sequence = event.sequence;
+        true
+    }
+}
+
 fn run_client(
     mut socket: WebSocket<MaybeTlsStream<TcpStream>>,
     outgoing: Receiver<Outgoing>,
@@ -348,23 +367,8 @@ fn run_client(
                         }
                     }
                     ServerMessage::Event(event) => {
-                        let should_deliver = {
-                            let mut sequences = inner.last_sequences.lock();
-                            let previous = sequences
-                                .entry((event.session_id, event.runtime_id))
-                                .or_insert(LastSequence {
-                                    epoch: event.epoch,
-                                    sequence: 0,
-                                });
-                            if previous.epoch == event.epoch && event.sequence <= previous.sequence
-                            {
-                                false
-                            } else {
-                                previous.epoch = event.epoch;
-                                previous.sequence = event.sequence;
-                                true
-                            }
-                        };
+                        let should_deliver =
+                            accept_event_sequence(&mut inner.last_sequences.lock(), &event);
                         if should_deliver {
                             let key = (event.session_id, event.runtime_id);
                             let sessions = inner.sessions.lock();
@@ -476,6 +480,7 @@ fn read_server_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use waku_protocol::WireDriverEvent;
 
     #[test]
     fn transport_errors_are_recognized_by_their_wire_text() {
@@ -513,6 +518,51 @@ mod tests {
         assert_eq!(cursors.len(), 1);
         assert_eq!(cursors[0].sequence, 5);
         assert_eq!(cursors[0].epoch, Uuid::from_u128(3));
+    }
+
+    #[test]
+    fn reconnect_sequences_dedupe_by_epoch_and_runtime() {
+        fn event(runtime_id: Uuid, epoch: Uuid, sequence: u64) -> SequencedEvent {
+            SequencedEvent {
+                session_id: Uuid::from_u128(1),
+                runtime_id,
+                epoch,
+                sequence,
+                event: WireDriverEvent::new("textDelta", serde_json::Value::Null),
+            }
+        }
+
+        let runtime = Uuid::from_u128(10);
+        let other_runtime = Uuid::from_u128(11);
+        let first_epoch = Uuid::from_u128(20);
+        let restarted_epoch = Uuid::from_u128(21);
+        let mut sequences = HashMap::new();
+
+        assert!(accept_event_sequence(
+            &mut sequences,
+            &event(runtime, first_epoch, 1)
+        ));
+        assert!(!accept_event_sequence(
+            &mut sequences,
+            &event(runtime, first_epoch, 1)
+        ));
+        assert!(accept_event_sequence(
+            &mut sequences,
+            &event(runtime, first_epoch, 2)
+        ));
+        assert!(!accept_event_sequence(
+            &mut sequences,
+            &event(runtime, first_epoch, 1)
+        ));
+        assert!(accept_event_sequence(
+            &mut sequences,
+            &event(other_runtime, first_epoch, 1)
+        ));
+        assert!(accept_event_sequence(
+            &mut sequences,
+            &event(runtime, restarted_epoch, 1)
+        ));
+        assert_eq!(sequences.len(), 2);
     }
 
     #[test]

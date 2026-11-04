@@ -27,6 +27,8 @@ pub enum ActivityPhase {
     Explore(ExploreBucket),
     /// A shell command that is not plain reading.
     Terminal,
+    /// A child agent task. Consecutive calls form one expandable group.
+    Subagent,
     /// Thinking. Carried along inside a group rather than breaking it.
     Reasoning,
     /// Anything else: edits, plans, web search, other tools.
@@ -38,6 +40,7 @@ pub enum ActivityPhase {
 pub enum GroupKind {
     Explore,
     Terminal,
+    Subagent,
 }
 
 impl ActivityPhase {
@@ -45,6 +48,7 @@ impl ActivityPhase {
         match self {
             Self::Explore(_) => Some(GroupKind::Explore),
             Self::Terminal => Some(GroupKind::Terminal),
+            Self::Subagent => Some(GroupKind::Subagent),
             Self::Reasoning | Self::Other => None,
         }
     }
@@ -619,6 +623,7 @@ mod tests {
     const RUN: ActivityPhase = ActivityPhase::Terminal;
     const THINK: ActivityPhase = ActivityPhase::Reasoning;
     const EDIT: ActivityPhase = ActivityPhase::Other;
+    const SUBAGENT: ActivityPhase = ActivityPhase::Subagent;
 
     #[test]
     fn a_group_forms_from_the_second_call_of_a_phase() {
@@ -642,6 +647,21 @@ mod tests {
                     members: 0..2
                 },
                 ActivityRun::Single(2),
+            ]
+        );
+    }
+
+    #[test]
+    fn consecutive_subagents_form_a_group() {
+        assert_eq!(group_activities(&[SUBAGENT]), [ActivityRun::Single(0)]);
+        assert_eq!(
+            group_activities(&[SUBAGENT, THINK, SUBAGENT, EDIT]),
+            [
+                ActivityRun::Group {
+                    kind: GroupKind::Subagent,
+                    members: 0..3
+                },
+                ActivityRun::Single(3),
             ]
         );
     }

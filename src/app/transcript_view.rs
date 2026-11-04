@@ -2051,7 +2051,13 @@ impl Waku {
         .flatten();
         let phases = activities
             .iter()
-            .map(|activity| activity_phase::phase(activity.kind, activity_command_text(activity)))
+            .map(|activity| {
+                if activity.subagent.is_some() {
+                    ActivityPhase::Subagent
+                } else {
+                    activity_phase::phase(activity.kind, activity_command_text(activity))
+                }
+            })
             .collect::<Vec<_>>();
         let mut column = div().w_full().min_w_0().flex().flex_col().gap(px(2.0));
         for run in activity_phase::group_activities(&phases) {
@@ -2106,10 +2112,25 @@ impl Waku {
             .get(&first_id)
             .copied()
             .unwrap_or(false);
-        let running = live_turn
-            && members
-                .iter()
-                .any(|activity| activity.reasoning.is_none() && activity_is_running(activity));
+        let running = if kind == GroupKind::Subagent {
+            members.iter().any(|activity| {
+                self.state
+                    .selected_session
+                    .zip(activity.source_id.as_deref())
+                    .and_then(|(session_id, source_id)| {
+                        self.background_work_for_activity(session_id, source_id)
+                    })
+                    .map(|work| work.status.is_live())
+                    .unwrap_or(
+                        live_turn && activity.reasoning.is_none() && activity_is_running(activity),
+                    )
+            })
+        } else {
+            live_turn
+                && members
+                    .iter()
+                    .any(|activity| activity.reasoning.is_none() && activity_is_running(activity))
+        };
         let title = activity_group_title(kind, members, phases, running);
         let key = format!("activity-group-{first_id}");
         let focus = self.transcript_control_focus(key.clone(), cx);
@@ -3082,6 +3103,7 @@ fn activity_group_icon(kind: GroupKind) -> &'static str {
     match kind {
         GroupKind::Explore => "icons/search.svg",
         GroupKind::Terminal => "icons/terminal.svg",
+        GroupKind::Subagent => "icons/bot.svg",
     }
 }
 

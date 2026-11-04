@@ -248,8 +248,14 @@ mod tests {
         let banner = |tone| Banner::new("notice", theme).tone(tone);
         assert_eq!(banner(BannerTone::Neutral).strip_background(), theme.raised);
         assert_eq!(banner(BannerTone::Info).strip_background(), theme.gauge);
-        assert_eq!(banner(BannerTone::Success).strip_background(), theme.success);
-        assert_eq!(banner(BannerTone::Warning).strip_background(), theme.warning);
+        assert_eq!(
+            banner(BannerTone::Success).strip_background(),
+            theme.success
+        );
+        assert_eq!(
+            banner(BannerTone::Warning).strip_background(),
+            theme.warning
+        );
         assert_eq!(banner(BannerTone::Error).strip_background(), theme.danger);
     }
 }

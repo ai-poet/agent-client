@@ -1554,6 +1554,10 @@ activity.group_terminal:
   en: "Terminal · %{parts}"
 activity.group_terminal_running:
   en: "Running · %{parts}"
+activity.group_subagent:
+  en: "Subagents · %{parts}"
+activity.group_subagent_running:
+  en: "Running subagents · %{parts}"
 activity.bucket_search_one:
   en: "%{count} search"
 activity.bucket_search_other:

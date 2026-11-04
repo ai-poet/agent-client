@@ -53,7 +53,11 @@ fn diff_search_matches(snapshot: &Snapshot, query: &str) -> Vec<usize> {
         .into_iter()
         .enumerate()
         .filter_map(|(index, entry)| {
-            entry.content.to_lowercase().contains(&query).then_some(index)
+            entry
+                .content
+                .to_lowercase()
+                .contains(&query)
+                .then_some(index)
         })
         .collect()
 }
@@ -174,14 +178,14 @@ impl Waku {
         let mut line_index = entry.line_index;
         if line_index.is_none()
             && let Some(gap_id) = entry.gap_id
-            && let Some(gap_index) = self
-                .right_panel_diff_snapshot
-                .as_deref()
-                .and_then(|snapshot| {
-                    snapshot.lines.iter().position(|line| {
-                        matches!(&line.kind, LineKind::Gap(gap) if gap.id == gap_id)
+            && let Some(gap_index) =
+                self.right_panel_diff_snapshot
+                    .as_deref()
+                    .and_then(|snapshot| {
+                        snapshot.lines.iter().position(
+                            |line| matches!(&line.kind, LineKind::Gap(gap) if gap.id == gap_id),
+                        )
                     })
-                })
         {
             self.expand_right_panel_diff_gap(gap_index, ExpansionDirection::All, cx);
             line_index = self
@@ -197,8 +201,7 @@ impl Waku {
         self.right_panel_diff_search_line = line_index;
         self.right_panel_diff_selected_file = Some(entry.file_index);
         if let Some(row) = line_index.and_then(|line| self.right_panel_diff_visible_row(line)) {
-            self.right_panel_diff_list_state
-                .scroll_to_reveal_item(row);
+            self.right_panel_diff_list_state.scroll_to_reveal_item(row);
         }
         cx.notify();
     }
@@ -216,7 +219,9 @@ impl Waku {
     ) -> AnyElement {
         let theme = Theme::current(cx);
         let count = self.right_panel_diff_search_matches.len();
-        let current = self.right_panel_diff_search_current.map_or(0, |index| index + 1);
+        let current = self
+            .right_panel_diff_search_current
+            .map_or(0, |index| index + 1);
         div()
             .h(px(38.0))
             .flex_none()
@@ -284,9 +289,10 @@ impl Waku {
         let Some(snapshot) = self.right_panel_diff_snapshot.as_deref() else {
             return false;
         };
-        snapshot.files.get(file_index).is_some_and(|file| {
-            self.right_panel_diff_viewed_files.contains_key(&file.path)
-        })
+        snapshot
+            .files
+            .get(file_index)
+            .is_some_and(|file| self.right_panel_diff_viewed_files.contains_key(&file.path))
     }
 
     pub(super) fn right_panel_diff_viewed_count(&self) -> usize {
@@ -305,9 +311,8 @@ impl Waku {
                     .map(|fingerprint| (file.path.clone(), fingerprint))
             })
             .collect::<std::collections::HashMap<_, _>>();
-        self.right_panel_diff_viewed_files.retain(|path, fingerprint| {
-            fingerprints.get(path) == Some(fingerprint)
-        });
+        self.right_panel_diff_viewed_files
+            .retain(|path, fingerprint| fingerprints.get(path) == Some(fingerprint));
         self.right_panel_diff_collapsed_files
             .retain(|path| self.right_panel_diff_viewed_files.contains_key(path));
     }
@@ -318,9 +323,12 @@ impl Waku {
     }
 
     pub(super) fn sync_right_panel_diff_visible_rows_state(&mut self) {
-        let rows = self.right_panel_diff_snapshot.as_deref().map_or_else(Vec::new, |snapshot| {
-            visible_diff_rows(snapshot, &self.right_panel_diff_collapsed_files)
-        });
+        let rows = self
+            .right_panel_diff_snapshot
+            .as_deref()
+            .map_or_else(Vec::new, |snapshot| {
+                visible_diff_rows(snapshot, &self.right_panel_diff_collapsed_files)
+            });
         let count = rows.len();
         *self.right_panel_diff_visible_rows.borrow_mut() = rows;
         self.right_panel_diff_list_state.reset(count);
@@ -375,7 +383,8 @@ impl Waku {
             self.right_panel_diff_viewed_files.remove(&path);
             self.right_panel_diff_collapsed_files.remove(&path);
         } else if let Some(fingerprint) = snapshot.file_fingerprint(file_index) {
-            self.right_panel_diff_viewed_files.insert(path.clone(), fingerprint);
+            self.right_panel_diff_viewed_files
+                .insert(path.clone(), fingerprint);
             self.right_panel_diff_collapsed_files.insert(path.clone());
             if self
                 .right_panel_diff_search_line

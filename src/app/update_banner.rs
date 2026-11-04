@@ -223,7 +223,11 @@ impl Waku {
             } else {
                 icon("icons/arrow-down.svg", 13.0, foreground).into_any_element()
             })
-            .child(Banner::content().font_weight(FontWeight::MEDIUM).child(text));
+            .child(
+                Banner::content()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(text),
+            );
 
         if !installing {
             banner = banner
