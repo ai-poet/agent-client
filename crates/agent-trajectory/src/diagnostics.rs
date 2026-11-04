@@ -102,11 +102,8 @@ impl Finding {
             Self::RequestFailed { .. } | Self::CompactionFailed { .. } => Severity::Error,
             Self::Retried {
                 recovered: false, ..
-            } => Severity::Error,
-            Self::Retried {
-                retries: 3..,
-                ..
             }
+            | Self::Retried { retries: 3.., .. }
             | Self::SlowFirstToken { .. } => Severity::Warning,
             Self::Retried { .. } | Self::CacheReadDropped { .. } => Severity::Info,
         }
@@ -393,7 +390,7 @@ fn waited(request: &RequestView) -> Option<(i64, bool)> {
     }
     let failure = request.failure.as_ref()?;
     if request.status != RequestStatus::Error
-        || failure.status.is_some()
+        || failure.status.is_some_and(|status| status >= 400)
         || !matches!(
             failure.reason.as_str(),
             "network" | "timeout" | "stream_interrupted" | "truncated"
@@ -582,7 +579,7 @@ mod tests {
         assert_eq!(report.requests, 2);
         assert_eq!(report.failed, 0);
         assert!(report.findings.is_empty());
-        assert_eq!(report.first_token.p50, Some(250));
+        assert_eq!(report.first_token.p50, Some(200));
         assert_eq!(report.total.max, Some(1_000));
         assert_eq!(report.cache.unwrap().requests, 2);
     }
@@ -665,10 +662,23 @@ mod tests {
             code: None,
             request_id: None,
         });
-        let snapshot = build(&[turn_start(1, 0, "s1", "t1"), failed]);
+        let snapshot = build(&[turn_start(1, 0, "s1", "t1"), failed.clone()]);
         let report = analyze(&snapshot);
         assert_eq!(report.slow_first_token, 0);
         assert_eq!(report.findings.len(), 1);
+
+        let Record::Request { failure, .. } = &mut failed else {
+            unreachable!()
+        };
+        *failure = Some(FailureInfo {
+            class: "retryable".into(),
+            reason: "truncated".into(),
+            status: Some(200),
+            code: None,
+            request_id: None,
+        });
+        let report = analyze(&build(&[turn_start(1, 0, "s1", "t1"), failed]));
+        assert_eq!(report.slow_first_token, 1);
     }
 
     #[test]

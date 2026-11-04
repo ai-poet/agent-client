@@ -19,6 +19,7 @@ use std::cell::Cell as StdCell;
 use std::collections::{BTreeMap, HashSet};
 use std::time::{Duration, Instant};
 
+use agent_trajectory::diagnostics::{self, Finding, Report, Severity};
 use agent_trajectory::metrics::{self, Timing};
 use agent_trajectory::prompt_diff::{LineTag, line_diff, tool_changes};
 use agent_trajectory::record::{CompactionPhase, Purpose, Record, RequestStatus};
@@ -201,6 +202,8 @@ struct View {
     consumed: BTreeMap<u32, usize>,
     records: Arc<Vec<Record>>,
     snapshot: Arc<Snapshot>,
+    report: Arc<Report>,
+    report_open: bool,
     timeline: Option<Arc<timeline::Model>>,
     generation: u64,
     loading: bool,
@@ -226,6 +229,8 @@ impl Default for View {
             consumed: BTreeMap::new(),
             records: Arc::new(Vec::new()),
             snapshot: Arc::new(Snapshot::default()),
+            report: Arc::new(Report::default()),
+            report_open: false,
             timeline: None,
             generation: 0,
             loading: false,
@@ -284,6 +289,7 @@ pub(super) struct TrajectoryPanelState {
     timeline_bounds: Rc<StdCell<Option<Bounds<Pixels>>>>,
     drag_from: Option<f64>,
     inspector_scroll: ScrollHandle,
+    report_scroll: ScrollHandle,
 }
 
 /// What one read brought back.
@@ -291,6 +297,7 @@ struct Read {
     consumed: BTreeMap<u32, usize>,
     records: Arc<Vec<Record>>,
     snapshot: Arc<Snapshot>,
+    report: Arc<Report>,
 }
 
 /// Read what the segments added since `consumed`, through the daemon.
@@ -340,10 +347,12 @@ fn read_trajectory(
         consumed.insert(segment, next);
     }
     let snapshot = Arc::new(agent_trajectory::build(&records));
+    let report = Arc::new(diagnostics::analyze(&snapshot));
     Ok(Read {
         consumed,
         records: Arc::new(records),
         snapshot,
+        report,
     })
 }
 
@@ -421,6 +430,7 @@ impl Waku {
                         view.loaded = true;
                         if changed {
                             view.snapshot = read.snapshot;
+                            view.report = read.report;
                             view.timeline =
                                 timeline::derive(&view.snapshot, view.mode).map(Arc::new);
                             view.rebuild_rows();
@@ -765,8 +775,16 @@ impl Waku {
             );
         }
         let snapshot = view.snapshot.clone();
-        let header =
-            self.render_trajectory_header(&snapshot, view.mode, view.focus.is_some(), theme, cx);
+        let header = self.render_trajectory_header(
+            &snapshot,
+            &view.report,
+            view.report_open,
+            view.mode,
+            view.focus.is_some(),
+            theme,
+            cx,
+        );
+        let report = self.render_trajectory_report(view, theme, cx);
         let overview = self.render_trajectory_timeline(view, theme, cx);
         let ledger = self.render_trajectory_ledger(view, cx);
         let inspector = view
@@ -789,6 +807,7 @@ impl Waku {
             .flex_col()
             .bg(theme.surface)
             .child(header)
+            .children(report)
             .children(overview)
             .child(ledger)
             .children(inspector)
@@ -798,6 +817,8 @@ impl Waku {
     fn render_trajectory_header(
         &self,
         snapshot: &Snapshot,
+        report: &Report,
+        report_open: bool,
         mode: Mode,
         focused: bool,
         theme: Theme,
@@ -811,6 +832,12 @@ impl Waku {
             input = metrics::format_tokens(usage.input + usage.cache_read),
             output = metrics::format_tokens(usage.output)
         );
+        let finding_count = report.findings.len() + report.omitted_findings;
+        let report_label = if finding_count == 0 {
+            tr!("trajectory.diagnostics.toggle")
+        } else {
+            tr!("trajectory.diagnostics.toggle_count", count = finding_count)
+        };
         let mode_button =
             |mode_value: Mode, id: &'static str, label: String, cx: &mut Context<Self>| {
                 let selected = mode == mode_value;
@@ -900,6 +927,45 @@ impl Waku {
                         cx,
                     ))
                     .child(div().flex_1())
+                    .child(
+                        div()
+                            .id("trajectory-diagnostics-toggle")
+                            .tab_index(0)
+                            .h(px(22.0))
+                            .px(px(8.0))
+                            .rounded(px(6.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(5.0))
+                            .text_size(sp(11.5))
+                            .text_color(if report_open {
+                                theme.text
+                            } else {
+                                theme.text_secondary
+                            })
+                            .when(report_open, |button| {
+                                button.bg(theme.overlay).font_weight(FontWeight::MEDIUM)
+                            })
+                            .hover(|button| button.bg(theme.overlay))
+                            .focus_visible(|button| {
+                                button.border_1().border_color(theme.accent)
+                            })
+                            .on_activation(cx, |this, _, cx| {
+                                this.with_trajectory_view(cx, |view| {
+                                    view.report_open = !view.report_open;
+                                });
+                            })
+                            .child(icon(
+                                "icons/alert.svg",
+                                12.0,
+                                if finding_count == 0 {
+                                    theme.text_tertiary
+                                } else {
+                                    theme.warning
+                                },
+                            ))
+                            .child(report_label),
+                    )
                     .when(focused, |row| {
                         row.child(card_button(
                             theme,
@@ -917,6 +983,194 @@ impl Waku {
                         ))
                     }),
             )
+    }
+
+    fn render_trajectory_report(
+        &self,
+        view: &View,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !view.report_open {
+            return None;
+        }
+        let report = view.report.clone();
+        let cache = report
+            .cache
+            .and_then(|cache| cache.hit_ratio)
+            .map(|ratio| format!("{:.1}%", ratio * 100.0))
+            .unwrap_or_else(|| tr!("trajectory.diagnostics.cache_unavailable"));
+        let summary = tr!(
+            "trajectory.diagnostics.summary",
+            failed = report.failed,
+            retries = report.retried_requests,
+            slow = report.slow_first_token,
+            cache = cache
+        );
+        let report_for_copy = report.clone();
+        let copy = card_button(
+            theme,
+            SharedString::from("trajectory-copy-diagnostics"),
+            tr!("trajectory.diagnostics.copy"),
+            false,
+            false,
+            cx,
+            move |this, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(report_for_copy.markdown()));
+                this.show_toast(tr!("common.copied"));
+                cx.notify();
+            },
+        );
+        let mut rows = div().flex().flex_col().gap(px(4.0));
+        for (position, finding) in report.findings.iter().enumerate() {
+            let cell = finding.cell();
+            let (marker, color, severity) = match finding.severity() {
+                Severity::Error => (
+                    "icons/circle-x.svg",
+                    theme.danger,
+                    tr!("trajectory.diagnostics.severity.error"),
+                ),
+                Severity::Warning => (
+                    "icons/alert.svg",
+                    theme.warning,
+                    tr!("trajectory.diagnostics.severity.warning"),
+                ),
+                Severity::Info => (
+                    "icons/info.svg",
+                    theme.text_secondary,
+                    tr!("trajectory.diagnostics.severity.info"),
+                ),
+            };
+            rows = rows.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "trajectory-diagnostic-{position}-{cell}"
+                    )))
+                    .tab_index(0)
+                    .p(px(7.0))
+                    .rounded(px(6.0))
+                    .flex()
+                    .items_start()
+                    .gap(px(7.0))
+                    .hover(|row| row.bg(theme.overlay))
+                    .focus_visible(|row| row.border_1().border_color(theme.accent))
+                    .on_activation(cx, move |this, _, cx| {
+                        this.select_trajectory_cell(cell, cx);
+                    })
+                    .child(icon(marker, 13.0, color))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.0))
+                            .child(
+                                div()
+                                    .text_size(sp(11.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(diagnostic_title(finding)),
+                            )
+                            .child(
+                                div()
+                                    .text_size(sp(11.0))
+                                    .line_height(sp(16.0))
+                                    .whitespace_normal()
+                                    .text_color(theme.text_secondary)
+                                    .child(diagnostic_detail(finding)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(10.0))
+                            .text_color(color)
+                            .child(severity),
+                    ),
+            );
+        }
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_secondary)
+                    .child(summary),
+            )
+            .child(
+                div()
+                    .text_size(sp(10.5))
+                    .line_height(sp(15.0))
+                    .whitespace_normal()
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("trajectory.diagnostics.limits")),
+            );
+        if report.findings.is_empty() {
+            body = body.child(
+                div()
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("trajectory.diagnostics.empty")),
+            );
+        } else {
+            body = body.child(rows);
+        }
+        if report.omitted_findings > 0 {
+            body = body.child(
+                div()
+                    .text_size(sp(10.5))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!(
+                        "trajectory.diagnostics.omitted",
+                        count = report.omitted_findings
+                    )),
+            );
+        }
+        Some(
+            div()
+                .flex_none()
+                .max_h(px(320.0))
+                .flex()
+                .flex_col()
+                .border_b_1()
+                .border_color(theme.border)
+                .bg(theme.raised)
+                .child(
+                    div()
+                        .flex_none()
+                        .px(px(12.0))
+                        .pt(px(8.0))
+                        .pb(px(6.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(icon("icons/alert.svg", 13.0, theme.warning))
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_size(sp(12.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(tr!("trajectory.diagnostics.title")),
+                        )
+                        .child(copy),
+                )
+                .child(
+                    div()
+                        .id("trajectory-diagnostics-body")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.trajectory_panel.report_scroll)
+                        .px(px(12.0))
+                        .pb(px(10.0))
+                        .child(body),
+                )
+                .into_any_element(),
+        )
     }
 
     fn render_trajectory_timeline(
@@ -1372,6 +1626,136 @@ impl Waku {
                     .child(body),
             )
             .into_any_element()
+    }
+}
+
+fn diagnostic_title(finding: &Finding) -> String {
+    match finding {
+        Finding::RequestFailed {
+            request,
+            turn,
+            step,
+            ..
+        } => tr!(
+            "trajectory.diagnostics.finding.request_failed",
+            request = request,
+            turn = turn,
+            step = step
+        ),
+        Finding::Retried {
+            request, retries, ..
+        } => tr!(
+            "trajectory.diagnostics.finding.retried",
+            request = request,
+            retries = retries
+        ),
+        Finding::SlowFirstToken { request, .. } => tr!(
+            "trajectory.diagnostics.finding.slow",
+            request = request
+        ),
+        Finding::CacheReadDropped { request, .. } => tr!(
+            "trajectory.diagnostics.finding.cache_drop",
+            request = request
+        ),
+        Finding::CompactionFailed { .. } => tr!("trajectory.compaction_failed"),
+    }
+}
+
+fn diagnostic_detail(finding: &Finding) -> String {
+    match finding {
+        Finding::RequestFailed {
+            model,
+            failure,
+            error,
+            ..
+        } => {
+            let mut parts = vec![model.clone()];
+            if let Some(failure) = failure {
+                if !failure.class.is_empty() {
+                    parts.push(failure.class.clone());
+                }
+                if !failure.reason.is_empty() {
+                    parts.push(RetryCause::from_reason(&failure.reason).label());
+                }
+                if let Some(status) = failure.status {
+                    parts.push(format!("HTTP {status}"));
+                }
+                if let Some(code) = &failure.code {
+                    parts.push(code.clone());
+                }
+                if let Some(id) = &failure.request_id {
+                    parts.push(format!("{}: {id}", tr!("trajectory.fact.request_id")));
+                }
+            }
+            if let Some(error) = error {
+                parts.push(error.clone());
+            }
+            parts.join(" · ")
+        }
+        Finding::Retried {
+            reasons,
+            discarded_output,
+            recovered,
+            ..
+        } => {
+            let mut parts = vec![reasons
+                .iter()
+                .map(|reason| RetryCause::from_reason(reason).label())
+                .collect::<Vec<_>>()
+                .join(" · ")];
+            parts.push(if *recovered {
+                tr!("trajectory.diagnostics.recovered")
+            } else {
+                tr!("trajectory.diagnostics.not_recovered")
+            });
+            if *discarded_output {
+                parts.push(tr!("trajectory.retry_discarded"));
+            }
+            parts.join(" · ")
+        }
+        Finding::SlowFirstToken {
+            waited_ms,
+            without_output,
+            ..
+        } => {
+            let mut detail = metrics::format_duration(*waited_ms);
+            if *without_output {
+                detail.push_str(&format!(
+                    " · {}",
+                    tr!("trajectory.diagnostics.without_output")
+                ));
+            }
+            detail
+        }
+        Finding::CacheReadDropped {
+            previous_request,
+            previous_read,
+            input,
+            since_previous_ms,
+            prompt_change,
+            ..
+        } => {
+            let mut detail = tr!(
+                "trajectory.diagnostics.cache_detail",
+                previous = previous_request,
+                read = metrics::format_tokens(*previous_read),
+                input = metrics::format_tokens(*input),
+                since = metrics::format_duration(*since_previous_ms)
+            );
+            if let Some(change) = prompt_change {
+                let change = match change {
+                    PromptChange::Initial => tr!("trajectory.prompt.initial"),
+                    PromptChange::System => tr!("trajectory.prompt.system"),
+                    PromptChange::Tools => tr!("trajectory.prompt.tools"),
+                    PromptChange::SystemAndTools => tr!("trajectory.prompt.both"),
+                };
+                detail.push_str(&format!(" · {change}"));
+            }
+            detail
+        }
+        Finding::CompactionFailed { turn, .. } => turn
+            .map(|turn| tr!("trajectory.turn", turn = turn))
+            .unwrap_or_default(),
     }
 }
 
