@@ -29,6 +29,20 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.3.3]
+
+- Review 面板支持全文搜索：可以查找折叠文件和尚未展开的上下文，命中后自动展开并定位；文件可标记为已读并折叠，内容再次变化时会自动恢复为未读
+
+  Review now supports full-text search across collapsed files and hidden context, expanding and revealing each match automatically. Files can be marked as viewed and collapsed, and changed content automatically becomes unread again
+
+- 子 Agent 的展示更清晰：连续子任务可以分组展开，显示成员数量、运行与失败状态；每个成员可展示角色、模型和结果预览，已有的流式记录与详情入口保持不变
+
+  Subagent activity is clearer: consecutive child tasks can be grouped and expanded, with member counts and running or failed states; each member can show its role, model and a result preview while preserving existing streaming records and detail views
+
+- 内置 Agent 的重试与中断恢复更可靠：保留中断前已经输出的内容，避免重复或覆盖；重试保持请求上下文稳定，并改进后台进程停止与失败恢复
+
+  Built-in agent retries and interruption recovery are more reliable: output shown before an interruption is preserved instead of duplicated or overwritten, retries keep request context stable, and background-process stopping and failure recovery are improved
+
 ## [0.3.2]
 
 - 新任务页支持自定义壁纸：可在「设置 → 外观」选择本地图片，调整焦点与缩放，应用抖动、ASCII、半色调或扫描线效果；切换壁纸时平滑交叉淡化，界面表面可随壁纸取色。窗口、侧栏与输入框采用更统一的半透明材质，macOS 支持整窗模糊
