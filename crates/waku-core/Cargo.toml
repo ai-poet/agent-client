@@ -55,3 +55,4 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 
 [dev-dependencies]
 waku-client = { path = "../waku-client" }
+tempfile = { workspace = true }

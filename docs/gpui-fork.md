@@ -1,8 +1,10 @@
 # Local GPUI fork
 
-Waku vendors its GPUI workspace under `vendor/agent-client-gpui/` so the
+Waku vendors its GPUI workspace under `vendor/gpui/` so the
 desktop can combine the `waku-webview` integration with Zeron's renderer work
-without requiring a separate checkout. The two `patch` entries in `Cargo.toml`
+without requiring a separate checkout. Reusable application components live
+separately in `vendor/gpui-kit/` (`waku-ui`); they must not add engine patches
+or a second GPUI dependency. The two `patch` entries in `Cargo.toml`
 resolve `gpui` and `gpui_platform` to that directory.
 
 ## Current base
@@ -67,5 +69,5 @@ cargo check --locked
 ```
 
 Run focused zui tests for any additional patch. Record the source commit for
-every sync. Keep the fork under `vendor/agent-client-gpui/` and do not replace
+every sync. Keep the fork under `vendor/gpui/` and do not replace
 it with a machine-specific absolute path in `Cargo.toml`.

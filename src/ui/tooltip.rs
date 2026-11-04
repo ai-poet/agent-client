@@ -1,15 +1,12 @@
-//! Waku's tooltip surface.
+//! Waku's tooltip view adapter.
 //!
-//! GPUI already owns tooltip *behaviour* — hover timing, placement, dismissal —
-//! through `InteractiveElement::tooltip`, which asks only for a view to render.
-//! This is that view, and nothing more.
+//! GPUI owns tooltip behavior; `waku-ui` owns the reusable surface.
 
-use gpui::{
-    AnyView, App, AppContext, IntoElement, ParentElement, Render, SharedString, Styled, Window,
-    div, px,
-};
+use gpui::{AnyView, App, AppContext, IntoElement, Render, SharedString, Window};
 
 use crate::theme::{Theme, sp};
+
+use super::ui_theme;
 
 /// A single-line hint.
 pub struct Tooltip {
@@ -40,25 +37,7 @@ impl Tooltip {
 
 impl Render for Tooltip {
     fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
-        let theme = Theme::current(cx);
-        // The outer wrapper is transparent and only offsets the card from the
-        // cursor; the shadow needs a parent that does not clip it.
-        div().pt(px(4.0)).pl(px(2.0)).child(
-            div()
-                .px(px(7.0))
-                .py(px(4.0))
-                .rounded(px(6.0))
-                .border_1()
-                .border_color(theme.border_strong)
-                .bg(theme.raised)
-                .shadow_md()
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .text_size(sp(12.5))
-                .line_height(sp(15.0))
-                .text_color(theme.text_secondary)
-                .child(self.label.clone()),
-        )
+        waku_ui::tooltip::Tooltip::new(self.label.clone(), ui_theme(Theme::current(cx)))
+            .text_metrics(sp(12.5), sp(15.0))
     }
 }

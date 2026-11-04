@@ -213,7 +213,11 @@ async fn run_in_background(
                         .spawn()
                 })
             } else {
-                Command::new("bash")
+                let mut process = Command::new("bash");
+                // Fork (Waku): the whole background workload gets one process
+                // group, so a stop reaches children as well as this shell.
+                crate::process::isolate_process_group(&mut process);
+                process
                     .arg("-c")
                     .arg(&command_clone)
                     .current_dir(&cwd)

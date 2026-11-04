@@ -332,9 +332,9 @@ pub struct RetryNotice {
     /// How long the loop waits before sending again.
     pub delay_ms: u64,
     pub reason: claurst_api::retry_policy::RetryReason,
-    /// The answer had started streaming and what arrived of it was thrown
-    /// away — never added to the conversation. A client that showed it
-    /// should take it back.
+    /// Whether the client must take back streamed output. New retries preserve
+    /// visible interrupted text, so this is false; older daemons may still send
+    /// true for their discard-and-restart behavior.
     pub discarded_output: bool,
     /// The failure, in the server's words where it gave any.
     pub detail: String,
@@ -546,6 +546,11 @@ pub async fn run_query_loop(
     loop_ctx.cancel_token = cancel_token.clone();
     let tool_ctx = &loop_ctx;
 
+    // Fork departure (Waku): the opening prompt is durable before the first
+    // provider call, not only after the model first asks for a tool. Without
+    // this, a crash during that first response loses the user's new prompt.
+    send_checkpoint(config, &event_tx, messages);
+
     let mut turn = 0u32;
     let mut compact_state = compact::AutoCompactState::default();
     // Tracks how many consecutive max_tokens recoveries we've attempted so
@@ -574,6 +579,10 @@ pub async fn run_query_loop(
     // (`runner::retry_loop`). It replaces two stall retries shared by every
     // request of the prompt, which a long task used up on its first blips.
     let mut retry = runner::retry_loop::RetryState::new(config.retry_budget);
+    // Fork departure (Waku): stable inputs for one logical request. A retry
+    // appends visible interrupted work but never resamples the system prompt,
+    // the step reminder or newly queued steering.
+    let mut retry_context = runner::retry_context::RetryContext::default();
     // Fork departure (Waku): the provider branch's adapter, built once per
     // run so its connection pool is reused rather than a new connection
     // (and TLS handshake) opened for every request.
@@ -719,14 +728,12 @@ pub async fn run_query_loop(
         }
 
         // Fork departure (Waku): act on a failed request — wait and send it
-        // again, compact first, or end the turn with the failure. A retry
-        // re-enters the loop at the same turn, so the request is rebuilt from
-        // the conversation as it was (nothing of a failed answer is ever
-        // added to it), picks up any steering that arrived meanwhile, and
-        // carries the same step reminder — the same bytes, so the prompt
-        // cache and the gateway's sticky routing still apply. Only used
-        // outside the stream-reading loops, where `continue` means the next
-        // request.
+        // again, compact first, or end the turn with the failure. A retry keeps
+        // the original system prompt and step reminder, and leaves newly queued
+        // steering for the next logical request. Visible interrupted text is
+        // appended before this macro so the next attempt can continue from it.
+        // Only used outside stream-reading loops, where `continue` means another
+        // request rather than the next stream event.
         macro_rules! retry_or_return {
             ($failure:expr, $visible:expr, $compact:expr) => {{
                 let failure: claurst_api::retry_policy::ModelFailure = $failure;
@@ -738,7 +745,7 @@ pub async fn run_query_loop(
                             attempt,
                             ?max,
                             delay_ms = delay.as_millis() as u64,
-                            discarded_output = visible,
+                            preserved_output = visible,
                             request_id = ?failure.request_id,
                             error = %failure,
                             "Model request failed — retrying"
@@ -749,7 +756,7 @@ pub async fn run_query_loop(
                                 max_attempts: max,
                                 delay_ms: u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
                                 reason: failure.reason,
-                                discarded_output: visible,
+                                discarded_output: false,
                                 detail: failure.to_string(),
                                 request_id: failure.request_id.clone(),
                             }));
@@ -757,12 +764,16 @@ pub async fn run_query_loop(
                         if runner::retry_loop::sleep_or_cancel(delay, &cancel_token).await {
                             return QueryOutcome::Cancelled;
                         }
+                        retry_context.begin_retry();
                         turn -= 1;
                         continue;
                     }
                     runner::retry_loop::RetryDecision::Compact => {
                         warn!(error = %failure, "Context window exceeded — compacting before sending again");
                         if $compact.await {
+                            // Compaction deliberately creates a new context;
+                            // the next request may also accept queued steering.
+                            retry_context.finish_request();
                             turn -= 1;
                             continue;
                         }
@@ -788,65 +799,70 @@ pub async fn run_query_loop(
             return QueryOutcome::Cancelled;
         }
 
-        // Drain any pending user messages that were queued during the previous
-        // tool-execution phase (e.g. commands entered while tools ran).
-        // Mirrors the TS `messageQueueManager` drain between turns.
-        if let Some(queue) = pending_messages.as_deref_mut() {
-            for text in queue.drain(..) {
-                debug!("Injecting pending message: {}", &text);
-                messages.push(Message::user(text));
-            }
-        }
-
-        // T1-4: Drain the priority command queue (if wired up) and append any
-        // resulting messages to the conversation before the API call.
-        // Mirrors the TS `messageQueueManager` priority-queue drain.
-        //
-        // Waku: appended, not prepended. `drain_command_queue` already orders
-        // them by priority among themselves; putting them in front of the
-        // whole conversation made a steering message the first thing the
-        // model read, before the prompt it was steering.
-        if let Some(ref cq) = config.command_queue {
-            let injected = inject_command_queue(messages, cq);
-            if injected > 0 {
-                debug!(count = injected, "Injecting command-queue messages");
-            }
-        }
-
-        // Apply tool-result budget: if the cumulative size of all tool results
-        // in the conversation exceeds the configured threshold, replace the
-        // oldest results with a placeholder until we're back under budget.
-        // This mirrors the TS `applyToolResultBudget` call in query.ts.
-        if config.tool_result_budget > 0 {
-            let (budgeted, truncated) =
-                apply_tool_result_budget(std::mem::take(messages), config.tool_result_budget);
-            *messages = budgeted;
-            if truncated > 0 {
-                info!(
-                    truncated,
-                    budget = config.tool_result_budget,
-                    "Tool-result budget exceeded: truncated {} result(s)",
-                    truncated
-                );
-                if let Some(ref tx) = event_tx {
-                    let _ = tx.send(QueryEvent::Status(format!(
-                        "[{} older tool result(s) truncated to save context]",
-                        truncated
-                    )));
+        // A retry keeps the history shape of the original request. New input
+        // waits for the next logical request instead of changing this one's
+        // prefix or landing before the interrupted answer it was steering.
+        if !retry_context.replaying() {
+            // Drain any pending user messages that were queued during the previous
+            // tool-execution phase (e.g. commands entered while tools ran).
+            // Mirrors the TS `messageQueueManager` drain between turns.
+            if let Some(queue) = pending_messages.as_deref_mut() {
+                for text in queue.drain(..) {
+                    debug!("Injecting pending message: {}", &text);
+                    messages.push(Message::user(text));
                 }
             }
-        }
 
-        // Request-boundary invariant pass (issue #229 / MI-2). Compaction,
-        // max_tokens recovery, and the command-queue / pending-message drains
-        // above can each independently leave the history with a broken
-        // tool_use ↔ tool_result pairing (an orphan result, or a dangling
-        // tool_use) that the provider rejects with HTTP 400. Heal it here —
-        // the single choke point covering BOTH the legacy Anthropic path
-        // (`api_messages` below) and the modern provider path (`provider_messages`
-        // built later in the dispatch branch), since both derive from `messages`.
-        // sanitize_history is idempotent, so a well-formed history is untouched.
-        *messages = sanitize::sanitize_history(std::mem::take(messages));
+            // T1-4: Drain the priority command queue (if wired up) and append any
+            // resulting messages to the conversation before the API call.
+            // Mirrors the TS `messageQueueManager` priority-queue drain.
+            //
+            // Waku: appended, not prepended. `drain_command_queue` already orders
+            // them by priority among themselves; putting them in front of the
+            // whole conversation made a steering message the first thing the
+            // model read, before the prompt it was steering.
+            if let Some(ref cq) = config.command_queue {
+                let injected = inject_command_queue(messages, cq);
+                if injected > 0 {
+                    debug!(count = injected, "Injecting command-queue messages");
+                }
+            }
+
+            // Apply tool-result budget: if the cumulative size of all tool results
+            // in the conversation exceeds the configured threshold, replace the
+            // oldest results with a placeholder until we're back under budget.
+            // This mirrors the TS `applyToolResultBudget` call in query.ts.
+            if config.tool_result_budget > 0 {
+                let (budgeted, truncated) =
+                    apply_tool_result_budget(std::mem::take(messages), config.tool_result_budget);
+                *messages = budgeted;
+                if truncated > 0 {
+                    info!(
+                        truncated,
+                        budget = config.tool_result_budget,
+                        "Tool-result budget exceeded: truncated {} result(s)",
+                        truncated
+                    );
+                    if let Some(ref tx) = event_tx {
+                        let _ = tx.send(QueryEvent::Status(format!(
+                            "[{} older tool result(s) truncated to save context]",
+                            truncated
+                        )));
+                    }
+                }
+            }
+
+            // Request-boundary invariant pass (issue #229 / MI-2). Compaction,
+            // max_tokens recovery, and the command-queue / pending-message drains
+            // above can each independently leave the history with a broken
+            // tool_use ↔ tool_result pairing (an orphan result, or a dangling
+            // tool_use) that the provider rejects with HTTP 400. Heal it here —
+            // the single choke point covering BOTH the legacy Anthropic path
+            // (`api_messages` below) and the modern provider path (`provider_messages`
+            // built later in the dispatch branch), since both derive from `messages`.
+            // sanitize_history is idempotent, so a well-formed history is untouched.
+            *messages = sanitize::sanitize_history(std::mem::take(messages));
+        }
 
         // Fork departure (Waku): what changes from one step to the next — the
         // todo nudge (its count moves with every finished item, and it starts
@@ -856,7 +872,7 @@ pub async fn run_query_loop(
         // after it a cache miss, on every route. The reminder is never written
         // to `messages`: the next request's prefix is the conversation as it
         // was, and only the message that carried it is read again.
-        let reminder = step_reminder(turn, config, tool_ctx);
+        let reminder = retry_context.reminder(|| step_reminder(turn, config, tool_ctx));
         let reminded = reminder
             .as_deref()
             .map(|text| with_step_reminder(messages, text));
@@ -880,12 +896,12 @@ pub async fn run_query_loop(
         // so an ultracode turn gets the model's top reasoning (via the budget /
         // provider mapping below) plus the ultracode procedure addendum injected
         // into the system prompt.
-        let effective_effort_level =
-            effective_effort_for_turn(config.effort_level, messages.as_slice());
+        let effective_effort_level = retry_context
+            .effort(|| effective_effort_for_turn(config.effort_level, messages.as_slice()));
 
         // Verification nudge: if there are incomplete todos for this session
         // and the conversation has more than 2 turns, append a reminder.
-        let system = {
+        let system = retry_context.system(|| {
             // Build a (possibly patched) config for system-prompt assembly.
             // Agent prompt prefix and todo nudge are both applied here.
             let mut patched = config.clone();
@@ -953,7 +969,7 @@ pub async fn run_query_loop(
             patched.output_style_prompt = turn_output_style_prompt;
 
             build_system_prompt(&patched)
-        };
+        });
 
         let system_for_provider = system.clone(); // used by non-Anthropic dispatch below
         let mut req_builder = CreateMessageRequest::builder(&effective_model, config.max_tokens)
@@ -1476,13 +1492,20 @@ pub async fn run_query_loop(
                             ));
                     }
 
-                    // A failed, stalled or truncated stream means the
-                    // accumulated text and tool-call JSON are incomplete.
-                    // Do NOT fall through to assemble and execute tools from
-                    // it (issue #215 — an Edit/Write could otherwise run with
-                    // empty `{}` args): send the request again, or end the
-                    // turn with the failure.
+                    // A failed, stalled or truncated stream must never execute
+                    // its incomplete tool-call JSON. Its visible text is still
+                    // real work: keep that text with an interruption marker so
+                    // the next attempt continues instead of forgetting it.
                     if let Some(failure) = provider_stream_failure {
+                        let had_content = visible_output
+                            || !text_chunks.is_empty()
+                            || !thinking_chunks.is_empty()
+                            || !tool_call_blocks.is_empty();
+                        runner::retry_context::preserve_interrupted_response(
+                            messages,
+                            text_chunks.concat(),
+                            had_content,
+                        );
                         retry_or_return!(
                             failure,
                             visible_output,
@@ -1528,11 +1551,13 @@ pub async fn run_query_loop(
                             if runner::retry_loop::sleep_or_cancel(delay, &cancel_token).await {
                                 return QueryOutcome::Cancelled;
                             }
+                            retry_context.begin_retry();
                             turn -= 1;
                             continue;
                         }
                     }
                     retry.on_success();
+                    retry_context.finish_request();
 
                     // Build the content blocks from accumulated stream data.
                     let mut content_blocks: Vec<ContentBlock> = Vec::new();
@@ -1918,6 +1943,7 @@ pub async fn run_query_loop(
                         }
                         effective_model = fb.clone();
                         used_fallback = true;
+                        retry_context.begin_retry();
                         turn -= 1; // don't count this attempt against max_turns
                         continue;
                     }
@@ -1944,10 +1970,9 @@ pub async fn run_query_loop(
         //
         // Fork departure (Waku): the stall timer is a backstop (see the
         // provider branch). A stream that breaks off, carries an `error`
-        // event, or ends without `message_stop` is a failed request: the
-        // partial answer is never added to the conversation, and the request
-        // is sent again or the turn ends with the failure. An `error` event
-        // after partial content used to be kept as a finished turn.
+        // event, or ends without `message_stop` is a failed request. Visible
+        // text is preserved as an interrupted fragment; incomplete tool calls
+        // are never assembled or executed.
         let mut accumulator = StreamAccumulator::new();
         let stall_deadline = tokio::time::sleep(STREAM_STALL_BACKSTOP);
         tokio::pin!(stall_deadline);
@@ -1991,6 +2016,13 @@ pub async fn run_query_loop(
         };
 
         if let Some(failure) = stream_failure {
+            // Preserve visible text, including a text block still open when
+            // the stream failed. Partial tool calls never become executable.
+            runner::retry_context::preserve_interrupted_response(
+                messages,
+                accumulator.visible_text(),
+                accumulator.has_content(),
+            );
             retry_or_return!(
                 failure.with_request_id(stream_request_id.clone()),
                 visible_output,
@@ -2032,11 +2064,13 @@ pub async fn run_query_loop(
                 if runner::retry_loop::sleep_or_cancel(delay, &cancel_token).await {
                     return QueryOutcome::Cancelled;
                 }
+                retry_context.begin_retry();
                 turn -= 1;
                 continue;
             }
         }
         retry.on_success();
+        retry_context.finish_request();
 
         let (mut assistant_msg, usage, stop_reason) = accumulator.finish();
 
@@ -4350,6 +4384,8 @@ mod tests {
         id: claurst_core::provider_id::ProviderId,
         script: StdMutex<std::collections::VecDeque<Step>>,
         requests: Arc<std::sync::atomic::AtomicUsize>,
+        request_bodies: Arc<StdMutex<Vec<serde_json::Value>>>,
+        on_request: Option<Arc<dyn Fn(usize) + Send + Sync>>,
     }
 
     #[async_trait::async_trait]
@@ -4368,7 +4404,7 @@ mod tests {
         }
         async fn create_message_stream(
             &self,
-            _request: claurst_api::ProviderRequest,
+            request: claurst_api::ProviderRequest,
         ) -> Result<
             std::pin::Pin<
                 Box<
@@ -4379,8 +4415,17 @@ mod tests {
             >,
             claurst_api::ProviderError,
         > {
-            self.requests
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let attempt = self
+                .requests
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1;
+            self.request_bodies
+                .lock()
+                .unwrap()
+                .push(serde_json::to_value(&request).expect("serialize scripted request"));
+            if let Some(on_request) = &self.on_request {
+                on_request(attempt);
+            }
             let step = self
                 .script
                 .lock()
@@ -4462,6 +4507,8 @@ mod tests {
         notices: Vec<RetryNotice>,
         /// Every `QueryEvent::RequestFailed`, in order.
         failures: Vec<claurst_api::retry_policy::ModelFailure>,
+        /// The normalized request sent on each attempt.
+        request_bodies: Vec<serde_json::Value>,
         messages: Vec<Message>,
     }
 
@@ -4472,11 +4519,33 @@ mod tests {
         cancel_after: Option<std::time::Duration>,
         auto_compact: Option<bool>,
     ) -> ScriptRun {
+        drive_script_configured(script, cancel_after, auto_compact, None).await
+    }
+
+    async fn drive_script_configured(
+        script: Vec<Step>,
+        cancel_after: Option<std::time::Duration>,
+        auto_compact: Option<bool>,
+        command_queue: Option<CommandQueue>,
+    ) -> ScriptRun {
         let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let request_bodies = Arc::new(StdMutex::new(Vec::new()));
+        let on_request = command_queue.clone().map(|queue| {
+            Arc::new(move |attempt: usize| {
+                if attempt == 1 {
+                    queue.push(
+                        QueuedCommand::InjectUserMessage("late steering".into()),
+                        CommandPriority::Normal,
+                    );
+                }
+            }) as Arc<dyn Fn(usize) + Send + Sync>
+        });
         let provider = Arc::new(ScriptedProvider {
             id: claurst_core::provider_id::ProviderId::new("scripted"),
             script: StdMutex::new(script.into()),
             requests: requests.clone(),
+            request_bodies: request_bodies.clone(),
+            on_request,
         });
         let mut registry = claurst_api::ProviderRegistry::new();
         registry.register(provider);
@@ -4495,6 +4564,12 @@ mod tests {
         config.model = "mock-model".to_string();
         config.max_turns = 5;
         config.provider_registry = Some(Arc::new(registry));
+        let initial_prompt = if command_queue.is_some() {
+            "ultracode start"
+        } else {
+            "start"
+        };
+        config.command_queue = command_queue;
 
         let cancel = tokio_util::sync::CancellationToken::new();
         if let Some(after) = cancel_after {
@@ -4505,7 +4580,7 @@ mod tests {
             });
         }
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut messages = vec![Message::user("start")];
+        let mut messages = vec![Message::user(initial_prompt)];
         let tools = noop_tools();
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(20),
@@ -4532,11 +4607,13 @@ mod tests {
                 _ => {}
             }
         }
+        let request_bodies = request_bodies.lock().unwrap().clone();
         ScriptRun {
             outcome,
             requests: requests.load(std::sync::atomic::Ordering::SeqCst),
             notices,
             failures,
+            request_bodies,
             messages,
         }
     }
@@ -4574,7 +4651,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_stream_broken_after_visible_text_is_taken_back_and_retried() {
+    async fn a_stream_broken_after_visible_text_is_preserved_and_retried() {
         use claurst_api::provider_types::StopReason;
         use claurst_api::retry_policy::RetryReason;
         let broken = vec![
@@ -4604,13 +4681,77 @@ mod tests {
         assert_eq!(requests, 2);
         assert_eq!(notices.len(), 1);
         assert!(
-            notices[0].discarded_output,
-            "the client must take the half answer back"
+            !notices[0].discarded_output,
+            "the client keeps the interrupted fragment"
         );
-        // The broken half never reached the conversation.
+        // Both the interrupted fragment and the completed answer remain in
+        // order, with the continuation note between them.
         assert_eq!(
             assistant_texts(&messages),
-            vec!["The whole answer.".to_string()]
+            vec!["Half an ans".to_string(), "The whole answer.".to_string()]
+        );
+        assert_eq!(messages.len(), 4);
+        assert!(messages[1]
+            .uuid
+            .as_deref()
+            .is_some_and(|uuid| uuid.starts_with("waku:interrupted:")));
+        assert_eq!(messages[2].role, Role::User);
+        assert!(messages[2].get_all_text().contains("without repeating"));
+    }
+
+    #[tokio::test]
+    async fn a_retry_preserves_the_original_request_prefix_and_defers_new_steering() {
+        use claurst_api::provider_types::StopReason;
+        use claurst_api::retry_policy::RetryReason;
+        let queue = CommandQueue::new();
+        let broken = vec![
+            Ok(claurst_api::StreamEvent::MessageStart {
+                id: "m1".to_string(),
+                model: "mock-model".to_string(),
+                usage: UsageInfo::default(),
+            }),
+            Ok(claurst_api::StreamEvent::TextDelta {
+                index: 0,
+                text: "Half an ans".to_string(),
+            }),
+            Err(quick_failure(RetryReason::StreamInterrupted)),
+        ];
+        let run = drive_script_configured(
+            vec![
+                Step::Stream(broken),
+                Step::Stream(text_answer("The whole answer.", StopReason::EndTurn)),
+            ],
+            None,
+            None,
+            Some(queue.clone()),
+        )
+        .await;
+        assert!(matches!(run.outcome, QueryOutcome::EndTurn { .. }));
+        assert_eq!(run.requests, 2);
+        assert_eq!(run.request_bodies.len(), 2);
+        let first = &run.request_bodies[0];
+        let second = &run.request_bodies[1];
+        assert_eq!(first["system_prompt"], second["system_prompt"]);
+        assert_eq!(first["tools"], second["tools"]);
+        assert_eq!(first["provider_options"], second["provider_options"]);
+        assert_eq!(first["thinking"], second["thinking"]);
+        assert_eq!(first["temperature"], second["temperature"]);
+        let first_messages = first["messages"].as_array().unwrap();
+        let second_messages = second["messages"].as_array().unwrap();
+        assert_eq!(second_messages.len(), first_messages.len() + 2);
+        assert_eq!(
+            &second_messages[..first_messages.len()],
+            first_messages.as_slice(),
+            "the original request remains an unchanged prefix"
+        );
+        let retried = serde_json::to_string(second_messages).unwrap();
+        assert!(retried.contains("Half an ans"));
+        assert!(retried.contains("without repeating"));
+        assert!(!retried.contains("late steering"));
+        assert!(!queue.is_empty(), "new steering waits for the next request");
+        assert_eq!(
+            assistant_texts(&run.messages),
+            vec!["Half an ans".to_string(), "The whole answer.".to_string()]
         );
     }
 
@@ -4643,7 +4784,10 @@ mod tests {
         );
         assert_eq!(requests, 2);
         assert_eq!(notices[0].reason, RetryReason::Truncated);
-        assert_eq!(assistant_texts(&messages), vec!["Complete.".to_string()]);
+        assert_eq!(
+            assistant_texts(&messages),
+            vec!["Cut".to_string(), "Complete.".to_string()]
+        );
     }
 
     #[tokio::test]

@@ -1,7 +1,6 @@
 // Fork addition (Waku): the query loop's side of `claurst_api::retry_policy`
-// — how many attempts the request now going out has left, whether an answer
-// that had started streaming may be thrown away and asked again, and the
-// cancellable wait before the next attempt.
+// — how many attempts the request now going out has left, how repeated visible
+// partial answers are budgeted, and the cancellable wait before the next attempt.
 
 use std::time::Duration;
 
@@ -31,9 +30,9 @@ pub(crate) enum RetryDecision {
 ///
 /// A request's retries are counted until it succeeds, and start again for
 /// the next one — a two-hundred-step task gets the full budget on every
-/// step, not two retries for the whole run. Throwing away an answer that had
-/// started streaming is counted per prompt as well, because each one costs
-/// the user a visible restart.
+/// step, not two retries for the whole run. Continuing after a visible partial
+/// answer is counted per prompt as well, because each one adds another fragment
+/// and another model request to the conversation.
 #[derive(Debug)]
 pub(crate) struct RetryState {
     budget: RetryBudget,
@@ -56,8 +55,9 @@ impl RetryState {
         }
     }
 
-    /// Decide on a failed attempt. `visible_output` says whether the user had
-    /// already seen part of its answer, which the retry will take back.
+    /// Decide on a failed attempt. `visible_output` records whether the failed
+    /// attempt produced visible work, so repeated continuations have a budget
+    /// of their own even though the work is preserved rather than rolled back.
     pub(crate) fn on_failure(
         &mut self,
         failure: &ModelFailure,

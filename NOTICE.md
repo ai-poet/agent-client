@@ -143,6 +143,9 @@ This fork remains licensed under GPL-3.0-only.
 | 2026-10-27 | Floating surfaces use Zeron-derived frosted glass (`src/ui/frost.rs`, MIT notice below): menus and submenus fade their backdrop blur out with the exit, while the command palette and status capsule use the same translucent treatment. The Agent working row now uses a quiet fixed-cell activity wave (`src/app/components.rs`) and static subdued status text instead of shimmering the whole line; stream commits and the Markdown veil are unchanged. |
 | 2026-10-29 | Extended the Zeron-derived visual port (MIT notice below): native window material selection and translucent, contrast-checked shell surfaces (`src/platform.rs`, `src/theme.rs`, `src/lib.rs`), whole-window macOS vibrancy without the former opaque sidebar tint, the frosted 26px composer (`src/app/composer.rs`, `src/ui/frost.rs`), and the new-task wallpaper system (`src/app/wallpaper.rs`, `wallpaper_view.rs`, `wallpaper_settings.rs`). The wallpaper port includes managed images, bounded background decoding, Dither / ASCII / Halftone / Scanlines effects, cover/focal/zoom framing, the composer-shaped alpha mask, crossfades and wallpaper-derived surface tints. No Zeron theme registry, Web/Electron code or vendored GPUI change is included. |
 
+| 2026-11-04 | Renamed the vendored GPUI workspace to `vendor/gpui` and added `vendor/gpui-kit` (`waku-ui`) for reusable components. Moved the existing activation, icon, frost, motion, scrollbar, menu, tooltip and text-field shells behind the `src/ui` compatibility layer. Added command selection/grouping helpers. Ported MessageScroller state and diff selection/highlight helpers from Longbridge GPUI Kit (Apache-2.0; details and license in `vendor/gpui-kit/NOTICE.md` and `LICENSE-LONGBRIDGE`). |
+| 2026-11-04 | Hardened the built-in agent's retry and recovery behavior, using Pi's retry/session contracts as behavioral reference only (no source copied): the system prompt, step reminder and effective effort stay fixed across retries, new steering waits for the next logical request, and visible interrupted text is preserved with an explicit continuation note instead of being discarded; incomplete tool calls never execute, and the app, sub-agent records and trajectory retain the fragment. The opening prompt is checkpointed before the first provider request, fork/rollback propagate transcript write failures, rollback saves its candidate before changing live history, and streaming checkpoints remain best-effort. Background Bash now gets an isolated Unix process group, and the model's cancel tool and desktop stop button share one process-tree terminator (`taskkill /T /F` on Windows). |
+
 ## Upstream attribution
 
 Waku is developed by egoist and contributors. Upstream source, issue tracker,
@@ -151,7 +154,7 @@ and releases: <https://github.com/egoist/waku>.
 The GPUI framework is developed by Zed Industries:
 <https://github.com/zed-industries/zed>.
 
-The GPUI workspace vendored under `vendor/agent-client-gpui` is derived from
+The GPUI workspace vendored under `vendor/gpui` is derived from
 zeronsh/zui (<https://github.com/zeronsh/zui>) at the integration commit
 recorded in `docs/gpui-fork.md`, with Waku's local patches. Its original
 licence files and notice are preserved alongside the vendored sources.
@@ -163,7 +166,14 @@ alongside the vendored sources; the modifications listed above are this fork's.
 
 ## Third-party notices
 
-The floating-surface wrapper (`src/ui/frost.rs`), the shared motion helpers,
+The MessageScroller state and diff selection/highlight helpers in
+`vendor/gpui-kit/src/{message_scroller,diff}.rs` are adapted from Longbridge GPUI
+Kit (<https://github.com/longbridge/gpui-kit>), Apache-2.0. The upstream revision,
+adapted file list and license are preserved in `vendor/gpui-kit/NOTICE.md` and
+`vendor/gpui-kit/LICENSE-LONGBRIDGE`.
+
+The floating-surface wrapper (`vendor/gpui-kit/src/frost.rs`, adapted through
+`src/ui/frost.rs`), the shared motion helpers,
 the working-cell phase pattern (`src/app/components.rs`), the glass surface
 and contrast recipes (`src/theme.rs`, `src/platform.rs`), and the new-task
 wallpaper implementation (`src/app/wallpaper.rs`, `wallpaper_view.rs`,

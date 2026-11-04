@@ -735,9 +735,8 @@ async fn forward_child(
 /// The part of a child's stream its record shows: what it wrote, the tools
 /// it called, and (fork) its requests being retried. Its usage is already in
 /// the session's totals (the cost tracker is shared) and must not move the
-/// parent's context meter — a settled request reaches the record only as
-/// `Settled`, so a later retry knows what to take back; its errors end up in
-/// `Finished`.
+/// parent's context meter — a settled request reaches the record as `Settled`,
+/// and an interrupted fragment stays visible while the child continues.
 pub(crate) fn child_event(event: AgentEvent) -> Option<SubagentEvent> {
     match event {
         AgentEvent::Text(text) => Some(SubagentEvent::Text(text)),

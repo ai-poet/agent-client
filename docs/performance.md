@@ -69,7 +69,7 @@ Two hard-won rules:
   while text streamed at 10% was this one flag.
 
 **Pulse ticks, ≤ ~30 Hz.** All repeating animation rides the shared
-self-parking clock in [src/ui/motion.rs](../src/ui/motion.rs) (ported from
+self-parking clock in [vendor/gpui-kit/src/motion.rs](../vendor/gpui-kit/src/motion.rs) (ported from
 Zeron): loaders read a phase from a shared epoch, leases expire 300 ms after
 the loader last painted, and the clock parks when no leases remain. Never use
 `with_animation(...).repeat()` — it re-arms `request_animation_frame` every
@@ -88,7 +88,7 @@ veil at full rate, the reasoning veil strided, both leasing
 **Overlay scrollbars are the classic violator of both cadences.** A streaming
 surface moves its content every commit, so the bar sits in its reveal hold for
 the whole turn — and the hold is constant-opacity, needing zero repaints.
-[src/ui/scrollbar.rs](../src/ui/scrollbar.rs) therefore schedules a single
+[vendor/gpui-kit/src/scrollbar.rs](../vendor/gpui-kit/src/scrollbar.rs) therefore schedules a single
 one-shot wake for hold expiry and rides the pulse clock only through the
 350 ms fade. Driving frames through the hold pinned the pane at pulse rate the
 moment any scrollbar became visible.

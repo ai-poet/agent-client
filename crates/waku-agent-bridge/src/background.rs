@@ -8,11 +8,9 @@
 //!
 //! Stopping is the one place the registry is not enough. `TaskRegistry::cancel`
 //! signals a sub-agent's token, which does stop it, but a background shell has
-//! no token — only a pid, held by a detached task that will not drop the child
-//! until it exits on its own. So stopping a shell means signalling the pid
-//! ourselves, and reporting honestly when that could not be done.
-
-use std::process::Command;
+//! no token — only a pid and its isolated process group, held by a detached task
+//! that will not drop the child until it exits on its own. The engine's shared
+//! process-tree stop handles that workload and reports failures honestly.
 
 use claurst_core::tasks::{BackgroundTask, TaskStatus, global_registry};
 
@@ -133,40 +131,10 @@ pub fn stop(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(unix)]
 fn signal(pid: u32) -> Result<(), String> {
-    // TERM first; the shell's own children get it through the process group
-    // when `bash -c` ran them in one. Escalating to KILL is left to the user
-    // pressing stop again after the panel shows it still running.
-    let status = Command::new("kill")
-        .args(["-TERM", &pid.to_string()])
-        .status()
-        .map_err(|error| format!("could not run kill: {error}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("kill exited with {status}"))
-    }
-}
-
-#[cfg(windows)]
-fn signal(pid: u32) -> Result<(), String> {
-    // `cmd /C` started the command, so the work is the tree under that pid,
-    // not the pid itself — `/T` is what actually stops it.
-    let status = Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .status()
-        .map_err(|error| format!("could not run taskkill: {error}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("taskkill exited with {status}"))
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-fn signal(_pid: u32) -> Result<(), String> {
-    Err("stopping a background process is not supported on this platform".to_owned())
+    // The engine owns the process-group / process-tree details so this stop
+    // and the model's `monitor cancel` cannot drift apart.
+    claurst_tools::terminate_process_tree(pid)
 }
 
 #[cfg(test)]

@@ -9289,6 +9289,7 @@ dependencies = [
  "uuid",
  "waku-client",
  "waku-protocol",
+ "waku-ui",
  "webview2-com",
  "windows 0.61.3",
  "windows-core 0.61.2",
@@ -9367,6 +9368,7 @@ dependencies = [
  "smol",
  "sub2api",
  "subtle",
+ "tempfile",
  "toml 0.8.23",
  "trash",
  "tungstenite 0.30.0",
@@ -9408,6 +9410,13 @@ dependencies = [
  "similar 3.1.2",
  "ts-rs",
  "uuid",
+]
+
+[[package]]
+name = "waku-ui"
+version = "0.1.0"
+dependencies = [
+ "gpui",
 ]
 
 [[package]]

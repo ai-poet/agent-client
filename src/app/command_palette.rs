@@ -227,6 +227,15 @@ struct ScoredPaletteItem {
     item: CommandPaletteItem,
 }
 
+fn command_palette_scroll_index(items: &[CommandPaletteItem], selected: usize) -> usize {
+    waku_ui::command::grouped_scroll_index_by(
+        items,
+        selected,
+        |item| item.section,
+        |section| *section != PaletteSection::Providers,
+    )
+}
+
 fn next_selection_index(selected: usize, len: usize, delta: isize) -> Option<usize> {
     if len == 0 {
         return None;
@@ -1153,15 +1162,16 @@ impl Waku {
         }
         let provider_selector = self.command_palette_resume_provider_selector();
         self.command_palette.results.insert(0, provider_selector);
-        self.command_palette.selected = selected_action
-            .flatten()
-            .and_then(|action| {
-                self.command_palette
-                    .results
-                    .iter()
-                    .position(|item| item.action == action)
-            })
-            .unwrap_or_else(|| usize::from(self.command_palette.results.len() > 1));
+        let default = usize::from(self.command_palette.results.len() > 1);
+        self.command_palette.selected = match selected_action.flatten() {
+            Some(action) => waku_ui::command::restore_selected_index_by(
+                &self.command_palette.results,
+                Some(&action),
+                default,
+                |item| &item.action,
+            ),
+            None => default,
+        };
         let scroll_index = self.command_palette_scroll_index(self.command_palette.selected);
         self.command_palette.scroll.scroll_to_item(scroll_index);
     }
@@ -1202,21 +1212,24 @@ impl Waku {
             candidates = scored.into_iter().map(|scored| scored.item).collect();
         }
         self.command_palette.results = candidates;
-        self.command_palette.selected = selected_action
-            .flatten()
-            .and_then(|action| {
-                self.command_palette
-                    .results
-                    .iter()
-                    .position(|item| item.action == action)
-            })
-            .or_else(|| {
-                self.command_palette.results.iter().position(|item| {
-                    item.action
-                        == PaletteAction::SelectResumeProvider(self.command_palette.resume_provider)
-                })
+        let default = self
+            .command_palette
+            .results
+            .iter()
+            .position(|item| {
+                item.action
+                    == PaletteAction::SelectResumeProvider(self.command_palette.resume_provider)
             })
             .unwrap_or(0);
+        self.command_palette.selected = match selected_action.flatten() {
+            Some(action) => waku_ui::command::restore_selected_index_by(
+                &self.command_palette.results,
+                Some(&action),
+                default,
+                |item| &item.action,
+            ),
+            None => default,
+        };
         self.command_palette
             .scroll
             .scroll_to_item(self.command_palette_scroll_index(self.command_palette.selected));
@@ -1337,31 +1350,21 @@ impl Waku {
             return;
         }
         self.command_palette.results = next_results;
-        self.command_palette.selected = selected_action
-            .flatten()
-            .and_then(|action| {
-                self.command_palette
-                    .results
-                    .iter()
-                    .position(|item| item.action == action)
-            })
-            .unwrap_or(0);
+        self.command_palette.selected = match selected_action.flatten() {
+            Some(action) => waku_ui::command::restore_selected_index_by(
+                &self.command_palette.results,
+                Some(&action),
+                0,
+                |item| &item.action,
+            ),
+            None => 0,
+        };
         let scroll_index = self.command_palette_scroll_index(self.command_palette.selected);
         self.command_palette.scroll.scroll_to_item(scroll_index);
     }
 
     fn command_palette_scroll_index(&self, selected: usize) -> usize {
-        let mut headers = 0;
-        let mut previous = None;
-        for item in self.command_palette.results.iter().take(selected + 1) {
-            if previous != Some(item.section) {
-                if item.section != PaletteSection::Providers {
-                    headers += 1;
-                }
-                previous = Some(item.section);
-            }
-        }
-        selected + headers
+        command_palette_scroll_index(&self.command_palette.results, selected)
     }
 
     fn move_command_palette_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
@@ -2218,27 +2221,34 @@ mod tests {
 
     #[test]
     fn scroll_indexes_include_section_headers() {
-        let sections = [
-            PaletteSection::Tasks,
-            PaletteSection::Tasks,
-            PaletteSection::Commands,
-            PaletteSection::Settings,
-        ];
-        let scroll_index = |selected: usize| {
-            let mut headers = 0;
-            let mut previous = None;
-            for section in sections.iter().take(selected + 1) {
-                if previous != Some(*section) {
-                    headers += 1;
-                    previous = Some(*section);
-                }
-            }
-            selected + headers
+        let item = |section, order| {
+            CommandPaletteItem::command(
+                section,
+                format!("Item {order}"),
+                "icons/search.svg",
+                None,
+                PaletteAction::NewTask,
+                "",
+                order,
+            )
         };
-        assert_eq!(scroll_index(0), 1);
-        assert_eq!(scroll_index(1), 2);
-        assert_eq!(scroll_index(2), 4);
-        assert_eq!(scroll_index(3), 6);
+        let items = vec![
+            item(PaletteSection::Tasks, 0),
+            item(PaletteSection::Tasks, 1),
+            item(PaletteSection::Commands, 2),
+            item(PaletteSection::Settings, 3),
+        ];
+        assert_eq!(command_palette_scroll_index(&items, 0), 1);
+        assert_eq!(command_palette_scroll_index(&items, 1), 2);
+        assert_eq!(command_palette_scroll_index(&items, 2), 4);
+        assert_eq!(command_palette_scroll_index(&items, 3), 6);
+
+        let without_provider_header = vec![
+            item(PaletteSection::Tasks, 0),
+            item(PaletteSection::Providers, 1),
+            item(PaletteSection::Settings, 2),
+        ];
+        assert_eq!(command_palette_scroll_index(&without_provider_header, 2), 4);
     }
 
     #[test]

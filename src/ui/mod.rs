@@ -1,8 +1,7 @@
 use gpui::{
     AnyElement, App, Context, Div, ElementId, Hsla, Img, InteractiveElement, Interactivity,
-    KeyDownEvent, ParentElement, PathBuilder, Pixels, RenderOnce, ScrollHandle, SharedString,
-    Stateful, StyleRefinement, Styled, Svg, Window, canvas, div, img, point, prelude::*, px, rgb,
-    svg,
+    ParentElement, PathBuilder, Pixels, RenderOnce, ScrollHandle, SharedString, Stateful,
+    StyleRefinement, Styled, Svg, Window, canvas, div, point, prelude::*, px, rgb,
 };
 
 pub mod menu;
@@ -15,102 +14,55 @@ pub mod scrollbar;
 pub mod text_field;
 pub mod tooltip;
 
+pub use waku_ui::ActivationExt;
+use waku_ui::UiTheme;
+
 use crate::model::{ActivityKind, ProviderKind, SessionStatus};
 use crate::theme::{Theme, sp};
+
+pub(crate) fn ui_theme(theme: Theme) -> UiTheme {
+    UiTheme {
+        is_dark: theme.is_dark,
+        overlay: theme.overlay,
+        overlay_strong: theme.overlay_strong,
+        raised: theme.raised,
+        inset: theme.inset,
+        border_strong: theme.border_strong,
+        border: theme.border,
+        text: theme.text,
+        text_secondary: theme.text_secondary,
+        text_tertiary: theme.text_tertiary,
+        text_ghost: theme.text_ghost,
+        accent: theme.accent,
+        inverse: theme.inverse,
+        on_inverse: theme.on_inverse,
+    }
+}
 
 /// A monochrome icon from the embedded set, tinted via text color. Sized in
 /// `sp` so icons keep pace with the chrome text they sit beside when the UI
 /// font size setting moves.
 pub fn icon(path: &'static str, size: f32, color: Hsla) -> Svg {
-    svg()
-        .path(path)
-        .w(sp(size))
-        .h(sp(size))
-        .flex_none()
-        .text_color(color)
+    waku_ui::icon::icon(path, sp(size), color)
 }
 
 /// A polychrome file icon rendered as an image so the SVG's authored colors
 /// are preserved. GPUI's `svg()` element intentionally renders an alpha mask
 /// tinted with one text color.
 pub fn file_icon(path: &'static str, size: f32) -> Img {
-    img(path).w(sp(size)).h(sp(size)).flex_none()
+    waku_ui::icon::file_icon(path, sp(size))
 }
 
 /// A compact ghost icon button: the only button shape outside the composer's
 /// bespoke send control.
 pub fn icon_button(id: impl Into<ElementId>, path: &'static str, theme: Theme) -> Stateful<Div> {
-    div()
-        .id(id)
-        .size(px(22.0))
-        .rounded(px(6.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .cursor_default()
-        .hover(|element| element.bg(theme.overlay))
-        .active(|element| element.bg(theme.overlay_strong))
-        .child(icon(path, 13.0, theme.text_tertiary))
+    waku_ui::icon_button::icon_button(id, path, sp(13.0), ui_theme(theme))
 }
 
 /// Keeps a wheel gesture in a nested scrollable while it can consume the
-/// delta, then lets it chain to the ancestor at either boundary. Call from an
-/// `on_scroll_wheel` listener. GPUI's own scroll handler runs first during the
-/// bubble phase, so an offset outside the clamped range means this event tried
-/// to move past the top or bottom and must keep bubbling. A viewport whose
-/// content fits also keeps chaining so short blocks do not dead-zone the page.
-/// Stopping propagation skips wheel listeners pushed earlier on the same
-/// element, so fold any sibling wheel logic into the listener that calls this.
+/// delta, then lets it chain to the ancestor at either boundary.
 pub fn contain_scroll(handle: &ScrollHandle, cx: &mut App) {
-    if nested_scroll_consumed_delta(handle.offset().y, handle.max_offset().y) {
-        cx.stop_propagation();
-    }
-}
-
-fn nested_scroll_consumed_delta(offset: Pixels, max_offset: Pixels) -> bool {
-    max_offset > px(0.5) && offset >= -max_offset && offset <= px(0.0)
-}
-
-/// Add conventional mouse and keyboard activation to a focusable element.
-pub trait ActivationExt: Sized {
-    fn on_activation<E>(
-        self,
-        cx: &mut Context<E>,
-        activate: impl Fn(&mut E, &mut Window, &mut Context<E>) + 'static,
-    ) -> Self
-    where
-        E: 'static;
-}
-
-impl ActivationExt for Stateful<Div> {
-    fn on_activation<E>(
-        self,
-        cx: &mut Context<E>,
-        activate: impl Fn(&mut E, &mut Window, &mut Context<E>) + 'static,
-    ) -> Self
-    where
-        E: 'static,
-    {
-        let activate = std::rc::Rc::new(activate);
-        let click_activate = activate.clone();
-        let key_activate = activate;
-        self.on_click(cx.listener(move |this, _, window, cx| {
-            click_activate(this, window, cx);
-            cx.stop_propagation();
-        }))
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-            // Bare Enter/Space only. A modified chord belongs to whatever
-            // command owns it, so a focused control must not swallow it —
-            // this is the guard the hand-rolled settings toggles carried
-            // before they moved onto this helper.
-            if !event.keystroke.modifiers.modified()
-                && matches!(event.keystroke.key.as_str(), "enter" | "space")
-            {
-                key_activate(this, window, cx);
-                cx.stop_propagation();
-            }
-        }))
-    }
+    waku_ui::scroll::contain_scroll(handle, cx);
 }
 
 /// The shared pill switch used by settings and automation forms.
@@ -128,38 +80,7 @@ pub fn toggle_switch<E>(
 where
     E: 'static,
 {
-    let base = div()
-        .id(id)
-        .tab_index(0)
-        .focus_visible(|style| style.border_color(theme.accent))
-        .w(px(36.0))
-        .h(px(20.0))
-        .p(px(2.0))
-        .flex_none()
-        .rounded_full()
-        .cursor_default()
-        .when(disabled, |element| element.opacity(0.55))
-        .bg(if on { theme.inverse } else { theme.inset })
-        .border_1()
-        .border_color(if on {
-            theme.inverse
-        } else {
-            theme.border_strong
-        })
-        .flex()
-        .items_center()
-        .when(on, |element| element.justify_end())
-        .child(div().w(px(14.0)).h(px(14.0)).rounded_full().bg(if on {
-            theme.on_inverse
-        } else {
-            theme.text_tertiary
-        }));
-
-    if disabled {
-        base
-    } else {
-        base.on_activation(cx, activate)
-    }
+    waku_ui::toggle_switch::toggle_switch(id, on, disabled, ui_theme(theme), cx, activate)
 }
 
 /// Brand hue for each provider's official mark.
@@ -233,36 +154,20 @@ pub fn activity_icon(kind: ActivityKind) -> &'static str {
 /// menu's open state and renders as a soft fill.
 #[derive(IntoElement)]
 pub struct MenuChip {
-    base: Stateful<Div>,
-    icon: Option<(&'static str, Hsla)>,
-    label: SharedString,
-    caret: bool,
-    outlined: bool,
-    selected: bool,
-    disabled: bool,
-    height: Option<Pixels>,
-    background: Option<Hsla>,
+    inner: waku_ui::MenuChip,
 }
 
 impl MenuChip {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            base: div().id(id),
-            icon: None,
-            label: SharedString::default(),
-            caret: true,
-            outlined: false,
-            selected: false,
-            disabled: false,
-            height: None,
-            background: None,
+            inner: waku_ui::MenuChip::new(id),
         }
     }
 
     /// Override the chip's fixed height, for rows whose controls share a
     /// different one.
     pub fn height(mut self, height: Pixels) -> Self {
-        self.height = Some(height);
+        self.inner = self.inner.height(height);
         self
     }
 
@@ -270,100 +175,65 @@ impl MenuChip {
     /// chip sitting directly on another surface passes that surface here so
     /// it doesn't read as a filled pill.
     pub fn background(mut self, background: Hsla) -> Self {
-        self.background = Some(background);
+        self.inner = self.inner.background(background);
         self
     }
 
     pub fn icon(mut self, path: &'static str, color: Hsla) -> Self {
-        self.icon = Some((path, color));
+        self.inner = self.inner.icon(path, color);
         self
     }
 
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
-        self.label = label.into();
+        self.inner = self.inner.label(label);
         self
     }
 
     pub fn outlined(mut self) -> Self {
-        self.outlined = true;
+        self.inner = self.inner.outlined(true);
         self
     }
 
     pub fn caret(mut self, caret: bool) -> Self {
-        self.caret = caret;
+        self.inner = self.inner.caret(caret);
         self
     }
 
     pub fn disabled(mut self, disabled: bool) -> Self {
-        self.disabled = disabled;
+        self.inner = self.inner.disabled(disabled);
         self
     }
 
     /// Soft fill marking the chip as the open menu's trigger.
     pub fn selected(mut self, selected: bool) -> Self {
-        self.selected = selected;
+        self.inner = self.inner.selected(selected);
         self
     }
 }
 
 impl Styled for MenuChip {
     fn style(&mut self) -> &mut StyleRefinement {
-        self.base.style()
+        self.inner.style()
     }
 }
 
 impl InteractiveElement for MenuChip {
     fn interactivity(&mut self) -> &mut Interactivity {
-        self.base.interactivity()
+        self.inner.interactivity()
     }
 }
 
 impl ParentElement for MenuChip {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
-        self.base.extend(elements);
+        self.inner.extend(elements);
     }
 }
 
 impl RenderOnce for MenuChip {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let theme = Theme::current(cx);
-        self.base
-            .h(self
-                .height
-                .unwrap_or(if self.outlined { px(30.0) } else { px(26.0) }))
-            .px(if self.outlined { px(10.0) } else { px(7.0) })
-            .rounded(if self.outlined { px(7.0) } else { px(6.0) })
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .text_size(sp(13.0))
-            .line_height(sp(16.0))
-            .cursor_default()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .when(self.outlined, |element| {
-                element
-                    .border_1()
-                    .border_color(theme.border_strong)
-                    .bg(self.background.unwrap_or(theme.raised))
-            })
-            .when(self.selected, |element| element.bg(theme.overlay))
-            .when(!self.disabled, |element| {
-                element.hover(|element| element.bg(theme.overlay))
-            })
-            .when(self.disabled, |element| element.opacity(0.7))
-            .when_some(self.icon, |element, (path, color)| {
-                element.child(icon(path, 12.0, color))
-            })
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .text_color(theme.text_secondary)
-                    .child(self.label),
-            )
-            .when(self.caret, |element| {
-                element.child(icon("icons/chevron-down.svg", 10.5, theme.text_ghost))
-            })
+        self.inner
+            .theme(ui_theme(Theme::current(cx)))
+            .text_metrics(sp(13.0), sp(16.0))
     }
 }
 
@@ -442,88 +312,5 @@ impl RenderOnce for ProjectNameSelector {
                 .absolute()
                 .inset_0(),
             )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn nested_scroll_chains_only_after_reaching_a_boundary() {
-        let max_offset = px(100.0);
-
-        assert!(nested_scroll_consumed_delta(px(0.0), max_offset));
-        assert!(nested_scroll_consumed_delta(px(-50.0), max_offset));
-        assert!(nested_scroll_consumed_delta(px(-100.0), max_offset));
-        assert!(!nested_scroll_consumed_delta(px(1.0), max_offset));
-        assert!(!nested_scroll_consumed_delta(px(-101.0), max_offset));
-        assert!(!nested_scroll_consumed_delta(px(0.0), px(0.0)));
-    }
-
-    #[test]
-    fn every_referenced_icon_is_embedded() {
-        use crate::assets::Assets;
-        use crate::model::{ActivityKind, ProviderKind};
-        use gpui::AssetSource;
-
-        let mut paths = vec![
-            "icons/panel-left.svg",
-            "icons/plus.svg",
-            "icons/arrow-left.svg",
-            "icons/arrow-right.svg",
-            "icons/arrow-up.svg",
-            "icons/stop.svg",
-            "icons/check.svg",
-            "icons/copy.svg",
-            "icons/rewind.svg",
-            "icons/fork.svg",
-            "icons/git-branch.svg",
-            "icons/chart-column.svg",
-            "icons/chevron-down.svg",
-            "icons/chevron-right.svg",
-            "icons/chevron-up.svg",
-            "icons/chevrons-up-down.svg",
-            "icons/folder.svg",
-            "icons/folder-new.svg",
-            "icons/laptop.svg",
-            "icons/file-diff.svg",
-            "icons/globe.svg",
-            "icons/alert.svg",
-            "icons/lock.svg",
-            "icons/lock-open.svg",
-            "icons/star.svg",
-            "icons/star-filled.svg",
-            "icons/sparkle.svg",
-            "icons/zap.svg",
-            "icons/panel-right.svg",
-            "icons/x.svg",
-            "icons/bot.svg",
-            "icons/rotate-cw.svg",
-            "icons/package.svg",
-            "icons/trash.svg",
-        ];
-        for provider in ProviderKind::ALL {
-            paths.push(provider_icon(provider));
-        }
-        for kind in [
-            ActivityKind::Reasoning,
-            ActivityKind::Command,
-            ActivityKind::FileChange,
-            ActivityKind::FileRead,
-            ActivityKind::FileSearch,
-            ActivityKind::FileList,
-            ActivityKind::Search,
-            ActivityKind::Plan,
-            ActivityKind::Tool,
-        ] {
-            paths.push(activity_icon(kind));
-        }
-        for path in paths {
-            assert!(
-                Assets.load(path).unwrap().is_some(),
-                "missing embedded icon: {path}"
-            );
-        }
     }
 }

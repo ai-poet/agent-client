@@ -306,14 +306,16 @@ impl DriverControl for NativeDriver {
     }
 
     fn rollback(&self, turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
-        let removed = self
-            .session
-            .rollback(turns)
-            .map_err(localize_rewind_error)?;
-        if removed == 0 {
+        // Compute the candidate first. A failed write must not report success
+        // or leave the live conversation truncated while disk still has more.
+        let candidate = self.session.fork(turns).map_err(localize_rewind_error)?;
+        if candidate == self.session.history_snapshot() {
             return Ok(None);
         }
-        self.store.save(&self.session.history_snapshot());
+        self.store.save(&candidate)?;
+        self.session
+            .rollback(turns)
+            .map_err(localize_rewind_error)?;
         Ok(Some(ProviderResumeCursor::Native {
             session_id: self.session_id.to_string(),
         }))
@@ -328,7 +330,7 @@ impl DriverControl for NativeDriver {
         // creates the session and starts a driver against this cursor; the
         // history has to be on disk before that happens.
         let branch_id = Uuid::new_v4();
-        SessionStore::new(branch_id).save(&branched);
+        SessionStore::new(branch_id).save(&branched)?;
         // Fork: the branch's trajectory says where it came from.
         waku_agent_bridge::trajectory::note_branch(
             &SessionStore::directory(),
@@ -593,13 +595,13 @@ impl SessionStore {
 
     /// Write the transcript. Atomic, because a crash between `TurnFinished`
     /// and the next prompt must not leave half a conversation on disk.
-    fn save(&self, bytes: &[u8]) {
-        if let Err(error) = self.write(bytes) {
-            report_warning(&format!(
-                "could not save the built-in agent's transcript to {}: {error:#}",
+    fn save(&self, bytes: &[u8]) -> anyhow::Result<()> {
+        self.write(bytes).with_context(|| {
+            format!(
+                "could not save the built-in agent's transcript to {}",
                 self.path.display()
-            ));
-        }
+            )
+        })
     }
 
     fn write(&self, bytes: &[u8]) -> anyhow::Result<()> {
@@ -1036,7 +1038,14 @@ impl EventTranslator {
             AgentEvent::SteerRejected { message, reason } => {
                 self.send(DriverEvent::SteerRejected { message, reason })
             }
-            AgentEvent::HistoryCommitted(bytes) => self.store.save(&bytes),
+            AgentEvent::HistoryCommitted(bytes) => {
+                // Streaming checkpoints stay best-effort: a full disk must not
+                // turn a valid model response into a failed turn. Explicit
+                // fork/rollback operations, in contrast, return this error.
+                if let Err(error) = self.store.save(&bytes) {
+                    report_warning(&format!("{error:#}"));
+                }
+            }
             // The gateway accepted the request and returned nothing usable.
             // Name the route: the cause is upstream, and which model over
             // which API is the only part of it the user can change.
@@ -1877,6 +1886,19 @@ mod tests {
         assert_eq!(item.duration_ms, Some(3_000));
         assert!(!item.can_stop);
         assert!(item.command.is_none());
+    }
+
+    #[test]
+    fn a_transcript_write_failure_is_an_error_with_its_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let blocked = directory.path().join("not-a-directory");
+        std::fs::write(&blocked, "file").unwrap();
+        let path = blocked.join("session.json");
+        let store = SessionStore { path: path.clone() };
+        let error = store.save(b"[]").expect_err("the parent is a file");
+        let shown = format!("{error:#}");
+        assert!(shown.contains("session.json"), "{shown}");
+        assert!(shown.contains("could not save"), "{shown}");
     }
 
     #[test]

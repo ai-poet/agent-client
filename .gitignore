@@ -14,7 +14,8 @@ deepseek-harness-master/
 dsh-claude-style-master/
 fusion-reference/
 t3-code/
-gpuix/
+/gpui-kit/
+pi_agent_rust/
 
 .DS_Store
 *.log

@@ -149,8 +149,9 @@ pub enum AgentEvent {
         delay_ms: u64,
         /// `claurst_api::retry_policy::RetryReason::as_str`, or `turn_failed`.
         reason: String,
-        /// What had streamed of the failed answer was thrown away; the client
-        /// takes it back.
+        /// Whether the client must take back streamed output. New retries
+        /// preserve it as an interrupted fragment, so this is false; older
+        /// engines may still report true.
         discarded_output: bool,
         /// The failure, in the server's words where it gave any.
         detail: String,

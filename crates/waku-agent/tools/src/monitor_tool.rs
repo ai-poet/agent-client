@@ -149,21 +149,13 @@ impl Tool for MonitorTool {
                     None => ToolResult::error(format!("Task {} not found", id)),
                     Some(t) => {
                         if let TaskStatus::Running = t.status {
-                            // Kill by PID if available.
                             if let Some(pid) = t.pid {
-                                // On Windows use taskkill; on Unix send SIGTERM.
-                                #[cfg(windows)]
-                                {
-                                    let _ = std::process::Command::new("taskkill")
-                                        .args(["/PID", &pid.to_string(), "/F"])
-                                        .output();
-                                }
-                                #[cfg(unix)]
-                                {
-                                    use std::process::Command;
-                                    let _ = Command::new("kill")
-                                        .args(["-TERM", &pid.to_string()])
-                                        .output();
+                                // Fork (Waku): the same process-tree path as the
+                                // desktop's stop button, including descendants.
+                                if let Err(error) = crate::terminate_process_tree(pid) {
+                                    return ToolResult::error(format!(
+                                        "Could not stop task {id}: {error}"
+                                    ));
                                 }
                             }
                             // Signal the task's cancellation token (if any) and

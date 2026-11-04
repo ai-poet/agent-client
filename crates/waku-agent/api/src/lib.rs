@@ -1614,6 +1614,33 @@ impl StreamAccumulator {
         !self.content_blocks.is_empty() || !self.partials.is_empty()
     }
 
+    /// Visible text including a text block that was still open when the stream
+    /// failed. `finish` intentionally drops those partial blocks; a retry needs
+    /// their text, but never their incomplete tool calls or unsigned thinking.
+    pub fn visible_text(&self) -> String {
+        let mut text = self
+            .content_blocks
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<String>();
+        let mut open: Vec<_> = self
+            .partials
+            .iter()
+            .filter_map(|(index, block)| match block {
+                PartialBlock::Text(partial) => Some((index, partial)),
+                _ => None,
+            })
+            .collect();
+        open.sort_by_key(|(index, _)| *index);
+        for (_, partial) in open {
+            text.push_str(partial);
+        }
+        text
+    }
+
     /// Feed a stream event. Call this for every event received from the stream.
     pub fn on_event(&mut self, event: &streaming::AnthropicStreamEvent) {
         use streaming::AnthropicStreamEvent;
@@ -1779,6 +1806,45 @@ impl StreamAccumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fork (Waku): visible text recovery keeps the last open text block but
+    /// never an incomplete tool call.
+    #[test]
+    fn interrupted_visible_text_includes_open_text_only() {
+        let mut accumulator = StreamAccumulator::new();
+        accumulator.on_event(&AnthropicStreamEvent::ContentBlockStart {
+            index: 0,
+            content_block: ContentBlock::Text {
+                text: "finished ".into(),
+            },
+        });
+        accumulator.on_event(&AnthropicStreamEvent::ContentBlockStop { index: 0 });
+        accumulator.on_event(&AnthropicStreamEvent::ContentBlockStart {
+            index: 1,
+            content_block: ContentBlock::Text {
+                text: String::new(),
+            },
+        });
+        accumulator.on_event(&AnthropicStreamEvent::ContentBlockDelta {
+            index: 1,
+            delta: streaming::ContentDelta::TextDelta {
+                text: "still streaming".into(),
+            },
+        });
+        assert_eq!(accumulator.visible_text(), "finished still streaming");
+
+        accumulator.on_event(&AnthropicStreamEvent::ContentBlockStart {
+            index: 2,
+            content_block: ContentBlock::ToolUse {
+                id: "call-1".into(),
+                name: "Edit".into(),
+                input: Value::Null,
+                thought_signature: None,
+            },
+        });
+        assert!(accumulator.has_content());
+        assert_eq!(accumulator.visible_text(), "finished still streaming");
+    }
 
     /// Fork (Waku): reasoning a Chat Completions model streamed is kept as an
     /// unsigned thinking block; Claude's own blocks carry a signature. Only

@@ -37,6 +37,9 @@ pub mod lsp_tool;
 pub mod mcp_resources;
 pub mod notebook_edit;
 pub mod pty_bash;
+// Fork addition (Waku): process-group ownership for background commands.
+mod process;
+pub use process::terminate_process_tree;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod todo_write;

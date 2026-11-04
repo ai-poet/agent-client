@@ -1,16 +1,11 @@
 //! A built-in agent request being retried: what the working row says while
-//! it waits, and taking back an answer that had started streaming when its
-//! connection broke.
+//! it waits, and compatibility with older daemons that discarded partial output.
 //!
-//! Fork addition. The engine sends a failed request again on its own
-//! (`claurst_api::retry_policy`) and reports each attempt as
-//! [`DriverEvent::ModelRetry`]. When part of the failed answer had already
-//! streamed, the engine threw it away — it never reached the conversation —
-//! and the transcript has to drop it too, or the retried answer would appear
-//! after the first half of the one that failed. Everything since the last
-//! point the engine is known to have settled (the turn's start, a finished
-//! request, a tool call, a compaction) is what goes; the person's own
-//! messages and the notices in between stay.
+//! Fork addition. Current engines preserve an interrupted answer as a marked
+//! fragment and continue from it, so their retry notices leave the transcript
+//! untouched. An older daemon could instead throw the failed answer away; its
+//! `discarded_output` notice still rolls back everything since the last settled
+//! boundary — never the person's own messages or intervening notices.
 
 use super::*;
 use crate::model::RetryCause;
@@ -22,7 +17,7 @@ const CONTINUE_PROMPT: &str = "The previous turn stopped because of an error bef
      if you are unsure what state things are in, check before changing anything.";
 
 /// Whether a turn got any work done — a tool call ran — so continuing it
-/// keeps something a retry would throw away.
+/// preserves something that must not be repeated blindly.
 pub(super) fn turn_did_work(session: &AgentSession, turn_id: Uuid) -> bool {
     session
         .transcript_blocks
@@ -244,8 +239,8 @@ impl RetryStatus {
 }
 
 impl Waku {
-    /// A built-in agent request is about to be sent again. Takes back what
-    /// streamed of the failed answer, and keeps the retry for the status.
+    /// A built-in agent request is about to be sent again. Current engines keep
+    /// the interrupted fragment; an older daemon may ask us to take it back.
     pub(super) fn handle_model_retry(
         &mut self,
         session_id: Uuid,

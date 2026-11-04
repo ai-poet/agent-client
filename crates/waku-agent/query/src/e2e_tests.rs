@@ -142,6 +142,7 @@ struct Run {
     outcome: QueryOutcome,
     messages: Vec<Message>,
     checkpoints: usize,
+    checkpoint_messages: Vec<Vec<Message>>,
 }
 
 /// Run the loop over `steps` in `workspace`, with every real tool.
@@ -204,16 +205,17 @@ async fn run(workspace: &Path, session: &str, steps: Vec<Step>) -> Run {
     )
     .await
     .expect("the loop must not hang");
-    let mut checkpoints = 0;
+    let mut checkpoints = Vec::new();
     while let Ok(event) = rx.try_recv() {
-        if matches!(event, QueryEvent::Checkpoint(_)) {
-            checkpoints += 1;
+        if let QueryEvent::Checkpoint(messages) = event {
+            checkpoints.push(messages);
         }
     }
     Run {
         outcome,
         messages,
-        checkpoints,
+        checkpoints: checkpoints.len(),
+        checkpoint_messages: checkpoints,
     }
 }
 
@@ -236,6 +238,23 @@ fn results(messages: &[Message]) -> Vec<(String, bool)> {
             _ => None,
         })
         .collect()
+}
+
+#[tokio::test]
+async fn the_opening_prompt_is_checkpointed_before_any_model_answer() {
+    let workspace = tempfile::tempdir().unwrap();
+    let run = run(
+        workspace.path(),
+        "e2e-opening-checkpoint",
+        vec![answer("Done.")],
+    )
+    .await;
+    assert!(matches!(run.outcome, QueryOutcome::EndTurn { .. }));
+    assert_eq!(run.checkpoints, 1);
+    let opening = &run.checkpoint_messages[0];
+    assert_eq!(opening.len(), 1);
+    assert_eq!(opening[0].role, claurst_core::types::Role::User);
+    assert_eq!(opening[0].get_all_text(), "go");
 }
 
 #[tokio::test]
@@ -267,8 +286,8 @@ async fn a_file_is_written_then_edited_on_disk() {
     let results = results(&run.messages);
     assert_eq!(results.len(), 2);
     assert!(results.iter().all(|(_, error)| !error), "{results:?}");
-    // Before each step's calls and after their results.
-    assert_eq!(run.checkpoints, 4);
+    // The opening prompt, then before each step's calls and after their results.
+    assert_eq!(run.checkpoints, 5);
 }
 
 #[tokio::test]

@@ -1,0 +1,13 @@
+[package]
+name = "waku-ui"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+description = "Waku's reusable GPUI components and interaction primitives"
+publish = false
+
+[dependencies]
+gpui = { path = "../gpui/crates/gpui" }
+
+[dev-dependencies]
+gpui = { path = "../gpui/crates/gpui", features = ["test-support"] }
