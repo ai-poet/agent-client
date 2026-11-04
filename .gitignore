@@ -13,6 +13,8 @@ zeron-main/
 deepseek-harness-master/
 dsh-claude-style-master/
 fusion-reference/
+t3-code/
+gpuix/
 
 .DS_Store
 *.log
