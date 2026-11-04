@@ -423,7 +423,7 @@ mod host {
     };
     use windows::Win32::Foundation::{E_FAIL, HWND, POINT, RECT};
     use windows::Win32::Graphics::DirectComposition::{
-        IDCompositionDevice, IDCompositionRectangleClip, IDCompositionVisual, IDCompositionVisual3,
+        IDCompositionDevice, IDCompositionRectangleClip, IDCompositionVisual,
     };
     use windows::core::{BOOL, HSTRING, Interface, PCWSTR, PWSTR};
 
@@ -634,7 +634,7 @@ mod host {
     pub(super) struct NativeSurface {
         device: IDCompositionDevice,
         layer: IDCompositionVisual,
-        visual: IDCompositionVisual3,
+        visual: IDCompositionVisual,
         clip: IDCompositionRectangleClip,
     }
 
@@ -660,11 +660,12 @@ mod host {
                 )
             };
             let (visual, clip) = (|| unsafe {
-                let visual = device.CreateVisual()?.cast::<IDCompositionVisual3>()?;
+                let visual = device.CreateVisual()?;
                 let clip = device.CreateRectangleClip()?;
                 visual.SetClip(&clip)?;
-                visual.SetVisible(false)?;
-                layer.AddVisual(&visual, false, None::<&IDCompositionVisual>)?;
+                // The page starts detached, hence hidden. Visibility toggles
+                // attachment below instead of requiring IDCompositionVisual3,
+                // which a visual from the base device interface may not expose.
                 device.Commit()?;
                 Ok::<_, windows::core::Error>((visual, clip))
             })()
@@ -689,7 +690,12 @@ mod host {
 
         fn set_visible(&self, visible: bool) -> windows::core::Result<()> {
             unsafe {
-                self.visual.SetVisible(visible)?;
+                if visible {
+                    self.layer
+                        .AddVisual(&self.visual, false, None::<&IDCompositionVisual>)?;
+                } else {
+                    self.layer.RemoveVisual(&self.visual)?;
+                }
                 self.device.Commit()
             }
         }
