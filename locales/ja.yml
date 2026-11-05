@@ -609,6 +609,11 @@ trajectory.inspect_tooltip: "トラジェクトリでこの呼び出しを開く
 trajectory.open: "トラジェクトリを開く"
 trajectory.settings_title: "トラジェクトリ"
 trajectory.settings_detail: "モデルへのリクエストとツール呼び出しを、所要時間・使用量・内容とともにタスクの記録の横に保存します。右パネルの「トラジェクトリ」に表示されます。"
+daemon.diagnostics.export_title: "デーモン再接続診断"
+daemon.diagnostics.export: "再接続ログを書き出す"
+daemon.diagnostics.export_description: "デーモン再接続の調査用に、最近の接続エラーと再接続履歴を書き出します。タイムスタンプ、接続 ID、OS エラー、バージョン、PID を含み、認証トークン、API キー、メッセージ本文は含みません。"
+daemon.diagnostics.exported: "診断ログを %{path} に書き出しました"
+daemon.diagnostics.export_failed: "診断ログを書き出せませんでした：%{error}"
 trajectory.diagnostics.toggle: "診断サポート"
 trajectory.diagnostics.toggle_count: "診断サポート · %{count}"
 trajectory.diagnostics.title: "問題レポートの分析サポート"
@@ -1157,6 +1162,7 @@ errors.save_draft: "下書きを保存できませんでした：%{error}"
 errors.rewind_task: "タスクを巻き戻せませんでした：%{error}"
 errors.project_not_found: プロジェクトが見つかりません
 errors.prepare_task_project_not_found: タスクを準備できませんでした：プロジェクトが見つかりません
+errors.pasted_image_too_large: "ペーストした画像が %{limit} MiB の添付上限を超えています"
 errors.store_pasted_image: "ペーストした画像を添付できませんでした：%{error}"
 errors.create_worktree: "ワークツリーを作成できませんでした：%{error}"
 errors.prepared_runtime_unavailable: 準備したエージェントランタイムは利用できません

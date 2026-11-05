@@ -55,6 +55,8 @@ enum Outgoing {
 }
 
 struct ClientInner {
+    connection_id: String,
+    daemon_version: String,
     outgoing: Sender<Outgoing>,
     pending: Mutex<HashMap<Uuid, Sender<Result<ResponsePayload, RpcError>>>>,
     sessions: Mutex<HashMap<(Uuid, Uuid), Sender<SequencedEvent>>>,
@@ -85,6 +87,34 @@ impl DaemonClient {
         token: String,
         resume_from: Vec<ReplayCursor>,
     ) -> anyhow::Result<Self> {
+        let client_id = Uuid::new_v4();
+        let connection_id = client_id.simple().to_string()[..8].to_owned();
+        crate::diagnostics::connection_event(
+            "dial_started",
+            &connection_id,
+            crate::diagnostics::fields(serde_json::json!({
+                "resume_cursor_count": resume_from.len(),
+            })),
+        );
+        let result = Self::establish_connection(address, token, resume_from, client_id);
+        if let Err(error) = &result {
+            crate::diagnostics::log_error_event(
+                "dial_failed",
+                &connection_id,
+                error.as_ref(),
+                crate::diagnostics::empty_fields(),
+            );
+        }
+        result
+    }
+
+    fn establish_connection(
+        address: &str,
+        token: String,
+        resume_from: Vec<ReplayCursor>,
+        client_id: Uuid,
+    ) -> anyhow::Result<Self> {
+        let connection_id = client_id.simple().to_string()[..8].to_owned();
         let last_sequences = resume_from
             .iter()
             .map(|cursor| {
@@ -110,15 +140,16 @@ impl DaemonClient {
             &ClientMessage::Hello {
                 protocol_version: PROTOCOL_VERSION,
                 token,
-                client_id: Uuid::new_v4(),
+                client_id,
                 resume_from,
             },
         )?;
         let hello = read_server_message(&mut socket)?;
-        match hello {
+        let daemon_version = match hello {
             ServerMessage::Hello {
-                protocol_version, ..
-            } if protocol_version == PROTOCOL_VERSION => {}
+                protocol_version,
+                daemon_version,
+            } if protocol_version == PROTOCOL_VERSION => daemon_version,
             ServerMessage::Hello {
                 protocol_version, ..
             } => bail!(
@@ -126,11 +157,13 @@ impl DaemonClient {
             ),
             ServerMessage::Rejected { message } => bail!("daemon rejected connection: {message}"),
             other => bail!("daemon sent an invalid handshake response: {other:?}"),
-        }
+        };
         set_client_read_timeout(&mut socket, Some(READ_POLL_INTERVAL))?;
 
         let (outgoing, outgoing_rx) = unbounded();
         let inner = Arc::new(ClientInner {
+            connection_id,
+            daemon_version,
             outgoing,
             pending: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
@@ -140,6 +173,13 @@ impl DaemonClient {
             disconnected: AtomicBool::new(false),
         });
         let thread_inner = inner.clone();
+        crate::diagnostics::connection_event(
+            "dial_succeeded",
+            &inner.connection_id,
+            crate::diagnostics::fields(serde_json::json!({
+                "daemon_version": inner.daemon_version.as_str(),
+            })),
+        );
         std::thread::Builder::new()
             .name("waku-daemon-client".into())
             .spawn(move || run_client(socket, outgoing_rx, thread_inner))
@@ -174,6 +214,15 @@ impl DaemonClient {
 
     pub fn is_disconnected(&self) -> bool {
         self.inner.disconnected.load(Ordering::Acquire)
+    }
+
+    /// Short identifier shared with daemon connection diagnostics.
+    pub fn connection_id(&self) -> &str {
+        &self.inner.connection_id
+    }
+
+    pub fn daemon_version(&self) -> &str {
+        &self.inner.daemon_version
     }
 
     pub fn unsubscribe(&self, session_id: Uuid, runtime_id: Uuid) {
@@ -283,6 +332,8 @@ impl DaemonClient {
             .collect();
         Self {
             inner: Arc::new(ClientInner {
+                connection_id: "test".into(),
+                daemon_version: "test".into(),
                 outgoing: unbounded().0,
                 pending: Mutex::new(HashMap::new()),
                 sessions: Mutex::new(HashMap::new()),
@@ -332,18 +383,18 @@ fn run_client(
     outgoing: Receiver<Outgoing>,
     inner: Arc<ClientInner>,
 ) {
-    'connection: loop {
+    let (reason, error): (&str, Option<anyhow::Error>) = 'connection: loop {
         while let Ok(message) = outgoing.try_recv() {
             match message {
                 Outgoing::Message(message) => {
-                    if write_json(&mut socket, &message).is_err() {
-                        break 'connection;
+                    if let Err(error) = write_json(&mut socket, &message) {
+                        break 'connection ("write", Some(error));
                     }
                 }
                 Outgoing::Shutdown => {
                     let _ = write_json(&mut socket, &ClientMessage::Shutdown);
                     let _ = socket.flush();
-                    break 'connection;
+                    break 'connection ("shutdown", None);
                 }
             }
         }
@@ -390,20 +441,35 @@ fn run_client(
                             .lock()
                             .retain(|subscriber| subscriber.send(revision).is_ok());
                     }
-                    ServerMessage::ShuttingDown => break,
+                    ServerMessage::ShuttingDown => {
+                        break 'connection ("shutting_down", None);
+                    }
                     ServerMessage::Hello { .. } | ServerMessage::Rejected { .. } => {}
                 }
             }
-            Ok(Message::Close(_)) => break,
+            Ok(Message::Close(_)) => break 'connection ("close", None),
             Ok(Message::Ping(_)) => {
                 let _ = socket.flush();
             }
             Ok(_) => {}
             Err(tungstenite::Error::Io(error)) if retryable_io(&error) => {}
-            Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => break,
-            Err(_) => break,
+            Err(
+                error @ (tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed),
+            ) => {
+                break 'connection ("read", Some(error.into()));
+            }
+            Err(error) => break 'connection ("read", Some(error.into())),
         }
+    };
+
+    let mut fields = crate::diagnostics::fields(serde_json::json!({
+        "reason": reason,
+        "daemon_version": inner.daemon_version,
+    }));
+    if let Some(error) = &error {
+        fields.extend(crate::diagnostics::error_fields(error.as_ref()));
     }
+    crate::diagnostics::connection_event("connection_drop", &inner.connection_id, fields);
 
     inner.disconnected.store(true, Ordering::Release);
     let pending = std::mem::take(&mut *inner.pending.lock());

@@ -644,6 +644,25 @@ impl Waku {
                         .text_color(theme.text_secondary)
                         .child(tr!("daemon.external_description")),
                 )
+                .child(
+                    div()
+                        .mt(px(12.0))
+                        .text_size(sp(12.5))
+                        .line_height(sp(18.0))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("daemon.diagnostics.export_description")),
+                )
+                .child(div().mt(px(12.0)).flex().justify_end().child(
+                    super::providers_page::card_button(
+                        theme,
+                        SharedString::from("export-daemon-diagnostics-remote"),
+                        tr!("daemon.diagnostics.export"),
+                        false,
+                        false,
+                        cx,
+                        |this, _, cx| this.export_daemon_diagnostics(cx),
+                    ),
+                ))
                 .into_any_element();
         }
 
@@ -1155,6 +1174,44 @@ impl Waku {
                         ),
                 )
             })
+            .child(
+                div()
+                    .px(px(20.0))
+                    .py(px(15.0))
+                    .rounded(px(13.0))
+                    .bg(theme.raised)
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("daemon.diagnostics.export_title")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(4.0))
+                            .mb(px(12.0))
+                            .whitespace_normal()
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("daemon.diagnostics.export_description")),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .child(super::providers_page::card_button(
+                                theme,
+                                SharedString::from("export-daemon-diagnostics"),
+                                tr!("daemon.diagnostics.export"),
+                                false,
+                                false,
+                                cx,
+                                |this, _, cx| this.export_daemon_diagnostics(cx),
+                            )),
+                    ),
+            )
             .into_any_element()
     }
 

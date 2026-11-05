@@ -2185,6 +2185,9 @@ impl Waku {
                         .into_iter()
                         .enumerate()
                         .map(|(index, image)| {
+                            if image.bytes.len() > MAX_ATTACHMENT_BYTES as usize {
+                                return Err(tr!("errors.pasted_image_too_large", limit = 32));
+                            }
                             let preview_image = Arc::new(image);
                             let bytes = preview_image.bytes.clone();
                             let response = daemon

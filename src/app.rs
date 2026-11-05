@@ -1882,6 +1882,7 @@ mod model_retry;
 // Fork: the ZCode-style task sidebar (rows, sections, toolbar, task marks).
 mod agent_trajectory_settings;
 mod daemon_banner;
+mod diagnostics_export;
 mod diff_review;
 mod plan_review;
 mod providers_page;

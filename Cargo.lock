@@ -9328,6 +9328,7 @@ name = "waku-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "crossbeam-channel",
  "dirs 6.0.0",
  "libc",
@@ -9340,6 +9341,7 @@ dependencies = [
  "url",
  "uuid",
  "waku-protocol",
+ "zip 8.6.0",
 ]
 
 [[package]]
@@ -9370,6 +9372,7 @@ dependencies = [
  "subtle",
  "tempfile",
  "toml 0.8.23",
+ "tracing",
  "trash",
  "tungstenite 0.30.0",
  "url",

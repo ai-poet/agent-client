@@ -9,6 +9,11 @@ mod client;
 pub mod command_env;
 pub mod composer_complete;
 pub mod computer_use;
+pub mod diagnostics;
+mod diagnostics_export;
+pub use diagnostics_export::{
+    DaemonDiagnosticsMetadata, export_daemon_diagnostics, validate_destination,
+};
 pub mod driver;
 pub mod persistence;
 // Fork addition: the digest a side question (`/btw`, ⌘;) is asked with.
