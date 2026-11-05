@@ -23,6 +23,7 @@ pub(crate) use native::{
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crossbeam_channel::{Receiver, SendError, Sender, unbounded};
 
@@ -88,6 +89,14 @@ pub struct DriverHandle {
 impl DriverHandle {
     pub fn from_control(control: Arc<dyn DriverControl>) -> Self {
         Self { inner: control }
+    }
+
+    pub fn shutdown(&self) {
+        self.inner.shutdown();
+    }
+
+    pub fn wait_for_shutdown(&self, timeout: Duration) -> bool {
+        self.inner.wait_for_shutdown(timeout)
     }
 
     pub fn prompt(&self, prompt: String) {
@@ -160,6 +169,13 @@ impl DriverHandle {
 }
 
 pub trait DriverControl: Send + Sync {
+    /// Begin provider cleanup without waiting on the daemon's caller thread.
+    fn shutdown(&self) {}
+    /// Wait for asynchronous cleanup after [`Self::shutdown`]. Providers with
+    /// only synchronous drop-based cleanup have nothing to wait for.
+    fn wait_for_shutdown(&self, _timeout: Duration) -> bool {
+        true
+    }
     fn prompt(&self, prompt: String);
     fn supports_steer(&self) -> bool {
         false

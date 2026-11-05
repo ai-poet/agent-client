@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::{
     Backend, Command, EventSink, Request, ResponsePayload, WireDriverEvent, WorkspaceOperation,
@@ -25,6 +26,25 @@ use crate::model::{
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
 use waku_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
+
+const DRIVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Start every driver's cleanup before waiting, and share one deadline so a
+/// large session roster cannot multiply the daemon's exit delay.
+fn shutdown_sessions(sessions: HashMap<Uuid, (Uuid, DriverHandle)>) {
+    let drivers: Vec<DriverHandle> = sessions.into_values().map(|(_, driver)| driver).collect();
+    for driver in &drivers {
+        driver.shutdown();
+    }
+    let deadline = Instant::now() + DRIVER_SHUTDOWN_TIMEOUT;
+    for driver in &drivers {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if !driver.wait_for_shutdown(remaining) {
+            tracing::warn!("daemon: driver cleanup did not finish before shutdown deadline");
+        }
+    }
+    drop(drivers);
+}
 
 pub struct WakuBackend {
     sessions: Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>,
@@ -804,7 +824,7 @@ impl Backend for WakuBackend {
 
     fn shutdown(&self) {
         let sessions = std::mem::take(&mut *self.sessions.lock());
-        drop(sessions);
+        shutdown_sessions(sessions);
         let terminals = std::mem::take(&mut *self.terminals.lock());
         drop(terminals);
     }
@@ -2075,6 +2095,50 @@ struct TurnFinishedWire {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn daemon_shutdown_waits_for_driver_cleanup() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct CleanupDriver {
+            shutdown: AtomicBool,
+            cleaned: AtomicBool,
+        }
+
+        impl crate::driver::DriverControl for CleanupDriver {
+            fn shutdown(&self) {
+                self.shutdown.store(true, Ordering::Release);
+            }
+
+            fn wait_for_shutdown(&self, _timeout: Duration) -> bool {
+                assert!(self.shutdown.load(Ordering::Acquire));
+                std::thread::sleep(Duration::from_millis(25));
+                self.cleaned.store(true, Ordering::Release);
+                true
+            }
+
+            fn prompt(&self, _prompt: String) {}
+            fn cancel(&self) {}
+            fn respond(&self, _request_id: String, _option_id: String) {}
+            fn rollback(&self, _turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
+                Ok(None)
+            }
+        }
+
+        let control = Arc::new(CleanupDriver {
+            shutdown: AtomicBool::new(false),
+            cleaned: AtomicBool::new(false),
+        });
+        let mut sessions = HashMap::new();
+        sessions.insert(
+            Uuid::new_v4(),
+            (Uuid::new_v4(), DriverHandle::from_control(control.clone())),
+        );
+
+        shutdown_sessions(sessions);
+
+        assert!(control.cleaned.load(Ordering::Acquire));
+    }
 
     #[test]
     fn stale_runtime_projection_keeps_newer_transcript_cursor() {

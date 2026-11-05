@@ -772,6 +772,7 @@ pub mod client {
                 (String, String),
                 tokio::sync::mpsc::Sender<ResourceChangedEvent>,
             >,
+            shutdown: &CancellationToken,
         ) {
             // Only process server-initiated notifications (have "method", no non-null "id")
             let has_method = raw.get("method").is_some();
@@ -790,17 +791,26 @@ pub mod client {
                 "notifications/resources/updated" => {
                     let uri = raw["params"]["uri"].as_str().unwrap_or("").to_string();
                     let key = (self.server_name.clone(), uri.clone());
-                    if let Some(tx) = resource_subscriptions.get(&key) {
+                    // Clone the sender and release the DashMap shard guard before
+                    // awaiting. A full subscriber channel must not prevent
+                    // `McpManager::shutdown` from clearing the subscriptions.
+                    let tx = resource_subscriptions.get(&key).map(|tx| tx.clone());
+                    if let Some(tx) = tx {
                         let event = ResourceChangedEvent {
                             server_name: self.server_name.clone(),
                             uri,
                         };
-                        if let Err(e) = tx.send(event).await {
-                            debug!(
-                                server = %self.server_name,
-                                error = %e,
-                                "process_notification: resource subscription receiver dropped"
-                            );
+                        tokio::select! {
+                            _ = shutdown.cancelled() => {}
+                            result = tx.send(event) => {
+                                if let Err(e) = result {
+                                    debug!(
+                                        server = %self.server_name,
+                                        error = %e,
+                                        "process_notification: resource subscription receiver dropped"
+                                    );
+                                }
+                            }
                         }
                     } else {
                         debug!(
@@ -889,8 +899,9 @@ pub struct McpManager {
     /// Original (unexpanded) server configs — needed for OAuth initiation.
     server_configs: HashMap<String, McpServerConfig>,
     /// Active resource subscriptions: (server_name, uri) → change event sender.
+    /// Shared with notification tasks without keeping the manager itself alive.
     pub resource_subscriptions:
-        DashMap<(String, String), tokio::sync::mpsc::Sender<ResourceChangedEvent>>,
+        Arc<DashMap<(String, String), tokio::sync::mpsc::Sender<ResourceChangedEvent>>>,
     /// Wakes notification tasks even when their idle streams produce no events.
     shutdown_token: CancellationToken,
 }
@@ -910,7 +921,7 @@ impl McpManager {
             clients: HashMap::new(),
             failed_servers: Vec::new(),
             server_configs: HashMap::new(),
-            resource_subscriptions: DashMap::new(),
+            resource_subscriptions: Arc::new(DashMap::new()),
             shutdown_token: CancellationToken::new(),
         }
     }
@@ -1351,11 +1362,12 @@ impl McpManager {
     pub fn spawn_notification_poll_loop(self: Arc<Self>) {
         let clients = self.clients.clone();
         let shutdown = self.shutdown_token.clone();
+        let resource_subscriptions = Arc::clone(&self.resource_subscriptions);
 
         // Spawn a task for each client to handle notifications via the stream
         for client in clients.values() {
             let client_clone = Arc::clone(client);
-            let manager_weak = Arc::downgrade(&self);
+            let resource_subscriptions = Arc::clone(&resource_subscriptions);
             let shutdown = shutdown.clone();
 
             tokio::spawn(async move {
@@ -1367,15 +1379,11 @@ impl McpManager {
                         _ = shutdown.cancelled() => break,
                         result = notification_stream.next() => {
                             let Some(result) = result else { break };
-                            let manager = match manager_weak.upgrade() {
-                                Some(m) => m,
-                                None => break,
-                            };
 
                             match result {
                                 Ok(raw) => {
                                     client_clone
-                                        .process_notification(raw, &manager.resource_subscriptions)
+                                        .process_notification(raw, &resource_subscriptions, &shutdown)
                                         .await;
                                 }
                                 Err(e) => {
@@ -1990,7 +1998,7 @@ mod notification_tests {
         subscriptions.insert(("myserver".to_string(), "file:///foo.txt".to_string()), tx);
 
         client
-            .process_notification(notification, &subscriptions)
+            .process_notification(notification, &subscriptions, &CancellationToken::new())
             .await;
 
         let event = rx.try_recv().expect("expected a ResourceChangedEvent");
@@ -2016,7 +2024,7 @@ mod notification_tests {
             tokio::sync::mpsc::Sender<ResourceChangedEvent>,
         > = DashMap::new();
         client
-            .process_notification(notification, &subscriptions)
+            .process_notification(notification, &subscriptions, &CancellationToken::new())
             .await;
     }
 
@@ -2034,7 +2042,7 @@ mod notification_tests {
             tokio::sync::mpsc::Sender<ResourceChangedEvent>,
         > = DashMap::new();
         client
-            .process_notification(notification, &subscriptions)
+            .process_notification(notification, &subscriptions, &CancellationToken::new())
             .await;
     }
 
@@ -2062,8 +2070,12 @@ mod notification_tests {
         subscriptions.insert(("s1".to_string(), "file:///a.txt".to_string()), tx_a);
         subscriptions.insert(("s1".to_string(), "file:///b.txt".to_string()), tx_b);
 
-        client.process_notification(n1, &subscriptions).await;
-        client.process_notification(n2, &subscriptions).await;
+        client
+            .process_notification(n1, &subscriptions, &CancellationToken::new())
+            .await;
+        client
+            .process_notification(n2, &subscriptions, &CancellationToken::new())
+            .await;
 
         let ev_a = rx_a.try_recv().expect("expected event for a.txt");
         assert_eq!(ev_a.uri, "file:///a.txt");
@@ -2090,11 +2102,58 @@ mod notification_tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<ResourceChangedEvent>(4);
         subscriptions.insert(("myserver".to_string(), "file:///foo.txt".to_string()), tx);
 
-        client.process_notification(response, &subscriptions).await;
+        client
+            .process_notification(response, &subscriptions, &CancellationToken::new())
+            .await;
 
         assert!(
             rx.try_recv().is_err(),
             "RPC response must not be dispatched as a notification"
         );
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_cancels_backpressured_resource_notification() {
+        let manager = Arc::new(McpManager::new());
+        let client = Arc::new(client::McpClient::new_for_test("myserver"));
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        tx.send(ResourceChangedEvent {
+            server_name: "myserver".into(),
+            uri: "file:///already-queued.txt".into(),
+        })
+        .await
+        .unwrap();
+        manager
+            .resource_subscriptions
+            .insert(("myserver".into(), "file:///blocked.txt".into()), tx);
+
+        let task_manager = Arc::clone(&manager);
+        let task_client = Arc::clone(&client);
+        let task = tokio::spawn(async move {
+            task_client
+                .process_notification(
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": "notifications/resources/updated",
+                        "params": { "uri": "file:///blocked.txt" }
+                    }),
+                    &task_manager.resource_subscriptions,
+                    &task_manager.shutdown_token,
+                )
+                .await;
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !task.is_finished(),
+            "the full subscription channel should apply backpressure"
+        );
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), manager.shutdown())
+            .await
+            .expect("notification backpressure must not block MCP shutdown");
+        tokio::time::timeout(std::time::Duration::from_secs(1), task)
+            .await
+            .expect("shutdown must cancel the blocked notification send")
+            .unwrap();
     }
 }

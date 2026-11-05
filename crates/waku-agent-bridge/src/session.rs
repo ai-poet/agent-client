@@ -29,6 +29,7 @@ use claurst_query::{
 use claurst_tools::{Tool, ToolContext, UserQuestionEvent};
 use parking_lot::Mutex;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::background;
@@ -62,6 +63,43 @@ pub struct AgentSession {
 }
 
 type ToolSet = Arc<Vec<Box<dyn Tool>>>;
+
+/// MCP connection and shutdown tasks whose completion daemon exit must await.
+/// Tracking the connection task also covers a shutdown that wins the race before
+/// the manager is installed: that task performs the late cleanup itself.
+#[derive(Default)]
+struct McpCleanup {
+    tasks: Mutex<Vec<JoinHandle<()>>>,
+}
+
+impl McpCleanup {
+    fn track(&self, task: JoinHandle<()>) {
+        self.tasks.lock().push(task);
+    }
+
+    /// Wait on the synchronous daemon thread, never on a runtime worker.
+    /// A timeout detaches any remaining tasks so process exit stays bounded.
+    fn wait(&self, timeout: Duration) -> bool {
+        let tasks = std::mem::take(&mut *self.tasks.lock());
+        if tasks.is_empty() {
+            return true;
+        }
+        let Ok(rt) = runtime::shared() else {
+            return false;
+        };
+        rt.block_on(async {
+            tokio::time::timeout(timeout, async {
+                for task in tasks {
+                    if let Err(error) = task.await {
+                        tracing::warn!(%error, "agent: MCP cleanup task failed");
+                    }
+                }
+            })
+            .await
+            .is_ok()
+        })
+    }
+}
 
 /// Engine tools that exist but do nothing in this process. Their runners —
 /// the team swarm, the inbox reader, the cron scheduler, remote triggers —
@@ -128,6 +166,8 @@ struct Inner {
     /// starts before then simply runs without MCP rather than waiting for
     /// servers that may never come up.
     mcp: Mutex<Option<Arc<claurst_mcp::McpManager>>>,
+    /// Background connection and explicit shutdown work awaited at daemon exit.
+    mcp_cleanup: McpCleanup,
     config: Mutex<Config>,
     query: Mutex<QueryConfig>,
     options: Mutex<AgentStartOptions>,
@@ -261,6 +301,7 @@ impl AgentSession {
             bridge,
             settings,
             mcp: Mutex::new(None),
+            mcp_cleanup: McpCleanup::default(),
             config: Mutex::new(config),
             query: Mutex::new(query),
             history: Mutex::new(history::deserialize(&options.history)),
@@ -290,6 +331,12 @@ impl AgentSession {
     /// every other owner.
     pub fn shutdown(&self) {
         self.inner.shutdown();
+    }
+
+    /// Wait for MCP connection races and shutdown work after [`Self::shutdown`].
+    /// Returns `false` when the runtime is unavailable or the deadline expires.
+    pub fn wait_for_shutdown(&self, timeout: Duration) -> bool {
+        self.inner.mcp_cleanup.wait(timeout)
     }
 
     /// Whether a turn is currently running.
@@ -655,7 +702,8 @@ impl Inner {
         if let Some(manager) = self.mcp.lock().clone() {
             match runtime::shared() {
                 Ok(rt) => {
-                    rt.spawn(async move { manager.shutdown().await });
+                    let task = rt.spawn(async move { manager.shutdown().await });
+                    self.mcp_cleanup.track(task);
                 }
                 Err(error) => {
                     tracing::warn!(%error, "agent: could not schedule MCP shutdown");
@@ -828,8 +876,9 @@ fn connect_mcp_in_background(inner: &Arc<Inner>) {
     }
     let Ok(rt) = runtime::shared() else { return };
     let shutdown = inner.shutdown.clone();
-    let inner = inner.clone();
-    rt.spawn(async move {
+    let task_inner = inner.clone();
+    let task = rt.spawn(async move {
+        let inner = task_inner;
         let manager = tokio::select! {
             _ = shutdown.cancelled() => return,
             manager = claurst_mcp::McpManager::connect_all(&servers) => Arc::new(manager),
@@ -862,6 +911,7 @@ fn connect_mcp_in_background(inner: &Arc<Inner>) {
             manager.shutdown().await;
         }
     });
+    inner.mcp_cleanup.track(task);
 }
 
 fn push_steer(inner: &Arc<Inner>, turn: &mut Turn, text: String) {
@@ -1794,6 +1844,37 @@ fn describe(outcome: QueryOutcome, produced_output: bool, route: &Route) -> (boo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_cleanup_waits_for_tracked_tasks() {
+        let cleanup = McpCleanup::default();
+        let rt = runtime::shared().unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        cleanup.track(rt.spawn(async move {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            done_tx.send(()).unwrap();
+        }));
+
+        assert!(cleanup.wait(Duration::from_secs(1)));
+        done_rx
+            .try_recv()
+            .expect("cleanup returned before its tracked task finished");
+        assert!(cleanup.wait(Duration::ZERO));
+    }
+
+    #[test]
+    fn mcp_cleanup_wait_has_a_bounded_deadline() {
+        let cleanup = McpCleanup::default();
+        let rt = runtime::shared().unwrap();
+        let stop = CancellationToken::new();
+        let task_stop = stop.clone();
+        cleanup.track(rt.spawn(async move {
+            task_stop.cancelled().await;
+        }));
+
+        assert!(!cleanup.wait(Duration::from_millis(10)));
+        stop.cancel();
+    }
 
     fn route() -> Route {
         Route {

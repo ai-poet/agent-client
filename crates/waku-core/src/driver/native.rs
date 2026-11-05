@@ -20,6 +20,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context as _, anyhow};
 use parking_lot::Mutex;
@@ -238,6 +239,14 @@ impl Drop for NativeDriver {
 }
 
 impl DriverControl for NativeDriver {
+    fn shutdown(&self) {
+        self.session.shutdown();
+    }
+
+    fn wait_for_shutdown(&self, timeout: Duration) -> bool {
+        self.session.wait_for_shutdown(timeout)
+    }
+
     fn prompt(&self, prompt: String) {
         if let Some(instructions) = compact_command(&prompt) {
             self.session.compact(instructions);
