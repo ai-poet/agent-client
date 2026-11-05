@@ -179,6 +179,12 @@ fn daemon_connection_record(line: &str) -> Option<Map<String, Value>> {
         let Some((key, value)) = token.split_once('=') else {
             continue;
         };
+        // tracing's default formatter quotes string values; whitelist the
+        // parsed value rather than its log representation.
+        let value = value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .unwrap_or(value);
         match key {
             "connection_id" if valid_connection_id(value) => {
                 output.insert(key.into(), value.into());
@@ -427,6 +433,33 @@ mod tests {
         assert!(!output.contains("api-key"));
         assert!(!output.contains("secret-token"));
         assert!(!output.contains("secret-body"));
+    }
+
+    #[test]
+    fn daemon_export_parses_quoted_tracing_fields_before_filtering() {
+        let input = br#"2026-11-05T00:00:00.123456Z WARN daemon_connection: daemon connection terminated connection_id="a1b2c3d4" phase="read" tungstenite_variant="io" io_kind="ConnectionReset" raw_os_error=104 message_size=None max_message_size=16777216 daemon_pid=43 daemon_version="0.1.0" message="secret body"
+"#;
+        let output = filter_daemon_connection_records(input);
+        let record: Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(
+            record,
+            serde_json::json!({
+                "timestamp": "2026-11-05T00:00:00.123456Z",
+                "level": "WARN",
+                "target": "daemon_connection",
+                "event": "connection_drop",
+                "connection_id": "a1b2c3d4",
+                "phase": "read",
+                "tungstenite_variant": "io",
+                "io_kind": "ConnectionReset",
+                "raw_os_error": 104,
+                "message_size": null,
+                "max_message_size": 16777216,
+                "daemon_pid": 43,
+                "daemon_version": "0.1.0"
+            })
+        );
+        assert!(!String::from_utf8(output).unwrap().contains("secret"));
     }
 
     #[test]
