@@ -64,6 +64,20 @@ pub struct AgentSession {
 
 type ToolSet = Arc<Vec<Box<dyn Tool>>>;
 
+/// A session-independent credential for awaiting MCP connection and shutdown
+/// tasks. Holding this does not retain the conversation or its provider driver.
+#[derive(Clone)]
+pub struct AgentSessionCleanup {
+    inner: Arc<McpCleanup>,
+}
+
+impl AgentSessionCleanup {
+    /// Wait on the synchronous daemon thread, never on a runtime worker.
+    pub fn wait(&self, timeout: Duration) -> bool {
+        self.inner.wait(timeout)
+    }
+}
+
 /// MCP connection and shutdown tasks whose completion daemon exit must await.
 /// Tracking the connection task also covers a shutdown that wins the race before
 /// the manager is installed: that task performs the late cleanup itself.
@@ -167,7 +181,7 @@ struct Inner {
     /// servers that may never come up.
     mcp: Mutex<Option<Arc<claurst_mcp::McpManager>>>,
     /// Background connection and explicit shutdown work awaited at daemon exit.
-    mcp_cleanup: McpCleanup,
+    mcp_cleanup: Arc<McpCleanup>,
     config: Mutex<Config>,
     query: Mutex<QueryConfig>,
     options: Mutex<AgentStartOptions>,
@@ -301,7 +315,7 @@ impl AgentSession {
             bridge,
             settings,
             mcp: Mutex::new(None),
-            mcp_cleanup: McpCleanup::default(),
+            mcp_cleanup: Arc::new(McpCleanup::default()),
             config: Mutex::new(config),
             query: Mutex::new(query),
             history: Mutex::new(history::deserialize(&options.history)),
@@ -337,6 +351,13 @@ impl AgentSession {
     /// Returns `false` when the runtime is unavailable or the deadline expires.
     pub fn wait_for_shutdown(&self, timeout: Duration) -> bool {
         self.inner.mcp_cleanup.wait(timeout)
+    }
+
+    /// Retain only the awaitable MCP cleanup state, not the session itself.
+    pub fn cleanup_handle(&self) -> AgentSessionCleanup {
+        AgentSessionCleanup {
+            inner: self.inner.mcp_cleanup.clone(),
+        }
     }
 
     /// Whether a turn is currently running.

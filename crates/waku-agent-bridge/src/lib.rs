@@ -87,7 +87,7 @@ pub use goal::{GoalOp, GoalSnapshot, GoalState};
 pub use claurst_tools::{KEEP_PLANNING_DENIAL, MISSING_PLAN_ERROR, PLAN_MODE_DENIAL_SUFFIX};
 pub use oneshot::one_shot;
 pub use permission::{EXIT_PLAN_MODE_DETAIL, rule_is_per_command};
-pub use session::{AgentSession, STOPPED_SUMMARY};
+pub use session::{AgentSession, AgentSessionCleanup, STOPPED_SUMMARY};
 
 /// Fork (AgentTeams): `/agent-teams` and its profile aliases for the
 /// composer, each with the profile it starts. Empty while switched off.

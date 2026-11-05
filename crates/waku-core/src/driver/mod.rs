@@ -81,6 +81,25 @@ pub(crate) fn test_event_channel() -> (DriverEventSender, Receiver<DriverEvent>)
     event_channel(wake)
 }
 
+/// An awaitable cleanup credential that does not keep the provider driver alive.
+/// Only drivers with asynchronous cleanup need to expose one.
+#[derive(Clone)]
+pub struct DriverCleanup {
+    wait: Arc<dyn Fn(Duration) -> bool + Send + Sync>,
+}
+
+impl DriverCleanup {
+    pub fn new(wait: impl Fn(Duration) -> bool + Send + Sync + 'static) -> Self {
+        Self {
+            wait: Arc::new(wait),
+        }
+    }
+
+    pub fn wait(&self, timeout: Duration) -> bool {
+        (self.wait)(timeout)
+    }
+}
+
 #[derive(Clone)]
 pub struct DriverHandle {
     inner: Arc<dyn DriverControl>,
@@ -95,8 +114,8 @@ impl DriverHandle {
         self.inner.shutdown();
     }
 
-    pub fn wait_for_shutdown(&self, timeout: Duration) -> bool {
-        self.inner.wait_for_shutdown(timeout)
+    pub fn cleanup_handle(&self) -> Option<DriverCleanup> {
+        self.inner.cleanup_handle()
     }
 
     pub fn prompt(&self, prompt: String) {
@@ -171,10 +190,11 @@ impl DriverHandle {
 pub trait DriverControl: Send + Sync {
     /// Begin provider cleanup without waiting on the daemon's caller thread.
     fn shutdown(&self) {}
-    /// Wait for asynchronous cleanup after [`Self::shutdown`]. Providers with
-    /// only synchronous drop-based cleanup have nothing to wait for.
-    fn wait_for_shutdown(&self, _timeout: Duration) -> bool {
-        true
+    /// Return an independent credential for asynchronous cleanup. The daemon
+    /// drops the driver itself immediately, preserving drop-based subprocess
+    /// shutdown for providers without an explicit shutdown implementation.
+    fn cleanup_handle(&self) -> Option<DriverCleanup> {
+        None
     }
     fn prompt(&self, prompt: String);
     fn supports_steer(&self) -> bool {

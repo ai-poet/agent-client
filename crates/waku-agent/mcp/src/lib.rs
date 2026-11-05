@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
@@ -608,11 +609,19 @@ pub mod client {
             config: &McpServerConfig,
             auth_token: Option<String>,
         ) -> anyhow::Result<Self> {
+            Self::connect_with_cancellation(config, auth_token, None).await
+        }
+
+        pub async fn connect_with_cancellation(
+            config: &McpServerConfig,
+            auth_token: Option<String>,
+            shutdown: Option<CancellationToken>,
+        ) -> anyhow::Result<Self> {
             match config.server_type.as_str() {
-                "stdio" => Self::connect_stdio(config).await,
+                "stdio" => Self::connect_stdio_with_cancellation(config, shutdown).await,
                 "sse" => {
-                    let backend = crate::rmcp_backend::RmcpClientBackend::connect_legacy_sse(
-                        config, auth_token,
+                    let backend = crate::rmcp_backend::RmcpClientBackend::connect_legacy_sse_with_cancellation(
+                        config, auth_token, shutdown,
                     )
                     .await?;
                     Ok(Self::from_backend(Arc::new(backend)))
@@ -632,10 +641,11 @@ pub mod client {
                             )
                         })?;
                         let protocol_version_label = protocol_version.as_str().to_string();
-                        match crate::rmcp_backend::RmcpClientBackend::connect_http(
+                        match crate::rmcp_backend::RmcpClientBackend::connect_http_with_cancellation(
                             config,
                             auth_token.clone(),
                             protocol_version,
+                            shutdown.clone(),
                         )
                         .await
                         {
@@ -685,7 +695,17 @@ pub mod client {
         /// Connect to an MCP server using stdio transport. The `config` should
         /// already have env vars expanded via `expand_server_config`.
         pub async fn connect_stdio(config: &McpServerConfig) -> anyhow::Result<Self> {
-            let backend = crate::rmcp_backend::RmcpClientBackend::connect_stdio(config).await?;
+            Self::connect_stdio_with_cancellation(config, None).await
+        }
+
+        pub async fn connect_stdio_with_cancellation(
+            config: &McpServerConfig,
+            shutdown: Option<CancellationToken>,
+        ) -> anyhow::Result<Self> {
+            let backend = crate::rmcp_backend::RmcpClientBackend::connect_stdio_with_cancellation(
+                config, shutdown,
+            )
+            .await?;
             Ok(Self::from_backend(Arc::new(backend)))
         }
 
@@ -896,6 +916,8 @@ pub enum McpAuthState {
 // MCP Manager: manages multiple server connections
 // ---------------------------------------------------------------------------
 
+const MCP_CANCELLED_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Manages a pool of MCP server connections.
 pub struct McpManager {
     clients: HashMap<String, Arc<McpClient>>,
@@ -941,10 +963,9 @@ impl McpManager {
         Self::connect_all_with_cancellation(configs, CancellationToken::new()).await
     }
 
-    /// Connect all servers, but on cancellation finish the in-flight connect and
-    /// explicitly close both it and every connection established before it.
-    /// Dropping the connect future would leave transport cleanup to asynchronous
-    /// drops that no session lifecycle can await.
+    /// Connect all servers, but bound cancellation cleanup even if a server
+    /// never answers `initialize`. RMCP force-kills a timed-out stdio child;
+    /// established clients are explicitly closed before this function returns.
     pub async fn connect_all_with_cancellation(
         configs: &[McpServerConfig],
         shutdown: CancellationToken,
@@ -965,15 +986,29 @@ impl McpManager {
                     } else {
                         None
                     };
-                    let connect = client::McpClient::connect(&expanded, auth_token);
+                    let connect = client::McpClient::connect_with_cancellation(
+                        &expanded,
+                        auth_token,
+                        Some(shutdown.clone()),
+                    );
                     tokio::pin!(connect);
                     let result = tokio::select! {
                         result = &mut connect => result,
                         _ = shutdown.cancelled() => {
-                            // Keep driving the connection until RMCP has either
-                            // established it or returned its initialization error;
-                            // only then is its transport safe to clean up explicitly.
-                            connect.await
+                            match tokio::time::timeout(MCP_CANCELLED_CONNECT_TIMEOUT, &mut connect).await {
+                                Ok(result) => result,
+                                Err(_) => {
+                                    warn!(
+                                        server = %expanded.name,
+                                        "MCP connection cleanup exceeded its cancellation deadline"
+                                    );
+                                    // RMCP normally returns after its forced
+                                    // stdio cleanup. This outer bound prevents a
+                                    // broken transport from trapping shutdown.
+                                    manager.shutdown().await;
+                                    return manager;
+                                }
+                            }
                         }
                     };
 
@@ -1891,20 +1926,20 @@ done
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn test_connect_cancellation_waits_for_and_cleans_inflight_child() {
+    async fn test_connect_cancellation_times_out_and_kills_inflight_child() {
         let root = tempfile::tempdir().unwrap();
-        let script = root.path().join("gated-mcp-server.sh");
-        let pid_path = root.path().join("gated-mcp-server.pid");
-        let release_path = root.path().join("release-initialize");
+        let script = root.path().join("stuck-mcp-server.sh");
+        let pid_path = root.path().join("stuck-mcp-server.pid");
+        let initialize_path = root.path().join("initialize-received");
         std::fs::write(
             &script,
-            r#"# Wait to finish initialization until the test releases it.
+            r#"# Never answer initialize; cancellation must still kill this process.
 printf '%s\n' "$$" > "$1"
 while IFS= read -r line; do
     case "$line" in
         *'"method":"initialize"'*)
-            while [ ! -f "$2" ]; do sleep 0.02; done
-            printf '%s\n' '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-11-25","capabilities":{},"serverInfo":{"name":"gated-fixture","version":"1.0"}}}'
+            printf 'received\n' > "$2"
+            while :; do sleep 1; done
             ;;
     esac
 done
@@ -1912,12 +1947,12 @@ done
         )
         .unwrap();
         let config = McpServerConfig {
-            name: "gated".into(),
+            name: "stuck".into(),
             command: Some("/bin/sh".into()),
             args: vec![
                 script.to_string_lossy().into_owned(),
                 pid_path.to_string_lossy().into_owned(),
-                release_path.to_string_lossy().into_owned(),
+                initialize_path.to_string_lossy().into_owned(),
             ],
             env: HashMap::new(),
             url: None,
@@ -1930,30 +1965,29 @@ done
             McpManager::connect_all_with_cancellation(&[config], connect_shutdown).await
         });
 
-        tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            while !pid_path.exists() {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !initialize_path.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
         .await
-        .expect("stdio fixture did not start");
+        .expect("stdio fixture did not receive initialize");
         let pid = std::fs::read_to_string(&pid_path)
             .unwrap()
             .trim()
             .parse()
             .unwrap();
         shutdown.cancel();
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        assert!(
-            !connect.is_finished(),
-            "cancellation dropped the in-flight connect instead of awaiting cleanup"
-        );
 
-        std::fs::write(&release_path, b"release").unwrap();
-        let manager = tokio::time::timeout(std::time::Duration::from_secs(2), connect)
-            .await
-            .expect("cancelled connection cleanup did not finish")
-            .unwrap();
+        // Do not release initialize: the cancelled connection itself must meet
+        // its deadline and forcibly terminate the unresponsive child.
+        let manager = tokio::time::timeout(
+            MCP_CANCELLED_CONNECT_TIMEOUT + Duration::from_secs(1),
+            connect,
+        )
+        .await
+        .expect("cancelled connection did not finish within its cleanup deadline")
+        .unwrap();
         assert!(manager.server_names().is_empty());
         assert_process_exits(pid).await;
     }

@@ -20,7 +20,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context as _, anyhow};
 use parking_lot::Mutex;
@@ -39,7 +38,8 @@ use super::subagent::{ChildCall, SubagentFeed};
 #[path = "memory_titles.rs"]
 mod memory_titles;
 use crate::driver::{
-    DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
+    DriverCleanup, DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions,
+    SessionOptions,
 };
 use crate::model::{
     ActivityKind, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey,
@@ -243,8 +243,9 @@ impl DriverControl for NativeDriver {
         self.session.shutdown();
     }
 
-    fn wait_for_shutdown(&self, timeout: Duration) -> bool {
-        self.session.wait_for_shutdown(timeout)
+    fn cleanup_handle(&self) -> Option<DriverCleanup> {
+        let cleanup = self.session.cleanup_handle();
+        Some(DriverCleanup::new(move |timeout| cleanup.wait(timeout)))
     }
 
     fn prompt(&self, prompt: String) {

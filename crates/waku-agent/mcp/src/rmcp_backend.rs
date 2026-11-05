@@ -23,9 +23,11 @@ use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::CancellationToken;
 
 const RMCP_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 const RMCP_FORCED_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
+const RMCP_CANCELLED_CONNECT_GRACE: Duration = Duration::from_secs(1);
 
 /// Lock a `std::sync::Mutex`, recovering from poisoning instead of panicking.
 ///
@@ -120,6 +122,13 @@ impl RmcpClientBackend {
     pub async fn connect_stdio(
         config: &claurst_core::config::McpServerConfig,
     ) -> anyhow::Result<Self> {
+        Self::connect_stdio_with_cancellation(config, None).await
+    }
+
+    pub async fn connect_stdio_with_cancellation(
+        config: &claurst_core::config::McpServerConfig,
+        shutdown: Option<CancellationToken>,
+    ) -> anyhow::Result<Self> {
         let command = config.command.clone().ok_or_else(|| {
             anyhow::anyhow!("MCP server '{}' has no command configured", config.name)
         })?;
@@ -138,13 +147,30 @@ impl RmcpClientBackend {
         let stdio_child_pid = transport.id();
 
         let client_info = build_client_info(rmcp_model::ProtocolVersion::default());
-        Self::connect_with_transport(config, transport, client_info, "stdio", stdio_child_pid).await
+        Self::connect_with_transport(
+            config,
+            transport,
+            client_info,
+            "stdio",
+            stdio_child_pid,
+            shutdown,
+        )
+        .await
     }
 
     pub async fn connect_http(
         config: &claurst_core::config::McpServerConfig,
         auth_token: Option<String>,
         protocol_version: rmcp_model::ProtocolVersion,
+    ) -> anyhow::Result<Self> {
+        Self::connect_http_with_cancellation(config, auth_token, protocol_version, None).await
+    }
+
+    pub async fn connect_http_with_cancellation(
+        config: &claurst_core::config::McpServerConfig,
+        auth_token: Option<String>,
+        protocol_version: rmcp_model::ProtocolVersion,
+        shutdown: Option<CancellationToken>,
     ) -> anyhow::Result<Self> {
         let endpoint = config
             .url
@@ -158,19 +184,27 @@ impl RmcpClientBackend {
 
         let transport = StreamableHttpClientTransport::from_config(transport_config);
         let client_info = build_client_info(protocol_version);
-        Self::connect_with_transport(config, transport, client_info, "http", None).await
+        Self::connect_with_transport(config, transport, client_info, "http", None, shutdown).await
     }
 
     pub async fn connect_legacy_sse(
         config: &claurst_core::config::McpServerConfig,
         auth_token: Option<String>,
     ) -> anyhow::Result<Self> {
+        Self::connect_legacy_sse_with_cancellation(config, auth_token, None).await
+    }
+
+    pub async fn connect_legacy_sse_with_cancellation(
+        config: &claurst_core::config::McpServerConfig,
+        auth_token: Option<String>,
+        shutdown: Option<CancellationToken>,
+    ) -> anyhow::Result<Self> {
         // Legacy SSE servers still expose the real POST endpoint via
         // `event: endpoint`; keep a thin compatibility shim here and hand the
         // session and capability flow back to rmcp once connected.
         let transport = LegacySseRmcpTransport::connect(config, auth_token).await?;
         let client_info = build_client_info(rmcp_model::ProtocolVersion::V_2024_11_05);
-        Self::connect_with_transport(config, transport, client_info, "sse", None).await
+        Self::connect_with_transport(config, transport, client_info, "sse", None, shutdown).await
     }
 
     async fn connect_with_transport<T, E, A>(
@@ -179,6 +213,7 @@ impl RmcpClientBackend {
         client_info: rmcp_model::ClientInfo,
         transport_label: &str,
         stdio_child_pid: Option<u32>,
+        shutdown: Option<CancellationToken>,
     ) -> anyhow::Result<Self>
     where
         T: rmcp::transport::IntoTransport<RoleClient, E, A>,
@@ -186,25 +221,50 @@ impl RmcpClientBackend {
     {
         let (notifications_tx, notifications_rx) = mpsc::unbounded_channel();
         let handler = RmcpNotificationClient::new(notifications_tx, client_info);
-        let running = handler.serve(transport).await.map_err(|e| {
-            anyhow::anyhow!(
-                "rmcp {} client '{}' failed to initialize: {}",
-                transport_label,
-                config.name,
-                e
-            )
-        })?;
+        let connect = Box::pin(async move {
+            let running = handler.serve(transport).await.map_err(|e| {
+                anyhow::anyhow!(
+                    "rmcp {} client '{}' failed to initialize: {}",
+                    transport_label,
+                    config.name,
+                    e
+                )
+            })?;
 
-        let peer = running.peer().clone();
-        let snapshot = build_snapshot(config, &peer).await?;
+            let peer = running.peer().clone();
+            let snapshot = build_snapshot(config, &peer).await?;
 
-        Ok(Self {
-            snapshot,
-            peer,
-            running: Mutex::new(Some(running)),
-            stdio_child_pid,
-            notifications_rx: Arc::new(Mutex::new(notifications_rx)),
-        })
+            Ok(Self {
+                snapshot,
+                peer,
+                running: Mutex::new(Some(running)),
+                stdio_child_pid,
+                notifications_rx: Arc::new(Mutex::new(notifications_rx)),
+            })
+        });
+        let mut connect = connect;
+        let Some(shutdown) = shutdown else {
+            return connect.await;
+        };
+
+        tokio::select! {
+            result = &mut connect => result,
+            _ = shutdown.cancelled() => {
+                match tokio::time::timeout(RMCP_CANCELLED_CONNECT_GRACE, &mut connect).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        // Dropping an unfinished RMCP connection alone does not
+                        // guarantee that a wedged stdio server terminates.
+                        drop(connect);
+                        if let Some(pid) = stdio_child_pid {
+                            force_kill_stdio_child(pid)?;
+                            tracing::warn!(pid, server = %config.name, "MCP initialize required forced cancellation cleanup");
+                        }
+                        anyhow::bail!("MCP server '{}' connection cancelled", config.name)
+                    }
+                }
+            }
+        }
     }
 }
 
