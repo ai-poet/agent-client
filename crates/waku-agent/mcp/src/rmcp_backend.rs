@@ -104,7 +104,6 @@ impl ClientHandler for RmcpNotificationClient {
 pub struct RmcpClientBackend {
     snapshot: McpClientSnapshot,
     peer: rmcp::Peer<RoleClient>,
-    #[allow(dead_code)]
     running: Mutex<RunningService<RoleClient, RmcpNotificationClient>>,
     notifications_rx: Arc<Mutex<mpsc::UnboundedReceiver<Value>>>,
 }
@@ -595,6 +594,20 @@ impl McpClientBackend for RmcpClientBackend {
             .unsubscribe(rmcp_model::UnsubscribeRequestParams::new(uri.to_string()))
             .await
             .map_err(|e| anyhow::anyhow!("rmcp unsubscribe '{}' failed: {}", uri, e))
+    }
+
+    async fn shutdown(&self) -> anyhow::Result<()> {
+        let mut running = self.running.lock().await;
+        let closed = running
+            .close_with_timeout(std::time::Duration::from_secs(5))
+            .await?;
+        if closed.is_none() {
+            anyhow::bail!(
+                "rmcp client '{}' did not close within five seconds",
+                self.snapshot.server_name
+            );
+        }
+        Ok(())
     }
 
     fn subscribe_to_notifications(&self) -> BoxStream<'static, anyhow::Result<Value>> {

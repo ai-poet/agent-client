@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 pub use client::McpClient;
@@ -741,6 +742,11 @@ pub mod client {
             self.backend()?.unsubscribe_resource(uri).await
         }
 
+        /// Close the connection and wait for the transport to release its resources.
+        pub async fn shutdown(&self) -> anyhow::Result<()> {
+            self.backend()?.shutdown().await
+        }
+
         /// Get all tools as `ToolDefinition` objects suitable for the API.
         pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
             self.tools.iter().map(|t| t.into()).collect()
@@ -885,6 +891,8 @@ pub struct McpManager {
     /// Active resource subscriptions: (server_name, uri) → change event sender.
     pub resource_subscriptions:
         DashMap<(String, String), tokio::sync::mpsc::Sender<ResourceChangedEvent>>,
+    /// Wakes notification tasks even when their idle streams produce no events.
+    shutdown_token: CancellationToken,
 }
 
 #[derive(Debug, Clone)]
@@ -903,6 +911,7 @@ impl McpManager {
             failed_servers: Vec::new(),
             server_configs: HashMap::new(),
             resource_subscriptions: DashMap::new(),
+            shutdown_token: CancellationToken::new(),
         }
     }
 
@@ -1310,6 +1319,24 @@ impl McpManager {
     // Notification dispatch loop
     // -----------------------------------------------------------------------
 
+    /// Close every connection and wake all notification tasks.
+    ///
+    /// Stdio transports close stdin, allow the server a short grace period, then
+    /// kill and reap the child if it does not exit. Safe to call more than once.
+    pub async fn shutdown(&self) {
+        self.shutdown_token.cancel();
+        self.resource_subscriptions.clear();
+        for client in self.clients.values() {
+            if let Err(error) = client.shutdown().await {
+                warn!(
+                    server = %client.server_name,
+                    %error,
+                    "MCP server shutdown did not complete cleanly"
+                );
+            }
+        }
+    }
+
     /// Spawn background Tokio tasks for each connected MCP client to handle
     /// server-initiated notifications via async streams. Uses native push notifications
     /// when available (e.g., WebSocket) and falls back to polling for other transports (e.g., stdio).
@@ -1318,46 +1345,63 @@ impl McpManager {
     /// `self.resource_subscriptions`.
     ///
     /// Call this once after constructing an `Arc<McpManager>` (e.g. immediately
-    /// after `McpManager::connect_all`).  Each notification handler task exits
-    /// when the transport closes or the manager is dropped.
+    /// after `McpManager::connect_all`). Each notification handler exits on
+    /// transport closure, manager drop, or [`McpManager::shutdown`], without
+    /// waiting for another notification to arrive.
     pub fn spawn_notification_poll_loop(self: Arc<Self>) {
         let clients = self.clients.clone();
+        let shutdown = self.shutdown_token.clone();
 
         // Spawn a task for each client to handle notifications via the stream
         for client in clients.values() {
             let client_clone = Arc::clone(client);
             let manager_weak = Arc::downgrade(&self);
+            let shutdown = shutdown.clone();
 
             tokio::spawn(async move {
                 // Subscribe to the transport's notification stream
                 let mut notification_stream = client_clone.subscribe_to_notifications();
 
-                // Process notifications from the stream
-                while let Some(result) = notification_stream.next().await {
-                    // Check if the manager is still alive
-                    let manager = match manager_weak.upgrade() {
-                        Some(m) => m,
-                        None => break, // Manager dropped — shut down
-                    };
+                loop {
+                    tokio::select! {
+                        _ = shutdown.cancelled() => break,
+                        result = notification_stream.next() => {
+                            let Some(result) = result else { break };
+                            let manager = match manager_weak.upgrade() {
+                                Some(m) => m,
+                                None => break,
+                            };
 
-                    match result {
-                        Ok(raw) => {
-                            client_clone
-                                .process_notification(raw, &manager.resource_subscriptions)
-                                .await;
-                        }
-                        Err(e) => {
-                            debug!(
-                                server = %client_clone.server_name,
-                                error = %e,
-                                "notification stream error"
-                            );
-                            break;
+                            match result {
+                                Ok(raw) => {
+                                    client_clone
+                                        .process_notification(raw, &manager.resource_subscriptions)
+                                        .await;
+                                }
+                                Err(e) => {
+                                    debug!(
+                                        server = %client_clone.server_name,
+                                        error = %e,
+                                        "notification stream error"
+                                    );
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
             });
         }
+    }
+}
+
+impl Drop for McpManager {
+    fn drop(&mut self) {
+        // A notification task owns its client, so dropping the manager alone
+        // used to leave idle stdio children alive forever. Wake those tasks now;
+        // dropping the last client then cancels RMCP and closes the transport.
+        self.shutdown_token.cancel();
+        self.resource_subscriptions.clear();
     }
 }
 
@@ -1604,6 +1648,93 @@ mod tests {
     }
 
     // ---- McpManager --------------------------------------------------------
+
+    #[cfg(unix)]
+    async fn idle_stdio_manager(root: &std::path::Path) -> (Arc<McpManager>, u32) {
+        let script = root.join("idle-mcp-server.sh");
+        let pid_path = root.join("idle-mcp-server.pid");
+        std::fs::write(
+            &script,
+            r#"# Waku MCP shutdown fixture: answer initialize, then idle on stdin.
+printf '%s\n' "$$" > "$1"
+while IFS= read -r line; do
+    case "$line" in
+        *'"method":"initialize"'*)
+            printf '%s\n' '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-11-25","capabilities":{},"serverInfo":{"name":"idle-fixture","version":"1.0"}}}'
+            ;;
+    esac
+done
+"#,
+        )
+        .unwrap();
+        let config = McpServerConfig {
+            name: "idle".into(),
+            command: Some("/bin/sh".into()),
+            args: vec![
+                script.to_string_lossy().into_owned(),
+                pid_path.to_string_lossy().into_owned(),
+            ],
+            env: HashMap::new(),
+            url: None,
+            server_type: "stdio".into(),
+            origin: Default::default(),
+        };
+        let manager = Arc::new(McpManager::connect_all(&[config]).await);
+        assert!(
+            manager.failed_servers().is_empty(),
+            "fixture failed to connect: {:?}",
+            manager.failed_servers()
+        );
+        manager.clone().spawn_notification_poll_loop();
+        let pid = std::fs::read_to_string(pid_path)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(process_is_alive(pid));
+        (manager, pid)
+    }
+
+    #[cfg(unix)]
+    fn process_is_alive(pid: u32) -> bool {
+        std::process::Command::new("kill")
+            .arg("-0")
+            .arg(pid.to_string())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    }
+
+    #[cfg(unix)]
+    async fn assert_process_exits(pid: u32) {
+        tokio::time::timeout(std::time::Duration::from_secs(7), async {
+            while process_is_alive(pid) {
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("MCP stdio child remained alive after its session closed");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_manager_shutdown_kills_idle_stdio_child() {
+        let root = tempfile::tempdir().unwrap();
+        let (manager, pid) = idle_stdio_manager(root.path()).await;
+        manager.shutdown().await;
+        assert_process_exits(pid).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_manager_drop_wakes_idle_notification_tasks() {
+        let root = tempfile::tempdir().unwrap();
+        let (manager, pid) = idle_stdio_manager(root.path()).await;
+        drop(manager);
+        assert_process_exits(pid).await;
+    }
 
     #[test]
     fn test_manager_server_names_empty() {

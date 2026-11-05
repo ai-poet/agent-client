@@ -228,6 +228,15 @@ impl NativeDriver {
     }
 }
 
+impl Drop for NativeDriver {
+    fn drop(&mut self) {
+        // RemoveSession, CloseSession, replacement, rewind and daemon shutdown
+        // all release this handle. Do not rely on the last background task
+        // dropping its `Arc`: close this session's MCP children immediately.
+        self.session.shutdown();
+    }
+}
+
 impl DriverControl for NativeDriver {
     fn prompt(&self, prompt: String) {
         if let Some(instructions) = compact_command(&prompt) {
