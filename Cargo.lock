@@ -1370,6 +1370,7 @@ dependencies = [
  "dirs 5.0.1",
  "futures",
  "getrandom 0.2.17",
+ "libc",
  "once_cell",
  "open",
  "parking_lot",

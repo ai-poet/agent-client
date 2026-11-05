@@ -879,10 +879,15 @@ fn connect_mcp_in_background(inner: &Arc<Inner>) {
     let task_inner = inner.clone();
     let task = rt.spawn(async move {
         let inner = task_inner;
-        let manager = tokio::select! {
-            _ = shutdown.cancelled() => return,
-            manager = claurst_mcp::McpManager::connect_all(&servers) => Arc::new(manager),
-        };
+        // Cancellation still drives an in-flight connection to a terminal state
+        // and closes every established transport before this tracked task exits.
+        let manager = Arc::new(
+            claurst_mcp::McpManager::connect_all_with_cancellation(&servers, shutdown.clone())
+                .await,
+        );
+        if shutdown.is_cancelled() {
+            return;
+        }
         manager.clone().spawn_notification_poll_loop();
         // A server that did not connect costs its own tools and nothing
         // more, so it is logged rather than raised: `AgentEvent::Error`

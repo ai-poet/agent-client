@@ -32,3 +32,6 @@ rmcp = { version = "1.4.0", default-features = false, features = ["client", "aut
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

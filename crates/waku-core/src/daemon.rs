@@ -29,10 +29,27 @@ use waku_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRe
 
 const DRIVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Start every driver's cleanup before waiting, and share one deadline so a
-/// large session roster cannot multiply the daemon's exit delay.
-fn shutdown_sessions(sessions: HashMap<Uuid, (Uuid, DriverHandle)>) {
-    let drivers: Vec<DriverHandle> = sessions.into_values().map(|(_, driver)| driver).collect();
+/// Move a retired driver into daemon-owned cleanup tracking. Starting shutdown
+/// here preserves the old drop-based behavior while keeping its asynchronous
+/// MCP tasks alive and awaitable until daemon exit.
+fn retire_session(
+    retired_sessions: &Mutex<Vec<DriverHandle>>,
+    removed: Option<(Uuid, DriverHandle)>,
+) {
+    if let Some((_, driver)) = removed {
+        driver.shutdown();
+        retired_sessions.lock().push(driver);
+    }
+}
+
+/// Start every active and retired driver's cleanup before waiting, and share
+/// one deadline so a large session roster cannot multiply the exit delay.
+fn shutdown_sessions(
+    sessions: HashMap<Uuid, (Uuid, DriverHandle)>,
+    retired_sessions: Vec<DriverHandle>,
+) {
+    let mut drivers: Vec<DriverHandle> = sessions.into_values().map(|(_, driver)| driver).collect();
+    drivers.extend(retired_sessions);
     for driver in &drivers {
         driver.shutdown();
     }
@@ -48,6 +65,9 @@ fn shutdown_sessions(sessions: HashMap<Uuid, (Uuid, DriverHandle)>) {
 
 pub struct WakuBackend {
     sessions: Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>,
+    /// Closed, removed, or replaced drivers retained until their MCP cleanup
+    /// has been awaited during daemon shutdown.
+    retired_sessions: Mutex<Vec<DriverHandle>>,
     terminals: Mutex<HashMap<Uuid, (Uuid, crate::terminal::DaemonTerminal)>>,
     settings: DaemonSettingsStore,
     task_store: StateStore,
@@ -82,6 +102,7 @@ impl WakuBackend {
             .to_owned();
         Ok(Self {
             sessions: Mutex::new(HashMap::new()),
+            retired_sessions: Mutex::new(Vec::new()),
             terminals: Mutex::new(HashMap::new()),
             settings,
             task_store,
@@ -437,7 +458,7 @@ impl Backend for WakuBackend {
                     self.task_store.save(&mut state)?;
                 }
                 let removed = self.sessions.lock().remove(&session_id);
-                drop(removed);
+                retire_session(&self.retired_sessions, removed);
                 Ok(ResponsePayload::Ack)
             }
             Command::HydrateSession { session_id } => {
@@ -787,9 +808,11 @@ impl Backend for WakuBackend {
                         }
                     })
                     .context("could not start daemon event forwarding thread")?;
-                self.sessions
+                let replaced = self
+                    .sessions
                     .lock()
                     .insert(session_id, (runtime_id, handle));
+                retire_session(&self.retired_sessions, replaced);
                 Ok(ResponsePayload::Started { supports_steer })
             }
             Command::CloseSession => {
@@ -801,7 +824,7 @@ impl Backend for WakuBackend {
                         .then(|| sessions.remove(&session_id))
                         .flatten()
                 };
-                drop(removed);
+                retire_session(&self.retired_sessions, removed);
                 Ok(ResponsePayload::Ack)
             }
             command => {
@@ -824,7 +847,8 @@ impl Backend for WakuBackend {
 
     fn shutdown(&self) {
         let sessions = std::mem::take(&mut *self.sessions.lock());
-        shutdown_sessions(sessions);
+        let retired_sessions = std::mem::take(&mut *self.retired_sessions.lock());
+        shutdown_sessions(sessions, retired_sessions);
         let terminals = std::mem::take(&mut *self.terminals.lock());
         drop(terminals);
     }
@@ -2097,7 +2121,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn daemon_shutdown_waits_for_driver_cleanup() {
+    fn daemon_shutdown_waits_for_active_and_retired_driver_cleanup() {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         struct CleanupDriver {
@@ -2135,9 +2159,24 @@ mod tests {
             (Uuid::new_v4(), DriverHandle::from_control(control.clone())),
         );
 
-        shutdown_sessions(sessions);
+        let retired_control = Arc::new(CleanupDriver {
+            shutdown: AtomicBool::new(false),
+            cleaned: AtomicBool::new(false),
+        });
+        let retired = Mutex::new(Vec::new());
+        retire_session(
+            &retired,
+            Some((
+                Uuid::new_v4(),
+                DriverHandle::from_control(retired_control.clone()),
+            )),
+        );
+        assert!(retired_control.shutdown.load(Ordering::Acquire));
+
+        shutdown_sessions(sessions, retired.into_inner());
 
         assert!(control.cleaned.load(Ordering::Acquire));
+        assert!(retired_control.cleaned.load(Ordering::Acquire));
     }
 
     #[test]

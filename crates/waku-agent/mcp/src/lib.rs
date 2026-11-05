@@ -593,6 +593,11 @@ pub mod client {
             client
         }
 
+        #[cfg(test)]
+        pub(crate) fn from_test_backend(backend: Arc<dyn backend::McpClientBackend>) -> Self {
+            Self::from_backend(backend)
+        }
+
         fn backend(&self) -> anyhow::Result<&Arc<dyn backend::McpClientBackend>> {
             self.backend
                 .as_ref()
@@ -933,6 +938,17 @@ impl McpManager {
     /// - Continues on failure (does not bail out on first error).
     /// - Tracks failed servers in `failed_servers()`.
     pub async fn connect_all(configs: &[McpServerConfig]) -> Self {
+        Self::connect_all_with_cancellation(configs, CancellationToken::new()).await
+    }
+
+    /// Connect all servers, but on cancellation finish the in-flight connect and
+    /// explicitly close both it and every connection established before it.
+    /// Dropping the connect future would leave transport cleanup to asynchronous
+    /// drops that no session lifecycle can await.
+    pub async fn connect_all_with_cancellation(
+        configs: &[McpServerConfig],
+        shutdown: CancellationToken,
+    ) -> Self {
         let mut manager = Self::new();
         for config in configs {
             // Store original config for later OAuth use
@@ -949,7 +965,33 @@ impl McpManager {
                     } else {
                         None
                     };
-                    match client::McpClient::connect(&expanded, auth_token).await {
+                    let connect = client::McpClient::connect(&expanded, auth_token);
+                    tokio::pin!(connect);
+                    let result = tokio::select! {
+                        result = &mut connect => result,
+                        _ = shutdown.cancelled() => {
+                            // Keep driving the connection until RMCP has either
+                            // established it or returned its initialization error;
+                            // only then is its transport safe to clean up explicitly.
+                            connect.await
+                        }
+                    };
+
+                    if shutdown.is_cancelled() {
+                        if let Ok(client) = result {
+                            if let Err(error) = client.shutdown().await {
+                                warn!(
+                                    server = %expanded.name,
+                                    %error,
+                                    "MCP connection cleanup after cancellation failed"
+                                );
+                            }
+                        }
+                        manager.shutdown().await;
+                        return manager;
+                    }
+
+                    match result {
                         Ok(client) => {
                             info!(
                                 server = %expanded.name,
@@ -1337,7 +1379,7 @@ impl McpManager {
     pub async fn shutdown(&self) {
         self.shutdown_token.cancel();
         self.resource_subscriptions.clear();
-        for client in self.clients.values() {
+        let shutdowns = self.clients.values().map(|client| async move {
             if let Err(error) = client.shutdown().await {
                 warn!(
                     server = %client.server_name,
@@ -1345,7 +1387,10 @@ impl McpManager {
                     "MCP server shutdown did not complete cleanly"
                 );
             }
-        }
+        });
+        // Every connection has its own grace period. Run them together so one
+        // stuck server cannot consume the deadline of every server after it.
+        futures::future::join_all(shutdowns).await;
     }
 
     /// Spawn background Tokio tasks for each connected MCP client to handle
@@ -1741,6 +1786,175 @@ done
         let root = tempfile::tempdir().unwrap();
         let (manager, pid) = idle_stdio_manager(root.path()).await;
         drop(manager);
+        assert_process_exits(pid).await;
+    }
+
+    struct ShutdownProbe {
+        name: String,
+        started: Arc<std::sync::atomic::AtomicUsize>,
+        release: CancellationToken,
+    }
+
+    #[async_trait]
+    impl backend::McpClientBackend for ShutdownProbe {
+        fn kind(&self) -> backend::McpBackendKind {
+            backend::McpBackendKind::Rmcp
+        }
+
+        fn snapshot(&self) -> backend::McpClientSnapshot {
+            backend::McpClientSnapshot::empty(self.name.clone())
+        }
+
+        async fn list_tools(&self) -> anyhow::Result<Vec<McpTool>> {
+            unreachable!()
+        }
+
+        async fn call_tool(
+            &self,
+            _name: &str,
+            _arguments: Option<Value>,
+        ) -> anyhow::Result<CallToolResult> {
+            unreachable!()
+        }
+
+        async fn list_resources(&self) -> anyhow::Result<Vec<McpResource>> {
+            unreachable!()
+        }
+
+        async fn read_resource(&self, _uri: &str) -> anyhow::Result<ResourceContents> {
+            unreachable!()
+        }
+
+        async fn list_prompts(&self) -> anyhow::Result<Vec<McpPrompt>> {
+            unreachable!()
+        }
+
+        async fn get_prompt(
+            &self,
+            _name: &str,
+            _arguments: Option<HashMap<String, String>>,
+        ) -> anyhow::Result<GetPromptResult> {
+            unreachable!()
+        }
+
+        async fn subscribe_resource(&self, _uri: &str) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn unsubscribe_resource(&self, _uri: &str) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn shutdown(&self) -> anyhow::Result<()> {
+            self.started
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            self.release.cancelled().await;
+            Ok(())
+        }
+
+        fn subscribe_to_notifications(&self) -> BoxStream<'static, anyhow::Result<Value>> {
+            Box::pin(futures::stream::empty())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_manager_shutdown_closes_connections_concurrently() {
+        let started = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let release = CancellationToken::new();
+        let mut manager = McpManager::new();
+        for name in ["one", "two"] {
+            let backend = Arc::new(ShutdownProbe {
+                name: name.into(),
+                started: started.clone(),
+                release: release.clone(),
+            });
+            manager.clients.insert(
+                name.into(),
+                Arc::new(client::McpClient::from_test_backend(backend)),
+            );
+        }
+
+        let shutdown = tokio::spawn(async move { manager.shutdown().await });
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while started.load(std::sync::atomic::Ordering::Acquire) != 2 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("a blocked connection must not prevent the others from closing");
+        release.cancel();
+        tokio::time::timeout(std::time::Duration::from_secs(1), shutdown)
+            .await
+            .expect("concurrent shutdown did not finish")
+            .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_connect_cancellation_waits_for_and_cleans_inflight_child() {
+        let root = tempfile::tempdir().unwrap();
+        let script = root.path().join("gated-mcp-server.sh");
+        let pid_path = root.path().join("gated-mcp-server.pid");
+        let release_path = root.path().join("release-initialize");
+        std::fs::write(
+            &script,
+            r#"# Wait to finish initialization until the test releases it.
+printf '%s\n' "$$" > "$1"
+while IFS= read -r line; do
+    case "$line" in
+        *'"method":"initialize"'*)
+            while [ ! -f "$2" ]; do sleep 0.02; done
+            printf '%s\n' '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-11-25","capabilities":{},"serverInfo":{"name":"gated-fixture","version":"1.0"}}}'
+            ;;
+    esac
+done
+"#,
+        )
+        .unwrap();
+        let config = McpServerConfig {
+            name: "gated".into(),
+            command: Some("/bin/sh".into()),
+            args: vec![
+                script.to_string_lossy().into_owned(),
+                pid_path.to_string_lossy().into_owned(),
+                release_path.to_string_lossy().into_owned(),
+            ],
+            env: HashMap::new(),
+            url: None,
+            server_type: "stdio".into(),
+            origin: Default::default(),
+        };
+        let shutdown = CancellationToken::new();
+        let connect_shutdown = shutdown.clone();
+        let connect = tokio::spawn(async move {
+            McpManager::connect_all_with_cancellation(&[config], connect_shutdown).await
+        });
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !pid_path.exists() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("stdio fixture did not start");
+        let pid = std::fs::read_to_string(&pid_path)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        shutdown.cancel();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            !connect.is_finished(),
+            "cancellation dropped the in-flight connect instead of awaiting cleanup"
+        );
+
+        std::fs::write(&release_path, b"release").unwrap();
+        let manager = tokio::time::timeout(std::time::Duration::from_secs(2), connect)
+            .await
+            .expect("cancelled connection cleanup did not finish")
+            .unwrap();
+        assert!(manager.server_names().is_empty());
         assert_process_exits(pid).await;
     }
 
