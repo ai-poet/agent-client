@@ -29,6 +29,20 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.3.5]
+
+- 云账户模型分组新增「福利」与「常驻」双轨分类：福利线路带「限时 · 波动」标识，切换前会提示确认，任务进行中也会给出状态提醒
+
+  Cloud account model groups are now split into welfare and standard categories: welfare routes carry a "Limited time · Variable" badge, switching to one asks for confirmation, and a busy task produces a status warning
+
+- 新增守护进程重连诊断：可从设置导出近期连接错误与重连历史，报告包含时间、系统错误、版本与进程信息，不包含鉴权令牌、API 密钥或消息正文；日志支持自动轮转
+
+  Added daemon reconnect diagnostics: export recent connection errors and reconnect history from Settings, including timestamps, OS errors, versions and process details while excluding auth tokens, API keys and message bodies; logs now rotate automatically
+
+- 提升 MCP 生命周期与 OAuth 稳定性：修复删除会话、停用服务及关闭时的进程清理与取消处理，避免 OAuth 刷新阻塞取消操作
+
+  Improved MCP lifecycle and OAuth stability: fixed process cleanup and cancellation when deleting sessions, retiring services or shutting down, and prevented OAuth refreshes from blocking cancellation
+
 ## [0.3.4]
 
 - 内置 Agent 的轨迹面板新增诊断报告：在本地汇总失败请求、重试、慢响应和缓存读取异常，按严重程度展示每条线索，并可切换详细视图，便于定位运行问题
