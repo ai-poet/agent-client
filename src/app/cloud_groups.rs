@@ -96,6 +96,37 @@ impl Waku {
         .detach();
     }
 
+    /// Fork: picking a welfare lane asks first. A daily coding lane must not
+    /// silently become a promo line, and an in-flight task makes the switch
+    /// riskier, so the copy calls that out when a session is busy.
+    pub(super) fn confirm_welfare_group_switch(
+        &mut self,
+        platform: String,
+        group_id: Option<i64>,
+        cx: &mut Context<Self>,
+    ) {
+        let busy = self
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.status.is_busy());
+        let body = if busy {
+            tr!("cloud.welfare_confirm_body_busy")
+        } else {
+            tr!("cloud.welfare_confirm_body")
+        };
+        self.request_confirm(
+            tr!("cloud.welfare_confirm_title").to_string(),
+            Some(body.to_string()),
+            tr!("cloud.welfare_confirm_action").to_string(),
+            false,
+            cx,
+            move |this, _, cx| {
+                this.select_cloud_group(platform, group_id, cx);
+            },
+        );
+    }
+
     /// Bind a platform's routing to a group (or back to the account default),
     /// reusing an existing key for it when there is one.
     pub(super) fn select_cloud_group(
