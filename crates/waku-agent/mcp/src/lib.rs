@@ -982,7 +982,16 @@ impl McpManager {
             match expanded.server_type.as_str() {
                 "stdio" | "sse" | "http" => {
                     let auth_token = if matches!(expanded.server_type.as_str(), "sse" | "http") {
-                        manager.load_token(&expanded.name).await
+                        tokio::select! {
+                            token = manager.load_token(&expanded.name) => token,
+                            _ = shutdown.cancelled() => {
+                                // A refresh may be waiting on an unresponsive OAuth
+                                // server. Drop it immediately and close connections
+                                // established before this server instead of waiting.
+                                manager.shutdown().await;
+                                return manager;
+                            }
+                        }
                     } else {
                         None
                     };
@@ -1552,6 +1561,8 @@ pub fn mcp_result_to_string(result: &CallToolResult) -> String {
 mod tests {
     use super::*;
 
+    static TOKEN_STORE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     // ---- env expansion -----------------------------------------------------
 
     #[test]
@@ -1738,7 +1749,7 @@ mod tests {
     // ---- McpManager --------------------------------------------------------
 
     #[cfg(unix)]
-    async fn idle_stdio_manager(root: &std::path::Path) -> (Arc<McpManager>, u32) {
+    fn idle_stdio_config(root: &std::path::Path) -> (McpServerConfig, std::path::PathBuf) {
         let script = root.join("idle-mcp-server.sh");
         let pid_path = root.join("idle-mcp-server.pid");
         std::fs::write(
@@ -1767,6 +1778,12 @@ done
             server_type: "stdio".into(),
             origin: Default::default(),
         };
+        (config, pid_path)
+    }
+
+    #[cfg(unix)]
+    async fn idle_stdio_manager(root: &std::path::Path) -> (Arc<McpManager>, u32) {
+        let (config, pid_path) = idle_stdio_config(root);
         let manager = Arc::new(McpManager::connect_all(&[config]).await);
         assert!(
             manager.failed_servers().is_empty(),
@@ -1992,6 +2009,92 @@ done
         assert_process_exits(pid).await;
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_connect_cancellation_interrupts_refresh_and_closes_established_stdio() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let _token_store_guard = TOKEN_STORE_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let previous_token_store = std::env::var_os("CLAURST_MCP_TOKENS_DIR");
+        std::env::set_var("CLAURST_MCP_TOKENS_DIR", root.path());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (refresh_started_tx, refresh_started_rx) = tokio::sync::oneshot::channel();
+        let oauth_server = tokio::spawn(async move {
+            let mut refresh_started_tx = Some(refresh_started_tx);
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0; 4096];
+                let read = socket.read(&mut request).await.unwrap();
+                if request[..read].starts_with(b"POST ") {
+                    // The refresh request has arrived, but its response never will.
+                    let _ = refresh_started_tx.take().unwrap().send(());
+                    std::future::pending::<()>().await;
+                }
+                socket
+                    .write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+
+        oauth::store_mcp_token(&oauth::McpToken {
+            access_token: "expired".into(),
+            refresh_token: Some("refresh".into()),
+            expires_at: Some(1),
+            scope: None,
+            server_name: "refresh".into(),
+        })
+        .unwrap();
+
+        let (stdio, pid_path) = idle_stdio_config(root.path());
+        let remote = McpServerConfig {
+            name: "refresh".into(),
+            command: None,
+            args: vec![],
+            env: HashMap::new(),
+            url: Some(format!("http://{}/mcp", address)),
+            server_type: "http".into(),
+            origin: Default::default(),
+        };
+        let shutdown = CancellationToken::new();
+        let connect_shutdown = shutdown.clone();
+        let connect = tokio::spawn(async move {
+            McpManager::connect_all_with_cancellation(&[stdio, remote], connect_shutdown).await
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), refresh_started_rx)
+            .await
+            .expect("OAuth refresh did not start")
+            .unwrap();
+        let pid = std::fs::read_to_string(pid_path)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(process_is_alive(pid));
+        shutdown.cancel();
+
+        let manager = tokio::time::timeout(Duration::from_secs(2), connect)
+            .await
+            .expect("cancellation kept waiting for the hung OAuth refresh")
+            .unwrap();
+        assert_process_exits(pid).await;
+        assert!(manager.failed_servers().is_empty());
+
+        oauth_server.abort();
+        match previous_token_store {
+            Some(value) => std::env::set_var("CLAURST_MCP_TOKENS_DIR", value),
+            None => std::env::remove_var("CLAURST_MCP_TOKENS_DIR"),
+        }
+    }
+
     #[test]
     fn test_manager_server_names_empty() {
         let mgr = McpManager::new();
@@ -2012,6 +2115,9 @@ done
 
     #[test]
     fn test_auth_state_uses_token_expiry_datetime() {
+        let _token_store_guard = TOKEN_STORE_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // Redirect the on-disk token store into a tempdir so this test never
         // touches (or requires a writable) ~/.claurst. Sandboxed builds run
         // with no HOME and disallow writes outside the build tree.

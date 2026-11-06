@@ -7,6 +7,15 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
+const OAUTH_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn oauth_http_client() -> anyhow::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(OAUTH_HTTP_TIMEOUT)
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {}", e))
+}
+
 // ---------------------------------------------------------------------------
 // Token storage
 // ---------------------------------------------------------------------------
@@ -154,10 +163,7 @@ pub async fn fetch_oauth_metadata(server_url: &str) -> anyhow::Result<McpOAuthMe
     let base_url = normalized_server_url(server_url);
     let fallback = fallback_oauth_metadata(base_url);
     let metadata_url = format!("{}/.well-known/oauth-authorization-server", base_url);
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {}", e))?;
+    let client = oauth_http_client()?;
 
     match client.get(&metadata_url).send().await {
         Ok(resp) if resp.status().is_success() => {
@@ -463,7 +469,7 @@ pub async fn exchange_code(
     verifier: &str,
     redirect_uri: &str,
 ) -> anyhow::Result<McpToken> {
-    let client = reqwest::Client::new();
+    let client = oauth_http_client()?;
     let params = [
         ("grant_type", "authorization_code"),
         ("code", code),
@@ -527,7 +533,7 @@ pub async fn refresh_mcp_token(
         .ok_or_else(|| anyhow::anyhow!("Token for {} has no refresh token", server_name))?
         .to_string();
 
-    let client = reqwest::Client::new();
+    let client = oauth_http_client()?;
     let params = [
         ("grant_type", "refresh_token"),
         ("refresh_token", refresh.as_str()),
