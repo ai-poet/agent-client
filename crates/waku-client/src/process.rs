@@ -262,6 +262,10 @@ impl DaemonProcess {
         self.client.clone()
     }
 
+    fn id(&self) -> u32 {
+        self.child.id()
+    }
+
     /// Address and bearer token for redialing this process.
     fn endpoint(&self) -> (String, String) {
         (self.client_address.clone(), self.token.clone())
@@ -493,6 +497,14 @@ impl DaemonSupervisor {
         self.inner.executable.is_none()
     }
 
+    /// PID of a desktop-managed daemon; remote daemon PIDs are not knowable.
+    pub fn daemon_pid(&self) -> Option<u32> {
+        match &*self.inner.target.lock() {
+            DaemonTarget::Local(process) => Some(process.id()),
+            DaemonTarget::Restarting(_) | DaemonTarget::Remote { .. } => None,
+        }
+    }
+
     pub fn settings(&self) -> DaemonSettings {
         self.inner.settings.lock().clone()
     }
@@ -683,11 +695,26 @@ fn publish_client(
     install: impl FnOnce(&mut DaemonTarget),
 ) {
     let mut target = inner.target.lock();
+    let previous_connection_id = target.client().connection_id().to_owned();
     install(&mut target);
+    let daemon_pid = match &*target {
+        DaemonTarget::Local(process) => Some(process.id()),
+        DaemonTarget::Restarting(_) | DaemonTarget::Remote { .. } => None,
+    };
     inner
         .client_updates
         .lock()
         .retain(|subscriber| subscriber.send(client.clone()).is_ok());
+    drop(target);
+    crate::diagnostics::connection_event(
+        "connection_publish",
+        client.connection_id(),
+        crate::diagnostics::fields(serde_json::json!({
+            "previous_connection_id": previous_connection_id,
+            "daemon_pid": daemon_pid,
+            "daemon_version": client.daemon_version(),
+        })),
+    );
 }
 
 /// Redial the target's endpoint with the dropped connection's replay cursors
@@ -744,14 +771,14 @@ fn monitor_daemon(
         // Snapshot under the target lock. The dial, the spawn and the process
         // drop below all run with it released: the UI thread takes this lock
         // on every save through `DaemonSupervisor::client`.
-        let (client, process_exited) = {
+        let (client, process_exited, daemon_pid) = {
             let mut target = inner.target.lock();
-            let process_exited = match &mut *target {
-                DaemonTarget::Local(process) => process.has_exited(),
-                DaemonTarget::Restarting(_) => true,
-                DaemonTarget::Remote { .. } => false,
+            let (process_exited, daemon_pid) = match &mut *target {
+                DaemonTarget::Local(process) => (process.has_exited(), Some(process.id())),
+                DaemonTarget::Restarting(_) => (true, None),
+                DaemonTarget::Remote { .. } => (false, None),
             };
-            (target.client(), process_exited)
+            (target.client(), process_exited, daemon_pid)
         };
         let now = Instant::now();
         let socket_disconnected = client.is_disconnected();
@@ -761,9 +788,32 @@ fn monitor_daemon(
             // there is no process here to replace.
             if socket_disconnected && !redials.backing_off(now) {
                 match reopen_socket(&inner, &client, &mut dial) {
-                    Ok(true) => redials.redialed(now),
+                    Ok(true) => {
+                        redials.redialed(now);
+                        let replacement = inner.target.lock().client();
+                        crate::diagnostics::connection_event(
+                            "redial_succeeded",
+                            replacement.connection_id(),
+                            crate::diagnostics::fields(serde_json::json!({
+                                "previous_connection_id": client.connection_id(),
+                                "daemon_version": replacement.daemon_version(),
+                                "daemon_pid": null,
+                            })),
+                        );
+                    }
                     Ok(false) => {}
-                    Err(_) => redials.dial_refused(),
+                    Err(error) => {
+                        redials.dial_refused();
+                        crate::diagnostics::log_error_event(
+                            "redial_failed",
+                            client.connection_id(),
+                            error.as_ref(),
+                            crate::diagnostics::fields(serde_json::json!({
+                                "attempt": redials.refused,
+                                "daemon_pid": null,
+                            })),
+                        );
+                    }
                 }
             }
             continue;
@@ -783,26 +833,81 @@ fn monitor_daemon(
                     continue;
                 }
                 match reopen_socket(&inner, &client, &mut dial) {
-                    Ok(true) => redials.redialed(now),
+                    Ok(true) => {
+                        redials.redialed(now);
+                        let replacement = inner.target.lock().client();
+                        crate::diagnostics::connection_event(
+                            "redial_succeeded",
+                            replacement.connection_id(),
+                            crate::diagnostics::fields(serde_json::json!({
+                                "previous_connection_id": client.connection_id(),
+                                "daemon_version": replacement.daemon_version(),
+                                "daemon_pid": daemon_pid,
+                            })),
+                        );
+                    }
                     Ok(false) => {}
                     Err(error) => {
                         redials.dial_refused();
-                        eprintln!(
-                            "could not reopen the Waku daemon socket (attempt {}): {error:#}",
-                            redials.refused
+                        crate::diagnostics::log_error_event(
+                            "redial_failed",
+                            client.connection_id(),
+                            error.as_ref(),
+                            crate::diagnostics::fields(serde_json::json!({
+                                "attempt": redials.refused,
+                                "daemon_pid": daemon_pid,
+                            })),
                         );
                     }
                 }
             }
             LocalRecovery::Restart => {
+                let restart_reason = if process_exited {
+                    "process_exited"
+                } else if executable_changed {
+                    "executable_changed"
+                } else {
+                    "redial_attempts_exhausted"
+                };
+                crate::diagnostics::connection_event(
+                    "restart_started",
+                    client.connection_id(),
+                    crate::diagnostics::fields(serde_json::json!({
+                        "restart_reason": restart_reason,
+                        "process_exited": process_exited,
+                        "executable_changed": executable_changed,
+                        "refused_redials": redials.refused,
+                        "daemon_pid": daemon_pid,
+                    })),
+                );
                 let _restart = inner.restart.lock();
                 let Some(exposure) = inner.exposure.lock().clone() else {
                     return;
                 };
                 match replace_local_daemon(&inner, executable, &exposure) {
-                    Ok(()) => redials.restarted(),
+                    Ok(()) => {
+                        redials.restarted();
+                        let replacement = inner.target.lock().client();
+                        crate::diagnostics::connection_event(
+                            "restart_succeeded",
+                            replacement.connection_id(),
+                            crate::diagnostics::fields(serde_json::json!({
+                                "previous_connection_id": client.connection_id(),
+                                "restart_reason": restart_reason,
+                                "daemon_version": replacement.daemon_version(),
+                            })),
+                        );
+                    }
                     Err(error) => {
-                        eprintln!("could not restart rebuilt Waku daemon: {error:#}");
+                        crate::diagnostics::log_error_event(
+                            "restart_failed",
+                            client.connection_id(),
+                            error.as_ref(),
+                            crate::diagnostics::fields(serde_json::json!({
+                                "restart_reason": restart_reason,
+                                "daemon_pid": daemon_pid,
+                            })),
+                        );
                         continue;
                     }
                 }

@@ -23,6 +23,7 @@ pub(crate) use native::{
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crossbeam_channel::{Receiver, SendError, Sender, unbounded};
 
@@ -80,6 +81,25 @@ pub(crate) fn test_event_channel() -> (DriverEventSender, Receiver<DriverEvent>)
     event_channel(wake)
 }
 
+/// An awaitable cleanup credential that does not keep the provider driver alive.
+/// Only drivers with asynchronous cleanup need to expose one.
+#[derive(Clone)]
+pub struct DriverCleanup {
+    wait: Arc<dyn Fn(Duration) -> bool + Send + Sync>,
+}
+
+impl DriverCleanup {
+    pub fn new(wait: impl Fn(Duration) -> bool + Send + Sync + 'static) -> Self {
+        Self {
+            wait: Arc::new(wait),
+        }
+    }
+
+    pub fn wait(&self, timeout: Duration) -> bool {
+        (self.wait)(timeout)
+    }
+}
+
 #[derive(Clone)]
 pub struct DriverHandle {
     inner: Arc<dyn DriverControl>,
@@ -88,6 +108,14 @@ pub struct DriverHandle {
 impl DriverHandle {
     pub fn from_control(control: Arc<dyn DriverControl>) -> Self {
         Self { inner: control }
+    }
+
+    pub fn shutdown(&self) {
+        self.inner.shutdown();
+    }
+
+    pub fn cleanup_handle(&self) -> Option<DriverCleanup> {
+        self.inner.cleanup_handle()
     }
 
     pub fn prompt(&self, prompt: String) {
@@ -160,6 +188,14 @@ impl DriverHandle {
 }
 
 pub trait DriverControl: Send + Sync {
+    /// Begin provider cleanup without waiting on the daemon's caller thread.
+    fn shutdown(&self) {}
+    /// Return an independent credential for asynchronous cleanup. The daemon
+    /// drops the driver itself immediately, preserving drop-based subprocess
+    /// shutdown for providers without an explicit shutdown implementation.
+    fn cleanup_handle(&self) -> Option<DriverCleanup> {
+        None
+    }
     fn prompt(&self, prompt: String);
     fn supports_steer(&self) -> bool {
         false

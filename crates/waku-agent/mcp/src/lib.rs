@@ -23,6 +23,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 pub use client::McpClient;
@@ -592,6 +594,11 @@ pub mod client {
             client
         }
 
+        #[cfg(test)]
+        pub(crate) fn from_test_backend(backend: Arc<dyn backend::McpClientBackend>) -> Self {
+            Self::from_backend(backend)
+        }
+
         fn backend(&self) -> anyhow::Result<&Arc<dyn backend::McpClientBackend>> {
             self.backend
                 .as_ref()
@@ -602,11 +609,19 @@ pub mod client {
             config: &McpServerConfig,
             auth_token: Option<String>,
         ) -> anyhow::Result<Self> {
+            Self::connect_with_cancellation(config, auth_token, None).await
+        }
+
+        pub async fn connect_with_cancellation(
+            config: &McpServerConfig,
+            auth_token: Option<String>,
+            shutdown: Option<CancellationToken>,
+        ) -> anyhow::Result<Self> {
             match config.server_type.as_str() {
-                "stdio" => Self::connect_stdio(config).await,
+                "stdio" => Self::connect_stdio_with_cancellation(config, shutdown).await,
                 "sse" => {
-                    let backend = crate::rmcp_backend::RmcpClientBackend::connect_legacy_sse(
-                        config, auth_token,
+                    let backend = crate::rmcp_backend::RmcpClientBackend::connect_legacy_sse_with_cancellation(
+                        config, auth_token, shutdown,
                     )
                     .await?;
                     Ok(Self::from_backend(Arc::new(backend)))
@@ -626,10 +641,11 @@ pub mod client {
                             )
                         })?;
                         let protocol_version_label = protocol_version.as_str().to_string();
-                        match crate::rmcp_backend::RmcpClientBackend::connect_http(
+                        match crate::rmcp_backend::RmcpClientBackend::connect_http_with_cancellation(
                             config,
                             auth_token.clone(),
                             protocol_version,
+                            shutdown.clone(),
                         )
                         .await
                         {
@@ -679,7 +695,17 @@ pub mod client {
         /// Connect to an MCP server using stdio transport. The `config` should
         /// already have env vars expanded via `expand_server_config`.
         pub async fn connect_stdio(config: &McpServerConfig) -> anyhow::Result<Self> {
-            let backend = crate::rmcp_backend::RmcpClientBackend::connect_stdio(config).await?;
+            Self::connect_stdio_with_cancellation(config, None).await
+        }
+
+        pub async fn connect_stdio_with_cancellation(
+            config: &McpServerConfig,
+            shutdown: Option<CancellationToken>,
+        ) -> anyhow::Result<Self> {
+            let backend = crate::rmcp_backend::RmcpClientBackend::connect_stdio_with_cancellation(
+                config, shutdown,
+            )
+            .await?;
             Ok(Self::from_backend(Arc::new(backend)))
         }
 
@@ -741,6 +767,11 @@ pub mod client {
             self.backend()?.unsubscribe_resource(uri).await
         }
 
+        /// Close the connection and wait for the transport to release its resources.
+        pub async fn shutdown(&self) -> anyhow::Result<()> {
+            self.backend()?.shutdown().await
+        }
+
         /// Get all tools as `ToolDefinition` objects suitable for the API.
         pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
             self.tools.iter().map(|t| t.into()).collect()
@@ -766,6 +797,7 @@ pub mod client {
                 (String, String),
                 tokio::sync::mpsc::Sender<ResourceChangedEvent>,
             >,
+            shutdown: &CancellationToken,
         ) {
             // Only process server-initiated notifications (have "method", no non-null "id")
             let has_method = raw.get("method").is_some();
@@ -784,17 +816,26 @@ pub mod client {
                 "notifications/resources/updated" => {
                     let uri = raw["params"]["uri"].as_str().unwrap_or("").to_string();
                     let key = (self.server_name.clone(), uri.clone());
-                    if let Some(tx) = resource_subscriptions.get(&key) {
+                    // Clone the sender and release the DashMap shard guard before
+                    // awaiting. A full subscriber channel must not prevent
+                    // `McpManager::shutdown` from clearing the subscriptions.
+                    let tx = resource_subscriptions.get(&key).map(|tx| tx.clone());
+                    if let Some(tx) = tx {
                         let event = ResourceChangedEvent {
                             server_name: self.server_name.clone(),
                             uri,
                         };
-                        if let Err(e) = tx.send(event).await {
-                            debug!(
-                                server = %self.server_name,
-                                error = %e,
-                                "process_notification: resource subscription receiver dropped"
-                            );
+                        tokio::select! {
+                            _ = shutdown.cancelled() => {}
+                            result = tx.send(event) => {
+                                if let Err(e) = result {
+                                    debug!(
+                                        server = %self.server_name,
+                                        error = %e,
+                                        "process_notification: resource subscription receiver dropped"
+                                    );
+                                }
+                            }
                         }
                     } else {
                         debug!(
@@ -875,6 +916,8 @@ pub enum McpAuthState {
 // MCP Manager: manages multiple server connections
 // ---------------------------------------------------------------------------
 
+const MCP_CANCELLED_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Manages a pool of MCP server connections.
 pub struct McpManager {
     clients: HashMap<String, Arc<McpClient>>,
@@ -883,8 +926,11 @@ pub struct McpManager {
     /// Original (unexpanded) server configs — needed for OAuth initiation.
     server_configs: HashMap<String, McpServerConfig>,
     /// Active resource subscriptions: (server_name, uri) → change event sender.
+    /// Shared with notification tasks without keeping the manager itself alive.
     pub resource_subscriptions:
-        DashMap<(String, String), tokio::sync::mpsc::Sender<ResourceChangedEvent>>,
+        Arc<DashMap<(String, String), tokio::sync::mpsc::Sender<ResourceChangedEvent>>>,
+    /// Wakes notification tasks even when their idle streams produce no events.
+    shutdown_token: CancellationToken,
 }
 
 #[derive(Debug, Clone)]
@@ -902,7 +948,8 @@ impl McpManager {
             clients: HashMap::new(),
             failed_servers: Vec::new(),
             server_configs: HashMap::new(),
-            resource_subscriptions: DashMap::new(),
+            resource_subscriptions: Arc::new(DashMap::new()),
+            shutdown_token: CancellationToken::new(),
         }
     }
 
@@ -913,6 +960,16 @@ impl McpManager {
     /// - Continues on failure (does not bail out on first error).
     /// - Tracks failed servers in `failed_servers()`.
     pub async fn connect_all(configs: &[McpServerConfig]) -> Self {
+        Self::connect_all_with_cancellation(configs, CancellationToken::new()).await
+    }
+
+    /// Connect all servers, but bound cancellation cleanup even if a server
+    /// never answers `initialize`. RMCP force-kills a timed-out stdio child;
+    /// established clients are explicitly closed before this function returns.
+    pub async fn connect_all_with_cancellation(
+        configs: &[McpServerConfig],
+        shutdown: CancellationToken,
+    ) -> Self {
         let mut manager = Self::new();
         for config in configs {
             // Store original config for later OAuth use
@@ -925,11 +982,60 @@ impl McpManager {
             match expanded.server_type.as_str() {
                 "stdio" | "sse" | "http" => {
                     let auth_token = if matches!(expanded.server_type.as_str(), "sse" | "http") {
-                        manager.load_token(&expanded.name).await
+                        tokio::select! {
+                            token = manager.load_token(&expanded.name) => token,
+                            _ = shutdown.cancelled() => {
+                                // A refresh may be waiting on an unresponsive OAuth
+                                // server. Drop it immediately and close connections
+                                // established before this server instead of waiting.
+                                manager.shutdown().await;
+                                return manager;
+                            }
+                        }
                     } else {
                         None
                     };
-                    match client::McpClient::connect(&expanded, auth_token).await {
+                    let connect = client::McpClient::connect_with_cancellation(
+                        &expanded,
+                        auth_token,
+                        Some(shutdown.clone()),
+                    );
+                    tokio::pin!(connect);
+                    let result = tokio::select! {
+                        result = &mut connect => result,
+                        _ = shutdown.cancelled() => {
+                            match tokio::time::timeout(MCP_CANCELLED_CONNECT_TIMEOUT, &mut connect).await {
+                                Ok(result) => result,
+                                Err(_) => {
+                                    warn!(
+                                        server = %expanded.name,
+                                        "MCP connection cleanup exceeded its cancellation deadline"
+                                    );
+                                    // RMCP normally returns after its forced
+                                    // stdio cleanup. This outer bound prevents a
+                                    // broken transport from trapping shutdown.
+                                    manager.shutdown().await;
+                                    return manager;
+                                }
+                            }
+                        }
+                    };
+
+                    if shutdown.is_cancelled() {
+                        if let Ok(client) = result {
+                            if let Err(error) = client.shutdown().await {
+                                warn!(
+                                    server = %expanded.name,
+                                    %error,
+                                    "MCP connection cleanup after cancellation failed"
+                                );
+                            }
+                        }
+                        manager.shutdown().await;
+                        return manager;
+                    }
+
+                    match result {
                         Ok(client) => {
                             info!(
                                 server = %expanded.name,
@@ -1310,6 +1416,27 @@ impl McpManager {
     // Notification dispatch loop
     // -----------------------------------------------------------------------
 
+    /// Close every connection and wake all notification tasks.
+    ///
+    /// Stdio transports close stdin, allow the server a short grace period, then
+    /// kill and reap the child if it does not exit. Safe to call more than once.
+    pub async fn shutdown(&self) {
+        self.shutdown_token.cancel();
+        self.resource_subscriptions.clear();
+        let shutdowns = self.clients.values().map(|client| async move {
+            if let Err(error) = client.shutdown().await {
+                warn!(
+                    server = %client.server_name,
+                    %error,
+                    "MCP server shutdown did not complete cleanly"
+                );
+            }
+        });
+        // Every connection has its own grace period. Run them together so one
+        // stuck server cannot consume the deadline of every server after it.
+        futures::future::join_all(shutdowns).await;
+    }
+
     /// Spawn background Tokio tasks for each connected MCP client to handle
     /// server-initiated notifications via async streams. Uses native push notifications
     /// when available (e.g., WebSocket) and falls back to polling for other transports (e.g., stdio).
@@ -1318,46 +1445,60 @@ impl McpManager {
     /// `self.resource_subscriptions`.
     ///
     /// Call this once after constructing an `Arc<McpManager>` (e.g. immediately
-    /// after `McpManager::connect_all`).  Each notification handler task exits
-    /// when the transport closes or the manager is dropped.
+    /// after `McpManager::connect_all`). Each notification handler exits on
+    /// transport closure, manager drop, or [`McpManager::shutdown`], without
+    /// waiting for another notification to arrive.
     pub fn spawn_notification_poll_loop(self: Arc<Self>) {
         let clients = self.clients.clone();
+        let shutdown = self.shutdown_token.clone();
+        let resource_subscriptions = Arc::clone(&self.resource_subscriptions);
 
         // Spawn a task for each client to handle notifications via the stream
         for client in clients.values() {
             let client_clone = Arc::clone(client);
-            let manager_weak = Arc::downgrade(&self);
+            let resource_subscriptions = Arc::clone(&resource_subscriptions);
+            let shutdown = shutdown.clone();
 
             tokio::spawn(async move {
                 // Subscribe to the transport's notification stream
                 let mut notification_stream = client_clone.subscribe_to_notifications();
 
-                // Process notifications from the stream
-                while let Some(result) = notification_stream.next().await {
-                    // Check if the manager is still alive
-                    let manager = match manager_weak.upgrade() {
-                        Some(m) => m,
-                        None => break, // Manager dropped — shut down
-                    };
+                loop {
+                    tokio::select! {
+                        _ = shutdown.cancelled() => break,
+                        result = notification_stream.next() => {
+                            let Some(result) = result else { break };
 
-                    match result {
-                        Ok(raw) => {
-                            client_clone
-                                .process_notification(raw, &manager.resource_subscriptions)
-                                .await;
-                        }
-                        Err(e) => {
-                            debug!(
-                                server = %client_clone.server_name,
-                                error = %e,
-                                "notification stream error"
-                            );
-                            break;
+                            match result {
+                                Ok(raw) => {
+                                    client_clone
+                                        .process_notification(raw, &resource_subscriptions, &shutdown)
+                                        .await;
+                                }
+                                Err(e) => {
+                                    debug!(
+                                        server = %client_clone.server_name,
+                                        error = %e,
+                                        "notification stream error"
+                                    );
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
             });
         }
+    }
+}
+
+impl Drop for McpManager {
+    fn drop(&mut self) {
+        // A notification task owns its client, so dropping the manager alone
+        // used to leave idle stdio children alive forever. Wake those tasks now;
+        // dropping the last client then cancels RMCP and closes the transport.
+        self.shutdown_token.cancel();
+        self.resource_subscriptions.clear();
     }
 }
 
@@ -1419,6 +1560,8 @@ pub fn mcp_result_to_string(result: &CallToolResult) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static TOKEN_STORE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     // ---- env expansion -----------------------------------------------------
 
@@ -1605,6 +1748,353 @@ mod tests {
 
     // ---- McpManager --------------------------------------------------------
 
+    #[cfg(unix)]
+    fn idle_stdio_config(root: &std::path::Path) -> (McpServerConfig, std::path::PathBuf) {
+        let script = root.join("idle-mcp-server.sh");
+        let pid_path = root.join("idle-mcp-server.pid");
+        std::fs::write(
+            &script,
+            r#"# Waku MCP shutdown fixture: answer initialize, then idle on stdin.
+printf '%s\n' "$$" > "$1"
+while IFS= read -r line; do
+    case "$line" in
+        *'"method":"initialize"'*)
+            printf '%s\n' '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-11-25","capabilities":{},"serverInfo":{"name":"idle-fixture","version":"1.0"}}}'
+            ;;
+    esac
+done
+"#,
+        )
+        .unwrap();
+        let config = McpServerConfig {
+            name: "idle".into(),
+            command: Some("/bin/sh".into()),
+            args: vec![
+                script.to_string_lossy().into_owned(),
+                pid_path.to_string_lossy().into_owned(),
+            ],
+            env: HashMap::new(),
+            url: None,
+            server_type: "stdio".into(),
+            origin: Default::default(),
+        };
+        (config, pid_path)
+    }
+
+    #[cfg(unix)]
+    async fn idle_stdio_manager(root: &std::path::Path) -> (Arc<McpManager>, u32) {
+        let (config, pid_path) = idle_stdio_config(root);
+        let manager = Arc::new(McpManager::connect_all(&[config]).await);
+        assert!(
+            manager.failed_servers().is_empty(),
+            "fixture failed to connect: {:?}",
+            manager.failed_servers()
+        );
+        manager.clone().spawn_notification_poll_loop();
+        let pid = std::fs::read_to_string(pid_path)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(process_is_alive(pid));
+        (manager, pid)
+    }
+
+    #[cfg(unix)]
+    fn process_is_alive(pid: u32) -> bool {
+        std::process::Command::new("kill")
+            .arg("-0")
+            .arg(pid.to_string())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    }
+
+    #[cfg(unix)]
+    async fn assert_process_exits(pid: u32) {
+        tokio::time::timeout(std::time::Duration::from_secs(7), async {
+            while process_is_alive(pid) {
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("MCP stdio child remained alive after its session closed");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_manager_shutdown_kills_idle_stdio_child() {
+        let root = tempfile::tempdir().unwrap();
+        let (manager, pid) = idle_stdio_manager(root.path()).await;
+        manager.shutdown().await;
+        assert_process_exits(pid).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_manager_drop_wakes_idle_notification_tasks() {
+        let root = tempfile::tempdir().unwrap();
+        let (manager, pid) = idle_stdio_manager(root.path()).await;
+        drop(manager);
+        assert_process_exits(pid).await;
+    }
+
+    struct ShutdownProbe {
+        name: String,
+        started: Arc<std::sync::atomic::AtomicUsize>,
+        release: CancellationToken,
+    }
+
+    #[async_trait]
+    impl backend::McpClientBackend for ShutdownProbe {
+        fn kind(&self) -> backend::McpBackendKind {
+            backend::McpBackendKind::Rmcp
+        }
+
+        fn snapshot(&self) -> backend::McpClientSnapshot {
+            backend::McpClientSnapshot::empty(self.name.clone())
+        }
+
+        async fn list_tools(&self) -> anyhow::Result<Vec<McpTool>> {
+            unreachable!()
+        }
+
+        async fn call_tool(
+            &self,
+            _name: &str,
+            _arguments: Option<Value>,
+        ) -> anyhow::Result<CallToolResult> {
+            unreachable!()
+        }
+
+        async fn list_resources(&self) -> anyhow::Result<Vec<McpResource>> {
+            unreachable!()
+        }
+
+        async fn read_resource(&self, _uri: &str) -> anyhow::Result<ResourceContents> {
+            unreachable!()
+        }
+
+        async fn list_prompts(&self) -> anyhow::Result<Vec<McpPrompt>> {
+            unreachable!()
+        }
+
+        async fn get_prompt(
+            &self,
+            _name: &str,
+            _arguments: Option<HashMap<String, String>>,
+        ) -> anyhow::Result<GetPromptResult> {
+            unreachable!()
+        }
+
+        async fn subscribe_resource(&self, _uri: &str) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn unsubscribe_resource(&self, _uri: &str) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn shutdown(&self) -> anyhow::Result<()> {
+            self.started
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            self.release.cancelled().await;
+            Ok(())
+        }
+
+        fn subscribe_to_notifications(&self) -> BoxStream<'static, anyhow::Result<Value>> {
+            Box::pin(futures::stream::empty())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_manager_shutdown_closes_connections_concurrently() {
+        let started = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let release = CancellationToken::new();
+        let mut manager = McpManager::new();
+        for name in ["one", "two"] {
+            let backend = Arc::new(ShutdownProbe {
+                name: name.into(),
+                started: started.clone(),
+                release: release.clone(),
+            });
+            manager.clients.insert(
+                name.into(),
+                Arc::new(client::McpClient::from_test_backend(backend)),
+            );
+        }
+
+        let shutdown = tokio::spawn(async move { manager.shutdown().await });
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while started.load(std::sync::atomic::Ordering::Acquire) != 2 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("a blocked connection must not prevent the others from closing");
+        release.cancel();
+        tokio::time::timeout(std::time::Duration::from_secs(1), shutdown)
+            .await
+            .expect("concurrent shutdown did not finish")
+            .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_connect_cancellation_times_out_and_kills_inflight_child() {
+        let root = tempfile::tempdir().unwrap();
+        let script = root.path().join("stuck-mcp-server.sh");
+        let pid_path = root.path().join("stuck-mcp-server.pid");
+        let initialize_path = root.path().join("initialize-received");
+        std::fs::write(
+            &script,
+            r#"# Never answer initialize; cancellation must still kill this process.
+printf '%s\n' "$$" > "$1"
+while IFS= read -r line; do
+    case "$line" in
+        *'"method":"initialize"'*)
+            printf 'received\n' > "$2"
+            while :; do sleep 1; done
+            ;;
+    esac
+done
+"#,
+        )
+        .unwrap();
+        let config = McpServerConfig {
+            name: "stuck".into(),
+            command: Some("/bin/sh".into()),
+            args: vec![
+                script.to_string_lossy().into_owned(),
+                pid_path.to_string_lossy().into_owned(),
+                initialize_path.to_string_lossy().into_owned(),
+            ],
+            env: HashMap::new(),
+            url: None,
+            server_type: "stdio".into(),
+            origin: Default::default(),
+        };
+        let shutdown = CancellationToken::new();
+        let connect_shutdown = shutdown.clone();
+        let connect = tokio::spawn(async move {
+            McpManager::connect_all_with_cancellation(&[config], connect_shutdown).await
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !initialize_path.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("stdio fixture did not receive initialize");
+        let pid = std::fs::read_to_string(&pid_path)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        shutdown.cancel();
+
+        // Do not release initialize: the cancelled connection itself must meet
+        // its deadline and forcibly terminate the unresponsive child.
+        let manager = tokio::time::timeout(
+            MCP_CANCELLED_CONNECT_TIMEOUT + Duration::from_secs(1),
+            connect,
+        )
+        .await
+        .expect("cancelled connection did not finish within its cleanup deadline")
+        .unwrap();
+        assert!(manager.server_names().is_empty());
+        assert_process_exits(pid).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_connect_cancellation_interrupts_refresh_and_closes_established_stdio() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let _token_store_guard = TOKEN_STORE_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let previous_token_store = std::env::var_os("CLAURST_MCP_TOKENS_DIR");
+        std::env::set_var("CLAURST_MCP_TOKENS_DIR", root.path());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (refresh_started_tx, refresh_started_rx) = tokio::sync::oneshot::channel();
+        let oauth_server = tokio::spawn(async move {
+            let mut refresh_started_tx = Some(refresh_started_tx);
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0; 4096];
+                let read = socket.read(&mut request).await.unwrap();
+                if request[..read].starts_with(b"POST ") {
+                    // The refresh request has arrived, but its response never will.
+                    let _ = refresh_started_tx.take().unwrap().send(());
+                    std::future::pending::<()>().await;
+                }
+                socket
+                    .write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+
+        oauth::store_mcp_token(&oauth::McpToken {
+            access_token: "expired".into(),
+            refresh_token: Some("refresh".into()),
+            expires_at: Some(1),
+            scope: None,
+            server_name: "refresh".into(),
+        })
+        .unwrap();
+
+        let (stdio, pid_path) = idle_stdio_config(root.path());
+        let remote = McpServerConfig {
+            name: "refresh".into(),
+            command: None,
+            args: vec![],
+            env: HashMap::new(),
+            url: Some(format!("http://{}/mcp", address)),
+            server_type: "http".into(),
+            origin: Default::default(),
+        };
+        let shutdown = CancellationToken::new();
+        let connect_shutdown = shutdown.clone();
+        let connect = tokio::spawn(async move {
+            McpManager::connect_all_with_cancellation(&[stdio, remote], connect_shutdown).await
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), refresh_started_rx)
+            .await
+            .expect("OAuth refresh did not start")
+            .unwrap();
+        let pid = std::fs::read_to_string(pid_path)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(process_is_alive(pid));
+        shutdown.cancel();
+
+        let manager = tokio::time::timeout(Duration::from_secs(2), connect)
+            .await
+            .expect("cancellation kept waiting for the hung OAuth refresh")
+            .unwrap();
+        assert_process_exits(pid).await;
+        assert!(manager.failed_servers().is_empty());
+
+        oauth_server.abort();
+        match previous_token_store {
+            Some(value) => std::env::set_var("CLAURST_MCP_TOKENS_DIR", value),
+            None => std::env::remove_var("CLAURST_MCP_TOKENS_DIR"),
+        }
+    }
+
     #[test]
     fn test_manager_server_names_empty() {
         let mgr = McpManager::new();
@@ -1625,6 +2115,9 @@ mod tests {
 
     #[test]
     fn test_auth_state_uses_token_expiry_datetime() {
+        let _token_store_guard = TOKEN_STORE_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // Redirect the on-disk token store into a tempdir so this test never
         // touches (or requires a writable) ~/.claurst. Sandboxed builds run
         // with no HOME and disallow writes outside the build tree.
@@ -1859,7 +2352,7 @@ mod notification_tests {
         subscriptions.insert(("myserver".to_string(), "file:///foo.txt".to_string()), tx);
 
         client
-            .process_notification(notification, &subscriptions)
+            .process_notification(notification, &subscriptions, &CancellationToken::new())
             .await;
 
         let event = rx.try_recv().expect("expected a ResourceChangedEvent");
@@ -1885,7 +2378,7 @@ mod notification_tests {
             tokio::sync::mpsc::Sender<ResourceChangedEvent>,
         > = DashMap::new();
         client
-            .process_notification(notification, &subscriptions)
+            .process_notification(notification, &subscriptions, &CancellationToken::new())
             .await;
     }
 
@@ -1903,7 +2396,7 @@ mod notification_tests {
             tokio::sync::mpsc::Sender<ResourceChangedEvent>,
         > = DashMap::new();
         client
-            .process_notification(notification, &subscriptions)
+            .process_notification(notification, &subscriptions, &CancellationToken::new())
             .await;
     }
 
@@ -1931,8 +2424,12 @@ mod notification_tests {
         subscriptions.insert(("s1".to_string(), "file:///a.txt".to_string()), tx_a);
         subscriptions.insert(("s1".to_string(), "file:///b.txt".to_string()), tx_b);
 
-        client.process_notification(n1, &subscriptions).await;
-        client.process_notification(n2, &subscriptions).await;
+        client
+            .process_notification(n1, &subscriptions, &CancellationToken::new())
+            .await;
+        client
+            .process_notification(n2, &subscriptions, &CancellationToken::new())
+            .await;
 
         let ev_a = rx_a.try_recv().expect("expected event for a.txt");
         assert_eq!(ev_a.uri, "file:///a.txt");
@@ -1959,11 +2456,58 @@ mod notification_tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<ResourceChangedEvent>(4);
         subscriptions.insert(("myserver".to_string(), "file:///foo.txt".to_string()), tx);
 
-        client.process_notification(response, &subscriptions).await;
+        client
+            .process_notification(response, &subscriptions, &CancellationToken::new())
+            .await;
 
         assert!(
             rx.try_recv().is_err(),
             "RPC response must not be dispatched as a notification"
         );
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_cancels_backpressured_resource_notification() {
+        let manager = Arc::new(McpManager::new());
+        let client = Arc::new(client::McpClient::new_for_test("myserver"));
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        tx.send(ResourceChangedEvent {
+            server_name: "myserver".into(),
+            uri: "file:///already-queued.txt".into(),
+        })
+        .await
+        .unwrap();
+        manager
+            .resource_subscriptions
+            .insert(("myserver".into(), "file:///blocked.txt".into()), tx);
+
+        let task_manager = Arc::clone(&manager);
+        let task_client = Arc::clone(&client);
+        let task = tokio::spawn(async move {
+            task_client
+                .process_notification(
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": "notifications/resources/updated",
+                        "params": { "uri": "file:///blocked.txt" }
+                    }),
+                    &task_manager.resource_subscriptions,
+                    &task_manager.shutdown_token,
+                )
+                .await;
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !task.is_finished(),
+            "the full subscription channel should apply backpressure"
+        );
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), manager.shutdown())
+            .await
+            .expect("notification backpressure must not block MCP shutdown");
+        tokio::time::timeout(std::time::Duration::from_secs(1), task)
+            .await
+            .expect("shutdown must cancel the blocked notification send")
+            .unwrap();
     }
 }

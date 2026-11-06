@@ -493,10 +493,19 @@ pub fn serve(
                     .name("waku-daemon-connection".into())
                     .spawn(move || {
                         let _connection_permit = connection_permit;
-                        if let Err(error) =
-                            handle_connection(stream, &token, dispatcher, hub, shutdown, &options)
-                        {
-                            eprintln!("waku-daemon connection ended: {error:#}");
+                        let mut connection_id = Uuid::new_v4().simple().to_string()[..8].to_owned();
+                        let mut phase = "handshake";
+                        if let Err(error) = handle_connection(
+                            stream,
+                            &token,
+                            dispatcher,
+                            hub,
+                            shutdown,
+                            &options,
+                            &mut connection_id,
+                            &mut phase,
+                        ) {
+                            log_connection_error(&connection_id, phase, &error);
                         }
                     })
                     .context("could not start Waku daemon connection thread")?;
@@ -559,6 +568,8 @@ fn handle_connection(
     hub: Arc<Hub>,
     shutdown: Arc<AtomicBool>,
     options: &ServerOptions,
+    connection_id: &mut String,
+    phase: &mut &str,
 ) -> anyhow::Result<()> {
     // Accepted sockets can inherit the listener's nonblocking flag on some
     // platforms. The handshake is deliberately blocking; steady-state reads
@@ -582,9 +593,11 @@ fn handle_connection(
         ClientMessage::Hello {
             protocol_version,
             token,
+            client_id,
             resume_from,
             ..
         } if protocol_version == PROTOCOL_VERSION && token_matches(expected_token, &token) => {
+            *connection_id = client_id.simple().to_string()[..8].to_owned();
             resume_from
         }
         ClientMessage::Hello {
@@ -629,12 +642,15 @@ fn handle_connection(
     let (outgoing, outgoing_rx) = unbounded();
     let subscriber_id = hub.subscribe(&resume_from, outgoing.clone());
 
-    'connection: while !shutdown.load(Ordering::Acquire) {
+    while !shutdown.load(Ordering::Acquire) {
+        *phase = "write";
         while let Ok(message) = outgoing_rx.try_recv() {
-            if write_json(&mut socket, &message).is_err() {
-                break 'connection;
+            if let Err(error) = write_json(&mut socket, &message) {
+                hub.unsubscribe(subscriber_id);
+                return Err(error).context("Waku daemon WebSocket write failed");
             }
         }
+        *phase = "read";
         match socket.read() {
             Ok(Message::Text(text)) => match serde_json::from_str(text.as_ref()) {
                 Ok(ClientMessage::Request(request)) => {
@@ -670,6 +686,61 @@ fn handle_connection(
     }
     hub.unsubscribe(subscriber_id);
     Ok(())
+}
+
+/// Persist only transport metadata. In particular, do not format the error:
+/// handshake and HTTP errors can contain peer-supplied response text.
+fn log_connection_error(connection_id: &str, phase: &str, error: &anyhow::Error) {
+    let mut tungstenite_variant = "other";
+    let mut io_kind = None;
+    let mut raw_os_error = None;
+    let mut message_size = None;
+    let mut max_message_size = None;
+    for cause in error.chain() {
+        if let Some(error) = cause.downcast_ref::<tungstenite::Error>() {
+            tungstenite_variant = match error {
+                tungstenite::Error::ConnectionClosed => "connection_closed",
+                tungstenite::Error::AlreadyClosed => "already_closed",
+                tungstenite::Error::Io(_) => "io",
+                tungstenite::Error::Tls(_) => "tls",
+                tungstenite::Error::Capacity(
+                    tungstenite::error::CapacityError::MessageTooLong { .. },
+                ) => "capacity.message_too_long",
+                tungstenite::Error::Capacity(_) => "capacity",
+                tungstenite::Error::Protocol(_) => "protocol",
+                tungstenite::Error::WriteBufferFull(_) => "write_buffer_full",
+                tungstenite::Error::Utf8(_) => "utf8",
+                tungstenite::Error::AttackAttempt => "attack_attempt",
+                tungstenite::Error::Url(_) => "url",
+                tungstenite::Error::Http(_) => "http",
+                tungstenite::Error::HttpFormat(_) => "http_format",
+            };
+            if let tungstenite::Error::Capacity(
+                tungstenite::error::CapacityError::MessageTooLong { size, max_size },
+            ) = error
+            {
+                message_size = Some(*size as u64);
+                max_message_size = Some(*max_size as u64);
+            }
+        }
+        if let Some(error) = cause.downcast_ref::<io::Error>() {
+            io_kind = Some(format!("{:?}", error.kind()));
+            raw_os_error = error.raw_os_error();
+        }
+    }
+    tracing::warn!(
+        target: "daemon_connection",
+        connection_id,
+        phase,
+        tungstenite_variant,
+        io_kind = io_kind.as_deref(),
+        raw_os_error,
+        message_size,
+        max_message_size,
+        daemon_pid = std::process::id(),
+        daemon_version = env!("CARGO_PKG_VERSION"),
+        "daemon connection terminated"
+    );
 }
 
 fn validate_handshake(

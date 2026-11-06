@@ -1206,6 +1206,16 @@ trajectory.settings_title:
   en: "Trajectory"
 trajectory.settings_detail:
   en: "Record every model request and tool call with its timing, usage and payload, next to the task's transcript. Shown in the right panel's Trajectory."
+daemon.diagnostics.export_title:
+  en: "Daemon reconnect diagnostics"
+daemon.diagnostics.export:
+  en: "Export reconnect logs"
+daemon.diagnostics.export_description:
+  en: "Export recent connection errors and reconnect history to investigate daemon reconnects. Includes timestamps, connection IDs, OS errors, versions and PIDs; excludes auth tokens, API keys and message bodies."
+daemon.diagnostics.exported:
+  en: "Diagnostics exported to %{path}"
+daemon.diagnostics.export_failed:
+  en: "Could not export diagnostics: %{error}"
 trajectory.diagnostics.toggle:
   en: "Diagnostic aid"
 trajectory.diagnostics.toggle_count:
@@ -2279,6 +2289,8 @@ errors.project_not_found:
   en: Project not found
 errors.prepare_task_project_not_found:
   en: "Could not prepare the task: project not found"
+errors.pasted_image_too_large:
+  en: "the pasted image exceeds the %{limit} MiB attachment limit"
 errors.store_pasted_image:
   en: "Could not attach the pasted image: %{error}"
 errors.create_worktree:
@@ -3292,6 +3304,20 @@ cloud.group_title:
   en: "Model group"
 cloud.group_detail:
   en: "Which pool your requests route through. Switching writes each CLI's own configuration files immediately (~/.claude/settings.json, ~/.codex, ~/.grok) — your originals are backed up and restored on sign-out. Running sessions keep their current route."
+cloud.group_category_standard:
+  en: "Standard"
+cloud.group_category_welfare:
+  en: "Welfare"
+cloud.welfare_short:
+  en: "Limited · Variable"
+cloud.welfare_confirm_title:
+  en: "Use a welfare group?"
+cloud.welfare_confirm_body:
+  en: "This is a limited-time welfare line. Rates and availability may change, and the line may end. For daily coding, standard groups are recommended."
+cloud.welfare_confirm_body_busy:
+  en: "A task is running right now. Switching to a limited-time welfare line may be less stable. Switch anyway?"
+cloud.welfare_confirm_action:
+  en: "Use welfare anyway"
 cloud.group_default:
   en: "Account default"
 cloud.group_active:

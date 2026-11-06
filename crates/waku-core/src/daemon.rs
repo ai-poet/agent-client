@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::{
     Backend, Command, EventSink, Request, ResponsePayload, WireDriverEvent, WorkspaceOperation,
@@ -17,7 +18,7 @@ use uuid::Uuid;
 
 use crate::attachments::AttachmentStore;
 use crate::computer_use::{ComputerTarget, ComputerUsePhase, ComputerUseState};
-use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
+use crate::driver::{self, DriverCleanup, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
     ActivityKind, AgentSession, Checkpoint, CheckpointStatus, DriverEvent, PermissionOption,
     Project, ProviderKind, ProviderResumeCursor, SessionStatus,
@@ -26,8 +27,53 @@ use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
 use waku_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
 
+const DRIVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Start cleanup, then release the provider driver immediately. Only an
+/// independent awaitable credential is retained: non-Native providers rely on
+/// `Drop` to terminate their CLI, and Native's MCP tasks outlive that drop.
+fn retire_session(
+    retired_sessions: &Mutex<Vec<DriverCleanup>>,
+    removed: Option<(Uuid, DriverHandle)>,
+) {
+    if let Some((_, driver)) = removed {
+        driver.shutdown();
+        let cleanup = driver.cleanup_handle();
+        drop(driver);
+        if let Some(cleanup) = cleanup {
+            retired_sessions.lock().push(cleanup);
+        }
+    }
+}
+
+/// Start every active driver's cleanup and release all provider drivers before
+/// waiting. Active and retired MCP credentials share one bounded deadline.
+fn shutdown_sessions(
+    sessions: HashMap<Uuid, (Uuid, DriverHandle)>,
+    mut retired_sessions: Vec<DriverCleanup>,
+) {
+    let drivers: Vec<DriverHandle> = sessions.into_values().map(|(_, driver)| driver).collect();
+    for driver in &drivers {
+        driver.shutdown();
+        if let Some(cleanup) = driver.cleanup_handle() {
+            retired_sessions.push(cleanup);
+        }
+    }
+    drop(drivers);
+    let deadline = Instant::now() + DRIVER_SHUTDOWN_TIMEOUT;
+    for cleanup in &retired_sessions {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if !cleanup.wait(remaining) {
+            tracing::warn!("daemon: driver cleanup did not finish before shutdown deadline");
+        }
+    }
+}
+
 pub struct WakuBackend {
     sessions: Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>,
+    /// Awaitable MCP cleanup for closed, removed, replaced, or rewound drivers.
+    /// Provider drivers themselves are dropped as soon as they are retired.
+    retired_sessions: Mutex<Vec<DriverCleanup>>,
     terminals: Mutex<HashMap<Uuid, (Uuid, crate::terminal::DaemonTerminal)>>,
     settings: DaemonSettingsStore,
     task_store: StateStore,
@@ -62,6 +108,7 @@ impl WakuBackend {
             .to_owned();
         Ok(Self {
             sessions: Mutex::new(HashMap::new()),
+            retired_sessions: Mutex::new(Vec::new()),
             terminals: Mutex::new(HashMap::new()),
             settings,
             task_store,
@@ -417,7 +464,7 @@ impl Backend for WakuBackend {
                     self.task_store.save(&mut state)?;
                 }
                 let removed = self.sessions.lock().remove(&session_id);
-                drop(removed);
+                retire_session(&self.retired_sessions, removed);
                 Ok(ResponsePayload::Ack)
             }
             Command::HydrateSession { session_id } => {
@@ -726,7 +773,7 @@ impl Backend for WakuBackend {
             }
             Command::Start { options } => {
                 let previous = self.sessions.lock().remove(&session_id);
-                drop(previous);
+                retire_session(&self.retired_sessions, previous);
                 let provider = decode_enum(&options.provider)?;
                 let options = DriverStartOptions {
                     binary: options.binary,
@@ -767,9 +814,11 @@ impl Backend for WakuBackend {
                         }
                     })
                     .context("could not start daemon event forwarding thread")?;
-                self.sessions
+                let replaced = self
+                    .sessions
                     .lock()
                     .insert(session_id, (runtime_id, handle));
+                retire_session(&self.retired_sessions, replaced);
                 Ok(ResponsePayload::Started { supports_steer })
             }
             Command::CloseSession => {
@@ -781,7 +830,7 @@ impl Backend for WakuBackend {
                         .then(|| sessions.remove(&session_id))
                         .flatten()
                 };
-                drop(removed);
+                retire_session(&self.retired_sessions, removed);
                 Ok(ResponsePayload::Ack)
             }
             command => {
@@ -804,7 +853,8 @@ impl Backend for WakuBackend {
 
     fn shutdown(&self) {
         let sessions = std::mem::take(&mut *self.sessions.lock());
-        drop(sessions);
+        let retired_sessions = std::mem::take(&mut *self.retired_sessions.lock());
+        shutdown_sessions(sessions, retired_sessions);
         let terminals = std::mem::take(&mut *self.terminals.lock());
         drop(terminals);
     }
@@ -1082,7 +1132,7 @@ impl WakuBackend {
         // prompt. Dropping a resident source driver also prevents its late
         // events from racing the rewound transcript.
         let removed = self.sessions.lock().remove(&session_id);
-        drop(removed);
+        retire_session(&self.retired_sessions, removed);
 
         let mut rewound = source.clone();
         if !message_ids.is_empty() {
@@ -2075,6 +2125,131 @@ struct TurnFinishedWire {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn daemon_shutdown_awaits_cleanup_credentials_after_dropping_drivers() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        #[derive(Default)]
+        struct CleanupState {
+            shutdown: AtomicBool,
+            cleaned: AtomicBool,
+            dropped: AtomicBool,
+        }
+
+        struct CleanupDriver {
+            state: Arc<CleanupState>,
+            cleanup: DriverCleanup,
+        }
+
+        impl CleanupDriver {
+            fn new() -> (Self, Arc<CleanupState>) {
+                let state = Arc::new(CleanupState::default());
+                let cleanup_state = state.clone();
+                let cleanup = DriverCleanup::new(move |_timeout| {
+                    assert!(cleanup_state.shutdown.load(Ordering::Acquire));
+                    std::thread::sleep(Duration::from_millis(25));
+                    cleanup_state.cleaned.store(true, Ordering::Release);
+                    true
+                });
+                (
+                    Self {
+                        state: state.clone(),
+                        cleanup,
+                    },
+                    state,
+                )
+            }
+        }
+
+        impl Drop for CleanupDriver {
+            fn drop(&mut self) {
+                self.state.dropped.store(true, Ordering::Release);
+            }
+        }
+
+        impl crate::driver::DriverControl for CleanupDriver {
+            fn shutdown(&self) {
+                self.state.shutdown.store(true, Ordering::Release);
+            }
+
+            fn cleanup_handle(&self) -> Option<DriverCleanup> {
+                Some(self.cleanup.clone())
+            }
+
+            fn prompt(&self, _prompt: String) {}
+            fn cancel(&self) {}
+            fn respond(&self, _request_id: String, _option_id: String) {}
+            fn rollback(&self, _turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
+                Ok(None)
+            }
+        }
+
+        let (active, active_state) = CleanupDriver::new();
+        let mut sessions = HashMap::new();
+        sessions.insert(
+            Uuid::new_v4(),
+            (Uuid::new_v4(), DriverHandle::from_control(Arc::new(active))),
+        );
+
+        let (retired_driver, retired_state) = CleanupDriver::new();
+        let retired = Mutex::new(Vec::new());
+        retire_session(
+            &retired,
+            Some((
+                Uuid::new_v4(),
+                DriverHandle::from_control(Arc::new(retired_driver)),
+            )),
+        );
+        assert!(retired_state.shutdown.load(Ordering::Acquire));
+        assert!(
+            retired_state.dropped.load(Ordering::Acquire),
+            "retirement must not retain the provider driver"
+        );
+        assert_eq!(retired.lock().len(), 1);
+
+        shutdown_sessions(sessions, retired.into_inner());
+
+        assert!(active_state.dropped.load(Ordering::Acquire));
+        assert!(active_state.cleaned.load(Ordering::Acquire));
+        assert!(retired_state.cleaned.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn retiring_drop_only_driver_releases_it_without_a_cleanup_credential() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct DropOnlyDriver(Arc<AtomicBool>);
+
+        impl Drop for DropOnlyDriver {
+            fn drop(&mut self) {
+                // Non-Native provider CLIs send their shutdown from Drop.
+                self.0.store(true, Ordering::Release);
+            }
+        }
+
+        impl crate::driver::DriverControl for DropOnlyDriver {
+            fn prompt(&self, _prompt: String) {}
+            fn cancel(&self) {}
+            fn respond(&self, _request_id: String, _option_id: String) {}
+            fn rollback(&self, _turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
+                Ok(None)
+            }
+        }
+
+        let dropped = Arc::new(AtomicBool::new(false));
+        let retired = Mutex::new(Vec::new());
+        retire_session(
+            &retired,
+            Some((
+                Uuid::new_v4(),
+                DriverHandle::from_control(Arc::new(DropOnlyDriver(dropped.clone()))),
+            )),
+        );
+
+        assert!(dropped.load(Ordering::Acquire));
+        assert!(retired.lock().is_empty());
+    }
 
     #[test]
     fn stale_runtime_projection_keeps_newer_transcript_cursor() {

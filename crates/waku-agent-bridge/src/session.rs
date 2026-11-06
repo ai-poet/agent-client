@@ -29,6 +29,7 @@ use claurst_query::{
 use claurst_tools::{Tool, ToolContext, UserQuestionEvent};
 use parking_lot::Mutex;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::background;
@@ -62,6 +63,57 @@ pub struct AgentSession {
 }
 
 type ToolSet = Arc<Vec<Box<dyn Tool>>>;
+
+/// A session-independent credential for awaiting MCP connection and shutdown
+/// tasks. Holding this does not retain the conversation or its provider driver.
+#[derive(Clone)]
+pub struct AgentSessionCleanup {
+    inner: Arc<McpCleanup>,
+}
+
+impl AgentSessionCleanup {
+    /// Wait on the synchronous daemon thread, never on a runtime worker.
+    pub fn wait(&self, timeout: Duration) -> bool {
+        self.inner.wait(timeout)
+    }
+}
+
+/// MCP connection and shutdown tasks whose completion daemon exit must await.
+/// Tracking the connection task also covers a shutdown that wins the race before
+/// the manager is installed: that task performs the late cleanup itself.
+#[derive(Default)]
+struct McpCleanup {
+    tasks: Mutex<Vec<JoinHandle<()>>>,
+}
+
+impl McpCleanup {
+    fn track(&self, task: JoinHandle<()>) {
+        self.tasks.lock().push(task);
+    }
+
+    /// Wait on the synchronous daemon thread, never on a runtime worker.
+    /// A timeout detaches any remaining tasks so process exit stays bounded.
+    fn wait(&self, timeout: Duration) -> bool {
+        let tasks = std::mem::take(&mut *self.tasks.lock());
+        if tasks.is_empty() {
+            return true;
+        }
+        let Ok(rt) = runtime::shared() else {
+            return false;
+        };
+        rt.block_on(async {
+            tokio::time::timeout(timeout, async {
+                for task in tasks {
+                    if let Err(error) = task.await {
+                        tracing::warn!(%error, "agent: MCP cleanup task failed");
+                    }
+                }
+            })
+            .await
+            .is_ok()
+        })
+    }
+}
 
 /// Engine tools that exist but do nothing in this process. Their runners —
 /// the team swarm, the inbox reader, the cron scheduler, remote triggers —
@@ -128,11 +180,16 @@ struct Inner {
     /// starts before then simply runs without MCP rather than waiting for
     /// servers that may never come up.
     mcp: Mutex<Option<Arc<claurst_mcp::McpManager>>>,
+    /// Background connection and explicit shutdown work awaited at daemon exit.
+    mcp_cleanup: Arc<McpCleanup>,
     config: Mutex<Config>,
     query: Mutex<QueryConfig>,
     options: Mutex<AgentStartOptions>,
     history: Mutex<Vec<Message>>,
     turn: Mutex<Option<Turn>>,
+    /// Cancelled as soon as the owning driver closes, before the last `Arc`
+    /// disappears, so background connection and turn tasks cannot retain MCP.
+    shutdown: CancellationToken,
     turn_counter: Arc<AtomicUsize>,
     /// `AskUserQuestion` calls waiting on the user, by request id.
     questions: Mutex<HashMap<String, oneshot::Sender<String>>>,
@@ -258,11 +315,13 @@ impl AgentSession {
             bridge,
             settings,
             mcp: Mutex::new(None),
+            mcp_cleanup: Arc::new(McpCleanup::default()),
             config: Mutex::new(config),
             query: Mutex::new(query),
             history: Mutex::new(history::deserialize(&options.history)),
             options: Mutex::new(options),
             turn: Mutex::new(None),
+            shutdown: CancellationToken::new(),
             turn_counter: Arc::new(AtomicUsize::new(0)),
             questions: Mutex::new(HashMap::new()),
             subagents,
@@ -279,6 +338,26 @@ impl AgentSession {
             .attach(Box::new(team_seam::Port(Arc::downgrade(&inner))));
         connect_mcp_in_background(&inner);
         Ok(Self { inner })
+    }
+
+    /// Stop this conversation and release its external connections immediately.
+    /// Driver removal calls this explicitly; `Inner::drop` is the fallback for
+    /// every other owner.
+    pub fn shutdown(&self) {
+        self.inner.shutdown();
+    }
+
+    /// Wait for MCP connection races and shutdown work after [`Self::shutdown`].
+    /// Returns `false` when the runtime is unavailable or the deadline expires.
+    pub fn wait_for_shutdown(&self, timeout: Duration) -> bool {
+        self.inner.mcp_cleanup.wait(timeout)
+    }
+
+    /// Retain only the awaitable MCP cleanup state, not the session itself.
+    pub fn cleanup_handle(&self) -> AgentSessionCleanup {
+        AgentSessionCleanup {
+            inner: self.inner.mcp_cleanup.clone(),
+        }
     }
 
     /// Whether a turn is currently running.
@@ -623,8 +702,12 @@ impl AgentSession {
     }
 }
 
-impl Drop for Inner {
-    fn drop(&mut self) {
+impl Inner {
+    fn shutdown(&self) {
+        if self.shutdown.is_cancelled() {
+            return;
+        }
+        self.shutdown.cancel();
         if let Some(turn) = self.turn.lock().as_ref() {
             turn.cancel.cancel();
         }
@@ -633,6 +716,22 @@ impl Drop for Inner {
         self.questions.lock().clear();
         self.subagents.cancel_all();
         self.team.shutdown();
+
+        // Do not wait for a running turn's `Arc<Inner>` to be released. Its
+        // cloned tools can retain the manager, but a closed manager cannot
+        // retain live MCP services or stdio children.
+        if let Some(manager) = self.mcp.lock().clone() {
+            match runtime::shared() {
+                Ok(rt) => {
+                    let task = rt.spawn(async move { manager.shutdown().await });
+                    self.mcp_cleanup.track(task);
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "agent: could not schedule MCP shutdown");
+                }
+            }
+        }
+
         // Fork (auto-memory): what was said since the last pass gets one.
         self.memory
             .on_session_end(|| crate::memory::ConsolidationRoute {
@@ -640,6 +739,12 @@ impl Drop for Inner {
                 query: self.query.lock().clone(),
                 config: self.config.lock().clone(),
             });
+    }
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -791,9 +896,19 @@ fn connect_mcp_in_background(inner: &Arc<Inner>) {
         return;
     }
     let Ok(rt) = runtime::shared() else { return };
-    let inner = inner.clone();
-    rt.spawn(async move {
-        let manager = Arc::new(claurst_mcp::McpManager::connect_all(&servers).await);
+    let shutdown = inner.shutdown.clone();
+    let task_inner = inner.clone();
+    let task = rt.spawn(async move {
+        let inner = task_inner;
+        // Cancellation still drives an in-flight connection to a terminal state
+        // and closes every established transport before this tracked task exits.
+        let manager = Arc::new(
+            claurst_mcp::McpManager::connect_all_with_cancellation(&servers, shutdown.clone())
+                .await,
+        );
+        if shutdown.is_cancelled() {
+            return;
+        }
         manager.clone().spawn_notification_poll_loop();
         // A server that did not connect costs its own tools and nothing
         // more, so it is logged rather than raised: `AgentEvent::Error`
@@ -813,8 +928,16 @@ fn connect_mcp_in_background(inner: &Arc<Inner>) {
             Some(&inner.team),
             Some(&inner.memory),
         );
-        *inner.mcp.lock() = Some(manager);
+        *inner.mcp.lock() = Some(manager.clone());
+
+        // Installation and shutdown can race on two threads. If shutdown won
+        // before installation, this task closes the manager itself; otherwise
+        // `Inner::shutdown` saw the installed manager and closes it there.
+        if shutdown.is_cancelled() {
+            manager.shutdown().await;
+        }
     });
+    inner.mcp_cleanup.track(task);
 }
 
 fn push_steer(inner: &Arc<Inner>, turn: &mut Turn, text: String) {
@@ -1747,6 +1870,37 @@ fn describe(outcome: QueryOutcome, produced_output: bool, route: &Route) -> (boo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_cleanup_waits_for_tracked_tasks() {
+        let cleanup = McpCleanup::default();
+        let rt = runtime::shared().unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        cleanup.track(rt.spawn(async move {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            done_tx.send(()).unwrap();
+        }));
+
+        assert!(cleanup.wait(Duration::from_secs(1)));
+        done_rx
+            .try_recv()
+            .expect("cleanup returned before its tracked task finished");
+        assert!(cleanup.wait(Duration::ZERO));
+    }
+
+    #[test]
+    fn mcp_cleanup_wait_has_a_bounded_deadline() {
+        let cleanup = McpCleanup::default();
+        let rt = runtime::shared().unwrap();
+        let stop = CancellationToken::new();
+        let task_stop = stop.clone();
+        cleanup.track(rt.spawn(async move {
+            task_stop.cancelled().await;
+        }));
+
+        assert!(!cleanup.wait(Duration::from_millis(10)));
+        stop.cancel();
+    }
 
     fn route() -> Route {
         Route {

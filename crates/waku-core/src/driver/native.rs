@@ -38,7 +38,8 @@ use super::subagent::{ChildCall, SubagentFeed};
 #[path = "memory_titles.rs"]
 mod memory_titles;
 use crate::driver::{
-    DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
+    DriverCleanup, DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions,
+    SessionOptions,
 };
 use crate::model::{
     ActivityKind, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey,
@@ -228,7 +229,25 @@ impl NativeDriver {
     }
 }
 
+impl Drop for NativeDriver {
+    fn drop(&mut self) {
+        // RemoveSession, CloseSession, replacement, rewind and daemon shutdown
+        // all release this handle. Do not rely on the last background task
+        // dropping its `Arc`: close this session's MCP children immediately.
+        self.session.shutdown();
+    }
+}
+
 impl DriverControl for NativeDriver {
+    fn shutdown(&self) {
+        self.session.shutdown();
+    }
+
+    fn cleanup_handle(&self) -> Option<DriverCleanup> {
+        let cleanup = self.session.cleanup_handle();
+        Some(DriverCleanup::new(move |timeout| cleanup.wait(timeout)))
+    }
+
     fn prompt(&self, prompt: String) {
         if let Some(instructions) = compact_command(&prompt) {
             self.session.compact(instructions);

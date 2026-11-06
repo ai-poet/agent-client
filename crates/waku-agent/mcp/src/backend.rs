@@ -76,6 +76,9 @@ pub trait McpClientBackend: Send + Sync {
 
     async fn unsubscribe_resource(&self, uri: &str) -> anyhow::Result<()>;
 
+    /// Close the protocol service and its transport, including any child process.
+    async fn shutdown(&self) -> anyhow::Result<()>;
+
     /// Subscribe to raw notification payloads emitted by the backend.
     fn subscribe_to_notifications(&self) -> BoxStream<'static, anyhow::Result<Value>>;
 }

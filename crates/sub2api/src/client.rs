@@ -82,6 +82,10 @@ pub struct Group {
     pub rate_multiplier: f64,
     #[serde(default)]
     pub status: String,
+    /// Fork: `standard` (long-term, stable) or `welfare` (limited-time promo).
+    /// Older servers omit the field; empty means standard.
+    #[serde(default)]
+    pub category: String,
     /// `standard` or `subscription`. A subscription group is reachable only
     /// while the user holds an active subscription to it, and bills against
     /// that subscription's limits instead of the balance.
@@ -99,6 +103,12 @@ pub struct Group {
 impl Group {
     pub fn is_subscription(&self) -> bool {
         self.subscription_type.eq_ignore_ascii_case("subscription")
+    }
+
+    /// Fork: welfare lanes are limited-time promos whose rates and
+    /// availability may change; everything else is a standard lane.
+    pub fn is_welfare(&self) -> bool {
+        self.category.eq_ignore_ascii_case("welfare")
     }
 }
 

@@ -166,8 +166,8 @@ impl Waku {
                 // One submenu per CLI: pick the group its traffic routes
                 // through, or drop back to the account default.
                 for (platform, bound) in &bindings {
-                    // (id, plain name, menu label with rate + 24h availability).
-                    let platform_groups: Vec<(i64, String, String)> = groups
+                    // (id, plain name, menu label with rate + 24h availability, welfare flag).
+                    let platform_groups: Vec<(i64, String, String, bool)> = groups
                         .iter()
                         .filter(|group| lanes.get(&group.id) == Some(platform))
                         .map(|group| {
@@ -182,7 +182,13 @@ impl Waku {
                             } else {
                                 format!("{name}   {suffix}")
                             };
-                            (group.id, name, label)
+                            // Fork: welfare rows carry the same 限时 · 波动 badge as the web.
+                            let label = if group.is_welfare() {
+                                format!("{}   {}", label, tr!("cloud.welfare_short"))
+                            } else {
+                                label
+                            };
+                            (group.id, name, label, group.is_welfare())
                         })
                         .collect();
                     if platform_groups.is_empty() {
@@ -193,7 +199,7 @@ impl Waku {
                             platform_groups
                                 .iter()
                                 .find(|(group_id, ..)| *group_id == id)
-                                .map(|(_, name, _)| name.clone())
+                                .map(|(_, name, ..)| name.clone())
                         })
                         .unwrap_or_else(|| tr!("cloud.group_default"));
                     let bound = *bound;
@@ -204,19 +210,44 @@ impl Waku {
                         current,
                         move |_| {
                             let mut entries = Vec::new();
-                            for (group_id, _, label) in &platform_groups {
-                                let entry_platform = submenu_platform.clone();
-                                let entry_weak = submenu_weak.clone();
-                                let group_id = *group_id;
-                                entries.push(
-                                    MenuItem::new(label.clone(), move |_, cx| {
-                                        let platform = entry_platform.clone();
-                                        let _ = entry_weak.update(cx, |this, cx| {
-                                            this.select_cloud_group(platform, Some(group_id), cx);
-                                        });
-                                    })
-                                    .selected(bound == Some(group_id)),
-                                );
+                            // Fork: standard lanes first, welfare lanes in their own
+                            // section — a promo line is never the default path.
+                            let has_standard = platform_groups.iter().any(|(.., welfare)| !welfare);
+                            let has_welfare = platform_groups.iter().any(|(.., welfare)| *welfare);
+                            for section_welfare in [false, true] {
+                                if (section_welfare && !has_welfare) || (!section_welfare && !has_standard) {
+                                    continue;
+                                }
+                                entries.push(MenuItem::Header(SharedString::from(
+                                    if section_welfare {
+                                        tr!("cloud.group_category_welfare")
+                                    } else {
+                                        tr!("cloud.group_category_standard")
+                                    },
+                                )));
+                                for (group_id, _, label, welfare) in &platform_groups {
+                                    if *welfare != section_welfare {
+                                        continue;
+                                    }
+                                    let entry_platform = submenu_platform.clone();
+                                    let entry_weak = submenu_weak.clone();
+                                    let group_id = *group_id;
+                                    let welfare = *welfare;
+                                    entries.push(
+                                        MenuItem::new(label.clone(), move |_, cx| {
+                                            let platform = entry_platform.clone();
+                                            let _ = entry_weak.update(cx, |this, cx| {
+                                                if welfare {
+                                                    // Fork: switching to a welfare lane asks first.
+                                                    this.confirm_welfare_group_switch(platform, Some(group_id), cx);
+                                                } else {
+                                                    this.select_cloud_group(platform, Some(group_id), cx);
+                                                }
+                                            });
+                                        })
+                                        .selected(bound == Some(group_id)),
+                                    );
+                                }
                             }
                             entries
                         },
