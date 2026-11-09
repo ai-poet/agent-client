@@ -149,6 +149,23 @@ pub async fn run(
         let Some(events) = &events else { return };
         match event {
             EngineEvent::Message(message) => forward_message(events, message),
+            EngineEvent::Retry(notice) => {
+                use agent_core_api::retry_policy::RetryReason;
+                let reason = match notice.kind {
+                    core::ErrorKind::RateLimited => RetryReason::RateLimited,
+                    core::ErrorKind::Network => RetryReason::Network,
+                    _ => RetryReason::ServerError,
+                };
+                let _ = events.send(QueryEvent::Retry(crate::RetryNotice {
+                    attempt: notice.attempt,
+                    max_attempts: notice.max_attempts,
+                    delay_ms: notice.delay.as_millis() as u64,
+                    reason,
+                    discarded_output: false,
+                    detail: notice.message,
+                    request_id: None,
+                }));
+            }
             EngineEvent::Compaction {
                 phase,
                 automatic,
