@@ -375,6 +375,7 @@ dependencies = [
  "once_cell",
  "parking_lot",
  "rmcp 3.5.1",
+ "sailry-protocol",
  "serde",
  "serde_json",
  "tempfile",

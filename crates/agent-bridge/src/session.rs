@@ -1293,10 +1293,10 @@ async fn run_turn(
         weight_before,
     ));
 
-    let outcome = agent_core_query::run_query_loop(
+    let outcome = agent_core_query::run_agent_core_loop(
         client.as_ref(),
         &mut messages,
-        tools.as_slice(),
+        tools,
         &tool_ctx,
         &query,
         inner.cost_tracker.clone(),

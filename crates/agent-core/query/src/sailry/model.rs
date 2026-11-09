@@ -424,7 +424,8 @@ impl Stream for ConvertStream {
                 }
                 StreamEvent::MessageStop => {
                     self.done = true;
-                    self.pending.push_back(Ok(self.finish()));
+                    let finish = self.finish();
+                    self.pending.push_back(Ok(finish));
                 }
                 StreamEvent::Error {
                     error_type,

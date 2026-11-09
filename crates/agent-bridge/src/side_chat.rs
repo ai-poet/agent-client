@@ -107,10 +107,10 @@ pub fn ask_streaming(
 
     rt.block_on(async {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let run = agent_core_query::run_query_loop(
+        let run = agent_core_query::run_agent_core_loop(
             client.as_ref(),
             &mut messages,
-            &tools,
+            tools,
             &tool_ctx,
             &query,
             cost_tracker,

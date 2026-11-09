@@ -121,10 +121,10 @@ pub(crate) async fn ask_once(
 
     let tools: Vec<Box<dyn Tool>> = Vec::new();
     let mut messages = vec![Message::user(prompt)];
-    let outcome = agent_core_query::run_query_loop(
+    let outcome = agent_core_query::run_agent_core_loop(
         client,
         &mut messages,
-        &tools,
+        tools,
         &tool_ctx,
         query,
         cost_tracker,

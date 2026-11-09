@@ -672,10 +672,10 @@ impl ChildRun {
         let (tx, rx) = mpsc::unbounded_channel::<QueryEvent>();
         let forwarder = tokio::spawn(forward_child(self.host.clone(), self.parent_id.clone(), rx));
         let mut messages = vec![Message::user(self.prompt)];
-        let outcome = agent_core_query::run_query_loop(
+        let outcome = agent_core_query::run_agent_core_loop(
             self.client.as_ref(),
             &mut messages,
-            &self.tools,
+            self.tools,
             &self.ctx,
             &self.query,
             self.ctx.cost_tracker.clone(),

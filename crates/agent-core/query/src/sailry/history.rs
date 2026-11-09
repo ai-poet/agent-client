@@ -125,7 +125,9 @@ fn to_engine_content(content: &ContentBlock) -> engine::Content {
                                     .unwrap_or_else(|| "image/png".into()),
                             ))
                         }),
-                        other => Some(rmcp::model::ContentBlock::text(other.to_string())),
+                        other => Some(rmcp::model::ContentBlock::text(
+                            serde_json::to_string(other).unwrap_or_default(),
+                        )),
                     })
                     .collect(),
             };
@@ -169,7 +171,7 @@ fn to_engine_content(content: &ContentBlock) -> engine::Content {
                 .unwrap_or_default(),
         },
         other => engine::Content::Text {
-            text: other.to_string(),
+            text: serde_json::to_string(other).unwrap_or_default(),
         },
     }
 }

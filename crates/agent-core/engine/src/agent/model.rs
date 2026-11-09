@@ -17,6 +17,6 @@ use sailry_protocol::{SessionConfig, conversation::Provider};
 use std::sync::Arc;
 
 pub use types::{
-    Config, Content, Error, ErrorKind, Event, Finish, Message, Model, ModelStream, Request, Role,
-    Tool, ToolCall, Usage,
+    Config, Content, Error, ErrorKind, Event, Finish, Image, Message, Metadata, Model, ModelStream,
+    Request, Role, Tool, ToolCall, ToolResult, Usage,
 };

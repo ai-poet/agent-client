@@ -196,8 +196,9 @@ pub async fn run(
             if let Some(error) = outcome.error {
                 return QueryOutcome::Error(error_current(error));
             }
-            let message =
-                last.unwrap_or_else(|| Message::assistant(outcome.output.unwrap_or_default()));
+            let message = last.unwrap_or_else(|| {
+                core::Message::assistant().with_text(outcome.output.unwrap_or_default())
+            });
             if message.metadata.output_token_limit_reached {
                 QueryOutcome::MaxTokens {
                     partial_message: history::from_engine(&message),
@@ -310,7 +311,7 @@ fn forward_commands(
         let mut interval = tokio::time::interval(Duration::from_millis(50));
         loop {
             tokio::select! {
-                _ = local.cancelled() => break,
+                _ = task_cancel.cancelled() => break,
                 _ = cancel.cancelled() => break,
                 _ = interval.tick() => {
                     for message in crate::drain_command_queue(&queue) {
