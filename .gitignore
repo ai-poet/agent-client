@@ -17,6 +17,7 @@ t3-code/
 check_agent/
 /gpui-kit/
 pi_agent_rust/
+/sailry-harness/
 
 .DS_Store
 *.log
