@@ -2,7 +2,7 @@
 //!
 //! Fork addition, after Claude Desktop's side chat (⌘;, `/btw`). A surface in
 //! the right panel holds one side thread per task. A question goes out with
-//! a digest of the task's transcript (`waku_client::side_chat`) to the
+//! a digest of the task's transcript (`client::side_chat`) to the
 //! built-in engine through the daemon, and the answer streams back here. The
 //! task itself is never touched: nothing reaches its transcript, its queue,
 //! its agent or the disk, and the thread is gone when the app quits.
@@ -13,9 +13,7 @@
 
 use std::cell::RefCell;
 
-use waku_client::side_chat::{
-    DIGEST_BUDGET, SIDE_SYSTEM, SideExchange, build_digest, side_messages,
-};
+use client::side_chat::{DIGEST_BUDGET, SIDE_SYSTEM, SideExchange, build_digest, side_messages};
 
 use crate::input::{InputEvent, TextInput};
 
@@ -163,7 +161,7 @@ impl Waku {
         prompt: &str,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(question) = waku_client::side_chat::btw_question(prompt) else {
+        let Some(question) = client::side_chat::btw_question(prompt) else {
             return false;
         };
         let question = question.to_owned();
@@ -254,13 +252,13 @@ impl Waku {
         self.side_chat.scroll.scroll_to_bottom();
         cx.notify();
 
-        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace_client = client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let started = {
                 let client = workspace_client.clone();
                 cx.background_executor()
                     .spawn(async move {
-                        client.request(waku_client::WorkspaceOperation::SideChatStart {
+                        client.request(client::WorkspaceOperation::SideChatStart {
                             cwd,
                             model,
                             system: SIDE_SYSTEM.to_owned(),
@@ -270,7 +268,7 @@ impl Waku {
                     .await
             };
             let job = match started {
-                Ok(waku_client::WorkspaceResult::SideChatStarted { job }) => job,
+                Ok(client::WorkspaceResult::SideChatStarted { job }) => job,
                 Ok(_) => {
                     let _ = waku.update(cx, |this, cx| {
                         this.finish_side_answer(
@@ -298,8 +296,8 @@ impl Waku {
                 .flatten()
                 .is_some();
             if !current {
-                let _ = workspace_client
-                    .request(waku_client::WorkspaceOperation::SideChatCancel { job });
+                let _ =
+                    workspace_client.request(client::WorkspaceOperation::SideChatCancel { job });
                 return;
             }
             let mut from = 0;
@@ -308,7 +306,7 @@ impl Waku {
                 let polled = cx
                     .background_executor()
                     .spawn(async move {
-                        client.request(waku_client::WorkspaceOperation::SideChatPoll {
+                        client.request(client::WorkspaceOperation::SideChatPoll {
                             job,
                             from,
                             wait_ms: POLL_WAIT_MS,
@@ -316,7 +314,7 @@ impl Waku {
                     })
                     .await;
                 let (text, next, done, error) = match polled {
-                    Ok(waku_client::WorkspaceResult::SideChatProgress {
+                    Ok(client::WorkspaceResult::SideChatProgress {
                         text,
                         next,
                         done,
@@ -393,10 +391,10 @@ impl Waku {
             exchange.status = ExchangeStatus::Stopped;
         }
         if let Some(job) = thread.job.take() {
-            let client = waku_client::WorkspaceClient::new(self.daemon.client());
+            let client = client::WorkspaceClient::new(self.daemon.client());
             cx.background_executor()
                 .spawn(async move {
-                    let _ = client.request(waku_client::WorkspaceOperation::SideChatCancel { job });
+                    let _ = client.request(client::WorkspaceOperation::SideChatCancel { job });
                 })
                 .detach();
         }

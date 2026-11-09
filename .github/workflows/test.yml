@@ -58,5 +58,5 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           bun run protocol:check
-          bun run --filter @waku/client check
-          bun run --filter @waku/client test
+          bun run --filter client check
+          bun run --filter client test

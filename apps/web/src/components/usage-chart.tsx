@@ -3,7 +3,7 @@ import { decorative } from '@tanstack/charts/mark/decorative'
 import { Chart } from '@tanstack/charts/react'
 import { scaleLinear } from '@tanstack/charts/scales/linear'
 import { tooltip } from '@tanstack/charts/tooltip'
-import type { UsageHistory } from '@waku/client'
+import type { UsageHistory } from 'client'
 import { scaleUtc } from 'd3-scale'
 import { useI18n, type AppLocale } from '@/lib/i18n'
 

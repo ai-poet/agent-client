@@ -109,7 +109,7 @@ const BLOCKED_EXECUTABLES: &[&str] = &[
     "kitty.exe",
     // this app and its helpers
     "waku.exe",
-    "waku-daemon.exe",
+    "client-daemon.exe",
     "waku_js_repl.exe",
     "cua-driver.exe",
     "cua-driver-uia.exe",

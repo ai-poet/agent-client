@@ -113,16 +113,16 @@ Run the focused checks relevant to your change, then run the full baseline
 before opening a pull request:
 
 ```sh
-cargo fmt --package waku --package waku-protocol --package waku-client --package waku-core --package waku-daemon -- --check
+cargo fmt --package waku --package client-protocol --package client --package client-core --package client-daemon -- --check
 cargo check
 cargo test
 bun run protocol:check
-bun run --filter @waku/client check
-bun run --filter @waku/client test
+bun run --filter client check
+bun run --filter client test
 ```
 
 When a Rust wire type changes, run `bun run protocol:generate` and commit the
-updated files under `packages/waku-client/src/generated`.
+updated files under `packages/client/src/generated`.
 
 For user-visible changes, wait for the watcher to report a successful rebuild
 and validate the freshly relaunched app. Include screenshots or a short

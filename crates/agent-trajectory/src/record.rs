@@ -93,7 +93,7 @@ pub struct RetryInfo {
     pub delay_ms: u64,
     #[serde(default)]
     pub error: String,
-    /// Fork: why it was retried (`claurst_api::retry_policy::RetryReason::as_str`).
+    /// Fork: why it was retried (`agent_core_api::retry_policy::RetryReason::as_str`).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub reason: String,
     /// Fork: what had streamed of the failed answer was thrown away.

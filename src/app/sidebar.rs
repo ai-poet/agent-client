@@ -801,28 +801,28 @@ impl Waku {
             return;
         }
 
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace = client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
-            let labels = cx
-                .background_executor()
-                .spawn(async move {
-                    let mut labels = HashMap::new();
-                    for path in paths {
-                        let branch = match workspace.request(
-                            waku_client::WorkspaceOperation::InspectBranches { cwd: path.clone() },
-                        ) {
-                            Ok(waku_client::WorkspaceResult::Branches {
-                                snapshot: Some(snapshot),
-                            }) => snapshot.display_branch().map(str::to_owned),
-                            _ => None,
-                        };
-                        if let Some(branch) = branch {
-                            labels.insert(path, branch);
+            let labels =
+                cx.background_executor()
+                    .spawn(async move {
+                        let mut labels = HashMap::new();
+                        for path in paths {
+                            let branch = match workspace.request(
+                                client::WorkspaceOperation::InspectBranches { cwd: path.clone() },
+                            ) {
+                                Ok(client::WorkspaceResult::Branches {
+                                    snapshot: Some(snapshot),
+                                }) => snapshot.display_branch().map(str::to_owned),
+                                _ => None,
+                            };
+                            if let Some(branch) = branch {
+                                labels.insert(path, branch);
+                            }
                         }
-                    }
-                    labels
-                })
-                .await;
+                        labels
+                    })
+                    .await;
             let _ = waku.update(cx, |waku, cx| {
                 if waku.sidebar_branch_scan_generation.get() != generation {
                     return;

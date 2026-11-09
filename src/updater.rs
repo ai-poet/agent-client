@@ -1364,7 +1364,7 @@ mod windows {
     fn preference_path() -> Option<PathBuf> {
         Some(
             dirs::data_local_dir()?
-                .join(waku_protocol::identity::DATA_DIRECTORY_NAME)
+                .join(client_protocol::identity::DATA_DIRECTORY_NAME)
                 .join("updater.json"),
         )
     }

@@ -1,4 +1,4 @@
-import type { ProviderKind } from '@waku/client'
+import type { ProviderKind } from 'client'
 
 export const WAKU_ICONS = {
   alert: 'i-waku-alert',

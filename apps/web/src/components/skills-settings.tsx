@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import type { Project, ProviderKind, SkillEntry, SkillSource } from '@waku/client'
+import type { Project, ProviderKind, SkillEntry, SkillSource } from 'client'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { Virtuoso } from 'react-virtuoso'

@@ -1,3 +1,3 @@
-//! Named curves, durations and motion helpers, implemented by `waku-ui`.
+//! Named curves, durations and motion helpers, implemented by `client-ui`.
 
-pub use waku_ui::motion_kit::*;
+pub use client_ui::motion_kit::*;

@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Editor } from '@pierre/diffs/edit'
-import type { AgentSession, Project, ReviewDiffSource, WorkingTreeEntry } from '@waku/client'
+import type { AgentSession, Project, ReviewDiffSource, WorkingTreeEntry } from 'client'
 import { GhosttyCore } from '@wterm/ghostty'
 import { Terminal, useTerminal } from '@wterm/react'
 import {

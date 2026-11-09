@@ -54,7 +54,7 @@ impl ParentElement for TextField {
 impl RenderOnce for TextField {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let focused = self.input.read(cx).is_visually_focused(window);
-        let field = waku_ui::TextField::from_base(
+        let field = client_ui::TextField::from_base(
             self.base,
             self.input,
             focused,

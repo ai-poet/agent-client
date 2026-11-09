@@ -1,0 +1,48 @@
+//! Rust transport and lifecycle support for clients of `client-daemon`.
+//!
+//! This crate intentionally depends only on [`client_protocol`], so GUI and CLI
+//! clients cannot accidentally reach daemon-owned filesystem, Git, database,
+//! or provider implementations.
+
+pub mod activity_phase;
+mod client;
+pub mod command_env;
+pub mod composer_complete;
+pub mod computer_use;
+pub mod diagnostics;
+mod diagnostics_export;
+pub use diagnostics_export::{
+    DaemonDiagnosticsMetadata, export_daemon_diagnostics, validate_destination,
+};
+pub mod driver;
+pub mod persistence;
+// Fork addition: the digest a side question (`/btw`, ⌘;) is asked with.
+mod process;
+pub mod side_chat;
+pub mod status_capsule;
+pub mod turn_segments;
+mod workspace_client;
+
+pub use client::{
+    DAEMON_CONNECTION_CLOSED, DAEMON_DISCONNECTED, DAEMON_DROPPED, DaemonClient,
+    is_daemon_transport_error,
+};
+pub use client_protocol::*;
+pub use process::{
+    DEFAULT_EXPOSED_DAEMON_PORT, DaemonExposureSettings, DaemonProcess, DaemonSupervisor,
+    parse_allowed_origins,
+};
+pub use workspace_client::WorkspaceClient;
+
+pub mod git_branch {
+    pub use client_protocol::git::{BranchEntry, BranchSnapshot};
+}
+
+pub mod git_commit {
+    pub use client_protocol::git::AgentInvocation;
+    pub use client_protocol::git::CommitSnapshot as Snapshot;
+}
+
+pub mod worktree {
+    pub use client_protocol::git::CreatedWorktree;
+}

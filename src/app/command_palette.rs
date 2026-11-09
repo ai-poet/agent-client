@@ -228,7 +228,7 @@ struct ScoredPaletteItem {
 }
 
 fn command_palette_scroll_index(items: &[CommandPaletteItem], selected: usize) -> usize {
-    waku_ui::command::grouped_scroll_index_by(
+    client_ui::command::grouped_scroll_index_by(
         items,
         selected,
         |item| item.section,
@@ -1164,7 +1164,7 @@ impl Waku {
         self.command_palette.results.insert(0, provider_selector);
         let default = usize::from(self.command_palette.results.len() > 1);
         self.command_palette.selected = match selected_action.flatten() {
-            Some(action) => waku_ui::command::restore_selected_index_by(
+            Some(action) => client_ui::command::restore_selected_index_by(
                 &self.command_palette.results,
                 Some(&action),
                 default,
@@ -1222,7 +1222,7 @@ impl Waku {
             })
             .unwrap_or(0);
         self.command_palette.selected = match selected_action.flatten() {
-            Some(action) => waku_ui::command::restore_selected_index_by(
+            Some(action) => client_ui::command::restore_selected_index_by(
                 &self.command_palette.results,
                 Some(&action),
                 default,
@@ -1351,7 +1351,7 @@ impl Waku {
         }
         self.command_palette.results = next_results;
         self.command_palette.selected = match selected_action.flatten() {
-            Some(action) => waku_ui::command::restore_selected_index_by(
+            Some(action) => client_ui::command::restore_selected_index_by(
                 &self.command_palette.results,
                 Some(&action),
                 0,

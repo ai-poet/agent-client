@@ -1,4 +1,4 @@
-import { MAX_WIRE_MESSAGE_BYTES, type MessageAttachment, type WakuClient } from '@waku/client'
+import { MAX_WIRE_MESSAGE_BYTES, type MessageAttachment, type WakuClient } from 'client'
 
 const MAX_UPLOAD_BYTES = Math.floor((MAX_WIRE_MESSAGE_BYTES * 3) / 4) - 1024 * 1024
 

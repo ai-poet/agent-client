@@ -7,7 +7,7 @@ the CLI binary is the only route to a model.
 
 Every provider gets the same prompt. The only per-provider code is the argument
 vector that puts its CLI into a one-shot, tool-free mode
-([`agent_arguments`](../crates/waku-core/src/git_commit.rs#L210)).
+([`agent_arguments`](../crates/client-core/src/git_commit.rs#L210)).
 
 ## Which model
 
@@ -31,7 +31,7 @@ commit message, so the pin stays on a level the list vouches for.
 
 Every other provider still runs on the session's own selection, captured when
 the dialog opens into an
-[`AgentInvocation`](../crates/waku-protocol/src/git.rs#L45) alongside the probed
+[`AgentInvocation`](../crates/client-protocol/src/git.rs#L45) alongside the probed
 binary path ([commit_dialog.rs:129](../src/app/commit_dialog.rs#L129)):
 
 | Field | Source |
@@ -47,7 +47,7 @@ flag.
 
 ## The prompt
 
-[`commit_prompt`](../crates/waku-core/src/git_commit.rs#L173) builds it from Git
+[`commit_prompt`](../crates/client-core/src/git_commit.rs#L173) builds it from Git
 alone — no transcript, no session history:
 
 | Include unstaged | Status | Diff |
@@ -90,7 +90,7 @@ Where a provider is not simply "flags plus prompt":
   file to the temp directory —
   `{"amp.tools.enable":[],"amp.notifications.enabled":false,"amp.skills.disableClaudeCodeSkills":true}`
   — passes it with `--settings-file`, and deletes it afterwards, including on
-  the error path ([git_commit.rs:90](../crates/waku-core/src/git_commit.rs#L90)).
+  the error path ([git_commit.rs:90](../crates/client-core/src/git_commit.rs#L90)).
   Its model selector is a *mode*, hence `--mode`.
 - **Claude Code** runs in `plan` permission mode with an empty `--tools` list,
   and `--no-session-persistence` keeps the run out of `~/.claude/projects`,
@@ -107,7 +107,7 @@ Where a provider is not simply "flags plus prompt":
   guard, which holds because all context is inlined.
 - **Grok** is the exception to prompt-last: the prompt is the value of
   `--single` and the function returns early, so it is never appended twice
-  ([git_commit.rs:303](../crates/waku-core/src/git_commit.rs#L303)).
+  ([git_commit.rs:303](../crates/client-core/src/git_commit.rs#L303)).
   `--verbatim` stops the CLI re-wrapping the answer; `--no-memory` keeps a
   commit subject out of Grok's long-term memory.
 - **Kimi** is the other exception to prompt-last: `--prompt` takes the prompt as
@@ -124,7 +124,7 @@ Where a provider is not simply "flags plus prompt":
   flag, so repo instructions cannot contradict the fixed prompt.
 
 `every_provider_uses_a_noninteractive_generation_mode`
-([git_commit.rs:691](../crates/waku-core/src/git_commit.rs#L691)) walks
+([git_commit.rs:691](../crates/client-core/src/git_commit.rs#L691)) walks
 `ProviderKind::ALL` and asserts each of these, so a new provider cannot be added
 without choosing its headless shape.
 `claude_and_codex_generate_on_a_pinned_cheap_tier` guards the pins by passing
@@ -133,7 +133,7 @@ without choosing its headless shape.
 ## Normalizing the output
 
 CLIs disagree about what "one line and nothing else" means — preamble lines,
-code fences, ANSI under `NO_COLOR`. [`normalize_message`](../crates/waku-core/src/git_commit.rs#L349)
+code fences, ANSI under `NO_COLOR`. [`normalize_message`](../crates/client-core/src/git_commit.rs#L349)
 strips ANSI, drops empty lines, bare ``` fences and `[tool]` / `[thinking]`
 lines, takes the **last** surviving line, then strips backticks, a
 `Commit message:` / `Commit subject:` prefix, wrapping quotes and a trailing

@@ -125,7 +125,7 @@ const installer = join(
   `CheapRouter-${version}-${architecture}-Setup.exe`,
 );
 
-await $`cargo build --locked --release --package waku --bin waku --bin waku_js_repl --package waku-daemon --bin waku-daemon`;
+await $`cargo build --locked --release --package waku --bin waku --bin waku_js_repl --package client-daemon --bin client-daemon`;
 
 const staging = await mkdtemp(join(tmpdir(), "waku-bundle-"));
 try {
@@ -134,7 +134,7 @@ try {
   // extracted zip runnable in place.
   const packageDirectory = join(staging, packageDirectoryName);
   await mkdir(packageDirectory, { recursive: true });
-  for (const file of ["waku.exe", "waku-daemon.exe", "waku_js_repl.exe"]) {
+  for (const file of ["waku.exe", "client-daemon.exe", "waku_js_repl.exe"]) {
     await copyFile(join(releaseDirectory, file), join(packageDirectory, file));
   }
   await copyFile(join(projectRoot, "LICENSE"), join(packageDirectory, "LICENSE"));
@@ -142,7 +142,7 @@ try {
   // binary redistributions to carry them).
   await copyFile(join(projectRoot, "NOTICE.md"), join(packageDirectory, "NOTICE.md"));
 
-  // Computer Use resources, at the flat paths waku-core's resolvers expect
+  // Computer Use resources, at the flat paths client-core's resolvers expect
   // beside the executable (the macOS bundle keeps them under Resources/).
   // The skill is the Windows variant, installed under the platform-neutral
   // name every provider wiring points at.
@@ -172,7 +172,7 @@ try {
     signtool = findSigntool();
     await sign(signtool, certificate, certificatePassword, [
       join(packageDirectory, "waku.exe"),
-      join(packageDirectory, "waku-daemon.exe"),
+      join(packageDirectory, "client-daemon.exe"),
       join(packageDirectory, "waku_js_repl.exe"),
     ]);
   } else {

@@ -2,7 +2,7 @@ use gpui::{
     App, Global, Hsla, Rems, Rgba, Window, WindowAppearance, hsla, rems, rgb, transparent_black,
 };
 
-pub use waku_client::theme::ThemePreference;
+pub use client::theme::ThemePreference;
 
 /// Scaled pixels: a dimension authored at the default 14px UI font size,
 /// expressed in rems so the UI font size setting scales it. The window's rem
@@ -14,7 +14,7 @@ pub use waku_client::theme::ThemePreference;
 /// editor, diff rows, tool-output mono — stay in `px` so they never scale
 /// twice.
 pub fn sp(value: f32) -> Rems {
-    rems(value / waku_client::persistence::DEFAULT_UI_FONT_SIZE)
+    rems(value / client::persistence::DEFAULT_UI_FONT_SIZE)
 }
 
 fn resolves_to_dark(preference: ThemePreference, system_appearance: WindowAppearance) -> bool {

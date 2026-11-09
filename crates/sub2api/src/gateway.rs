@@ -99,7 +99,7 @@ pub fn openai_base_url(endpoint: &str) -> String {
 /// `<base>/<path>` when `base` already ends in a version segment, else
 /// `<base>/v1/<path>`.
 ///
-/// Kept in step with `claurst_api::endpoint::versioned_url`, which is what
+/// Kept in step with `agent_core_api::endpoint::versioned_url`, which is what
 /// the built-in agent's adapters build their requests with; a probe from
 /// here has to reach the URL the agent will.
 pub fn versioned_url(base: &str, path: &str) -> String {

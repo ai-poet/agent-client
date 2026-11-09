@@ -10,7 +10,7 @@
 //!   shell profile. [`version_manager_dirs`] enumerates their conventional
 //!   directories so a CLI installed through any of them is found without a
 //!   restart; the desktop merges these with the login-shell `PATH` that
-//!   waku-core captures.
+//!   client-core captures.
 //! - **It runs the binary.** Finding `claude.cmd` proves nothing when the Node
 //!   it needs is too old or gone; [`probe_version`] distinguishes *not
 //!   installed* from *installed but not runnable* and keeps the CLI's own
@@ -234,7 +234,7 @@ fn push_existing(dirs: &mut Vec<PathBuf>, candidate: Option<PathBuf>) {
 /// Every directory this crate adds to a `PATH` walk: the app-managed
 /// runtime, the version managers, and whatever a previous install taught us.
 ///
-/// waku-core appends this to its own search paths, so provider detection,
+/// client-core appends this to its own search paths, so provider detection,
 /// the CLI-setup section, and every spawned agent agree on where to look.
 pub fn detection_dirs() -> Vec<PathBuf> {
     let mut dirs = cli_install::node_runtime_dirs();
@@ -279,7 +279,7 @@ pub fn default_search_dirs() -> Vec<PathBuf> {
 /// A GUI-launched app inherits the launcher's `PATH`, not the one the
 /// user's shell profile builds — and nvm, fnm, Homebrew, Volta and the
 /// PowerShell-profile managers extend `PATH` only there. The daemon runs an
-/// equivalent probe in waku-core for provider detection; this is the
+/// equivalent probe in client-core for provider detection; this is the
 /// desktop-side twin, so both processes look in the same places. Unix asks
 /// the login shell to print its environment (`$SHELL -ilc /usr/bin/env`,
 /// falling back to a non-interactive login shell when an rc file blocks);
@@ -450,7 +450,7 @@ fn persist_remembered(path: Option<&Path>, dirs: &[PathBuf]) {
 ///
 /// On Windows the suffixed names are tried before the bare one: a global npm
 /// install writes an extensionless POSIX shim beside `claude.cmd`, and
-/// `CreateProcess` cannot run that shim. Same order as waku-core.
+/// `CreateProcess` cannot run that shim. Same order as client-core.
 pub fn find_executable_in(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
     let candidates = executable_candidates(name);
     dirs.iter().find_map(|directory| {

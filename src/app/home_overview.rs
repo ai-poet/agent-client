@@ -9,12 +9,12 @@
 //! of the task store (`Command::LoadActivityOverview`) whenever the welcome
 //! screen shows and the last read is older than [`REFRESH_AFTER`]. Frames
 //! only read the folded result; a range switch re-folds the records in
-//! memory (`waku_protocol::activity_overview`).
+//! memory (`client_protocol::activity_overview`).
 
 use std::sync::Arc;
 
 use chrono::{Datelike, NaiveDate};
-use waku_protocol::activity_overview::{
+use client_protocol::activity_overview::{
     self as overview, ActivityRange, ActivityRecords, ActivitySummary, HeatGrid,
 };
 
@@ -84,9 +84,9 @@ impl Waku {
                     match daemon.request(
                         Uuid::nil(),
                         Uuid::nil(),
-                        waku_client::Command::LoadActivityOverview,
+                        client::Command::LoadActivityOverview,
                     )? {
-                        waku_client::ResponsePayload::ActivityOverview { records } => Ok(records),
+                        client::ResponsePayload::ActivityOverview { records } => Ok(records),
                         _ => anyhow::bail!("the daemon returned an invalid activity response"),
                     }
                 })
@@ -446,12 +446,7 @@ fn overview_pill(id: &'static str, label: String, selected: bool, theme: &Theme)
 fn render_heat_grid(grid: &HeatGrid, theme: &Theme) -> impl IntoElement {
     let mut columns = div().w_full().flex().gap(px(HEAT_GAP));
     for week in 0..grid.weeks {
-        let mut column = div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap(px(HEAT_GAP));
+        let mut column = div().flex_1().min_w_0().flex().flex_col().gap(px(HEAT_GAP));
         for weekday in 0..7 {
             let index = week * 7 + weekday;
             let cell = div().w_full().h(px(HEAT_CELL)).rounded(px(3.0));
@@ -490,32 +485,21 @@ fn render_heat_grid(grid: &HeatGrid, theme: &Theme) -> impl IntoElement {
         );
     }
     legend = legend.child(div().ml(px(3.0)).child(tr!("home_overview.more")));
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(8.0))
-        .child(columns)
-        .child(
-            div()
-                .w_full()
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap(px(8.0))
-                .text_size(sp(11.5))
-                .text_color(theme.text_tertiary)
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .child(tr!(
-                            "home_overview.heat_caption",
-                            count = group_digits(total)
-                        )),
-                )
-                .child(legend.flex_none()),
-        )
+    div().flex().flex_col().gap(px(8.0)).child(columns).child(
+        div()
+            .w_full()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(8.0))
+            .text_size(sp(11.5))
+            .text_color(theme.text_tertiary)
+            .child(div().flex_1().min_w_0().truncate().child(tr!(
+                "home_overview.heat_caption",
+                count = group_digits(total)
+            )))
+            .child(legend.flex_none()),
+    )
 }
 
 fn heat_color(theme: &Theme, level: u8) -> Hsla {

@@ -15,7 +15,7 @@
 //! outcome from the same `UpdaterEvent`s.
 
 use crate::ui::{ActivationExt as _, ui_theme};
-use waku_ui::{Banner, BannerSurface, BannerTone};
+use client_ui::{Banner, BannerSurface, BannerTone};
 
 use super::*;
 

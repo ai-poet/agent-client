@@ -10,7 +10,7 @@ use sub2api::paywall::{Paywall, PaywallState};
 use super::*;
 use crate::model::TurnFailureKind;
 use crate::ui::{ActivationExt as _, ui_theme};
-use waku_ui::{Banner, BannerSurface, BannerTone};
+use client_ui::{Banner, BannerSurface, BannerTone};
 
 /// Past this the message is clipped to two lines until its details open.
 const COLLAPSED_CHARS: usize = 160;

@@ -2545,7 +2545,11 @@ mod backdrop_blur_tests {
                 .unwrap()
         };
         let unclipped = paint(false);
-        assert_eq!(unclipped.get_pixel(5, 5)[0], 255, "a zeroed clip is a no-op");
+        assert_eq!(
+            unclipped.get_pixel(5, 5)[0],
+            255,
+            "a zeroed clip is a no-op"
+        );
         let clipped = paint(true);
         // Outside the rectangle, and inside its bounds but past a corner arc.
         assert_eq!(clipped.get_pixel(5, 30)[0], 0);

@@ -5,7 +5,7 @@ import {
   type FileDiffContentsLoader,
   type FileDiffMetadata,
 } from '@pierre/diffs'
-import type { AgentSession, ReviewDiffSource } from '@waku/client'
+import type { AgentSession, ReviewDiffSource } from 'client'
 
 const REVIEW_DIFF_CONTEXT_LINES = 3
 

@@ -3,7 +3,7 @@ import type {
   DaemonSettings,
   Project,
   ProviderKind,
-} from '@waku/client'
+} from 'client'
 import { useEffect, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { ControlMenu } from '@/components/control-menu'

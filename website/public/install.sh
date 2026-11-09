@@ -116,10 +116,10 @@ main() {
     mkdir -p "$staging" "$(dirname "$bin_link")" "$(dirname "$desktop_file")"
     tar -xzf "$archive" --strip-components=1 -C "$staging"
 
-    # Waku resolves waku-daemon next to its own executable, so the two must
+    # Waku resolves client-daemon next to its own executable, so the two must
     # stay together in bin/. Linking only the binary onto PATH is safe —
     # current_exe() resolves the symlink back into waku.app.
-    for binary in waku waku-daemon; do
+    for binary in waku client-daemon; do
         if [ ! -x "$staging/bin/$binary" ]; then
             echo "Archive is missing bin/$binary." >&2
             exit 1

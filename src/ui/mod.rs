@@ -14,8 +14,8 @@ pub mod scrollbar;
 pub mod text_field;
 pub mod tooltip;
 
-pub use waku_ui::ActivationExt;
-use waku_ui::UiTheme;
+pub use client_ui::ActivationExt;
+use client_ui::UiTheme;
 
 use crate::model::{ActivityKind, ProviderKind, SessionStatus};
 use crate::theme::{Theme, sp};
@@ -47,26 +47,26 @@ pub(crate) fn ui_theme(theme: Theme) -> UiTheme {
 /// `sp` so icons keep pace with the chrome text they sit beside when the UI
 /// font size setting moves.
 pub fn icon(path: &'static str, size: f32, color: Hsla) -> Svg {
-    waku_ui::icon::icon(path, sp(size), color)
+    client_ui::icon::icon(path, sp(size), color)
 }
 
 /// A polychrome file icon rendered as an image so the SVG's authored colors
 /// are preserved. GPUI's `svg()` element intentionally renders an alpha mask
 /// tinted with one text color.
 pub fn file_icon(path: &'static str, size: f32) -> Img {
-    waku_ui::icon::file_icon(path, sp(size))
+    client_ui::icon::file_icon(path, sp(size))
 }
 
 /// A compact ghost icon button: the only button shape outside the composer's
 /// bespoke send control.
 pub fn icon_button(id: impl Into<ElementId>, path: &'static str, theme: Theme) -> Stateful<Div> {
-    waku_ui::icon_button::icon_button(id, path, sp(13.0), ui_theme(theme))
+    client_ui::icon_button::icon_button(id, path, sp(13.0), ui_theme(theme))
 }
 
 /// Keeps a wheel gesture in a nested scrollable while it can consume the
 /// delta, then lets it chain to the ancestor at either boundary.
 pub fn contain_scroll(handle: &ScrollHandle, cx: &mut App) {
-    waku_ui::scroll::contain_scroll(handle, cx);
+    client_ui::scroll::contain_scroll(handle, cx);
 }
 
 /// The shared pill switch used by settings and automation forms.
@@ -84,7 +84,7 @@ pub fn toggle_switch<E>(
 where
     E: 'static,
 {
-    waku_ui::toggle_switch::toggle_switch(id, on, disabled, ui_theme(theme), cx, activate)
+    client_ui::toggle_switch::toggle_switch(id, on, disabled, ui_theme(theme), cx, activate)
 }
 
 /// Brand hue for each provider's official mark.
@@ -158,13 +158,13 @@ pub fn activity_icon(kind: ActivityKind) -> &'static str {
 /// menu's open state and renders as a soft fill.
 #[derive(IntoElement)]
 pub struct MenuChip {
-    inner: waku_ui::MenuChip,
+    inner: client_ui::MenuChip,
 }
 
 impl MenuChip {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            inner: waku_ui::MenuChip::new(id),
+            inner: client_ui::MenuChip::new(id),
         }
     }
 

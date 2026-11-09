@@ -328,7 +328,7 @@ async function build(target: BuildTarget): Promise<boolean> {
 async function buildDaemon(): Promise<boolean> {
   console.log("[waku-dev] Building daemon...");
   const result = await allowFailure(
-    $`cargo build --package waku-daemon --features dev-binary --bin waku-debug-daemon`,
+    $`cargo build --package client-daemon --features dev-binary --bin waku-debug-daemon`,
   );
   if (result.exitCode !== 0) {
     console.error(
@@ -404,8 +404,8 @@ function targetForChange(
   if (directory !== "crates" || filename === null) return "app";
   const relativePath = filename.toString().replaceAll("\\", "/");
   if (
-    relativePath.startsWith("waku-daemon/") ||
-    relativePath.startsWith("waku-core/")
+    relativePath.startsWith("client-daemon/") ||
+    relativePath.startsWith("client-core/")
   ) {
     return "daemon";
   }

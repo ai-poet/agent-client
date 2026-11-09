@@ -606,7 +606,7 @@ struct DriverStartRequest {
     provider: ProviderKind,
     options: DriverStartOptions,
     event_wake: smol::channel::Sender<()>,
-    daemon: waku_client::DaemonSupervisor,
+    daemon: client::DaemonSupervisor,
     /// Fork addition: a warm process for this session — booted already, or
     /// still booting. When set, `start_driver` takes it instead of spawning.
     prewarmed: Option<runtime_prewarm::PrewarmClaim>,
@@ -1103,7 +1103,7 @@ pub struct Waku {
     /// Owns the headless provider process for exactly as long as the desktop
     /// app entity. Debug builds can replace it independently after a rebuild;
     /// all live driver handles below are lightweight RPC proxies.
-    daemon: waku_client::DaemonSupervisor,
+    daemon: client::DaemonSupervisor,
     /// Cached once at construction for the Daemon settings connection URL;
     /// rendering must not query account or network configuration.
     daemon_hostname: String,
@@ -1990,7 +1990,7 @@ pub(super) fn next_time_label_change(sessions: &[AgentSession], now: u64) -> Opt
 
 fn migrate_legacy_projectless_projects(
     state: &mut PersistedState,
-    workspace: &waku_client::WorkspaceClient,
+    workspace: &client::WorkspaceClient,
 ) -> (bool, Option<anyhow::Error>) {
     let legacy_indices = state
         .projects
@@ -2007,10 +2007,10 @@ fn migrate_legacy_projectless_projects(
     let mut changed = false;
     for index in legacy_indices {
         let path = state.projects[index].path.clone();
-        let response = workspace
-            .request(waku_client::WorkspaceOperation::MigrateProjectlessWorkspace { path });
+        let response =
+            workspace.request(client::WorkspaceOperation::MigrateProjectlessWorkspace { path });
         let cwd = match response {
-            Ok(waku_client::WorkspaceResult::ProjectlessWorkspace { cwd }) => cwd,
+            Ok(client::WorkspaceResult::ProjectlessWorkspace { cwd }) => cwd,
             Ok(_) => {
                 return (
                     changed,
@@ -2112,7 +2112,7 @@ impl Waku {
 
     fn show_toast_with_tone(&mut self, message: impl Into<String>, tone: ToastTone) {
         let mut message = message.into();
-        if tone == ToastTone::Alert && waku_client::is_daemon_transport_error(&message) {
+        if tone == ToastTone::Alert && client::is_daemon_transport_error(&message) {
             // Fork addition: a dropped daemon socket is one condition with one
             // notice. The connection banner owns it while it shows; otherwise
             // the raw wire text becomes the localized message.
@@ -2254,7 +2254,7 @@ impl Waku {
     pub fn new(
         window: &mut Window,
         cx: &mut App,
-        daemon: waku_client::DaemonSupervisor,
+        daemon: client::DaemonSupervisor,
     ) -> Entity<Self> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let store = StateStore::remote(daemon.clone());
@@ -2286,7 +2286,7 @@ impl Waku {
         crate::i18n::set_language(state.language);
         // Chrome text is authored in `sp` rems against the default UI font
         // size, so the window's rem size *is* the UI font size setting.
-        window.set_rem_size(px(waku_client::persistence::sanitized_ui_font_size(
+        window.set_rem_size(px(client::persistence::sanitized_ui_font_size(
             state.ui_font_size,
         )));
         let analytics = crate::analytics::Analytics::new(
@@ -2396,7 +2396,7 @@ impl Waku {
         let sidebar_pane = WakuPane::new(Waku::sidebar_pane_content, cx);
         let transcript_pane = WakuPane::new(Waku::transcript_pane_content, cx);
         let right_panel_pane = WakuPane::new(Waku::right_panel_pane_content, cx);
-        let workspace_client = waku_client::WorkspaceClient::new(daemon.client());
+        let workspace_client = client::WorkspaceClient::new(daemon.client());
         let (projectless_migrated, projectless_migration_error) =
             migrate_legacy_projectless_projects(&mut state, &workspace_client);
         let projectless_save_error = (projectless_migrated
@@ -2567,9 +2567,9 @@ impl Waku {
                     let result = match daemon.request(
                         Uuid::nil(),
                         Uuid::nil(),
-                        waku_client::Command::ProbeComputerPermissions { prompt: false },
+                        client::Command::ProbeComputerPermissions { prompt: false },
                     ) {
-                        Ok(waku_client::ResponsePayload::ComputerPermissions { permissions }) => {
+                        Ok(client::ResponsePayload::ComputerPermissions { permissions }) => {
                             Ok(permissions)
                         }
                         Ok(_) => Err("the daemon returned an invalid permission response".into()),

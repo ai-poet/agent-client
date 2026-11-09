@@ -1,0 +1,78 @@
+//! Adapted from Goose ee8500d5, crates/goose/src/token_counter.rs (Apache-2.0).
+//! The shared tokenizer is retained; an application token cache is unnecessary here.
+use crate::agent::model::{Content, Message};
+use std::sync::OnceLock;
+static TOKENIZER: OnceLock<tiktoken_rs::CoreBPE> = OnceLock::new();
+pub fn text(text: &str) -> usize {
+    TOKENIZER
+        .get_or_init(|| tiktoken_rs::o200k_base().expect("o200k tokenizer initializes"))
+        .encode_with_special_tokens(text)
+        .len()
+}
+pub(super) fn chat(system: &str, messages: &[Message]) -> usize {
+    let mut tokens = if system.is_empty() {
+        0
+    } else {
+        text(system) + 4
+    };
+    for message in messages
+        .iter()
+        .filter(|message| message.metadata.agent_visible)
+    {
+        tokens += 4;
+        for content in &message.content {
+            match content {
+                Content::Text { text: value } => tokens += text(value),
+                Content::ToolCall(call) if call.error.is_none() => {
+                    tokens += text(&format!(
+                        "{}:{}:{:?}",
+                        call.id,
+                        call.name,
+                        call.arguments.as_object()
+                    ));
+                }
+                Content::ToolResult(response) => {
+                    if let Ok(result) = &response.result {
+                        let values: Vec<_> = result
+                            .content
+                            .iter()
+                            .filter_map(|content| {
+                                content.as_text().map(|value| value.text.as_str())
+                            })
+                            .collect();
+                        if !values.is_empty() {
+                            tokens += text(&values.join("\n"));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    tokens + 3
+}
+pub fn records(records: &[crate::agent::canonical::Record]) -> u64 {
+    use crate::agent::canonical::{BlockKind, Kind};
+    records
+        .iter()
+        .filter_map(|record| match &record.kind {
+            Kind::Message(message) => Some(message),
+            Kind::Compaction(compaction) => Some(&compaction.summary),
+            _ => None,
+        })
+        .map(|message| {
+            let mut tokens = 4usize;
+            for block in &message.content {
+                tokens += match &block.kind {
+                    BlockKind::Text { text: value } => text(value),
+                    BlockKind::ToolRequest(call) => {
+                        text(&format!("{}:{}:{:?}", call.id, call.name, call.arguments))
+                    }
+                    BlockKind::ToolResponse(result) => text(&result.result.value.to_string()),
+                    _ => 0,
+                };
+            }
+            tokens.saturating_add(3) as u64
+        })
+        .sum()
+}

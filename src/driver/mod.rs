@@ -1,4 +1,4 @@
-//! Desktop proxy for the provider runtime owned by `waku-daemon`.
+//! Desktop proxy for the provider runtime owned by `client-daemon`.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,13 +10,13 @@ use crate::model::{
 use crossbeam_channel::{Sender, bounded, select};
 use parking_lot::Mutex;
 
-pub use waku_client::driver::{
+pub use client::driver::{
     DriverControl, DriverEventSender, DriverHandle, DriverStartOptions, SessionOptions,
     event_channel,
 };
 
 pub(crate) fn start_remote(
-    daemon: waku_client::DaemonSupervisor,
+    daemon: client::DaemonSupervisor,
     session_id: uuid::Uuid,
     provider: ProviderKind,
     options: DriverStartOptions,
@@ -24,13 +24,13 @@ pub(crate) fn start_remote(
 ) -> anyhow::Result<DriverHandle> {
     let client = daemon.client();
     let runtime_id = uuid::Uuid::new_v4();
-    let command = waku_client::Command::Start {
-        options: waku_client::WireDriverStartOptions {
-            provider: waku_client::encode_enum(provider)?,
+    let command = client::Command::Start {
+        options: client::WireDriverStartOptions {
+            provider: client::encode_enum(provider)?,
             binary: options.binary,
             cwd: options.cwd,
-            mode: waku_client::encode_enum(options.mode)?,
-            interaction_mode: waku_client::encode_enum(options.interaction_mode)?,
+            mode: client::encode_enum(options.mode)?,
+            interaction_mode: client::encode_enum(options.interaction_mode)?,
             model: options.model,
             reasoning_effort: options.reasoning_effort,
             service_tier: options.service_tier,
@@ -44,7 +44,7 @@ pub(crate) fn start_remote(
         },
     };
     let supports_steer = match client.request(session_id, runtime_id, command) {
-        Ok(waku_client::ResponsePayload::Started { supports_steer }) => supports_steer,
+        Ok(client::ResponsePayload::Started { supports_steer }) => supports_steer,
         Ok(_) => anyhow::bail!("the daemon returned an invalid start response"),
         Err(error) => return Err(error),
     };
@@ -60,8 +60,8 @@ pub(crate) fn start_remote(
 }
 
 pub(crate) fn attach_remote(
-    daemon: waku_client::DaemonSupervisor,
-    client: waku_client::DaemonClient,
+    daemon: client::DaemonSupervisor,
+    client: client::DaemonClient,
     session_id: uuid::Uuid,
     runtime_id: uuid::Uuid,
     supports_steer: bool,
@@ -80,8 +80,8 @@ pub(crate) fn attach_remote(
 }
 
 fn connect_remote(
-    daemon: waku_client::DaemonSupervisor,
-    initial_client: waku_client::DaemonClient,
+    daemon: client::DaemonSupervisor,
+    initial_client: client::DaemonClient,
     session_id: uuid::Uuid,
     runtime_id: uuid::Uuid,
     supports_steer: bool,
@@ -97,7 +97,7 @@ fn connect_remote(
     let forwarding_events = events.clone();
     let thread_initial_client = initial_client.clone();
     let spawn = std::thread::Builder::new()
-        .name(format!("waku-daemon-session-{session_id}"))
+        .name(format!("client-daemon-session-{session_id}"))
         .spawn(move || {
             let mut client = thread_initial_client;
             let mut remote_events = client.subscribe(session_id, runtime_id);
@@ -121,12 +121,12 @@ fn connect_remote(
                                 epoch: sequenced.epoch,
                                 sequence: sequenced.sequence,
                             };
-                            let event = match waku_client::event_from_wire(sequenced.event) {
+                            let event = match client::event_from_wire(sequenced.event) {
                                 Ok(event) => event,
                                 // Fork: a newer daemon's event this build does not
                                 // know is skipped, not reported as a broken daemon;
                                 // the events around it still make sense.
-                                Err(error) if error.is::<waku_client::UnsupportedDriverEvent>() => {
+                                Err(error) if error.is::<client::UnsupportedDriverEvent>() => {
                                     if forwarding_events
                                         .send(DriverEvent::RuntimeEventCursorAdvanced(cursor))
                                         .is_err()
@@ -178,10 +178,10 @@ fn connect_remote(
                 let attached = replacement.request(
                     session_id,
                     uuid::Uuid::nil(),
-                    waku_client::Command::AttachSession,
+                    client::Command::AttachSession,
                 );
                 match attached {
-                    Ok(waku_client::ResponsePayload::SessionRuntime {
+                    Ok(client::ResponsePayload::SessionRuntime {
                         runtime_id: Some(attached_runtime_id),
                         ..
                     }) if attached_runtime_id == runtime_id => {
@@ -189,7 +189,7 @@ fn connect_remote(
                         client = replacement;
                         remote_events = client.subscribe(session_id, runtime_id);
                     }
-                    Ok(waku_client::ResponsePayload::SessionRuntime { .. }) => {
+                    Ok(client::ResponsePayload::SessionRuntime { .. }) => {
                         let _ = forwarding_events.send(DriverEvent::ProcessExited);
                         break;
                     }
@@ -225,7 +225,7 @@ fn connect_remote(
 }
 
 struct RemoteDriverControl {
-    client: Arc<Mutex<waku_client::DaemonClient>>,
+    client: Arc<Mutex<client::DaemonClient>>,
     session_id: uuid::Uuid,
     runtime_id: uuid::Uuid,
     supports_steer: bool,
@@ -235,7 +235,7 @@ struct RemoteDriverControl {
 }
 
 impl RemoteDriverControl {
-    fn notify(&self, command: waku_client::Command) {
+    fn notify(&self, command: client::Command) {
         let client = self.client.lock().clone();
         if let Err(error) = client.notify(self.session_id, self.runtime_id, command)
             && let Some(notice) = transport_failure_notice(&error.to_string())
@@ -253,13 +253,13 @@ impl RemoteDriverControl {
 /// raise the same notice again. The background-work poll alone did it every
 /// five seconds, and each notice also marked the task failed.
 fn transport_failure_notice(error: &str) -> Option<String> {
-    (!waku_client::is_daemon_transport_error(error))
+    (!client::is_daemon_transport_error(error))
         .then(|| format!("the daemon command failed: {error}"))
 }
 
 impl DriverControl for RemoteDriverControl {
     fn prompt(&self, prompt: String) {
-        self.notify(waku_client::Command::Prompt { prompt });
+        self.notify(client::Command::Prompt { prompt });
     }
 
     fn supports_steer(&self) -> bool {
@@ -267,24 +267,24 @@ impl DriverControl for RemoteDriverControl {
     }
 
     fn steer(&self, prompt: String) {
-        self.notify(waku_client::Command::Steer { prompt });
+        self.notify(client::Command::Steer { prompt });
     }
 
     fn cancel(&self) {
-        self.notify(waku_client::Command::Cancel);
+        self.notify(client::Command::Cancel);
     }
 
     fn cancel_computer_use(&self) {
-        self.notify(waku_client::Command::CancelComputerUse);
+        self.notify(client::Command::CancelComputerUse);
     }
 
     fn refresh_background_work(&self) {
-        self.notify(waku_client::Command::RefreshBackgroundWork);
+        self.notify(client::Command::RefreshBackgroundWork);
     }
 
     fn stop_background_work(&self, key: BackgroundWorkKey, control_id: String) {
         match serde_json::to_value(key) {
-            Ok(key) => self.notify(waku_client::Command::StopBackgroundWork { key, control_id }),
+            Ok(key) => self.notify(client::Command::StopBackgroundWork { key, control_id }),
             Err(error) => {
                 let _ = self.events.send(DriverEvent::Error(format!(
                     "could not encode background-work command: {error}"
@@ -294,7 +294,7 @@ impl DriverControl for RemoteDriverControl {
     }
 
     fn respond(&self, request_id: String, option_id: String) {
-        self.notify(waku_client::Command::Respond {
+        self.notify(client::Command::Respond {
             request_id,
             option_id,
         });
@@ -303,9 +303,9 @@ impl DriverControl for RemoteDriverControl {
     fn respond_user_input(
         &self,
         request_id: String,
-        answers: Vec<waku_protocol::model::UserInputAnswer>,
+        answers: Vec<client_protocol::model::UserInputAnswer>,
     ) {
-        self.notify(waku_client::Command::RespondUserInput {
+        self.notify(client::Command::RespondUserInput {
             request_id,
             answers,
         });
@@ -313,16 +313,16 @@ impl DriverControl for RemoteDriverControl {
 
     // Fork addition: the in-app browser's answer to the built-in agent.
     fn browser_result(&self, request_id: String, result: serde_json::Value) {
-        self.notify(waku_client::Command::BrowserResult { request_id, result });
+        self.notify(client::Command::BrowserResult { request_id, result });
     }
 
-    fn goal(&self, operation: waku_protocol::model::GoalOperation) {
-        self.notify(waku_client::Command::Goal { operation });
+    fn goal(&self, operation: client_protocol::model::GoalOperation) {
+        self.notify(client::Command::Goal { operation });
     }
 
     fn run_computer_tool(&self, request: ComputerToolRequest) {
-        self.notify(waku_client::Command::RunComputerTool {
-            request: waku_client::WireComputerToolRequest {
+        self.notify(client::Command::RunComputerTool {
+            request: client::WireComputerToolRequest {
                 call_id: request.call_id,
                 tool: request.tool,
                 arguments: request.arguments,
@@ -331,8 +331,8 @@ impl DriverControl for RemoteDriverControl {
     }
 
     fn reject_computer_tool(&self, request: ComputerToolRequest, reason: String) {
-        self.notify(waku_client::Command::RejectComputerTool {
-            request: waku_client::WireComputerToolRequest {
+        self.notify(client::Command::RejectComputerTool {
+            request: client::WireComputerToolRequest {
                 call_id: request.call_id,
                 tool: request.tool,
                 arguments: request.arguments,
@@ -343,9 +343,9 @@ impl DriverControl for RemoteDriverControl {
 
     fn apply_options(&self, options: SessionOptions) -> bool {
         let options = (|| {
-            Ok::<_, anyhow::Error>(waku_client::WireSessionOptions {
-                mode: waku_client::encode_enum(options.mode)?,
-                interaction_mode: waku_client::encode_enum(options.interaction_mode)?,
+            Ok::<_, anyhow::Error>(client::WireSessionOptions {
+                mode: client::encode_enum(options.mode)?,
+                interaction_mode: client::encode_enum(options.interaction_mode)?,
                 model: options.model,
                 reasoning_effort: options.reasoning_effort,
                 service_tier: options.service_tier,
@@ -360,9 +360,9 @@ impl DriverControl for RemoteDriverControl {
             client.request(
                 self.session_id,
                 self.runtime_id,
-                waku_client::Command::ApplyOptions { options }
+                client::Command::ApplyOptions { options }
             ),
-            Ok(waku_client::ResponsePayload::OptionsApplied { applied: true })
+            Ok(client::ResponsePayload::OptionsApplied { applied: true })
         )
     }
 
@@ -371,9 +371,9 @@ impl DriverControl for RemoteDriverControl {
         match client.request(
             self.session_id,
             self.runtime_id,
-            waku_client::Command::Rollback { turns },
+            client::Command::Rollback { turns },
         )? {
-            waku_client::ResponsePayload::Cursor { cursor } => cursor
+            client::ResponsePayload::Cursor { cursor } => cursor
                 .map(serde_json::from_value)
                 .transpose()
                 .map_err(Into::into),
@@ -386,9 +386,9 @@ impl DriverControl for RemoteDriverControl {
         match client.request(
             self.session_id,
             self.runtime_id,
-            waku_client::Command::Fork { turns_to_remove },
+            client::Command::Fork { turns_to_remove },
         )? {
-            waku_client::ResponsePayload::Cursor {
+            client::ResponsePayload::Cursor {
                 cursor: Some(cursor),
             } => serde_json::from_value(cursor).map_err(Into::into),
             _ => anyhow::bail!("the daemon returned an invalid fork response"),
@@ -396,7 +396,7 @@ impl DriverControl for RemoteDriverControl {
     }
 
     fn close(&self) {
-        self.notify(waku_client::Command::CloseSession);
+        self.notify(client::Command::CloseSession);
     }
 }
 
@@ -415,13 +415,10 @@ mod tests {
 
     #[test]
     fn a_dropped_socket_is_not_a_command_failure_but_a_daemon_answer_is() {
+        assert_eq!(transport_failure_notice(client::DAEMON_DISCONNECTED), None);
+        assert_eq!(transport_failure_notice(client::DAEMON_DROPPED), None);
         assert_eq!(
-            transport_failure_notice(waku_client::DAEMON_DISCONNECTED),
-            None
-        );
-        assert_eq!(transport_failure_notice(waku_client::DAEMON_DROPPED), None);
-        assert_eq!(
-            transport_failure_notice(waku_client::DAEMON_CONNECTION_CLOSED),
+            transport_failure_notice(client::DAEMON_CONNECTION_CLOSED),
             None
         );
         assert_eq!(

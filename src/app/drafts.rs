@@ -209,7 +209,7 @@ impl Waku {
             // draft stays in memory and the store only advances its snapshot
             // on success, so the save after reconnecting carries the changes.
             if let Err(error) = result
-                && !waku_client::is_daemon_transport_error(&error.to_string())
+                && !client::is_daemon_transport_error(&error.to_string())
             {
                 let _ = waku.update(cx, |waku, cx| {
                     waku.show_toast(tr!("errors.save_local_state", error = error));

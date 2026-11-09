@@ -9,7 +9,7 @@
 //! This crate is the pure part: the durable record and its JSON boundary,
 //! state-file I/O, the task state machine, scheduling decisions, the
 //! quality-gate rules, team profiles, prompt text and the view model the
-//! desktop draws. The bridge (`waku-agent-bridge/src/team/`) runs members and
+//! desktop draws. The bridge (`agent-bridge/src/team/`) runs members and
 //! exposes the tools; the app (`src/app/team_panel.rs`) shows the team.
 //!
 //! Translated from `@nanmicoder/dsh-agent-teams` 0.1.22 — MIT License,

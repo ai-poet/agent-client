@@ -31,10 +31,10 @@ Waku 路径相对于客户端根目录。两者在 2026-10-04 均已核对存在
   没有进程外插件模式，也没有插件沙箱。Rust 客户端无法承载它；用 Rust 重写 Cordis 及其服务集等于重写 dsh。
 - UI 部分是给 dsh 自家 Web 应用的 React 18 bundle，GPUI 渲染不了。
 - dsh 插件已经在一个地方**原样**运行：我们现有的 `ProviderKind::DeepSeek` provider 以 sidecar 方式启动 `dsh web`
-  （`crates/waku-core/src/deepseek_session.rs`、`crates/waku-core/src/deepseek_pool.rs`、
-  `crates/waku-core/src/driver/deepseek.rs`），dsh 从自己的 home 加载用户自己的插件。本文讲的不是那个 provider。
+  （`crates/client-core/src/deepseek_session.rs`、`crates/client-core/src/deepseek_pool.rs`、
+  `crates/client-core/src/driver/deepseek.rs`），dsh 从自己的 home 加载用户自己的插件。本文讲的不是那个 provider。
   不要把“移植 dsh 功能”和“改 DeepSeek provider”混为一谈。
-- vendored 引擎的 `claurst-plugins` crate（`crates/waku-agent/plugins`）处于休眠状态（没有任何地方调用
+- vendored 引擎的 `agent-core-plugins` crate（`crates/agent-core/plugins`）处于休眠状态（没有任何地方调用
   `load_plugins`），不是做这件事的途径。
 
 ## 2. 插件模型（Cordis）
@@ -342,15 +342,15 @@ Waku 没有槽位或服务注册表。一个 dsh 槽位要么变成一个封闭�
 | `sidebar.panellist`、`main` 面板 | `src/app/sidebar.rs` 的 `render_sidebar_search`、`render_sidebar_action_row`；`src/app/model_status.rs` 的 `main_page_open` / `close_main_pages` / `main_page_title` | 在新文件里写一行入口；加一个 `.child()`；两处行高倍数都要加；在 `Waku` 上加状态字段；在 `src/app/render.rs` 里加 `.when(open, …)`（范例：`src/app/image_studio.rs`） |
 | `sidebar.workspaces.session.*` | `src/app/sidebar.rs` 的 `SidebarRow`、`sidebar_row` | 新变体或行操作 |
 | `sidebar.right.pane.tab` | `src/app.rs` 的 `RightPanelSurface`；`src/app/right_panel.rs`；`src/app/surface_bar.rs` 的 `SurfaceKind` | 新变体；编译器会列出要补的分支（`label`、`icon_path`、`reusable_surface_index`、`render_right_panel`）；可选头部按钮和快捷键 |
-| `conversation.view`（轨迹） | `RightPanelSurface::Trajectory`、`src/app/trajectory_panel.rs`；记录由 `crates/waku-agent-bridge/src/trajectory.rs` 写入，模型在 `crates/agent-trajectory` | 2026-10-22 移植，仅内置 Agent：dsh 里它是聊天旁的一个标签页，这里是对话旁的右侧面板；工具行上有「查看」入口（`render_activity_item`） |
+| `conversation.view`（轨迹） | `RightPanelSurface::Trajectory`、`src/app/trajectory_panel.rs`；记录由 `crates/agent-bridge/src/trajectory.rs` 写入，模型在 `crates/agent-trajectory` | 2026-10-22 移植，仅内置 Agent：dsh 里它是聊天旁的一个标签页，这里是对话旁的右侧面板；工具行上有「查看」入口（`render_activity_item`） |
 | `shell.overlay`（对话框、toast） | `Option<XState>` + 在 `src/app/render.rs` 两个分支里的 `render_x`；`src/app/confirm_dialog.rs` 的 `request_confirm`；`src/app.rs` 的 `show_toast*` | 新建模态文件；toast 辅助函数 |
 | 横幅、`shell.quota-notice` | `src/app/update_banner.rs`、`src/app/daemon_banner.rs`、`src/app/error_banner.rs` | `render_x_banner` + 在 `render.rs` 里加 `.children()` |
 | `shell.bottom` | 没有（只有 `src/app/composer.rs` 里的 `render_workspace_footer`） | 需要新建 |
 | `conversation.session.header.actions` | `src/app/sidebar.rs` 里的 `render_header` | 加一个 `.child(self.render_x_action(cx))`；用 `src/ui` 的 `icon_button` / `popover` |
 | `conversation.chat.node`、`turnTail` | `src/app/transcript.rs` 的 `TranscriptRowKind`；`src/app/transcript_view.rs` 的 `transcript_row` | 新行类型或在行构建器里加分支 |
-| `tool.call.toolview` | `src/app/transcript_view.rs` 的 `render_activity_item`（子 agent 先例：`src/app/subagent_row.rs`） | 没有按工具的注册表，`ActivityItem`（`crates/waku-protocol/src/model.rs`）也没有工具名字段：加一个 `#[serde(default)]` 字段，在 `crates/waku-core/src/driver/native.rs` / `driver/activity.rs` 里赋值，提前返回到新文件里的渲染函数，运行 `bun run protocol:generate` |
+| `tool.call.toolview` | `src/app/transcript_view.rs` 的 `render_activity_item`（子 agent 先例：`src/app/subagent_row.rs`） | 没有按工具的注册表，`ActivityItem`（`crates/client-protocol/src/model.rs`）也没有工具名字段：加一个 `#[serde(default)]` 字段，在 `crates/client-core/src/driver/native.rs` / `driver/activity.rs` 里赋值，提前返回到新文件里的渲染函数，运行 `bun run protocol:generate` |
 | `conversation.composer.dock`、`conversation.input.dock` | `src/app/render.rs`（输入框上方 / 下方）；`src/app/composer.rs` 的 `render_composer` 控件行 | 加一行 `.children()`；或在模型 / effort / 模式 / goal 芯片旁加控件 |
-| `conversation.input.overlay`（斜杠、`@`） | `src/app/autocomplete.rs`；`crates/waku-client/src/composer_complete.rs` | 新的触发来源或行 |
+| `conversation.input.overlay`（斜杠、`@`） | `src/app/autocomplete.rs`；`crates/client/src/composer_complete.rs` | 新的触发来源或行 |
 | `conversation.composer` 链（审批、提问）、`conversation.approval.detail`、`plan-review.actions` | `src/app/permission_card.rs` 的 `render_permission_card`（计划分支：`is_plan_approval`）；`src/app/composer.rs` 的 `render_user_input` | 像计划审批那样在卡片里加分支 |
 | `settings.section`、`settings.general.item`、`plugins.*` | `src/app.rs` 的 `SettingsPage`；`src/app/settings.rs` 的 `SETTINGS_PAGES` | 变体 + 一行（数组长度加一）+ 标题和分发分支 + `settings.x` / `settings.x_keywords` 键 + `src/app/tests.rs` |
 | `ctx.shortcuts`、命令面板 | `src/app/command_palette.rs` 的 `PaletteAction`；`src/app/shortcuts.rs` | 新动作变体 |
@@ -361,15 +361,15 @@ Waku 没有槽位或服务注册表。一个 dsh 槽位要么变成一个封闭�
 
 | dsh 接缝 | Waku 接缝 | 作用范围 |
 |---|---|---|
-| `ctx.tools.register` | `Tool` trait（`crates/waku-agent/tools/src/lib.rs`，vendored——不要改）；`crates/waku-agent-bridge/src/session.rs` 的 `builtin_tools` / `engine_tools`；范例 `crates/waku-agent-bridge/src/subagent.rs`；可开关列表 `crates/sub2api/src/agent_settings.rs` 的 `BUILTIN_TOOLS`；标题在 `native.rs` | 仅内置 agent；要对所有 provider 生效就改为提供一个 MCP 服务器 |
-| `ctx.systemPrompt.section`、`agent.inject` | `crates/waku-agent-bridge/src/config.rs` 的 `session_rules` / `refresh_session_rules` | 内置 agent |
-| `tools/pre-execute` 策略、`ctx.approval` | `crates/waku-agent-bridge/src/permission.rs`（`PermissionBridge`、`GuiPermissionHandler`） | 内置 agent |
+| `ctx.tools.register` | `Tool` trait（`crates/agent-core/tools/src/lib.rs`，vendored——不要改）；`crates/agent-bridge/src/session.rs` 的 `builtin_tools` / `engine_tools`；范例 `crates/agent-bridge/src/subagent.rs`；可开关列表 `crates/sub2api/src/agent_settings.rs` 的 `BUILTIN_TOOLS`；标题在 `native.rs` | 仅内置 agent；要对所有 provider 生效就改为提供一个 MCP 服务器 |
+| `ctx.systemPrompt.section`、`agent.inject` | `crates/agent-bridge/src/config.rs` 的 `session_rules` / `refresh_session_rules` | 内置 agent |
+| `tools/pre-execute` 策略、`ctx.approval` | `crates/agent-bridge/src/permission.rs`（`PermissionBridge`、`GuiPermissionHandler`） | 内置 agent |
 | `ctx.userQuestions` | `session.rs` 的 `forward_questions` → `DriverEvent::UserInputRequested` | 内置 agent；其他 provider 各自映射 |
-| `ctx.jobs`、子 agent 记录 | `BackgroundWorkEvent`（`crates/waku-protocol/src/model.rs`）、`crates/waku-agent-bridge/src/background.rs`、`src/app/background_work.rs` | 所有上报它的 provider |
-| goal / plan / todo / 压缩 | goal：`crates/waku-agent-bridge/src/goal.rs`、`src/app/goal_dialog.rs`；plan：`InteractionMode`、`/plan`；todo：`crates/waku-protocol/src/todo.rs`、`src/app/todo_list.rs`；压缩：`DriverEvent::ContextCompaction` | 已经存在；移植改进点，不另起新系统 |
-| `ctx.commands` | `crates/waku-core/src/composer_complete.rs` 的 `assemble_slash_commands`；`src/app/composer.rs` 的 `execute_local_composer_command`；零代码：`.cheaprouter/commands/*.md` | 应用层 = 所有 provider |
-| 宿主服务 + `ctx.remote` | `Command`（`crates/waku-protocol/src/protocol.rs`）+ `handle_driver_command`（`crates/waku-core/src/daemon.rs`）；无状态的用 `WorkspaceOperation`（`crates/waku-protocol/src/workspace.rs`） | daemon |
-| 会话事件 | `DriverEvent`（`model.rs`）+ `crates/waku-protocol/src/driver_wire.rs` | 旧客户端遇到未知类型会报错——优先用 `BackgroundWorkEvent` 或 `serde(default)` 字段 |
+| `ctx.jobs`、子 agent 记录 | `BackgroundWorkEvent`（`crates/client-protocol/src/model.rs`）、`crates/agent-bridge/src/background.rs`、`src/app/background_work.rs` | 所有上报它的 provider |
+| goal / plan / todo / 压缩 | goal：`crates/agent-bridge/src/goal.rs`、`src/app/goal_dialog.rs`；plan：`InteractionMode`、`/plan`；todo：`crates/client-protocol/src/todo.rs`、`src/app/todo_list.rs`；压缩：`DriverEvent::ContextCompaction` | 已经存在；移植改进点，不另起新系统 |
+| `ctx.commands` | `crates/client-core/src/composer_complete.rs` 的 `assemble_slash_commands`；`src/app/composer.rs` 的 `execute_local_composer_command`；零代码：`.cheaprouter/commands/*.md` | 应用层 = 所有 provider |
+| 宿主服务 + `ctx.remote` | `Command`（`crates/client-protocol/src/protocol.rs`）+ `handle_driver_command`（`crates/client-core/src/daemon.rs`）；无状态的用 `WorkspaceOperation`（`crates/client-protocol/src/workspace.rs`） | daemon |
+| 会话事件 | `DriverEvent`（`model.rs`）+ `crates/client-protocol/src/driver_wire.rs` | 旧客户端遇到未知类型会报错——优先用 `BackgroundWorkEvent` 或 `serde(default)` 字段 |
 | 持久状态 | `AgentSession` / `AgentTurn` 的 `#[serde(default)]` 字段（`model.rs`，存在 `app.db`）；新表通过 `db/schema.ts` + `bun run db:generate`；fork 本地 JSON 通过 `crates/sub2api` 存在 `~/.cheaprouter/` | — |
 
 始终写明移植落在哪个范围：**仅内置 agent**（bridge）还是**所有 provider**（daemon / 应用层）。

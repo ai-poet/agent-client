@@ -19,7 +19,7 @@ use crate::brand;
 const LEGACY_DATA_DIR_NAME: &str = ".waku";
 
 /// Upstream's platform data/cache folder renames (release, debug). Keep the
-/// new names in sync with `waku_protocol::identity::DATA_DIRECTORY_NAME`.
+/// new names in sync with `client_protocol::identity::DATA_DIRECTORY_NAME`.
 const PLATFORM_DIR_RENAMES: &[(&str, &str)] =
     &[("Waku", "CheapRouter"), ("Waku Debug", "CheapRouter Debug")];
 

@@ -1,0 +1,33 @@
+[package]
+name = "agent-core-engine"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Sailry Agent execution core adapted for in-process embedding"
+
+[features]
+test-support = []
+
+[dependencies]
+anyhow = { workspace = true }
+blake3 = "1.8"
+minijinja = { version = "=3.0.1", features = ["serde"] }
+vte = "0.15"
+async-trait = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tiktoken-rs = "=0.12.0"
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+rmcp = { git = "https://github.com/sailry/rust-sdk.git", rev = "5e8fb5a9502d0fd153c29369b11e93bee88e63ac" }
+sailry-protocol = { git = "https://github.com/sailry/sailry-harness.git", rev = "cfc0a06ceaa14fad16f1b1b1ee6957bd53b0610e" }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -3708,8 +3708,8 @@ impl Window {
                 .min(((fade.bounds.bottom().0 - center.y.0) / fade.bottom_band()).clamp(0.0, 1.0));
         }
         if fade.left {
-            ramp = ramp
-                .min(((center.x.0 - fade.bounds.left().0) / fade.left_band()).clamp(0.0, 1.0));
+            ramp =
+                ramp.min(((center.x.0 - fade.bounds.left().0) / fade.left_band()).clamp(0.0, 1.0));
         }
         if fade.right {
             ramp = ramp

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { WakuClient } from '@waku/client'
+import type { WakuClient } from 'client'
 import { importDaemonPathAttachment } from './attachments'
 
 describe('importDaemonPathAttachment', () => {

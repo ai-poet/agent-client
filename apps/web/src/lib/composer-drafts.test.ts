@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { ComposerDrafts } from '@waku/client'
+import type { ComposerDrafts } from 'client'
 import {
   composerDraftFor,
   moveComposerDraftToEmpty,

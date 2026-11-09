@@ -24,7 +24,7 @@
 use std::time::{Duration, Instant};
 
 use agent_trajectory::metrics::format_tokens;
-use waku_protocol::todo::{TodoItem, current_todo};
+use client_protocol::todo::{TodoItem, current_todo};
 
 use crate::ui::ActivationExt as _;
 
@@ -48,7 +48,7 @@ const MIN_REFRESH_GAP: Duration = Duration::from_secs(2);
 
 #[derive(Default)]
 struct Changes {
-    snapshot: Option<waku_client::git_commit::Snapshot>,
+    snapshot: Option<client::git_commit::Snapshot>,
     /// The folder is not a Git repository, or the read failed.
     unavailable: bool,
     loading: bool,
@@ -227,12 +227,12 @@ impl Waku {
         entry.read_for = updated_at;
         entry.generation += 1;
         let generation = entry.generation;
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace = client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |this, cx| {
             let read = cx
                 .background_executor()
                 .spawn(async move {
-                    workspace.request(waku_client::WorkspaceOperation::InspectCommit { cwd })
+                    workspace.request(client::WorkspaceOperation::InspectCommit { cwd })
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
@@ -244,7 +244,7 @@ impl Waku {
                     return;
                 }
                 match read {
-                    Ok(waku_client::WorkspaceResult::CommitSnapshot { snapshot }) => {
+                    Ok(client::WorkspaceResult::CommitSnapshot { snapshot }) => {
                         entry.snapshot = Some(snapshot);
                         entry.unavailable = false;
                     }
@@ -661,7 +661,7 @@ impl Waku {
         let done = session
             .todos
             .iter()
-            .filter(|todo| matches!(todo.status, waku_protocol::todo::TodoStatus::Completed))
+            .filter(|todo| matches!(todo.status, client_protocol::todo::TodoStatus::Completed))
             .count();
         let folded = self.session_rail.todo_folded.contains(&session_id);
         let header = div()
@@ -751,7 +751,7 @@ pub(super) fn todo_row_hides_after_update(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use waku_protocol::todo::TodoStatus;
+    use client_protocol::todo::TodoStatus;
 
     #[test]
     fn the_rail_steps_aside_on_a_narrow_window() {

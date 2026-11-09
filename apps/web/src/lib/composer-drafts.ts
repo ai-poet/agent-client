@@ -3,7 +3,7 @@ import type {
   ComposerDraftChange,
   ComposerDrafts,
   ComposerDraftTarget,
-} from '@waku/client'
+} from 'client'
 
 export function composerDraftId(target: ComposerDraftTarget): string {
   return target.type === 'newSession'

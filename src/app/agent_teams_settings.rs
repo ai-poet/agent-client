@@ -15,12 +15,16 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use agent_teams::config::TeamsConfig;
-use agent_teams::profiles::TeamProfileConfig;
+use agent_teams::profiles::{ProfileMemberConfig, TeamProfileConfig};
+use gpui::ElementId;
 
 use super::providers_page::card_button;
 use super::*;
 
 use crate::ui::text_field::TextField;
+
+#[path = "agent_team_roster.rs"]
+mod agent_team_roster;
 
 /// Presets for the member cap.
 const MAX_MEMBER_PRESETS: [u32; 5] = [2, 4, 8, 12, 16];
@@ -36,6 +40,8 @@ pub(super) struct AgentTeamsPageState {
     pub prompt_input: Option<Entity<TextInput>>,
     /// The profile editor, while open.
     pub profile_editor: Option<ProfileEditor>,
+    /// The structured role/model editor, while open.
+    pub roster_editor: Option<agent_team_roster::RosterEditor>,
 }
 
 pub(super) struct ProfileEditor {
@@ -78,6 +84,36 @@ fn profile_skeleton() -> String {
         ]
     }))
     .unwrap_or_default()
+}
+
+/// The picker's stable route id for a profile member. A model id that already
+/// carries its platform wins over the legacy separate provider field.
+fn profile_member_picker_id(member: &ProfileMemberConfig) -> Option<String> {
+    let model = member.model.as_deref()?.trim();
+    if model.is_empty() {
+        return None;
+    }
+    if model.contains("::") {
+        return Some(model.to_owned());
+    }
+    member
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|provider| !provider.is_empty())
+        .map(|provider| format!("{provider}::{model}"))
+        .or_else(|| Some(model.to_owned()))
+}
+
+fn profile_member_model_label(member: &ProfileMemberConfig, models: &[ProviderModel]) -> String {
+    let Some(id) = profile_member_picker_id(member) else {
+        return tr!("team.settings.role_model_inherit");
+    };
+    models
+        .iter()
+        .find(|model| model.id == id)
+        .map(|model| model.name.clone())
+        .unwrap_or(id)
 }
 
 impl Waku {
@@ -194,6 +230,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.agent_page.teams.roster_editor = None;
         let profiles = self
             .agent_page
             .teams
@@ -290,6 +327,15 @@ impl Waku {
     }
 
     fn remove_agent_team_profile(&mut self, name: String, cx: &mut Context<Self>) {
+        if self
+            .agent_page
+            .teams
+            .roster_editor
+            .as_ref()
+            .is_some_and(|editor| editor.profile == name)
+        {
+            self.agent_page.teams.roster_editor = None;
+        }
         self.edit_agent_team_profiles(cx, move |profiles| {
             profiles.remove(&name);
         });
@@ -300,6 +346,15 @@ impl Waku {
         self.edit_agent_team_profiles(cx, |profiles| {
             for (name, profile) in agent_teams::profiles::builtin_profiles() {
                 profiles.entry(name).or_insert(profile);
+            }
+        });
+    }
+
+    /// Add the flagship template without restoring templates the user removed.
+    fn add_flagship_team_template(&mut self, cx: &mut Context<Self>) {
+        self.edit_agent_team_profiles(cx, |profiles| {
+            if let Some(profile) = agent_teams::profiles::builtin_profiles().remove("flagship") {
+                profiles.insert("flagship".to_owned(), profile);
             }
         });
     }
@@ -639,6 +694,10 @@ impl Waku {
     ) -> Div {
         let saving = self.agent_page.teams.saving;
         let profiles = config.effective_profiles();
+        let models: Vec<ProviderModel> = self
+            .provider_probe(ProviderKind::Native)
+            .map(|probe| probe.models.clone())
+            .unwrap_or_default();
         let mut list = div().mt(px(6.0)).flex().flex_col();
         if profiles.is_empty() {
             list = list.child(
@@ -666,10 +725,17 @@ impl Waku {
             let roster = profile
                 .members
                 .iter()
-                .map(|member| member.name.clone())
+                .map(|member| {
+                    format!(
+                        "{} → {}",
+                        member.name,
+                        profile_member_model_label(member, &models)
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(" · ");
             let edit_name = name.clone();
+            let roster_name = name.clone();
             let remove_name = name.clone();
             let command = agent_teams::command::profile_command_name(name)
                 .map(|alias| format!("/{alias}"))
@@ -735,8 +801,19 @@ impl Waku {
                     )
                     .child(card_button(
                         theme,
+                        SharedString::from(format!("agent-teams-roster-edit-{name}")),
+                        tr!("team.settings.roster_edit"),
+                        false,
+                        saving,
+                        cx,
+                        move |this, window, cx| {
+                            this.open_agent_team_roster_editor(roster_name.clone(), window, cx)
+                        },
+                    ))
+                    .child(card_button(
+                        theme,
                         SharedString::from(format!("agent-teams-profile-edit-{name}")),
-                        tr!("common.edit"),
+                        tr!("team.settings.profile_advanced"),
                         false,
                         saving,
                         cx,
@@ -776,7 +853,9 @@ impl Waku {
             )
             .child(list);
 
-        if let Some(editor) = &self.agent_page.teams.profile_editor {
+        if self.agent_page.teams.roster_editor.is_some() {
+            block = block.child(self.render_agent_team_roster_editor(theme, cx));
+        } else if let Some(editor) = &self.agent_page.teams.profile_editor {
             block = block.child(
                 div()
                     .mt(px(12.0))
@@ -862,6 +941,17 @@ impl Waku {
                         |this, _, cx| this.restore_agent_team_templates(cx),
                     )),
             );
+            if !profiles.contains_key("flagship") {
+                block = block.child(div().mt(px(8.0)).child(card_button(
+                    theme,
+                    SharedString::from("agent-teams-profile-flagship"),
+                    tr!("team.settings.profile_add_flagship"),
+                    false,
+                    saving,
+                    cx,
+                    |this, _, cx| this.add_flagship_team_template(cx),
+                )));
+            }
         }
         block
     }
@@ -877,7 +967,7 @@ fn error_line(theme: Theme, error: String) -> Div {
 }
 
 /// A dropdown trigger: the current choice and a chevron.
-fn picker_trigger(theme: Theme, id: &'static str, label: String) -> Stateful<Div> {
+fn picker_trigger(theme: Theme, id: impl Into<ElementId>, label: String) -> Stateful<Div> {
     div()
         .id(id)
         .tab_index(0)
@@ -917,5 +1007,31 @@ mod tests {
             let back: TeamProfileConfig = serde_json::from_value(value).unwrap();
             assert_eq!(back, profile, "{name}");
         }
+    }
+
+    #[test]
+    fn role_picker_ids_cover_legacy_and_custom_routes() {
+        let legacy = ProfileMemberConfig {
+            provider: Some("anthropic".to_owned()),
+            model: Some("claude-sonnet-5-5".to_owned()),
+            ..ProfileMemberConfig::default()
+        };
+        assert_eq!(
+            profile_member_picker_id(&legacy).as_deref(),
+            Some("anthropic::claude-sonnet-5-5")
+        );
+        let custom = ProfileMemberConfig {
+            provider: None,
+            model: Some("custom:local::deepseek-v4".to_owned()),
+            ..ProfileMemberConfig::default()
+        };
+        assert_eq!(
+            profile_member_picker_id(&custom).as_deref(),
+            Some("custom:local::deepseek-v4")
+        );
+        assert_eq!(
+            profile_member_picker_id(&ProfileMemberConfig::default()),
+            None
+        );
     }
 }

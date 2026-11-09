@@ -1,0 +1,1351 @@
+// providers/codex.rs — OpenAI Codex provider (OAuth-authenticated).
+//
+// Codex uses OpenAI's Responses API at:
+//   https://chatgpt.com/backend-api/codex/responses
+//
+// Auth: Bearer token obtained via the Codex OAuth flow stored in
+//   ~/.claurst/codex_tokens.json (`CodexTokens` struct).
+//
+// Token refresh: if `expires_at` is in the past we POST to the OpenAI token
+//   endpoint with `grant_type=refresh_token` before making the request.
+//
+// Model list: static — the Codex endpoint does not expose a /models route,
+//   so we use the `CODEX_MODELS` constant from `agent-core`.
+
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use agent_core::codex_oauth::{
+    CODEX_API_ENDPOINT, CODEX_MODELS, CODEX_TOKEN_URL, DEFAULT_CODEX_MODEL,
+};
+use agent_core::oauth_config::{get_codex_tokens, save_codex_tokens, CodexTokens};
+use agent_core::provider_id::{ModelId, ProviderId};
+use agent_core::types::UsageInfo;
+use async_stream::stream;
+use async_trait::async_trait;
+use futures::{Stream, StreamExt};
+use serde_json::{json, Value};
+use tracing::{debug, warn};
+
+use crate::error_handling::parse_error_response;
+use crate::provider::{LlmProvider, ModelInfo};
+use crate::provider_error::ProviderError;
+use crate::provider_types::{
+    ProviderCapabilities, ProviderRequest, ProviderResponse, ProviderStatus, StopReason,
+    StreamEvent, SystemPromptStyle,
+};
+
+// Re-use Copilot's message translation helpers via the public Copilot type.
+use crate::providers::copilot::CopilotProvider;
+
+// ---------------------------------------------------------------------------
+// CodexProvider
+// ---------------------------------------------------------------------------
+
+pub struct CodexProvider {
+    id: ProviderId,
+    http_client: reqwest::Client,
+    /// Mutable token cache: updated in-place when a refresh succeeds.
+    tokens: Arc<Mutex<CodexTokens>>,
+    /// Where `/responses` requests go. Upstream this is always the ChatGPT
+    /// Codex backend; the Waku fork also points it at a gateway that speaks
+    /// the same API (see [`CodexProvider::with_gateway`]).
+    endpoint: String,
+}
+
+/// Read a Responses `function_call`'s arguments.
+///
+/// Fork: the API specifies `arguments` as a JSON *string*, but a gateway that
+/// normalizes a response can hand back the object it already parsed. Reading
+/// only the string form dropped those arguments and ran the tool with
+/// nothing — silently, because `{}` is indistinguishable from a call that
+/// genuinely takes no arguments.
+///
+/// A parse failure still yields `{}`, since this decoder has no error channel
+/// (the agent loop's `parse_tool_args` does, and surfaces a tool error
+/// instead — issue #215). What changed is that it is no longer silent: a
+/// truncated stream now leaves a trail.
+/// Fork (Waku): the part of a call's complete `arguments` that its deltas did
+/// not already deliver — all of it when none came. `None` when nothing is
+/// left, or when what streamed is not a prefix of the whole: appending cannot
+/// mend that, so it is logged and the streamed text stands.
+fn arguments_remainder(streamed: &str, complete: &str) -> Option<String> {
+    match complete.strip_prefix(streamed) {
+        Some("") => None,
+        Some(rest) => Some(rest.to_owned()),
+        None => {
+            warn!(
+                streamed_len = streamed.len(),
+                complete_len = complete.len(),
+                "Responses stream: streamed tool arguments disagree with the completed call"
+            );
+            None
+        }
+    }
+}
+
+fn decode_tool_arguments(arguments: Option<&Value>, tool: &str) -> Value {
+    match arguments {
+        Some(Value::String(encoded)) => {
+            let trimmed = encoded.trim();
+            if trimmed.is_empty() {
+                return json!({});
+            }
+            serde_json::from_str(trimmed).unwrap_or_else(|error| {
+                warn!(
+                    %tool,
+                    %error,
+                    "tool-call arguments did not parse; running with none"
+                );
+                json!({})
+            })
+        }
+        Some(object @ Value::Object(_)) => object.clone(),
+        _ => json!({}),
+    }
+}
+
+/// Read a Responses `usage` object.
+///
+/// Fork: the Responses API counts cached tokens *inside* `input_tokens` and
+/// reports them again under `input_tokens_details.cached_tokens`, where the
+/// Messages API reports the two apart. Carried over as-is, every cached token
+/// was counted twice — the context meter read high, and compaction would fire
+/// early. The cached share is taken out of `input_tokens` here so
+/// `UsageInfo::total_input` means the same on every route.
+fn responses_usage(usage: Option<&Value>) -> UsageInfo {
+    let count = |value: Option<&Value>| value.and_then(Value::as_u64).unwrap_or(0);
+    let input = count(usage.and_then(|value| value.get("input_tokens")));
+    let cached = count(
+        usage
+            .and_then(|value| value.get("input_tokens_details"))
+            .and_then(|value| value.get("cached_tokens")),
+    );
+    UsageInfo {
+        input_tokens: input.saturating_sub(cached),
+        output_tokens: count(usage.and_then(|value| value.get("output_tokens"))),
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: cached,
+    }
+}
+
+impl CodexProvider {
+    pub fn new(tokens: CodexTokens) -> Self {
+        // Fork departure (Waku): connect and read timeouts instead of a
+        // total deadline that cut long answers off mid-stream.
+        let http_client = crate::retry_policy::model_client_builder()
+            .build()
+            .expect("failed to build reqwest client");
+
+        Self {
+            id: ProviderId::new(ProviderId::CODEX),
+            http_client,
+            tokens: Arc::new(Mutex::new(tokens)),
+            endpoint: CODEX_API_ENDPOINT.to_string(),
+        }
+    }
+
+    /// Fork addition: the Responses API against an arbitrary endpoint with a
+    /// plain API key. The key rides as the bearer token; no expiry, no
+    /// refresh, no ChatGPT account id. Everything else — request shape,
+    /// streaming, tool translation — is unchanged, which is the point: a
+    /// gateway that implements `/responses` gets the same client the
+    /// ChatGPT backend does.
+    pub fn with_gateway(endpoint: impl Into<String>, api_key: String) -> Self {
+        let tokens = CodexTokens {
+            access_token: api_key,
+            ..CodexTokens::default()
+        };
+        let mut provider = Self::new(tokens);
+        provider.endpoint = endpoint.into();
+        provider
+    }
+
+    /// Construct from stored tokens; returns `None` if no tokens are saved.
+    pub fn from_stored() -> Option<Self> {
+        let tokens = get_codex_tokens()?;
+        if tokens.access_token.is_empty() {
+            return None;
+        }
+        Some(Self::new(tokens))
+    }
+
+    // -----------------------------------------------------------------------
+    // Token management
+    // -----------------------------------------------------------------------
+
+    fn is_expired(tokens: &CodexTokens) -> bool {
+        let Some(expires_at) = tokens.expires_at else {
+            return false; // No expiry info — assume still valid.
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        // Treat as expired 60 s early to avoid races.
+        now + 60 >= expires_at
+    }
+
+    /// Return the current access token, refreshing first if it is expired.
+    async fn access_token(&self) -> Result<String, ProviderError> {
+        // Check expiry under the lock; clone what we need; release.
+        let (token, needs_refresh, refresh_token) = {
+            let guard = self.tokens.lock().unwrap();
+            let expired = Self::is_expired(&guard);
+            (
+                guard.access_token.clone(),
+                expired,
+                guard.refresh_token.clone(),
+            )
+        };
+
+        if !needs_refresh {
+            return Ok(token);
+        }
+
+        let Some(refresh) = refresh_token else {
+            // No refresh token — return what we have and hope for the best.
+            warn!("Codex access token is expired and no refresh token is available");
+            return Ok(token);
+        };
+
+        debug!("Codex access token expired — refreshing");
+        self.refresh_token(&refresh).await
+    }
+
+    async fn refresh_token(&self, refresh_token: &str) -> Result<String, ProviderError> {
+        let body = json!({
+            "grant_type": "refresh_token",
+            "client_id": agent_core::codex_oauth::CODEX_CLIENT_ID,
+            "refresh_token": refresh_token,
+        });
+
+        let resp = self
+            .http_client
+            .post(CODEX_TOKEN_URL)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ProviderError::Other {
+                provider: self.id.clone(),
+                message: format!("Token refresh request failed: {}", e),
+                status: None,
+                body: None,
+            })?;
+
+        let status = resp.status().as_u16();
+        let text = resp.text().await.map_err(|e| ProviderError::Other {
+            provider: self.id.clone(),
+            message: format!("Failed to read token refresh response: {}", e),
+            status: Some(status),
+            body: None,
+        })?;
+
+        if !(200..300).contains(&(status as usize)) {
+            return Err(ProviderError::Other {
+                provider: self.id.clone(),
+                message: format!("Token refresh failed (HTTP {})", status),
+                status: Some(status),
+                body: Some(text),
+            });
+        }
+
+        let json_val: Value = serde_json::from_str(&text).map_err(|e| ProviderError::Other {
+            provider: self.id.clone(),
+            message: format!("Failed to parse token refresh response: {}", e),
+            status: Some(status),
+            body: Some(text.clone()),
+        })?;
+
+        let new_access = json_val
+            .get("access_token")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if new_access.is_empty() {
+            return Err(ProviderError::Other {
+                provider: self.id.clone(),
+                message: "Token refresh response missing access_token".to_string(),
+                status: Some(status),
+                body: Some(text),
+            });
+        }
+
+        let new_refresh = json_val
+            .get("refresh_token")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let expires_in = json_val.get("expires_in").and_then(|v| v.as_u64());
+
+        let new_expires_at = expires_in.map(|secs| {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+                + secs
+        });
+
+        // Persist and cache the refreshed tokens.
+        let mut updated = {
+            let guard = self.tokens.lock().unwrap();
+            guard.clone()
+        };
+        updated.access_token = new_access.clone();
+        if let Some(r) = new_refresh {
+            updated.refresh_token = Some(r);
+        }
+        updated.expires_at = new_expires_at;
+
+        if let Err(e) = save_codex_tokens(&updated) {
+            warn!("Failed to persist refreshed Codex tokens: {}", e);
+        }
+
+        {
+            let mut guard = self.tokens.lock().unwrap();
+            *guard = updated;
+        }
+
+        Ok(new_access)
+    }
+
+    // -----------------------------------------------------------------------
+    // Request helpers
+    // -----------------------------------------------------------------------
+
+    fn codex_headers(
+        &self,
+        builder: reqwest::RequestBuilder,
+        token: &str,
+        account_id: Option<&str>,
+    ) -> reqwest::RequestBuilder {
+        let builder = builder
+            .bearer_auth(token)
+            .header("User-Agent", concat!("claurst/", env!("CARGO_PKG_VERSION")));
+
+        if let Some(id) = account_id {
+            builder.header("ChatGPT-Account-Id", id)
+        } else {
+            builder
+        }
+    }
+
+    fn account_id(&self) -> Option<String> {
+        self.tokens.lock().unwrap().account_id.clone()
+    }
+
+    fn system_prompt_to_text(request: &ProviderRequest) -> String {
+        match request.system_prompt.as_ref() {
+            Some(crate::provider_types::SystemPrompt::Text(text)) => text.clone(),
+            Some(crate::provider_types::SystemPrompt::Blocks(blocks)) => blocks
+                .iter()
+                .map(|b| b.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            None => String::new(),
+        }
+    }
+
+    /// Build the Responses-API request body for Codex.
+    fn build_responses_body(request: &ProviderRequest) -> Value {
+        // Re-use the same message translation that the Copilot provider uses.
+        let mut input = CopilotProvider::to_responses_input_pub(request);
+        let instructions = Self::system_prompt_to_text(request);
+        // Fork departure (Waku): the system prompt goes out once, as
+        // `instructions`, the way Codex sends it. The shared translation also
+        // opens `input` with it as a `system` item, so every request carried
+        // it twice — about 2k tokens of a fresh session's 9k — and a gateway
+        // in front of a ChatGPT account folds that item into `instructions`
+        // as well, making it three copies.
+        if !instructions.is_empty()
+            && input
+                .first()
+                .is_some_and(|item| item.get("role").and_then(Value::as_str) == Some("system"))
+        {
+            input.remove(0);
+        }
+
+        let tools: Vec<Value> = request
+            .tools
+            .iter()
+            .map(|tool| {
+                json!({
+                    "type": "function",
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.input_schema,
+                    "strict": false,
+                })
+            })
+            .collect();
+
+        let mut body = json!({
+            "model": request.model,
+            "input": input,
+            "instructions": instructions,
+            "store": false,
+        });
+
+        if !tools.is_empty() {
+            body["tools"] = json!(tools);
+        }
+
+        // Apply reasoning effort / summary / verbosity exactly like the Copilot
+        // Responses path. The query layer already populates `reasoningEffort`
+        // (default "medium"), `reasoningSummary`, and `include` for gpt-5 Codex
+        // models — without this they were silently dropped and every request ran
+        // at the server default. Mirrors opencode's gpt-5 reasoning defaults.
+        CopilotProvider::apply_responses_provider_options_pub(&mut body, &request.provider_options);
+
+        body
+    }
+
+    /// The error's type or code, wherever the event carries it.
+    fn extract_stream_error_code(json_val: &Value) -> String {
+        [
+            "/error/code",
+            "/response/error/code",
+            "/code",
+            "/error/type",
+        ]
+        .iter()
+        .find_map(|path| json_val.pointer(path).and_then(|value| value.as_str()))
+        .unwrap_or_default()
+        .to_string()
+    }
+
+    fn extract_stream_error_message(json_val: &Value) -> String {
+        json_val
+            .pointer("/error/message")
+            .and_then(|value| value.as_str())
+            .or_else(|| {
+                json_val
+                    .pointer("/response/error/message")
+                    .and_then(|value| value.as_str())
+            })
+            .or_else(|| {
+                json_val
+                    .pointer("/message")
+                    .and_then(|value| value.as_str())
+            })
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| json_val.to_string())
+    }
+
+    // -----------------------------------------------------------------------
+    // HTTP call
+    // -----------------------------------------------------------------------
+
+    async fn send_responses_request(
+        &self,
+        request: &ProviderRequest,
+    ) -> Result<ProviderResponse, ProviderError> {
+        let token = self.access_token().await?;
+        let account_id = self.account_id();
+
+        let body = Self::build_responses_body(request);
+
+        let builder = self
+            .http_client
+            .post(self.endpoint.as_str())
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json");
+        let builder = self.codex_headers(builder, &token, account_id.as_deref());
+
+        let resp = builder
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ProviderError::Other {
+                provider: self.id.clone(),
+                message: format!("HTTP request failed: {}", e),
+                status: None,
+                body: None,
+            })?;
+
+        let status = resp.status().as_u16();
+        let text = resp.text().await.map_err(|e| ProviderError::Other {
+            provider: self.id.clone(),
+            message: format!("Failed to read response body: {}", e),
+            status: Some(status),
+            body: None,
+        })?;
+
+        if !(200..300).contains(&(status as usize)) {
+            return Err(parse_error_response(status, &text, &self.id));
+        }
+
+        let json_val: Value = serde_json::from_str(&text).map_err(|e| ProviderError::Other {
+            provider: self.id.clone(),
+            message: format!("Failed to parse response JSON: {}", e),
+            status: Some(status),
+            body: Some(text.clone()),
+        })?;
+
+        Self::parse_responses_response(&self.id, &json_val)
+    }
+
+    async fn send_responses_streaming_request(
+        &self,
+        request: &ProviderRequest,
+    ) -> Result<reqwest::Response, ProviderError> {
+        let token = self.access_token().await?;
+        let account_id = self.account_id();
+
+        let mut body = Self::build_responses_body(request);
+        body["stream"] = json!(true);
+
+        let builder = self
+            .http_client
+            .post(self.endpoint.as_str())
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream");
+        let builder = self.codex_headers(builder, &token, account_id.as_deref());
+
+        // Fork departure (Waku): failures leave classified, headers read —
+        // `Retry-After` and the gateway's own message used to be dropped here.
+        let resp = builder
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ProviderError::Classified {
+                provider: self.id.clone(),
+                failure: crate::retry_policy::classify_transport(&e),
+            })?;
+
+        let status = resp.status().as_u16();
+        if !(200..300).contains(&(status as usize)) {
+            let headers = resp.headers().clone();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(ProviderError::Classified {
+                provider: self.id.clone(),
+                failure: crate::retry_policy::classify_http(status, &headers, &text),
+            });
+        }
+
+        Ok(resp)
+    }
+
+    // -----------------------------------------------------------------------
+    // Response parsing  (mirrors CopilotProvider::parse_responses_response)
+    // -----------------------------------------------------------------------
+
+    fn parse_responses_response(
+        provider_id: &ProviderId,
+        json_val: &Value,
+    ) -> Result<ProviderResponse, ProviderError> {
+        use agent_core::types::ContentBlock;
+
+        let id = json_val
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let model = json_val
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or(DEFAULT_CODEX_MODEL)
+            .to_string();
+
+        let output = json_val
+            .get("output")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| ProviderError::Other {
+                provider: provider_id.clone(),
+                message: "No output in Codex Responses API response".to_string(),
+                status: None,
+                body: Some(json_val.to_string()),
+            })?;
+
+        let mut content: Vec<ContentBlock> = Vec::new();
+        let mut has_tool_call = false;
+
+        for item in output {
+            match item.get("type").and_then(|v| v.as_str()) {
+                Some("message") => {
+                    if let Some(parts) = item.get("content").and_then(|v| v.as_array()) {
+                        for part in parts {
+                            match part.get("type").and_then(|v| v.as_str()) {
+                                Some("output_text") | Some("text") => {
+                                    if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                                        if !text.is_empty() {
+                                            content.push(ContentBlock::Text {
+                                                text: text.to_string(),
+                                            });
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                Some("reasoning") => {
+                    if let Some(summaries) = item.get("summary").and_then(|v| v.as_array()) {
+                        let reasoning: String = summaries
+                            .iter()
+                            .filter_map(|s| s.get("text").and_then(|t| t.as_str()))
+                            .collect::<Vec<_>>()
+                            .join("");
+                        if !reasoning.is_empty() {
+                            content.push(ContentBlock::Thinking {
+                                thinking: reasoning,
+                                signature: String::new(),
+                            });
+                        }
+                    }
+                }
+                Some("function_call") => {
+                    has_tool_call = true;
+                    let id = item
+                        .get("call_id")
+                        .or_else(|| item.get("id"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let name = item
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let input = decode_tool_arguments(item.get("arguments"), &name);
+                    content.push(ContentBlock::ToolUse {
+                        id,
+                        name,
+                        input,
+                        thought_signature: None,
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        let stop_reason = if has_tool_call {
+            StopReason::ToolUse
+        } else {
+            match json_val
+                .get("incomplete_details")
+                .and_then(|v| v.get("reason"))
+                .and_then(|v| v.as_str())
+            {
+                Some("max_output_tokens") => StopReason::MaxTokens,
+                Some("content_filter") => StopReason::ContentFiltered,
+                Some(other) if !other.is_empty() => StopReason::Other(other.to_string()),
+                _ => StopReason::EndTurn,
+            }
+        };
+
+        let usage = {
+            let u = json_val.get("usage");
+            UsageInfo {
+                input_tokens: u
+                    .and_then(|v| v.get("input_tokens"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                output_tokens: u
+                    .and_then(|v| v.get("output_tokens"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: 0,
+            }
+        };
+
+        Ok(ProviderResponse {
+            id,
+            content,
+            stop_reason,
+            usage,
+            model,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LlmProvider impl
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl LlmProvider for CodexProvider {
+    fn id(&self) -> &ProviderId {
+        &self.id
+    }
+
+    fn name(&self) -> &str {
+        "OpenAI Codex"
+    }
+
+    async fn create_message(
+        &self,
+        request: ProviderRequest,
+    ) -> Result<ProviderResponse, ProviderError> {
+        self.send_responses_request(&request).await
+    }
+
+    async fn create_message_stream(
+        &self,
+        request: ProviderRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, ProviderError>> + Send>>, ProviderError>
+    {
+        let resp = self.send_responses_streaming_request(&request).await?;
+        let provider_id = self.id.clone();
+        // Fork (Waku): a failure inside the stream still names its request.
+        let request_id = crate::retry_policy::request_id_of(resp.headers());
+
+        let s = stream! {
+            let mut byte_stream = resp.bytes_stream();
+            let mut leftover = String::new();
+            let mut current_event = String::new();
+            let mut current_data: Vec<String> = Vec::new();
+            let mut message_started = false;
+            let mut message_id = String::from("unknown");
+            let mut model_name = String::from(DEFAULT_CODEX_MODEL);
+            let mut saw_tool_call = false;
+            let mut open_blocks: std::collections::HashSet<usize> = std::collections::HashSet::new();
+            // Fork (Waku): each call's arguments as streamed so far, so the
+            // complete string a `.done` event carries can fill in what the
+            // deltas did not deliver (`arguments_remainder`).
+            let mut streamed_arguments: std::collections::HashMap<usize, String> =
+                std::collections::HashMap::new();
+
+            while let Some(chunk_result) = byte_stream.next().await {
+                let chunk = match chunk_result {
+                    Ok(chunk) => chunk,
+                    Err(e) => {
+                        yield Err(ProviderError::Classified {
+                            provider: provider_id.clone(),
+                            failure: crate::retry_policy::classify_transport(&e),
+                        });
+                        return;
+                    }
+                };
+
+                let text = String::from_utf8_lossy(&chunk);
+                let combined = if leftover.is_empty() {
+                    text.to_string()
+                } else {
+                    let mut s = std::mem::take(&mut leftover);
+                    s.push_str(&text);
+                    s
+                };
+
+                let mut lines: Vec<&str> = combined.split('\n').collect();
+                if !combined.ends_with('\n') {
+                    leftover = lines.pop().unwrap_or("").to_string();
+                }
+
+                for raw_line in lines {
+                    let line = raw_line.trim_end_matches('\r');
+
+                    if line.is_empty() {
+                        if current_data.is_empty() {
+                            current_event.clear();
+                            continue;
+                        }
+
+                        let data = current_data.join("\n");
+                        current_data.clear();
+                        let trimmed = data.trim();
+                        if trimmed.is_empty() || trimmed == "[DONE]" {
+                            current_event.clear();
+                            continue;
+                        }
+
+                        let json_val: Value = match serde_json::from_str(trimmed) {
+                            Ok(value) => value,
+                            Err(e) => {
+                                yield Err(ProviderError::StreamError {
+                                    provider: provider_id.clone(),
+                                    message: format!("Failed to parse Codex stream JSON: {}", e),
+                                    partial_response: Some(trimmed.to_string()),
+                                });
+                                return;
+                            }
+                        };
+
+                        let event_name = if current_event.is_empty() {
+                            json_val
+                                .get("type")
+                                .and_then(|value| value.as_str())
+                                .unwrap_or("")
+                                .to_string()
+                        } else {
+                            current_event.clone()
+                        };
+
+                        match event_name.as_str() {
+                            "response.created" | "response.in_progress" => {
+                                if let Some(response) = json_val.get("response") {
+                                    if let Some(id) = response.get("id").and_then(|value| value.as_str()) {
+                                        message_id = id.to_string();
+                                    }
+                                    if let Some(model) = response.get("model").and_then(|value| value.as_str()) {
+                                        model_name = model.to_string();
+                                    }
+                                    if !message_started {
+                                        yield Ok(StreamEvent::MessageStart {
+                                            id: message_id.clone(),
+                                            model: model_name.clone(),
+                                            usage: UsageInfo::default(),
+                                        });
+                                        message_started = true;
+                                    }
+                                }
+                            }
+                            "response.output_item.added" => {
+                                let output_index = json_val
+                                    .get("output_index")
+                                    .and_then(|value| value.as_u64())
+                                    .unwrap_or(0) as usize;
+                                if let Some(item) = json_val.get("item") {
+                                    match item.get("type").and_then(|value| value.as_str()) {
+                                        Some("message") => {
+                                            if let Some(id) = item.get("id").and_then(|value| value.as_str()) {
+                                                message_id = id.to_string();
+                                            }
+                                            if !message_started {
+                                                yield Ok(StreamEvent::MessageStart {
+                                                    id: message_id.clone(),
+                                                    model: model_name.clone(),
+                                                    usage: UsageInfo::default(),
+                                                });
+                                                message_started = true;
+                                            }
+                                        }
+                                        Some("function_call") => {
+                                            saw_tool_call = true;
+                                            let call_id = item
+                                                .get("call_id")
+                                                .or_else(|| item.get("id"))
+                                                .and_then(|value| value.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            let name = item
+                                                .get("name")
+                                                .and_then(|value| value.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            if open_blocks.insert(output_index) {
+                                                yield Ok(StreamEvent::ContentBlockStart {
+                                                    index: output_index,
+                                                    content_block: agent_core::types::ContentBlock::ToolUse {
+                                                        id: call_id,
+                                                        name,
+                                                        input: json!({}),
+                                                        thought_signature: None,
+                                                    },
+                                                });
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            "response.content_part.added" => {
+                                let output_index = json_val
+                                    .get("output_index")
+                                    .and_then(|value| value.as_u64())
+                                    .unwrap_or(0) as usize;
+                                if let Some(part) = json_val.get("part") {
+                                    if matches!(part.get("type").and_then(|value| value.as_str()), Some("output_text") | Some("text")) {
+                                        if !message_started {
+                                            yield Ok(StreamEvent::MessageStart {
+                                                id: message_id.clone(),
+                                                model: model_name.clone(),
+                                                usage: UsageInfo::default(),
+                                            });
+                                            message_started = true;
+                                        }
+                                        if open_blocks.insert(output_index) {
+                                            yield Ok(StreamEvent::ContentBlockStart {
+                                                index: output_index,
+                                                content_block: agent_core::types::ContentBlock::Text {
+                                                    text: String::new(),
+                                                },
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            "response.output_text.delta" => {
+                                let output_index = json_val
+                                    .get("output_index")
+                                    .and_then(|value| value.as_u64())
+                                    .unwrap_or(0) as usize;
+                                let delta = json_val
+                                    .get("delta")
+                                    .and_then(|value| value.as_str())
+                                    .unwrap_or("");
+                                if !message_started {
+                                    yield Ok(StreamEvent::MessageStart {
+                                        id: message_id.clone(),
+                                        model: model_name.clone(),
+                                        usage: UsageInfo::default(),
+                                    });
+                                    message_started = true;
+                                }
+                                if open_blocks.insert(output_index) {
+                                    yield Ok(StreamEvent::ContentBlockStart {
+                                        index: output_index,
+                                        content_block: agent_core::types::ContentBlock::Text {
+                                            text: String::new(),
+                                        },
+                                    });
+                                }
+                                if !delta.is_empty() {
+                                    yield Ok(StreamEvent::TextDelta {
+                                        index: output_index,
+                                        text: delta.to_string(),
+                                    });
+                                }
+                            }
+                            // Fork (Waku): the reasoning summary the request
+                            // asks for (`reasoning.summary: "auto"`). This
+                            // match had no arm for it, so every GPT turn
+                            // streamed its summary into `_ => {}` and the
+                            // transcript showed no reasoning. It rides out as
+                            // thinking; the request side does not send it back
+                            // (see `CopilotProvider::to_responses_input_pub`).
+                            "response.reasoning_summary_part.added" => {
+                                // A new part is a new paragraph of the summary.
+                                let part = json_val
+                                    .get("summary_index")
+                                    .and_then(|value| value.as_u64())
+                                    .unwrap_or(0);
+                                if part > 0 {
+                                    let output_index = json_val
+                                        .get("output_index")
+                                        .and_then(|value| value.as_u64())
+                                        .unwrap_or(0) as usize;
+                                    yield Ok(StreamEvent::ThinkingDelta {
+                                        index: output_index,
+                                        thinking: "\n\n".to_string(),
+                                    });
+                                }
+                            }
+                            "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
+                                let output_index = json_val
+                                    .get("output_index")
+                                    .and_then(|value| value.as_u64())
+                                    .unwrap_or(0) as usize;
+                                let delta = json_val
+                                    .get("delta")
+                                    .and_then(|value| value.as_str())
+                                    .unwrap_or("");
+                                if !message_started {
+                                    yield Ok(StreamEvent::MessageStart {
+                                        id: message_id.clone(),
+                                        model: model_name.clone(),
+                                        usage: UsageInfo::default(),
+                                    });
+                                    message_started = true;
+                                }
+                                if !delta.is_empty() {
+                                    yield Ok(StreamEvent::ThinkingDelta {
+                                        index: output_index,
+                                        thinking: delta.to_string(),
+                                    });
+                                }
+                            }
+                            "response.function_call_arguments.delta" => {
+                                let output_index = json_val
+                                    .get("output_index")
+                                    .and_then(|value| value.as_u64())
+                                    .unwrap_or(0) as usize;
+                                let delta = json_val
+                                    .get("delta")
+                                    .and_then(|value| value.as_str())
+                                    .unwrap_or("");
+                                if !delta.is_empty() {
+                                    streamed_arguments
+                                        .entry(output_index)
+                                        .or_default()
+                                        .push_str(delta);
+                                    yield Ok(StreamEvent::InputJsonDelta {
+                                        index: output_index,
+                                        partial_json: delta.to_string(),
+                                    });
+                                }
+                            }
+                            // Fork (Waku): the complete arguments. Some models
+                            // (gpt-6.1-sol) stream no deltas at all and send
+                            // the whole string only here and in
+                            // `output_item.done`; read from deltas alone, every
+                            // call they made ran with `{}`.
+                            "response.function_call_arguments.done" => {
+                                let output_index = json_val
+                                    .get("output_index")
+                                    .and_then(|value| value.as_u64())
+                                    .unwrap_or(0) as usize;
+                                let rest = json_val
+                                    .get("arguments")
+                                    .and_then(|value| value.as_str())
+                                    .and_then(|complete| {
+                                        let streamed = streamed_arguments.entry(output_index).or_default();
+                                        let rest = arguments_remainder(streamed, complete);
+                                        if let Some(rest) = &rest {
+                                            streamed.push_str(rest);
+                                        }
+                                        rest
+                                    });
+                                if let Some(rest) = rest {
+                                    yield Ok(StreamEvent::InputJsonDelta {
+                                        index: output_index,
+                                        partial_json: rest,
+                                    });
+                                }
+                            }
+                            "response.output_item.done" => {
+                                let output_index = json_val
+                                    .get("output_index")
+                                    .and_then(|value| value.as_u64())
+                                    .unwrap_or(0) as usize;
+                                // Fork (Waku): the same fill-in from the finished
+                                // item, for a stream with no `.done` event either.
+                                let rest = json_val
+                                    .get("item")
+                                    .filter(|item| {
+                                        item.get("type").and_then(|value| value.as_str())
+                                            == Some("function_call")
+                                    })
+                                    .and_then(|item| item.get("arguments"))
+                                    .and_then(|value| value.as_str())
+                                    .and_then(|complete| {
+                                        let streamed =
+                                            streamed_arguments.remove(&output_index).unwrap_or_default();
+                                        arguments_remainder(&streamed, complete)
+                                    });
+                                if let Some(rest) = rest {
+                                    if open_blocks.contains(&output_index) {
+                                        yield Ok(StreamEvent::InputJsonDelta {
+                                            index: output_index,
+                                            partial_json: rest,
+                                        });
+                                    }
+                                }
+                                if open_blocks.remove(&output_index) {
+                                    yield Ok(StreamEvent::ContentBlockStop { index: output_index });
+                                }
+                            }
+                            // Fork (Waku): `response.incomplete` ends the
+                            // stream the same way, its reason in
+                            // `incomplete_details` (an output-limit cut is a
+                            // max_tokens stop the loop continues from). It
+                            // used to fall through and read as a stream that
+                            // broke off.
+                            "response.completed" | "response.incomplete" => {
+                                if let Some(response) = json_val.get("response") {
+                                    if let Some(id) = response.get("id").and_then(|value| value.as_str()) {
+                                        message_id = id.to_string();
+                                    }
+                                    if let Some(model) = response.get("model").and_then(|value| value.as_str()) {
+                                        model_name = model.to_string();
+                                    }
+
+                                    if !message_started {
+                                        yield Ok(StreamEvent::MessageStart {
+                                            id: message_id.clone(),
+                                            model: model_name.clone(),
+                                            usage: UsageInfo::default(),
+                                        });
+                                        // No reassignment: this branch is the
+                                        // stream-completion handler — execution
+                                        // never re-enters the guard below.
+                                    }
+
+                                    let mut remaining: Vec<usize> = open_blocks.drain().collect();
+                                    remaining.sort_unstable();
+                                    for index in remaining {
+                                        yield Ok(StreamEvent::ContentBlockStop { index });
+                                    }
+
+                                    let usage = responses_usage(response.get("usage"));
+
+                                    let stop_reason = if saw_tool_call {
+                                        StopReason::ToolUse
+                                    } else {
+                                        match response
+                                            .get("incomplete_details")
+                                            .and_then(|value| value.get("reason"))
+                                            .and_then(|value| value.as_str())
+                                        {
+                                            Some("max_output_tokens") => StopReason::MaxTokens,
+                                            Some("content_filter") => StopReason::ContentFiltered,
+                                            Some(other) if !other.is_empty() => StopReason::Other(other.to_string()),
+                                            _ => StopReason::EndTurn,
+                                        }
+                                    };
+
+                                    yield Ok(StreamEvent::MessageDelta {
+                                        stop_reason: Some(stop_reason),
+                                        usage: Some(usage),
+                                    });
+                                    yield Ok(StreamEvent::MessageStop);
+                                    return;
+                                }
+                            }
+                            "response.failed" | "response.error" | "error" => {
+                                let kind = Self::extract_stream_error_code(&json_val);
+                                let message = Self::extract_stream_error_message(&json_val);
+                                yield Err(ProviderError::Classified {
+                                    provider: provider_id.clone(),
+                                    failure: crate::retry_policy::classify_stream_error(&kind, &message),
+                                });
+                                return;
+                            }
+                            _ => {}
+                        }
+
+                        current_event.clear();
+                        continue;
+                    }
+
+                    if let Some(rest) = line.strip_prefix("event:") {
+                        current_event = rest.trim().to_string();
+                        continue;
+                    }
+
+                    if let Some(rest) = line.strip_prefix("data:") {
+                        current_data.push(rest.trim_start().to_string());
+                    }
+                }
+            }
+
+            yield Err(ProviderError::Classified {
+                provider: provider_id,
+                failure: crate::retry_policy::ModelFailure::truncated("the Responses stream"),
+            });
+        };
+
+        Ok(Box::pin(s.map(move |item| {
+            item.map_err(|error| error.with_request_id(request_id.as_deref()))
+        })))
+    }
+
+    async fn discover_models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
+        use agent_core::codex_oauth::codex_limit_override;
+        let models = CODEX_MODELS
+            .iter()
+            .map(|(id, name)| {
+                let (context_window, max_output_tokens) = codex_limit_override(id)
+                    .map(|(ctx, _, out)| (ctx, out))
+                    .unwrap_or((400_000, 128_000));
+                ModelInfo {
+                    id: ModelId::new(*id),
+                    provider_id: self.id.clone(),
+                    name: name.to_string(),
+                    context_window,
+                    max_output_tokens,
+                    ..Default::default()
+                }
+            })
+            .collect();
+        Ok(models)
+    }
+
+    async fn health_check(&self) -> Result<ProviderStatus, ProviderError> {
+        // Validate that a non-expired token exists without making a network call.
+        let guard = self.tokens.lock().unwrap();
+        if guard.access_token.is_empty() {
+            return Ok(ProviderStatus::Unavailable {
+                reason: "no Codex access token — run /connect to authenticate".to_string(),
+            });
+        }
+        if Self::is_expired(&guard) && guard.refresh_token.is_none() {
+            return Ok(ProviderStatus::Unavailable {
+                reason: "Codex access token expired and no refresh token — re-run /connect"
+                    .to_string(),
+            });
+        }
+        Ok(ProviderStatus::Healthy)
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            streaming: true,
+            tool_calling: true,
+            thinking: false,
+            image_input: false,
+            pdf_input: false,
+            audio_input: false,
+            video_input: false,
+            caching: false,
+            structured_output: false,
+            system_prompt_style: SystemPromptStyle::SystemMessage,
+        }
+    }
+}
+
+#[cfg(test)]
+mod fork_argument_decoding_tests {
+    use super::*;
+
+    /// Cached tokens are part of the Responses `input_tokens`; counted once.
+    #[test]
+    fn cached_input_is_counted_once() {
+        let usage = responses_usage(Some(&json!({
+            "input_tokens": 100_000,
+            "output_tokens": 800,
+            "input_tokens_details": { "cached_tokens": 90_000 }
+        })));
+        assert_eq!(usage.input_tokens, 10_000);
+        assert_eq!(usage.cache_read_input_tokens, 90_000);
+        assert_eq!(usage.total_input(), 100_000);
+        assert_eq!(usage.output_tokens, 800);
+        assert_eq!(responses_usage(None).total_input(), 0);
+    }
+
+    #[test]
+    fn the_specified_string_form_is_decoded() {
+        let decoded = decode_tool_arguments(Some(&json!(r#"{"limit": 120}"#)), "Read");
+        assert_eq!(decoded, json!({"limit": 120}));
+    }
+
+    /// A gateway that already parsed the response hands back an object. This
+    /// used to be dropped, and the tool ran with no arguments at all.
+    #[test]
+    fn an_already_parsed_object_is_kept() {
+        let decoded = decode_tool_arguments(Some(&json!({"limit": 120})), "Read");
+        assert_eq!(decoded, json!({"limit": 120}));
+    }
+
+    /// A call that genuinely takes no arguments, in both spellings.
+    #[test]
+    fn nothing_and_empty_both_mean_no_arguments() {
+        assert_eq!(decode_tool_arguments(None, "Pwd"), json!({}));
+        assert_eq!(decode_tool_arguments(Some(&json!("")), "Pwd"), json!({}));
+        assert_eq!(decode_tool_arguments(Some(&json!("   ")), "Pwd"), json!({}));
+    }
+
+    /// Truncated mid-stream. `{}` is all this decoder can return, but the
+    /// warning it now logs is what makes the cause findable.
+    #[test]
+    fn a_truncated_argument_string_does_not_crash() {
+        let decoded = decode_tool_arguments(Some(&json!(r#"{"limit": 12"#)), "Read");
+        assert_eq!(decoded, json!({}));
+    }
+
+    /// gpt-6.1-sol streams no argument deltas: the whole string arrives with
+    /// `.done`, and has to be sent on in full.
+    #[test]
+    fn arguments_that_never_streamed_are_sent_whole() {
+        assert_eq!(
+            arguments_remainder("", r#"{"file_path": "src/main.rs"}"#).as_deref(),
+            Some(r#"{"file_path": "src/main.rs"}"#)
+        );
+    }
+
+    /// A model that streamed them: only what is missing, never twice.
+    #[test]
+    fn streamed_arguments_are_not_sent_twice() {
+        let complete = r#"{"pattern": "TODO"}"#;
+        assert_eq!(arguments_remainder(complete, complete), None);
+        assert_eq!(
+            arguments_remainder(r#"{"pattern": "#, complete).as_deref(),
+            Some(r#""TODO"}"#)
+        );
+        assert_eq!(arguments_remainder("", ""), None);
+        // Disagreeing text cannot be mended by appending.
+        assert_eq!(arguments_remainder(r#"{"x"#, complete), None);
+    }
+
+    /// The system prompt rides in `instructions` alone, as Codex sends it,
+    /// not again as the first `input` item.
+    #[test]
+    fn the_system_prompt_goes_out_once() {
+        let request = ProviderRequest {
+            model: "gpt-5.6-sol".into(),
+            messages: vec![agent_core::types::Message::user("hi")],
+            system_prompt: Some(crate::provider_types::SystemPrompt::Text(
+                "Be brief.".into(),
+            )),
+            tools: vec![],
+            max_tokens: 1024,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: vec![],
+            thinking: None,
+            provider_options: json!({}),
+        };
+        let body = CodexProvider::build_responses_body(&request);
+        assert_eq!(body["instructions"], "Be brief.");
+        let input = body["input"].as_array().unwrap();
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["role"], "user");
+        assert!(!body.to_string().contains(r#""role":"system""#));
+    }
+
+    /// A stream that breaks off after a 200 still names the request it
+    /// belonged to: the turn that gives up reports the id support needs.
+    #[tokio::test]
+    async fn an_in_stream_failure_carries_the_responses_request_id() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("connect");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            loop {
+                let read = socket.read(&mut buffer).await.expect("read");
+                request.extend_from_slice(&buffer[..read]);
+                let Some(end) = request.windows(4).position(|window| window == b"\r\n\r\n") else {
+                    continue;
+                };
+                let headers = String::from_utf8_lossy(&request[..end]).to_ascii_lowercase();
+                let length = headers
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length:"))
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if read == 0 || request.len() >= end + 4 + length {
+                    break;
+                }
+            }
+            // A 200 whose stream ends before `response.completed`.
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nx-request-id: req_cut_off\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                )
+                .await
+                .expect("write");
+        });
+        let provider = CodexProvider::with_gateway(
+            format!("http://{address}/v1/responses"),
+            "test-key".into(),
+        );
+        let request = ProviderRequest {
+            model: "gpt-5.6-sol".into(),
+            messages: vec![agent_core::types::Message::user("hi")],
+            system_prompt: None,
+            tools: vec![],
+            max_tokens: 1024,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: vec![],
+            thinking: None,
+            provider_options: json!({}),
+        };
+        let mut stream = provider
+            .create_message_stream(request)
+            .await
+            .expect("the stream opens");
+        let mut failure = None;
+        while let Some(item) = stream.next().await {
+            if let Err(error) = item {
+                failure = Some(crate::retry_policy::from_provider_error(&error));
+            }
+        }
+        server.await.expect("server");
+        let failure = failure.expect("a truncated stream fails");
+        assert_eq!(failure.reason, crate::retry_policy::RetryReason::Truncated);
+        assert_eq!(failure.request_id.as_deref(), Some("req_cut_off"));
+    }
+}

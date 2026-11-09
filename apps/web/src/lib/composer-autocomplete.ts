@@ -4,7 +4,7 @@ import type {
   ProviderModelOption,
   ReportedCommand,
   SlashCommand,
-} from '@waku/client'
+} from 'client'
 import { fuzzyScore } from './palette-search'
 
 export const COMPOSER_AUTOCOMPLETE_CAP = 64

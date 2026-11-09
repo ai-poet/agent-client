@@ -6,7 +6,7 @@ import type {
   ProviderSessionHistory,
   ProviderSessionSummary,
   WakuClient,
-} from '@waku/client'
+} from 'client'
 import {
   applyComposerDraftChanges,
   beginTurn,

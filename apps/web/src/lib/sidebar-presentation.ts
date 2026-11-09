@@ -1,4 +1,4 @@
-import type { AgentSession, Project } from '@waku/client'
+import type { AgentSession, Project } from 'client'
 import { projectDisplayName } from './project-presentation'
 
 export type DateGroup = 'today' | 'yesterday' | 'week' | 'month' | 'year' | 'more'

@@ -1,4 +1,4 @@
-import type { AgentSession, Project } from '@waku/client'
+import type { AgentSession, Project } from 'client'
 import { isProjectlessProject } from './project-presentation'
 
 export type RememberedNavigation =

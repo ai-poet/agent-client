@@ -10,7 +10,7 @@
 //! change's diff.
 //!
 //! The record is written by the bridge beside the session's transcript
-//! (`waku-agent-bridge/src/trajectory.rs`) and read here through the daemon,
+//! (`agent-bridge/src/trajectory.rs`) and read here through the daemon,
 //! as the Team panel reads its files: no wire change. Reading and building
 //! run off the UI thread; frames read only what the last read left. Only
 //! the built-in agent's sessions have one.
@@ -303,27 +303,26 @@ struct Read {
 /// Read what the segments added since `consumed`, through the daemon.
 /// Blocking: runs on the background executor.
 fn read_trajectory(
-    workspace: &waku_client::WorkspaceClient,
+    workspace: &client::WorkspaceClient,
     root: PathBuf,
     dir_name: String,
     mut consumed: BTreeMap<u32, usize>,
     records: Arc<Vec<Record>>,
 ) -> Result<Read, String> {
     let dir = root.join(&dir_name);
-    let segments: Vec<u32> = match workspace
-        .request(waku_client::WorkspaceOperation::BrowseDirectory { path: Some(dir) })
-    {
-        Ok(waku_client::WorkspaceResult::Directory { entries, .. }) => {
-            let mut numbers: Vec<u32> = entries
-                .into_iter()
-                .filter_map(|entry| entry.name.strip_suffix(".jsonl")?.parse().ok())
-                .collect();
-            numbers.sort_unstable();
-            numbers
-        }
-        // No directory yet: nothing recorded so far.
-        _ => Vec::new(),
-    };
+    let segments: Vec<u32> =
+        match workspace.request(client::WorkspaceOperation::BrowseDirectory { path: Some(dir) }) {
+            Ok(client::WorkspaceResult::Directory { entries, .. }) => {
+                let mut numbers: Vec<u32> = entries
+                    .into_iter()
+                    .filter_map(|entry| entry.name.strip_suffix(".jsonl")?.parse().ok())
+                    .collect();
+                numbers.sort_unstable();
+                numbers
+            }
+            // No directory yet: nothing recorded so far.
+            _ => Vec::new(),
+        };
     let mut records = (*records).clone();
     let last = segments.last().copied();
     for segment in segments {
@@ -334,11 +333,11 @@ fn read_trajectory(
         }
         let relative =
             PathBuf::from(&dir_name).join(agent_trajectory::writer::segment_name(segment));
-        let text = match workspace.request(waku_client::WorkspaceOperation::ReadTextFile {
+        let text = match workspace.request(client::WorkspaceOperation::ReadTextFile {
             root: root.clone(),
             relative_path: relative,
         }) {
-            Ok(waku_client::WorkspaceResult::TextFile { content }) => content,
+            Ok(client::WorkspaceResult::TextFile { content }) => content,
             Ok(_) => return Err("unexpected answer".into()),
             Err(error) => return Err(error.to_string()),
         };
@@ -396,10 +395,9 @@ impl Waku {
         let generation = view.generation;
         let consumed = view.consumed.clone();
         let records = view.records.clone();
-        let root =
-            waku_client::persistence::StateStore::default_path().with_file_name("agent-sessions");
+        let root = client::persistence::StateStore::default_path().with_file_name("agent-sessions");
         let dir_name = format!("{transcript}.trajectory");
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace = client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |this, cx| {
             let read = cx
                 .background_executor()
@@ -947,9 +945,7 @@ impl Waku {
                                 button.bg(theme.overlay).font_weight(FontWeight::MEDIUM)
                             })
                             .hover(|button| button.bg(theme.overlay))
-                            .focus_visible(|button| {
-                                button.border_1().border_color(theme.accent)
-                            })
+                            .focus_visible(|button| button.border_1().border_color(theme.accent))
                             .on_activation(cx, |this, _, cx| {
                                 this.with_trajectory_view(cx, |view| {
                                     view.report_open = !view.report_open;
@@ -1649,10 +1645,9 @@ fn diagnostic_title(finding: &Finding) -> String {
             request = request,
             retries = retries
         ),
-        Finding::SlowFirstToken { request, .. } => tr!(
-            "trajectory.diagnostics.finding.slow",
-            request = request
-        ),
+        Finding::SlowFirstToken { request, .. } => {
+            tr!("trajectory.diagnostics.finding.slow", request = request)
+        }
         Finding::CacheReadDropped { request, .. } => tr!(
             "trajectory.diagnostics.finding.cache_drop",
             request = request
@@ -1698,11 +1693,13 @@ fn diagnostic_detail(finding: &Finding) -> String {
             recovered,
             ..
         } => {
-            let mut parts = vec![reasons
-                .iter()
-                .map(|reason| RetryCause::from_reason(reason).label())
-                .collect::<Vec<_>>()
-                .join(" · ")];
+            let mut parts = vec![
+                reasons
+                    .iter()
+                    .map(|reason| RetryCause::from_reason(reason).label())
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+            ];
             parts.push(if *recovered {
                 tr!("trajectory.diagnostics.recovered")
             } else {

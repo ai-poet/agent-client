@@ -1,4 +1,4 @@
-import type { ProviderKind, ProviderProbe } from '@waku/client'
+import type { ProviderKind, ProviderProbe } from 'client'
 
 const CACHE_KEY = 'waku.provider-probes.v1'
 const CACHE_VERSION = 1

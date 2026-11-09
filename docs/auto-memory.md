@@ -88,7 +88,7 @@ On its first turn the root session reads both indexes and appends one section to
 
 Writes and single deletes do not ask and work in plan mode too: memory files are not workspace changes. The two bulk deletes call `check_permission_with_details` with the list of what would go, and `GuiPermissionHandler::decide` turns that into a two-button dialog (allow once / reject) **whatever the access mode** — full access and standing "always allow" answers do not apply, so the model can never approve a bulk delete itself. A team member asking is refused.
 
-The transcript names each call in the user's language (`crates/waku-core/src/driver/memory_titles.rs`); without that, `memory_write`'s `title` argument would become the row title.
+The transcript names each call in the user's language (`crates/client-core/src/driver/memory_titles.rs`); without that, `memory_write`'s `title` argument would become the row title.
 
 ## Consolidation
 
@@ -149,7 +149,7 @@ Running sessions keep the settings they started with.
 ## Files
 
 - `crates/auto-memory/` — the pure part: types, names and project keys, frontmatter, the store and its lock, the Claude Code mirror, scan, links, prompt section, consolidation prompt and parsing, settings. Tests: `cargo test -p auto-memory`.
-- `crates/waku-agent-bridge/src/memory/{mod,tools,consolidate}.rs` — `MemoryHost`, the six tools and the consolidation pass; hooks in `session.rs`, `session_team.rs`, `permission.rs` and `oneshot.rs`.
-- `crates/waku-core/src/driver/memory_titles.rs` — transcript and dialog titles, mounted from `native.rs`.
+- `crates/agent-bridge/src/memory/{mod,tools,consolidate}.rs` — `MemoryHost`, the six tools and the consolidation pass; hooks in `session.rs`, `session_team.rs`, `permission.rs` and `oneshot.rs`.
+- `crates/client-core/src/driver/memory_titles.rs` — transcript and dialog titles, mounted from `native.rs`.
 - `src/app/agent_memory_settings.rs` — the settings section; hooks in `agent_page.rs`, `usage_page.rs` and `app.rs`.
 - `locales/{app,zh-CN,ja}.yml` — `memory.tool.*`, `memory.approval.*`, `memory.settings.*`.

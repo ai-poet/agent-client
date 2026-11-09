@@ -44,11 +44,11 @@ client root. Both are verified to exist as of 2026-10-04.
 - UI halves are React 18 bundles for dsh's own web app. GPUI cannot render them.
 - dsh plugins already run **unchanged** in one place: our existing
   `ProviderKind::DeepSeek` provider starts `dsh web` as a sidecar
-  (`crates/waku-core/src/deepseek_session.rs`, `crates/waku-core/src/deepseek_pool.rs`,
-  `crates/waku-core/src/driver/deepseek.rs`) and dsh loads the user's own
+  (`crates/client-core/src/deepseek_session.rs`, `crates/client-core/src/deepseek_pool.rs`,
+  `crates/client-core/src/driver/deepseek.rs`) and dsh loads the user's own
   plugins from its own home. That provider is not what this document is about.
   Do not confuse "port a dsh feature" with "change the DeepSeek provider".
-- The vendored engine's `claurst-plugins` crate (`crates/waku-agent/plugins`) is
+- The vendored engine's `agent-core-plugins` crate (`crates/agent-core/plugins`) is
   dormant (nothing calls `load_plugins`). It is not a route for this work.
 
 ## 2. The plugin model (Cordis)
@@ -428,15 +428,15 @@ render function; the feature itself goes in a new fork-owned file
 | `sidebar.panellist`, `main` panel | `src/app/sidebar.rs` `render_sidebar_search`, `render_sidebar_action_row`; `src/app/model_status.rs` `main_page_open` / `close_main_pages` / `main_page_title` | a row in a new file; one `.child()`; bump the row-height multiplier in both places; state field on `Waku`; `.when(open, …)` in `src/app/render.rs` (pattern: `src/app/image_studio.rs`) |
 | `sidebar.workspaces.session.*` | `src/app/sidebar.rs` `SidebarRow`, `sidebar_row` | new variant or row action |
 | `sidebar.right.pane.tab` | `RightPanelSurface` in `src/app.rs`; `src/app/right_panel.rs`; `src/app/surface_bar.rs` `SurfaceKind` | new variant; compiler lists the arms (`label`, `icon_path`, `reusable_surface_index`, `render_right_panel`); optional header button and shortcut |
-| `conversation.view` (Trajectory) | `RightPanelSurface::Trajectory`, `src/app/trajectory_panel.rs`; the record is written by `crates/waku-agent-bridge/src/trajectory.rs` and modelled by `crates/agent-trajectory` | ported 2026-10-22, built-in agent only: dsh shows it as a tab beside Chat, here it is a right-panel surface beside the conversation; the Inspect pill sits on tool rows (`render_activity_item`) |
+| `conversation.view` (Trajectory) | `RightPanelSurface::Trajectory`, `src/app/trajectory_panel.rs`; the record is written by `crates/agent-bridge/src/trajectory.rs` and modelled by `crates/agent-trajectory` | ported 2026-10-22, built-in agent only: dsh shows it as a tab beside Chat, here it is a right-panel surface beside the conversation; the Inspect pill sits on tool rows (`render_activity_item`) |
 | `shell.overlay` (dialogs, toasts) | `Option<XState>` + `render_x` in both branches of `src/app/render.rs`; `src/app/confirm_dialog.rs` `request_confirm`; `show_toast*` in `src/app.rs` | new modal file; toast helpers |
 | banners, `shell.quota-notice` | `src/app/update_banner.rs`, `src/app/daemon_banner.rs`, `src/app/error_banner.rs` | `render_x_banner` + `.children()` in `render.rs` |
 | `shell.bottom` | not found (only `render_workspace_footer` in `src/app/composer.rs`) | would be new |
 | `conversation.session.header.actions` | `render_header` in `src/app/sidebar.rs` | one `.child(self.render_x_action(cx))`; `icon_button` / `popover` from `src/ui` |
 | `conversation.chat.node`, `turnTail` | `TranscriptRowKind` in `src/app/transcript.rs`; `transcript_row` in `src/app/transcript_view.rs` | new row kind or a branch in the row builder |
-| `tool.call.toolview` | `render_activity_item` in `src/app/transcript_view.rs` (sub-agent precedent: `src/app/subagent_row.rs`) | there is no per-tool registry and `ActivityItem` (`crates/waku-protocol/src/model.rs`) has no tool-name field: add a `#[serde(default)]` field, set it in `crates/waku-core/src/driver/native.rs` / `driver/activity.rs`, early-return to a renderer in a new file, run `bun run protocol:generate` |
+| `tool.call.toolview` | `render_activity_item` in `src/app/transcript_view.rs` (sub-agent precedent: `src/app/subagent_row.rs`) | there is no per-tool registry and `ActivityItem` (`crates/client-protocol/src/model.rs`) has no tool-name field: add a `#[serde(default)]` field, set it in `crates/client-core/src/driver/native.rs` / `driver/activity.rs`, early-return to a renderer in a new file, run `bun run protocol:generate` |
 | `conversation.composer.dock`, `conversation.input.dock` | `src/app/render.rs` (above / below the composer); `src/app/composer.rs` `render_composer` control row | one `.children()` line; a control beside the model / effort / mode / goal chips |
-| `conversation.input.overlay` (slash, `@`) | `src/app/autocomplete.rs`; `crates/waku-client/src/composer_complete.rs` | new trigger source or rows |
+| `conversation.input.overlay` (slash, `@`) | `src/app/autocomplete.rs`; `crates/client/src/composer_complete.rs` | new trigger source or rows |
 | `conversation.composer` chain (approval, questions), `conversation.approval.detail`, `plan-review.actions` | `src/app/permission_card.rs` `render_permission_card` (plan branch: `is_plan_approval`); `render_user_input` in `src/app/composer.rs` | branch inside the card like the plan approval |
 | `settings.section`, `settings.general.item`, `plugins.*` | `SettingsPage` in `src/app.rs`; `SETTINGS_PAGES` in `src/app/settings.rs` | variant + row (bump the array length) + title and dispatch arms + `settings.x` / `settings.x_keywords` keys + `src/app/tests.rs` |
 | `ctx.shortcuts`, palette | `src/app/command_palette.rs` `PaletteAction`; `src/app/shortcuts.rs` | new action variant |
@@ -447,15 +447,15 @@ render function; the feature itself goes in a new fork-owned file
 
 | dsh seam | Waku seam | Scope |
 |---|---|---|
-| `ctx.tools.register` | `Tool` trait (`crates/waku-agent/tools/src/lib.rs`, vendored — do not edit); `builtin_tools` / `engine_tools` in `crates/waku-agent-bridge/src/session.rs`; pattern `crates/waku-agent-bridge/src/subagent.rs`; switchable list `BUILTIN_TOOLS` in `crates/sub2api/src/agent_settings.rs`; titles in `native.rs` | built-in agent only; for every provider ship an MCP server instead |
-| `ctx.systemPrompt.section`, `agent.inject` | `session_rules` / `refresh_session_rules` in `crates/waku-agent-bridge/src/config.rs` | built-in agent |
-| `tools/pre-execute` policy, `ctx.approval` | `crates/waku-agent-bridge/src/permission.rs` (`PermissionBridge`, `GuiPermissionHandler`) | built-in agent |
+| `ctx.tools.register` | `Tool` trait (`crates/agent-core/tools/src/lib.rs`, vendored — do not edit); `builtin_tools` / `engine_tools` in `crates/agent-bridge/src/session.rs`; pattern `crates/agent-bridge/src/subagent.rs`; switchable list `BUILTIN_TOOLS` in `crates/sub2api/src/agent_settings.rs`; titles in `native.rs` | built-in agent only; for every provider ship an MCP server instead |
+| `ctx.systemPrompt.section`, `agent.inject` | `session_rules` / `refresh_session_rules` in `crates/agent-bridge/src/config.rs` | built-in agent |
+| `tools/pre-execute` policy, `ctx.approval` | `crates/agent-bridge/src/permission.rs` (`PermissionBridge`, `GuiPermissionHandler`) | built-in agent |
 | `ctx.userQuestions` | `forward_questions` in `session.rs` → `DriverEvent::UserInputRequested` | built-in agent; other providers map their own |
-| `ctx.jobs`, subagent records | `BackgroundWorkEvent` (`crates/waku-protocol/src/model.rs`), `crates/waku-agent-bridge/src/background.rs`, `src/app/background_work.rs` | all providers that report it |
-| goal / plan / todo / compaction | goal: `crates/waku-agent-bridge/src/goal.rs`, `src/app/goal_dialog.rs`; plan: `InteractionMode`, `/plan`; todo: `crates/waku-protocol/src/todo.rs`, `src/app/todo_list.rs`; compaction: `DriverEvent::ContextCompaction` | exists today; port refinements, not new systems |
-| `ctx.commands` | `assemble_slash_commands` in `crates/waku-core/src/composer_complete.rs`; `execute_local_composer_command` in `src/app/composer.rs`; no code: `.cheaprouter/commands/*.md` | app-level = every provider |
-| host service + `ctx.remote` | `Command` (`crates/waku-protocol/src/protocol.rs`) + `handle_driver_command` (`crates/waku-core/src/daemon.rs`); stateless: `WorkspaceOperation` (`crates/waku-protocol/src/workspace.rs`) | daemon |
-| session events | `DriverEvent` (`model.rs`) + `crates/waku-protocol/src/driver_wire.rs` | an unknown kind is an error on older clients — prefer `BackgroundWorkEvent` or a `serde(default)` field |
+| `ctx.jobs`, subagent records | `BackgroundWorkEvent` (`crates/client-protocol/src/model.rs`), `crates/agent-bridge/src/background.rs`, `src/app/background_work.rs` | all providers that report it |
+| goal / plan / todo / compaction | goal: `crates/agent-bridge/src/goal.rs`, `src/app/goal_dialog.rs`; plan: `InteractionMode`, `/plan`; todo: `crates/client-protocol/src/todo.rs`, `src/app/todo_list.rs`; compaction: `DriverEvent::ContextCompaction` | exists today; port refinements, not new systems |
+| `ctx.commands` | `assemble_slash_commands` in `crates/client-core/src/composer_complete.rs`; `execute_local_composer_command` in `src/app/composer.rs`; no code: `.cheaprouter/commands/*.md` | app-level = every provider |
+| host service + `ctx.remote` | `Command` (`crates/client-protocol/src/protocol.rs`) + `handle_driver_command` (`crates/client-core/src/daemon.rs`); stateless: `WorkspaceOperation` (`crates/client-protocol/src/workspace.rs`) | daemon |
+| session events | `DriverEvent` (`model.rs`) + `crates/client-protocol/src/driver_wire.rs` | an unknown kind is an error on older clients — prefer `BackgroundWorkEvent` or a `serde(default)` field |
 | durable state | `AgentSession` / `AgentTurn` `#[serde(default)]` fields (`model.rs`, stored in `app.db`); tables via `db/schema.ts` + `bun run db:generate`; fork-local JSON in `~/.cheaprouter/` via `crates/sub2api` | — |
 
 Always state which scope a port lands in: **built-in agent only** (bridge) or

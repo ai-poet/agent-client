@@ -17,7 +17,7 @@ want to script the download.
 `waku-<version>-<target>.zip` is the same build without an installer. Unpack it
 anywhere and run `waku.exe`.
 
-**Keep the two executables together.** Waku launches `waku-daemon.exe` from its
+**Keep the two executables together.** Waku launches `client-daemon.exe` from its
 own directory, so moving `waku.exe` out on its own leaves it unable to start
 the daemon. A shortcut is fine.
 

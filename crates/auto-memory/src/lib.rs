@@ -15,7 +15,7 @@
 //!
 //! This crate is the pure part: the record, its file format, the store with
 //! its cross-process lock, the index and prompt section, the consolidation
-//! prompt and the settings. The bridge (`waku-agent-bridge/src/memory/`)
+//! prompt and the settings. The bridge (`agent-bridge/src/memory/`)
 //! exposes the tools and runs consolidation; the app
 //! (`src/app/agent_memory_settings.rs`) manages the files.
 //!

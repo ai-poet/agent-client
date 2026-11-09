@@ -1,7 +1,7 @@
 //! One place that knows whether the daemon socket is up, and one strip that
 //! says so.
 //!
-//! Fork addition. The supervisor in `waku_client` redials a dropped socket and
+//! Fork addition. The supervisor in `client` redials a dropped socket and
 //! restarts a dead process on its own, but the app used to learn about either
 //! only by having a request fail: once per background poll, once per state
 //! save, once per draft save, and it answered each failure with the same
@@ -15,7 +15,7 @@
 //! redials the strip offers to restart the daemon outright.
 
 use crate::ui::{ActivationExt as _, ui_theme};
-use waku_ui::{Banner, BannerSurface, BannerTone};
+use client_ui::{Banner, BannerSurface, BannerTone};
 
 use super::*;
 
@@ -134,9 +134,11 @@ impl Waku {
         self.daemon_banner_dismissed = false;
         let stale = tr!("errors.daemon_disconnected");
         for runtime in self.runtimes.values_mut() {
-            if runtime.last_driver_error.as_deref().is_some_and(|error| {
-                error == stale || waku_client::is_daemon_transport_error(error)
-            }) {
+            if runtime
+                .last_driver_error
+                .as_deref()
+                .is_some_and(|error| error == stale || client::is_daemon_transport_error(error))
+            {
                 runtime.last_driver_error = None;
             }
         }

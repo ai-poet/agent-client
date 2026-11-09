@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { ProviderModel } from '@waku/client'
+import type { ProviderModel } from 'client'
 import {
   nextModelPickerHighlight,
   selectedModelPickerIndex,

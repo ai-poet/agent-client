@@ -1046,6 +1046,7 @@ fn optional_non_empty_string(value: Option<&Value>, path: &str) -> Result<Option
 /// None sets a provider or model: members inherit the captain's route.
 pub fn builtin_profiles() -> BTreeMap<String, TeamProfileConfig> {
     BTreeMap::from([
+        ("flagship".to_owned(), flagship()),
         ("prd-implement-review".to_owned(), prd_implement_review()),
         ("implement-test-fix".to_owned(), implement_test_fix()),
         ("dual-review".to_owned(), dual_review()),
@@ -1074,6 +1075,44 @@ fn builtin_task(
         assignee: Some(assignee.to_owned()),
         dependencies: dependencies.iter().map(|id| (*id).to_owned()).collect(),
         extra: Map::new(),
+    }
+}
+
+fn flagship() -> TeamProfileConfig {
+    TeamProfileConfig {
+        description: Some(
+            "A configurable flagship team for planning, implementation and hard problems, with independent work dispatched in parallel."
+                .to_owned(),
+        ),
+        protocol: Some(
+            "Flagship team. Give each seat its own model in Settings before starting when you \
+             want a mixed-model team. Plan the smallest task graph that covers the goal, then \
+             dispatch independent tasks to their best-fit members as soon as their dependencies \
+             allow; do not manufacture a serial chain. The planner turns ambiguity into a concrete \
+             approach and reviews architectural fit without editing implementation files. The \
+             engineer owns ordinary implementation and verification. The solver owns isolated hard \
+             problems, debugging and alternative approaches. Use a planner task first when the goal \
+             needs alignment, then run independent implementation, research and troubleshooting \
+             tasks in parallel. The captain integrates the results and preserves the verification \
+             and review gates."
+                .to_owned(),
+        ),
+        task_planning: Some(TaskPlanning::Captain),
+        members: vec![
+            builtin_member(
+                "planner",
+                "Solution architect: clarifies requirements, proposes the approach and reviews architectural fit; stays read-only during implementation.",
+            ),
+            builtin_member(
+                "engineer",
+                "Implementation engineer: owns focused code changes, tests and repair work that follow the project's conventions.",
+            ),
+            builtin_member(
+                "solver",
+                "Hard-problem specialist: investigates difficult debugging, algorithms and isolated technical obstacles, and reports evidence for the chosen solution.",
+            ),
+        ],
+        ..TeamProfileConfig::default()
     }
 }
 
@@ -1890,7 +1929,7 @@ mod tests {
     #[test]
     fn builtin_profiles_all_normalize() {
         let builtins = builtin_profiles();
-        assert_eq!(builtins.len(), 3);
+        assert_eq!(builtins.len(), 4);
         for (name, profile) in &builtins {
             let normalized = normalize_team_profile(name, profile)
                 .unwrap_or_else(|error| panic!("{name}: {error}"));
@@ -1907,6 +1946,7 @@ mod tests {
         }
         resolve_team_profile(&builtins, "dual-review", 8).unwrap();
         let text = format_profiles_for_prompt(&builtins).unwrap();
+        assert!(text.contains("- flagship (3 members, captain planning): "));
         assert!(text.contains("- implement-test-fix (3 members, captain planning): "));
         assert!(text.contains("- dual-review (4 members, 4 tasks): "));
         assert!(text.contains("- prd-implement-review (3 members, 3 tasks): "));
@@ -1938,6 +1978,12 @@ mod tests {
         assert!(fix.tasks.is_empty());
         let names: Vec<&str> = fix.members.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(names, ["engineer", "tester", "reviewer"]);
+
+        let flagship = normalize_team_profile("flagship", &builtins["flagship"]).unwrap();
+        assert_eq!(flagship.task_planning(), TaskPlanning::Captain);
+        assert!(flagship.tasks.is_empty());
+        let names: Vec<&str> = flagship.members.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["planner", "engineer", "solver"]);
 
         let dual = normalize_team_profile("dual-review", &builtins["dual-review"]).unwrap();
         let order: Vec<&str> = dual.tasks.iter().map(|task| task.id.as_str()).collect();

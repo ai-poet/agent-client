@@ -1,7 +1,7 @@
 //! Minimal HTTP over a `curl` subprocess.
 //!
 //! The fork deliberately adds no HTTP crate. Upstream already reaches the
-//! network this way (`waku-core`'s usage probe), and reusing the pattern keeps
+//! network this way (`client-core`'s usage probe), and reusing the pattern keeps
 //! three properties that matter here:
 //!
 //! * **Secrets stay out of the process table.** Headers and request bodies

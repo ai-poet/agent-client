@@ -215,7 +215,9 @@ impl Waku {
                             let has_standard = platform_groups.iter().any(|(.., welfare)| !welfare);
                             let has_welfare = platform_groups.iter().any(|(.., welfare)| *welfare);
                             for section_welfare in [false, true] {
-                                if (section_welfare && !has_welfare) || (!section_welfare && !has_standard) {
+                                if (section_welfare && !has_welfare)
+                                    || (!section_welfare && !has_standard)
+                                {
                                     continue;
                                 }
                                 entries.push(MenuItem::Header(SharedString::from(
@@ -239,9 +241,17 @@ impl Waku {
                                             let _ = entry_weak.update(cx, |this, cx| {
                                                 if welfare {
                                                     // Fork: switching to a welfare lane asks first.
-                                                    this.confirm_welfare_group_switch(platform, Some(group_id), cx);
+                                                    this.confirm_welfare_group_switch(
+                                                        platform,
+                                                        Some(group_id),
+                                                        cx,
+                                                    );
                                                 } else {
-                                                    this.select_cloud_group(platform, Some(group_id), cx);
+                                                    this.select_cloud_group(
+                                                        platform,
+                                                        Some(group_id),
+                                                        cx,
+                                                    );
                                                 }
                                             });
                                         })

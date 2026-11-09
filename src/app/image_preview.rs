@@ -52,8 +52,8 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Option<Arc<gpui::Image>> {
         let attachment_reference =
-            reference.starts_with(waku_protocol::attachments::ATTACHMENT_SCHEME);
-        if !waku_protocol::blob::is_reference(reference) && !attachment_reference {
+            reference.starts_with(client_protocol::attachments::ATTACHMENT_SCHEME);
+        if !client_protocol::blob::is_reference(reference) && !attachment_reference {
             return None;
         }
         if let Some(state) = self.remote_images.borrow().get(reference) {
@@ -84,7 +84,7 @@ impl Waku {
             let image = cx
                 .background_executor()
                 .spawn(async move {
-                    waku_client::persistence::read_remote_reference(
+                    client::persistence::read_remote_reference(
                         &fetch_reference,
                         daemon_path.as_deref(),
                         &daemon,

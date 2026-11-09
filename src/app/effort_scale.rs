@@ -355,7 +355,7 @@ pub(super) fn contrast(a: Hsla, b: Hsla) -> f32 {
 mod tests {
     use super::*;
     use crate::theme::Theme;
-    use waku_protocol::model::ProviderKind;
+    use client_protocol::model::ProviderKind;
 
     const ALL_TONES: [Tone; 7] = [
         Tone::Off,
@@ -530,7 +530,7 @@ mod tests {
 
     #[test]
     fn traits_fall_back_to_the_models_default_then_its_first_option() {
-        let option = |id: &str| waku_protocol::model::ProviderModelOption::new(id, id);
+        let option = |id: &str| client_protocol::model::ProviderModelOption::new(id, id);
         let mut model = ProviderModel::new("m", "M");
         model.reasoning_efforts = vec![option("low"), option("high"), option("max")];
         model.default_reasoning_effort = Some("high".to_owned());

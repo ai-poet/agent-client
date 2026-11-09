@@ -95,7 +95,7 @@ impl NativeRouting {
 /// row: `deepseek+payg::deepseek-v4.1-flash`. That row is gone — the Chinese
 /// models' group decides now — and ids saved with it are rewritten to the
 /// plain row on load ([`legacy_plain_id`]). Kept in step with
-/// `waku_agent_bridge::LEGACY_PAY_AS_YOU_GO_MARK`, which the desktop does not
+/// `agent_bridge::LEGACY_PAY_AS_YOU_GO_MARK`, which the desktop does not
 /// link.
 pub(super) const LEGACY_PAY_AS_YOU_GO_MARK: &str = "+payg";
 
@@ -214,7 +214,7 @@ pub(super) fn migrate_bare_endpoint_ids(
 /// into the app state before anyone picked anything — so a newcomer's first
 /// task opened on a CLI they most likely do not have, instead of on the
 /// agent that works with nothing installed. New state now starts on the
-/// built-in agent (`waku_client::persistence`); this carries over a state
+/// built-in agent (`client::persistence`); this carries over a state
 /// written by an earlier build, but only while it still reads as untouched:
 /// the old default provider, no model ever picked, no task ever started on a
 /// CLI, and the built-in agent not switched off. Unstarted drafts on the old
@@ -546,7 +546,7 @@ fn supports_ultracode(model: &str) -> bool {
 
 /// One wire format, as the traits menu names it.
 ///
-/// Kept in step with `waku_agent_bridge::WireFormat`, which the desktop does
+/// Kept in step with `agent_bridge::WireFormat`, which the desktop does
 /// not link — the bridge is the daemon's dependency, not the app's. The
 /// bridge clamps whatever it receives, so a disagreement here costs a
 /// surprising default, never a broken request. `WireFormat::resolve` there
@@ -584,7 +584,7 @@ pub(super) static NATIVE_WIRE_FORMATS: [WireFormatOption; 4] = [
 ];
 
 /// The Gemini models offered over Gemini's own API. Kept in step with
-/// `waku_agent_bridge::GEMINI_NATIVE_MODELS`: one for now, and every other
+/// `agent_bridge::GEMINI_NATIVE_MODELS`: one for now, and every other
 /// `gemini-*` stays unoffered rather than sent somewhere that cannot serve it.
 const NATIVE_GEMINI_MODELS: [&str; 1] = ["gemini-4-argon"];
 

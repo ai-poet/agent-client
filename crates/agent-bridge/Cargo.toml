@@ -1,0 +1,41 @@
+[package]
+name = "agent-bridge"
+version = "0.1.0"
+edition = "2024"
+description = "Drives the vendored agent engine as an in-process Waku provider"
+license = "GPL-3.0-only"
+
+# Deliberately depends on neither `client-core` nor `client-protocol`.
+#
+# `client-core` owns the `DriverControl` trait and calls into this crate from
+# `driver::start_local`, so a dependency in that direction would close a cycle.
+# `client-protocol` is avoided for a different reason: keeping `AgentEvent` this
+# crate's own type is what stops Waku's wire format from leaking into the
+# engine adapter. The translation into `DriverEvent` lives in
+# `client-core/src/driver/native.rs`, which is the only file that knows both.
+[dependencies]
+# Fork: AgentTeams' durable state, rules and prompts (`src/team/`).
+agent-teams = { path = "../agent-teams" }
+agent-trajectory = { path = "../agent-trajectory" }
+# Fork: auto-memory's store, index and prompts (`src/memory/`).
+auto-memory = { path = "../auto-memory" }
+anyhow = "1.0"
+async-trait = { workspace = true }
+base64 = { workspace = true }
+agent-core-api = { workspace = true }
+agent-core = { workspace = true }
+agent-core-mcp = { workspace = true }
+agent-core-query = { workspace = true }
+agent-core-tools = { workspace = true }
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+# Fork: `WebSearch` through the gateway's search endpoint (`src/gateway_search.rs`).
+reqwest = { workspace = true }
+serde_json = "1.0"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tokio-util = { version = "0.7" }
+tracing = "0.1"
+uuid = { version = "1.18", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

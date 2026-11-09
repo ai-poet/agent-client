@@ -2,7 +2,7 @@
 //!
 //! Fork addition. Opening a picture, a spreadsheet or a Word / PowerPoint
 //! file used to land in the text editor, which could show none of them. A
-//! file `waku_protocol::workspace::preview_kind` recognises is read on the
+//! file `client_protocol::workspace::preview_kind` recognises is read on the
 //! daemon host (`WorkspaceOperation::PreviewFile`, so a remote workspace
 //! previews too) and shown here instead: a picture fitted to the panel or at
 //! its own size, a spreadsheet's sheets as a grid, a document's words, or —
@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use client_protocol::workspace::{FilePreview, PreviewKind, PreviewSheet};
 use gpui::{ImageFormat, ObjectFit, uniform_list};
-use waku_protocol::workspace::{FilePreview, PreviewKind, PreviewSheet};
 
 use super::*;
 
@@ -397,17 +397,17 @@ impl Waku {
                 previews.sheet.remove(&evicted);
             }
         }
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace = client::WorkspaceClient::new(self.daemon.client());
         let (root, relative_path) = key.clone();
         cx.spawn(async move |waku, cx| {
             let loaded = cx
                 .background_executor()
                 .spawn(async move {
-                    match workspace.request(waku_client::WorkspaceOperation::PreviewFile {
+                    match workspace.request(client::WorkspaceOperation::PreviewFile {
                         root,
                         relative_path: PathBuf::from(relative_path),
                     }) {
-                        Ok(waku_client::WorkspaceResult::FilePreview { preview }) => load(preview),
+                        Ok(client::WorkspaceResult::FilePreview { preview }) => load(preview),
                         Ok(_) => Err("the daemon answered something else".to_owned()),
                         Err(error) => Err(format!("{error:#}")),
                     }

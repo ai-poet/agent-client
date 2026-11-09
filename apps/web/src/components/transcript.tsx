@@ -3,7 +3,7 @@ import type {
   AgentSession,
   MessageAttachment,
   ReviewDiffSource,
-} from '@waku/client'
+} from 'client'
 import { ContextMenu } from '@base-ui/react/context-menu'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { Virtuoso, type ListItem, type VirtuosoHandle } from 'react-virtuoso'

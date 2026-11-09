@@ -6,7 +6,7 @@ use crate::theme::Theme;
 
 use super::ui_theme;
 
-pub use waku_ui::menu::{
+pub use client_ui::menu::{
     ConfirmEntry, ContextMenuHandle, DismissMenu, MenuAlign, MenuItem, SelectNextEntry,
     SelectNextTab, SelectPreviousEntry, SelectPreviousTab, init, popover, toggle_popover,
 };
@@ -21,7 +21,7 @@ pub fn dropdown_menu<E>(
 where
     E: ParentElement + Styled + InteractiveElement + IntoElement + 'static,
 {
-    waku_ui::menu::dropdown_menu_with_theme(trigger, id, handle, align, items, |cx| {
+    client_ui::menu::dropdown_menu_with_theme(trigger, id, handle, align, items, |cx| {
         ui_theme(Theme::current(cx))
     })
 }
@@ -35,7 +35,7 @@ pub fn context_menu<E>(
 where
     E: ParentElement + Styled + InteractiveElement + IntoElement + 'static,
 {
-    waku_ui::menu::context_menu_with_theme(element, id, handle, items, |cx| {
+    client_ui::menu::context_menu_with_theme(element, id, handle, items, |cx| {
         ui_theme(Theme::current(cx))
     })
 }

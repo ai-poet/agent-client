@@ -9,7 +9,7 @@ import type {
   TokenTotals,
   TranscriptBlock,
   TurnStatus,
-} from '@waku/client'
+} from 'client'
 
 export interface PendingPermission {
   requestId: string

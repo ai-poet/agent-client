@@ -1,3 +1,3 @@
-//! Shared pulse clock and motion primitives, implemented by `waku-ui`.
+//! Shared pulse clock and motion primitives, implemented by `client-ui`.
 
-pub use waku_ui::motion::*;
+pub use client_ui::motion::*;

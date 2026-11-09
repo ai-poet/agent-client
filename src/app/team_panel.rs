@@ -70,7 +70,7 @@ pub(super) struct TeamPanelState {
 /// Read the team a captain leads, or its newest archived one, through the
 /// daemon. Blocking: runs on the background executor.
 fn fetch_team(
-    workspace: &waku_client::WorkspaceClient,
+    workspace: &client::WorkspaceClient,
     cwd: &Path,
     state_dir: &str,
     captain: &str,
@@ -78,19 +78,17 @@ fn fetch_team(
 ) -> Result<Option<TeamSnapshot>, String> {
     let root = cwd.join(state_dir);
     let read = |relative: String| -> Option<String> {
-        match workspace.request(waku_client::WorkspaceOperation::ReadTextFile {
+        match workspace.request(client::WorkspaceOperation::ReadTextFile {
             root: root.clone(),
             relative_path: PathBuf::from(relative),
         }) {
-            Ok(waku_client::WorkspaceResult::TextFile { content }) => Some(content),
+            Ok(client::WorkspaceResult::TextFile { content }) => Some(content),
             _ => None,
         }
     };
     let directories = |path: PathBuf| -> Vec<String> {
-        match workspace
-            .request(waku_client::WorkspaceOperation::BrowseDirectory { path: Some(path) })
-        {
-            Ok(waku_client::WorkspaceResult::Directory { entries, .. }) => entries
+        match workspace.request(client::WorkspaceOperation::BrowseDirectory { path: Some(path) }) {
+            Ok(client::WorkspaceResult::Directory { entries, .. }) => entries
                 .into_iter()
                 .filter(|entry| entry.is_dir && !entry.name.starts_with('.'))
                 .map(|entry| entry.name)
@@ -222,7 +220,7 @@ impl Waku {
             return;
         };
         let live = self.team_member_activity(session_id);
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace = client::WorkspaceClient::new(self.daemon.client());
         let generation = {
             let entry = self.team_panel.generation.entry(session_id).or_default();
             *entry += 1;

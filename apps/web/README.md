@@ -14,7 +14,7 @@ exact browser origin in its `--allow-origin` list. For local development the
 origin is `http://localhost:3001`.
 
 ```sh
-WAKU_DAEMON_TOKEN=replace-me cargo run -p waku-daemon --bin waku-daemon -- \
+WAKU_DAEMON_TOKEN=replace-me cargo run -p client-daemon --bin client-daemon -- \
   --bind 127.0.0.1:34123 \
   --allow-origin http://localhost:3001
 ```

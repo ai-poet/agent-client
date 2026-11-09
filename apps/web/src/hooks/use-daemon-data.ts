@@ -1,5 +1,5 @@
 import { useQueries, useQuery } from '@tanstack/react-query'
-import type { ProviderKind } from '@waku/client'
+import type { ProviderKind } from 'client'
 import { PROVIDERS } from '@/components/waku-icon'
 import { useDaemon } from '@/lib/daemon-context'
 import {

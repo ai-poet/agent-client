@@ -9,7 +9,7 @@ import type {
   ProviderProbe,
   SequencedEvent,
   UserInputAnswer,
-} from '@waku/client'
+} from 'client'
 import {
   createContext,
   useCallback,

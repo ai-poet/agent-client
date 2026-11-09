@@ -71,18 +71,18 @@ impl Waku {
         };
         self.turn_undo_pending.insert(turn_id);
         cx.notify();
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace = client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    match workspace.request(waku_client::WorkspaceOperation::PlanTurnUndo {
+                    match workspace.request(client::WorkspaceOperation::PlanTurnUndo {
                         cwd: target.cwd,
                         session_id: target.session_id,
                         turn_count: target.turn_count,
                         edited_paths: target.edited_paths,
                     })? {
-                        waku_client::WorkspaceResult::TurnUndoPlan { plan } => Ok(plan),
+                        client::WorkspaceResult::TurnUndoPlan { plan } => Ok(plan),
                         _ => anyhow::bail!("the daemon returned an invalid undo response"),
                     }
                 })
@@ -104,17 +104,17 @@ impl Waku {
     fn confirm_turn_undo(
         &mut self,
         turn_id: Uuid,
-        plan: waku_client::TurnUndoPlan,
+        plan: client::TurnUndoPlan,
         cx: &mut Context<Self>,
     ) {
         if plan.safe.is_empty() {
             self.show_toast(tr!("changes.undo_nothing"));
             return;
         }
-        let reason = |reason: waku_client::UndoReason| match reason {
-            waku_client::UndoReason::ChangedSinceTurn => tr!("changes.reason_changed"),
-            waku_client::UndoReason::ShellWritten => tr!("changes.reason_shell"),
-            waku_client::UndoReason::Submodule => tr!("changes.reason_submodule"),
+        let reason = |reason: client::UndoReason| match reason {
+            client::UndoReason::ChangedSinceTurn => tr!("changes.reason_changed"),
+            client::UndoReason::ShellWritten => tr!("changes.reason_shell"),
+            client::UndoReason::Submodule => tr!("changes.reason_submodule"),
         };
         let mut sections = vec![ConfirmSection {
             title: tr!("changes.undo_safe", count = plan.safe.len()),
@@ -166,19 +166,19 @@ impl Waku {
         let session_id = target.session_id;
         self.turn_undo_pending.insert(turn_id);
         cx.notify();
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace = client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    match workspace.request(waku_client::WorkspaceOperation::ApplyTurnUndo {
+                    match workspace.request(client::WorkspaceOperation::ApplyTurnUndo {
                         cwd: target.cwd,
                         session_id: target.session_id,
                         turn_count: target.turn_count,
                         edited_paths: target.edited_paths,
                         expected_safe,
                     })? {
-                        waku_client::WorkspaceResult::TurnUndone { restored } => Ok(restored),
+                        client::WorkspaceResult::TurnUndone { restored } => Ok(restored),
                         _ => anyhow::bail!("the daemon returned an invalid undo response"),
                     }
                 })
@@ -189,7 +189,7 @@ impl Waku {
                     Ok(restored) => waku.finish_turn_undo(session_id, turn_id, restored.len()),
                     Err(error) => {
                         let error = error.to_string();
-                        waku.show_toast(if error.contains(waku_client::TURN_UNDO_STALE) {
+                        waku.show_toast(if error.contains(client::TURN_UNDO_STALE) {
                             tr!("changes.undo_stale")
                         } else {
                             tr!("changes.undo_failed", error = error)

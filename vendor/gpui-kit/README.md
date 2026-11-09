@@ -1,6 +1,6 @@
 # Waku UI (`vendor/gpui-kit`)
 
-Waku's reusable GPUI component crate. The Rust package is named `waku-ui` to
+Waku's reusable GPUI component crate. The Rust package is named `client-ui` to
 avoid confusion with the Longbridge GPUI Kit reference checkout in the repository
 root.
 
@@ -29,6 +29,6 @@ GPUI stack. Record closely adapted source, its upstream revision and license in
 ## Checks
 
 ```bash
-cargo test -p waku-ui
-cargo check -p waku-ui
+cargo test -p client-ui
+cargo check -p client-ui
 ```

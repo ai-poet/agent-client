@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import type { WorkingTreeEntry } from '@waku/client'
+import type { WorkingTreeEntry } from 'client'
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { Button } from '@/components/ui/button'

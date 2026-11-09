@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { FileEntry, ReportedCommand, SlashCommand } from '@waku/client'
+import type { FileEntry, ReportedCommand, SlashCommand } from 'client'
 import {
   composerAutocompleteRows,
   detectComposerTrigger,

@@ -1,7 +1,7 @@
 //! A sub-agent's record, kept beside its background-work entry.
 //!
 //! Drivers stream it as `BackgroundWorkEvent::Transcript` entries (see
-//! `waku-core/src/driver/subagent.rs`): text the sub-agent wrote, and its
+//! `client-core/src/driver/subagent.rs`): text the sub-agent wrote, and its
 //! tool calls as whole `ActivityItem`s, each keyed by an id so a later entry
 //! replaces — or, for text, extends — an earlier one. This holds them in
 //! order, bounded, with the parsed markdown for each text entry, so the panel

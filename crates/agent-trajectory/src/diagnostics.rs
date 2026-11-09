@@ -242,7 +242,10 @@ impl Report {
                         "- Wait: {}\n",
                         metrics::format_duration(*waited_ms)
                     ));
-                    out.push_str(&format!("- No token arrived: {}\n", yes_no(*without_output)));
+                    out.push_str(&format!(
+                        "- No token arrived: {}\n",
+                        yes_no(*without_output)
+                    ));
                     out.push_str(
                         "- Next check: compare provider latency/status and network captures around this request.\n",
                     );
@@ -278,7 +281,9 @@ impl Report {
                     if let Some(turn) = turn {
                         out.push_str(&format!("- Turn: {turn}\n"));
                     }
-                    out.push_str("- Next check: inspect the adjacent request failure and context usage.\n");
+                    out.push_str(
+                        "- Next check: inspect the adjacent request failure and context usage.\n",
+                    );
                 }
             }
             out.push_str(&format!("- Trajectory cell: {}\n", finding.cell()));
@@ -369,7 +374,9 @@ fn percentile(sorted: &[i64], p: f64) -> Option<i64> {
         return None;
     }
     let rank = (p * sorted.len() as f64).ceil() as usize;
-    sorted.get(rank.saturating_sub(1).min(sorted.len() - 1)).copied()
+    sorted
+        .get(rank.saturating_sub(1).min(sorted.len() - 1))
+        .copied()
 }
 
 fn percentiles(mut values: Vec<i64>) -> Percentiles {
@@ -510,8 +517,7 @@ pub fn analyze(snapshot: &Snapshot) -> Report {
                                     previous_request: previous.request,
                                     previous_read: previous.read,
                                     input,
-                                    since_previous_ms: (request.started_at
-                                        - previous.ended_at)
+                                    since_previous_ms: (request.started_at - previous.ended_at)
                                         .max(0),
                                     prompt_change: prompt_changes.get(&request.turn).copied(),
                                 },
@@ -557,8 +563,8 @@ pub fn analyze(snapshot: &Snapshot) -> Report {
 mod tests {
     use super::*;
     use crate::record::{Record, RetryInfo, Usage};
-    use crate::snapshot::tests::{request, sample, turn_start};
     use crate::snapshot::build;
+    use crate::snapshot::tests::{request, sample, turn_start};
 
     fn with_usage(mut record: Record, input: u64, cache_read: u64) -> Record {
         let Record::Request { usage, .. } = &mut record else {

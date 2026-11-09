@@ -134,7 +134,7 @@ PowerShell（有 7 就用 7），工作目录在多次调用之间保持，中�
 与阈值、内置工具开关、MCP 服务器、权限规则，以及启用开关。
 
 内置 Agent 的引擎基于 [Claurst](https://github.com/kuberwastaken/claurst)
-（GPL-3.0），以 vendored 形式放在 [`crates/waku-agent`](crates/waku-agent)，
+（GPL-3.0），以 vendored 形式放在 [`crates/agent-core`](crates/agent-core)，
 所做的修改逐条记录在 [NOTICE.md](NOTICE.md)。
 
 ## 画图
@@ -185,11 +185,11 @@ Windows 从 [最新 Release](../../releases/latest) 下载 `CheapRouter-*-Setup.
 
 ## Architecture
 
-The native desktop is an RPC client of the standalone `waku-daemon` process.
-Provider sessions run in [`waku-core`](crates/waku-core), behind the
+The native desktop is an RPC client of the standalone `client-daemon` process.
+Provider sessions run in [`client-core`](crates/client-core), behind the
 authenticated, versioned WebSocket contract in
-[`waku-protocol`](crates/waku-protocol). The desktop depends on
-[`waku-client`](crates/waku-client), not on the daemon implementation. The
+[`client-protocol`](crates/client-protocol). The desktop depends on
+[`client`](crates/client), not on the daemon implementation. The
 daemon owns task SQLite data, uploaded attachments, provider-native session
 forks, and all workspace filesystem and Git operations; paths returned by it
 always refer to the daemon host. The desktop retains only presentation state
@@ -197,10 +197,10 @@ and a disposable preview cache.
 
 The built-in agent (`ProviderKind::Native`) runs inside the daemon rather than
 as a child process: a vendored copy of the Claurst engine in
-[`crates/waku-agent`](crates/waku-agent), driven through
-[`crates/waku-agent-bridge`](crates/waku-agent-bridge) (engine lifecycle,
+[`crates/agent-core`](crates/agent-core), driven through
+[`crates/agent-bridge`](crates/agent-bridge) (engine lifecycle,
 permissions, history, MCP, routing) and translated into the provider contract
-by `crates/waku-core/src/driver/native.rs`. Its transcript is owned by the
+by `crates/client-core/src/driver/native.rs`. Its transcript is owned by the
 daemon, which is what makes rewind, branch and resume plain truncations.
 
 All fork functionality lives in [`crates/sub2api`](crates/sub2api) plus a
@@ -211,7 +211,7 @@ configuration (cc-switch model, with pre-takeover backups in
 the wire protocol stays byte-identical to upstream.
 
 The browser client lives at [`apps/web`](apps/web) and uses the generated
-browser transport in [`packages/waku-client`](packages/waku-client). Its
+browser transport in [`packages/client`](packages/client). Its
 checked-in types are generated directly from the Rust protocol. Run
 `bun run protocol:generate` after changing a wire type and
 `bun run protocol:check` to verify that generated files are current.
@@ -222,7 +222,7 @@ App data lives under `~/.cheaprouter` (projectless task workspaces at
 isolated at `temp/`). Legacy `~/.waku` directories from older builds are
 renamed in place at startup.
 
-Release apps bundle and sign `waku-daemon`. Development keeps the daemon at
+Release apps bundle and sign `client-daemon`. Development keeps the daemon at
 `target/debug/waku-debug-daemon`, allowing provider-only edits to rebuild and
 replace the daemon without relaunching the debug build.
 
@@ -233,7 +233,7 @@ Development is supported on macOS and Windows and requires
 [Bun](https://bun.sh/). Windows needs the MSVC toolchain; install the native
 build prerequisites listed in [CONTRIBUTING.md](CONTRIBUTING.md) first. The
 customized GPUI workspace is vendored under `vendor/gpui/`, and reusable UI
-components live in `vendor/gpui-kit/` (the `waku-ui` crate); no
+components live in `vendor/gpui-kit/` (the `client-ui` crate); no
 separate checkout or submodule initialization is needed. Linux
 still builds from source, but it is not tested in CI and no Linux package is
 published.

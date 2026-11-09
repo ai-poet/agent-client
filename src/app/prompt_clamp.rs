@@ -50,7 +50,7 @@ impl Waku {
         let width =
             f32::from(self.transcript_layout_width.get()).min(BUBBLE_MAX_WIDTH) - BUBBLE_PADDING_X;
         let font =
-            f32::from(window.rem_size()) * FONT_SP / waku_client::persistence::DEFAULT_UI_FONT_SIZE;
+            f32::from(window.rem_size()) * FONT_SP / client::persistence::DEFAULT_UI_FONT_SIZE;
         if !self.prompt_is_long(message, width, font) {
             return None;
         }

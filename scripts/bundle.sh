@@ -47,7 +47,7 @@ case "$profile" in
     # Fork change: the release bundle carries the brand, matching what
     # scripts/release.ts expects to find in target/release. Keep the fallback
     # chain identical to release.ts and build.rs. The bundle identifier stays
-    # upstream's `sh.waku` on purpose (see crates/waku-protocol/src/identity.rs),
+    # upstream's `sh.waku` on purpose (see crates/client-protocol/src/identity.rs),
     # and the debug bundle keeps upstream's "Waku Debug" name because the dev
     # tooling (dev.ts, delete-debug-app.ts) is keyed to it.
     app_name="${SUB2API_BRAND_NAME:-CheapRouter}"
@@ -67,7 +67,7 @@ fi
 debug_adhoc_requirement="=designated => identifier \"$bundle_identifier\""
 if [ "${WAKU_SKIP_CARGO_BUILD:-0}" != "1" ]; then
   if [ "$profile" = "release" ]; then
-    cargo build --release --package waku --bin waku --bin waku_js_repl --package waku-daemon --bin waku-daemon
+    cargo build --release --package waku --bin waku --bin waku_js_repl --package client-daemon --bin client-daemon
   else
     cargo build --package waku --bin waku --bin waku_js_repl
   fi
@@ -77,7 +77,7 @@ bundle="$cargo_target_dir/$profile/$app_name.app"
 contents="$bundle/Contents"
 helper_bundle="$contents/Helpers/$helper_name.app"
 repl_executable="$contents/Resources/waku_js_repl"
-daemon_executable="$contents/MacOS/waku-daemon"
+daemon_executable="$contents/MacOS/client-daemon"
 swift_module_cache="$cargo_target_dir/$profile/swift-module-cache"
 helper_source="resources/computer-use/WakuComputerUse.swift"
 menu_bar_cursor_resource="resources/computer-use/menubar-cursor.png"
@@ -162,7 +162,7 @@ cp "$cargo_target_dir/$profile/waku" "$contents/MacOS/$app_name"
 cp "$cargo_target_dir/$profile/waku_js_repl" "$repl_executable"
 chmod 755 "$repl_executable"
 if [ "$profile" = "release" ]; then
-  cp "$cargo_target_dir/$profile/waku-daemon" "$daemon_executable"
+  cp "$cargo_target_dir/$profile/client-daemon" "$daemon_executable"
   chmod 755 "$daemon_executable"
 fi
 cp resources/Info.plist "$contents/Info.plist"

@@ -11,7 +11,7 @@ import type {
   ProviderModel,
   ProviderProbe,
   ThreadGoalStatus,
-} from '@waku/client'
+} from 'client'
 import {
   useEffect,
   useRef,

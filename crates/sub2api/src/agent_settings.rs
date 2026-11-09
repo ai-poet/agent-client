@@ -159,8 +159,8 @@ pub struct AgentSettings {
 
 /// Every built-in tool the engine offers, for the Tools section.
 ///
-/// Mirrors `claurst_tools::all_tools()` plus the sub-agent tool from
-/// `claurst_query`. `waku-agent-bridge` asserts in its tests that this list
+/// Mirrors `agent_core_tools::all_tools()` plus the sub-agent tool from
+/// `agent_core_query`. `agent-bridge` asserts in its tests that this list
 /// and the engine's agree, so the page cannot drift from what the model is
 /// actually offered — and this crate stays free of the engine crates.
 pub const BUILTIN_TOOLS: [&str; 37] = [

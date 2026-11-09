@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AgentSession, Project } from '@waku/client'
+import type { AgentSession, Project } from 'client'
 import { useEffect, useState, type RefObject } from 'react'
 import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'

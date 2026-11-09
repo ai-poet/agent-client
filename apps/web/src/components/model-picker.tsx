@@ -1,4 +1,4 @@
-import type { AgentSession, ProviderKind, ProviderModel, ProviderProbe } from '@waku/client'
+import type { AgentSession, ProviderKind, ProviderModel, ProviderProbe } from 'client'
 import { Popover } from '@base-ui/react/popover'
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { ProviderIcon, PROVIDERS, providerMeta, WakuIcon } from '@/components/waku-icon'

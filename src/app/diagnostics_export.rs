@@ -3,7 +3,7 @@ use super::*;
 impl Waku {
     pub(super) fn export_daemon_diagnostics(&self, cx: &mut Context<Self>) {
         let client = self.daemon.client();
-        let metadata = waku_client::DaemonDiagnosticsMetadata {
+        let metadata = client::DaemonDiagnosticsMetadata {
             exported_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             app_version: env!("CARGO_PKG_VERSION").into(),
             app_pid: std::process::id(),
@@ -16,7 +16,7 @@ impl Waku {
             .or_else(dirs::home_dir)
             .unwrap_or_else(std::env::temp_dir);
         let suggested_name = format!(
-            "waku-daemon-diagnostics-{}.zip",
+            "client-daemon-diagnostics-{}.zip",
             chrono::Utc::now().format("%Y%m%d-%H%M%S")
         );
         let receiver = cx.prompt_for_new_path(&directory, Some(&suggested_name));
@@ -42,8 +42,8 @@ impl Waku {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    waku_client::validate_destination(&path)?;
-                    waku_client::export_daemon_diagnostics(&path, &metadata)?;
+                    client::validate_destination(&path)?;
+                    client::export_daemon_diagnostics(&path, &metadata)?;
                     Ok::<_, anyhow::Error>(path)
                 })
                 .await;

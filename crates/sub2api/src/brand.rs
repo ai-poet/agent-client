@@ -76,7 +76,7 @@ pub const RELEASES_BASE_URL: &str = match option_env!("SUB2API_RELEASES_BASE_URL
 /// Application data directory name under the user's home directory.
 ///
 /// Carries the brand (renamed from upstream's `.waku`). Keep the default
-/// identical to `waku_protocol::identity::DATA_DIR_NAME` — that crate cannot
+/// identical to `client_protocol::identity::DATA_DIR_NAME` — that crate cannot
 /// depend on this one, so both read the same build-time variable with the
 /// same fallback. Legacy `~/.waku` state is renamed in place at startup by
 /// [`crate::migrate::migrate_legacy_storage`].

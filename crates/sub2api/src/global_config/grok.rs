@@ -46,7 +46,7 @@ fn managed_models(target: &RouteTarget) -> (Vec<String>, String) {
 
 /// The effort levels a profile declares. `grok-4.6` and `grok-4.7` go up to
 /// xhigh — the CLI's own definition of 4.6 says so, and the model picker
-/// offers it on both (`waku_protocol::model_catalog::grok_model_reasoning_efforts`),
+/// offers it on both (`client_protocol::model_catalog::grok_model_reasoning_efforts`),
 /// so the profile has to agree. Any other id keeps the ladder every Grok
 /// model accepts.
 fn profile_reasoning_efforts(id: &str) -> &'static [&'static str] {

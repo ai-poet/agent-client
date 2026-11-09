@@ -1,0 +1,1536 @@
+// PTY-backed Bash tool: wraps every command in a real pseudo-terminal so that
+// programs that query isatty() (npm, cargo, git, pytest, …) behave correctly.
+//
+// Shell state (cwd + env) is persisted across calls through the same sentinel
+// mechanism as the original BashTool, so `cd` and `export` work as expected.
+//
+// Platform notes
+// ──────────────
+//  Unix  → portable_pty (native openpty)
+//  Windows → no PTY. Fork (Waku): Git Bash when Git for Windows is installed,
+//             PowerShell otherwise (see `agent_core::shell`); upstream ran
+//             `cmd /C`. ConPTY is available in portable_pty but adds
+//             complexity for minimal gain on Windows.
+
+use crate::{session_shell_state, PermissionLevel, Tool, ToolContext, ToolResult};
+use agent_core::bash_classifier::{
+    classify_bash_command, is_read_only_bash_command, BashRiskLevel,
+};
+use agent_core::tasks::{global_registry, BackgroundTask};
+use async_trait::async_trait;
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::time::Duration;
+use tokio::process::Command;
+use tracing::debug;
+
+// Unix-only imports used by the shell-state helpers and PTY execution path.
+#[cfg(unix)]
+use crate::ShellState;
+#[cfg(unix)]
+use regex::Regex;
+#[cfg(unix)]
+use std::collections::HashMap;
+
+/// Sentinel appended to the shell wrapper script (Unix, and Git Bash on
+/// Windows).
+const SHELL_STATE_SENTINEL: &str = "__CC_SHELL_STATE__";
+
+pub struct PtyBashTool;
+
+#[derive(Debug, Deserialize)]
+struct BashInput {
+    command: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default = "default_timeout")]
+    timeout: u64,
+    #[serde(default)]
+    run_in_background: bool,
+}
+
+fn default_timeout() -> u64 {
+    120_000
+}
+
+// ---------------------------------------------------------------------------
+// Shell state helpers — Unix only (used by the PTY wrapper script)
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+fn parse_shell_state_block(lines: &[String]) -> Option<(PathBuf, HashMap<String, String>)> {
+    let mut iter = lines.iter();
+    let cwd_line = iter.next()?;
+    let cwd = PathBuf::from(cwd_line.trim());
+
+    let mut env_vars = HashMap::new();
+    for line in iter {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(eq) = line.find('=') {
+            let key = line[..eq].to_string();
+            let val = line[eq + 1..].to_string();
+            if !key.starts_with('_')
+                && ![
+                    "SHLVL",
+                    "BASH_LINENO",
+                    "BASH_SOURCE",
+                    "FUNCNAME",
+                    "PIPESTATUS",
+                    "OLDPWD",
+                ]
+                .contains(&key.as_str())
+            {
+                env_vars.insert(key, val);
+            }
+        }
+    }
+
+    Some((cwd, env_vars))
+}
+
+#[cfg(unix)]
+fn extract_exports_from_command(command: &str) -> HashMap<String, String> {
+    let re =
+        Regex::new(r#"(?m)^\s*export\s+([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"]*)"|'([^']*)'|(\S*))"#)
+            .unwrap();
+    let mut map = HashMap::new();
+    for cap in re.captures_iter(command) {
+        let key = cap[1].to_string();
+        let val = cap
+            .get(2)
+            .or_else(|| cap.get(3))
+            .or_else(|| cap.get(4))
+            .map(|m| m.as_str())
+            .unwrap_or("")
+            .to_string();
+        map.insert(key, val);
+    }
+    map
+}
+
+// SECURITY (#211): restored env vars are NEVER emitted into this script.
+// The script becomes an argv element (`bash -c "<script>"`), which is readable
+// by any local user via `ps auxww` / `/proc/<pid>/cmdline`. Instead the restored
+// vars are handed to the child through its ENVIRONMENT via `apply_restored_env`
+// (portable_pty `CommandBuilder::env`), so secret values never touch a command line.
+#[cfg(unix)]
+fn build_wrapper_script(command: &str, state: &ShellState, base_cwd: &PathBuf) -> String {
+    let effective_cwd = state.cwd.as_ref().unwrap_or(base_cwd);
+    let cwd_escaped: String = effective_cwd.to_string_lossy().replace('\'', "'\\''");
+
+    format!(
+        r#"set -e
+cd '{cwd}'
+set +e
+{user_cmd}
+__CC_EXIT_CODE=$?
+echo '{sentinel}'
+pwd
+env | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' || true
+exit $__CC_EXIT_CODE
+"#,
+        cwd = cwd_escaped,
+        user_cmd = command,
+        sentinel = SHELL_STATE_SENTINEL,
+    )
+}
+
+/// Plumb the persisted shell env vars into the child process's environment
+/// (NOT its argv). Each var is set with `CommandBuilder::env`, so the child
+/// inherits it exactly as `export` would have — but the value never appears on
+/// any command line. This is the sole path through which restored values reach
+/// the child (#211).
+#[cfg(unix)]
+fn apply_restored_env(cmd: &mut portable_pty::CommandBuilder, env_vars: &HashMap<String, String>) {
+    for (k, v) in env_vars {
+        cmd.env(k, v);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Background execution (identical to bash.rs — no PTY needed for background)
+// ---------------------------------------------------------------------------
+
+async fn run_in_background(
+    command: String,
+    cwd: PathBuf,
+    notifier: Option<crate::CompletionNotifier>,
+) -> ToolResult {
+    // Fork departure (Waku): cut the name on a character boundary. This was a
+    // byte slice, and any command whose 60th byte fell inside a multi-byte
+    // character — a Chinese `echo`, a path in any non-Latin script — panicked.
+    let task_name = format!("bg: {}", &command[..floor_char_boundary(&command, 60)]);
+    let mut task = BackgroundTask::new(&task_name);
+    task.pid = None;
+    let task_id = global_registry().register(task);
+    let task_id_clone = task_id.clone();
+    let command_clone = command.clone();
+
+    // Fork departure (Waku): no deadline. This used to run under the call's
+    // `timeout`, which is the foreground one (120 s unless the model set it),
+    // so the server or watcher a background command exists for was killed two
+    // minutes after it started. It now runs until it exits, until it is
+    // cancelled (`monitor`'s cancel, the background-work panel), or until the
+    // runtime goes down with the daemon.
+    tokio::spawn(async move {
+        async {
+            // kill_on_drop: when this future is dropped — the runtime shutting
+            // down — the child must die with it, otherwise it leaks (#220).
+            // A PowerShell script too long for the command line runs from a
+            // temporary file, which has to outlive the process.
+            let mut _script_file: Option<tempfile::TempPath> = None;
+            let child = if cfg!(windows) {
+                // Fork (Waku): the same executor as a foreground call — Git
+                // Bash when it is installed, PowerShell otherwise — so a
+                // command that works in the foreground does not fail when
+                // backgrounded.
+                let process = match agent_core::shell::windows_bash() {
+                    Some(bash) => {
+                        let mut process = Command::new(bash);
+                        process.arg("-c").arg(&command_clone);
+                        Ok(process)
+                    }
+                    None => crate::powershell::powershell_process(&command_clone).map(
+                        |(process, file)| {
+                            _script_file = file;
+                            process
+                        },
+                    ),
+                };
+                process.and_then(|mut process| {
+                    crate::capture::hide_window(&mut process);
+                    process
+                        .current_dir(&cwd)
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .stdin(Stdio::null())
+                        .kill_on_drop(true)
+                        .spawn()
+                })
+            } else {
+                let mut process = Command::new("bash");
+                // Fork (Waku): the whole background workload gets one process
+                // group, so a stop reaches children as well as this shell.
+                crate::process::isolate_process_group(&mut process);
+                process
+                    .arg("-c")
+                    .arg(&command_clone)
+                    .current_dir(&cwd)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .stdin(Stdio::null())
+                    .kill_on_drop(true)
+                    .spawn()
+            };
+
+            match child {
+                Ok(mut c) => {
+                    if let Some(pid) = c.id() {
+                        global_registry().set_pid(&task_id_clone, pid);
+                    }
+                    let stdout = c.stdout.take();
+                    let stderr = c.stderr.take();
+                    // Fork (Waku): both pipes at once, decoded per line — see
+                    // `crate::capture`. Reading stdout to its end first let a
+                    // chatty stderr fill its pipe and stall the task.
+                    tokio::join!(
+                        async {
+                            if let Some(out) = stdout {
+                                crate::capture::for_each_line(out, |line| {
+                                    global_registry().append_output(&task_id_clone, &line);
+                                })
+                                .await;
+                            }
+                        },
+                        async {
+                            if let Some(err) = stderr {
+                                crate::capture::for_each_line(err, |line| {
+                                    global_registry().append_output(
+                                        &task_id_clone,
+                                        &format!("STDERR: {}", line),
+                                    );
+                                })
+                                .await;
+                            }
+                        },
+                    );
+                    match c.wait().await {
+                        Ok(status) if status.success() => {
+                            global_registry().complete(&task_id_clone);
+                        }
+                        Ok(status) => {
+                            let code = status.code().unwrap_or(-1);
+                            global_registry().update_status(
+                                &task_id_clone,
+                                agent_core::tasks::TaskStatus::Failed(format!(
+                                    "exit code {}",
+                                    code
+                                )),
+                            );
+                        }
+                        Err(e) => {
+                            global_registry().update_status(
+                                &task_id_clone,
+                                agent_core::tasks::TaskStatus::Failed(e.to_string()),
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    global_registry().update_status(
+                        &task_id_clone,
+                        agent_core::tasks::TaskStatus::Failed(e.to_string()),
+                    );
+                }
+            }
+        }
+        .await;
+
+        // Fork departure (Waku): say that it ended. Nothing told the agent,
+        // which either polled `monitor` or never learned a build had failed.
+        if let Some(notifier) = notifier {
+            if let Some(task) = global_registry().get(&task_id_clone) {
+                notifier.notify(background_completion_notice(
+                    &task_id_clone,
+                    &command_clone,
+                    &task,
+                ));
+            }
+        }
+    });
+
+    ToolResult::success(format!(
+        "Command started in background.\nTask ID: {}\nCommand: {}",
+        task_id, command
+    ))
+}
+
+/// Fork (Waku): how a background command's completion notice opens, so a
+/// session can tell it apart from other queued messages.
+pub const BACKGROUND_NOTICE_OPEN: &str = "<system-reminder>The background command";
+
+/// Fork (Waku): what the agent is told when a background command ends — how
+/// it ended and its last lines, so a short result needs no `monitor` call.
+pub fn background_completion_notice(task_id: &str, command: &str, task: &BackgroundTask) -> String {
+    use agent_core::tasks::TaskStatus;
+    let outcome = match &task.status {
+        TaskStatus::Completed => "finished successfully".to_string(),
+        TaskStatus::Failed(reason) => format!("failed ({reason})"),
+        TaskStatus::Cancelled => "was stopped".to_string(),
+        TaskStatus::Running => "stopped reporting".to_string(),
+    };
+    let command = &command[..floor_char_boundary(command, 200)];
+    let start = task.output.len().saturating_sub(20);
+    let tail = task.output[start..].join("\n");
+    let tail = &tail[ceil_char_boundary(&tail, tail.len().saturating_sub(2_000))..];
+    let shown = if tail.trim().is_empty() {
+        "It printed nothing. ".to_string()
+    } else {
+        format!("Its last lines:\n{tail}\n")
+    };
+    format!(
+        "{BACKGROUND_NOTICE_OPEN} `{command}` (task {task_id}) {outcome}. {shown}\
+         Read all of its output with the monitor tool (action \"output\", task_id \"{task_id}\") \
+         if you need more.</system-reminder>"
+    )
+}
+
+// ---------------------------------------------------------------------------
+// ANSI stripping (Unix only — PTY output only happens on Unix)
+// ---------------------------------------------------------------------------
+
+/// Remove ANSI/VT escape sequences from PTY output, producing clean text.
+#[cfg(unix)]
+fn strip_ansi(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            match chars.peek() {
+                Some('[') => {
+                    chars.next(); // consume '['
+                                  // CSI: consume parameter + intermediate bytes, stop at final byte
+                    for c in &mut chars {
+                        if c.is_ascii_alphabetic() || c == '@' {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    // OSC: consume until ST (ESC \) or BEL
+                    chars.next(); // consume ']'
+                    let mut prev = '\0';
+                    for c in &mut chars {
+                        if c == '\x07' {
+                            break; // BEL terminates OSC
+                        }
+                        if prev == '\x1b' && c == '\\' {
+                            break; // ST = ESC \ terminates OSC
+                        }
+                        prev = c;
+                    }
+                }
+                Some('(') | Some(')') | Some('*') | Some('+') => {
+                    chars.next(); // consume designator introducer
+                    chars.next(); // consume charset code
+                }
+                _ => {
+                    // Two-character escape (ESC X): skip next char
+                    chars.next();
+                }
+            }
+        } else if ch == '\r' {
+            // CR without LF: treat as line reset (discard pending partial line)
+            // CR+LF is fine: LF will follow and push the newline
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Unix PTY execution
+// ---------------------------------------------------------------------------
+
+/// Outcome of a single foreground PTY run.
+#[cfg(unix)]
+enum PtyOutcome {
+    /// The command finished; carries (raw PTY output, exit code).
+    Completed(String, i32),
+    /// The command exceeded its timeout. The child has been KILLED (#220).
+    TimedOut,
+    /// The PTY could not be set up / the command could not be spawned.
+    Failed(String),
+}
+
+/// Guard that guarantees the PTY child is killed if the running future is
+/// dropped before the command completes — e.g. the turn is cancelled or the
+/// task is aborted mid-command. This is the PTY analogue of tokio's
+/// `kill_on_drop(true)`: portable_pty's child is NOT killed on drop, so without
+/// this a cancelled command would orphan its child (#220).
+///
+/// The guard is disarmed on normal completion and fired explicitly on timeout.
+#[cfg(unix)]
+struct PtyKillGuard {
+    killer: Box<dyn portable_pty::ChildKiller + Send + Sync>,
+    armed: bool,
+}
+
+#[cfg(unix)]
+impl PtyKillGuard {
+    fn new(killer: Box<dyn portable_pty::ChildKiller + Send + Sync>) -> Self {
+        Self {
+            killer,
+            armed: true,
+        }
+    }
+
+    /// The command finished on its own — there is nothing left to kill.
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+
+    /// Kill the child now (timeout path) and disarm so `Drop` is a no-op.
+    fn kill_now(&mut self) {
+        if self.armed {
+            let _ = self.killer.kill();
+            self.armed = false;
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PtyKillGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            // Future dropped before completion (cancel / abort): don't leak the child.
+            let _ = self.killer.kill();
+        }
+    }
+}
+
+#[cfg(unix)]
+async fn run_in_pty(
+    script: &str,
+    working_dir: &str,
+    env_vars: &HashMap<String, String>,
+    timeout: Duration,
+) -> PtyOutcome {
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
+    let pty_system = native_pty_system();
+
+    let pair = match pty_system.openpty(PtySize {
+        rows: 50,
+        cols: 220,
+        pixel_width: 0,
+        pixel_height: 0,
+    }) {
+        Ok(p) => p,
+        Err(e) => return PtyOutcome::Failed(format!("Failed to open PTY: {}", e)),
+    };
+
+    let mut cmd = CommandBuilder::new("bash");
+    cmd.args(["-c", script]);
+    cmd.cwd(working_dir);
+    // Restored shell vars go through the child's ENVIRONMENT, never its argv (#211).
+    apply_restored_env(&mut cmd, env_vars);
+
+    let child = match pair.slave.spawn_command(cmd) {
+        Ok(c) => c,
+        Err(e) => return PtyOutcome::Failed(format!("Failed to spawn in PTY: {}", e)),
+    };
+
+    // Grab the reader *before* dropping slave so the fd stays valid.
+    let reader = match pair.master.try_clone_reader() {
+        Ok(r) => r,
+        Err(e) => return PtyOutcome::Failed(format!("Failed to clone PTY reader: {}", e)),
+    };
+
+    // A killer handle cloned from the child. This is how a timed-out or
+    // cancelled command is explicitly KILLED (portable_pty does not kill on
+    // drop, so without this the child would orphan) (#220).
+    let killer = child.clone_killer();
+
+    // Drop slave after spawn — once the child's controlling terminal is gone,
+    // the master side will see EOF when the child exits.
+    drop(pair.slave);
+    // Keep master alive (inside the read thread) until reading is done.
+    let master = pair.master;
+
+    // Read all PTY output in a blocking thread (portable_pty reader is sync) and
+    // reap the child there so we can return its exit code. drive_pty_child stops
+    // reading as soon as the DIRECT child exits rather than waiting for pty EOF,
+    // which a detached grandchild would hold open forever (#184).
+    let read_handle = tokio::task::spawn_blocking(move || {
+        let master_fd = master.as_raw_fd();
+        let result = drive_pty_child(child, reader, master_fd);
+        // Keep the master fd alive until reading + reaping is complete.
+        drop(master);
+        result
+    });
+
+    // Kill-on-drop guard: if this future is dropped mid-command (turn cancelled)
+    // the guard fires and kills the child instead of leaking it (#220).
+    let mut guard = PtyKillGuard::new(killer);
+
+    match tokio::time::timeout(timeout, read_handle).await {
+        Ok(Ok((output, exit_code))) => {
+            guard.disarm();
+            PtyOutcome::Completed(output, exit_code)
+        }
+        Ok(Err(e)) => {
+            guard.disarm();
+            PtyOutcome::Failed(format!("PTY read thread panicked: {}", e))
+        }
+        Err(_) => {
+            // Timed out: explicitly KILL the child so it can't linger as an
+            // orphan (#220). The read thread then observes the exit and finishes.
+            guard.kill_now();
+            PtyOutcome::TimedOut
+        }
+    }
+}
+
+/// Poll interval used to wake the PTY read loop so it can notice that the direct
+/// child has exited even while a detached grandchild still holds the pty open.
+#[cfg(unix)]
+const PTY_POLL_INTERVAL_MS: i32 = 20;
+
+/// Wait up to `timeout_ms` for `fd` to become readable. Returns `true` when the
+/// caller should attempt a read — data ready, EOF/hangup, or a poll error we'd
+/// rather surface through `read` — and `false` on a clean timeout with nothing
+/// pending.
+#[cfg(unix)]
+fn poll_readable(fd: std::os::unix::io::RawFd, timeout_ms: i32) -> bool {
+    let mut pfd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    loop {
+        let rc = unsafe { libc::poll(&mut pfd as *mut libc::pollfd, 1, timeout_ms) };
+        if rc < 0 {
+            // Retry on EINTR; on any other error let the subsequent `read` surface it.
+            if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return true;
+        }
+        // rc == 0 → clean timeout, nothing ready. rc > 0 → POLLIN/POLLHUP/POLLERR.
+        return rc > 0;
+    }
+}
+
+/// Drive a spawned PTY child to completion: read its output while it runs, reap
+/// it, and return `(output, exit_code)`.
+///
+/// Crucially — and mirroring bash.rs's `drive_child` — the loop stops as soon as
+/// the DIRECT child exits rather than waiting for pty EOF. A grandchild that
+/// detached into its own session (`setsid`) inherits the pty slave and would
+/// otherwise hold it open indefinitely, hanging the tool for the grandchild's
+/// full lifetime (#184). `poll_readable` lets the blocking read wake up
+/// periodically so we can re-check `try_wait()` without spinning.
+#[cfg(unix)]
+fn drive_pty_child(
+    mut child: Box<dyn portable_pty::Child + Send + Sync>,
+    mut reader: Box<dyn std::io::Read + Send>,
+    master_fd: Option<std::os::unix::io::RawFd>,
+) -> (String, i32) {
+    use std::io::Read;
+
+    let mut output = String::new();
+    let mut buf = [0u8; 4096];
+    const MAX_BYTES: usize = 2 * 1024 * 1024;
+    let mut total = 0usize;
+
+    // Set once the direct child has exited. We then drain any already-buffered
+    // pty output and stop — we never block waiting for EOF that a detached
+    // grandchild would hold open forever (#184).
+    let mut child_exited = false;
+
+    loop {
+        // Wait briefly for data. When we can poll, this lets the loop wake up to
+        // re-check the child's liveness even while the pty is held open elsewhere.
+        let data_ready = match master_fd {
+            Some(fd) => poll_readable(fd, PTY_POLL_INTERVAL_MS),
+            None => true, // can't poll — fall back to a plain blocking read
+        };
+
+        if data_ready {
+            match reader.read(&mut buf) {
+                Ok(0) => break, // EOF: every pty writer (incl. the child) is gone
+                Ok(n) => {
+                    total += n;
+                    if total > MAX_BYTES {
+                        output.push_str("\n[output truncated at 2 MB limit]");
+                        break;
+                    }
+                    output.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    continue; // keep draining while bytes remain
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(_) => break,
+            }
+        }
+
+        // Nothing was ready this cycle.
+        if child_exited {
+            // Direct child already exited and the pty is now idle → stop instead
+            // of hanging on a detached grandchild still holding it open (#184).
+            break;
+        }
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                // Direct child is done. Loop once more to drain any final buffered
+                // bytes; the `child_exited` guard above then breaks us out.
+                child_exited = true;
+            }
+            Ok(None) => {}   // still running
+            Err(_) => break, // can't observe the child — bail rather than spin
+        }
+    }
+
+    let exit_code = match child.wait() {
+        Ok(status) => status.exit_code() as i32,
+        Err(_) => -1,
+    };
+    (output, exit_code)
+}
+
+// ---------------------------------------------------------------------------
+// Windows (Git Bash, or PowerShell when there is none; no PTY)
+// ---------------------------------------------------------------------------
+
+/// What runs a Bash tool call on this Windows machine.
+#[cfg_attr(not(windows), allow(dead_code))]
+enum WindowsShell<'a> {
+    GitBash(&'a std::path::Path),
+    PowerShell,
+}
+
+#[cfg(windows)]
+fn windows_shell() -> WindowsShell<'static> {
+    match agent_core::shell::windows_bash() {
+        Some(bash) => WindowsShell::GitBash(bash),
+        None => WindowsShell::PowerShell,
+    }
+}
+
+/// Fork (Waku): run a command on Windows the way Claude Code and Pi do —
+/// through Git Bash — and through PowerShell, which every supported Windows
+/// ships, when Git Bash is not installed. See `agent_core::shell` for why,
+/// and `crate::capture` for how the output is read.
+///
+/// Either way the working directory persists between calls, as it does on
+/// Unix, by the same wrapper-and-sentinel scheme; the environment does not
+/// (see [`windows_bash_script`]).
+#[cfg(windows)]
+async fn run_windows(
+    shell: WindowsShell<'_>,
+    command: &str,
+    shell_state: &std::sync::Arc<parking_lot::Mutex<crate::ShellState>>,
+    base_cwd: &std::path::Path,
+    timeout_dur: Duration,
+    timeout_ms: u64,
+) -> ToolResult {
+    let cwd = shell_state
+        .lock()
+        .cwd
+        .clone()
+        .unwrap_or_else(|| base_cwd.to_path_buf());
+    // Held until the process has finished: a PowerShell script too long for
+    // the command line runs from this file.
+    let mut _script_file = None;
+    let mut process = match shell {
+        WindowsShell::GitBash(bash) => {
+            let mut process = Command::new(bash);
+            process.arg("-c").arg(windows_bash_script(command, &cwd));
+            process
+        }
+        WindowsShell::PowerShell => {
+            match crate::powershell::powershell_process(&windows_powershell_script(command, &cwd)) {
+                Ok((process, file)) => {
+                    _script_file = file;
+                    process
+                }
+                Err(e) => return ToolResult::error(format!("Failed to prepare PowerShell: {}", e)),
+            }
+        }
+    };
+    process.current_dir(&cwd);
+
+    let captured = match crate::capture::run_captured(process, timeout_dur).await {
+        Ok(captured) => captured,
+        Err(e) => return ToolResult::error(format!("Failed to spawn command: {}", e)),
+    };
+    if captured.timed_out {
+        return ToolResult::error(format!("Command timed out after {}ms", timeout_ms));
+    }
+
+    let (stdout, new_cwd) = split_windows_state(&captured.stdout);
+    if let Some(new_cwd) = new_cwd {
+        shell_state.lock().cwd = Some(new_cwd);
+    }
+
+    let exit_code = captured.exit_code.unwrap_or(-1);
+    let mut output = stdout.trim_end_matches(['\n', '\r']).to_string();
+    let stderr = captured.stderr.trim_end();
+    if !stderr.is_empty() {
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push_str("STDERR:\n");
+        output.push_str(stderr);
+    }
+    if output.is_empty() {
+        output = "(no output)".to_string();
+    }
+    truncate_output(output, exit_code)
+}
+
+/// The Unix wrapper's shape, for Git Bash: start in the tracked directory,
+/// run the command, and report where it ended up — as a Windows path
+/// (`pwd -W`, `C:/Users/...`), since that is what the next call's
+/// `current_dir` needs and what `cd` accepts back.
+///
+/// The environment is not carried over, unlike on Unix: the dump would be
+/// MSYS's view of it, `PATH` in POSIX form included, and handing that back to
+/// a native process breaks every Windows program the next command runs.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_bash_script(command: &str, cwd: &std::path::Path) -> String {
+    let cwd = cwd
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace('\'', "'\\''");
+    format!(
+        "cd '{cwd}' || exit 1\n{command}\n__CC_EXIT_CODE=$?\necho '{sentinel}'\npwd -W\nexit $__CC_EXIT_CODE\n",
+        sentinel = SHELL_STATE_SENTINEL,
+    )
+}
+
+/// The same wrapper for PowerShell: start in the tracked directory, run the
+/// command, report success the way a shell would — `$?`, then the native
+/// exit code — and the directory it finished in.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_powershell_script(command: &str, cwd: &std::path::Path) -> String {
+    let cwd = cwd.to_string_lossy().replace('\'', "''");
+    format!(
+        "Set-Location -LiteralPath '{cwd}'\n\
+         {command}\n\
+         $__cc_ok = $?\n\
+         $__cc_code = if ($__cc_ok) {{ 0 }} elseif ($LASTEXITCODE) {{ $LASTEXITCODE }} else {{ 1 }}\n\
+         Write-Output '{sentinel}'\n\
+         Write-Output (Get-Location).ProviderPath\n\
+         exit $__cc_code\n",
+        sentinel = SHELL_STATE_SENTINEL,
+    )
+}
+
+/// Split the wrapper's output into what the command printed and the
+/// directory it finished in.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn split_windows_state(stdout: &str) -> (String, Option<PathBuf>) {
+    let lines: Vec<&str> = stdout.lines().collect();
+    let Some(position) = lines
+        .iter()
+        .rposition(|line| line.trim() == SHELL_STATE_SENTINEL)
+    else {
+        return (stdout.to_string(), None);
+    };
+    let cwd = lines
+        .get(position + 1)
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from);
+    (lines[..position].join("\n"), cwd)
+}
+
+// ---------------------------------------------------------------------------
+// Shared output truncation helper
+// ---------------------------------------------------------------------------
+
+/// Fork addition (Waku): the largest character boundary at or below `index`.
+///
+/// `str::floor_char_boundary` is still unstable, and every truncation in this
+/// crate used to slice on a raw byte offset instead. That is fine for ASCII
+/// and panics on everything else, which made a long command in any non-Latin
+/// script crash the tool call rather than truncate it.
+pub(crate) fn floor_char_boundary(text: &str, index: usize) -> usize {
+    if index >= text.len() {
+        return text.len();
+    }
+    let mut index = index;
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+/// The smallest character boundary at or above `index`.
+pub(crate) fn ceil_char_boundary(text: &str, index: usize) -> usize {
+    if index >= text.len() {
+        return text.len();
+    }
+    let mut index = index;
+    while index < text.len() && !text.is_char_boundary(index) {
+        index += 1;
+    }
+    index
+}
+
+fn truncate_output(mut output: String, exit_code: i32) -> ToolResult {
+    // Fork (Waku): raised from 100,000. What passes this cap now reaches the
+    // model through `crate::spill` — its two ends inline, the whole in a file
+    // it can read back — so a cap this low only threw output away.
+    const MAX_OUTPUT_LEN: usize = 1_000_000;
+    if output.len() > MAX_OUTPUT_LEN {
+        // Fork departure (Waku): keep the halves on character boundaries.
+        // These were byte slices, and any command whose output is not ASCII
+        // — which is most of them outside English — eventually lands the cut
+        // inside a multi-byte character and panics the tool call.
+        let half = MAX_OUTPUT_LEN / 2;
+        let dropped = output.len() - MAX_OUTPUT_LEN;
+        let start = &output[..floor_char_boundary(&output, half)];
+        let end = &output[ceil_char_boundary(&output, output.len() - half)..];
+        output = format!("{start}\n\n... ({dropped} characters truncated) ...\n\n{end}");
+    }
+
+    if exit_code != 0 {
+        ToolResult::error(format!(
+            "Command exited with code {}\n{}",
+            exit_code, output
+        ))
+    } else {
+        ToolResult::success(output)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tool implementation
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl Tool for PtyBashTool {
+    // Gates itself: calls `ctx.check_permission*` in `execute()` (#210).
+    fn self_gates(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        agent_core::constants::TOOL_NAME_BASH
+    }
+
+    fn description(&self) -> &str {
+        // Fork (Waku): say what actually runs the command. On Windows it
+        // was described as a bash PTY while `cmd /C` executed it.
+        match agent_core::shell::bash_tool_shell() {
+            agent_core::shell::BashToolShell::Bash => {
+                "Executes a given bash command in a real terminal (PTY) and returns its output. \
+                 The working directory persists between commands. Supports interactive programs, \
+                 colored output (stripped for readability), and terminal-aware tools like npm, \
+                 cargo, git, and pytest. Use for running shell commands, scripts, git operations, \
+                 and system tasks."
+            }
+            agent_core::shell::BashToolShell::GitBash => {
+                "Executes a given bash command with Git for Windows' bash and returns its output. \
+                 Use Unix shell syntax; write Windows paths as C:/Users/... . The working \
+                 directory persists between commands; exported variables do not. This is not a \
+                 terminal, so interactive prompts cannot be answered - pass non-interactive flags. \
+                 Use for running shell commands, scripts, git operations, and builds."
+            }
+            agent_core::shell::BashToolShell::PowerShell => {
+                "Executes a command in PowerShell (Git Bash is not installed on this Windows \
+                 machine) and returns its output. Write PowerShell, not bash: Get-ChildItem, \
+                 Get-Content, Select-String, $env:NAME, 2>$null. The working directory persists \
+                 between commands; variables do not. This is not a terminal, so interactive \
+                 prompts cannot be answered - pass non-interactive flags. Use for running \
+                 commands, scripts, git operations, and builds."
+            }
+        }
+    }
+
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Execute
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The bash command to execute"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Clear, concise description of what this command does"
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": "Optional timeout in milliseconds (max 600000, default 120000). Not applied with run_in_background"
+                },
+                "run_in_background": {
+                    "type": "boolean",
+                    "description": "Set to true to run command in the background. It keeps running until it exits or is cancelled with the monitor tool"
+                }
+            },
+            "required": ["command"]
+        })
+    }
+
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+        let params: BashInput = match serde_json::from_value(input) {
+            Ok(p) => p,
+            Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
+        };
+
+        // Permission check
+        let reason = params
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("This will execute a shell command.")
+            .to_string();
+
+        // Permission check. A command whose every segment the classifier
+        // proved read-only applies nothing, which is what lets plan mode
+        // let `ls -la | head -30` through while still denying real writes.
+        // Fork (Waku): judged in the language that will run it — PowerShell
+        // on a Windows machine without Git Bash.
+        let runs_powershell =
+            agent_core::shell::bash_tool_shell() == agent_core::shell::BashToolShell::PowerShell;
+        let is_read_only = if runs_powershell {
+            agent_core::ps_classifier::is_read_only_ps_command(&params.command)
+        } else {
+            is_read_only_bash_command(&params.command)
+        };
+        if let Err(e) = ctx.check_permission_for_path(
+            self.name(),
+            &reason,
+            std::path::PathBuf::from(&params.command),
+            is_read_only,
+        ) {
+            return ToolResult::error(e.to_string());
+        }
+
+        // Security classifier — block Critical-risk commands unconditionally.
+        let critical = if runs_powershell {
+            agent_core::ps_classifier::classify_ps_command(&params.command)
+                == agent_core::ps_classifier::PsRiskLevel::Critical
+        } else {
+            classify_bash_command(&params.command) == BashRiskLevel::Critical
+        };
+        if critical {
+            return ToolResult::error(format!(
+                "Command blocked: classified as Critical risk by the bash security classifier.\n\
+                 Refusing to execute: {}",
+                params.command
+            ));
+        }
+
+        let timeout_ms = params.timeout.min(600_000);
+        let timeout_dur = Duration::from_millis(timeout_ms);
+        let shell_state_arc = session_shell_state(&ctx.session_id);
+
+        // ── Background path ──────────────────────────────────────────────────
+        if params.run_in_background {
+            let cwd = {
+                let state = shell_state_arc.lock();
+                state.cwd.clone().unwrap_or_else(|| ctx.working_dir.clone())
+            };
+            return run_in_background(params.command, cwd, ctx.completion_notifier.clone()).await;
+        }
+
+        debug!(command = %params.command, "Executing bash command via PTY");
+
+        // ── Windows path (no PTY — Git Bash, or PowerShell without it) ──────
+        #[cfg(windows)]
+        {
+            return run_windows(
+                windows_shell(),
+                &params.command,
+                &shell_state_arc,
+                &ctx.working_dir,
+                timeout_dur,
+                timeout_ms,
+            )
+            .await;
+        }
+
+        // ── Unix PTY path ────────────────────────────────────────────────────
+        #[cfg(unix)]
+        {
+            // Build the wrapper script that restores cwd + captures shell state.
+            // Restored env vars are cloned out and later injected into the child's
+            // environment (never its argv) — see `apply_restored_env` (#211).
+            let (script, restored_env, working_dir_str) = {
+                let state = shell_state_arc.lock();
+                let script = build_wrapper_script(&params.command, &state, &ctx.working_dir);
+                let restored_env = state.env_vars.clone();
+                let wd = ctx.working_dir.to_string_lossy().into_owned();
+                (script, restored_env, wd)
+            };
+
+            // run_in_pty owns the timeout so it can KILL the child when it fires
+            // (a bare outer timeout would just drop the future and orphan it) (#220).
+            let outcome = run_in_pty(&script, &working_dir_str, &restored_env, timeout_dur).await;
+
+            match outcome {
+                PtyOutcome::Completed(raw_output, exit_code) => {
+                    // Strip ANSI escape codes from PTY output
+                    let cleaned = strip_ansi(&raw_output);
+
+                    // Split into user-visible lines and state block
+                    let all_lines: Vec<String> = cleaned.lines().map(|l| l.to_string()).collect();
+
+                    let sentinel_pos = all_lines
+                        .iter()
+                        .rposition(|l| l.trim() == SHELL_STATE_SENTINEL);
+
+                    let (user_lines, state_lines) = match sentinel_pos {
+                        Some(pos) => (&all_lines[..pos], &all_lines[pos + 1..]),
+                        None => (all_lines.as_slice(), &[][..]),
+                    };
+
+                    // Update persistent shell state
+                    if !state_lines.is_empty() {
+                        if let Some((new_cwd, env_delta)) = parse_shell_state_block(state_lines) {
+                            let mut state = shell_state_arc.lock();
+                            state.cwd = Some(new_cwd);
+                            for (k, v) in env_delta {
+                                state.env_vars.insert(k, v);
+                            }
+                        }
+                    }
+
+                    // Fast-path export capture
+                    {
+                        let exports = extract_exports_from_command(&params.command);
+                        if !exports.is_empty() {
+                            let mut state = shell_state_arc.lock();
+                            for (k, v) in exports {
+                                state.env_vars.insert(k, v);
+                            }
+                        }
+                    }
+
+                    let mut output = user_lines.join("\n");
+                    if output.is_empty() {
+                        output = "(no output)".to_string();
+                    }
+
+                    truncate_output(output, exit_code)
+                }
+                PtyOutcome::Failed(e) => ToolResult::error(format!("PTY execution failed: {}", e)),
+                PtyOutcome::TimedOut => {
+                    ToolResult::error(format!("Command timed out after {}ms", timeout_ms))
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    /// #211: restored env values (secrets) must NOT be baked into the wrapper
+    /// script, because that script becomes an argv element of `bash -c`, which is
+    /// visible to any local user via `ps auxww` / `/proc/<pid>/cmdline`.
+    #[test]
+    fn wrapper_script_never_embeds_restored_env_values() {
+        let mut state = ShellState::new();
+        state
+            .env_vars
+            .insert("SECRET".to_string(), "topsecret".to_string());
+        state.env_vars.insert(
+            "AWS_SECRET_ACCESS_KEY".to_string(),
+            "aws-argv-leak".to_string(),
+        );
+
+        let base = PathBuf::from("/tmp");
+        let script = build_wrapper_script("echo hi", &state, &base);
+
+        // The secret VALUES must never appear in the script string / argv.
+        assert!(
+            !script.contains("topsecret"),
+            "secret value leaked into wrapper script (argv):\n{script}"
+        );
+        assert!(
+            !script.contains("aws-argv-leak"),
+            "AWS secret leaked into wrapper script (argv):\n{script}"
+        );
+        // And there must be no re-exported `export KEY=` lines for restored vars.
+        assert!(
+            !script.contains("export SECRET="),
+            "restored var was re-exported into the script (argv):\n{script}"
+        );
+        assert!(
+            !script.contains("export AWS_SECRET_ACCESS_KEY="),
+            "restored var was re-exported into the script (argv):\n{script}"
+        );
+    }
+
+    /// #211: the value IS delivered to the child — but through its environment
+    /// (`CommandBuilder::env`), which is not part of argv. This exercises the
+    /// env-plumbing function directly.
+    #[test]
+    fn restored_env_reaches_child_via_env_map_not_argv() {
+        use portable_pty::CommandBuilder;
+
+        let mut env_vars = HashMap::new();
+        env_vars.insert("SECRET".to_string(), "topsecret".to_string());
+
+        let mut cmd = CommandBuilder::new("bash");
+        cmd.args(["-c", "true"]);
+        apply_restored_env(&mut cmd, &env_vars);
+
+        // Value is present in the child's environment...
+        assert_eq!(cmd.get_env("SECRET"), Some(OsStr::new("topsecret")));
+        // ...and NOT in argv (only `bash -c true`).
+        for arg in cmd.get_argv() {
+            assert!(
+                !arg.to_string_lossy().contains("topsecret"),
+                "secret value leaked into CommandBuilder argv: {arg:?}"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Execution tests (#220 / #184) — exercise the live PTY path end-to-end.
+    // -----------------------------------------------------------------------
+
+    /// Permission handler that allows everything — for exercising `execute`.
+    struct AllowAllHandler;
+
+    impl agent_core::permissions::PermissionHandler for AllowAllHandler {
+        fn check_permission(
+            &self,
+            _request: &agent_core::permissions::PermissionRequest,
+        ) -> agent_core::permissions::PermissionDecision {
+            agent_core::permissions::PermissionDecision::Allow
+        }
+
+        fn request_permission(
+            &self,
+            _request: &agent_core::permissions::PermissionRequest,
+        ) -> agent_core::permissions::PermissionDecision {
+            agent_core::permissions::PermissionDecision::Allow
+        }
+    }
+
+    fn allow_all_context() -> ToolContext {
+        ToolContext {
+            working_dir: std::env::temp_dir(),
+            permission_mode: agent_core::config::PermissionMode::Default,
+            permission_handler: std::sync::Arc::new(AllowAllHandler),
+            cost_tracker: agent_core::cost::CostTracker::new(),
+            session_id: "pty-bash-test".to_string(),
+            file_history: std::sync::Arc::new(parking_lot::Mutex::new(
+                agent_core::file_history::FileHistory::new(),
+            )),
+            current_turn: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            non_interactive: true,
+            mcp_manager: None,
+            config: agent_core::config::Config::default(),
+            managed_agent_config: None,
+            completion_notifier: None,
+            pending_permissions: None,
+            permission_manager: None,
+            user_question_tx: None,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+        }
+    }
+
+    /// #220: a command that exceeds its timeout must have its child KILLED, not
+    /// merely dropped. portable_pty does not kill the child on drop, so before
+    /// the fix a timed-out command left an orphaned process running to its
+    /// natural end. We time out a long `sleep` and then assert the process is
+    /// gone.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn timeout_kills_the_child() {
+        let tool = PtyBashTool;
+        let ctx = allow_all_context();
+
+        // A distinctive duration doubles as a searchable marker for the process.
+        let marker = "sleep 31337";
+        let input = json!({
+            "command": marker,
+            "timeout": 500u64, // ms — far shorter than the sleep
+        });
+
+        let started = std::time::Instant::now();
+        let result = tool.execute(input, &ctx).await;
+        let elapsed = started.elapsed();
+
+        assert!(
+            result.is_error,
+            "a timed-out command should be an error, got: {}",
+            result.content
+        );
+        assert!(
+            result.content.contains("timed out"),
+            "expected a timeout message, got: {}",
+            result.content
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "execute should return shortly after the 500ms timeout, took {:?}",
+            elapsed
+        );
+
+        // Give the kill a moment to propagate, then assert the sleep is gone.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        if let Ok(out) = std::process::Command::new("pgrep")
+            .arg("-f")
+            .arg(marker)
+            .output()
+        {
+            let pids = String::from_utf8_lossy(&out.stdout);
+            let lingering: Vec<&str> = pids.split_whitespace().collect();
+            assert!(
+                lingering.is_empty(),
+                "timed-out child `{marker}` was not killed; still running (pids: {lingering:?})",
+            );
+        }
+    }
+
+    /// Regression test for #184: a tool command that spawns a child which
+    /// detaches into its own session (`setsid`) inherits the pty slave. The
+    /// read loop must stop once the *direct* child exits instead of blocking on
+    /// pty EOF held open by the detached grandchild — otherwise the tool (and the
+    /// agent turn) hangs for the grandchild's full lifetime.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn foreground_does_not_hang_on_detached_grandchild() {
+        let tool = PtyBashTool;
+        let ctx = allow_all_context();
+
+        // `setsid sleep 30` runs in a brand-new session but inherits the pty;
+        // `&` lets the wrapper shell return immediately without waiting.
+        let input = json!({
+            "command": "setsid sleep 30 & echo spawned",
+            "timeout": 120000u64,
+        });
+
+        let started = std::time::Instant::now();
+        let result = tokio::time::timeout(Duration::from_secs(10), tool.execute(input, &ctx)).await;
+        let elapsed = started.elapsed();
+
+        let result = result
+            .expect("execute hung waiting on the detached grandchild's pty (regression of #184)");
+        assert!(
+            !result.is_error,
+            "command should have succeeded, got: {}",
+            result.content
+        );
+        assert!(
+            result.content.contains("spawned"),
+            "expected the parent command's output, got: {}",
+            result.content
+        );
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "execute should return promptly after the direct child exits, took {:?}",
+            elapsed
+        );
+    }
+
+    /// Fork (Waku): a background command outlives the call's timeout — the
+    /// servers and watchers it is meant for were killed at the foreground
+    /// deadline — and a command in a non-Latin script no longer panics when
+    /// its task name is cut to 60 bytes.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_background_command_outlives_the_call_timeout() {
+        let tool = PtyBashTool;
+        let ctx = allow_all_context();
+        // Three bytes a character after the five of `echo `: byte 60 falls
+        // inside one.
+        let input = json!({
+            "command": "echo 后台命令后台命令后台命令后台命令后台命令后台命令; sleep 1; echo finished",
+            "timeout": 200u64,
+            "run_in_background": true,
+        });
+
+        let result = tool.execute(input, &ctx).await;
+        assert!(!result.is_error, "{}", result.content);
+        let task_id = result
+            .content
+            .lines()
+            .find_map(|line| line.strip_prefix("Task ID: "))
+            .expect("the result names its task")
+            .trim()
+            .to_string();
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let task = global_registry()
+                .get(&task_id)
+                .expect("the task is tracked");
+            if !task.is_running() {
+                assert!(
+                    matches!(task.status, agent_core::tasks::TaskStatus::Completed),
+                    "ended as {}",
+                    task.status
+                );
+                assert!(
+                    task.output.iter().any(|line| line.trim() == "finished"),
+                    "{:?}",
+                    task.output
+                );
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the background command never finished"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+/// Fork (Waku): the Windows execution path. The wrapper and its parsing are
+/// plain text and tested everywhere; running it needs Git Bash, so those
+/// tests run on Windows machines that have it.
+#[cfg(test)]
+mod windows_path_tests {
+    use super::*;
+
+    #[test]
+    fn the_git_bash_wrapper_starts_in_the_tracked_directory_and_reports_where_it_ended() {
+        let script = windows_bash_script("npm test", std::path::Path::new("C:/Users/me/it's here"));
+        assert!(script.starts_with("cd 'C:/Users/me/it'"), "{script}");
+        assert!(script.contains("npm test"));
+        assert!(script.contains(SHELL_STATE_SENTINEL));
+        assert!(
+            script.contains("pwd -W"),
+            "a Windows path is what current_dir needs"
+        );
+        // The exit code of the user's command is the one reported.
+        assert!(script.trim_end().ends_with("exit $__CC_EXIT_CODE"));
+    }
+
+    #[test]
+    fn the_powershell_wrapper_tracks_the_directory_and_the_outcome() {
+        let script =
+            windows_powershell_script("npm test", std::path::Path::new(r"C:\Users\me\it's here"));
+        assert!(
+            script.starts_with("Set-Location -LiteralPath 'C:\\Users\\me\\it''s here'"),
+            "{script}"
+        );
+        assert!(script.contains("npm test"));
+        assert!(script.contains("$__cc_ok = $?"));
+        assert!(script.contains(SHELL_STATE_SENTINEL));
+        assert!(script.trim_end().ends_with("exit $__cc_code"));
+    }
+
+    #[test]
+    fn the_state_block_is_split_off_the_output() {
+        let stdout = format!("built\nok\n{SHELL_STATE_SENTINEL}\nC:/repo/sub\n");
+        let (output, cwd) = split_windows_state(&stdout);
+        assert_eq!(output, "built\nok");
+        assert_eq!(cwd, Some(PathBuf::from("C:/repo/sub")));
+
+        // A command that exited before the wrapper could report leaves the
+        // directory where it was.
+        let (output, cwd) = split_windows_state("partial\n");
+        assert_eq!(output, "partial\n");
+        assert_eq!(cwd, None);
+    }
+
+    #[cfg(windows)]
+    fn fresh_state() -> std::sync::Arc<parking_lot::Mutex<crate::ShellState>> {
+        std::sync::Arc::new(parking_lot::Mutex::new(crate::ShellState::new()))
+    }
+
+    #[cfg(windows)]
+    fn text(result: &ToolResult) -> String {
+        format!("{:?}", result)
+    }
+
+    /// What the model is trained on has to work: Unix syntax, pipes, and a
+    /// `cd` that the next call remembers.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn git_bash_runs_unix_syntax_and_remembers_the_directory() {
+        let Some(bash) = agent_core::shell::windows_bash() else {
+            return;
+        };
+        let root = tempfile::tempdir().expect("tempdir");
+        let state = fresh_state();
+        let timeout = Duration::from_secs(60);
+
+        let first = run_windows(
+            WindowsShell::GitBash(bash),
+            "mkdir -p sub && cd sub && printf 'a\nb\nc\n' > f.txt && ls | head -1 2>/dev/null",
+            &state,
+            root.path(),
+            timeout,
+            60_000,
+        )
+        .await;
+        assert!(!first.is_error, "{}", text(&first));
+        assert!(text(&first).contains("f.txt"), "{}", text(&first));
+
+        let second = run_windows(
+            WindowsShell::GitBash(bash),
+            "wc -l < f.txt",
+            &state,
+            root.path(),
+            timeout,
+            60_000,
+        )
+        .await;
+        assert!(
+            !second.is_error,
+            "the next call should start in sub/: {}",
+            text(&second)
+        );
+        assert!(text(&second).contains('3'), "{}", text(&second));
+    }
+
+    /// Without Git Bash the tool runs PowerShell: its syntax works, a
+    /// `Set-Location` is remembered, and failures report as failures.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn powershell_runs_its_own_syntax_and_remembers_the_directory() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let state = fresh_state();
+        let timeout = Duration::from_secs(90);
+
+        let first = run_windows(
+            WindowsShell::PowerShell,
+            "New-Item -ItemType Directory sub | Out-Null; Set-Location sub; \
+             Set-Content f.txt \"一\" -Encoding UTF8; Get-ChildItem -Name",
+            &state,
+            root.path(),
+            timeout,
+            90_000,
+        )
+        .await;
+        assert!(!first.is_error, "{}", text(&first));
+        assert!(text(&first).contains("f.txt"), "{}", text(&first));
+
+        let second = run_windows(
+            WindowsShell::PowerShell,
+            "(Get-Content f.txt -Encoding UTF8) + ' ' + (Split-Path -Leaf (Get-Location))",
+            &state,
+            root.path(),
+            timeout,
+            90_000,
+        )
+        .await;
+        assert!(
+            text(&second).contains("一 sub"),
+            "the next call should start in sub/: {}",
+            text(&second)
+        );
+
+        let failed = run_windows(
+            WindowsShell::PowerShell,
+            "Get-Item does-not-exist.txt",
+            &state,
+            root.path(),
+            timeout,
+            90_000,
+        )
+        .await;
+        assert!(failed.is_error, "{}", text(&failed));
+
+        let native = run_windows(
+            WindowsShell::PowerShell,
+            "cmd /c exit 7",
+            &state,
+            root.path(),
+            timeout,
+            90_000,
+        )
+        .await;
+        assert!(
+            native.is_error,
+            "a native exit code is a failure: {}",
+            text(&native)
+        );
+    }
+
+    /// The output that used to stop the reader: a line in a language other
+    /// than English, and a failing command's exit code.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn non_ascii_output_and_failures_come_back_whole() {
+        let Some(bash) = agent_core::shell::windows_bash() else {
+            return;
+        };
+        let root = tempfile::tempdir().expect("tempdir");
+        let state = fresh_state();
+        let result = run_windows(
+            WindowsShell::GitBash(bash),
+            "echo 编译完成; echo 失败了 >&2; exit 3",
+            &state,
+            root.path(),
+            Duration::from_secs(60),
+            60_000,
+        )
+        .await;
+        let shown = text(&result);
+        assert!(result.is_error, "exit 3 is a failure: {shown}");
+        assert!(shown.contains("编译完成"), "{shown}");
+        assert!(shown.contains("失败了"), "{shown}");
+    }
+}

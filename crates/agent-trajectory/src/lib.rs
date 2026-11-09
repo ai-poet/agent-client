@@ -13,7 +13,7 @@
 //! from ([`reader`]), and the view model built from them ([`snapshot`],
 //! [`timeline`], [`metrics`], [`prompt_diff`]), plus bounded diagnostic
 //! evidence for issue reports ([`diagnostics`]). The bridge
-//! (`waku-agent-bridge/src/trajectory.rs`) writes it; the app
+//! (`agent-bridge/src/trajectory.rs`) writes it; the app
 //! (`src/app/trajectory_panel.rs`) draws it.
 //!
 //! The ledger model, the timeline projection and the timing rules are

@@ -3,7 +3,7 @@
 Waku vendors its GPUI workspace under `vendor/gpui/` so the
 desktop can combine the `waku-webview` integration with Zeron's renderer work
 without requiring a separate checkout. Reusable application components live
-separately in `vendor/gpui-kit/` (`waku-ui`); they must not add engine patches
+separately in `vendor/gpui-kit/` (`client-ui`); they must not add engine patches
 or a second GPUI dependency. The two `patch` entries in `Cargo.toml`
 resolve `gpui` and `gpui_platform` to that directory.
 

@@ -21,7 +21,11 @@ It is a translation of dsh-agent-teams (`@nanmicoder/dsh-agent-teams` 0.1.22, MI
    - `/agent-teams --profile <name> <goal>`;
    - `/agent-teams-<name> <goal>`.
 
-   The composer offers all three forms when the feature is enabled and `slashCommand` is on.
+   The composer offers all three forms when the feature is enabled and
+   `slashCommand` is on. The built-in `flagship` profile provides planner,
+   engineer and solver seats with captain-planned tasks; assign a model to each
+   seat under Settings → Agent → Teams → Roles & models, then start it with
+   `/agent-teams-flagship <goal>`. Independent ready tasks run in parallel.
 2. The captain drafts the team and ends its turn. The Team surface opens in the right panel with the draft and three buttons:
    - **Approve and start.** Saying "approve" in the chat works too.
    - **Back to chat to revise.** The captain asks what to change, rewrites the draft as a whole, and waits again.
@@ -41,18 +45,22 @@ Settings → Agent → Teams edits the configuration:
 - whether members may start one level of sub-agents;
 - the default member model and effort;
 - the execution prompt;
-- the profiles, edited as JSON with the same validation team creation uses.
+- the profiles, with a structured role/model editor for seat names,
+  responsibilities, per-model routes and effort. Advanced JSON remains
+  available for the protocol, fixed task graph, review policy, member prompts
+  and fallback routes. Saving either editor validates the whole profile.
 
 ## Code map
 
 | Where | What |
 |---|---|
 | `crates/agent-teams` | Pure logic, no tokio and no GPUI. It holds:<ul><li>the types (camelCase, the same on-disk format as the reference, unknown keys kept in `extra`);</li><li>the store and mailbox;</li><li>the state machine (`transitions.rs`);</li><li>the quality gates (`quality.rs`);</li><li>profiles, prompts, `/agent-teams` parsing and the control sentinel (`command.rs`);</li><li>the config;</li><li>the panel snapshot and DAG layout (`snapshot.rs`);</li><li>the synchronous runtime (`runtime/`: tool operations, scheduler, status rendering, process-wide keyed locks) behind a `Host` trait.</li></ul> |
-| `crates/waku-agent-bridge/src/team/` | Implements `Host` for one session:<ul><li>`TeamHost` (`mod.rs`): activation, prompt augmentation, controls, the idle edge;</li><li>`BridgeHost` (`host.rs`);</li><li>`MemberRuntime` (`member.rs`): one member's engine, history and turns;</li><li>`TeamTool` (`tools.rs`): the runtime's operations as engine tools, run on `spawn_blocking`.</li></ul> |
-| `crates/waku-agent-bridge/src/session_team.rs` | Mounted inside `session.rs` (`#[path] mod team_seam`) so it can reach the private turn state. It contains:<ul><li>`Port`, which wakes the captain;</li><li>the snapshots that carry the team's running members;</li><li>`PromptOrigin`.</li></ul> |
-| `crates/waku-core/src/driver/native.rs` | Keeps one feed per member across its turns (`member_feeds`) and titles a member's permission dialog with the member's name. |
+| `crates/agent-bridge/src/team/` | Implements `Host` for one session:<ul><li>`TeamHost` (`mod.rs`): activation, prompt augmentation, controls, the idle edge;</li><li>`BridgeHost` (`host.rs`);</li><li>`MemberRuntime` (`member.rs`): one member's engine, history and turns;</li><li>`TeamTool` (`tools.rs`): the runtime's operations as engine tools, run on `spawn_blocking`.</li></ul> |
+| `crates/agent-bridge/src/session_team.rs` | Mounted inside `session.rs` (`#[path] mod team_seam`) so it can reach the private turn state. It contains:<ul><li>`Port`, which wakes the captain;</li><li>the snapshots that carry the team's running members;</li><li>`PromptOrigin`.</li></ul> |
+| `crates/client-core/src/driver/native.rs` | Keeps one feed per member across its turns (`member_feeds`) and titles a member's permission dialog with the member's name. |
 | `src/app/team_panel.rs` | The right-panel Team surface and its surface-bar button. |
 | `src/app/agent_teams_settings.rs` | The Teams section of Settings → Agent. |
+| `src/app/agent_team_roster.rs` | The structured profile roster editor; it preserves advanced member/profile fields and validates fixed-task assignee references on save. |
 
 ## State on disk
 
@@ -198,10 +206,14 @@ The configuration is `agent-teams.json`, beside the engine's `settings.json` (`n
 }
 ```
 
-- **`profiles` absent** means the three built-in profiles:
+- **`profiles` absent** means the four built-in profiles:
+  - `flagship` (captain planning; planner, engineer and solver);
   - `prd-implement-review` (seed);
   - `implement-test-fix` (captain);
   - `dual-review` (seed).
+  Every built-in leaves its model unset so it inherits the team default until
+  the user assigns a route. A customized configuration can add only `flagship`
+  from the settings UI without restoring other deleted templates.
 - **`profiles: {}`** means none.
 - **Limits:** at most 16 profiles and 32 seed tasks each. An unknown key gets a "did you mean" hint.
 

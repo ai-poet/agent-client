@@ -23,7 +23,7 @@ import { extractReleaseNotes } from "./changelog";
 const appName = process.env.SUB2API_BRAND_NAME || "CheapRouter";
 const executableName = appName;
 const jsReplExecutableName = "waku_js_repl";
-const daemonExecutableName = "waku-daemon";
+const daemonExecutableName = "client-daemon";
 const computerUseHelperName = `${appName} Computer Use`;
 const packageName = "waku";
 const defaultNotaryProfile = "NOTARY";
@@ -53,7 +53,7 @@ Options:
                                 Cargo version)
   --volume-name <name>          Mounted DMG name (default: Waku)
   --skip-build                  Reuse target/release/waku, waku_js_repl, and
-                                waku-daemon
+                                client-daemon
   --skip-notarize               Unnotarized signed DMG (implies --local)
   --adhoc                       Ad-hoc sign, no notarization (implies --local)
   --help                        Show this help

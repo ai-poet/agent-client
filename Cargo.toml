@@ -11,22 +11,23 @@ members = [
     "crates/agent-teams",
     "crates/agent-trajectory",
     "crates/auto-memory",
-    "crates/waku-agent-bridge",
-    "crates/waku-agent/api",
-    "crates/waku-agent/core",
-    "crates/waku-agent/mcp",
-    "crates/waku-agent/plugins",
-    "crates/waku-agent/query",
-    "crates/waku-agent/tools",
-    "crates/waku-client",
-    "crates/waku-core",
-    "crates/waku-daemon",
-    "crates/waku-protocol",
+    "crates/agent-bridge",
+    "crates/agent-core/api",
+    "crates/agent-core/core",
+    "crates/agent-core/engine",
+    "crates/agent-core/mcp",
+    "crates/agent-core/plugins",
+    "crates/agent-core/query",
+    "crates/agent-core/tools",
+    "crates/client",
+    "crates/client-core",
+    "crates/client-daemon",
+    "crates/client-protocol",
     "vendor/gpui-kit",
 ]
 exclude = ["vendor/gpui"]
-# The vendored engine under `crates/waku-agent` is deliberately absent here.
-# It builds as a dependency of `waku-agent-bridge`, but a bare `cargo test`
+# The vendored engine under `crates/agent-core` is deliberately absent here.
+# It builds as a dependency of `agent-bridge`, but a bare `cargo test`
 # should not run 76k lines of upstream tests written against Claurst's own
 # fixtures and environment — see docs/FORK.md.
 default-members = [
@@ -35,26 +36,28 @@ default-members = [
     "crates/agent-teams",
     "crates/agent-trajectory",
     "crates/auto-memory",
-    "crates/waku-agent-bridge",
-    "crates/waku-client",
-    "crates/waku-core",
-    "crates/waku-daemon",
-    "crates/waku-protocol",
+    "crates/agent-bridge",
+    "crates/agent-core/engine",
+    "crates/client",
+    "crates/client-core",
+    "crates/client-daemon",
+    "crates/client-protocol",
     "vendor/gpui-kit",
 ]
 resolver = "2"
 
-# Dependencies of the vendored agent engine (`crates/waku-agent/**`), which
+# Dependencies of the vendored agent engine (`crates/agent-core/**`), which
 # declares every one of them as `{ workspace = true }`. Keeping the versions
 # exactly as Claurst pinned them is what lets that tree stay a clean subtree —
 # the two deliberate departures are called out below.
 [workspace.dependencies]
-claurst-api = { path = "crates/waku-agent/api" }
-claurst-core = { path = "crates/waku-agent/core" }
-claurst-mcp = { path = "crates/waku-agent/mcp" }
-claurst-plugins = { path = "crates/waku-agent/plugins" }
-claurst-query = { path = "crates/waku-agent/query" }
-claurst-tools = { path = "crates/waku-agent/tools" }
+agent-core-api = { path = "crates/agent-core/api" }
+agent-core = { path = "crates/agent-core/core" }
+agent-core-engine = { path = "crates/agent-core/engine" }
+agent-core-mcp = { path = "crates/agent-core/mcp" }
+agent-core-plugins = { path = "crates/agent-core/plugins" }
+agent-core-query = { path = "crates/agent-core/query" }
+agent-core-tools = { path = "crates/agent-core/tools" }
 
 anyhow = "1"
 async-stream = "0.3"
@@ -84,7 +87,7 @@ reqwest = { version = "0.13", features = [
     "form",
     "query",
 ], default-features = false }
-# Fork departure: Claurst pins 0.31. `waku-core` already links 0.37, and
+# Fork departure: Claurst pins 0.31. `client-core` already links 0.37, and
 # `libsqlite3-sys` declares `links = "sqlite3"`, so two versions cannot
 # coexist in one binary. Every call site the engine has (`Connection::open`,
 # `execute_batch`, `execute`, `prepare`, `query_map`, `params!`) is unchanged
@@ -117,7 +120,7 @@ enigo = "0.2"
 image = { version = "0.25", features = ["png", "jpeg"] }
 xcap = "0.0.13"
 
-# Unix-only, declared by `waku-agent/tools` under its own `cfg(unix)` block.
+# Unix-only, declared by `agent-core/tools` under its own `cfg(unix)` block.
 nix = { version = "0.29", features = ["process", "signal", "user"] }
 
 [dependencies]
@@ -154,9 +157,9 @@ auto-memory = { path = "crates/auto-memory" }
 unicode-segmentation = "1.12"
 url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }
-waku-client = { path = "crates/waku-client" }
-waku-protocol = { path = "crates/waku-protocol" }
-waku-ui = { path = "vendor/gpui-kit" }
+client = { path = "crates/client" }
+client-protocol = { path = "crates/client-protocol" }
+client-ui = { path = "vendor/gpui-kit" }
 pulldown-cmark = "0.13"
 regex = "1"
 rust-i18n = "4"

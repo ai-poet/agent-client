@@ -6,7 +6,7 @@ description = "Trajectory for the built-in agent: the timed record of every mode
 license = "GPL-3.0-only"
 
 # Pure logic: no async runtime, no GPUI, no upstream crate. The bridge writes
-# the record (`crates/waku-agent-bridge/src/trajectory.rs`), the app reads and
+# the record (`crates/agent-bridge/src/trajectory.rs`), the app reads and
 # draws it (`src/app/trajectory_panel.rs`). The ledger model, the timeline
 # projection and the timing rules are translated from DeepSeek Harness's
 # `ui-trajectory` (MIT); see NOTICE.md.

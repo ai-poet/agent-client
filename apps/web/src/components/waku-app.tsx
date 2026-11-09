@@ -11,7 +11,7 @@ import type {
   Project,
   ProviderSessionSummary,
   ReviewDiffSource,
-} from '@waku/client'
+} from 'client'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'

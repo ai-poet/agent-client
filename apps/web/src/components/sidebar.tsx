@@ -1,4 +1,4 @@
-import type { AgentSession } from '@waku/client'
+import type { AgentSession } from 'client'
 import { ContextMenu } from '@base-ui/react/context-menu'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Virtuoso } from 'react-virtuoso'

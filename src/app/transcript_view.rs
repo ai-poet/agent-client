@@ -1100,16 +1100,16 @@ impl Waku {
             .collect::<Vec<_>>();
         self.checkpoint_ref_prefetch
             .set(Some((session_id, generation)));
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace = client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |this, cx| {
             let existing = cx
                 .background_executor()
                 .spawn(async move {
-                    match workspace.request(waku_client::WorkspaceOperation::SessionTurnRefs {
+                    match workspace.request(client::WorkspaceOperation::SessionTurnRefs {
                         cwd: project_path,
                         session_id,
                     }) {
-                        Ok(waku_client::WorkspaceResult::TurnRefs { turn_counts }) => {
+                        Ok(client::WorkspaceResult::TurnRefs { turn_counts }) => {
                             turn_counts.into_iter().collect::<HashSet<_>>()
                         }
                         Ok(_) | Err(_) => HashSet::new(),
@@ -3332,8 +3332,8 @@ fn render_activity_image(
             .object_fit(ObjectFit::Contain)
             .into_any_element();
     }
-    if waku_protocol::blob::is_reference(image_url)
-        || image_url.starts_with(waku_protocol::attachments::ATTACHMENT_SCHEME)
+    if client_protocol::blob::is_reference(image_url)
+        || image_url.starts_with(client_protocol::attachments::ATTACHMENT_SCHEME)
     {
         return div()
             .id(id)

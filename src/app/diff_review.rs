@@ -11,7 +11,7 @@ use crate::review_diff::{ExpansionDirection, LineKind, Snapshot};
 use crate::ui::text_field::TextField;
 use crate::ui::tooltip::Tooltip;
 use crate::ui::{ActivationExt as _, icon, icon_button, ui_theme};
-use waku_ui::{Banner, BannerSurface};
+use client_ui::{Banner, BannerSurface};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct DiffSearchEntry {

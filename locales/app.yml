@@ -4882,6 +4882,36 @@ team.settings.profile_name_taken:
   en: "A template named %{name} already exists."
 team.settings.profile_invalid_json:
   en: "Not valid JSON: %{error}"
+team.settings.profile_advanced:
+  en: "Advanced JSON"
+team.settings.profile_add_flagship:
+  en: "Add flagship team"
+team.settings.roster_edit:
+  en: "Roles & models"
+team.settings.roster_title:
+  en: "Roles and models · %{name}"
+team.settings.roster_description:
+  en: "Give every seat a role and its own model and effort. Empty model choices inherit the team default. Names, prompts, fallbacks and fixed-task references are validated when you save."
+team.settings.roster_limit:
+  en: "This team allows at most %{max} members."
+team.settings.roster_empty:
+  en: "No roles yet. Add at least one before saving."
+team.settings.role_add:
+  en: "Add role"
+team.settings.role_position:
+  en: "Role %{index}"
+team.settings.role_name:
+  en: "Seat name"
+team.settings.role_name_placeholder:
+  en: "For example: planner"
+team.settings.role_description:
+  en: "Responsibilities"
+team.settings.role_description_placeholder:
+  en: "What this member owns, and what it must not do"
+team.settings.role_model:
+  en: "Model and reasoning effort"
+team.settings.role_model_inherit:
+  en: "Inherit the team default"
 file_preview.loading:
   en: "Reading the file…"
 file_preview.failed:

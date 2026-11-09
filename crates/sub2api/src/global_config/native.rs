@@ -33,9 +33,9 @@
 //!
 //! A partial `config` block is only legal because the vendored engine's
 //! `Config` carries a container-level `#[serde(default)]` — a recorded fork
-//! departure in `crates/waku-agent/core/src/lib.rs`. A future engine re-sync
+//! departure in `crates/agent-core/core/src/lib.rs`. A future engine re-sync
 //! that drops it would make every file this writer creates unreadable to the
-//! engine again; `waku-agent-bridge`'s `a_fresh_takeover_file_parses_and_routes_every_format`
+//! engine again; `agent-bridge`'s `a_fresh_takeover_file_parses_and_routes_every_format`
 //! is the test that would catch it.
 
 use std::path::{Path, PathBuf};
@@ -60,7 +60,7 @@ pub const GATEWAY_KEYS_OPTION: &str = "gateway_keys";
 /// Where the user's own endpoints live inside the anthropic entry's options:
 /// `{"<provider id>": {"format", "api_base", "api_key", "context_windows"}}`.
 /// A session on `custom:<provider id>::<model>` is routed by its entry alone.
-/// Kept in step with `waku_agent_bridge::ENDPOINTS_OPTION`.
+/// Kept in step with `agent_bridge::ENDPOINTS_OPTION`.
 pub const ENDPOINTS_OPTION: &str = "endpoints";
 
 /// The member of that table holding the per-model keys. Nested rather than
@@ -73,7 +73,7 @@ pub const MODEL_KEYS_MEMBER: &str = "models";
 /// Fork: the member of that table naming the platform of the group behind
 /// each per-model key (`{"<model>": "<platform>"}`). Only Gemini's route
 /// reads it: an `antigravity` group's Gemini requests go to another mount.
-/// Kept in step with `waku_agent_bridge`'s `MODEL_PLATFORMS_MEMBER`.
+/// Kept in step with `agent_bridge`'s `MODEL_PLATFORMS_MEMBER`.
 pub const MODEL_PLATFORMS_MEMBER: &str = "model_platforms";
 
 /// Where each model's context window is filed (`{"<model>": <tokens>}`), in
@@ -87,7 +87,7 @@ pub const CONTEXT_WINDOWS_OPTION: &str = "context_windows";
 /// anthropic entry: `{"connect_timeout_secs", "idle_timeout_secs"}`. Only
 /// written when the user set values other than the engine's defaults (in
 /// `gateway-origin.json`), so an untouched file stays as it was. Kept in step
-/// with `waku_agent_bridge`'s `NETWORK_OPTION`.
+/// with `agent_bridge`'s `NETWORK_OPTION`.
 pub const NETWORK_OPTION: &str = "network";
 
 /// The option value for `network`, or `None` for the defaults.
@@ -692,7 +692,7 @@ mod tests {
     }
 
     /// The document the bridge's tests load as engine settings. Kept in
-    /// step with `waku-agent-bridge/src/config.rs::FRESH_TAKEOVER_SETTINGS`;
+    /// step with `agent-bridge/src/config.rs::FRESH_TAKEOVER_SETTINGS`;
     /// the bridge cannot depend on this crate, so the contract is a literal
     /// on each side and this assertion.
     #[test]

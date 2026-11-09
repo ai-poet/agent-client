@@ -609,7 +609,7 @@ impl Waku {
                     return;
                 }
                 (
-                    waku_client::WorkspaceOperation::RenamePath {
+                    client::WorkspaceOperation::RenamePath {
                         root: root.clone(),
                         from: PathBuf::from(&target.relative_path),
                         to: PathBuf::from(&to),
@@ -626,12 +626,12 @@ impl Waku {
                     return;
                 };
                 let operation = if directory {
-                    waku_client::WorkspaceOperation::CreateDirectory {
+                    client::WorkspaceOperation::CreateDirectory {
                         root: root.clone(),
                         relative_path: PathBuf::from(&path),
                     }
                 } else {
-                    waku_client::WorkspaceOperation::CreateFile {
+                    client::WorkspaceOperation::CreateFile {
                         root: root.clone(),
                         relative_path: PathBuf::from(&path),
                     }
@@ -654,7 +654,7 @@ impl Waku {
             true,
             cx,
             move |waku, _, cx| {
-                let operation = waku_client::WorkspaceOperation::TrashPath {
+                let operation = client::WorkspaceOperation::TrashPath {
                     root: root.clone(),
                     relative_path: PathBuf::from(&target.relative_path),
                 };
@@ -675,11 +675,11 @@ impl Waku {
     fn run_file_tree_operation(
         &mut self,
         root: PathBuf,
-        operation: waku_client::WorkspaceOperation,
+        operation: client::WorkspaceOperation,
         outcome: FileEditOutcome,
         cx: &mut Context<Self>,
     ) {
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace = client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()

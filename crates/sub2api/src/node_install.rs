@@ -94,7 +94,7 @@ pub fn detect_node() -> Option<String> {
 }
 
 /// [`detect_node`] over an explicit directory list — the desktop passes the
-/// login-shell-aware list waku-core maintains.
+/// login-shell-aware list client-core maintains.
 pub fn detect_node_in(dirs: &[PathBuf]) -> Option<String> {
     crate::cli_detect::probe_named("node", dirs, dirs)
         .version()

@@ -869,15 +869,15 @@ fn file_highlighter_language(relative_path: &str) -> &'static str {
 /// One unbounded `read_to_string`, so callers keep it off the UI thread; the
 /// only caller is [`Waku::read_right_panel_file_into_editor`].
 fn read_right_panel_file(
-    workspace: &waku_client::WorkspaceClient,
+    workspace: &client::WorkspaceClient,
     project_path: &Path,
     relative_path: &str,
 ) -> (String, bool) {
-    match workspace.request(waku_client::WorkspaceOperation::ReadTextFile {
+    match workspace.request(client::WorkspaceOperation::ReadTextFile {
         root: project_path.to_path_buf(),
         relative_path: PathBuf::from(relative_path),
     }) {
-        Ok(waku_client::WorkspaceResult::TextFile { content }) => (content, true),
+        Ok(client::WorkspaceResult::TextFile { content }) => (content, true),
         Ok(_) => (
             tr!(
                 "files.unable_to_edit",
@@ -2962,7 +2962,7 @@ impl Waku {
     ) -> Div {
         // Fork: a picture, spreadsheet, document or other binary is
         // previewed, not opened as text (file_preview.rs).
-        if let Some(kind) = waku_protocol::workspace::preview_kind(&relative_path) {
+        if let Some(kind) = client_protocol::workspace::preview_kind(&relative_path) {
             return self.render_file_preview_surface(relative_path, kind, panel_width, cx);
         }
         let theme = Theme::current(cx);
@@ -3183,7 +3183,7 @@ impl Waku {
         editor.reading = true;
         editor.read_epoch += 1;
         let epoch = editor.read_epoch;
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace = client::WorkspaceClient::new(self.daemon.client());
 
         cx.spawn(async move |waku, cx| {
             let read = cx
@@ -3525,7 +3525,7 @@ impl Waku {
         } else {
             return;
         };
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace = client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -3534,12 +3534,12 @@ impl Waku {
                     let relative_path = relative_path.clone();
                     let content = content.clone();
                     async move {
-                        match workspace.request(waku_client::WorkspaceOperation::WriteTextFile {
+                        match workspace.request(client::WorkspaceOperation::WriteTextFile {
                             root: project_path,
                             relative_path: PathBuf::from(relative_path),
                             content,
                         })? {
-                            waku_client::WorkspaceResult::Ack => Ok(()),
+                            client::WorkspaceResult::Ack => Ok(()),
                             _ => anyhow::bail!("the daemon returned an invalid file response"),
                         }
                     }
@@ -4534,32 +4534,30 @@ impl Waku {
             Query::Pending => {}
             Query::Missing(token) => {
                 let expanded = self.right_panel_expanded_paths.clone();
-                let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+                let workspace = client::WorkspaceClient::new(self.daemon.client());
                 cx.spawn(async move |waku, cx| {
                     let entries = cx
                         .background_executor()
                         .spawn({
                             let path = project_path.clone();
                             async move {
-                                match workspace.request(waku_client::WorkspaceOperation::ListTree {
+                                match workspace.request(client::WorkspaceOperation::ListTree {
                                     root: path,
                                     expanded_paths: expanded.into_iter().collect(),
                                 }) {
-                                    Ok(waku_client::WorkspaceResult::WorkingTree { entries }) => {
-                                        entries
-                                            .into_iter()
-                                            .map(|entry| WorkingTreeEntry {
-                                                file_icon: (!entry.is_dir)
-                                                    .then(|| file_icon_for_name(&entry.name)),
-                                                relative_path: entry.relative_path,
-                                                absolute_path: entry.absolute_path,
-                                                name: entry.name,
-                                                is_dir: entry.is_dir,
-                                                expanded: entry.expanded,
-                                                depth: entry.depth,
-                                            })
-                                            .collect()
-                                    }
+                                    Ok(client::WorkspaceResult::WorkingTree { entries }) => entries
+                                        .into_iter()
+                                        .map(|entry| WorkingTreeEntry {
+                                            file_icon: (!entry.is_dir)
+                                                .then(|| file_icon_for_name(&entry.name)),
+                                            relative_path: entry.relative_path,
+                                            absolute_path: entry.absolute_path,
+                                            name: entry.name,
+                                            is_dir: entry.is_dir,
+                                            expanded: entry.expanded,
+                                            depth: entry.depth,
+                                        })
+                                        .collect(),
                                     Ok(_) | Err(_) => Vec::new(),
                                 }
                             }
@@ -4686,20 +4684,18 @@ impl Waku {
         self.right_panel_diff_error = None;
         cx.notify();
 
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        let workspace = client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
                 .spawn({
                     let project_path = project_path.clone();
                     async move {
-                        match workspace.request(
-                            waku_client::WorkspaceOperation::CollectReviewDiff {
-                                cwd: project_path,
-                                source: crate::review_diff::wire_source(source),
-                            },
-                        )? {
-                            waku_client::WorkspaceResult::ReviewDiff { data } => {
+                        match workspace.request(client::WorkspaceOperation::CollectReviewDiff {
+                            cwd: project_path,
+                            source: crate::review_diff::wire_source(source),
+                        })? {
+                            client::WorkspaceResult::ReviewDiff { data } => {
                                 Ok(crate::review_diff::parse_collected(
                                     source,
                                     &data.numstat,

@@ -1,6 +1,6 @@
 //! What the built-in agent's browser tools do to the page.
 //!
-//! Fork addition. The agent's `browser_*` tools (`waku-agent-bridge`'s
+//! Fork addition. The agent's `browser_*` tools (`agent-bridge`'s
 //! `browser.rs`) reach the desktop as requests; `app/browser_agent.rs` picks
 //! the session's browser tab and calls these. Everything that reads or acts
 //! on the page is JavaScript evaluated in it, so the result is the same on

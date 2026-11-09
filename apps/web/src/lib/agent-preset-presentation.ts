@@ -1,4 +1,4 @@
-import type { ProviderAgentPreset } from '@waku/client'
+import type { ProviderAgentPreset } from 'client'
 
 type Translator = (key: string) => string
 

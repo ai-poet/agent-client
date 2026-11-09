@@ -1,4 +1,4 @@
-import type { AgentSession, ThreadGoal, ThreadGoalStatus } from '@waku/client'
+import type { AgentSession, ThreadGoal, ThreadGoalStatus } from 'client'
 import { useEffect, useState, type RefObject } from 'react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'

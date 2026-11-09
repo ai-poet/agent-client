@@ -6,7 +6,7 @@ description = "AgentTeams for the built-in agent: durable team state, scheduling
 license = "GPL-3.0-only"
 
 # Pure logic: no async runtime, no GPUI, no upstream crate. The bridge drives
-# it (`crates/waku-agent-bridge/src/team/`), the app draws it
+# it (`crates/agent-bridge/src/team/`), the app draws it
 # (`src/app/team_panel.rs`) and `sub2api` stores its settings. Much of it is
 # translated from `@nanmicoder/dsh-agent-teams` (MIT); see NOTICE.md.
 [dependencies]

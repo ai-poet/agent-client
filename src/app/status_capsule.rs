@@ -7,7 +7,7 @@
 //! the todo list under the tool that wrote it, the right panel's background
 //! work, each turn's changed-files card); this gathers them where the reader
 //! of a long task looks. Which line it shows is decided in
-//! `waku_client::status_capsule`.
+//! `client::status_capsule`.
 
 use super::*;
 use crate::status_capsule::{CapsuleFact, select_fact, todo_progress};

@@ -400,7 +400,7 @@ mod tests {
         };
         assert_eq!(
             directive_for_invocation(&invocation, &profiles),
-            "AgentTeams profile \"nope\" does not exist. Available profiles: dual-review, implement-test-fix, prd-implement-review. Do not create a team."
+            "AgentTeams profile \"nope\" does not exist. Available profiles: dual-review, flagship, implement-test-fix, prd-implement-review. Do not create a team."
         );
         assert!(
             directive_for_invocation(&invocation, &BTreeMap::new())
