@@ -139,14 +139,16 @@ impl Tool for FileEditTool {
 
         // Perform the replacement on the ORIGINAL bytes, preserving every
         // untouched region's line endings and re-rendering inserted lines with
-        // the file's dominant line ending.
-        let (new_content, _replacements) = crate::line_endings::replace_preserving_eol(
-            &content,
-            &old_string,
-            &new_string,
-            eol,
-            params.replace_all,
-        );
+        // the file's dominant line ending. The returned ranges locate the
+        // replaced regions in the new content for the edit excerpt below.
+        let (new_content, _replacements, replaced_ranges) =
+            crate::line_endings::replace_preserving_eol(
+                &content,
+                &old_string,
+                &new_string,
+                eol,
+                params.replace_all,
+            );
 
         // Write back
         if let Err(e) = crate::write_atomic(&path, new_content.as_bytes()).await {
@@ -163,6 +165,13 @@ impl Tool for FileEditTool {
         // Run any configured formatter for this file type.
         crate::try_format_file(&path.to_string_lossy(), ctx).await;
 
+        // Structured result: the `FileWritten` shape Sailry protocol defines
+        // (path, revision, size, excerpt), as plain JSON. The revision and
+        // excerpt describe the edit's own result, before any formatter ran
+        // (a formatter's rewrite is recorded in `read_state` separately).
+        let revision = blake3::hash(new_content.as_bytes()).to_hex().to_string();
+        let excerpt = crate::line_endings::edit_excerpt(&new_content, &replaced_ranges).to_value();
+
         // Build a diff snippet for the response
         let replacements = if params.replace_all { count } else { 1 };
         let msg = format!(
@@ -172,10 +181,20 @@ impl Tool for FileEditTool {
             if replacements != 1 { "s" } else { "" }
         );
 
-        ToolResult::success(msg).with_metadata(json!({
-            "file_path": path.display().to_string(),
-            "replacements": replacements,
-        }))
+        ToolResult::success(msg)
+            .with_metadata(json!({
+                "file_path": path.display().to_string(),
+                "replacements": replacements,
+            }))
+            .with_structured_content(json!({
+                "kind": "file_written",
+                "data": {
+                    "path": path.display().to_string(),
+                    "revision": revision,
+                    "size": new_content.len() as u64,
+                    "excerpt": excerpt,
+                }
+            }))
     }
 }
 
@@ -279,5 +298,94 @@ mod tests {
         let after = std::fs::read_to_string(&path).unwrap();
         assert_eq!(after, "line one\nLINE TWO\nline three\n");
         assert!(!after.contains('\r'), "LF file gained a CR: {:?}", after);
+    }
+
+    /// The structured result is the Sailry `FileWritten` shape: the revision
+    /// matches the post-edit file content, and the excerpt shows the edited
+    /// region with its line numbers.
+    #[tokio::test]
+    async fn edit_produces_file_written_with_excerpt() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snippet.txt");
+        let original = "fn main() {\n    let x = 1;\n}\n";
+        std::fs::write(&path, original).unwrap();
+
+        let ctx = allow_all_context(dir.path().to_path_buf());
+        crate::read_state::mark_seen(&ctx.session_id, &path);
+        let res = FileEditTool
+            .execute(
+                json!({
+                    "file_path": path.to_string_lossy(),
+                    "old_string": "let x = 1;",
+                    "new_string": "let x = 2;",
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(!res.is_error, "edit failed: {}", res.content);
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        let value = res
+            .structured_content
+            .expect("edit must produce structured content");
+        assert_eq!(value["kind"], "file_written");
+        let data = &value["data"];
+        assert_eq!(data["path"], path.to_string_lossy().as_ref());
+        assert_eq!(data["size"], after.len() as u64);
+        assert_eq!(
+            data["revision"],
+            blake3::hash(after.as_bytes()).to_hex().to_string()
+        );
+        let excerpt = &data["excerpt"];
+        assert_eq!(excerpt["omitted"], 0);
+        let lines = excerpt["hunks"][0]["lines"]
+            .as_array()
+            .expect("excerpt hunk lines");
+        // One hunk covering the whole 3-line file; line 2 is the edit.
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[1], json!({"number": 2, "text": "    let x = 2;\n"}));
+
+        // The text message keeps its long-standing shape.
+        assert!(
+            res.content.contains("Successfully edited") && res.content.contains("1 replacement"),
+            "{}",
+            res.content
+        );
+    }
+
+    /// `replace_all` edits report every replaced region in the excerpt.
+    #[tokio::test]
+    async fn replace_all_excerpt_covers_every_replacement() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("all.txt");
+        std::fs::write(&path, "foo\nfoo\nfoo\n").unwrap();
+
+        let ctx = allow_all_context(dir.path().to_path_buf());
+        crate::read_state::mark_seen(&ctx.session_id, &path);
+        let res = FileEditTool
+            .execute(
+                json!({
+                    "file_path": path.to_string_lossy(),
+                    "old_string": "foo",
+                    "new_string": "bar",
+                    "replace_all": true,
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(!res.is_error, "edit failed: {}", res.content);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "bar\nbar\nbar\n");
+
+        let excerpt = &res.structured_content.expect("structured content")["data"]["excerpt"];
+        assert_eq!(excerpt["omitted"], 0);
+        // Three replacements on adjacent lines merge into one hunk.
+        assert_eq!(excerpt["hunks"].as_array().unwrap().len(), 1);
+        let numbers: Vec<usize> = excerpt["hunks"][0]["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|line| line["number"].as_u64().unwrap() as usize)
+            .collect();
+        assert_eq!(numbers, vec![1, 2, 3]);
     }
 }

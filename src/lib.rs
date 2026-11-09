@@ -219,7 +219,6 @@ pub fn run() {
             crate::app::init_commit_dialog_keys(cx);
             crate::app::init_goal_dialog_keys(cx);
             crate::app::init_confirm_dialog_keys(cx);
-            crate::app::init_cli_takeover_keys(cx);
             crate::app::init_permission_card_keys(cx);
             crate::app::init_question_panel_keys(cx);
             crate::app::init_shortcut_keys(cx);

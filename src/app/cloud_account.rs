@@ -4,10 +4,10 @@
 //! GPUI dependency and is unit-tested on its own; this file is the view and the
 //! plumbing that runs that logic off the UI thread.
 //!
-//! Routing is applied by writing each CLI's own global configuration —
-//! [`Waku::apply_cloud_routing`] → `sub2api::global_config::reconcile` — the
-//! moment the state changes (sign-in, group switch, toggle, sign-out). The
-//! daemon carries no routing state.
+//! Routing writes only the built-in agent's own settings through
+//! [`Waku::apply_cloud_routing`] → `sub2api::global_config::reconcile`.
+//! Business API clients separately resolve the same selected gateway origin;
+//! authentication remains on the credential's login origin.
 //!
 //! The rest of the account lives beside it: group lanes and switching in
 //! `cloud_groups.rs`, group health and automatic failover in
@@ -84,12 +84,9 @@ pub(super) struct CloudAccountState {
     pub failover_polling: bool,
     /// Which of the service's domains the CLIs are pointed at.
     pub gateway_origin: sub2api::gateway_origin::GatewayOriginConfig,
-    /// Which CLIs the account may configure, loaded at startup. Outlives
-    /// the session: signing out does not reset it.
-    pub cli_takeover: sub2api::cli_takeover::CliTakeoverPrefs,
-    /// The question asked at sign-in about CLIs already on their own
-    /// account (`cli_takeover.rs`).
-    pub takeover_prompt: Option<super::cli_takeover::CliTakeoverPrompt>,
+    /// Bumped when the selected API origin changes; late responses from the
+    /// previous origin must not overwrite the newly selected node's data.
+    pub api_generation: u64,
     /// The last domain measurement's progress and results.
     pub origin_test: Option<super::cloud_origins::OriginTest>,
     /// Bumped per measurement; a result from a superseded run is discarded.
@@ -178,7 +175,6 @@ impl Waku {
         self.migrate_legacy_routing_transport();
         self.cloud_account.failover = sub2api::failover::load();
         self.cloud_account.gateway_origin = sub2api::gateway_origin::load();
-        self.cloud_account.cli_takeover = sub2api::cli_takeover::load();
         let Some(mut credentials) = sub2api::Credentials::load() else {
             // Reconcile anyway: custom endpoints apply while signed out, and
             // a takeover left behind by a wiped login must be restored.
@@ -293,6 +289,7 @@ impl Waku {
         cx.notify();
 
         let session = credentials.session_id.clone();
+        let api_generation = self.cloud_account.api_generation;
         cx.spawn(async move |this, cx| {
             let fetched = cx
                 .background_executor()
@@ -310,7 +307,9 @@ impl Waku {
                 // Signed out meanwhile: this is the old account's balance.
                 // Writing it back is exactly what used to put the email
                 // back in the footer a moment after signing out.
-                if !this.cloud_session_is(&session) {
+                if !this.cloud_session_is(&session)
+                    || api_generation != this.cloud_account.api_generation
+                {
                     return;
                 }
                 this.cloud_account.refreshing = false;
@@ -574,9 +573,6 @@ impl Waku {
         // Signing in is an explicit request to use the service, so routing
         // starts on rather than needing a second switch nobody would find.
         self.cloud_account.routing_enabled = true;
-        // A CLI already on the user's own account is held back and asked
-        // about before anything is written into it.
-        self.prompt_cli_takeover_on_sign_in(cx);
         self.apply_cloud_routing();
         self.load_cloud_details(cx);
         // A new account reaches a different set of models.
@@ -718,6 +714,7 @@ impl Waku {
         let Some(credentials) = self.cloud_account.credentials.clone() else {
             return;
         };
+        let api_generation = self.cloud_account.api_generation;
         cx.spawn(async move |this, cx| {
             let loaded = cx
                 .background_executor()
@@ -735,6 +732,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                if api_generation != this.cloud_account.api_generation {
+                    return;
+                }
                 let Ok((credentials, groups, referral)) = loaded else {
                     // A failed renewal here is not worth a banner: the balance
                     // poll reports the same problem, and this data is optional.
@@ -770,6 +770,7 @@ impl Waku {
         cx.notify();
 
         let session = credentials.session_id.clone();
+        let api_generation = self.cloud_account.api_generation;
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -781,7 +782,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if !this.cloud_session_is(&session) {
+                if !this.cloud_session_is(&session)
+                    || api_generation != this.cloud_account.api_generation
+                {
                     return;
                 }
                 this.cloud_account.busy = false;
@@ -867,14 +870,9 @@ impl Waku {
         cx.notify();
     }
 
-    /// Drive every CLI's global configuration to the current routing state.
-    ///
-    /// This *is* the routing mechanism now: the gateway (or a custom
-    /// endpoint) is written into `~/.claude/settings.json`, `~/.codex/*`,
-    /// `~/.grok/config.toml`, `opencode.json`, and Pi's `models.json` —
-    /// with the pre-takeover originals backed up, and restored the moment a
-    /// CLI stops being routed. Files change immediately; running sessions
-    /// keep whatever they already read.
+    /// Write the built-in agent's routes from the current account, custom
+    /// endpoints and selected origin. No external CLI file is touched.
+    /// Running turns finish on the route where they started.
     pub(super) fn apply_cloud_routing(&mut self) {
         let custom = sub2api::custom_api::load();
         let cloud = super::providers_page::cloud_config(self);
@@ -966,9 +964,6 @@ impl Waku {
                 cx,
             ));
         }
-
-        // Signed out too: the choice can be made before the first sign-in.
-        page = page.child(self.render_cli_takeover_settings(theme, cx));
 
         if signed_in {
             // Redeem codes live in the top-up sheet and pricing on the Model

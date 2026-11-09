@@ -46,7 +46,7 @@ use crate::md::render::{
 };
 use crate::ui::menu::{
     ConfirmEntry, ContextMenuHandle, DismissMenu, MenuAlign, MenuItem, SelectNextEntry,
-    SelectNextTab, SelectPreviousEntry, SelectPreviousTab, context_menu, dropdown_menu, popover,
+    SelectPreviousEntry, context_menu, dropdown_menu, popover,
 };
 use crate::ui::scrollbar::{self, ScrollbarState};
 use crate::ui::tooltip::Tooltip;
@@ -214,7 +214,6 @@ enum BranchPickerAction {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SettingsPage {
     General,
-    Providers,
     Skills,
     Usage,
     Daemon,
@@ -231,10 +230,7 @@ enum SettingsPage {
     /// Fork addition: the built-in agent's behaviour, tools, MCP servers and
     /// permission rules — the engine's own settings file, editable in the app.
     Agent,
-    /// Fork addition: the endpoints themselves — a list beside one form.
-    /// Separate from Providers, which is about the CLIs: an endpoint is not
-    /// a property of the program that calls it, and one is often called by
-    /// several.
+    /// Fork addition: reusable model endpoints, edited beside their list.
     ModelProviders,
 }
 
@@ -1568,8 +1564,6 @@ pub struct Waku {
     /// Fork addition: each model's context window from a public list, the
     /// context ring's fallback.
     model_windows: model_windows::ModelWindowsState,
-    /// Fork addition: agent CLI setup view state.
-    cli_setup: cli_setup::CliSetupState,
     /// Fork addition: first-run checklist state.
     onboarding: onboarding::OnboardingViewState,
     agent_page: agent_page::AgentPageState,
@@ -1577,10 +1571,6 @@ pub struct Waku {
     model_providers: model_providers_page::ModelProvidersPageState,
     /// Fork addition: provider processes warmed while the user types.
     runtime_prewarms: runtime_prewarm::RuntimePrewarms,
-    /// Fork addition: which vendor of the built-in agent's model list the
-    /// picker's vendor column has open (`native_agent::NATIVE_VENDORS` ids).
-    /// Picker state, not session state, and not persisted.
-    model_picker_vendor: String,
     /// Fork addition: cloud usage view state.
     cloud_usage: cloud_usage::CloudUsageState,
     /// Fork addition: model plaza view state.
@@ -1814,8 +1804,6 @@ mod announcements;
 mod autocomplete;
 mod background_work;
 mod branches;
-mod cli_setup;
-mod cli_takeover;
 mod cloud_account;
 mod cloud_failover;
 mod cloud_groups;
@@ -1932,7 +1920,6 @@ pub use autocomplete::init as init_composer_autocomplete;
 use background_work::{
     BackgroundWorkRegistry, work_kind_icon, work_status_color, work_status_label,
 };
-pub use cli_takeover::init as init_cli_takeover_keys;
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
 use components::*;
@@ -3102,14 +3089,10 @@ impl Waku {
             .detach();
 
             // Fork addition: restore the managed cloud session, then keep the
-            // balance current. The balance is spendable, so a stale figure is
-            // worse than a slightly chatty refresh; the request is a single
-            // cheap GET and only runs while signed in. The same task kicks off
-            // the first Node / agent-CLI detection pass, which runs off-thread.
+            // balance current. All account and catalog requests run off-thread.
             cx.spawn(async move |this, cx| {
                 if this
                     .update(cx, |this, cx| {
-                        this.refresh_cli_environment(cx);
                         this.load_onboarding_state(cx);
                         this.load_model_windows(cx);
                         this.reset_content_translations(cx);
@@ -3411,12 +3394,12 @@ impl Waku {
                 skills_catalog: None,
                 cloud_account: cloud_account::CloudAccountState::default(),
                 model_windows: model_windows::ModelWindowsState::default(),
-                cli_setup: cli_setup::CliSetupState::with_custom_cache(custom_api),
                 onboarding: onboarding::OnboardingViewState::default(),
                 agent_page: agent_page::AgentPageState::default(),
-                model_providers: model_providers_page::ModelProvidersPageState::default(),
+                model_providers: model_providers_page::ModelProvidersPageState::with_custom_cache(
+                    custom_api,
+                ),
                 runtime_prewarms: runtime_prewarm::RuntimePrewarms::default(),
-                model_picker_vendor: "anthropic".to_owned(),
                 cloud_usage: cloud_usage::CloudUsageState::default(),
                 model_plaza: model_plaza::ModelPlazaState::default(),
                 content_translations: content_translations::ContentTranslationsState::default(),

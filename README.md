@@ -4,7 +4,7 @@ CheapRouter 把「低价模型网关」和「原生 Agent 工作台」合成了�
 一端是 Claude / GPT / Grok，以及订阅分组里的 DeepSeek / Kimi / GLM 等模型的
 网关，另一端是用 Rust + [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)
 写的本地编码 agent 工作台，自带一个编译在客户端里的内置 Agent。登录即用，
-开箱即路由，新手不用碰任何配置文件，老手也能精确掌控每一份 CLI 配置。
+模型按当前源站自动拉取，不需要安装或配置任何外部 CLI。
 
 > **Built on [Waku](https://github.com/egoist/waku)** by egoist, licensed under
 > GPL-3.0-only. This is a modified fork; see [NOTICE.md](NOTICE.md) for the list
@@ -17,27 +17,22 @@ CheapRouter 把「低价模型网关」和「原生 Agent 工作台」合成了�
   外部 CLI。网关上能对话的 Claude、GPT、Grok、DeepSeek、Kimi、GLM 等模型都在
   它的模型选择器里，每个模型自动走对应的接口格式、用提供它的那个分组的密钥，
   推理强度按模型家族给出可选档位。详见下文 [内置 Agent](#内置-agent)。
-- **登录即路由，零配置。** 浏览器里登录云账号，客户端就把网关地址和密钥直接写进
-  每个 CLI 自己的全局配置——Claude Code、Codex、Grok Build、OpenCode、Pi 全部对齐。
-  接管前自动备份你的原配置，退出登录时原样恢复；不注入环境变量、不架本地代理、
-  不需要手改任何文件，Codex 的 ChatGPT 登录（`auth.json`）也不会被改动。终端里
-  直接跑 `claude` / `codex` 同样走网关。
+- **源站一切，全局联动。** 底部源站菜单切换后，内置 Agent 的模型请求、模型目录、
+  余额、用量、订阅、公告和充值等业务 API 都使用新源站；旧源站尚未返回的请求不会
+  覆盖新数据。登录和令牌刷新仍固定在完成登录的认证域名，避免认证会话跨节点漂移。
 - **订阅一目了然。** 设置 → CheapRouter 账号列出你的每个有效订阅：剩余天数、日 /
   周 / 月的已用额度与上限；左下角账号菜单也有一行摘要。订阅里的模型按周期计费，
   不扣余额，内置 Agent 会让 DeepSeek、Kimi、GLM 这类模型自动走提供它的订阅。
-- **缺什么装什么。** 全新电脑没装 Node、没装任何 CLI 也没关系：设置 → 服务商
-  会检测缺失项并一键补齐。Node 22 无人值守安装（Windows 便携包 → 静默 MSI →
-  winget 三级回退，npm 国内镜像优先），Claude Code / Codex / Grok Build 一键安装，
-  安装失败直接显示安装器的原始输出，命令也可以一键复制自己跑。
+- **模型直接选。** 模型入口位于输入区的一级控件里，打开后直接列出全部可用模型；
+  可按名称、厂商或自定义接口搜索，不用再进入服务商或厂商二级菜单。
 - **余额、充值、用量原生内置。** 左下角实时余额（每个任务结束自动刷新，低于 $5
   变黄、$1 变红），原生充值弹窗支持扫码 / Stripe / 兑换码，用量页带模型与分组
   筛选、分页、逐请求的 token / 缓存 / 费用 / 延迟明细——不用再开网页后台。
 - **模型广场，先比价再干活。** 全部在售模型的官方价与网关价对照（划线价一目了然）、
   分组倍率与健康度、缓存 / 长上下文 / 阶梯计费标注，一眼挑出最划算的分组。
-- **分组一键切换。** 每个 CLI（Claude Code / Codex / Grok）独立绑定计费分组，
-  左下角账号菜单里两次点击就能换线路——不进设置页、不重启：切换即时重写该 CLI
-  的全局配置并重新绑定密钥，新启动的任务立刻走新分组。菜单里每个分组旁直接
-  标注倍率（如 ×0.50）、24 小时在线率和降级/故障状态；也可以按平台开启自动
+- **分组一键切换。** 左下角账号菜单按模型平台选择计费分组，内置 Agent 会立即拿到
+  新的分组密钥；进行中的单次请求保持在原线路，新请求使用新分组。菜单里每个分组旁
+  直接标注倍率（如 ×0.50）、24 小时在线率和降级/故障状态；也可以按平台开启自动
   故障转移，分组故障时切到健康分组，恢复后自动切回。
 - **画图，文生图和图生图都在一个框里。** 侧栏「搜索」下面点「画图」：只写提示词
   就出图，拖入、粘贴或选几张图片就在它们的基础上改图。模型、尺寸（每档标好单价）、
@@ -68,21 +63,18 @@ CheapRouter 把「低价模型网关」和「原生 Agent 工作台」合成了�
 ## 两步上手
 
 1. **安装并登录。** 从 [最新 Release](../../releases/latest) 下载对应平台安装包，
-   打开应用点「登录」，浏览器里完成注册——回到客户端一切就绪，路由已自动配置。
-2. **开跑。** 打开一个项目文件夹，输入你想做的事，回车。默认用的就是内置 Agent；
-   余额在左下角，随用随充。
-
-外部 agent CLI 依然可以接（设置 → 服务商），但那是可选项，不再是跑起来的前提。
+   打开应用点「登录」，浏览器里完成注册——回到客户端即可拉取当前源站的模型目录。
+2. **开跑。** 打开一个项目文件夹，输入你想做的事，回车。默认且唯一使用的 Agent
+   就是内置 Agent；余额在左下角，随用随充。
 
 进阶：设置 → 模型接口 统一登记你自己的接口——地址、密钥、接口格式、模型列表，
-以及可测速自动选优的备用域名；内置 Agent 的四种接口格式和各个 CLI 各自选用其中
-一个。已登录时 CLI 优先走云路由，内置 Agent 的某种接口格式指向了自定义接口时
-则以自定义接口为准。`cargo run -p sub2api --example routing_doctor` 可以随时对照
-期望路由与磁盘上的实际配置。
+以及可测速自动选优的备用域名。内置 Agent 的 Messages、Responses、Chat Completions
+三种接口格式可分别绑定自定义接口；未绑定的格式使用底部当前源站。输入框只展示内置
+Agent 实际支持的 `/` 命令、共享技能和自定义命令，不再发现或透传外部 CLI 命令。
 
 ## 内置 Agent
 
-内置 Agent 是默认 provider。它是编译进客户端的一个完整编码 agent：读写文件、
+内置 Agent 是默认且唯一可启动的 provider。它是编译进客户端的一个完整编码 agent：读写文件、
 执行命令、搜索代码、调用 MCP 工具、启动子 agent。会话记录由应用自己保存，回滚、
 分支、续聊都不依赖任何外部进程。
 
@@ -98,10 +90,10 @@ CheapRouter 把「低价模型网关」和「原生 Agent 工作台」合成了�
 | Gemini 4 Argon | Google Gemini（网关 v1beta） | low / medium / high |
 
 **每个模型走对的分组。** 一个密钥只属于一个分组，而每个分组只提供它支持的那些
-模型。内置 Agent 按模型挑分组：Claude、GPT、Grok 走你为 Claude Code、Codex、
-通用线路绑定的分组；其余模型优先走提供它的有效订阅，没有订阅时走提供它的、倍率
-最低的分组。需要的密钥会自动准备好（优先复用账号里已有的密钥），选择器里走订阅
-的模型会注明订阅名。
+模型。内置 Agent 按模型挑分组：Claude、GPT、Grok 使用账号菜单里为对应模型平台
+绑定的分组；其余模型优先走提供它的有效订阅，没有订阅时走提供它的、倍率最低的
+分组。需要的密钥会自动准备好（优先复用账号里已有的密钥），选择器里走订阅的模型
+会注明订阅名。
 
 **Claude 路线省钱又听话。** 走 Claude 时按 Claude Code 的方式打提示缓存断点，
 直连 Anthropic 的分组（如 Claude Max）每一步都从缓存读前面的对话，不再整段重付；
@@ -161,18 +153,10 @@ PowerShell（有 7 就用 7），工作目录在多次调用之间保持，中�
 
 ## 支持的 agent
 
-| Agent | 云网关路由 | 自定义接口 | 一键安装 |
-|---|---|---|---|
-| **内置 Agent**（默认） | ✓ | ✓ | 无需安装 |
-| Claude Code | ✓ | ✓ | ✓ |
-| Codex CLI | ✓ | ✓ | ✓ |
-| Grok Build | ✓ | ✓ | ✓ |
-| OpenCode | — | ✓ | — |
-| Pi | — | ✓ | — |
-
-会话协议层面还支持 [Amp](https://ampcode.com/)、Cursor CLI、
-[Fx](https://fx.sh/)、Kimi Code 等（自带配置使用）。每个 provider 走各自的
-原生结构化协议，会话可延续。
+只支持 **内置 Agent**。它直接运行在 `client-daemon` 内，支持云网关和自定义模型接口，
+无需安装任何外部程序。Claude Code、Codex、Grok Build、OpenCode、Pi、Amp、Cursor、
+Fx、Kimi Code 等外部 CLI 不再被检测、配置、导入或启动；已有本地会话镜像仍可查看，
+但不能续跑外部 CLI。
 
 ## Install
 
@@ -207,10 +191,12 @@ daemon, which is what makes rewind, branch and resume plain truncations.
 
 All fork functionality lives in [`crates/sub2api`](crates/sub2api) plus a
 handful of view files; see [docs/FORK.md](docs/FORK.md) for the hook-point
-register. Routing is desktop-local: the desktop writes each CLI's own global
-configuration (cc-switch model, with pre-takeover backups in
-`~/.cheaprouter/takeover.json`), and the daemon carries no routing state, so
-the wire protocol stays byte-identical to upstream.
+register. Routing is desktop-local: the desktop writes only the built-in agent's
+own settings (with backups in `~/.cheaprouter/takeover.json`), never an external
+CLI's configuration. Business API clients resolve the currently selected gateway
+origin; login, token refresh and logout stay on the credential's authentication
+origin. Switching origin invalidates origin-scoped caches and rejects late
+responses from the previous origin.
 
 The browser client lives at [`apps/web`](apps/web) and uses the generated
 browser transport in [`packages/client`](packages/client). Its

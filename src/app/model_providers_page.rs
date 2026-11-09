@@ -63,6 +63,8 @@ pub(super) struct ModelProvidersPageState {
     /// What `reconcile` warned about on the last save.
     pub warning: Option<String>,
     pub saving: bool,
+    /// Cached endpoint registry; render never reads the backing file.
+    pub custom_cache: std::cell::RefCell<Option<sub2api::custom_api::CustomApiConfig>>,
     pub test: Option<super::providers_page::EndpointTest>,
     pub speed: Option<super::providers_page::SpeedTest>,
     /// Which model's metadata is open for editing, if any.
@@ -76,6 +78,14 @@ pub(super) struct ModelProvidersPageState {
     /// as that save lands: dropping them would let a model typed right after
     /// creating a provider, or a fetch that lands mid-save, vanish unsaved.
     queued: Vec<QueuedChange>,
+}
+
+impl ModelProvidersPageState {
+    pub fn with_custom_cache(config: sub2api::custom_api::CustomApiConfig) -> Self {
+        let state = Self::default();
+        *state.custom_cache.borrow_mut() = Some(config);
+        state
+    }
 }
 
 /// One change to the provider registry, applied inside a save.
@@ -132,6 +142,16 @@ fn field_label(theme: Theme, text: String) -> Div {
 }
 
 impl Waku {
+    /// The stored custom endpoints, cached so render never reads the file.
+    pub(super) fn custom_api_snapshot(&self) -> sub2api::custom_api::CustomApiConfig {
+        if let Some(config) = self.model_providers.custom_cache.borrow().clone() {
+            return config;
+        }
+        let config = sub2api::custom_api::load();
+        *self.model_providers.custom_cache.borrow_mut() = Some(config.clone());
+        config
+    }
+
     /// The registry as last read. Same cache the Providers page uses, so the
     /// two pages never disagree about what is stored.
     fn provider_registry(&self) -> sub2api::providers::ProviderRegistry {
@@ -1077,7 +1097,7 @@ impl Waku {
         // replaces the cache with the real thing either way.
         let mut config = self.custom_api_snapshot();
         config.registry.providers.push(entry.clone());
-        *self.cli_setup.custom_cache.borrow_mut() = Some(config);
+        *self.model_providers.custom_cache.borrow_mut() = Some(config);
         self.open_provider(id, window, cx);
         self.commit_registry(
             None,
@@ -1387,7 +1407,7 @@ impl Waku {
                 this.model_providers.saving = false;
                 match outcome {
                     Ok((config, warnings)) => {
-                        *this.cli_setup.custom_cache.borrow_mut() = Some(config);
+                        *this.model_providers.custom_cache.borrow_mut() = Some(config);
                         if !warnings.is_empty() {
                             this.model_providers.warning = Some(warnings.join("\n"));
                         }
@@ -2128,7 +2148,7 @@ impl Waku {
                 this.model_providers.saving = false;
                 match outcome {
                     Ok((config, warnings)) => {
-                        *this.cli_setup.custom_cache.borrow_mut() = Some(config);
+                        *this.model_providers.custom_cache.borrow_mut() = Some(config);
                         if !warnings.is_empty() {
                             this.show_toast(warnings.join("\n"));
                         }

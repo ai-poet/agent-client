@@ -27,7 +27,6 @@ use crate::brand;
 use crate::cli_detect;
 use crate::cli_install::{self, InstallOutcome};
 use crate::mcp_stdio::McpStdioClient;
-use crate::node_install;
 
 /// The pinned upstream version.
 pub const CUA_DRIVER_VERSION: &str = "0.23.2";
@@ -211,7 +210,7 @@ pub fn install_driver(mut report: impl FnMut(CuaStage)) -> InstallOutcome {
     let Some(install_dir) = managed_driver_dir() else {
         return failed(vec!["no home directory".to_owned()]);
     };
-    let staging = match node_install::staging_dir() {
+    let staging = match cli_install::staging_dir() {
         Ok(staging) => staging,
         Err(error) => return failed(vec![format!("{error:#}")]),
     };
@@ -220,7 +219,7 @@ pub fn install_driver(mut report: impl FnMut(CuaStage)) -> InstallOutcome {
     let mut failures = Vec::new();
     let source = download_url(&asset);
     report(CuaStage::Downloading);
-    if let Err(error) = node_install::download(&source, &archive, &mut |_| {}) {
+    if let Err(error) = cli_install::download(&source, &archive) {
         failures.push(format!("{source}: {error:#}"));
         let _ = std::fs::remove_dir_all(&staging);
         return failed(failures);

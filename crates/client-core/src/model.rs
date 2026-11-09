@@ -1,72 +1,39 @@
-//! Daemon-only provider discovery layered over shared protocol models.
+//! Native-only provider availability for the daemon.
 
 use std::path::Path;
 
 pub use client_protocol::model::*;
 
-pub fn provider_probe(provider: ProviderKind, binary_override: Option<&str>) -> ProviderProbe {
-    // A built-in provider is installed by construction and has no path. It
-    // must not reach `find_executable`, whose command name for it is empty —
-    // searching PATH for "" would walk every search directory to no purpose.
-    if !provider.is_builtin() {
-        return ProviderProbe {
-            provider,
-            installed: false,
-            path: None,
-            models: Vec::new(),
-            agent_presets: Vec::new(),
-        };
-    }
+pub fn provider_probe(provider: ProviderKind, _binary_override: Option<&str>) -> ProviderProbe {
+    let installed = provider.is_builtin();
     ProviderProbe {
         provider,
-        installed: true,
+        installed,
         path: None,
-        models: crate::model_catalog::fallback_models(provider),
-        agent_presets: crate::model_catalog::fallback_agent_presets(provider),
+        models: if installed {
+            crate::model_catalog::fallback_models(provider)
+        } else {
+            Vec::new()
+        },
+        agent_presets: Vec::new(),
     }
 }
 
-/// Detect a provider and hydrate its catalog from the daemon-owned cache.
-///
-/// This is the fast half of stale-while-revalidate: clients can render the
-/// last successful catalog immediately, then request live discovery to replace
-/// it. Cache I/O stays in the daemon instead of leaking host filesystem access
-/// into desktop or Web clients.
+/// No CLI catalog cache is consulted: native models come from the selected
+/// gateway origin and are synchronized by the desktop.
 pub fn cached_provider_probe(
     provider: ProviderKind,
     binary_override: Option<&str>,
 ) -> ProviderProbe {
-    let cached = crate::model_catalog::cached_models(provider);
-    apply_cached_models(provider_probe(provider, binary_override), cached)
+    provider_probe(provider, binary_override)
 }
 
-fn apply_cached_models(
-    mut probe: ProviderProbe,
-    cached_models: Option<Vec<ProviderModel>>,
-) -> ProviderProbe {
-    if probe.provider.supports_model_discovery()
-        && let Some(models) = cached_models
-    {
-        // Fork: a cache written before a curated entry existed still shows it.
-        probe.models = crate::model_catalog::with_curated_fallback(probe.provider, models);
-    }
+pub fn discover_provider_models(probe: ProviderProbe) -> ProviderProbe {
     probe
 }
 
-pub fn discover_provider_models(mut probe: ProviderProbe) -> ProviderProbe {
-    if probe.provider.supports_model_discovery()
-        && let Some(path) = probe.path.as_deref()
-    {
-        let (models, agent_presets) = crate::model_catalog::discover_catalog(probe.provider, path);
-        probe.models = models;
-        probe.agent_presets = agent_presets;
-    }
-    probe
-}
-
-/// Run `<cli> --version` on the daemon host and extract its first version-like
-/// token. Provider CLIs decorate this output differently, so clients receive a
-/// normalized value rather than subprocess output.
+/// Read a tool's version for the legacy probe command. External provider probes
+/// never reach this because they have no executable path.
 pub fn probe_provider_version(binary: &Path) -> Option<String> {
     let mut command = crate::command_env::command(binary);
     let command = command.arg("--version").stdin(std::process::Stdio::null());
@@ -84,50 +51,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cached_catalog_replaces_fallback_before_live_discovery() {
-        let probe = ProviderProbe {
-            provider: ProviderKind::Codex,
-            installed: true,
-            path: Some("/usr/bin/codex".into()),
-            models: crate::model_catalog::fallback_models(ProviderKind::Codex),
-            agent_presets: Vec::new(),
-        };
-        let cached = vec![ProviderModel::new("cached-model", "Cached model").default()];
-
-        let probe = apply_cached_models(probe, Some(cached));
-
-        assert_eq!(probe.models.len(), 1);
-        assert_eq!(probe.models[0].id, "cached-model");
-    }
-
-    #[test]
-    fn cached_claude_catalog_gains_curated_entries_it_predates() {
-        let probe = ProviderProbe {
-            provider: ProviderKind::Claude,
-            installed: true,
-            path: Some("/usr/bin/claude".into()),
-            models: crate::model_catalog::fallback_models(ProviderKind::Claude),
-            agent_presets: Vec::new(),
-        };
-        let cached = vec![ProviderModel::new("claude-sonnet-5", "Sonnet").default()];
-
-        let probe = apply_cached_models(probe, Some(cached));
-
-        assert_eq!(probe.models[0].id, "claude-sonnet-5");
-        assert!(probe.models[0].is_default);
-        assert!(
-            probe
-                .models
-                .iter()
-                .any(|model| model.id == "claude-fable-5-1")
-        );
-        assert_eq!(
-            probe
-                .models
-                .iter()
-                .filter(|model| model.id == "claude-sonnet-5")
-                .count(),
-            1
-        );
+    fn only_the_builtin_provider_is_available() {
+        assert!(provider_probe(ProviderKind::Native, None).installed);
+        for provider in [
+            ProviderKind::Amp,
+            ProviderKind::Claude,
+            ProviderKind::Codex,
+            ProviderKind::Cursor,
+            ProviderKind::DeepSeek,
+            ProviderKind::Fx,
+            ProviderKind::OpenCode,
+            ProviderKind::Grok,
+            ProviderKind::Kimi,
+            ProviderKind::OhMyPi,
+            ProviderKind::Pi,
+        ] {
+            let probe = provider_probe(provider, Some("/does/not/run"));
+            assert!(!probe.installed);
+            assert!(probe.path.is_none());
+            assert!(probe.models.is_empty());
+        }
     }
 }

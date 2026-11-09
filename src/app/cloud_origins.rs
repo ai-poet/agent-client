@@ -119,20 +119,44 @@ impl Waku {
         cx.notify();
     }
 
-    /// Save the origin choice and re-point every routed CLI at it.
+    /// Save the origin choice and move both agent traffic and business APIs.
     fn persist_gateway_origin(&mut self, cx: &mut Context<Self>) {
         if let Err(error) = sub2api::gateway_origin::save(&self.cloud_account.gateway_origin) {
             self.show_toast(format!("{error:#}"));
         }
+        self.cloud_account.api_generation = self.cloud_account.api_generation.wrapping_add(1);
+
+        // Invalidate every origin-scoped cache and allow a fresh request even
+        // when the previous origin still has one in flight. Response handlers
+        // check api_generation, so those late responses cannot land here.
+        self.model_plaza.loading = false;
+        self.model_plaza.loaded_at = None;
+        self.model_plaza.retry_at = None;
+        self.cloud_usage.loading = false;
+        self.cloud_usage.loaded_at = None;
+        self.cloud_announcements.loading = false;
+        self.cloud_announcements.fetched_at = None;
+        self.plans.loading = false;
+        self.plans.loaded_at = None;
+        self.model_status.loading = false;
+        self.model_status.attempted_at = None;
+        self.cloud_account.refreshing = false;
+        self.cloud_account.subscriptions_at = None;
+        self.cloud_account.group_status_at = None;
+        self.close_cloud_pay_modal(cx);
+
         self.apply_cloud_routing();
         // Open built-in agent sessions read the route only when their
         // options are applied; without this they kept the old node until
         // something else re-applied them. A turn in flight finishes where it
         // started.
         self.reapply_built_in_session_options(cx);
-        // The model list is served by the domain that was just swapped.
-        self.refresh_provider_detection(None);
-        self.refresh_native_catalog(false, cx);
+        self.refresh_native_catalog(true, cx);
+        self.load_cloud_usage_if_needed(true, cx);
+        self.load_plans_if_needed(true, cx);
+        self.load_model_status_if_needed(true, false, cx);
+        self.load_cloud_details(cx);
+        self.refresh_cloud_account(cx);
         cx.notify();
     }
 

@@ -1,22 +1,10 @@
 //! Local provider runtime owned by `client-daemon`.
 
-mod acp;
 mod activity;
-mod amp;
-mod claude;
-mod codex;
 mod computer_use;
-mod deepseek;
 mod native;
-mod opencode;
-mod pi;
 mod subagent;
 mod support;
-mod title_refresh;
-// Fork addition: naming an empty turn's cause.
-mod turn_diagnosis;
-
-pub(crate) use acp::catalog_agent;
 pub(crate) use native::{
     delete_agent_transcript, provider_session_history as native_session_history,
 };
@@ -262,36 +250,9 @@ pub(crate) fn start_local(
     options: DriverStartOptions,
     events: DriverEventSender,
 ) -> anyhow::Result<DriverHandle> {
-    if !provider.is_builtin() {
-        anyhow::bail!("external agent CLIs are not supported");
-    }
     let inner: Arc<dyn DriverControl> = match provider {
-        ProviderKind::Codex => Arc::new(codex::CodexDriver::start(options, events)?),
-        ProviderKind::Pi => Arc::new(pi::PiDriver::start(pi::PiFlavor::Pi, options, events)?),
-        ProviderKind::OhMyPi => {
-            Arc::new(pi::PiDriver::start(pi::PiFlavor::OhMyPi, options, events)?)
-        }
-        // Cursor, Fx, Grok, and Kimi Code all serve a long-lived ACP session,
-        // which is the only way their Supervised mode can actually ask the user
-        // rather than silently forcing or denying.
-        ProviderKind::Cursor | ProviderKind::Fx | ProviderKind::Grok | ProviderKind::Kimi => {
-            Arc::new(acp::AcpDriver::start(provider, options, events)?)
-        }
-        ProviderKind::DeepSeek => Arc::new(deepseek::DeepSeekDriver::start(options, events)?),
-        // OpenCode's own server is its real API, and it is what exposes
-        // interactive permission requests.
-        ProviderKind::OpenCode => Arc::new(opencode::OpenCodeDriver::start(options, events)?),
-        // Claude serves a realtime stream of user messages on stdin — the same
-        // transport the Agent SDK drives — which is what lets its Supervised
-        // mode ask rather than decide alone.
-        ProviderKind::Claude => Arc::new(claude::ClaudeDriver::start(options, events)?),
-        // Amp reads newline-delimited user messages on stdin and stays alive
-        // until stdin closes, so it too serves the whole conversation.
-        ProviderKind::Amp => Arc::new(amp::AmpDriver::start(options, events)?),
-        // The only provider that is not a process. `binary` is unused, and
-        // there is nothing to launch, wait on, or close stdin against — the
-        // engine is a library call on the daemon's own runtime.
         ProviderKind::Native => Arc::new(native::NativeDriver::start(options, events)?),
+        _ => anyhow::bail!("external agent CLIs are not supported"),
     };
     Ok(DriverHandle { inner })
 }

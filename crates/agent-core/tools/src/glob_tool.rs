@@ -14,6 +14,10 @@ struct GlobInput {
     pattern: String,
     #[serde(default)]
     path: Option<String>,
+    #[serde(default)]
+    offset: Option<usize>,
+    #[serde(default)]
+    limit: Option<usize>,
 }
 
 #[async_trait]
@@ -49,7 +53,9 @@ impl Tool for GlobTool {
                 "path": {
                     "type": "string",
                     "description": "The directory to search in. Defaults to working directory."
-                }
+                },
+                "offset": {"type":"number","description":"Skip this many matching files"},
+                "limit": {"type":"number","description":"Maximum files in this page"}
             },
             "required": ["pattern"]
         })
@@ -117,7 +123,8 @@ impl Tool for GlobTool {
                 "No files matched pattern \"{}\" in {}",
                 params.pattern,
                 base_dir.display()
-            ));
+            ))
+            .with_structured_content(glob_results(Vec::new(), 0, 0, None, false));
         }
 
         // Sort by modification time (most recent first) — fall back to name sort
@@ -132,23 +139,87 @@ impl Tool for GlobTool {
         entries_with_time.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         let total = entries_with_time.len();
-        let max_results = 250;
-        let truncated = total > max_results;
+        let offset = params.offset.unwrap_or(0).min(total);
+        let limit = params.limit.unwrap_or(250).max(1);
+        let end = offset.saturating_add(limit).min(total);
+        let next_offset = (end < total).then_some(end);
+        let truncated = next_offset.is_some() || offset > 0;
+        let paths = entries_with_time[offset..end]
+            .iter()
+            .map(|(path, _)| path.display().to_string())
+            .collect::<Vec<_>>();
 
         let mut output = String::new();
-        for (path, _) in entries_with_time.iter().take(max_results) {
-            output.push_str(&path.display().to_string());
+        for path in &paths {
+            output.push_str(path);
             output.push('\n');
         }
 
         if truncated {
             output.push_str(&format!(
                 "\n... and {} more files (showing first {})\n",
-                total - max_results,
-                max_results,
+                total - end,
+                paths.len(),
             ));
         }
 
-        ToolResult::success(output)
+        ToolResult::success(output).with_structured_content(glob_results(
+            paths,
+            total,
+            offset,
+            next_offset,
+            truncated,
+        ))
+    }
+}
+
+fn glob_results(
+    paths: Vec<String>,
+    scanned: usize,
+    offset: usize,
+    next_offset: Option<usize>,
+    truncated: bool,
+) -> Value {
+    json!({
+        "kind":"search_results",
+        "data":{
+            "mode":"files",
+            "paths":paths,
+            "scanned_files":scanned,
+            "skipped":0,
+            "truncated":truncated,
+            "partial":false,
+            "offset":offset,
+            "next_offset":next_offset,
+            "diagnostics":[],
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::allow_all_context;
+
+    #[tokio::test]
+    async fn glob_results_share_the_search_cursor() {
+        let directory = tempfile::tempdir().unwrap();
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(directory.path().join(name), name).unwrap();
+        }
+        let context = allow_all_context(directory.path().to_path_buf());
+        let mut next = Vec::new();
+        for offset in [0, 1, 2] {
+            let result = GlobTool
+                .execute(
+                    json!({"path":directory.path(),"pattern":"*.txt","offset":offset,"limit":1}),
+                    &context,
+                )
+                .await;
+            let data = result.structured_content.unwrap()["data"].clone();
+            assert_eq!(data["paths"].as_array().unwrap().len(), 1);
+            next.push(data["next_offset"].clone());
+        }
+        assert_eq!(next, [json!(1), json!(2), Value::Null]);
     }
 }

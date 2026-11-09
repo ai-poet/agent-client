@@ -19,7 +19,7 @@ const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 13] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 12] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -31,12 +31,6 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 13] = [
         "settings.appearance",
         "icons/appearance.svg",
         "settings.appearance_keywords",
-    ),
-    (
-        SettingsPage::Providers,
-        "settings.providers",
-        "icons/bot.svg",
-        "settings.providers_keywords",
     ),
     (
         SettingsPage::ModelProviders,
@@ -397,7 +391,6 @@ impl Waku {
                     .text_color(theme.text)
                     .child(match page {
                         SettingsPage::General => tr!("settings.general"),
-                        SettingsPage::Providers => tr!("settings.providers"),
                         SettingsPage::ModelProviders => tr!("settings.model_providers"),
                         SettingsPage::Skills => tr!("settings.skills"),
                         SettingsPage::Usage => tr!("settings.usage"),
@@ -413,7 +406,6 @@ impl Waku {
             )
             .child(match page {
                 SettingsPage::General => self.render_general_settings(cx),
-                SettingsPage::Providers => self.render_providers_page(cx),
                 // Drawn by the split branch above; this arm keeps the match
                 // total.
                 SettingsPage::ModelProviders => self.render_model_providers_page(cx),

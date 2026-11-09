@@ -50,20 +50,6 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
     command
 }
 
-/// [`command`], plus the app-managed Node runtime on `PATH`.
-///
-/// Fork addition. Routing itself is no longer applied here: the desktop
-/// writes each CLI's own global configuration (see `sub2api::global_config`),
-/// so a spawned CLI picks its route up from its own files exactly as if the
-/// user had configured it by hand. What remains provider-specific is only
-/// that a CLI installed by Settings → Providers may need the app-managed
-/// Node runtime, whose directory predates the desktop's `PATH`.
-pub fn command_for_provider(program: impl AsRef<OsStr>, provider_id: &str) -> Command {
-    let mut command = command(program);
-    sub2api::cli_install::apply_provider_launch_env(&mut command, provider_id);
-    command
-}
-
 /// The `PATH` a provider CLI runs with: every directory Waku itself searched,
 /// plus the one the binary was found in.
 ///
@@ -140,23 +126,6 @@ pub fn output(command: &mut Command) -> io::Result<Output> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     spawn(command)?.wait_with_output()
-}
-
-/// Normalize a Waku-owned provider thread before a dependency spawns the child
-/// internally. The ACP SDK owns its `async_process::Command`, so its dedicated
-/// connection thread uses this once at startup instead of [`spawn`].
-pub(crate) fn unblock_sigchld_for_current_thread() -> io::Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        let sigchld = sigchld_set()?;
-        pthread_result(unsafe {
-            libc::pthread_sigmask(libc::SIG_UNBLOCK, &sigchld, std::ptr::null_mut())
-        })
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Ok(())
-    }
 }
 
 fn with_sigchld_unblocked<T>(operation: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
@@ -459,21 +428,11 @@ fn take_environment_variable(environment: &mut ShellEnvironment, name: &str) -> 
 }
 
 fn executable_search_paths() -> Vec<PathBuf> {
-    let mut directories = search_paths_from(
+    search_paths_from(
         cached_login_shell_variable(OsStr::new("PATH")).as_deref(),
         std::env::var_os("PATH").as_deref(),
         dirs::home_dir().as_deref(),
-    );
-    // Fork: the app-managed Node runtime. npm's global shims land inside it
-    // when no system Node existed, so a CLI installed through the assisted
-    // setup must be detectable before the updated user PATH reaches a fresh
-    // process — that is, without restarting the app.
-    for directory in sub2api::cli_detect::detection_dirs() {
-        if !directories.contains(&directory) {
-            directories.push(directory);
-        }
-    }
-    directories
+    )
 }
 
 fn login_shell_environment() -> &'static RwLock<Option<ShellEnvironment>> {

@@ -1,6 +1,7 @@
 //! Sailry execution core behind the existing query-loop contract.
 mod history;
 mod model;
+mod output_store;
 mod tools;
 
 use agent_core::cost::CostTracker;

@@ -289,24 +289,11 @@ impl Waku {
     /// here would not fix it. The built-in agent counts as custom when any of
     /// its three APIs is: which one the failed turn used is not recorded.
     fn provider_on_custom_endpoint(&self, provider: ProviderKind) -> bool {
-        let slots: &[&str] = match provider {
-            ProviderKind::Claude => &["claude"],
-            ProviderKind::Codex => &["codex"],
-            ProviderKind::Grok => &["grok"],
-            ProviderKind::OpenCode => &["opencode"],
-            ProviderKind::Pi => &["pi"],
-            ProviderKind::Native => &sub2api::custom_api::NATIVE_SLOTS,
-            _ => return true,
-        };
-        // A CLI kept on the user's own sign-in never reaches the gateway.
-        if slots
-            .iter()
-            .any(|slot| self.cloud_account.cli_takeover.keeps_own(slot))
-        {
+        if !provider.is_builtin() {
             return true;
         }
         let config = self.custom_api_snapshot();
-        slots
+        sub2api::custom_api::NATIVE_SLOTS
             .iter()
             .any(|slot| config.routed_endpoint(slot).is_some())
     }

@@ -1,35 +1,10 @@
-//! Routing by writing each CLI's own global configuration — the cc-switch
-//! model.
+//! Persist the built-in agent's model routes in its own settings file.
 //!
-//! The previous mechanism injected environment at spawn and kept generated
-//! config directories. It was invisible (users verify routing by reading
-//! their CLI's config files), fragile against config layers that outrank the
-//! process environment, and split session storage. This module does what
-//! cc-switch and the Electron client do instead: **edit the live files**.
-//!
-//! Two modes, matching cc-switch's split:
-//!
-//! * **Switching mode** — Claude Code (`~/.claude/settings.json`), Codex
-//!   (`~/.codex/auth.json` + `config.toml`), Grok (`~/.grok/config.toml`).
-//!   Taking over captures a backup of each file first, then surgically edits
-//!   only our keys (JSON deep-merge; TOML via `toml_edit`, preserving the
-//!   user's comments and key order). Releasing restores our keys from the
-//!   backup and leaves everything the user changed meanwhile intact.
-//! * **Additive mode** — OpenCode (`opencode.json`) and Pi (`models.json`).
-//!   We own exactly one provider entry named [`PROVIDER_ID`]; adding and
-//!   removing it never touches the user's other entries. Pi's `auth.json`
-//!   and `settings.json` are never read or written.
-//!
-//! The takeover ledger lives at `~/.cheaprouter/takeover.json`. Every write is
-//! atomic (temp file + rename) and credential-bearing files are 0600 on
-//! Unix. All paths are parameterized so tests never touch the real home.
+//! External agent CLIs are not configured or launched by this build. The
+//! native writer keeps the original backup/restore behavior for the built-in
+//! agent's settings, and all filesystem writes are atomic.
 
-pub mod claude;
-pub mod codex;
-pub mod grok;
 pub mod native;
-pub mod opencode;
-pub mod pi;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -41,43 +16,19 @@ use crate::brand;
 use crate::custom_api::{CustomApiConfig, NATIVE_SLOTS};
 use crate::gateway::GatewayConfig;
 
-/// The provider entry name we own in additive configs and the Codex provider
-/// table. One stable id, so upgrades and removals always find their entry.
-pub const PROVIDER_ID: &str = "cheaprouter";
-
-/// Where every file this module touches lives. Parameterized so tests build
-/// the whole tree under a temp directory.
+/// Files used by the built-in agent's routing writer. Parameterized so tests
+/// never touch the real home directory.
 #[derive(Clone, Debug)]
 pub struct Paths {
-    /// Our own state directory (`~/.cheaprouter`), holding the takeover ledger.
     pub data_dir: PathBuf,
-    /// The built-in agent's config directory. Not a CLI, but its routing is
-    /// written the same way so it is just as verifiable.
     pub native_dir: PathBuf,
-    pub claude_dir: PathBuf,
-    pub codex_dir: PathBuf,
-    pub grok_dir: PathBuf,
-    pub opencode_dir: PathBuf,
-    pub pi_agent_dir: PathBuf,
 }
 
 impl Paths {
-    /// The real locations, matching each CLI's own resolution rules.
     pub fn resolve() -> Option<Self> {
-        let home = dirs::home_dir()?;
         Some(Self {
             data_dir: brand::data_dir()?,
             native_dir: native::config_dir()?,
-            claude_dir: home.join(".claude"),
-            codex_dir: home.join(".codex"),
-            grok_dir: home.join(".grok"),
-            // OpenCode uses `~/.config/opencode` on every platform.
-            opencode_dir: home.join(".config").join("opencode"),
-            // Pi honours PI_CODING_AGENT_DIR, same as the CLI itself.
-            pi_agent_dir: std::env::var_os("PI_CODING_AGENT_DIR")
-                .map(PathBuf::from)
-                .filter(|path| path.is_absolute())
-                .unwrap_or_else(|| home.join(".pi").join("agent")),
         })
     }
 
@@ -86,72 +37,36 @@ impl Paths {
     }
 }
 
-/// What one CLI should route through.
+/// One API route used by the built-in agent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RouteTarget {
-    /// Service origin as entered; writers normalize (`/v1` etc.) per CLI.
     pub base_url: String,
     pub api_key: String,
-    /// Model ids to advertise, for the CLIs whose config carries a model
-    /// list (OpenCode, Pi). Empty means "none declared".
     pub models: Vec<String>,
-    /// The managed gateway, not somebody else's endpoint. The gateway also
-    /// answers the OpenAI paths at its root (`/responses`, `/models`), which
-    /// a writer may rely on only here.
     pub managed_gateway: bool,
 }
 
-/// The built-in agent's routing: one line per API it can speak, because
-/// each is reached separately and may be pointed somewhere different.
+/// The built-in agent's routing: one line per API format it can speak.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NativeRoutes {
-    /// Anthropic Messages — the engine's `anthropic` provider entry.
     pub messages: Option<RouteTarget>,
-    /// OpenAI Responses — the engine's `codex` provider entry.
     pub responses: Option<RouteTarget>,
-    /// OpenAI Chat Completions — the engine's `openai` provider entry.
     pub chat: Option<RouteTarget>,
-    /// Every gateway key the account holds, by the platform it authorizes:
-    /// `anthropic`, `openai`, and `default` (the general key). The session
-    /// picks from these by the model's platform.
-    ///
-    /// Invariant: empty whenever any line above is the user's own endpoint.
-    /// This table is consulted by platform and would otherwise hand a
-    /// gateway key to a request aimed at somebody else's server.
+    /// Gateway keys by platform. Empty whenever a user's own endpoint is in
+    /// use, so a gateway key can never be sent to that endpoint.
     pub platform_keys: BTreeMap<String, String>,
-    /// The key for each model whose group is known, consulted before
-    /// `platform_keys`: the group that serves a model is not always the one
-    /// holding its platform's key. Same invariant as `platform_keys`.
     pub model_keys: BTreeMap<String, String>,
-    /// The platform of the group behind each model in `model_keys`, where
-    /// known. Same invariant as `model_keys`.
     pub model_platforms: BTreeMap<String, String>,
-    /// Each model's context window in tokens: the gateway catalog's, with
-    /// what the user declared for the models of an endpoint of their own on
-    /// top. Not a secret and not tied to a route, so it has no invariant of
-    /// its own — a window is a property of the model name.
     pub context_windows: BTreeMap<String, u64>,
-    /// Every endpoint of the user's own whose models the picker lists, by
-    /// provider id. A session on one of those models (`custom:<id>::<model>`)
-    /// goes to that endpoint in its declared format, whatever the three lines
-    /// above say.
-    ///
-    /// Not subject to the key invariant: a session names its endpoint
-    /// explicitly and never consults `platform_keys` or `model_keys`, so
-    /// listing endpoints here does not empty them.
+    /// User-declared endpoints whose models are offered to the built-in agent.
     pub endpoints: BTreeMap<String, EndpointRoute>,
 }
 
-/// One endpoint of the user's own, as the built-in agent reaches it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EndpointRoute {
     pub format: crate::providers::ApiFormat,
-    /// The stored address; the writer normalizes it like every other base.
     pub base_url: String,
     pub api_key: String,
-    /// The windows the user declared for this endpoint's models. Kept per
-    /// endpoint: the same model name on the gateway, or on another relay,
-    /// may have another window.
     pub context_windows: BTreeMap<String, u64>,
 }
 
@@ -163,7 +78,6 @@ impl NativeRoutes {
             && self.endpoints.is_empty()
     }
 
-    /// The line feeding one engine provider entry.
     pub fn target(&self, engine_provider: &str) -> Option<&RouteTarget> {
         match engine_provider {
             "anthropic" => self.messages.as_ref(),
@@ -174,31 +88,14 @@ impl NativeRoutes {
     }
 }
 
-/// The routing every CLI should end up with. `None` = leave alone / restore.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DesiredRoutes {
     pub native: Option<NativeRoutes>,
-    pub claude: Option<RouteTarget>,
-    pub codex: Option<RouteTarget>,
-    pub grok: Option<RouteTarget>,
-    pub opencode: Option<RouteTarget>,
-    pub pi: Option<RouteTarget>,
 }
 
-/// Fold the cloud gateway and the custom endpoints into one desired state.
-///
-/// Per CLI the cloud wins while it covers it (signed in, routing on, key
-/// present); the custom endpoint applies otherwise. Grok rides the general
-/// gateway key — the Electron client's managed login set Grok up the same
-/// way. OpenCode and Pi are custom-only for now; their writers are generic,
-/// so extending cloud coverage later is a matter of adding two lines here.
-///
-/// The built-in agent is the one exception, and deliberately so: there the
-/// **custom endpoint wins**. Its three lines are individually configurable,
-/// and a line the user has filled in is an instruction about that API — "use
-/// this one" — which a signed-in session has no business overriding. Lines
-/// left blank still fall back to the gateway, so signing in and filling in
-/// one box are not mutually exclusive.
+/// Fold the managed gateway and the user's endpoints into native routes.
+/// An explicitly bound custom format wins; unbound formats fall back to the
+/// selected gateway origin.
 pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -> DesiredRoutes {
     let cloud = cloud.filter(|config| config.is_usable());
     let cloud_target = |key: Option<&str>| {
@@ -221,74 +118,53 @@ pub fn desired_routes(cloud: Option<&GatewayConfig>, custom: &CustomApiConfig) -
                 managed_gateway: false,
             })
     };
-    let native = {
-        let any_custom = NATIVE_SLOTS
-            .into_iter()
-            .any(|slot| custom.routed_endpoint(slot).is_some());
-        let mut platform_keys = BTreeMap::new();
-        let mut model_keys = BTreeMap::new();
-        let mut model_platforms = BTreeMap::new();
-        // Only while every line is the gateway's. A per-platform table next
-        // to somebody else's endpoint would hand that server our key.
-        if let Some(config) = cloud.filter(|_| !any_custom) {
-            model_keys = config
-                .model_keys
-                .iter()
-                .filter(|(_, key)| !key.trim().is_empty())
-                .map(|(model, key)| (model.clone(), key.trim().to_owned()))
-                .collect();
-            model_platforms = config
-                .model_platforms
-                .iter()
-                .filter(|(model, _)| model_keys.contains_key(*model))
-                .map(|(model, platform)| (model.clone(), platform.clone()))
-                .collect();
-            for (platform, key) in [
-                ("anthropic", config.key_for("claude")),
-                ("openai", config.key_for("codex")),
-                ("default", config.api_key.as_deref()),
-            ] {
-                if let Some(key) = key.map(str::trim).filter(|key| !key.is_empty()) {
-                    platform_keys.insert(platform.to_owned(), key.to_owned());
-                }
+    let any_custom = NATIVE_SLOTS
+        .into_iter()
+        .any(|slot| custom.routed_endpoint(slot).is_some());
+    let mut platform_keys = BTreeMap::new();
+    let mut model_keys = BTreeMap::new();
+    let mut model_platforms = BTreeMap::new();
+    if let Some(config) = cloud.filter(|_| !any_custom) {
+        model_keys = config
+            .model_keys
+            .iter()
+            .filter(|(_, key)| !key.trim().is_empty())
+            .map(|(model, key)| (model.clone(), key.trim().to_owned()))
+            .collect();
+        model_platforms = config
+            .model_platforms
+            .iter()
+            .filter(|(model, _)| model_keys.contains_key(*model))
+            .map(|(model, platform)| (model.clone(), platform.clone()))
+            .collect();
+        for (platform, key) in [
+            ("anthropic", config.key_for("claude")),
+            ("openai", config.key_for("codex")),
+            ("default", config.api_key.as_deref()),
+        ] {
+            if let Some(key) = key.map(str::trim).filter(|key| !key.is_empty()) {
+                platform_keys.insert(platform.to_owned(), key.to_owned());
             }
         }
-        let routes = NativeRoutes {
-            messages: custom_target("native_messages")
-                .or_else(|| cloud_target(cloud.and_then(|config| config.key_for("claude")))),
-            responses: custom_target("native_responses")
-                .or_else(|| cloud_target(cloud.and_then(|config| config.key_for("codex")))),
-            chat: custom_target("native_chat")
-                .or_else(|| cloud_target(cloud.and_then(|config| config.api_key.as_deref()))),
-            platform_keys,
-            model_keys,
-            model_platforms,
-            context_windows: native_context_windows(cloud, custom),
-            endpoints: native_endpoints(custom),
-        };
-        (!routes.is_empty()).then_some(routes)
+    }
+    let routes = NativeRoutes {
+        messages: custom_target("native_messages")
+            .or_else(|| cloud_target(cloud.and_then(|config| config.key_for("claude")))),
+        responses: custom_target("native_responses")
+            .or_else(|| cloud_target(cloud.and_then(|config| config.key_for("codex")))),
+        chat: custom_target("native_chat")
+            .or_else(|| cloud_target(cloud.and_then(|config| config.api_key.as_deref()))),
+        platform_keys,
+        model_keys,
+        model_platforms,
+        context_windows: native_context_windows(cloud, custom),
+        endpoints: native_endpoints(custom),
     };
-    // A CLI the user keeps on their own sign-in gets nothing from the cloud;
-    // an endpoint they bound to it themselves still applies.
-    let managed = |cli: &str| cloud.filter(|config| config.manages_cli(cli));
     DesiredRoutes {
-        native,
-        claude: cloud_target(managed("claude").and_then(|config| config.key_for("claude")))
-            .or_else(|| custom_target("claude")),
-        codex: cloud_target(managed("codex").and_then(|config| config.key_for("codex")))
-            .or_else(|| custom_target("codex")),
-        grok: cloud_target(managed("grok").and_then(|config| config.api_key.as_deref()))
-            .or_else(|| custom_target("grok")),
-        opencode: custom_target("opencode"),
-        pi: custom_target("pi"),
+        native: (!routes.is_empty()).then_some(routes),
     }
 }
 
-/// The endpoints whose models the built-in agent's picker lists: every
-/// provider the user described that routes and declares a model
-/// ([`crate::providers::ProviderEntry::offers_models_to_agent`]). Bound to a
-/// slot or not — describing an endpoint and its models is what puts them in
-/// the picker.
 fn native_endpoints(custom: &CustomApiConfig) -> BTreeMap<String, EndpointRoute> {
     custom
         .registry
@@ -318,11 +194,6 @@ fn native_endpoints(custom: &CustomApiConfig) -> BTreeMap<String, EndpointRoute>
         .collect()
 }
 
-/// The context windows the built-in agent sizes its models by: the gateway
-/// catalog's, then — winning — the ones the user declared for the models of
-/// each endpoint a native line is routed through. Only declared values count;
-/// `ModelEntry::context_window_or_default`'s fallback is a guess, and the
-/// engine already has guesses of its own.
 fn native_context_windows(
     cloud: Option<&GatewayConfig>,
     custom: &CustomApiConfig,
@@ -349,64 +220,41 @@ fn native_context_windows(
     windows
 }
 
-/// Which configuration a CLI runs with right now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RouteKind {
-    /// The managed gateway covers it: signed in, routing on, key present.
     Cloud,
-    /// A usable custom endpoint is set and nothing outranks it.
     Custom,
-    /// Neither — the CLI's own configuration, untouched (or restored).
+    /// No managed or custom route is bound to this native API format.
     CliOwn,
 }
 
-/// The route an endpoint is on, for the Providers page. Same precedence as
-/// [`desired_routes`], including its one asymmetry: for a CLI the cloud wins
-/// while it covers it, and a custom entry the cloud outranks is still stored
-/// (which is why the page says so next to it) — but for the built-in agent's
-/// three lines the user's own endpoint wins, so a filled-in box always reads
-/// as Custom.
 pub fn active_route_kind(
     provider_id: &str,
     cloud: Option<&GatewayConfig>,
     custom: &CustomApiConfig,
 ) -> RouteKind {
-    if NATIVE_SLOTS.contains(&provider_id) {
-        if custom.routed_endpoint(provider_id).is_some() {
-            return RouteKind::Custom;
-        }
-        let cloud_only = desired_routes(cloud, &CustomApiConfig::default());
-        let covered = cloud_only
-            .native
-            .as_ref()
-            .is_some_and(|routes| match provider_id {
-                "native_messages" => routes.messages.is_some(),
-                "native_responses" => routes.responses.is_some(),
-                _ => routes.chat.is_some(),
-            });
-        return if covered {
-            RouteKind::Cloud
-        } else {
-            RouteKind::CliOwn
-        };
+    if !NATIVE_SLOTS.contains(&provider_id) {
+        return RouteKind::CliOwn;
+    }
+    if custom.routed_endpoint(provider_id).is_some() {
+        return RouteKind::Custom;
     }
     let cloud_only = desired_routes(cloud, &CustomApiConfig::default());
-    let cloud_covers = match provider_id {
-        "claude" => cloud_only.claude.is_some(),
-        "codex" => cloud_only.codex.is_some(),
-        "grok" => cloud_only.grok.is_some(),
-        _ => false,
-    };
-    if cloud_covers {
+    let covered = cloud_only
+        .native
+        .as_ref()
+        .is_some_and(|routes| match provider_id {
+            "native_messages" => routes.messages.is_some(),
+            "native_responses" => routes.responses.is_some(),
+            _ => routes.chat.is_some(),
+        });
+    if covered {
         RouteKind::Cloud
-    } else if custom.routed_endpoint(provider_id).is_some() {
-        RouteKind::Custom
     } else {
         RouteKind::CliOwn
     }
 }
 
-/// A file as it was the moment we first took a CLI over.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileBackup {
     pub existed: bool,
@@ -414,25 +262,13 @@ pub struct FileBackup {
     pub content: String,
 }
 
-/// Backups for one switching-mode CLI, keyed by file name.
 pub type CliBackups = BTreeMap<String, FileBackup>;
 
-/// The takeover ledger: which CLIs we currently manage, and what their
-/// files looked like before we did.
+/// The native settings backup. Old CLI fields in this JSON are ignored.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TakeoverState {
     #[serde(default)]
     pub native: Option<CliBackups>,
-    #[serde(default)]
-    pub claude: Option<CliBackups>,
-    #[serde(default)]
-    pub codex: Option<CliBackups>,
-    #[serde(default)]
-    pub grok: Option<CliBackups>,
-    #[serde(default)]
-    pub opencode: bool,
-    #[serde(default)]
-    pub pi: bool,
 }
 
 pub fn load_state(paths: &Paths) -> TakeoverState {
@@ -447,10 +283,6 @@ fn save_state(paths: &Paths, state: &TakeoverState) -> Result<()> {
     atomic_write_private(&paths.takeover_path(), encoded.as_bytes())
 }
 
-/// Drive every CLI's live configuration to `desired`, at the real paths.
-///
-/// Returns per-CLI warnings; a CLI that cannot be written (unparseable file,
-/// permissions) is skipped with a warning rather than failing the rest.
 pub fn reconcile(desired: &DesiredRoutes) -> Result<Vec<String>> {
     let paths = Paths::resolve().ok_or_else(|| anyhow!("could not locate the home directory"))?;
     let warnings = reconcile_at(&paths, desired)?;
@@ -458,77 +290,21 @@ pub fn reconcile(desired: &DesiredRoutes) -> Result<Vec<String>> {
     Ok(warnings)
 }
 
-/// [`reconcile`] against explicit paths.
 pub fn reconcile_at(paths: &Paths, desired: &DesiredRoutes) -> Result<Vec<String>> {
     let mut state = load_state(paths);
     let mut warnings = Vec::new();
-
-    // Switching-mode CLIs: take over (capturing backups once) or restore.
-    reconcile_switching(
-        "native",
+    reconcile_native(
         desired.native.as_ref(),
         &mut state.native,
         &mut warnings,
         |routes, backups| native::take_over(&paths.native_dir, routes, backups),
         |backups| native::restore(&paths.native_dir, backups),
     );
-    reconcile_switching(
-        "claude",
-        desired.claude.as_ref(),
-        &mut state.claude,
-        &mut warnings,
-        |target, backups| claude::take_over(&paths.claude_dir, target, backups),
-        |backups| claude::restore(&paths.claude_dir, backups),
-    );
-    reconcile_switching(
-        "codex",
-        desired.codex.as_ref(),
-        &mut state.codex,
-        &mut warnings,
-        |target, backups| codex::take_over(&paths.codex_dir, target, backups),
-        |backups| codex::restore(&paths.codex_dir, backups),
-    );
-    reconcile_switching(
-        "grok",
-        desired.grok.as_ref(),
-        &mut state.grok,
-        &mut warnings,
-        |target, backups| grok::take_over(&paths.grok_dir, target, backups),
-        |backups| grok::restore(&paths.grok_dir, backups),
-    );
-
-    // Additive-mode CLIs: insert or remove our single provider entry.
-    match desired.opencode.as_ref() {
-        Some(target) => match opencode::take_over(&paths.opencode_dir, target) {
-            Ok(()) => state.opencode = true,
-            Err(error) => warnings.push(format!("opencode: {error:#}")),
-        },
-        None if state.opencode => match opencode::remove(&paths.opencode_dir) {
-            Ok(()) => state.opencode = false,
-            Err(error) => warnings.push(format!("opencode: {error:#}")),
-        },
-        None => {}
-    }
-    match desired.pi.as_ref() {
-        Some(target) => match pi::take_over(&paths.pi_agent_dir, target) {
-            Ok(()) => state.pi = true,
-            Err(error) => warnings.push(format!("pi: {error:#}")),
-        },
-        None if state.pi => match pi::remove(&paths.pi_agent_dir) {
-            Ok(()) => state.pi = false,
-            Err(error) => warnings.push(format!("pi: {error:#}")),
-        },
-        None => {}
-    }
-
     save_state(paths, &state)?;
     Ok(warnings)
 }
 
-/// One switching-mode CLI's reconcile step. On a failed restore the backups
-/// are kept so a later attempt can still put the user's file back.
-fn reconcile_switching<T>(
-    cli: &str,
+fn reconcile_native<T>(
     target: Option<&T>,
     slot: &mut Option<CliBackups>,
     warnings: &mut Vec<String>,
@@ -539,47 +315,33 @@ fn reconcile_switching<T>(
         Some(target) => {
             let backups = slot.get_or_insert_with(BTreeMap::new);
             if let Err(error) = take_over(target, backups) {
-                warnings.push(format!("{cli}: {error:#}"));
+                warnings.push(format!("native: {error:#}"));
             }
         }
         None => {
-            if let Some(backups) = slot.take() {
-                if let Err(error) = restore(&backups) {
-                    warnings.push(format!("{cli}: {error:#}"));
-                    *slot = Some(backups);
-                }
+            if let Some(backups) = slot.take()
+                && let Err(error) = restore(&backups)
+            {
+                warnings.push(format!("native: {error:#}"));
+                *slot = Some(backups);
             }
         }
     }
 }
 
-/// The live configuration file routing writes for `provider_id` — what a
-/// user opens to verify a save took.
 pub fn config_file_for(provider_id: &str) -> Option<PathBuf> {
     let paths = Paths::resolve()?;
-    Some(match provider_id {
-        // All three of the built-in agent's lines live in the one file the
-        // engine reads, as three entries inside it.
-        provider if NATIVE_SLOTS.contains(&provider) => native::settings_path(&paths.native_dir),
-        "claude" => paths.claude_dir.join("settings.json"),
-        "codex" => paths.codex_dir.join("config.toml"),
-        "grok" => paths.grok_dir.join("config.toml"),
-        "opencode" => paths.opencode_dir.join("opencode.json"),
-        "pi" => paths.pi_agent_dir.join("models.json"),
-        _ => return None,
-    })
+    NATIVE_SLOTS
+        .contains(&provider_id)
+        .then(|| native::settings_path(&paths.native_dir))
 }
 
-/// The injection era generated config directories under our data dir; they
-/// are dead weight now and their stale credentials should not linger.
 fn cleanup_legacy_generated_dirs(data_dir: &Path) {
     for legacy in ["gateway", "custom"] {
         let _ = std::fs::remove_dir_all(data_dir.join(legacy));
     }
 }
 
-/// Record `path`'s current content into `backups` under `name`, once. Later
-/// takeovers (group switches) must not overwrite the pre-takeover original.
 pub(crate) fn capture_backup(backups: &mut CliBackups, name: &str, path: &Path) -> Result<()> {
     if backups.contains_key(name) {
         return Ok(());
@@ -598,8 +360,7 @@ pub(crate) fn capture_backup(backups: &mut CliBackups, name: &str, path: &Path) 
     Ok(())
 }
 
-/// Write atomically: temp file in the same directory, then rename over the
-/// target. Credential-bearing files get 0600 on Unix.
+/// Write atomically beside the target, with owner-only permissions on Unix.
 pub fn atomic_write_private(path: &Path, contents: &[u8]) -> Result<()> {
     let parent = path
         .parent()
@@ -615,8 +376,6 @@ pub fn atomic_write_private(path: &Path, contents: &[u8]) -> Result<()> {
         let _ = std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600));
     }
     std::fs::rename(&temporary, path).or_else(|_| {
-        // Windows rename over an existing read-locked file can fail; fall
-        // back to remove + rename, and clean the temp file up on failure.
         let fallback = std::fs::remove_file(path).and_then(|_| std::fs::rename(&temporary, path));
         if fallback.is_err() {
             let _ = std::fs::remove_file(&temporary);
@@ -626,19 +385,6 @@ pub fn atomic_write_private(path: &Path, contents: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Set a TOML key, replacing an existing value **in place** so the key's
-/// decor — the user's comment sitting right above it — survives.
-/// `Table::insert` would mint a fresh key and drop that comment.
-pub(crate) fn set_toml_value(table: &mut toml_edit::Table, key: &str, item: toml_edit::Item) {
-    match table.get_mut(key) {
-        Some(existing) => *existing = item,
-        None => {
-            table.insert(key, item);
-        }
-    }
-}
-
-/// Remove `path` if it exists; absent is success.
 pub(crate) fn remove_if_exists(path: &Path) -> Result<()> {
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
@@ -650,622 +396,50 @@ pub(crate) fn remove_if_exists(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::{ApiFormat, ProviderEntry};
 
-    /// Routing follows the registry, not the copy a slot still carries: the
-    /// two only agree until the user edits one of them, and the entry is the
-    /// one the settings page edits.
-    #[test]
-    fn a_bound_slot_routes_through_its_registry_entry() {
-        let mut custom = CustomApiConfig::default();
-        custom.set(
-            "grok",
-            Some(crate::custom_api::CustomEndpoint {
-                base_url: "https://stale.example.org".into(),
-                api_key: "sk-stale".into(),
-                models: Vec::new(),
-            }),
-        );
-        let mut entry = ProviderEntry::new("Relay", ApiFormat::OpenAiChat);
-        entry.base_url = "https://relay.example.org".into();
-        entry.api_key = "sk-relay".into();
-        entry.set_model_ids(["m1"]);
-        let id = custom.registry.add(entry);
-        assert!(custom.bind_provider("grok", Some(&id)));
-
-        let routes = desired_routes(None, &custom);
-        let grok = routes.grok.expect("the entry routes");
-        assert_eq!(grok.base_url, "https://relay.example.org");
-        assert_eq!(grok.api_key, "sk-relay");
-        assert_eq!(grok.models, ["m1"]);
-        assert_eq!(active_route_kind("grok", None, &custom), RouteKind::Custom);
-
-        // Switched off, the slot stops routing rather than falling back to
-        // the address it used to hold.
-        custom.registry.get_mut(&id).unwrap().enabled = false;
-        assert!(desired_routes(None, &custom).grok.is_none());
-        assert_eq!(active_route_kind("grok", None, &custom), RouteKind::CliOwn);
-    }
-
-    /// The built-in agent's inversion has to survive the indirection: a
-    /// filled-in line still outranks a signed-in gateway, and a line pointing
-    /// at a switched-off entry falls back to the gateway rather than to
-    /// nothing.
-    #[test]
-    fn a_bound_native_line_still_outranks_the_gateway() {
-        let cloud = GatewayConfig {
-            enabled: true,
-            endpoint: "https://cloud.example.org".into(),
-            api_key: Some("sk-general".into()),
-            claude_api_key: Some("sk-claude".into()),
-            codex_api_key: None,
-            codex_model: None,
-            model_keys: Default::default(),
-            model_platforms: Default::default(),
-            model_windows: Default::default(),
-            own_login_clis: Default::default(),
-        };
-        let mut custom = CustomApiConfig::default();
-        let mut entry = ProviderEntry::new("Mine", ApiFormat::Anthropic);
-        entry.base_url = "https://mine.example.org".into();
-        entry.api_key = "sk-mine".into();
-        let id = custom.registry.add(entry);
-        assert!(custom.bind_provider("native_messages", Some(&id)));
-
-        let native = desired_routes(Some(&cloud), &custom)
-            .native
-            .expect("the built-in agent is routed");
-        assert_eq!(
-            native
-                .messages
-                .as_ref()
-                .map(|route| route.base_url.as_str()),
-            Some("https://mine.example.org")
-        );
-        // Untouched lines still reach the gateway, and the per-platform key
-        // table is withheld while any line is the user's own.
-        assert_eq!(
-            native.chat.as_ref().map(|route| route.base_url.as_str()),
-            Some("https://cloud.example.org")
-        );
-        assert!(native.platform_keys.is_empty());
-
-        custom.registry.get_mut(&id).unwrap().enabled = false;
-        let native = desired_routes(Some(&cloud), &custom)
-            .native
-            .expect("the gateway still covers it");
-        assert_eq!(
-            native
-                .messages
-                .as_ref()
-                .map(|route| route.base_url.as_str()),
-            Some("https://cloud.example.org")
-        );
-        // Nothing is the user's own any more, so the table comes back.
-        assert!(!native.platform_keys.is_empty());
-    }
-
-    fn signed_in() -> GatewayConfig {
+    fn cloud() -> GatewayConfig {
         GatewayConfig {
             enabled: true,
-            endpoint: "https://cloud.example.org".into(),
+            endpoint: "https://gateway.example.com".into(),
             api_key: Some("sk-general".into()),
-            claude_api_key: Some("sk-claude".into()),
             ..GatewayConfig::default()
         }
     }
 
-    fn relay(name: &str, format: ApiFormat, models: &[&str]) -> ProviderEntry {
-        let mut entry = ProviderEntry::new(name, format);
-        entry.base_url = format!("https://{name}.example.org");
-        entry.api_key = format!("sk-{name}");
-        entry.set_model_ids(models.iter().copied());
-        entry
-    }
-
-    /// Describing an endpoint and its models is what puts them in front of
-    /// the built-in agent — on any of the three formats, bound to a line or
-    /// not.
     #[test]
-    fn every_usable_provider_with_models_is_offered_to_the_agent() {
-        let mut custom = CustomApiConfig::default();
-        let mut messages = relay("kimi", ApiFormat::Anthropic, &["kimi-k3"]);
-        messages.models[0].context_window = Some(256_000);
-        let messages = custom.registry.add(messages);
-        let responses =
-            custom
-                .registry
-                .add(relay("ark", ApiFormat::OpenAiResponses, &["doubao-seed"]));
-        let chat = custom
-            .registry
-            .add(relay("glm", ApiFormat::OpenAiChat, &["glm-5.1"]));
-
-        let native = desired_routes(Some(&signed_in()), &custom).native.unwrap();
-        let ids: Vec<&str> = native.endpoints.keys().map(String::as_str).collect();
-        let mut expected = vec![messages.as_str(), responses.as_str(), chat.as_str()];
-        expected.sort_unstable();
-        assert_eq!(ids, expected);
-        let kimi = &native.endpoints[&messages];
-        assert_eq!(kimi.format, ApiFormat::Anthropic);
-        assert_eq!(kimi.base_url, "https://kimi.example.org");
-        assert_eq!(kimi.api_key, "sk-kimi");
-        assert_eq!(
-            kimi.context_windows,
-            BTreeMap::from([("kimi-k3".to_owned(), 256_000)])
-        );
-        // Undeclared windows stay undeclared.
-        assert!(native.endpoints[&chat].context_windows.is_empty());
-    }
-
-    #[test]
-    fn disabled_incomplete_or_empty_providers_are_not() {
-        let mut custom = CustomApiConfig::default();
-        let mut off = relay("off", ApiFormat::OpenAiChat, &["m"]);
-        off.enabled = false;
-        custom.registry.add(off);
-        let mut keyless = relay("keyless", ApiFormat::OpenAiChat, &["m"]);
-        keyless.api_key.clear();
-        custom.registry.add(keyless);
-        custom
-            .registry
-            .add(relay("empty", ApiFormat::OpenAiChat, &[]));
-
-        let native = desired_routes(Some(&signed_in()), &custom).native.unwrap();
-        assert!(native.endpoints.is_empty());
-    }
-
-    /// Endpoints are chosen by name, never by platform, so listing one does
-    /// not cost the gateway models their per-model keys. Binding a line
-    /// still does: that line sends gateway model ids to the user's server.
-    #[test]
-    fn offering_providers_keeps_the_gateway_key_tables() {
-        let mut custom = CustomApiConfig::default();
-        let id = custom
-            .registry
-            .add(relay("glm", ApiFormat::OpenAiChat, &["glm-5.1"]));
-
-        let native = desired_routes(Some(&signed_in()), &custom).native.unwrap();
-        assert!(!native.endpoints.is_empty());
-        assert!(!native.platform_keys.is_empty());
-        assert_eq!(
-            native.chat.as_ref().map(|route| route.base_url.as_str()),
-            Some("https://cloud.example.org")
-        );
-
-        assert!(custom.bind_provider("native_chat", Some(&id)));
-        let native = desired_routes(Some(&signed_in()), &custom).native.unwrap();
-        assert!(
-            native.platform_keys.is_empty(),
-            "a bound line still empties them"
-        );
-    }
-
-    /// Signed out with nothing bound, an endpoint of their own is still a
-    /// route the built-in agent has to be told about.
-    #[test]
-    fn providers_alone_take_the_agent_over() {
-        let mut custom = CustomApiConfig::default();
-        custom
-            .registry
-            .add(relay("glm", ApiFormat::OpenAiChat, &["glm-5.1"]));
-        let native = desired_routes(None, &custom).native.expect("routed");
-        assert!(native.messages.is_none() && native.responses.is_none() && native.chat.is_none());
-        assert_eq!(native.endpoints.len(), 1);
-    }
-
-    /// The catalog's windows reach the built-in agent, and what the user
-    /// declared for a model of their own endpoint wins — but only a declared
-    /// window: the fallback a model entry answers with is a guess.
-    #[test]
-    fn native_windows_are_the_catalogs_with_the_users_declarations_on_top() {
-        let cloud = GatewayConfig {
-            enabled: true,
-            endpoint: "https://cloud.example.org".into(),
-            api_key: Some("sk-general".into()),
-            claude_api_key: Some("sk-claude".into()),
-            model_windows: BTreeMap::from([
-                ("gpt-5.6-sol".to_owned(), 400_000),
-                ("claude-sonnet-5".to_owned(), 1_000_000),
-            ]),
-            ..GatewayConfig::default()
-        };
-        let mut custom = CustomApiConfig::default();
-        let mut entry = ProviderEntry::new("Mine", ApiFormat::Anthropic);
-        entry.base_url = "https://mine.example.org".into();
-        entry.api_key = "sk-mine".into();
-        entry.models = vec![
-            crate::providers::ModelEntry {
-                context_window: Some(200_000),
-                ..crate::providers::ModelEntry::new("claude-sonnet-5")
-            },
-            crate::providers::ModelEntry::new("undeclared"),
-        ];
-        let id = custom.registry.add(entry);
-        assert!(custom.bind_provider("native_messages", Some(&id)));
-
-        let native = desired_routes(Some(&cloud), &custom).native.unwrap();
-        assert_eq!(
-            native.context_windows,
-            BTreeMap::from([
-                ("claude-sonnet-5".to_owned(), 200_000),
-                ("gpt-5.6-sol".to_owned(), 400_000),
-            ])
-        );
-    }
-
-    #[test]
-    fn active_route_kind_prefers_cloud_over_custom() {
-        let cloud = GatewayConfig {
-            enabled: true,
-            endpoint: "https://cloud.example.org".into(),
-            api_key: Some("sk-general".into()),
-            claude_api_key: Some("sk-claude".into()),
-            codex_api_key: None,
-            codex_model: None,
-            model_keys: Default::default(),
-            model_platforms: Default::default(),
-            model_windows: Default::default(),
-            own_login_clis: Default::default(),
-        };
-        let mut custom = CustomApiConfig::default();
-        custom.set(
-            "claude",
-            Some(crate::custom_api::CustomEndpoint {
-                base_url: "https://mine.example.org".into(),
-                api_key: "sk-mine".into(),
-                models: Vec::new(),
-            }),
-        );
-        custom.set(
-            "codex",
-            Some(crate::custom_api::CustomEndpoint {
-                base_url: "https://mine.example.org".into(),
-                api_key: "sk-mine".into(),
-                models: Vec::new(),
-            }),
-        );
-
-        // Claude: the cloud key outranks the stored custom endpoint.
-        assert_eq!(
-            active_route_kind("claude", Some(&cloud), &custom),
-            RouteKind::Cloud
-        );
-        // Codex and Grok ride the general key when they have none of their own.
-        assert_eq!(
-            active_route_kind("codex", Some(&cloud), &custom),
-            RouteKind::Cloud
-        );
-        assert_eq!(
-            active_route_kind("grok", Some(&cloud), &custom),
-            RouteKind::Cloud
-        );
-        // Without a general key, Codex falls back to its custom endpoint and
-        // Grok has nothing.
-        let claude_only = GatewayConfig {
-            api_key: None,
-            ..cloud.clone()
-        };
-        assert_eq!(
-            active_route_kind("codex", Some(&claude_only), &custom),
-            RouteKind::Custom
-        );
-        assert_eq!(
-            active_route_kind("grok", Some(&claude_only), &custom),
-            RouteKind::CliOwn
-        );
-        // Nothing configured at all.
-        assert_eq!(
-            active_route_kind("pi", Some(&cloud), &custom),
-            RouteKind::CliOwn
-        );
-        // Signed out: the custom endpoint takes over for Claude.
-        assert_eq!(
-            active_route_kind("claude", None, &custom),
-            RouteKind::Custom
-        );
-        let disabled = GatewayConfig {
-            enabled: false,
-            ..cloud
-        };
-        assert_eq!(
-            active_route_kind("grok", Some(&disabled), &custom),
-            RouteKind::CliOwn
-        );
-    }
-
-    /// A CLI kept on the user's own sign-in drops out of the cloud's routes
-    /// only: its bound endpoint still applies, the other CLIs and the
-    /// built-in agent stay on the gateway.
-    #[test]
-    fn a_cli_kept_on_its_own_login_is_left_to_it() {
-        let cloud = GatewayConfig {
-            own_login_clis: ["claude".to_owned()].into(),
-            ..signed_in()
-        };
-        let custom = CustomApiConfig::default();
-        let desired = desired_routes(Some(&cloud), &custom);
-        assert!(desired.claude.is_none());
-        assert_eq!(desired.codex.as_ref().unwrap().api_key, "sk-general");
-        assert_eq!(desired.grok.as_ref().unwrap().api_key, "sk-general");
-        let native = desired
-            .native
-            .expect("the built-in agent keeps the account");
-        assert_eq!(
-            native.messages.as_ref().map(|route| route.api_key.as_str()),
-            Some("sk-claude")
-        );
-        assert_eq!(
-            native.platform_keys.get("anthropic").map(String::as_str),
-            Some("sk-claude")
-        );
-        assert_eq!(
-            active_route_kind("claude", Some(&cloud), &custom),
-            RouteKind::CliOwn
-        );
-        assert_eq!(
-            active_route_kind("codex", Some(&cloud), &custom),
-            RouteKind::Cloud
-        );
-
-        let mut custom = CustomApiConfig::default();
-        custom.set(
-            "claude",
-            Some(crate::custom_api::CustomEndpoint {
-                base_url: "https://mine.example.org".into(),
-                api_key: "sk-mine".into(),
-                models: Vec::new(),
-            }),
-        );
-        let desired = desired_routes(Some(&cloud), &custom);
-        assert_eq!(desired.claude.as_ref().unwrap().api_key, "sk-mine");
-        assert_eq!(
-            active_route_kind("claude", Some(&cloud), &custom),
-            RouteKind::Custom
-        );
-    }
-
-    /// Choosing "keep my own" while signed in hands the files back exactly
-    /// as they were; choosing the account again takes them over afresh.
-    #[test]
-    fn switching_a_cli_to_its_own_login_restores_its_files() {
-        let paths = temp_paths("own-login");
-        let settings = r#"{"env":{"FOO":"bar"},"model":"opus"}"#;
-        let config = "# mine\nmodel = \"my-model\"\n";
-        std::fs::create_dir_all(&paths.claude_dir).unwrap();
-        std::fs::write(paths.claude_dir.join("settings.json"), settings).unwrap();
-        std::fs::create_dir_all(&paths.codex_dir).unwrap();
-        std::fs::write(paths.codex_dir.join("config.toml"), config).unwrap();
-
-        let managed = desired_routes(Some(&signed_in()), &CustomApiConfig::default());
-        reconcile_at(&paths, &managed).expect("take over");
-        assert!(
-            std::fs::read_to_string(paths.claude_dir.join("settings.json"))
-                .unwrap()
-                .contains("ANTHROPIC_AUTH_TOKEN")
-        );
-
-        let cloud = GatewayConfig {
-            own_login_clis: ["claude".to_owned(), "codex".to_owned()].into(),
-            ..signed_in()
-        };
-        let own = desired_routes(Some(&cloud), &CustomApiConfig::default());
-        let warnings = reconcile_at(&paths, &own).expect("hand back");
-        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
-        let restored: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(paths.claude_dir.join("settings.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            restored,
-            serde_json::from_str::<serde_json::Value>(settings).unwrap()
-        );
-        assert_eq!(
-            std::fs::read_to_string(paths.codex_dir.join("config.toml")).unwrap(),
-            config
-        );
-        let state = load_state(&paths);
-        assert!(state.claude.is_none() && state.codex.is_none());
-        assert!(state.native.is_some(), "the built-in agent stays routed");
-
-        reconcile_at(&paths, &managed).expect("take over again");
-        assert!(load_state(&paths).claude.is_some());
-        assert!(
-            std::fs::read_to_string(paths.claude_dir.join("settings.json"))
-                .unwrap()
-                .contains("ANTHROPIC_AUTH_TOKEN")
-        );
-        cleanup(&paths);
-    }
-
-    fn target(url: &str, key: &str) -> RouteTarget {
-        RouteTarget {
-            base_url: url.to_owned(),
-            api_key: key.to_owned(),
-            models: Vec::new(),
-            managed_gateway: false,
+    fn the_gateway_feeds_every_unbound_native_format() {
+        let desired = desired_routes(Some(&cloud()), &CustomApiConfig::default());
+        let native = desired.native.expect("native routes");
+        for target in [native.messages, native.responses, native.chat] {
+            let target = target.expect("route");
+            assert_eq!(target.base_url, "https://gateway.example.com");
+            assert_eq!(target.api_key, "sk-general");
         }
-    }
-
-    fn temp_paths(tag: &str) -> Paths {
-        let root = std::env::temp_dir().join(format!(
-            "sub2api-gc-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        Paths {
-            data_dir: root.join("waku"),
-            native_dir: root.join("claurst"),
-            claude_dir: root.join("claude"),
-            codex_dir: root.join("codex"),
-            grok_dir: root.join("grok"),
-            opencode_dir: root.join("opencode"),
-            pi_agent_dir: root.join("pi-agent"),
-        }
-    }
-
-    fn cleanup(paths: &Paths) {
-        if let Some(root) = paths.data_dir.parent() {
-            let _ = std::fs::remove_dir_all(root);
-        }
-    }
-
-    #[test]
-    fn cloud_wins_over_custom_and_grok_rides_the_general_key() {
-        let cloud = GatewayConfig {
-            enabled: true,
-            endpoint: "https://cloud.example.org".into(),
-            api_key: Some("sk-general".into()),
-            claude_api_key: Some("sk-claude".into()),
-            codex_api_key: None,
-            codex_model: None,
-            model_keys: Default::default(),
-            model_platforms: Default::default(),
-            model_windows: Default::default(),
-            own_login_clis: Default::default(),
-        };
-        let mut custom = CustomApiConfig::default();
-        custom.set(
-            "claude",
-            Some(crate::custom_api::CustomEndpoint {
-                base_url: "https://relay.example.org".into(),
-                api_key: "sk-custom".into(),
-                models: Vec::new(),
-            }),
-        );
-        custom.set(
-            "pi",
-            Some(crate::custom_api::CustomEndpoint {
-                base_url: "https://relay.example.org".into(),
-                api_key: "sk-pi".into(),
-                models: vec!["m1".into()],
-            }),
-        );
-
-        let desired = desired_routes(Some(&cloud), &custom);
-        // Cloud claude key beats the custom claude endpoint.
-        assert_eq!(desired.claude.as_ref().unwrap().api_key, "sk-claude");
-        // Codex falls back to the general key via the cloud.
-        assert_eq!(desired.codex.as_ref().unwrap().api_key, "sk-general");
-        // Grok rides the general key too.
-        assert_eq!(desired.grok.as_ref().unwrap().api_key, "sk-general");
-        // Pi is custom-only, with its model list carried through.
-        assert_eq!(desired.pi.as_ref().unwrap().models, vec!["m1".to_owned()]);
-        assert!(desired.opencode.is_none());
-
-        // Signed out: customs apply where set.
-        let desired = desired_routes(None, &custom);
-        assert_eq!(desired.claude.as_ref().unwrap().api_key, "sk-custom");
-        assert!(desired.codex.is_none());
-        assert!(desired.grok.is_none());
-    }
-
-    #[test]
-    fn reconcile_round_trips_every_cli_and_is_idempotent() {
-        let paths = temp_paths("roundtrip");
-        // Pre-existing user files with content that must survive.
-        std::fs::create_dir_all(&paths.claude_dir).unwrap();
-        std::fs::write(
-            paths.claude_dir.join("settings.json"),
-            r#"{"permissions":{"allow":["Bash"]},"env":{"FOO":"bar"}}"#,
-        )
-        .unwrap();
-        std::fs::create_dir_all(&paths.codex_dir).unwrap();
-        std::fs::write(
-            paths.codex_dir.join("config.toml"),
-            "# my note\nmodel = \"my-model\"\n\n[mcp_servers.files]\ncommand = \"fs\"\n",
-        )
-        .unwrap();
-        std::fs::write(
-            paths.codex_dir.join("auth.json"),
-            r#"{"tokens":{"access_token":"chatgpt-oauth"}}"#,
-        )
-        .unwrap();
-
-        let desired = DesiredRoutes {
-            native: Some(NativeRoutes {
-                messages: Some(target("https://gw.example.org", "sk-c")),
-                responses: Some(target("https://gw.example.org", "sk-x")),
-                chat: Some(target("https://gw.example.org", "sk-c")),
-                platform_keys: BTreeMap::from([
-                    ("anthropic".to_owned(), "sk-c".to_owned()),
-                    ("openai".to_owned(), "sk-x".to_owned()),
-                ]),
-                model_keys: BTreeMap::new(),
-                model_platforms: Default::default(),
-                context_windows: BTreeMap::new(),
-                endpoints: BTreeMap::new(),
-            }),
-            claude: Some(target("https://gw.example.org", "sk-c")),
-            codex: Some(target("https://gw.example.org", "sk-x")),
-            grok: Some(target("https://gw.example.org", "sk-g")),
-            opencode: Some(target("https://gw.example.org", "sk-o")),
-            pi: Some(target("https://gw.example.org", "sk-p")),
-        };
-        let warnings = reconcile_at(&paths, &desired).expect("reconcile");
-        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
-        // Idempotent: a second pass changes nothing and warns nothing.
-        let warnings = reconcile_at(&paths, &desired).expect("reconcile again");
-        assert!(warnings.is_empty());
-
-        // Spot-check each file is managed.
-        let claude_raw = std::fs::read_to_string(paths.claude_dir.join("settings.json")).unwrap();
-        assert!(claude_raw.contains("https://gw.example.org"));
-        assert!(claude_raw.contains(r#""FOO": "bar""#));
-        let codex_raw = std::fs::read_to_string(paths.codex_dir.join("config.toml")).unwrap();
-        assert!(codex_raw.contains("# my note"));
-        assert!(codex_raw.contains("[model_providers.OpenAI]"));
-        assert!(codex_raw.contains("[mcp_servers.files]"));
-        assert!(
-            std::fs::read_to_string(paths.grok_dir.join("config.toml"))
-                .unwrap()
-                .contains("sk-g")
-        );
-        assert!(
-            std::fs::read_to_string(paths.opencode_dir.join("opencode.json"))
-                .unwrap()
-                .contains(PROVIDER_ID)
-        );
-        assert!(
-            std::fs::read_to_string(paths.pi_agent_dir.join("models.json"))
-                .unwrap()
-                .contains(PROVIDER_ID)
-        );
-
-        // Release everything: files return to their pre-takeover state.
-        let warnings = reconcile_at(&paths, &DesiredRoutes::default()).expect("restore");
-        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
-        let claude_restored: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(paths.claude_dir.join("settings.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(claude_restored["env"]["FOO"], "bar");
-        assert!(claude_restored["env"].get("ANTHROPIC_BASE_URL").is_none());
-        let codex_restored = std::fs::read_to_string(paths.codex_dir.join("config.toml")).unwrap();
-        assert!(codex_restored.contains("# my note"));
-        assert!(codex_restored.contains("model = \"my-model\""));
-        assert!(!codex_restored.contains("[model_providers.OpenAI]"));
         assert_eq!(
-            std::fs::read_to_string(paths.codex_dir.join("auth.json")).unwrap(),
-            r#"{"tokens":{"access_token":"chatgpt-oauth"}}"#
+            native.platform_keys.get("default").map(String::as_str),
+            Some("sk-general")
         );
-        // Files we created from nothing are gone again.
-        assert!(!paths.grok_dir.join("config.toml").exists());
+    }
+
+    #[test]
+    fn an_empty_configuration_writes_no_native_route() {
         assert!(
-            !std::fs::read_to_string(paths.opencode_dir.join("opencode.json"))
-                .unwrap()
-                .contains(PROVIDER_ID)
+            desired_routes(None, &CustomApiConfig::default())
+                .native
+                .is_none()
         );
-        assert!(
-            !std::fs::read_to_string(paths.pi_agent_dir.join("models.json"))
-                .unwrap()
-                .contains(PROVIDER_ID)
+        assert_eq!(
+            active_route_kind("native_chat", None, &CustomApiConfig::default()),
+            RouteKind::CliOwn
         );
-        // Restore with nothing managed is a no-op.
-        let warnings = reconcile_at(&paths, &DesiredRoutes::default()).expect("noop");
-        assert!(warnings.is_empty());
-        cleanup(&paths);
+    }
+
+    #[test]
+    fn the_legacy_takeover_file_keeps_only_native_state() {
+        let state: TakeoverState = serde_json::from_str(
+            r#"{"claude":{"settings.json":{"existed":true,"content":"old"}}}"#,
+        )
+        .expect("legacy state");
+        assert_eq!(state, TakeoverState::default());
     }
 }

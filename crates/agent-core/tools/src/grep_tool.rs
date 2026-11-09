@@ -31,6 +31,8 @@ struct GrepInput {
     #[serde(default)]
     head_limit: Option<usize>,
     #[serde(default)]
+    offset: Option<usize>,
+    #[serde(default)]
     multiline: bool,
 }
 
@@ -128,6 +130,10 @@ impl Tool for GrepTool {
                     "type": "number",
                     "description": "Limit output to first N entries (default 250)"
                 },
+                "offset": {
+                    "type": "number",
+                    "description": "Skip this many results before starting the page"
+                },
                 "multiline": {
                     "type": "boolean",
                     "description": "Enable multiline mode where . matches newlines"
@@ -171,7 +177,8 @@ impl Tool for GrepTool {
             Err(e) => return ToolResult::error(format!("Invalid regex: {}", e)),
         };
 
-        let head_limit = params.head_limit.unwrap_or(250);
+        let head_limit = params.head_limit.unwrap_or(250).max(1);
+        let offset = params.offset.unwrap_or(0);
         let context_lines = params.context.unwrap_or(0);
         let show_line_numbers = params.show_line_numbers.unwrap_or(true);
 
@@ -193,12 +200,20 @@ impl Tool for GrepTool {
                 &params.output_mode,
                 context_lines,
                 show_line_numbers,
+                offset,
+                head_limit,
             );
         }
 
         // Walk directory tree
         let mut results: Vec<String> = Vec::new();
         let mut match_count = 0usize;
+        let mut matches = Vec::new();
+        let mut paths = Vec::new();
+        let mut counts = Vec::new();
+        let mut scanned_files = 0usize;
+        let mut skipped = 0usize;
+        let mut next_offset = None;
 
         for entry in WalkDir::new(&search_path)
             .follow_links(true)
@@ -206,11 +221,12 @@ impl Tool for GrepTool {
             .filter_entry(|e| {
                 // Skip hidden directories
                 let name = e.file_name().to_string_lossy();
-                !name.starts_with('.')
-                    && name != "node_modules"
-                    && name != "target"
-                    && name != "__pycache__"
-                    && name != ".git"
+                e.depth() == 0
+                    || (!name.starts_with('.')
+                        && name != "node_modules"
+                        && name != "target"
+                        && name != "__pycache__"
+                        && name != ".git")
             })
         {
             let entry = match entry {
@@ -239,6 +255,7 @@ impl Tool for GrepTool {
             if !type_exts.is_empty() {
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                 if !type_exts.contains(&ext) {
+                    skipped += 1;
                     continue;
                 }
             }
@@ -248,15 +265,20 @@ impl Tool for GrepTool {
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 if let Ok(m) = glob::Pattern::new(pattern) {
                     if !m.matches(name) {
+                        skipped += 1;
                         continue;
                     }
                 }
             }
 
             // Read file (skip binary)
+            scanned_files += 1;
             let content = match std::fs::read_to_string(path) {
                 Ok(c) => c,
-                Err(_) => continue,
+                Err(_) => {
+                    skipped += 1;
+                    continue;
+                }
             };
 
             let lines: Vec<&str> = content.lines().collect();
@@ -274,17 +296,43 @@ impl Tool for GrepTool {
 
             match params.output_mode.as_str() {
                 "files_with_matches" => {
-                    results.push(path.display().to_string());
                     match_count += 1;
+                    if match_count <= offset {
+                        continue;
+                    }
+                    if match_count > offset + head_limit {
+                        next_offset = Some(offset + head_limit);
+                        break;
+                    }
+                    results.push(path.display().to_string());
+                    paths.push(path.display().to_string());
                 }
                 "count" => {
-                    results.push(format!("{}:{}", path.display(), file_matches.len()));
                     match_count += 1;
+                    if match_count <= offset {
+                        continue;
+                    }
+                    if match_count > offset + head_limit {
+                        next_offset = Some(offset + head_limit);
+                        break;
+                    }
+                    results.push(format!("{}:{}", path.display(), file_matches.len()));
+                    counts.push(
+                        json!({"path":path.display().to_string(),"count":file_matches.len()}),
+                    );
                 }
                 "content" => {
-                    for (line_idx, _) in &file_matches {
+                    for &(line_idx, _) in &file_matches {
+                        match_count += 1;
+                        if match_count <= offset {
+                            continue;
+                        }
+                        if match_count > offset + head_limit {
+                            next_offset = Some(offset + head_limit);
+                            break;
+                        }
                         let start = line_idx.saturating_sub(context_lines);
-                        let end = (*line_idx + context_lines + 1).min(lines.len());
+                        let end = (line_idx + context_lines + 1).min(lines.len());
 
                         for (ci, line) in lines.iter().enumerate().take(end).skip(start) {
                             let prefix = if show_line_numbers {
@@ -293,36 +341,74 @@ impl Tool for GrepTool {
                                 format!("{}:", path.display())
                             };
                             results.push(format!("{}{}", prefix, line));
+                            matches.push(json!({
+                                "path":path.display().to_string(),
+                                "line_number":ci + 1,
+                                "line":line,
+                                "matched":ci == line_idx,
+                                "truncated":false,
+                            }));
                         }
 
                         if context_lines > 0 {
                             results.push("--".to_string());
                         }
-
-                        match_count += 1;
+                    }
+                    if next_offset.is_some() {
+                        break;
                     }
                 }
                 _ => {
-                    results.push(path.display().to_string());
                     match_count += 1;
+                    if match_count <= offset {
+                        continue;
+                    }
+                    if match_count > offset + head_limit {
+                        next_offset = Some(offset + head_limit);
+                        break;
+                    }
+                    results.push(path.display().to_string());
+                    paths.push(path.display().to_string());
                 }
             }
 
-            if match_count >= head_limit {
+            if next_offset.is_some() {
                 break;
             }
         }
 
+        let mode = match params.output_mode.as_str() {
+            "files_with_matches" => "files",
+            "count" => "count",
+            _ => "content",
+        };
+        let structured = json!({
+            "kind":"search_results",
+            "data":{
+                "mode":mode,
+                "matches":matches,
+                "paths":paths,
+                "counts":counts,
+                "scanned_files":scanned_files,
+                "skipped":skipped,
+                "truncated":next_offset.is_some(),
+                "partial":false,
+                "offset":offset,
+                "next_offset":next_offset,
+                "diagnostics":[],
+            }
+        });
         if results.is_empty() {
             return ToolResult::success(format!(
                 "No matches found for pattern \"{}\" in {}",
                 params.pattern,
                 search_path.display()
-            ));
+            ))
+            .with_structured_content(structured);
         }
 
         let output = results.join("\n");
-        ToolResult::success(output)
+        ToolResult::success(output).with_structured_content(structured)
     }
 }
 
@@ -334,6 +420,8 @@ impl GrepTool {
         output_mode: &str,
         context_lines: usize,
         show_line_numbers: bool,
+        offset: usize,
+        head_limit: usize,
     ) -> ToolResult {
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
@@ -341,41 +429,124 @@ impl GrepTool {
                 return ToolResult::error(format!("Failed to read {}: {}", path.display(), e))
             }
         };
-
         let lines: Vec<&str> = content.lines().collect();
-        let mut matching_lines: Vec<usize> = Vec::new();
-
-        for (i, line) in lines.iter().enumerate() {
-            if regex.is_match(line) {
-                matching_lines.push(i);
+        let matching_lines: Vec<usize> = lines
+            .iter()
+            .enumerate()
+            .filter_map(|(index, line)| regex.is_match(line).then_some(index))
+            .collect();
+        let mode = match output_mode {
+            "files_with_matches" => "files",
+            "count" => "count",
+            _ => "content",
+        };
+        let next_offset = (mode == "content" && matching_lines.len() > offset + head_limit)
+            .then_some(offset + head_limit);
+        let page_end = (offset + head_limit).min(matching_lines.len());
+        let page = matching_lines
+            .get(offset.min(matching_lines.len())..page_end)
+            .unwrap_or(&[]);
+        let mut results = Vec::new();
+        let mut matches = Vec::new();
+        for line_idx in page {
+            let start = line_idx.saturating_sub(context_lines);
+            let end = (*line_idx + context_lines + 1).min(lines.len());
+            for (ci, line) in lines.iter().enumerate().take(end).skip(start) {
+                results.push(if show_line_numbers {
+                    format!("{}:{}", ci + 1, line)
+                } else {
+                    line.to_string()
+                });
+                matches.push(json!({
+                    "path":path.display().to_string(),
+                    "line_number":ci + 1,
+                    "line":line,
+                    "matched":ci == *line_idx,
+                    "truncated":false,
+                }));
+            }
+            if context_lines > 0 {
+                results.push("--".to_string());
             }
         }
-
-        if matching_lines.is_empty() {
-            return ToolResult::success(format!("No matches found in {}", path.display()));
-        }
-
-        match output_mode {
-            "files_with_matches" => ToolResult::success(path.display().to_string()),
-            "count" => ToolResult::success(format!("{}:{}", path.display(), matching_lines.len())),
-            _ => {
-                let mut results = Vec::new();
-                for line_idx in &matching_lines {
-                    let start = line_idx.saturating_sub(context_lines);
-                    let end = (*line_idx + context_lines + 1).min(lines.len());
-                    for (ci, line) in lines.iter().enumerate().take(end).skip(start) {
-                        if show_line_numbers {
-                            results.push(format!("{}:{}", ci + 1, line));
-                        } else {
-                            results.push(line.to_string());
-                        }
-                    }
-                    if context_lines > 0 {
-                        results.push("--".to_string());
-                    }
-                }
-                ToolResult::success(results.join("\n"))
+        let has_result = !matching_lines.is_empty() && offset == 0;
+        let structured = json!({
+            "kind":"search_results",
+            "data":{
+                "mode":mode,
+                "matches":matches,
+                "paths":if mode == "files" && has_result { vec![path.display().to_string()] } else { vec![] },
+                "counts":if mode == "count" && has_result {
+                    vec![json!({"path":path.display().to_string(),"count":matching_lines.len()})]
+                } else { vec![] },
+                "scanned_files":1,
+                "skipped":0,
+                "truncated":next_offset.is_some(),
+                "partial":false,
+                "offset":offset,
+                "next_offset":next_offset,
+                "diagnostics":[],
             }
+        });
+        let output = match output_mode {
+            "files_with_matches" if has_result => path.display().to_string(),
+            "count" if has_result => format!("{}:{}", path.display(), matching_lines.len()),
+            "content" if !results.is_empty() => results.join("\n"),
+            _ if matching_lines.is_empty() => format!("No matches found in {}", path.display()),
+            _ => String::new(),
+        };
+        ToolResult::success(output).with_structured_content(structured)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::allow_all_context;
+
+    #[tokio::test]
+    async fn content_results_use_a_global_cursor() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("a.txt"), "alpha\nbeta\nalpha\n").unwrap();
+        std::fs::write(directory.path().join("b.txt"), "alpha\n").unwrap();
+        let context = allow_all_context(directory.path().to_path_buf());
+        let mut pages = Vec::new();
+        for offset in [0, 1, 2] {
+            let result = GrepTool
+                .execute(
+                    json!({
+                        "path":directory.path(),
+                        "pattern":"alpha",
+                        "output_mode":"content",
+                        "head_limit":1,
+                        "offset":offset,
+                    }),
+                    &context,
+                )
+                .await;
+            let data = result.structured_content.unwrap()["data"].clone();
+            assert_eq!(data["offset"], offset);
+            assert_eq!(data["matches"].as_array().unwrap().len(), 1, "{data}");
+            assert_eq!(data["matches"][0]["line"], "alpha");
+            pages.push(data["next_offset"].clone());
         }
+        assert_eq!(pages, [json!(1), json!(2), Value::Null]);
+    }
+
+    #[tokio::test]
+    async fn single_file_uses_the_same_cursor_contract() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("lines.txt");
+        std::fs::write(&path, "alpha\nbeta\nalpha\n").unwrap();
+        let context = allow_all_context(directory.path().to_path_buf());
+        let result = GrepTool
+            .execute(
+                json!({"path":path,"pattern":"alpha","output_mode":"content","offset":1,"head_limit":1}),
+                &context,
+            )
+            .await;
+        let data = result.structured_content.unwrap()["data"].clone();
+        assert_eq!(data["matches"][0]["line_number"], 3);
+        assert_eq!(data["next_offset"], Value::Null);
     }
 }

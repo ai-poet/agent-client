@@ -49,7 +49,7 @@ pub(super) struct PlansState {
     pub availability: PlansAvailability,
     pub loading: bool,
     pub error: Option<String>,
-    loaded_at: Option<Instant>,
+    pub loaded_at: Option<Instant>,
     /// Render schedules loads; this keeps it from scheduling twice per frame.
     load_scheduled: Cell<bool>,
     /// Bumped per load and on sign-out; an answer for an older one is dropped.
@@ -123,6 +123,7 @@ impl Waku {
         self.plans.loading = true;
         self.plans.generation = self.plans.generation.wrapping_add(1);
         let generation = self.plans.generation;
+        let api_generation = self.cloud_account.api_generation;
         cx.notify();
 
         cx.spawn(async move |this, cx| {
@@ -142,7 +143,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if this.plans.generation != generation {
+                if this.plans.generation != generation
+                    || api_generation != this.cloud_account.api_generation
+                {
                     return;
                 }
                 this.plans.loading = false;

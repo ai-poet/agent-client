@@ -786,86 +786,6 @@ fn vendor_by_name(model: &str) -> Option<&'static str> {
     (name.starts_with("qwen") || name.starts_with("qwq")).then_some("qwen")
 }
 
-/// One entry of the vendor column as drawn: a vendor of the table, or one
-/// of the user's own endpoints, which the table cannot name in advance.
-#[derive(Clone)]
-pub(super) struct VendorEntry {
-    /// What the column filters by — a table id, or `custom:<provider id>`.
-    pub id: String,
-    /// The name shown, already in the UI's language.
-    pub label: String,
-    /// The mark and hue drawn beside it.
-    pub vendor: &'static NativeVendor,
-    pub count: usize,
-}
-
-/// The vendors the column draws for a list: the table's vendors that hold
-/// models, in table order, then each of the user's own endpoints under its
-/// own name, in the order the list has them — the way ZCode gives every
-/// provider a group of its own. With no endpoint listed, a `custom` entry
-/// stands in their place, to say where models of the user's own go.
-pub(super) fn native_vendors_present(models: &[ProviderModel]) -> Vec<VendorEntry> {
-    let mut counts = vec![0usize; NATIVE_VENDORS.len()];
-    let mut endpoints: Vec<VendorEntry> = Vec::new();
-    for model in models {
-        let id = native_vendor_of(model);
-        if id.starts_with(AGENT_MODEL_PREFIX) {
-            match endpoints.iter_mut().find(|entry| entry.id == id) {
-                Some(entry) => entry.count += 1,
-                None => endpoints.push(VendorEntry {
-                    id: id.to_owned(),
-                    label: model
-                        .sub_provider
-                        .clone()
-                        .filter(|label| !label.trim().is_empty())
-                        .unwrap_or_else(|| tr!("model_providers.unnamed")),
-                    vendor: native_vendor(CUSTOM_VENDOR),
-                    count: 1,
-                }),
-            }
-        } else if let Some(index) = NATIVE_VENDORS.iter().position(|vendor| vendor.id == id) {
-            counts[index] += 1;
-        }
-    }
-    let mut present: Vec<VendorEntry> = NATIVE_VENDORS
-        .iter()
-        .zip(counts)
-        .filter(|(vendor, count)| *count > 0 && vendor.id != CUSTOM_VENDOR)
-        .map(|(vendor, count)| VendorEntry {
-            id: vendor.id.to_owned(),
-            label: crate::i18n::translate(vendor.label),
-            vendor,
-            count,
-        })
-        .collect();
-    if endpoints.is_empty() {
-        let custom = native_vendor(CUSTOM_VENDOR);
-        present.push(VendorEntry {
-            id: custom.id.to_owned(),
-            label: crate::i18n::translate(custom.label),
-            vendor: custom,
-            count: 0,
-        });
-    } else {
-        present.extend(endpoints);
-    }
-    present
-}
-
-/// Whether the column entry `id` is where models of the user's own go —
-/// the placeholder, or one of their endpoints — which is where the picker
-/// offers a way to manage them.
-pub(super) fn is_endpoint_vendor(id: &str) -> bool {
-    id == CUSTOM_VENDOR || id.starts_with(AGENT_MODEL_PREFIX)
-}
-
-/// The provider id behind an endpoint's column entry (`custom:<id>`), or
-/// `None` for a vendor of the table and for the placeholder.
-pub(super) fn endpoint_of_vendor(id: &str) -> Option<&str> {
-    id.strip_prefix(AGENT_MODEL_PREFIX)
-        .filter(|provider| sub2api::providers::is_safe_endpoint_id(provider))
-}
-
 fn reasoning_effort_label(effort: &str) -> String {
     match effort {
         "low" => tr!("model_option.low"),
@@ -1727,10 +1647,10 @@ mod tests {
         assert!(!adopt_built_in_default(&mut earlier));
     }
 
-    /// Anything that reads as a choice stays: a picked model, a task run on
-    /// a CLI, or the built-in agent switched off.
+    /// Started external history remains intact, but defaults, drafts and an old
+    /// disabled-native flag all adopt the built-in-only policy.
     #[test]
-    fn a_provider_someone_chose_is_left_alone() {
+    fn started_external_history_is_preserved_while_new_work_moves_native() {
         let codex = || {
             let mut state = PersistedState::fresh(std::path::PathBuf::from("."));
             state.last_provider = ProviderKind::Codex;
@@ -1740,20 +1660,24 @@ mod tests {
 
         let mut picked = codex();
         picked.last_model = Some("gpt-5.6-sol".into());
-        assert!(!adopt_built_in_default(&mut picked));
+        assert!(adopt_built_in_default(&mut picked));
+        assert_eq!(picked.last_provider, ProviderKind::Native);
+        assert_eq!(picked.sessions[0].provider, ProviderKind::Native);
 
         let mut used = codex();
         used.sessions[0].begin_turn("hello");
-        assert!(!adopt_built_in_default(&mut used));
-        assert_eq!(used.last_provider, ProviderKind::Codex);
+        assert!(adopt_built_in_default(&mut used));
+        assert_eq!(used.last_provider, ProviderKind::Native);
+        assert_eq!(used.sessions[0].provider, ProviderKind::Codex);
 
         let mut switched_off = codex();
         switched_off.disabled_providers.push(ProviderKind::Native);
-        assert!(!adopt_built_in_default(&mut switched_off));
-
-        let mut claude = codex();
-        claude.last_provider = ProviderKind::Claude;
-        assert!(!adopt_built_in_default(&mut claude));
+        assert!(adopt_built_in_default(&mut switched_off));
+        assert!(
+            !switched_off
+                .disabled_providers
+                .contains(&ProviderKind::Native)
+        );
     }
 
     #[test]
@@ -1842,72 +1766,6 @@ mod tests {
         ));
         assert_eq!(native_vendor_of(&declared[0]), "custom:pr-1");
         assert_eq!(native_vendor("custom:pr-1").id, CUSTOM_VENDOR);
-        assert!(is_endpoint_vendor("custom:pr-1") && is_endpoint_vendor(CUSTOM_VENDOR));
-        assert!(!is_endpoint_vendor("anthropic"));
-    }
-
-    #[test]
-    fn the_vendor_column_lists_vendors_with_models_in_table_order() {
-        let mut models = native_models_from_catalog(&[
-            item("deepseek-v4.1-flash", "deepseek"),
-            item("glm-5", "composite"),
-            item("claude-sonnet-5", "anthropic"),
-            item("claude-opus-5", "anthropic"),
-        ]);
-        let column = |models: &[ProviderModel]| -> Vec<(String, usize)> {
-            native_vendors_present(models)
-                .into_iter()
-                .map(|entry| (entry.id, entry.count))
-                .collect()
-        };
-        let pairs = |expected: &[(&str, usize)]| -> Vec<(String, usize)> {
-            expected
-                .iter()
-                .map(|(id, count)| ((*id).to_owned(), *count))
-                .collect()
-        };
-        assert_eq!(
-            column(&models),
-            pairs(&[
-                ("anthropic", 2),
-                ("deepseek", 1),
-                ("zhipu", 1),
-                ("custom", 0)
-            ])
-        );
-
-        // Each endpoint of the user's own gets an entry of its own, last,
-        // named after it — and the placeholder goes, having nothing to say.
-        models.extend(native_endpoint_models(&endpoint(
-            "pr-1",
-            "GLM",
-            ApiFormat::OpenAiChat,
-            &["glm-5.1", "glm-5.1-air"],
-        )));
-        models.extend(native_endpoint_models(&endpoint(
-            "pr-2",
-            "Kimi",
-            ApiFormat::Anthropic,
-            &["kimi-k3"],
-        )));
-        assert_eq!(
-            column(&models),
-            pairs(&[
-                ("anthropic", 2),
-                ("deepseek", 1),
-                ("zhipu", 1),
-                ("custom:pr-1", 2),
-                ("custom:pr-2", 1)
-            ])
-        );
-        let labels: Vec<String> = native_vendors_present(&models)
-            .into_iter()
-            .map(|entry| entry.label)
-            .collect();
-        assert_eq!(labels[3..], ["GLM".to_owned(), "Kimi".to_owned()]);
-
-        // An id the table does not know reads as "other".
-        assert_eq!(native_vendor("nope").id, "other");
     }
 
     #[test]

@@ -1,11 +1,7 @@
 //! The managed gateway's routing values.
 //!
-//! This used to carry an entire transport (daemon settings, spawn-time
-//! environment injection, generated config homes). Routing now writes each
-//! CLI's own global configuration instead — see [`crate::global_config`] —
-//! so what remains here is the desktop-side value object built from the
-//! signed-in credentials, plus the endpoint normalization every writer
-//! shares.
+//! This is the desktop-side value object built from the signed-in credentials,
+//! plus the endpoint normalization the built-in agent and its probes share.
 
 use serde::{Deserialize, Serialize};
 
@@ -44,11 +40,6 @@ pub struct GatewayConfig {
     /// Only the built-in agent reads it; the CLIs know their own models.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub model_windows: std::collections::BTreeMap<String, u64>,
-    /// CLIs the user keeps on their own sign-in ([`crate::cli_takeover`]):
-    /// the gateway is never written into their configuration. Only the
-    /// cloud source is filtered — an endpoint bound to the CLI still routes.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
-    pub own_login_clis: std::collections::BTreeSet<String>,
 }
 
 impl GatewayConfig {
@@ -60,11 +51,6 @@ impl GatewayConfig {
                 .into_iter()
                 .flatten()
                 .any(|key| !key.is_empty())
-    }
-
-    /// Whether the account may write its route into `cli`'s configuration.
-    pub fn manages_cli(&self, cli: &str) -> bool {
-        !self.own_login_clis.contains(cli)
     }
 
     /// Key for a provider, falling back to the general gateway key.
@@ -166,7 +152,6 @@ mod tests {
             model_keys: Default::default(),
             model_platforms: Default::default(),
             model_windows: Default::default(),
-            own_login_clis: Default::default(),
         }
     }
 

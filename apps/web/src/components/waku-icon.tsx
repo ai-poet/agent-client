@@ -333,16 +333,30 @@ const PROVIDER_ICONS: Record<ProviderKind, string> = {
   openCode: 'i-waku-provider-opencode',
   grok: 'i-waku-provider-grok',
   kimi: 'i-waku-provider-kimi',
+  native: 'i-waku-bot',
   ohMyPi: 'i-waku-provider-ohmypi',
   pi: 'i-waku-provider-pi',
 }
 
-export const PROVIDERS: Array<{
+interface ProviderMetadata {
   id: ProviderKind
   name: string
   shortName: string
   command: string
-}> = [
+}
+
+const NATIVE_PROVIDER: ProviderMetadata = {
+  id: 'native',
+  name: '内置 Agent',
+  shortName: '内置 Agent',
+  command: '',
+}
+
+// Only the built-in agent can be selected. Legacy metadata remains available
+// for displaying sessions written by earlier builds.
+export const PROVIDERS: ProviderMetadata[] = [NATIVE_PROVIDER]
+
+const LEGACY_PROVIDERS: ProviderMetadata[] = [
   { id: 'amp', name: 'Amp', shortName: 'Amp', command: 'amp' },
   { id: 'claude', name: 'Claude Code', shortName: 'Claude', command: 'claude' },
   { id: 'codex', name: 'Codex CLI', shortName: 'Codex', command: 'codex' },
@@ -356,8 +370,10 @@ export const PROVIDERS: Array<{
   { id: 'pi', name: 'Pi', shortName: 'Pi', command: 'pi' },
 ]
 
+const ALL_PROVIDER_METADATA = [NATIVE_PROVIDER, ...LEGACY_PROVIDERS]
+
 export function providerMeta(provider: ProviderKind) {
-  return PROVIDERS.find((candidate) => candidate.id === provider) ?? PROVIDERS[2]!
+  return ALL_PROVIDER_METADATA.find((candidate) => candidate.id === provider) ?? NATIVE_PROVIDER
 }
 
 export function ProviderIcon({

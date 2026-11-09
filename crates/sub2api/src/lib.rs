@@ -1,4 +1,4 @@
-//! Managed cloud account, gateway routing, and agent CLI installation.
+//! Managed cloud account and built-in-agent gateway routing.
 //!
 //! Everything this fork adds on top of upstream Waku lives here, in a crate of
 //! its own. Upstream files get small hook points that call in; nothing of ours
@@ -8,32 +8,18 @@
 //! The crate is deliberately free of GPUI and of the upstream crates, so its
 //! logic compiles and tests in seconds without building the UI.
 //!
-//! ```text
-//! desktop process
-//! ┌──────────────────────────┐   gateway keys only   ┌──────────────────────┐
-//! │ auth: browser sign-in    │ ────────────────────▶ │ global_config: each  │
-//! │ client: /auth/me, /keys  │                       │ CLI's own config file│
-//! │ credentials  (local file)│                       └──────────────────────┘
-//! └──────────────────────────┘
-//! ```
-//!
-//! OAuth tokens never leave the desktop's credential file; the CLIs only ever
-//! see derived gateway keys.
+//! OAuth tokens remain in the desktop's credential file. Only derived gateway
+//! keys are written to the built-in agent's settings.
 
 pub mod agent_settings;
 pub mod auth;
 pub mod brand;
-pub mod claude_compat;
 pub mod cli_detect;
 pub mod cli_install;
-pub mod cli_takeover;
 pub mod client;
-pub mod codex_compat;
 pub mod content_translations;
 pub mod cua_install;
 pub mod custom_api;
-pub mod env_conflicts;
-pub mod env_fix;
 pub mod failover;
 pub mod gateway;
 pub mod gateway_origin;
@@ -47,7 +33,6 @@ pub mod model_copy;
 pub mod model_routing;
 pub mod model_test;
 pub mod model_windows;
-pub mod node_install;
 pub mod onboarding;
 pub mod pay;
 pub mod paywall;
@@ -220,7 +205,7 @@ pub fn api_origin_with(
 
 /// Resolve the current business-API origin from the persisted node choice.
 pub fn api_origin(credentials: &Credentials) -> String {
-    api_origin_with(credentials, &gateway_origin::GatewayOriginConfig::load())
+    api_origin_with(credentials, &gateway_origin::load())
 }
 
 /// Build a business-API client without refreshing or otherwise changing the
@@ -937,7 +922,6 @@ pub fn gateway_config_with_origin(
             })
             .collect(),
         model_windows: credentials.model_windows.clone(),
-        own_login_clis: Default::default(),
     }
 }
 
@@ -1234,6 +1218,38 @@ mod tests {
     #[test]
     fn default_client_targets_the_branded_service() {
         assert_eq!(default_client().endpoint(), brand::MANAGED_SERVICE_URL);
+    }
+
+    #[test]
+    fn business_apis_follow_the_selected_origin() {
+        let credentials = Credentials {
+            endpoint: "https://login.example.com".into(),
+            ..Credentials::default()
+        };
+        let mut origin = gateway_origin::GatewayOriginConfig::default();
+        origin.select("https://node.example.com").expect("select");
+
+        assert_eq!(
+            api_origin_with(&credentials, &origin),
+            "https://node.example.com"
+        );
+        assert_eq!(credentials.endpoint, "https://login.example.com");
+    }
+
+    #[test]
+    fn an_unselected_origin_preserves_a_self_hosted_credential_endpoint() {
+        let credentials = Credentials {
+            endpoint: "https://self-hosted.example.com".into(),
+            ..Credentials::default()
+        };
+
+        assert_eq!(
+            api_origin_with(
+                &credentials,
+                &gateway_origin::GatewayOriginConfig::default()
+            ),
+            "https://self-hosted.example.com"
+        );
     }
 
     #[test]

@@ -20,7 +20,7 @@ export interface ComposerPreferences {
 }
 
 const DEFAULT_PREFERENCES: ComposerPreferences = {
-  lastProvider: 'codex',
+  lastProvider: 'native',
   lastModel: null,
   lastReasoningEffort: null,
   lastServiceTier: null,

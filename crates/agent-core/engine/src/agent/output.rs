@@ -15,6 +15,14 @@ mod terminal;
 
 pub(in crate::agent) use cache::Cache;
 
+/// Revision of the unprojected tool result, shared with the readback owner.
+pub fn result_revision(result: &CallToolResult) -> String {
+    limit::reference("", result, None)["revision"]
+        .as_str()
+        .expect("output reference revision")
+        .to_owned()
+}
+
 /// Model-facing line ceiling for one tool result, as in OpenCode 3ba597f
 /// `tool-output.ts` and Pi 90b42bc `truncate.ts`. The canonical result keeps
 /// every line and stays readable through `read_tool_output`.

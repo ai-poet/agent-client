@@ -133,22 +133,12 @@ pub fn detect_trigger(text: &str, cursor: usize) -> Option<Trigger> {
 pub fn discover_slash_commands(
     provider: ProviderKind,
     project_root: &Path,
-    binary_override: Option<&str>,
+    _binary_override: Option<&str>,
 ) -> Vec<SlashCommand> {
-    // A built-in provider has no binary to interrogate, and `find_executable`
-    // with its empty command name would resolve every PATH directory as a
-    // candidate. Its commands are the file-backed ones alone.
-    if provider.is_builtin() {
-        return assemble_slash_commands(provider, project_root, native_builtin_commands());
+    if !provider.is_builtin() {
+        return Vec::new();
     }
-    let cli_commands = match binary_override {
-        Some(binary) => crate::command_env::resolve_binary_override(binary),
-        None => crate::command_env::find_executable(provider.command()),
-    }
-    .as_deref()
-    .and_then(|binary| crate::slash_command_catalog::discover(provider, binary, project_root))
-    .unwrap_or_default();
-    assemble_slash_commands(provider, project_root, cli_commands)
+    assemble_slash_commands(provider, project_root, native_builtin_commands())
 }
 
 /// Commands the built-in agent answers itself instead of passing to the

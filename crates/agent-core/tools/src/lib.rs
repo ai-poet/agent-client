@@ -136,6 +136,8 @@ pub struct ToolResult {
     pub content: String,
     /// Whether this invocation was an error.
     pub is_error: bool,
+    /// Optional canonical data used by the Sailry output projections.
+    pub structured_content: Option<Value>,
     /// Optional structured metadata (for the TUI to render diffs, etc.).
     pub metadata: Option<Value>,
 }
@@ -145,6 +147,7 @@ impl ToolResult {
         Self {
             content: content.into(),
             is_error: false,
+            structured_content: None,
             metadata: None,
         }
     }
@@ -153,12 +156,18 @@ impl ToolResult {
         Self {
             content: content.into(),
             is_error: true,
+            structured_content: None,
             metadata: None,
         }
     }
 
     pub fn with_metadata(mut self, meta: Value) -> Self {
         self.metadata = Some(meta);
+        self
+    }
+
+    pub fn with_structured_content(mut self, content: Value) -> Self {
+        self.structured_content = Some(content);
         self
     }
 }

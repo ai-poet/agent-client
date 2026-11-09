@@ -1,10 +1,9 @@
-//! Agent-skill discovery and management for the Skills settings page.
+//! Skill discovery and management for the built-in agent.
 //!
-//! A skill is a directory holding a `SKILL.md` — reusable instructions any
-//! coding agent can load. Every ecosystem keeps its own skill roots (see
-//! [`crate::composer_complete::discover_slash_commands`] for the invocation
-//! side); this module walks all of them at once so the settings page can show
-//! one library across providers and projects.
+//! The library reads the shared `.agents/skills` roots and the built-in
+//! agent's own user roots. External CLI skill directories are not scanned or
+//! installed into. Discovery runs on the background executor; one-shot edits
+//! remain synchronous user actions.
 //!
 //! Installers routinely drop the same skill into several ecosystems' roots,
 //! and dotfile setups symlink one directory everywhere. The catalog therefore
@@ -45,88 +44,39 @@ const DIR_WALK_MAX_FILES: usize = 500;
 /// filesystem access — so this is safe to call while building a frame.
 pub fn user_skill_locations() -> Vec<SkillLocation> {
     let home = dirs::home_dir();
-    let claude_config_dir = std::env::var("CLAUDE_CONFIG_DIR")
-        .ok()
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .or_else(|| home.as_deref().map(|home| home.join(".claude")));
     let mut locations = Vec::new();
-    let mut push = |source: SkillSource, root: Option<PathBuf>| {
-        if let Some(root) = root {
-            locations.push(SkillLocation {
-                source,
-                scope: SkillScope::User,
-                root,
-                project: None,
-            });
-        }
-    };
-    let home_join = |suffix: &str| home.as_deref().map(|home| home.join(suffix));
-    push(SkillSource::Shared, home_join(".agents/skills"));
-    push(
-        SkillSource::Provider(ProviderKind::Claude),
-        claude_config_dir.map(|dir| dir.join("skills")),
-    );
-    push(
-        SkillSource::Provider(ProviderKind::Codex),
-        home_join(".codex/skills"),
-    );
-    push(
-        SkillSource::Provider(ProviderKind::OpenCode),
-        home_join(".config/opencode/skills"),
-    );
-    push(
-        SkillSource::Provider(ProviderKind::Cursor),
-        home_join(".cursor/skills"),
-    );
-    push(
-        SkillSource::Provider(ProviderKind::Fx),
-        home_join(".fx/skills"),
-    );
-    push(
-        SkillSource::Provider(ProviderKind::Pi),
-        home_join(".pi/agent/skills"),
-    );
-    push(
-        SkillSource::Provider(ProviderKind::OhMyPi),
-        home_join(".omp/agent/skills"),
-    );
-    push(
-        SkillSource::Provider(ProviderKind::Amp),
-        home_join(".config/agents/skills"),
-    );
+    if let Some(root) = home.as_deref().map(|home| home.join(".agents/skills")) {
+        locations.push(SkillLocation {
+            source: SkillSource::Shared,
+            scope: SkillScope::User,
+            root,
+            project: None,
+        });
+    }
+    let mut native_roots = Vec::new();
+    if let Some(explicit) = std::env::var_os("CLAURST_HOME").filter(|value| !value.is_empty()) {
+        native_roots.push(PathBuf::from(explicit).join("skills"));
+    }
+    if let Some(home) = home {
+        native_roots.push(home.join(".claurst").join("skills"));
+    }
+    locations.extend(native_roots.into_iter().map(|root| SkillLocation {
+        source: SkillSource::Provider(ProviderKind::Native),
+        scope: SkillScope::User,
+        root,
+        project: None,
+    }));
     locations
 }
 
 /// Every project-scope skill root under `project_root`. Path joins only.
 pub fn project_skill_locations(project_root: &Path, project_name: &str) -> Vec<SkillLocation> {
-    [
-        (SkillSource::Shared, ".agents/skills"),
-        (
-            SkillSource::Provider(ProviderKind::Claude),
-            ".claude/skills",
-        ),
-        (SkillSource::Provider(ProviderKind::Codex), ".codex/skills"),
-        (
-            SkillSource::Provider(ProviderKind::OpenCode),
-            ".opencode/skills",
-        ),
-        (
-            SkillSource::Provider(ProviderKind::Cursor),
-            ".cursor/skills",
-        ),
-        (SkillSource::Provider(ProviderKind::Fx), "skills"),
-        (SkillSource::Provider(ProviderKind::Pi), ".pi/skills"),
-        (SkillSource::Provider(ProviderKind::OhMyPi), ".omp/skills"),
-    ]
-    .into_iter()
-    .map(|(source, suffix)| SkillLocation {
-        source,
+    vec![SkillLocation {
+        source: SkillSource::Shared,
         scope: SkillScope::Project,
-        root: project_root.join(suffix),
+        root: project_root.join(".agents/skills"),
         project: Some(project_name.to_owned()),
-    })
-    .collect()
+    }]
 }
 
 /// All roots the scan walks for the given projects: user scope plus each
@@ -414,28 +364,12 @@ pub fn bundled_skills() -> Vec<BundledSkill> {
     }]
 }
 
-/// Where a bundled skill may be installed.
-///
-/// Only the CLIs that cannot be handed a skill at launch. Codex, Pi,
-/// OpenCode and Grok receive it per session, Claude Code through a
-/// throwaway plugin directory, and Oh My Pi ships its own — installing for
-/// any of them would leave a copy behind that nothing reads.
-///
-/// This list is also the authorization boundary for
-/// [`install_bundled_skill`]: the daemon writes to one of these roots or to
-/// nowhere.
+/// Only the shared root is writable through the Skills page. The built-in
+/// agent receives its Computer Use skill per session and needs no CLI copies.
 pub fn bundled_skill_targets() -> Vec<SkillLocation> {
     user_skill_locations()
         .into_iter()
-        .filter(|location| {
-            matches!(
-                location.source,
-                SkillSource::Shared
-                    | SkillSource::Provider(ProviderKind::Cursor)
-                    | SkillSource::Provider(ProviderKind::Fx)
-                    | SkillSource::Provider(ProviderKind::Amp)
-            )
-        })
+        .filter(|location| matches!(location.source, SkillSource::Shared))
         .collect()
 }
 
@@ -534,28 +468,15 @@ mod tests {
         assert!(install_bundled_skill("something-else", &[]).is_err());
     }
 
-    /// Only the CLIs that cannot be handed the skill at launch. Codex, Pi,
-    /// OpenCode and Grok get it per session and Claude Code through a
-    /// throwaway plugin, so installing for them would leave a copy nothing
-    /// reads.
+    /// The built-in agent receives Computer Use per session, so only the
+    /// shared user root may be an install target.
     #[test]
-    fn the_targets_are_the_clis_with_no_other_route() {
+    fn bundled_skill_targets_are_shared_only() {
         let sources: Vec<SkillSource> = bundled_skill_targets()
             .into_iter()
             .map(|location| location.source)
             .collect();
-        for absent in [
-            SkillSource::Provider(ProviderKind::Codex),
-            SkillSource::Provider(ProviderKind::Claude),
-            SkillSource::Provider(ProviderKind::OpenCode),
-            SkillSource::Provider(ProviderKind::Pi),
-            SkillSource::Provider(ProviderKind::OhMyPi),
-        ] {
-            assert!(
-                !sources.contains(&absent),
-                "{absent:?} already receives the skill another way"
-            );
-        }
+        assert!(sources.iter().all(|source| *source == SkillSource::Shared));
         // And every target is a user-scope root, never a project one: this
         // installs for the person, not for a checkout.
         assert!(
@@ -761,19 +682,11 @@ mod tests {
     }
 
     #[test]
-    fn every_ecosystem_root_is_listed() {
+    fn skill_roots_are_shared_and_native_only() {
         let project_root = std::env::temp_dir().join("waku-skills-project");
         let projects = vec![("waku".to_owned(), project_root.clone())];
         let locations = skill_locations(&projects);
-        for expected in [
-            ".agents/skills",
-            ".claude/skills",
-            ".codex/skills",
-            ".config/opencode/skills",
-            ".cursor/skills",
-            ".pi/agent/skills",
-            ".config/agents/skills",
-        ] {
+        for expected in [".agents/skills", ".claurst/skills"] {
             assert!(
                 locations
                     .iter()
@@ -781,22 +694,19 @@ mod tests {
                 "user root missing: {expected}"
             );
         }
-        for expected in [
-            ".agents/skills",
-            ".claude/skills",
-            ".codex/skills",
-            ".opencode/skills",
-            ".cursor/skills",
-            ".pi/skills",
-        ] {
-            let expected = project_root.join(expected);
+        assert!(
+            locations
+                .iter()
+                .any(|location| location.root == project_root.join(".agents/skills"))
+        );
+        for removed in [".claude", ".codex", ".opencode", ".cursor", ".pi"] {
             assert!(
-                locations.iter().any(|location| location.root == expected),
-                "project root missing: {}",
-                expected.display()
+                locations
+                    .iter()
+                    .all(|location| !location.root.to_string_lossy().contains(removed)),
+                "external root is still listed: {removed}"
             );
         }
-        // User scope leads the scan, so grouped entries prefer user copies.
         assert!(locations[0].scope == SkillScope::User);
         assert_eq!(locations[0].source, SkillSource::Shared);
     }

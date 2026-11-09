@@ -156,6 +156,8 @@ This fork remains licensed under GPL-3.0-only.
 
 | 2026-11-09 | Ported Sailry's Agent execution core at `cfc0a06ceaa14fad16f1b1b1ee6957bd53b0610e` into `crates/agent-core/engine`, retaining its `agent/{engine,model,canonical}` structure and its state machine, stream/tool pairing, bounded tool concurrency, structured compaction, cancellation, steering, and request recovery. Node admission, Turso, GPUI, Rig, and plugin hosts are not included; existing providers, tools, permissions, and history remain in `agent-core-query` / `agent-bridge`. Sailry and retained Goose-derived code are Apache-2.0; rmcp is MIT. Their notices are preserved in `third_party_licenses/`. |
 
+| 2026-11-09 | Removed external agent CLI drivers, session import, model/command discovery, automatic installation, environment repair, and CLI configuration takeover. The built-in agent is the only startable provider; its model picker is a single flat searchable list. Business APIs now follow the selected gateway origin with cache/generation invalidation, while login, token refresh and logout retain the authentication origin. Legacy provider variants remain deserializable and existing CLI files are left untouched. Updated README, AGENTS.md, CONTRIBUTING and docs/FORK.md. |
+
 ## Upstream attribution
 
 Waku is developed by egoist and contributors. Upstream source, issue tracker,

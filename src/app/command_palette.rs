@@ -911,12 +911,6 @@ impl Waku {
                 "settings preferences appearance theme language light dark",
             ),
             (
-                SettingsPage::Providers,
-                "settings.providers",
-                "icons/bot.svg",
-                "settings preferences providers agents models cli",
-            ),
-            (
                 SettingsPage::Skills,
                 "settings.skills",
                 "icons/package.svg",

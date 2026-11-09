@@ -274,34 +274,8 @@ impl Backend for WakuBackend {
                 }
                 Ok(ResponsePayload::ProviderProbe { probe, version })
             }
-            Command::FetchPlanUsage {
-                provider,
-                binary_override,
-                cli_version,
-            } => {
-                let usage = match provider {
-                    crate::model::ProviderKind::Claude => Some(
-                        crate::usage::fetch_claude_plan_usage(cli_version.as_deref())?,
-                    ),
-                    crate::model::ProviderKind::Codex => {
-                        Some(crate::usage::fetch_codex_plan_usage()?)
-                    }
-                    crate::model::ProviderKind::OpenCode => {
-                        crate::usage::fetch_opencode_go_plan_usage()?
-                    }
-                    crate::model::ProviderKind::Grok => {
-                        ensure_shell_environment();
-                        let probe = match binary_override.as_deref() {
-                            override_value => {
-                                crate::model::provider_probe(provider, override_value)
-                            }
-                        };
-                        let binary = probe.path.ok_or_else(|| anyhow!("grok is not installed"))?;
-                        Some(crate::usage::fetch_grok_plan_usage(&binary)?)
-                    }
-                    _ => bail!("provider has no plan usage fetcher"),
-                };
-                Ok(ResponsePayload::PlanUsage { usage })
+            Command::FetchPlanUsage { .. } => {
+                bail!("external provider plan usage is not supported")
             }
             Command::ProbeComputerPermissions { prompt } => {
                 Ok(ResponsePayload::ComputerPermissions {
@@ -485,156 +459,20 @@ impl Backend for WakuBackend {
                 let matches = self.task_store.session_message_search(query, limit)()?;
                 Ok(ResponsePayload::SessionMessageMatches { matches })
             }
-            Command::ListProviderSessions { provider, limit } => {
-                const MAX_PROVIDER_SESSIONS: usize = 500;
-                let limit = limit.min(MAX_PROVIDER_SESSIONS);
-                if limit == 0 {
-                    return Ok(ResponsePayload::ProviderSessions {
-                        sessions: Vec::new(),
-                    });
-                }
-                ensure_shell_environment();
-                let settings = self.settings.get();
-                if settings.disabled_providers.contains(&provider) {
-                    return Ok(ResponsePayload::ProviderSessions {
-                        sessions: Vec::new(),
-                    });
-                }
-                let binary_override = settings
-                    .provider_binary_overrides
-                    .get(&provider)
-                    .map(String::as_str);
-                let Some(binary) = crate::model::provider_probe(provider, binary_override).path
-                else {
-                    return Ok(ResponsePayload::ProviderSessions {
-                        sessions: Vec::new(),
-                    });
-                };
-                // Discovery is deliberately provider-scoped. Opening Resume
-                // must not start every installed agent CLI, and another
-                // provider is queried only after the user explicitly picks it.
-                let mut sessions = match provider {
-                    ProviderKind::Amp => {
-                        crate::amp_session::list_provider_sessions(&binary, limit)?
-                    }
-                    ProviderKind::Claude => crate::claude_session::list_provider_sessions(limit)?,
-                    ProviderKind::Codex => {
-                        crate::codex_session::list_provider_sessions(&binary, limit)?
-                    }
-                    ProviderKind::Cursor | ProviderKind::Fx | ProviderKind::OpenCode => {
-                        crate::acp_session::list_provider_sessions(provider, &binary, &[], limit)?
-                    }
-                    ProviderKind::DeepSeek => {
-                        crate::deepseek_session::list_provider_sessions(&binary, limit)?
-                    }
-                    ProviderKind::Grok => crate::grok_session::list_provider_sessions(limit)?,
-                    ProviderKind::Kimi => crate::kimi_session::list_provider_sessions(limit)?,
-                    ProviderKind::OhMyPi | ProviderKind::Pi => {
-                        crate::pi_session::list_provider_sessions(provider, limit)?
-                    }
-                    // Nothing to import: the built-in agent has no session
-                    // store of its own. Waku's task list is the only one.
-                    ProviderKind::Native => Vec::new(),
-                };
-                sessions.sort_by(|a, b| {
-                    b.updated_at
-                        .cmp(&a.updated_at)
-                        .then_with(|| a.title.cmp(&b.title))
-                });
-                let imported = {
-                    let state = self.task_state.lock();
-                    state
-                        .sessions
-                        .iter()
-                        .filter_map(|session| session.provider_cursor.as_ref())
-                        .map(|cursor| (cursor.provider(), cursor.native_id().to_owned()))
-                        .collect::<HashSet<_>>()
-                };
-                sessions.retain(|session| {
-                    !imported.contains(&(session.provider(), session.cursor.native_id().to_owned()))
-                });
-                sessions.truncate(limit);
-                Ok(ResponsePayload::ProviderSessions { sessions })
+            Command::ListProviderSessions { .. } => {
+                // External CLI session import is no longer available. Native
+                // tasks already live in Waku's own task store.
+                Ok(ResponsePayload::ProviderSessions {
+                    sessions: Vec::new(),
+                })
             }
-            Command::LoadProviderSession { cursor, cwd } => {
-                // Preserve every native turn shell for exact provider turn
-                // numbering, but bound imported display text to recent turns.
+            Command::LoadProviderSession { cursor, .. } => {
                 const VISIBLE_TURN_LIMIT: usize = 100;
                 let history = match &cursor {
-                    ProviderResumeCursor::Amp { thread_id, .. } => {
-                        let binary = self.provider_binary(ProviderKind::Amp)?;
-                        crate::amp_session::provider_session_history(
-                            &binary,
-                            &cwd,
-                            thread_id,
-                            VISIBLE_TURN_LIMIT,
-                        )?
-                    }
-                    ProviderResumeCursor::Claude { session_id, .. } => {
-                        self.provider_binary(ProviderKind::Claude)?;
-                        crate::claude_session::provider_session_history(
-                            session_id,
-                            VISIBLE_TURN_LIMIT,
-                        )?
-                    }
-                    ProviderResumeCursor::Codex { thread_id } => {
-                        let binary = self.provider_binary(ProviderKind::Codex)?;
-                        crate::codex_session::provider_session_history(
-                            &binary,
-                            thread_id,
-                            VISIBLE_TURN_LIMIT,
-                        )?
-                    }
-                    ProviderResumeCursor::Cursor { session_id, .. }
-                    | ProviderResumeCursor::Fx { session_id }
-                    | ProviderResumeCursor::OpenCode { session_id }
-                    | ProviderResumeCursor::Grok { session_id }
-                    | ProviderResumeCursor::Kimi { session_id } => {
-                        let provider = cursor.provider();
-                        let binary = self.provider_binary(provider)?;
-                        crate::acp_session::provider_session_history(
-                            provider,
-                            &binary,
-                            &cwd,
-                            session_id,
-                            VISIBLE_TURN_LIMIT,
-                        )?
-                    }
-                    ProviderResumeCursor::DeepSeek { session_id } => {
-                        let binary = self.provider_binary(ProviderKind::DeepSeek)?;
-                        crate::deepseek_session::provider_session_history(
-                            &binary,
-                            session_id,
-                            VISIBLE_TURN_LIMIT,
-                        )?
-                    }
-                    // No binary and no provider-side store: the transcript is
-                    // the file the built-in driver wrote, named by the cursor.
                     ProviderResumeCursor::Native { session_id } => {
                         crate::driver::native_session_history(session_id, VISIBLE_TURN_LIMIT)?
                     }
-                    ProviderResumeCursor::OhMyPi {
-                        session_id,
-                        session_file,
-                    }
-                    | ProviderResumeCursor::Pi {
-                        session_id,
-                        session_file,
-                    } => {
-                        self.provider_binary(cursor.provider())?;
-                        let session_file = session_file.as_deref().ok_or_else(|| {
-                            anyhow!(
-                                "{} did not report its native session file",
-                                cursor.provider().display_name()
-                            )
-                        })?;
-                        crate::pi_session::provider_session_history(
-                            cursor.provider(),
-                            session_id,
-                            session_file,
-                            VISIBLE_TURN_LIMIT,
-                        )?
-                    }
+                    _ => bail!("external CLI sessions cannot be restored by this build"),
                 };
                 Ok(ResponsePayload::ProviderSessionHistory { history })
             }
@@ -1511,21 +1349,11 @@ impl WakuBackend {
     }
 
     fn provider_binary(&self, provider: ProviderKind) -> anyhow::Result<PathBuf> {
-        // Nothing to look for, and nothing to fail on. Callers pass the result
-        // straight into `DriverStartOptions::binary`, which the built-in
-        // driver ignores.
-        if provider.is_builtin() {
-            return Ok(PathBuf::new());
+        if !provider.is_builtin() {
+            bail!("external agent CLIs are not supported");
         }
-        ensure_shell_environment();
-        let settings = self.settings.get();
-        let binary_override = settings
-            .provider_binary_overrides
-            .get(&provider)
-            .map(String::as_str);
-        crate::model::provider_probe(provider, binary_override)
-            .path
-            .ok_or_else(|| anyhow!("{} is not installed on the daemon", provider.display_name()))
+        // Native ignores this field; no executable lookup is needed.
+        Ok(PathBuf::new())
     }
 }
 
@@ -1623,82 +1451,8 @@ fn next_response_fork_title<'a>(
 fn fork_provider_session(
     request: ProviderSessionForkRequest,
 ) -> anyhow::Result<ProviderSessionFork> {
-    use crate::model::ProviderResumeCursor;
-
-    let (cursor, message_ids, source_resume_at) = match request {
-        ProviderSessionForkRequest::Claude {
-            session_id,
-            resume_at,
-            turn_count,
-            title,
-        } => {
-            let source_resume_at = resume_at.map(Ok).unwrap_or_else(|| {
-                crate::claude_session::message_id_for_turn(&session_id, turn_count)
-            })?;
-            let fork =
-                crate::claude_session::fork_session_at(&session_id, &source_resume_at, &title)?;
-            let fork_resume_at = fork
-                .message_ids
-                .get(&source_resume_at)
-                .cloned()
-                .ok_or_else(|| anyhow!("Claude fork did not include its target message"))?;
-            (
-                ProviderResumeCursor::Claude {
-                    session_id: fork.session_id,
-                    resume_at: Some(fork_resume_at),
-                },
-                fork.message_ids,
-                Some(source_resume_at),
-            )
-        }
-        ProviderSessionForkRequest::Amp {
-            binary,
-            cwd,
-            thread_id,
-            fork_context,
-            turn_count,
-        } => (
-            crate::amp_session::fork_session_at_turn(
-                &binary,
-                &cwd,
-                &thread_id,
-                fork_context.as_deref(),
-                turn_count,
-            )?,
-            HashMap::new(),
-            None,
-        ),
-        ProviderSessionForkRequest::Cursor { source, turn_count } => (
-            crate::cursor_session::fork_session_at_turn(&source, turn_count)?,
-            HashMap::new(),
-            None,
-        ),
-        ProviderSessionForkRequest::OpenCode {
-            binary,
-            cwd,
-            session_id,
-            turn_count,
-        } => (
-            crate::opencode_session::fork_session_at_turn(&binary, &cwd, &session_id, turn_count)?,
-            HashMap::new(),
-            None,
-        ),
-        ProviderSessionForkRequest::Grok {
-            binary,
-            cwd,
-            session_id,
-            turn_count,
-        } => (
-            crate::grok_session::fork_session_at_turn(&binary, &cwd, &session_id, turn_count)?,
-            HashMap::new(),
-            None,
-        ),
-    };
-    Ok(ProviderSessionFork {
-        cursor,
-        message_ids,
-        source_resume_at,
-    })
+    let _ = request;
+    bail!("external CLI session forks are not supported")
 }
 
 fn handle_driver_command(

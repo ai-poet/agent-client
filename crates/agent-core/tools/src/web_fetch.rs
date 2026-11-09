@@ -3,6 +3,7 @@
 
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
+use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::fs;
@@ -268,6 +269,159 @@ fn strip_html(html: &str) -> String {
     collapsed.trim().to_string()
 }
 
+const MAX_REDIRECTS: usize = 5;
+const MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
+
+fn redirect_target(current: &reqwest::Url, location: &str) -> Result<reqwest::Url, String> {
+    current
+        .join(location)
+        .map_err(|error| format!("Invalid redirect URL: {error}"))
+}
+
+fn public_address(address: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match address {
+        IpAddr::V4(address) => {
+            let octets = address.octets();
+            let blocked = address.is_loopback()
+                || address.is_private()
+                || address.is_link_local()
+                || address.is_multicast()
+                || address.is_broadcast()
+                || address.is_unspecified()
+                || octets[0] == 0
+                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 0)
+                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)
+                || (octets[0] == 192 && octets[1] == 88 && octets[2] == 99)
+                || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
+                || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
+                || (octets[0] == 198 && (18..=19).contains(&octets[1]))
+                || octets[0] >= 224;
+            !blocked
+        }
+        IpAddr::V6(address) => {
+            if let Some(mapped) = address.to_ipv4_mapped() {
+                return public_address(IpAddr::V4(mapped));
+            }
+            let segments = address.segments();
+            !(address.is_loopback()
+                || address.is_unspecified()
+                || address.is_multicast()
+                || (segments[0] & 0xfe00) == 0xfc00
+                || (segments[0] & 0xffc0) == 0xfe80
+                || (segments[0] == 0x2001 && segments[1] == 0xdb8)
+                || (segments[0] == 0x2001 && segments[1] == 0))
+        }
+    }
+}
+
+async fn validate_url(value: &str) -> Result<(reqwest::Url, Vec<std::net::SocketAddr>), String> {
+    let mut url = reqwest::Url::parse(value).map_err(|error| format!("Invalid URL: {error}"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("Only HTTP and HTTPS URLs are allowed".into());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("URLs with embedded credentials are not allowed".into());
+    }
+    url.set_fragment(None);
+    let host = url.host_str().ok_or_else(|| "URL has no host".to_owned())?;
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| "URL has no port".to_owned())?;
+    let addresses = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|error| format!("DNS lookup failed: {error}"))?
+        .collect::<Vec<_>>();
+    if addresses.is_empty()
+        || addresses
+            .iter()
+            .any(|address| !public_address(address.ip()))
+    {
+        return Err("The URL resolves to a non-public address".into());
+    }
+    Ok((url, addresses))
+}
+
+async fn read_body(response: reqwest::Response) -> Result<String, String> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_BODY_BYTES as u64)
+    {
+        return Err("Response exceeds the 10 MiB limit".into());
+    }
+    if response
+        .headers()
+        .get("content-encoding")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| !value.eq_ignore_ascii_case("identity"))
+    {
+        return Err("Encoded responses are not supported".into());
+    }
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| format!("Failed to read response: {error}"))?;
+        if bytes.len().saturating_add(chunk.len()) > MAX_BODY_BYTES {
+            return Err("Response exceeds the 10 MiB limit".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+async fn fetch_body(url: &str) -> Result<(String, String), String> {
+    let mut current = reqwest::Url::parse(url).map_err(|error| format!("Invalid URL: {error}"))?;
+    for redirects in 0..=MAX_REDIRECTS {
+        let (url, addresses) = validate_url(current.as_str()).await?;
+        let host = url.host_str().ok_or_else(|| "URL has no host".to_owned())?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve_to_addrs(host, &addresses)
+            .build()
+            .map_err(|error| format!("Failed to create HTTP client: {error}"))?;
+        let response = client
+            .get(url.clone())
+            .header("User-Agent", "Claude-Code/1.0")
+            .send()
+            .await
+            .map_err(|error| format!("Failed to fetch {url}: {error}"))?;
+        if response.status().is_redirection() {
+            if redirects == MAX_REDIRECTS {
+                return Err("Too many redirects".into());
+            }
+            let location = response
+                .headers()
+                .get("location")
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| "Redirect has no location".to_owned())?;
+            current = redirect_target(&url, location)?;
+            continue;
+        }
+        if !response.status().is_success() {
+            return Err(format!("HTTP {} when fetching {url}", response.status()));
+        }
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        if !content_type.is_empty()
+            && !content_type.starts_with("text/")
+            && !["json", "xml", "html", "xhtml", "javascript"]
+                .iter()
+                .any(|kind| content_type.contains(kind))
+        {
+            return Err(format!("Unsupported response content type: {content_type}"));
+        }
+        let body = read_body(response).await?;
+        return Ok((body, content_type));
+    }
+    Err("Too many redirects".into())
+}
+
 #[async_trait]
 impl Tool for WebFetchTool {
     // Gates itself: calls `ctx.check_permission` in `execute()` (#210).
@@ -323,41 +477,9 @@ impl Tool for WebFetchTool {
 
         debug!(url = %params.url, "Fetching web page");
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::limited(10))
-            .build();
-
-        let client = match client {
-            Ok(c) => c,
-            Err(e) => return ToolResult::error(format!("Failed to create HTTP client: {}", e)),
-        };
-
-        let resp = match client
-            .get(&params.url)
-            .header("User-Agent", "Claude-Code/1.0")
-            .send()
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => return ToolResult::error(format!("Failed to fetch {}: {}", params.url, e)),
-        };
-
-        let status = resp.status();
-        if !status.is_success() {
-            return ToolResult::error(format!("HTTP {} when fetching {}", status, params.url));
-        }
-
-        let content_type = resp
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_string();
-
-        let body = match resp.text().await {
-            Ok(b) => b,
-            Err(e) => return ToolResult::error(format!("Failed to read response body: {}", e)),
+        let (body, content_type) = match fetch_body(&params.url).await {
+            Ok(result) => result,
+            Err(error) => return ToolResult::error(error),
         };
 
         // Try to load from cache first
@@ -400,5 +522,35 @@ impl Tool for WebFetchTool {
         save_cached_extraction(&params.url, &text);
 
         ToolResult::success(text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_non_public_addresses() {
+        for address in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "192.168.1.1",
+            "169.254.1.1",
+            "::1",
+            "fc00::1",
+        ] {
+            assert!(!public_address(address.parse().unwrap()), "{address}");
+        }
+        assert!(public_address("1.1.1.1".parse().unwrap()));
+        assert!(public_address("2606:4700:4700::1111".parse().unwrap()));
+    }
+
+    #[test]
+    fn redirects_resolve_against_the_current_url() {
+        let current = reqwest::Url::parse("https://example.com/docs/page").unwrap();
+        assert_eq!(
+            redirect_target(&current, "/next").unwrap().as_str(),
+            "https://example.com/next"
+        );
     }
 }

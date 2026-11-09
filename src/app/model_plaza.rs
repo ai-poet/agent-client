@@ -46,10 +46,10 @@ pub(super) struct ModelPlazaState {
     /// When the last *successful* fetch landed. A failure leaves it alone:
     /// it used to be stamped too, which held an empty catalog for a full
     /// minute after one failed request.
-    loaded_at: Option<Instant>,
+    pub loaded_at: Option<Instant>,
     /// Failed fetches in a row, and when the next automatic one may go out.
     failures: u32,
-    retry_at: Option<Instant>,
+    pub retry_at: Option<Instant>,
     /// Render schedules loads; this keeps it from scheduling twice per frame.
     load_scheduled: std::cell::Cell<bool>,
 }
@@ -293,6 +293,7 @@ impl Waku {
         cx.notify();
 
         let session = credentials.session_id.clone();
+        let api_generation = self.cloud_account.api_generation;
         cx.spawn(async move |this, cx| {
             let fetched = cx
                 .background_executor()
@@ -308,7 +309,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if !this.cloud_session_is(&session) {
+                if !this.cloud_session_is(&session)
+                    || api_generation != this.cloud_account.api_generation
+                {
                     return;
                 }
                 this.model_plaza.loading = false;

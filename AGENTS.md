@@ -113,9 +113,9 @@
   objects; there is no compatibility layer to build. Re-read the dsh source
   before porting a mechanism, because the project is a preview and changes
   under us.
-- Do not confuse this with the DeepSeek provider (`ProviderKind::DeepSeek`,
-  `crates/client-core/src/driver/deepseek.rs`), which runs `dsh web` as a
-  sidecar and already loads the user's own dsh plugins unchanged.
+- The legacy `ProviderKind::DeepSeek` value remains only for saved-state and
+  wire compatibility. No DeepSeek sidecar or other external CLI is loaded or
+  launched by this build.
 - A port follows [docs/FORK.md](docs/FORK.md): new files, registered hook
   points, protocol changes additive only, a dated `NOTICE.md` row, and the MIT
   notice kept on anything translated closely, prompt text included.

@@ -240,6 +240,14 @@ async fn pairs_tools_and_runs_read_only_calls_concurrently() {
         })
         .collect::<Vec<_>>();
     assert_eq!(responses, ["a", "b"]);
+    for id in ["a", "b"] {
+        assert!(
+            session
+                .conversation
+                .iter()
+                .any(|message| { message.metadata.operation_note("tool_output", id).is_some() })
+        );
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]

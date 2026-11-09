@@ -821,7 +821,6 @@ impl Waku {
         // `picker_vendor` is which vendor of the built-in agent's list the
         // vendor column has open. The filter belongs here so the keyboard
         // cursor and the drawn rows agree about what is in the section.
-        let picker_vendor = self.model_picker_vendor.clone();
         let available_models = Rc::new(if handle.is_open() {
             visible_picker_models(
                 &probes,
@@ -829,7 +828,7 @@ impl Waku {
                 &disabled_providers,
                 locked_provider,
                 selected_tab,
-                &picker_vendor,
+                "",
                 &normalized_query,
             )
         } else {
@@ -1216,53 +1215,6 @@ impl Waku {
         cx.notify();
     }
 
-    /// Step the sidebar rail to the adjacent usable tab — or, on the
-    /// built-in agent's tab, to the adjacent vendor — wrapping at both ends.
-    /// `tab`/`shift-tab` land here from under the focused filter field,
-    /// the same route the arrows take. A live query hides which tab is
-    /// selected and searches across all of them, so cycling waits until the
-    /// field is cleared.
-    fn cycle_model_picker_tab(&mut self, key: &str, cx: &mut Context<Self>) {
-        if !self.model_search.read(cx).content().trim().is_empty() {
-            return;
-        }
-        let locked_provider = self
-            .selected_session()
-            .filter(|session| !session.messages.is_empty())
-            .map(|session| session.provider);
-        let tabs = visible_picker_tabs(
-            &self.probes,
-            &self.state.disabled_providers,
-            locked_provider,
-        );
-        let native_vendors: Vec<String> = self
-            .probes
-            .iter()
-            .find(|probe| probe.provider == ProviderKind::Native)
-            .map(|probe| {
-                super::native_agent::native_vendors_present(&probe.models)
-                    .into_iter()
-                    .map(|entry| entry.id)
-                    .collect()
-            })
-            .unwrap_or_default();
-        let stops = picker_stops(&tabs, &native_vendors);
-        let current = stops.iter().position(|(tab, vendor)| {
-            *tab == self.model_picker_tab
-                && vendor
-                    .as_deref()
-                    .is_none_or(|vendor| vendor == self.model_picker_vendor)
-        });
-        let Some(next) = next_picker_highlight(current, stops.len(), key) else {
-            return;
-        };
-        let (tab, vendor) = stops[next].clone();
-        self.select_model_picker_tab(tab, cx);
-        if let Some(vendor) = vendor {
-            self.show_model_picker_vendor(&vendor, cx);
-        }
-    }
-
     /// Bring the current model's row into view whenever the picker shows the
     /// unfiltered list — on open, on a cleared query, and on tab switches.
     ///
@@ -1284,7 +1236,7 @@ impl Waku {
             &self.state.disabled_providers,
             locked_provider,
             self.model_picker_tab,
-            &self.model_picker_vendor,
+            "",
             "",
         )
         .iter()
@@ -3663,49 +3615,6 @@ pub(super) fn next_picker_highlight(
     }
 }
 
-/// The sidebar tabs the picker can land on, in rail order: favorites first,
-/// then every installed provider a new session may use.
-///
-/// Shared by the rail's click gating and by `tab`'s cycle handler so the two
-/// agree on which tabs are usable. A locked session keeps its own provider
-/// usable even if it was switched off afterwards — disabling is for new work —
-/// while every other provider drops out for the lock's duration.
-pub(super) fn visible_picker_tabs(
-    probes: &[ProviderProbe],
-    disabled_providers: &[ProviderKind],
-    locked_provider: Option<ProviderKind>,
-) -> Vec<ModelPickerTab> {
-    let mut tabs = vec![ModelPickerTab::Favorites];
-    tabs.extend(ProviderKind::ALL.into_iter().filter_map(|kind| {
-        let drawn = picker_rail_shows_provider(probes, disabled_providers, locked_provider, kind);
-        let allowed = locked_provider.is_none() || locked_provider == Some(kind);
-        (drawn && allowed).then_some(ModelPickerTab::Provider(kind))
-    }));
-    tabs
-}
-
-/// Where `tab`/`shift-tab` can land in the picker, in order: the rail's tabs,
-/// with the built-in agent's tab opened out into its vendor column so the
-/// keyboard reaches every vendor the mouse can.
-pub(super) fn picker_stops<S: AsRef<str>>(
-    tabs: &[ModelPickerTab],
-    native_vendors: &[S],
-) -> Vec<(ModelPickerTab, Option<String>)> {
-    tabs.iter()
-        .flat_map(|tab| match tab {
-            ModelPickerTab::Provider(provider)
-                if provider.is_builtin() && !native_vendors.is_empty() =>
-            {
-                native_vendors
-                    .iter()
-                    .map(|vendor| (*tab, Some(vendor.as_ref().to_owned())))
-                    .collect::<Vec<_>>()
-            }
-            _ => vec![(*tab, None)],
-        })
-        .collect()
-}
-
 /// The picker's whole body when nothing can back a session: no agent CLI
 /// found on this machine, and none left switched on.
 ///
@@ -3809,7 +3718,7 @@ fn open_provider_settings_from_picker(
     popover.close(window, cx);
     let _ = waku.update(cx, |this, cx| {
         this.open_settings_action(&OpenSettings, window, cx);
-        this.open_settings_page(SettingsPage::Providers, cx);
+        this.open_settings_page(SettingsPage::ModelProviders, cx);
     });
 }
 
@@ -3915,96 +3824,6 @@ pub(super) fn native_wire_format(
         .to_owned()
 }
 
-/// The column beside the built-in agent's model list: one row per vendor
-/// that has models, plus "custom" for the user's own endpoint, each with its
-/// mark and how many models it holds. It sits outside the scrolling list, so
-/// it reads at any scroll position, and scrolls itself only when the vendors
-/// outgrow the panel. The open vendor is marked by fill *and* weight, never
-/// colour alone.
-fn native_vendor_column(
-    theme: Theme,
-    vendors: &[super::native_agent::VendorEntry],
-    active: &str,
-    weak: gpui::WeakEntity<Waku>,
-) -> impl IntoElement {
-    let mut column = div()
-        .id("model-vendor-column")
-        .w(px(132.0))
-        .h_full()
-        .flex_none()
-        .flex()
-        .flex_col()
-        .gap(px(2.0))
-        .p(px(6.0))
-        .overflow_y_scroll()
-        .border_r_1()
-        .border_color(theme.border);
-    for entry in vendors {
-        let vendor = entry.vendor;
-        let count = entry.count;
-        let id = entry.id.clone();
-        let selected = id == active;
-        let weak = weak.clone();
-        column = column.child(
-            div()
-                .id(SharedString::from(format!("model-vendor-{id}")))
-                .h(px(32.0))
-                .flex_none()
-                .px(px(8.0))
-                .rounded(px(7.0))
-                .flex()
-                .items_center()
-                .gap(px(8.0))
-                .cursor_default()
-                .when(selected, |element| element.bg(theme.overlay_strong))
-                .when(!selected, |element| {
-                    element
-                        .hover(|element| element.bg(theme.overlay))
-                        .on_click(move |_, _, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.show_model_picker_vendor(&id, cx);
-                            });
-                        })
-                })
-                .child(icon(
-                    vendor.icon,
-                    15.0,
-                    native_vendor_color(&theme, vendor).opacity(if selected { 1.0 } else { 0.82 }),
-                ))
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex_1()
-                        .truncate()
-                        .text_size(sp(12.5))
-                        .font_weight(if selected {
-                            FontWeight::SEMIBOLD
-                        } else {
-                            FontWeight::NORMAL
-                        })
-                        .text_color(if selected {
-                            theme.text
-                        } else {
-                            theme.text_secondary
-                        })
-                        .child(SharedString::from(entry.label.clone())),
-                )
-                .when(count > 0, |element| {
-                    element.child(
-                        div()
-                            .flex_none()
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_ghost)
-                            .child(SharedString::from(count.to_string())),
-                    )
-                }),
-        );
-    }
-    column
-}
-
-/// A vendor's mark colour: its brand hue, or the theme's ink for a mark
-/// that has none — the same ink `provider_color` gives monochrome marks.
 fn native_vendor_color(theme: &Theme, vendor: &super::native_agent::NativeVendor) -> Hsla {
     match vendor.color {
         Some(hex) => rgb(hex).into(),

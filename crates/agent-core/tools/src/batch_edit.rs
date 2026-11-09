@@ -4,15 +4,27 @@
 // fails the tool returns an error and leaves every file untouched.  If a write
 // fails after some files have already been written, the tool attempts to
 // restore those files from in-memory backups.
+//
+// Within one file, every old_string is matched against the file as originally
+// read — before any edit of the batch is applied — and the matched regions
+// must not overlap (Sailry `node-runtime files/edit.rs`). The replacements
+// are spliced in one ascending pass, so untouched regions keep their exact
+// bytes and line endings.
 
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::ops::Range;
 use tracing::debug;
 
 pub struct BatchEditTool;
+
+/// Total byte budget for the excerpts appended to a batch result. The
+/// per-file excerpts are already bounded (see `line_endings::edit_excerpt`);
+/// this keeps a large multi-file batch from flooding the tool output.
+const BATCH_EXCERPT_BUDGET: usize = 16 * 1024;
 
 #[derive(Debug, Deserialize)]
 struct SingleEdit {
@@ -103,86 +115,87 @@ impl Tool for BatchEditTool {
             return ToolResult::error(e.to_string());
         }
 
-        // ----------------------------------------------------------------
-        // Phase 1: read all files and validate every edit before writing
-        // ----------------------------------------------------------------
-
-        // (resolved_path_string, original_content, new_content)
-        let mut prepared: Vec<(String, String, String)> = Vec::with_capacity(params.edits.len());
-        let mut pre_check_errors: Vec<String> = Vec::new();
-        let mut path_content: HashMap<String, String> = HashMap::new();
-
-        for (i, edit) in params.edits.iter().enumerate() {
+        // Group the edits by resolved path, keeping the original edit indices
+        // for error messages and the file's first-appearance order.
+        let mut file_order: Vec<String> = Vec::new();
+        let mut by_file: HashMap<String, Vec<(usize, &SingleEdit)>> = HashMap::new();
+        for (index, edit) in params.edits.iter().enumerate() {
             let path = ctx.resolve_path(&edit.file_path);
-            debug!(path = %path.display(), index = i, "BatchEdit pre-check");
+            let key = path.display().to_string();
+            by_file
+                .entry(key.clone())
+                .or_insert_with(|| {
+                    file_order.push(key.clone());
+                    Vec::new()
+                })
+                .push((index, edit));
+        }
 
-            if edit.old_string.is_empty() {
-                pre_check_errors.push(format!("Edit {}: old_string must not be empty", i));
+        // ----------------------------------------------------------------
+        // Phase 1: read every file once and validate the whole batch before
+        // any write. Each file's edits all match against its original
+        // content, in one pass (`replace_many_preserving_eol`).
+        // ----------------------------------------------------------------
+
+        // (resolved_path, original_content, new_content, replaced_ranges)
+        let mut prepared: Vec<(String, String, String, Vec<Range<usize>>)> =
+            Vec::with_capacity(file_order.len());
+        let mut pre_check_errors: Vec<String> = Vec::new();
+
+        for key in &file_order {
+            let file_edits = &by_file[key];
+            let first_index = file_edits[0].0;
+
+            // Basic per-edit validation, reported with the original indices.
+            let mut file_is_valid = true;
+            for (original_index, edit) in file_edits {
+                if edit.old_string.is_empty() {
+                    pre_check_errors.push(format!(
+                        "Edit {}: old_string must not be empty",
+                        original_index
+                    ));
+                    file_is_valid = false;
+                }
+            }
+            if !file_is_valid {
                 continue;
             }
 
-            let original = if let Some(content) = path_content.get(&path.display().to_string()) {
-                // use cached edited content if available
-                content.clone()
-            } else {
-                // Fork (Waku): as for Edit (`read_state`).
-                if let Some(reason) = crate::read_state::refusal(&ctx.session_id, &path) {
-                    pre_check_errors.push(format!("Edit {}: {}", i, reason));
+            let path = std::path::Path::new(key);
+            debug!(path = %path.display(), "BatchEdit pre-check");
+
+            // Fork (Waku): as for Edit (`read_state`), once per file.
+            if let Some(reason) = crate::read_state::refusal(&ctx.session_id, path) {
+                pre_check_errors.push(format!("Edit {}: {}", first_index, reason));
+                continue;
+            }
+            let original = match tokio::fs::read_to_string(path).await {
+                Ok(c) => c,
+                Err(e) => {
+                    pre_check_errors
+                        .push(format!("Edit {}: cannot read {}: {}", first_index, key, e));
                     continue;
-                }
-                match tokio::fs::read_to_string(&path).await {
-                    Ok(c) => c,
-                    Err(e) => {
-                        pre_check_errors.push(format!(
-                            "Edit {}: cannot read {}: {}",
-                            i,
-                            path.display(),
-                            e
-                        ));
-                        continue;
-                    }
                 }
             };
 
-            // Detect the current content's dominant line ending BEFORE editing
-            // so it survives the write (#225).  Match on an LF-normalized view
-            // but splice the replacement into the original bytes so untouched
-            // lines keep their exact endings.  `original` here is either the raw
-            // on-disk content or a previous edit's output (both real EOLs).
+            // Detect the current content's dominant line ending BEFORE
+            // editing so it survives the write (#225). Matching runs on an
+            // LF-normalized view while the spliced-in bytes keep every
+            // untouched region's exact endings.
             let eol = crate::line_endings::LineEnding::detect(&original);
-            let normalized = original.replace("\r\n", "\n");
-            let old_string = edit.old_string.replace("\r\n", "\n");
-            let new_string = edit.new_string.replace("\r\n", "\n");
-
-            let count = normalized.matches(&old_string).count();
-            if count == 0 {
-                pre_check_errors.push(format!(
-                    "Edit {}: old_string not found in {}",
-                    i,
-                    path.display()
-                ));
-                continue;
+            let specs: Vec<crate::line_endings::EditReplacement> = file_edits
+                .iter()
+                .map(|(_, edit)| crate::line_endings::EditReplacement {
+                    old: &edit.old_string,
+                    new: &edit.new_string,
+                })
+                .collect();
+            match crate::line_endings::replace_many_preserving_eol(&original, &specs, eol) {
+                Ok((new_content, _count, ranges)) => {
+                    prepared.push((key.clone(), original, new_content, ranges));
+                }
+                Err(error) => pre_check_errors.push(edit_error_message(error, file_edits, key)),
             }
-            if count > 1 {
-                pre_check_errors.push(format!(
-                    "Edit {}: old_string appears {} times in {} (must be unique)",
-                    i,
-                    count,
-                    path.display()
-                ));
-                continue;
-            }
-
-            let (new_content, _replacements) = crate::line_endings::replace_preserving_eol(
-                &original,
-                &old_string,
-                &new_string,
-                eol,
-                false,
-            );
-            prepared.push((path.display().to_string(), original, new_content.clone()));
-            // update path_content so future edits see the new content
-            path_content.insert(path.display().to_string(), new_content);
         }
 
         if !pre_check_errors.is_empty() {
@@ -193,29 +206,14 @@ impl Tool for BatchEditTool {
             ));
         }
 
-        let edit_count = prepared.len();
-        let unique_files: std::collections::HashSet<&str> =
-            prepared.iter().map(|(p, _, _)| p.as_str()).collect();
-        let file_count = unique_files.len();
+        let edit_count = params.edits.len();
+        let file_count = prepared.len();
 
         // ----------------------------------------------------------------
         // Phase 2: write all files; roll back on any failure
         // ----------------------------------------------------------------
 
-        // merge file writes into a single transaction
-        let mut by_file_writing: HashMap<String, (String, String)> = HashMap::new();
-        for (path_str, original, new_content) in prepared.into_iter() {
-            by_file_writing
-                .entry(path_str.clone())
-                .and_modify(|v| v.1 = new_content.clone()) // only update new_content
-                .or_insert((original, new_content));
-        }
-        let unique_writings = by_file_writing
-            .into_iter()
-            .map(|(path_str, (original, new_content))| (path_str, original, new_content))
-            .collect::<Vec<_>>();
-
-        for (i, (path_str, original, new_content)) in unique_writings.iter().enumerate() {
+        for (i, (path_str, original, new_content, _)) in prepared.iter().enumerate() {
             let path = std::path::Path::new(path_str);
             match crate::write_atomic(path, new_content.as_bytes()).await {
                 Ok(()) => {
@@ -231,8 +229,7 @@ impl Tool for BatchEditTool {
                     let mut rollback_errors: Vec<String> = Vec::new();
 
                     // rollback in reverse order to preserve original file state
-                    for (rb_path, rb_original, rb_new_content) in unique_writings[0..i].iter().rev()
-                    {
+                    for (rb_path, rb_original, rb_new_content, _) in prepared[0..i].iter().rev() {
                         if let Err(re) = crate::write_atomic(
                             std::path::Path::new(rb_path),
                             rb_original.as_bytes(),
@@ -270,7 +267,7 @@ impl Tool for BatchEditTool {
         // Build success response
         // ----------------------------------------------------------------
 
-        let summary = format!(
+        let mut response = format!(
             "BatchEdit applied {} edit{} across {} file{}.",
             edit_count,
             if edit_count != 1 { "s" } else { "" },
@@ -278,12 +275,93 @@ impl Tool for BatchEditTool {
             if file_count != 1 { "s" } else { "" },
         );
 
-        ToolResult::success(summary).with_metadata(json!({
-            "edits_applied": edit_count,
-            "files_modified": file_count,
-            "files": unique_writings.iter().map(|(p, _, _)| p).collect::<Vec<_>>(),
-        }))
+        // Bounded edit excerpts as a plain-text aid: the caller can verify
+        // the batch without reading every file back. The whole batch shares
+        // one budget, so a large batch cannot flood the tool output.
+        let mut budget = BATCH_EXCERPT_BUDGET;
+        for (path_str, _, new_content, ranges) in prepared.iter() {
+            if budget == 0 {
+                response.push_str("\n[Further edit excerpts omitted]\n");
+                break;
+            }
+            let mut text = crate::line_endings::edit_excerpt(new_content, ranges).render_text();
+            if text.len() > budget {
+                truncate_at_boundary(&mut text, budget);
+                text.push_str("[Excerpt truncated]\n");
+            }
+            budget -= text.len();
+            response.push_str(&format!("\n--- {} ---\n{}", path_str, text));
+        }
+
+        let files = prepared
+            .iter()
+            .map(|(path, _, content, ranges)| {
+                json!({
+                    "path":path,
+                    "destination":null,
+                    "kind":"modified",
+                    "status":"applied",
+                    "revision":blake3::hash(content.as_bytes()).to_hex().to_string(),
+                    "size":content.len() as u64,
+                    "excerpt":crate::line_endings::edit_excerpt(content, ranges).to_value(),
+                    "error":null,
+                })
+            })
+            .collect::<Vec<_>>();
+        ToolResult::success(response)
+            .with_metadata(json!({
+                "edits_applied": edit_count,
+                "files_modified": file_count,
+                "files": prepared.iter().map(|(p, _, _, _)| p).collect::<Vec<_>>(),
+            }))
+            .with_structured_content(json!({
+                "kind":"file_changes",
+                "data":{"status":"applied","files":files}
+            }))
     }
+}
+
+/// Map a batch replacement error onto the batch's message style, translating
+/// the per-file edit position back to the original edit index.
+fn edit_error_message(
+    error: crate::line_endings::ReplaceManyError,
+    file_edits: &[(usize, &SingleEdit)],
+    path: &str,
+) -> String {
+    let original_index = |local: usize| file_edits[local].0;
+    match error {
+        crate::line_endings::ReplaceManyError::NotFound(local) => format!(
+            "Edit {}: old_string not found in {}. Make sure the string matches exactly, \
+             including whitespace and indentation.",
+            original_index(local),
+            path
+        ),
+        crate::line_endings::ReplaceManyError::NotUnique(local, count) => format!(
+            "Edit {}: old_string appears {} times in {} (must be unique)",
+            original_index(local),
+            count,
+            path
+        ),
+        crate::line_endings::ReplaceManyError::Overlap(a, b) => format!(
+            "Edit {} and Edit {}: old_strings match overlapping regions in {}; \
+             make them disjoint so the batch can be applied",
+            original_index(a),
+            original_index(b),
+            path
+        ),
+    }
+}
+
+/// Truncate `text` to at most `limit` bytes without splitting a UTF-8 char.
+fn truncate_at_boundary(text: &mut String, limit: usize) {
+    if text.len() <= limit {
+        return;
+    }
+    let mut end = limit;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
 }
 
 #[cfg(test)]
@@ -357,5 +435,130 @@ mod tests {
             .filter_map(|e| e.ok())
             .any(|e| e.file_name().to_string_lossy().contains(".claurst-tmp-"));
         assert!(!tmp_left, "atomic write must not leave a temp file behind");
+    }
+
+    /// Every old_string is matched against the file as originally read. An
+    /// edit whose text only exists inside another edit's replacement does not
+    /// match (no sequential cascading), and the whole batch is rejected
+    /// without touching the file.
+    #[tokio::test]
+    async fn edits_match_the_original_content_not_previous_replacements() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("chain.txt");
+        std::fs::write(&path, "a\n").unwrap();
+
+        let ctx = allow_all_context(dir.path().to_path_buf());
+        crate::read_state::mark_seen(&ctx.session_id, &path);
+        let res = BatchEditTool
+            .execute(
+                json!({
+                    "edits": [
+                        { "file_path": path.to_string_lossy(), "old_string": "a", "new_string": "b" },
+                        { "file_path": path.to_string_lossy(), "old_string": "b", "new_string": "c" }
+                    ]
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(res.is_error, "a chained match must be rejected");
+        assert!(
+            res.content.contains("Edit 1") && res.content.contains("not found"),
+            "{}",
+            res.content
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "a\n");
+    }
+
+    /// Overlapping old_strings are detected and reported with both edit
+    /// indices; nothing is written.
+    #[tokio::test]
+    async fn overlapping_edits_are_rejected_with_both_indices() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("overlap.txt");
+        std::fs::write(&path, "alpha beta gamma\n").unwrap();
+
+        let ctx = allow_all_context(dir.path().to_path_buf());
+        crate::read_state::mark_seen(&ctx.session_id, &path);
+        let res = BatchEditTool
+            .execute(
+                json!({
+                    "edits": [
+                        { "file_path": path.to_string_lossy(), "old_string": "beta", "new_string": "B" },
+                        { "file_path": path.to_string_lossy(), "old_string": "beta ga", "new_string": "X" }
+                    ]
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(res.is_error, "overlapping matches must be rejected");
+        assert!(
+            res.content.contains("Edit 0") && res.content.contains("Edit 1"),
+            "{}",
+            res.content
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "alpha beta gamma\n"
+        );
+    }
+
+    /// Adjacent (touching but disjoint) matches are fine and splice in order.
+    #[tokio::test]
+    async fn adjacent_edits_apply_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("adjacent.txt");
+        std::fs::write(&path, "abcdef\n").unwrap();
+
+        let ctx = allow_all_context(dir.path().to_path_buf());
+        crate::read_state::mark_seen(&ctx.session_id, &path);
+        let res = BatchEditTool
+            .execute(
+                json!({
+                    "edits": [
+                        { "file_path": path.to_string_lossy(), "old_string": "abc", "new_string": "ABC" },
+                        { "file_path": path.to_string_lossy(), "old_string": "def", "new_string": "DEF" }
+                    ]
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(!res.is_error, "batch edit failed: {}", res.content);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "ABCDEF\n");
+    }
+
+    /// A successful batch appends a bounded excerpt of each file so the model
+    /// can verify the edits without reading the files back.
+    #[tokio::test]
+    async fn success_response_includes_bounded_excerpts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snippet.txt");
+        std::fs::write(&path, "one\ntwo\nthree\nfour\nfive\nsix\nseven\n").unwrap();
+
+        let ctx = allow_all_context(dir.path().to_path_buf());
+        crate::read_state::mark_seen(&ctx.session_id, &path);
+        let res = BatchEditTool
+            .execute(
+                json!({
+                    "edits": [
+                        { "file_path": path.to_string_lossy(), "old_string": "four", "new_string": "FOUR" }
+                    ]
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(!res.is_error, "batch edit failed: {}", res.content);
+
+        // The edit is on line 4; three lines of context on each side show
+        // lines 1..=7, numbered.
+        assert!(
+            res.content
+                .contains("BatchEdit applied 1 edit across 1 file."),
+            "{}",
+            res.content
+        );
+        assert!(res.content.contains("1\tone"), "{}", res.content);
+        assert!(res.content.contains("4\tFOUR"), "{}", res.content);
+        assert!(res.content.contains("7\tseven"), "{}", res.content);
+        assert!(!res.content.contains("8\t"), "{}", res.content);
     }
 }

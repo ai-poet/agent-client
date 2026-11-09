@@ -1,23 +1,15 @@
-//! Choosing which of the managed service's domains the CLIs talk to.
+//! Choose which managed-service origin carries agent and business API traffic.
 //!
-//! The service answers on more than one origin, and which one is fastest —
-//! or reachable at all — is a property of the user's network, not of the
-//! account. This applies the same candidate-and-measure idea as a custom
-//! endpoint's alternate domains, one level up: the origin written into every
-//! CLI's configuration.
+//! Candidates can come from the build, the service's public node list, or the
+//! user. The same origin feeds the built-in agent and authenticated account,
+//! catalog, usage, plan, payment, and announcement clients.
 //!
-//! **Signing in stays on one origin.** Tokens are minted, refreshed and
-//! checked against the domain the browser flow used
-//! ([`crate::auth::credentials_from_fragment`] rejects a callback from
-//! anywhere else, and the refresh path reconciles a stored session by
-//! endpoint), so `Credentials.endpoint` is never rewritten here. Only
-//! [`crate::GatewayConfig::endpoint`] — the URL the agent CLIs are pointed
-//! at — moves.
+//! **Authentication stays on the login origin.** Tokens are minted, refreshed,
+//! revoked, and callback-checked against the credential's `endpoint`;
+//! selecting a gateway node never rewrites that stored endpoint.
 //!
-//! A domain counts as usable only when it answers the models listing with
-//! the account's own gateway key. That is the same request a routed CLI
-//! makes first, so a green result means the CLI will work, not merely that
-//! the host is up.
+//! A node is usable only when it answers a models listing with the account's
+//! gateway key, which tests the route the agent will actually use.
 
 use std::path::PathBuf;
 
@@ -36,7 +28,7 @@ pub const SERVER_NODES_TTL_SECS: i64 = 6 * 60 * 60;
 /// At most this many server nodes are kept; the service caps its list at ten.
 const MAX_SERVER_NODES: usize = 10;
 
-/// Which service origin the CLIs are routed through.
+/// Which service origin the built-in agent and business APIs use.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct GatewayOriginConfig {
     /// Origins the user added, on top of the ones the build ships with.
@@ -79,7 +71,7 @@ pub struct ServerNode {
 
 /// How long a model request may take to connect, and how long a response
 /// may stay silent, before it is abandoned and retried. Read by the built-in
-/// agent; the other CLIs keep their own.
+/// agent's model clients.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct NetworkTimeouts {
     #[serde(default = "default_connect_secs")]
@@ -238,9 +230,8 @@ impl GatewayOriginConfig {
     /// update drops a retired domain — the alternative is every request pointed
     /// at a host that no longer exists.
     pub fn origin(&self) -> Option<String> {
-        self.selected_origin().or_else(|| {
-            self.effective_candidates().first().cloned()
-        })
+        self.selected_origin()
+            .or_else(|| self.effective_candidates().first().cloned())
     }
 
     /// Route through `origin`, remembering it as a candidate. A deliberate

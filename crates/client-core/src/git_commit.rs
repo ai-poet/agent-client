@@ -2,7 +2,7 @@
 //! generation. Every entry point performs process I/O and must run on the
 //! background executor; render code consumes only the returned snapshots.
 
-use std::ffi::OsString;
+#[cfg(test)]
 use std::fs;
 use std::io::Read;
 use std::path::Path;
@@ -13,32 +13,17 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow, bail};
+#[cfg(test)]
 use uuid::Uuid;
 
-use crate::model::ProviderKind;
 pub use client_protocol::git::{AgentInvocation, CommitSnapshot as Snapshot};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
-const AGENT_TIMEOUT: Duration = Duration::from_secs(180);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(40);
 const MAX_DIFF_BYTES: usize = 96 * 1024;
 const MAX_STDOUT_BYTES: usize = 1024 * 1024;
 const MAX_STDERR_BYTES: usize = 256 * 1024;
 const MAX_ERROR_CHARS: usize = 4_000;
-
-// A commit subject is a fixed classification over a diff that is already in the
-// prompt, so it does not need — or benefit from — the model the task runs on.
-// Where a provider exposes a cheap tier by name, generation is pinned to it and
-// to the lowest effort that tier's API accepts, whatever the session selected.
-const CLAUDE_COMMIT_MODEL: &str = "claude-haiku-4-5";
-const CLAUDE_COMMIT_EFFORT: &str = "low";
-// Fork: Terra, not Luna — the gateway's groups no longer carry Luna.
-const CODEX_COMMIT_MODEL: &str = "gpt-5.6-terra";
-// `codex exec` has no effort flag, so the config override is the only route.
-// `low` is the lowest level Codex's own model list gives Terra. Luna ran at
-// `none`, which the API accepted there without listing it; for Terra that is
-// unverified, and a rejected level would fail every commit message.
-const CODEX_COMMIT_EFFORT: &str = r#"model_reasoning_effort="low""#;
 
 struct CapturedOutput {
     status: ExitStatus,
@@ -167,194 +152,6 @@ fn commit_prompt(cwd: &Path, include_unstaged: bool) -> anyhow::Result<String> {
         },
         context
     ))
-}
-
-fn agent_arguments(
-    provider: ProviderKind,
-    model: Option<&str>,
-    reasoning_effort: Option<&str>,
-    prompt: &str,
-    amp_settings: Option<&Path>,
-) -> Vec<OsString> {
-    let mut args = Vec::<OsString>::new();
-    fn push(args: &mut Vec<OsString>, value: &str) {
-        args.push(OsString::from(value));
-    }
-    match provider {
-        ProviderKind::Amp => {
-            push(&mut args, "--execute");
-            push(&mut args, "--no-color");
-            push(&mut args, "--no-ide");
-            push(&mut args, "--no-notifications");
-            if let Some(settings) = amp_settings {
-                push(&mut args, "--settings-file");
-                args.push(settings.as_os_str().to_owned());
-            }
-            if let Some(model) = model {
-                push(&mut args, "--mode");
-                push(&mut args, model);
-            }
-            if let Some(effort) = reasoning_effort {
-                push(&mut args, "--effort");
-                push(&mut args, effort);
-            }
-        }
-        ProviderKind::Claude => {
-            push(&mut args, "--print");
-            push(&mut args, "--output-format");
-            push(&mut args, "text");
-            push(&mut args, "--permission-mode");
-            push(&mut args, "plan");
-            push(&mut args, "--tools");
-            push(&mut args, "");
-            push(&mut args, "--disable-slash-commands");
-            push(&mut args, "--no-session-persistence");
-            push(&mut args, "--no-chrome");
-            push(&mut args, "--model");
-            push(&mut args, CLAUDE_COMMIT_MODEL);
-            push(&mut args, "--effort");
-            push(&mut args, CLAUDE_COMMIT_EFFORT);
-        }
-        ProviderKind::Codex => {
-            push(&mut args, "exec");
-            push(&mut args, "--sandbox");
-            push(&mut args, "read-only");
-            push(&mut args, "--ephemeral");
-            push(&mut args, "--color");
-            push(&mut args, "never");
-            push(&mut args, "--skip-git-repo-check");
-            push(&mut args, "--model");
-            push(&mut args, CODEX_COMMIT_MODEL);
-            push(&mut args, "-c");
-            push(&mut args, CODEX_COMMIT_EFFORT);
-        }
-        ProviderKind::Cursor => {
-            push(&mut args, "--print");
-            push(&mut args, "--output-format");
-            push(&mut args, "text");
-            push(&mut args, "--mode");
-            push(&mut args, "ask");
-            push(&mut args, "--sandbox");
-            push(&mut args, "enabled");
-            push(&mut args, "--trust");
-            if let Some(model) = model {
-                push(&mut args, "--model");
-                push(&mut args, model);
-            }
-        }
-        ProviderKind::DeepSeek => {
-            // The headless profile is Harness's one-shot, stdout-only client.
-            // The commit prompt embeds all context and explicitly forbids tools.
-            push(&mut args, "--profile");
-            push(&mut args, "headless");
-        }
-        ProviderKind::Fx => {
-            push(&mut args, "ask");
-            push(&mut args, "--no-save");
-            push(&mut args, "--no-color");
-            push(&mut args, "--");
-        }
-        ProviderKind::OpenCode => {
-            push(&mut args, "run");
-            push(&mut args, "--pure");
-            push(&mut args, "--agent");
-            push(&mut args, "plan");
-            if let Some(model) = model {
-                push(&mut args, "--model");
-                push(&mut args, model);
-            }
-            if let Some(effort) = reasoning_effort {
-                push(&mut args, "--variant");
-                push(&mut args, effort);
-            }
-        }
-        ProviderKind::Grok => {
-            push(&mut args, "--single");
-            push(&mut args, prompt);
-            push(&mut args, "--output-format");
-            push(&mut args, "plain");
-            push(&mut args, "--permission-mode");
-            push(&mut args, "plan");
-            push(&mut args, "--tools");
-            push(&mut args, "");
-            push(&mut args, "--no-memory");
-            push(&mut args, "--no-subagents");
-            push(&mut args, "--disable-web-search");
-            push(&mut args, "--verbatim");
-            if let Some(model) = model {
-                push(&mut args, "--model");
-                push(&mut args, model);
-            }
-            if let Some(effort) = reasoning_effort {
-                push(&mut args, "--reasoning-effort");
-                push(&mut args, effort);
-            }
-            return args;
-        }
-        // The built-in agent has no command line: `generate_message` answers
-        // it through `agent_bridge::one_shot` before ever building
-        // arguments. Reaching this arm means a caller skipped that branch.
-        ProviderKind::Native => {
-            debug_assert!(
-                false,
-                "the built-in agent has no CLI to generate a commit message with"
-            );
-            return args;
-        }
-        // Kimi carries the prompt as `--prompt`'s value rather than a trailing
-        // positional, so it returns early. It has no tool or session switches
-        // to turn off; the commit prompt is what forbids tool use.
-        ProviderKind::Kimi => {
-            push(&mut args, "--prompt");
-            push(&mut args, prompt);
-            push(&mut args, "--output-format");
-            push(&mut args, "text");
-            if let Some(model) = model {
-                push(&mut args, "--model");
-                push(&mut args, model);
-            }
-            return args;
-        }
-        // Oh My Pi rejects unknown flags outright, so it gets its own list
-        // rather than Pi's: context files are `--no-rules`, and it has no
-        // prompt-template or project-trust switch to turn off.
-        ProviderKind::OhMyPi => {
-            push(&mut args, "--print");
-            push(&mut args, "--no-session");
-            push(&mut args, "--no-tools");
-            push(&mut args, "--no-rules");
-            push(&mut args, "--no-extensions");
-            push(&mut args, "--no-skills");
-            if let Some(model) = model {
-                push(&mut args, "--model");
-                push(&mut args, model);
-            }
-            if let Some(effort) = reasoning_effort {
-                push(&mut args, "--thinking");
-                push(&mut args, effort);
-            }
-        }
-        ProviderKind::Pi => {
-            push(&mut args, "--print");
-            push(&mut args, "--no-session");
-            push(&mut args, "--no-tools");
-            push(&mut args, "--no-context-files");
-            push(&mut args, "--no-extensions");
-            push(&mut args, "--no-skills");
-            push(&mut args, "--no-prompt-templates");
-            push(&mut args, "--no-approve");
-            if let Some(model) = model {
-                push(&mut args, "--model");
-                push(&mut args, model);
-            }
-            if let Some(effort) = reasoning_effort {
-                push(&mut args, "--thinking");
-                push(&mut args, effort);
-            }
-        }
-    }
-    push(&mut args, prompt);
-    args
 }
 
 fn normalize_message(output: &str) -> Option<String> {
@@ -687,145 +484,5 @@ mod tests {
             normalize_message("Commit message: Add commit dialog\n").as_deref(),
             Some("Add commit dialog")
         );
-    }
-
-    fn has(args: &[OsString], value: &str) -> bool {
-        args.iter().any(|arg| arg == value)
-    }
-
-    fn has_pair(args: &[OsString], first: &str, second: &str) -> bool {
-        args.windows(2)
-            .any(|pair| pair[0] == first && pair[1] == second)
-    }
-
-    #[test]
-    fn the_builtin_agent_builds_no_command_line() {
-        // `debug_assert` fires in a debug test build, which is the point: the
-        // release behaviour is an empty argument list, and reaching it at all
-        // means a caller skipped the binary check.
-        assert!(ProviderKind::Native.is_builtin());
-        assert!(ProviderKind::Native.command().is_empty());
-    }
-
-    #[test]
-    fn every_provider_uses_a_noninteractive_generation_mode() {
-        let prompt = "Generate subject";
-        for provider in ProviderKind::ALL {
-            // The built-in agent is not launched, so it has no arguments to
-            // check. Its absence here is asserted by
-            // `the_builtin_agent_builds_no_command_line` below.
-            if provider.is_builtin() {
-                continue;
-            }
-            let args = agent_arguments(
-                provider,
-                Some("model"),
-                Some("low"),
-                prompt,
-                Some(Path::new("/tmp/amp.json")),
-            );
-            assert!(has(&args, prompt));
-            match provider {
-                ProviderKind::Amp => {
-                    assert!(has(&args, "--execute"));
-                    assert!(has_pair(&args, "--settings-file", "/tmp/amp.json"));
-                    assert!(has_pair(&args, "--mode", "model"));
-                    assert!(has_pair(&args, "--effort", "low"));
-                }
-                ProviderKind::Codex => {
-                    assert_eq!(args.first().and_then(|arg| arg.to_str()), Some("exec"));
-                    assert!(has_pair(&args, "--sandbox", "read-only"));
-                    assert!(has(&args, "--ephemeral"));
-                    assert!(has(&args, "--skip-git-repo-check"));
-                }
-                ProviderKind::OpenCode => {
-                    assert_eq!(args.first().and_then(|arg| arg.to_str()), Some("run"));
-                    assert!(has(&args, "--pure"));
-                    assert!(has_pair(&args, "--agent", "plan"));
-                    assert!(has_pair(&args, "--variant", "low"));
-                }
-                ProviderKind::Claude => {
-                    assert!(has(&args, "--print"));
-                    assert!(has_pair(&args, "--permission-mode", "plan"));
-                    assert!(has_pair(&args, "--tools", ""));
-                    assert!(has(&args, "--no-session-persistence"));
-                }
-                ProviderKind::Cursor => {
-                    assert!(has(&args, "--print"));
-                    assert!(has_pair(&args, "--mode", "ask"));
-                    assert!(has_pair(&args, "--sandbox", "enabled"));
-                }
-                ProviderKind::DeepSeek => {
-                    assert!(has_pair(&args, "--profile", "headless"));
-                }
-                ProviderKind::Fx => {
-                    assert_eq!(args.first().and_then(|arg| arg.to_str()), Some("ask"));
-                    assert!(has(&args, "--no-save"));
-                    assert!(has(&args, "--no-color"));
-                    assert!(has(&args, "--"));
-                }
-                ProviderKind::Grok => {
-                    assert!(has_pair(&args, "--single", prompt));
-                    assert!(has_pair(&args, "--permission-mode", "plan"));
-                    assert!(has_pair(&args, "--tools", ""));
-                    assert!(has(&args, "--no-memory"));
-                    assert!(has(&args, "--no-subagents"));
-                    assert!(has_pair(&args, "--reasoning-effort", "low"));
-                }
-                ProviderKind::Pi => {
-                    assert!(has(&args, "--print"));
-                    assert!(has(&args, "--no-session"));
-                    assert!(has(&args, "--no-tools"));
-                    assert!(has_pair(&args, "--thinking", "low"));
-                }
-                ProviderKind::OhMyPi => {
-                    assert!(has(&args, "--print"));
-                    assert!(has(&args, "--no-session"));
-                    assert!(has(&args, "--no-tools"));
-                    assert!(has(&args, "--no-rules"));
-                    assert!(has_pair(&args, "--thinking", "low"));
-                }
-                ProviderKind::Kimi => {
-                    assert!(has_pair(&args, "--prompt", prompt));
-                    assert!(has_pair(&args, "--output-format", "text"));
-                    assert!(has_pair(&args, "--model", "model"));
-                }
-                // Skipped by the `is_builtin` guard above, which the
-                // dedicated test below covers instead. Named rather than
-                // wildcarded so a new provider still has to be accounted
-                // for here.
-                ProviderKind::Native => unreachable!("built-in providers are skipped above"),
-            }
-        }
-    }
-
-    /// The session's own model must not reach commit-message generation for the
-    /// two providers that name a cheap tier: a subject line is the same job on
-    /// Haiku as on Opus, and the diff is already in the prompt.
-    #[test]
-    fn claude_and_codex_generate_on_a_pinned_cheap_tier() {
-        let claude = agent_arguments(
-            ProviderKind::Claude,
-            Some("claude-opus-5"),
-            Some("xhigh"),
-            "Generate subject",
-            None,
-        );
-        assert!(has_pair(&claude, "--model", CLAUDE_COMMIT_MODEL));
-        assert!(has_pair(&claude, "--effort", CLAUDE_COMMIT_EFFORT));
-        assert!(!has(&claude, "claude-opus-5"));
-        assert!(!has(&claude, "xhigh"));
-
-        let codex = agent_arguments(
-            ProviderKind::Codex,
-            Some("gpt-5.6-sol"),
-            Some("high"),
-            "Generate subject",
-            None,
-        );
-        assert!(has_pair(&codex, "--model", CODEX_COMMIT_MODEL));
-        assert!(has_pair(&codex, "-c", CODEX_COMMIT_EFFORT));
-        assert!(!has(&codex, "gpt-5.6-sol"));
-        assert!(!has(&codex, "high"));
     }
 }

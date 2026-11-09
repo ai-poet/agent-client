@@ -64,7 +64,9 @@ impl Sessions {
             effect.identify();
             match effect {
                 Effect::Conversation(ConversationEffect::AppendMessage(message)) => {
-                    current.conversation.push(message.clone());
+                    let mut message = message.clone();
+                    stamp_output_revisions(&mut message);
+                    current.conversation.push(message);
                 }
                 Effect::Conversation(ConversationEffect::PatchToolRequestMeta {
                     tool_call_id,
@@ -108,6 +110,7 @@ impl Sessions {
                     current.context.loaded_tools = Some(tools.clone());
                     let mut compact_usage = usage.clone();
                     compact_usage.is_compaction = true;
+                    summary.metadata.compaction_summary = true;
                     summary.metadata.usage = Some(Box::new(compact_usage));
                     current.conversation.push((**summary).clone());
                 }
@@ -120,6 +123,21 @@ impl Sessions {
             }
         }
         Ok(())
+    }
+}
+
+fn stamp_output_revisions(message: &mut Message) {
+    for content in &mut message.content {
+        if let crate::agent::model::Content::ToolResult(response) = content
+            && let Ok(result) = &response.result
+        {
+            let revision = crate::agent::output::result_revision(result);
+            message.metadata.set_operation_note(
+                "tool_output",
+                &response.id,
+                serde_json::Value::String(revision),
+            );
+        }
     }
 }
 

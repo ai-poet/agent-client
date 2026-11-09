@@ -2280,7 +2280,6 @@ fn settings_search_filters_pages_for_arrow_cycling() {
     let mut all_pages = vec![
         SettingsPage::General,
         SettingsPage::Appearance,
-        SettingsPage::Providers,
         SettingsPage::ModelProviders,
         SettingsPage::Agent,
         SettingsPage::Skills,
@@ -2300,11 +2299,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
     assert_eq!(pages("skill"), vec![SettingsPage::Skills]);
 
     // A keyword shared across pages keeps them all reachable.
-    let mut codex_pages = vec![
-        SettingsPage::Providers,
-        SettingsPage::Skills,
-        SettingsPage::Usage,
-    ];
+    let mut codex_pages = vec![SettingsPage::Skills, SettingsPage::Usage];
     if cfg!(any(target_os = "macos", windows)) {
         codex_pages.push(SettingsPage::ComputerUse);
     }
@@ -2493,15 +2488,12 @@ fn the_built_in_agents_api_is_decided_by_the_model() {
     assert_eq!(native_wire_format(None, None), "chat");
 }
 
-/// The fallback list the picker shows while signed out is bare Claude ids
-/// with no platform ahead of a `::` and no tier. The vendor column still
-/// files them — by name — so the picker is never empty before a catalog
-/// lands, and "custom" is drawn, empty, as the place the user's own models go.
+/// The signed-out fallback participates in the same flat model list as a
+/// fetched catalog; there is no vendor submenu to open first.
 #[test]
-fn the_signed_out_fallback_is_filed_under_anthropic() {
+fn the_signed_out_fallback_uses_the_flat_model_list() {
     use super::ModelPickerTab;
     use super::composer::visible_picker_models;
-    use super::native_agent::native_vendors_present;
     use crate::model::ProviderProbe;
 
     let fallback = crate::model_catalog::fallback_models(ProviderKind::Native);
@@ -2525,24 +2517,13 @@ fn the_signed_out_fallback_is_filed_under_anthropic() {
     };
 
     assert_eq!(vendor("anthropic").len(), fallback.len());
-    assert!(vendor("custom").is_empty());
-    let column: Vec<(String, usize)> = native_vendors_present(&fallback)
-        .into_iter()
-        .map(|entry| (entry.id, entry.count))
-        .collect();
-    assert_eq!(
-        column,
-        [
-            ("anthropic".to_owned(), fallback.len()),
-            ("custom".to_owned(), 0)
-        ]
-    );
+    assert_eq!(vendor("custom").len(), fallback.len());
 }
 
-/// A vendor is picked by the model's name, so a query naming the vendor finds
-/// its models from any tab, and the open vendor only filters the list.
+/// The primary list contains every vendor at once; search narrows that same
+/// flat list by model, vendor, or custom endpoint name.
 #[test]
-fn the_built_in_agents_list_is_filed_by_vendor() {
+fn the_built_in_agents_list_is_flat_and_searchable() {
     use super::ModelPickerTab;
     use super::composer::visible_picker_models;
     use crate::model::{ProviderModel, ProviderProbe};
@@ -2577,52 +2558,15 @@ fn the_built_in_agents_list_is_filed_by_vendor() {
         .collect()
     };
 
-    assert_eq!(list("zhipu", ""), ["zhipu::glm-5", "composite::glm-4.6"]);
-    assert_eq!(list("deepseek", ""), ["deepseek::deepseek-v4"]);
-    // The user's own endpoint keeps its models, whatever they are called,
-    // under the endpoint itself.
-    assert_eq!(list("custom:pr-1", ""), ["custom:pr-1::deepseek-local"]);
-    assert!(
-        list("deepseek", "")
-            .iter()
-            .all(|id| !id.starts_with("custom:"))
-    );
-    // A search crosses vendors, and finds an endpoint's models by its name.
+    assert_eq!(list("zhipu", "").len(), 5);
+    assert_eq!(list("custom:pr-1", "").len(), 5);
+    assert_eq!(list("deepseek", "").len(), 5);
+    // Search crosses vendors and finds an endpoint's models by its name.
     assert_eq!(
         list("zhipu", "deepseek"),
         ["deepseek::deepseek-v4", "custom:pr-1::deepseek-local"]
     );
     assert_eq!(list("zhipu", "my box"), ["custom:pr-1::deepseek-local"]);
-}
-
-#[test]
-fn tab_steps_through_the_built_in_agents_vendors() {
-    use super::ModelPickerTab;
-    use super::composer::{next_picker_highlight, picker_stops};
-
-    let tabs = [
-        ModelPickerTab::Favorites,
-        ModelPickerTab::Provider(ProviderKind::Claude),
-        ModelPickerTab::Provider(ProviderKind::Native),
-    ];
-    // Every endpoint of the user's own is a stop of its own, like a vendor.
-    let stops = picker_stops(&tabs, &["anthropic", "deepseek", "custom:pr-1"]);
-    let native = ModelPickerTab::Provider(ProviderKind::Native);
-    assert_eq!(
-        stops,
-        [
-            (ModelPickerTab::Favorites, None),
-            (ModelPickerTab::Provider(ProviderKind::Claude), None),
-            (native, Some("anthropic".to_owned())),
-            (native, Some("deepseek".to_owned())),
-            (native, Some("custom:pr-1".to_owned())),
-        ]
-    );
-    // Wraps at both ends.
-    assert_eq!(next_picker_highlight(Some(4), stops.len(), "down"), Some(0));
-    assert_eq!(next_picker_highlight(Some(0), stops.len(), "up"), Some(4));
-    // Without a vendor list the built-in tab is one stop like any other.
-    assert_eq!(picker_stops::<&str>(&tabs, &[]).len(), 3);
 }
 
 #[test]
@@ -2637,8 +2581,8 @@ fn the_rail_always_draws_the_built_in_provider() {
         None,
         ProviderKind::Native
     ));
-    // Switching it off in the settings still removes it.
-    assert!(!picker_rail_shows_provider(
+    // A stale disabled flag from an older build cannot remove the only agent.
+    assert!(picker_rail_shows_provider(
         &[],
         &[ProviderKind::Native],
         None,
@@ -2647,106 +2591,19 @@ fn the_rail_always_draws_the_built_in_provider() {
 }
 
 #[test]
-fn tab_cycle_walks_favorites_then_usable_providers_in_rail_order() {
-    use super::ModelPickerTab;
-    use super::composer::visible_picker_tabs;
-    use crate::model::{ProviderModel, ProviderProbe};
-
-    let probe = |provider: ProviderKind, installed: bool| ProviderProbe {
-        provider,
-        installed,
-        path: installed.then(|| std::path::PathBuf::from(format!("/bin/{}", provider.id()))),
-        models: vec![ProviderModel::new("model", "model")],
-        agent_presets: Vec::new(),
-    };
-    let probes = [
-        probe(ProviderKind::Claude, true),
-        probe(ProviderKind::Codex, true),
-        probe(ProviderKind::Cursor, false),
-    ];
-
-    // Uninstalled providers never join the cycle; favorites leads. The
-    // built-in agent is always there — it is compiled in, so it has no
-    // probe to wait for and no way to be missing.
-    assert_eq!(
-        visible_picker_tabs(&probes, &[], None),
-        vec![
-            ModelPickerTab::Favorites,
-            ModelPickerTab::Provider(ProviderKind::Native),
-            ModelPickerTab::Provider(ProviderKind::Claude),
-            ModelPickerTab::Provider(ProviderKind::Codex),
-        ]
-    );
-
-    // Switched-off providers leave the cycle like they leave the rail.
-    assert_eq!(
-        visible_picker_tabs(&probes, &[ProviderKind::Claude], None),
-        vec![
-            ModelPickerTab::Favorites,
-            ModelPickerTab::Provider(ProviderKind::Native),
-            ModelPickerTab::Provider(ProviderKind::Codex),
-        ]
-    );
-
-    // A locked session cycles between favorites and its own provider only,
-    // even when that provider was switched off after the session started.
-    assert_eq!(
-        visible_picker_tabs(&probes, &[ProviderKind::Claude], Some(ProviderKind::Claude)),
-        vec![
-            ModelPickerTab::Favorites,
-            ModelPickerTab::Provider(ProviderKind::Claude),
-        ]
-    );
-}
-
-#[test]
-fn the_picker_is_empty_only_once_detection_has_answered() {
+fn the_native_only_picker_always_has_a_provider() {
     use super::composer::picker_has_no_providers;
-    use crate::model::{ProviderModel, ProviderProbe};
 
-    let probe = |provider: ProviderKind, installed: bool| ProviderProbe {
-        provider,
-        installed,
-        path: installed.then(|| std::path::PathBuf::from(format!("/bin/{}", provider.id()))),
-        models: vec![ProviderModel::new("model", "model")],
-        agent_presets: Vec::new(),
-    };
-    // What every probe looks like before detection answers: seeded with a
-    // fallback catalog and not yet installed.
-    let undetected = [
-        probe(ProviderKind::Claude, false),
-        probe(ProviderKind::Codex, false),
-    ];
-    let detected = [
-        probe(ProviderKind::Claude, true),
-        probe(ProviderKind::Codex, false),
-    ];
-
-    // The built-in agent is compiled in, so it is always one usable
-    // provider: emptiness now means every CLI is missing *and* the built-in
-    // agent has been switched off. These cases say so explicitly.
-    let off = [ProviderKind::Native, ProviderKind::Claude];
-
-    // An unsettled first pass reads as "not known yet", so the composer keeps
-    // showing the remembered model instead of flashing an empty state.
-    assert!(!picker_has_no_providers(&undetected, &off, None, false));
-    // Once it settles, the same probes really do mean nothing is installed.
-    assert!(picker_has_no_providers(&undetected, &off, None, true));
-    // One detected CLI is enough to keep the picker populated...
-    assert!(!picker_has_no_providers(&detected, &off[..1], None, true));
-    // ...until it is switched off, which empties the picker just as surely as
-    // never having been installed.
-    assert!(picker_has_no_providers(&detected, &off, None, true));
-    // A session already locked to that provider keeps it, switched off or not.
-    assert!(!picker_has_no_providers(
-        &detected,
-        &off,
-        Some(ProviderKind::Claude),
-        true
-    ));
-    // And the built-in agent alone keeps it populated, with nothing else
-    // installed at all.
-    assert!(!picker_has_no_providers(&undetected, &[], None, true));
+    // Detection is irrelevant to a provider compiled into the app, and a stale
+    // disabled flag cannot remove the sole provider.
+    for settled in [false, true] {
+        assert!(!picker_has_no_providers(
+            &[],
+            &[ProviderKind::Native],
+            None,
+            settled,
+        ));
+    }
 }
 
 #[test]
@@ -2910,19 +2767,12 @@ fn each_route_names_the_path_its_adapter_requests() {
     assert_eq!(unique.len(), paths.len());
 }
 
-/// Everything configurable about the built-in agent lives on the Agent page
-/// now, so the Providers page must not grow a card for it again — that was
-/// the split this move removed.
+/// Only the built-in agent is selectable; external variants remain solely for
+/// deserializing old state.
 #[test]
-fn the_providers_page_lists_only_clis() {
+fn the_provider_catalog_is_builtin_only() {
     use crate::model::ProviderKind;
 
-    let listed: Vec<ProviderKind> = ProviderKind::ALL
-        .into_iter()
-        .filter(|kind| !kind.is_builtin())
-        .collect();
-    assert!(!listed.contains(&ProviderKind::Native));
-    assert!(!listed.is_empty(), "the page would otherwise be empty");
-    // Exactly one provider is built in; the rest are CLIs with binaries.
-    assert_eq!(ProviderKind::ALL.len() - listed.len(), 1);
+    assert_eq!(ProviderKind::ALL, [ProviderKind::Native]);
+    assert!(ProviderKind::ALL.into_iter().all(|kind| kind.is_builtin()));
 }

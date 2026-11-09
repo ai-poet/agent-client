@@ -40,7 +40,7 @@ pub(super) struct ModelStatusState {
     pub(super) feature_disabled: bool,
     /// Unix seconds of the last successful refresh.
     pub(super) updated_at: Option<i64>,
-    attempted_at: Option<Instant>,
+    pub attempted_at: Option<Instant>,
     /// Render schedules loads; this keeps it from scheduling twice per frame.
     load_scheduled: Cell<bool>,
     /// A poll loop lives only while its epoch is current.
@@ -204,6 +204,7 @@ impl Waku {
         cx.notify();
 
         let session = credentials.session_id.clone();
+        let api_generation = self.cloud_account.api_generation;
         cx.spawn(async move |this, cx| {
             let (credentials, fetched) = cx
                 .background_executor()
@@ -216,7 +217,9 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if !this.cloud_session_is(&session) {
+                if !this.cloud_session_is(&session)
+                    || api_generation != this.cloud_account.api_generation
+                {
                     return;
                 }
                 if let Err(error) = &fetched
@@ -394,6 +397,7 @@ impl Waku {
         cx.notify();
 
         let session = credentials.session_id.clone();
+        let api_generation = self.cloud_account.api_generation;
         cx.spawn(async move |this, cx| {
             let (credentials, fetched) = cx
                 .background_executor()
@@ -412,7 +416,9 @@ impl Waku {
                 .await;
             let _ =
                 this.update(cx, |this, cx| {
-                    if !this.cloud_session_is(&session) {
+                    if !this.cloud_session_is(&session)
+                        || api_generation != this.cloud_account.api_generation
+                    {
                         return;
                     }
                     if let Err(error) = &fetched

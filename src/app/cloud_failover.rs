@@ -45,6 +45,7 @@ impl Waku {
         self.cloud_account.group_status_at = Some(Instant::now());
 
         let session = credentials.session_id.clone();
+        let api_generation = self.cloud_account.api_generation;
         cx.spawn(async move |this, cx| {
             let fetched = cx
                 .background_executor()
@@ -58,7 +59,9 @@ impl Waku {
                 .await;
             if let Ok(statuses) = fetched {
                 let _ = this.update(cx, |this, cx| {
-                    if !this.cloud_session_is(&session) {
+                    if !this.cloud_session_is(&session)
+                        || api_generation != this.cloud_account.api_generation
+                    {
                         return;
                     }
                     this.cloud_account.group_status = statuses;

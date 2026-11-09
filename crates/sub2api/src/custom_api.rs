@@ -1,14 +1,13 @@
-//! Per-CLI custom API endpoints — bring your own endpoint.
+//! Custom model endpoints for the built-in agent.
 //!
-//! The managed gateway is one way to route an agent; this is the other: the
-//! user pastes a base URL and an API key per CLI, and `global_config` writes
-//! them into that CLI's own configuration file, exactly like the cloud
-//! routing. OpenCode and Pi additionally take an optional model list, since
-//! their native configs declare models explicitly.
+//! The registry stores address, key, wire format, models, and alternate
+//! domains. Only the three native API slots feed the routing writer. Legacy
+//! CLI-shaped fields remain readable as old data, but no external CLI is
+//! configured or launched.
 //!
-//! Stored in `~/.cheaprouter/custom-api.json`, desktop-local: routing no longer
-//! involves the daemon at all. Earlier builds carried this configuration in
-//! `DaemonSettings.extra`; [`migrate_from_extra`] adopts that once.
+//! Stored in `~/.cheaprouter/custom-api.json`, desktop-local. Earlier builds
+//! carried this configuration in `DaemonSettings.extra`; [`migrate_from_extra`]
+//! adopts that once.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -25,22 +24,9 @@ use crate::providers::{ApiFormat, ProviderEntry, ProviderRegistry, format_for_sl
 /// Key the legacy daemon-settings transport used; read once for migration.
 pub const LEGACY_SETTINGS_KEY: &str = "sub2apiCustomApi";
 
-/// Everything a custom endpoint can be set for, in display order.
-///
-/// The first three are the built-in agent, which is not a CLI: it speaks
-/// three APIs and each one is reached separately, so it holds three
-/// endpoints rather than one. The rest are CLIs, one endpoint each, written
-/// into that CLI's own configuration file.
-pub const CUSTOM_API_PROVIDERS: [&str; 8] = [
-    "native_messages",
-    "native_responses",
-    "native_chat",
-    "claude",
-    "codex",
-    "grok",
-    "opencode",
-    "pi",
-];
+/// Slots that can route the built-in agent. Legacy CLI fields are retained
+/// only for deserialization and are never adopted into the active registry.
+pub const CUSTOM_API_PROVIDERS: [&str; 3] = NATIVE_SLOTS;
 
 /// The built-in agent's three endpoints, in the order the picker lists the
 /// APIs they serve. Each maps to one entry in the engine's own settings:
@@ -1096,10 +1082,10 @@ mod tests {
         assert!(!config.is_empty());
     }
 
-    /// The point of the registry: slots sharing an endpoint share one entry,
-    /// so the address and key are typed once and edited once.
+    /// Legacy CLI slots remain readable but are not adopted into the native
+    /// endpoint registry or offered as routes.
     #[test]
-    fn slots_on_the_same_endpoint_and_format_adopt_one_entry() {
+    fn legacy_cli_slots_stay_inert() {
         let slot = |name: &str| {
             format!(
                 r#""{name}":{{"profiles":[{{"id":"p-{name}","name":"",
@@ -1109,27 +1095,10 @@ mod tests {
         };
         let raw = format!("{{{},{},{}}}", slot("grok"), slot("opencode"), slot("pi"));
         let mut config: CustomApiConfig = serde_json::from_str(&raw).expect("decodes");
-        assert!(config.normalize());
 
-        assert_eq!(config.registry.providers.len(), 1);
-        let entry = &config.registry.providers[0];
-        // Named after the host, since no profile carried a name.
-        assert_eq!(entry.name, "relay.example.org");
-        assert_eq!(entry.format, crate::providers::ApiFormat::OpenAiChat);
-        assert_eq!(entry.models.len(), 1);
-
-        for name in ["grok", "opencode", "pi"] {
-            assert_eq!(
-                config.active_profile(name).unwrap().provider_ref.as_deref(),
-                Some(entry.id.as_str()),
-                "{name}"
-            );
-            assert_eq!(
-                config.routed_endpoint(name).unwrap().base_url,
-                "https://relay.example.org",
-                "{name}"
-            );
-        }
+        assert!(!config.normalize());
+        assert!(config.registry.providers.is_empty());
+        assert!(config.routed_endpoint("native_chat").is_none());
     }
 
     /// Switching the entry off stops every slot bound to it, and does not
@@ -1137,33 +1106,33 @@ mod tests {
     #[test]
     fn unbinding_or_disabling_the_entry_stops_the_route() {
         let mut config: CustomApiConfig = serde_json::from_str(
-            r#"{"grok":{"profiles":[{"id":"p1","name":"",
+            r#"{"native_chat":{"profiles":[{"id":"p1","name":"",
                  "base_url":"https://relay.example.org","api_key":"sk-one"}],"active":"p1"}}"#,
         )
         .expect("decodes");
         assert!(config.normalize());
         let id = config.registry.providers[0].id.clone();
-        assert!(config.routed_endpoint("grok").is_some());
+        assert!(config.routed_endpoint("native_chat").is_some());
         // The slot's own copy is still there, which is what makes a
         // downgrade safe.
         assert_eq!(
-            config.get("grok").unwrap().base_url,
+            config.get("native_chat").unwrap().base_url,
             "https://relay.example.org"
         );
 
         config.registry.get_mut(&id).unwrap().enabled = false;
-        assert!(config.routed_endpoint("grok").is_none());
-        assert!(config.bound_provider("grok").is_some());
+        assert!(config.routed_endpoint("native_chat").is_none());
+        assert!(config.bound_provider("native_chat").is_some());
 
         config.registry.get_mut(&id).unwrap().enabled = true;
-        assert!(config.bind_provider("grok", None));
+        assert!(config.bind_provider("native_chat", None));
         // Unbound, the slot falls back to its own fields rather than to
         // nothing: that is the pre-registry path, still intact.
         assert_eq!(
-            config.routed_endpoint("grok").unwrap().base_url,
+            config.routed_endpoint("native_chat").unwrap().base_url,
             "https://relay.example.org"
         );
-        assert!(config.bound_provider("grok").is_none());
+        assert!(config.bound_provider("native_chat").is_none());
     }
 
     /// Editing through the old per-CLI form must reach the entry that
@@ -1171,7 +1140,7 @@ mod tests {
     #[test]
     fn writing_a_bound_slot_reaches_the_entry_and_keeps_model_metadata() {
         let mut config: CustomApiConfig = serde_json::from_str(
-            r#"{"pi":{"profiles":[{"id":"p1","name":"",
+            r#"{"native_chat":{"profiles":[{"id":"p1","name":"",
                  "base_url":"https://old.example.org","api_key":"sk-old",
                  "models":["keeper","goner"]}],"active":"p1"}}"#,
         )
@@ -1187,7 +1156,7 @@ mod tests {
             .context_window = Some(128_000);
 
         config.set(
-            "pi",
+            "native_chat",
             Some(CustomEndpoint {
                 base_url: "https://new.example.org".to_owned(),
                 api_key: "sk-new".to_owned(),
@@ -1195,7 +1164,7 @@ mod tests {
             }),
         );
 
-        let routed = config.routed_endpoint("pi").expect("still routed");
+        let routed = config.routed_endpoint("native_chat").expect("still routed");
         assert_eq!(routed.base_url, "https://new.example.org");
         assert_eq!(routed.api_key, "sk-new");
         assert_eq!(routed.models, ["keeper", "newcomer"]);
@@ -1216,7 +1185,7 @@ mod tests {
     #[test]
     fn the_registry_and_the_binding_round_trip_through_json() {
         let mut config: CustomApiConfig = serde_json::from_str(
-            r#"{"grok":{"profiles":[{"id":"p1","name":"Relay",
+            r#"{"native_chat":{"profiles":[{"id":"p1","name":"Relay",
                  "base_url":"https://relay.example.org","api_key":"sk-one"}],"active":"p1"}}"#,
         )
         .expect("decodes");
@@ -1233,7 +1202,7 @@ mod tests {
         assert_eq!(reloaded, config);
         assert_eq!(reloaded.registry.providers.len(), 1);
         assert_eq!(
-            reloaded.routed_endpoint("grok").unwrap().base_url,
+            reloaded.routed_endpoint("native_chat").unwrap().base_url,
             "https://relay.example.org"
         );
     }
@@ -1243,7 +1212,7 @@ mod tests {
     #[test]
     fn a_dangling_reference_routes_nothing() {
         let mut config: CustomApiConfig = serde_json::from_str(
-            r#"{"grok":{"profiles":[{"id":"p1","name":"",
+            r#"{"native_chat":{"profiles":[{"id":"p1","name":"",
                  "base_url":"https://relay.example.org","api_key":"sk-one"}],"active":"p1"}}"#,
         )
         .expect("decodes");
@@ -1251,11 +1220,11 @@ mod tests {
         let id = config.registry.providers[0].id.clone();
         assert!(config.registry.remove(&id));
 
-        assert!(config.routed_endpoint("grok").is_none());
-        assert!(config.bound_provider("grok").is_none());
+        assert!(config.routed_endpoint("native_chat").is_none());
+        assert!(config.bound_provider("native_chat").is_none());
         // Still stored, and still the thing a downgrade would read.
         assert_eq!(
-            config.get("grok").unwrap().base_url,
+            config.get("native_chat").unwrap().base_url,
             "https://relay.example.org"
         );
     }

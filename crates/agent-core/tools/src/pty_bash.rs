@@ -843,13 +843,21 @@ fn truncate_output(mut output: String, exit_code: i32) -> ToolResult {
         output = format!("{start}\n\n... ({dropped} characters truncated) ...\n\n{end}");
     }
 
+    let structured = json!({
+        "kind":"command_result",
+        "data":{
+            "stdout":{"text":output.clone(),"truncated":false,"invalid_utf8":false},
+            "stderr":{"text":"","truncated":false,"invalid_utf8":false}
+        }
+    });
     if exit_code != 0 {
         ToolResult::error(format!(
             "Command exited with code {}\n{}",
             exit_code, output
         ))
+        .with_structured_content(structured)
     } else {
-        ToolResult::success(output)
+        ToolResult::success(output).with_structured_content(structured)
     }
 }
 
