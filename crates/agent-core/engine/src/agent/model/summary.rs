@@ -27,7 +27,7 @@ pub(super) fn max_tokens(provider: &Provider, config: &SessionConfig) -> i32 {
     output_limit(model(provider, config).map_or(0, |model| model.output)) as i32
 }
 
-pub(in crate::agent) fn output_limit(output: u32) -> u32 {
+pub fn output_limit(output: u32) -> u32 {
     if output == 0 {
         OUTPUT_TOKENS
     } else {

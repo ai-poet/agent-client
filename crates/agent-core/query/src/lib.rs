@@ -23,6 +23,7 @@ pub mod coordinator;
 pub mod cron_scheduler;
 pub mod goal_loop;
 pub mod managed_orchestrator;
+pub mod sailry;
 pub mod sanitize;
 pub mod session_memory;
 pub mod skill_prefetch;
@@ -53,6 +54,7 @@ pub use goal_loop::{
     StopReason,
 };
 pub use runner::*;
+pub use sailry::run as run_agent_core_loop;
 pub use sanitize::sanitize_history;
 pub use session_memory::{
     ExtractedMemory, MemoryCategory, SessionMemoryExtractor, SessionMemoryState,

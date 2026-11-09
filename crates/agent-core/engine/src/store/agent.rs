@@ -106,7 +106,9 @@ impl Sessions {
                     current.conversation.clear();
                     current.records.clear();
                     current.context.loaded_tools = Some(tools.clone());
-                    summary.metadata.usage = Some(Box::new(usage.clone()));
+                    let mut compact_usage = usage.clone();
+                    compact_usage.is_compaction = true;
+                    summary.metadata.usage = Some(Box::new(compact_usage));
                     current.conversation.push((**summary).clone());
                 }
                 Effect::Records(records) => current.records.extend(records.clone()),

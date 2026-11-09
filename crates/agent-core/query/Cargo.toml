@@ -8,6 +8,8 @@ agent-core = { workspace = true }
 agent-core-api = { workspace = true }
 agent-core-plugins = { workspace = true }
 agent-core-tools = { workspace = true }
+agent-core-engine = { workspace = true }
+rmcp = { git = "https://github.com/sailry/rust-sdk.git", rev = "5e8fb5a9502d0fd153c29369b11e93bee88e63ac" }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }

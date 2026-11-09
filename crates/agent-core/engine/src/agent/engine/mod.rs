@@ -13,6 +13,9 @@ pub mod steer;
 pub mod tokens;
 pub mod tools;
 
+#[cfg(test)]
+mod host_tests;
+
 pub use effects::{ConversationEffect, Effect};
 pub use operation::{Callback, Emitter, Outcome, RunStatus};
 pub use steer::SteerQueue;

@@ -18,5 +18,5 @@ use std::sync::Arc;
 
 pub use types::{
     Config, Content, Error, ErrorKind, Event, Finish, Message, Model, ModelStream, Request, Role,
-    Tool, Usage,
+    Tool, ToolCall, Usage,
 };

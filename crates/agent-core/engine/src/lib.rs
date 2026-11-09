@@ -3,4 +3,4 @@
 
 pub mod agent;
 mod process;
-mod store;
+pub mod store;
