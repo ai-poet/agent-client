@@ -35,6 +35,7 @@ pub struct RetryNotice {
     pub message: String,
 }
 
+#[cfg(test)]
 pub(super) fn stream(
     model: Arc<dyn Model>,
     request: Request,

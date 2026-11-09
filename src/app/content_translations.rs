@@ -136,7 +136,7 @@ impl Waku {
             .cloud_account
             .credentials
             .as_ref()
-            .map(|credentials| credentials.endpoint.clone())
+            .map(sub2api::api_origin)
         else {
             return;
         };

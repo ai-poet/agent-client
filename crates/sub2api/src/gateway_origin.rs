@@ -218,19 +218,29 @@ impl GatewayOriginConfig {
         true
     }
 
-    /// The origin to route through: the chosen one while it is still a
-    /// candidate, otherwise the build's primary.
+    /// The explicitly selected origin, while it is still a candidate.
     ///
-    /// Falling back rather than trusting the stored value matters after an
-    /// update drops a retired domain — the alternative is every CLI pointed
-    /// at a host that no longer exists.
-    pub fn origin(&self) -> Option<String> {
+    /// Unlike [`Self::origin`], this does not fall back to the build's primary.
+    /// Account API callers use it to preserve a self-hosted credential's own
+    /// endpoint until the user actually chooses a node.
+    pub fn selected_origin(&self) -> Option<String> {
         let candidates = self.effective_candidates();
         self.chosen
             .as_ref()
             .filter(|chosen| candidates.iter().any(|known| known == *chosen))
             .cloned()
-            .or_else(|| candidates.first().cloned())
+    }
+
+    /// The origin to route through: the chosen one while it is still a
+    /// candidate, otherwise the build's primary.
+    ///
+    /// Falling back rather than trusting the stored value matters after an
+    /// update drops a retired domain — the alternative is every request pointed
+    /// at a host that no longer exists.
+    pub fn origin(&self) -> Option<String> {
+        self.selected_origin().or_else(|| {
+            self.effective_candidates().first().cloned()
+        })
     }
 
     /// Route through `origin`, remembering it as a candidate. A deliberate

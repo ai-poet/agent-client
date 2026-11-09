@@ -133,7 +133,7 @@ impl Waku {
                     let fetched = sub2api::pay::session_token(&mut credentials).and_then(|token| {
                         let plans = client.list_plans(&token)?;
                         // Decoration: an answer without it keeps the old list.
-                        let subscriptions = sub2api::Client::new(credentials.endpoint.clone())
+                        let subscriptions = sub2api::api_client(&credentials)
                             .subscription_progress(&token)
                             .ok();
                         anyhow::Ok((plans, subscriptions))

@@ -721,7 +721,9 @@ impl Waku {
         let locked_provider = session
             .filter(|session| !session.messages.is_empty())
             .map(|session| session.provider);
-        let picker_enabled = session.is_some_and(|session| session.can_choose_model(provider));
+        let picker_enabled = session.is_some_and(|session| {
+            session.provider.is_builtin() && session.can_choose_model(provider)
+        });
 
         if !picker_enabled {
             return div()
@@ -772,38 +774,8 @@ impl Waku {
                 let _ = reset_weak.update(cx, |this, cx| {
                     if open {
                         empty = this.model_picker_has_no_providers();
-                        let provider = this
-                            .selected_session()
-                            .map(|session| session.provider)
-                            .unwrap_or_default();
-                        // A draft can sit on a provider that was since switched
-                        // off; open onto the first usable provider instead of a
-                        // tab whose rows the filter would leave empty.
-                        let locked = this
-                            .selected_session()
-                            .is_some_and(|session| !session.messages.is_empty());
-                        let provider =
-                            if !locked && this.state.disabled_providers.contains(&provider) {
-                                ProviderKind::ALL
-                                    .into_iter()
-                                    .find(|kind| this.provider_enabled(*kind))
-                                    .unwrap_or(provider)
-                            } else {
-                                provider
-                            };
-                        this.model_picker_tab = ModelPickerTab::Provider(provider);
-                        // Opening re-runs the tab's catalog discovery so models
-                        // authored since launch appear without a restart; the
-                        // other rails refresh when selected, not all at once.
-                        this.refresh_provider_model_discovery(provider);
-                        // The built-in agent has no CLI to ask; its list is
-                        // the account's catalog, refreshed within the
-                        // Plaza's freshness window. The vendor that opens is
-                        // the one holding the session's current model.
-                        if provider.is_builtin() {
-                            this.refresh_native_catalog(false, cx);
-                            this.sync_model_picker_vendor();
-                        }
+                        this.model_picker_tab = ModelPickerTab::Provider(ProviderKind::Native);
+                        this.refresh_native_catalog(false, cx);
                         this.model_picker_highlight = None;
                         reset_search.update(cx, |search, cx| search.clear(cx));
                         this.reveal_selected_picker_model();
@@ -863,28 +835,9 @@ impl Waku {
         } else {
             Vec::new()
         });
-        // The vendor column's entries, only while it can be drawn.
-        let native_vendors = if handle.is_open()
-            && selected_tab == ModelPickerTab::Provider(ProviderKind::Native)
-            && !searching
-        {
-            probes
-                .iter()
-                .find(|probe| probe.provider == ProviderKind::Native)
-                .map(|probe| super::native_agent::native_vendors_present(&probe.models))
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-        // Under the user's own endpoints the list ends in a row that opens
-        // Settings → Model providers — on that endpoint when one is open —
-        // the way ZCode's picker ends in "manage models". It counts as a row
-        // for the keyboard cursor, after the models.
-        let manage_models = (handle.is_open()
-            && selected_tab == ModelPickerTab::Provider(ProviderKind::Native)
-            && !searching
-            && super::native_agent::is_endpoint_vendor(&picker_vendor))
-        .then(|| super::native_agent::endpoint_of_vendor(&picker_vendor).map(str::to_owned));
+        // The gateway catalog and the user's own endpoints share one flat list;
+        // search filters across every vendor.
+        let manage_models = (handle.is_open() && !searching).then_some(None);
         let row_count = available_models.len() + usize::from(manage_models.is_some());
         let highlight = self
             .model_picker_highlight
@@ -921,113 +874,6 @@ impl Waku {
                     return model_picker_empty_state(&theme, &empty_focus, popover, weak.clone());
                 }
 
-                let mut sidebar = div()
-                    .w(px(50.0))
-                    .h_full()
-                    .flex_none()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(px(4.0))
-                    .p(px(5.0))
-                    .rounded_tl(px(12.0))
-                    .rounded_bl(px(12.0))
-                    .bg(theme.canvas)
-                    .border_r_1()
-                    .border_color(theme.border);
-
-                let favorites_selected = selected_tab == ModelPickerTab::Favorites && !searching;
-                let favorite_weak = weak.clone();
-                sidebar = sidebar
-                    .child(
-                        div()
-                            .id("model-tab-favorites")
-                            .w(px(38.0))
-                            .h(px(38.0))
-                            .rounded(px(7.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .cursor_default()
-                            .when(favorites_selected, |element| {
-                                element.bg(theme.overlay_strong)
-                            })
-                            .hover(|element| element.bg(theme.overlay))
-                            .child(icon(
-                                "icons/star.svg",
-                                17.0,
-                                if favorites_selected {
-                                    theme.text
-                                } else {
-                                    theme.text_tertiary
-                                },
-                            ))
-                            .on_click(move |_, _, cx| {
-                                let _ = favorite_weak.update(cx, |this, cx| {
-                                    this.select_model_picker_tab(ModelPickerTab::Favorites, cx);
-                                });
-                            }),
-                    )
-                    .child(div().w(px(34.0)).h(px(1.0)).my(px(3.0)).bg(theme.border));
-
-                // One predicate with the `tab` cycle, so clicking and cycling
-                // agree on which tabs are usable.
-                let rail_tabs = visible_picker_tabs(&probes, &disabled_providers, locked_provider);
-                for kind in ProviderKind::ALL {
-                    // A provider with no CLI on the machine, or one switched
-                    // off in the Providers settings, leaves the rail entirely
-                    // rather than sitting there dimmed: a tab that can never
-                    // open only advertises a choice settings already ruled
-                    // out. Being locked out by the current session is a
-                    // different claim — that tab stays, dimmed, because it is
-                    // true only until the next session.
-                    if !picker_rail_shows_provider(
-                        &probes,
-                        &disabled_providers,
-                        locked_provider,
-                        kind,
-                    ) {
-                        continue;
-                    }
-                    let usable = rail_tabs.contains(&ModelPickerTab::Provider(kind));
-                    let selected = selected_tab == ModelPickerTab::Provider(kind) && !searching;
-                    let tab_weak = weak.clone();
-                    sidebar = sidebar.child(
-                        div()
-                            .id(SharedString::from(format!("model-tab-{}", kind.id())))
-                            .w(px(38.0))
-                            .h(px(38.0))
-                            .rounded(px(7.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .cursor_default()
-                            .when(selected, |element| element.bg(theme.overlay_strong))
-                            .when(!usable, |element| element.opacity(0.35))
-                            .when(usable, |element| {
-                                element.hover(|element| element.bg(theme.overlay)).on_click(
-                                    move |_, _, cx| {
-                                        let _ = tab_weak.update(cx, |this, cx| {
-                                            this.select_model_picker_tab(
-                                                ModelPickerTab::Provider(kind),
-                                                cx,
-                                            );
-                                        });
-                                    },
-                                )
-                            })
-                            .child(icon(
-                                provider_icon(kind),
-                                18.0,
-                                provider_color(&theme, kind).opacity(if selected {
-                                    1.0
-                                } else {
-                                    0.82
-                                }),
-                            )),
-                    );
-                }
-
                 let search_input = div()
                     .h(px(52.0))
                     .px(px(12.0))
@@ -1050,12 +896,6 @@ impl Waku {
                             .child(div().flex_1().min_w_0().child(search.clone())),
                     );
 
-                // Which vendor of the built-in agent's list is open. Read
-                // before the rows so the empty state can name it.
-                let native_vendor =
-                    (selected_tab == ModelPickerTab::Provider(ProviderKind::Native) && !searching)
-                        .then(|| picker_vendor.clone());
-
                 let mut rows = div()
                     .id("model-picker-list")
                     .size_full()
@@ -1073,10 +913,6 @@ impl Waku {
                             if pending_discoveries.contains(&provider)
                     ) {
                         tr!("models.loading")
-                    } else if native_vendor.as_deref() == Some(super::native_agent::CUSTOM_VENDOR) {
-                        // Nothing can discover what sits behind an endpoint
-                        // of the user's own. Say where to declare them.
-                        tr!("models.declare_your_own")
                     } else {
                         tr!("models.none_reported")
                     };
@@ -1287,14 +1123,10 @@ impl Waku {
                 let confirm_manage = manage_models.clone();
                 let next_weak = weak.clone();
                 let previous_weak = weak.clone();
-                let next_tab_weak = weak.clone();
-                let previous_tab_weak = weak.clone();
                 let confirm_weak = weak.clone();
                 let confirm_popover = popover.clone();
-                // Wide enough for the built-in agent's vendor column beside a
-                // list; the same on every tab so switching never resizes it.
                 div()
-                    .w(px(560.0))
+                    .w(px(440.0))
                     // Fork: taller than upstream's 390 so rows carrying a
                     // description line still show five at a time.
                     .h(px(440.0))
@@ -1318,16 +1150,6 @@ impl Waku {
                     .on_action(move |_: &SelectPreviousEntry, _, cx| {
                         let _ = previous_weak.update(cx, |this, cx| {
                             this.move_model_picker_highlight("up", row_count, cx);
-                        });
-                    })
-                    .on_action(move |_: &SelectNextTab, _, cx| {
-                        let _ = next_tab_weak.update(cx, |this, cx| {
-                            this.cycle_model_picker_tab("down", cx);
-                        });
-                    })
-                    .on_action(move |_: &SelectPreviousTab, _, cx| {
-                        let _ = previous_tab_weak.update(cx, |this, cx| {
-                            this.cycle_model_picker_tab("up", cx);
                         });
                     })
                     .on_action(move |_: &ConfirmEntry, window, cx| {
@@ -1356,7 +1178,6 @@ impl Waku {
                         confirm_popover.close(window, cx);
                         window.refresh();
                     })
-                    .child(sidebar)
                     .child(
                         div()
                             .min_w_0()
@@ -1371,24 +1192,9 @@ impl Waku {
                                 div()
                                     .flex_1()
                                     .min_h_0()
-                                    .flex()
-                                    .children(native_vendor.as_deref().map(|active| {
-                                        native_vendor_column(
-                                            theme,
-                                            &native_vendors,
-                                            active,
-                                            weak.clone(),
-                                        )
-                                    }))
-                                    .child(
-                                        div()
-                                            .min_w_0()
-                                            .flex_1()
-                                            .h_full()
-                                            .relative()
-                                            .child(rows)
-                                            .child(scrollbar::vertical(&scroll, &scrollbar_state)),
-                                    ),
+                                    .relative()
+                                    .child(rows)
+                                    .child(scrollbar::vertical(&scroll, &scrollbar_state)),
                             ),
                     )
                     .into_any_element()
@@ -4047,7 +3853,8 @@ pub(super) fn picker_rail_shows_provider(
         || probes
             .iter()
             .any(|probe| probe.provider == kind && probe.installed);
-    let switched_off = disabled_providers.contains(&kind) && locked_provider != Some(kind);
+    let switched_off =
+        !kind.is_builtin() && disabled_providers.contains(&kind) && locked_provider != Some(kind);
     installed && !switched_off
 }
 
@@ -4238,7 +4045,7 @@ pub(super) fn visible_picker_models(
     disabled_providers: &[ProviderKind],
     locked_provider: Option<ProviderKind>,
     selected_tab: ModelPickerTab,
-    native_vendor: &str,
+    _native_vendor: &str,
     normalized_query: &str,
 ) -> Vec<(ProviderKind, ProviderModel)> {
     let searching = !normalized_query.is_empty();
@@ -4255,7 +4062,11 @@ pub(super) fn visible_picker_models(
         .filter(|(kind, _)| locked_provider.is_none() || locked_provider == Some(*kind))
         // Switched-off providers keep serving the session already locked to
         // them, but offer nothing to new work — including favorites.
-        .filter(|(kind, _)| !disabled_providers.contains(kind) || locked_provider == Some(*kind))
+        .filter(|(kind, _)| {
+            kind.is_builtin()
+                || !disabled_providers.contains(kind)
+                || locked_provider == Some(*kind)
+        })
         .filter(|(kind, model)| {
             if searching {
                 // The built-in agent's vendor goes in by its shown name too,
@@ -4285,10 +4096,7 @@ pub(super) fn visible_picker_models(
                 ModelPickerTab::Favorites => favorites
                     .iter()
                     .any(|favorite| favorite.provider == *kind && favorite.model == model.id),
-                ModelPickerTab::Provider(provider) if provider.is_builtin() => {
-                    provider == *kind
-                        && super::native_agent::native_vendor_of(model) == native_vendor
-                }
+                ModelPickerTab::Provider(provider) if provider.is_builtin() => provider == *kind,
                 ModelPickerTab::Provider(provider) => provider == *kind,
             }
         })

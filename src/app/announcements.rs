@@ -67,7 +67,7 @@ impl Waku {
                 .spawn(async move {
                     let mut credentials = credentials;
                     sub2api::refresh_if_needed(&mut credentials)?;
-                    let items = sub2api::Client::new(credentials.endpoint.clone())
+                    let items = sub2api::api_client(&credentials)
                         .announcements(&credentials.access_token)?;
                     anyhow::Ok((credentials, items))
                 })
@@ -140,7 +140,7 @@ impl Waku {
                     if sub2api::refresh_if_needed(&mut credentials).is_err() {
                         return;
                     }
-                    let client = sub2api::Client::new(credentials.endpoint.clone());
+                    let client = sub2api::api_client(&credentials);
                     for id in unread {
                         let _ = client.mark_announcement_read(&credentials.access_token, id);
                     }

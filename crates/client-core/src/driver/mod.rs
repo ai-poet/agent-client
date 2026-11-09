@@ -262,6 +262,9 @@ pub(crate) fn start_local(
     options: DriverStartOptions,
     events: DriverEventSender,
 ) -> anyhow::Result<DriverHandle> {
+    if !provider.is_builtin() {
+        anyhow::bail!("external agent CLIs are not supported");
+    }
     let inner: Arc<dyn DriverControl> = match provider {
         ProviderKind::Codex => Arc::new(codex::CodexDriver::start(options, events)?),
         ProviderKind::Pi => Arc::new(pi::PiDriver::start(pi::PiFlavor::Pi, options, events)?),

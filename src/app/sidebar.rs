@@ -745,6 +745,9 @@ impl Waku {
                         this.open_settings_action(&OpenSettings, window, cx);
                     })),
             )
+            .when(self.cloud_account.credentials.is_some(), |footer| {
+                footer.child(div().ml(px(4.0)).child(self.render_announcement_bell(cx)))
+            })
             // Fork addition: cloud account entry, always one click away.
             .child(div().ml(px(4.0)).child(self.render_cloud_footer_chip(cx)))
             .child(div().flex_1())
@@ -904,6 +907,12 @@ impl Waku {
                     .flex_none()
                     .px(px(10.0))
                     .child(self.render_sidebar_new_session(cx)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .px(px(10.0))
+                    .child(self.render_sidebar_surface_dock(cx)),
             )
             .child(
                 div()
@@ -1486,14 +1495,7 @@ impl Waku {
                 ),
             )
             .child(self.render_background_work_summary(cx))
-            // Fork addition: service announcements bell, signed-in only.
-            .when(self.cloud_account.credentials.is_some(), |element| {
-                element.child(self.render_announcement_bell(cx))
-            })
-            // Fork addition: direct entries for the right-panel surfaces.
-            .child(self.render_surface_bar(cx))
-            // Fork change: the panel toggle is gone from here — the surface
-            // bar above opens, switches and hides the panel.
+            // Surface entries live in the sidebar; the right panel owns their tabs.
             .when(!self.right_panel_visible, |element| {
                 element.when(self.fps_counter_visible, |element| {
                     element.child(self.render_fps_counter(cx))

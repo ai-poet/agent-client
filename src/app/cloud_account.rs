@@ -298,8 +298,7 @@ impl Waku {
                 .background_executor()
                 .spawn(async move {
                     let mut credentials = credentials;
-                    sub2api::refresh_if_needed(&mut credentials)?;
-                    let client = sub2api::Client::new(credentials.endpoint.clone());
+                    let client = sub2api::authenticated(&mut credentials)?;
                     let user = client.me(&credentials.access_token)?;
                     let subscriptions = read_subscriptions
                         .then(|| client.subscription_progress(&credentials.access_token).ok())

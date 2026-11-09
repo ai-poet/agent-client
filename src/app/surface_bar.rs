@@ -1,9 +1,9 @@
 //! Direct entries for the right panel's surfaces.
 //!
-//! Fork addition. Terminal, Files and Review stay one click away in the window
-//! header; lower-frequency surfaces share its More menu. Every surface is also
-//! available in the right panel's "+" menu, and each pinned surface keeps its
-//! shortcut, View-menu item and palette command.
+//! Fork addition. The sidebar's tool directory keeps every surface one click
+//! away; the right panel owns its content and tabs. Every surface is also
+//! available in the right panel's "+" menu, and keeps its shortcut, View-menu
+//! item and palette command.
 //!
 //! The panel is untouched: every entry ends in `open_right_panel_surface`
 //! or `set_right_panel_visible`, the same calls the panel's own chrome makes,
@@ -12,7 +12,6 @@
 use gpui::{Action, KeyBinding, MenuItem};
 
 use crate::ui::ActivationExt as _;
-use crate::ui::menu::{MenuAlign, MenuItem as UiMenuItem, dropdown_menu};
 
 use super::*;
 
@@ -28,8 +27,6 @@ pub enum SurfaceKind {
 impl SurfaceKind {
     /// Every surface with a direct action.
     pub const ALL: [SurfaceKind; 4] = [Self::Terminal, Self::Files, Self::Browser, Self::Review];
-    /// The entries kept visible in the window header.
-    const PINNED: [SurfaceKind; 3] = [Self::Terminal, Self::Files, Self::Review];
 
     fn element_id(self) -> &'static str {
         match self {
@@ -183,27 +180,6 @@ pub(crate) fn surface_menu_items() -> Vec<MenuItem> {
         .collect()
 }
 
-/// A More-menu row that opens a surface, or hides it when already in front.
-fn more_surface_item(
-    weak: &WeakEntity<Waku>,
-    surface: RightPanelSurface,
-    shown: bool,
-    open: fn(&mut Waku, &mut Context<Waku>),
-) -> UiMenuItem {
-    let weak = weak.clone();
-    UiMenuItem::new(surface.label(), move |_, cx| {
-        let _ = weak.update(cx, |this, cx| {
-            if shown {
-                this.set_right_panel_visible(false, cx);
-            } else {
-                open(this, cx);
-            }
-        });
-    })
-    .icon(surface.icon_path())
-    .selected(shown)
-}
-
 impl Waku {
     /// Open, switch to, or put away the surface behind a button.
     pub(super) fn activate_surface_kind(&mut self, kind: SurfaceKind, cx: &mut Context<Self>) {
@@ -250,113 +226,52 @@ impl Waku {
         self.activate_surface_kind(action.kind, cx);
     }
 
-    /// The pinned surface buttons and the lower-frequency More menu.
-    pub(super) fn render_surface_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// The sidebar's labelled surface directory. Every entry uses the same
+    /// activation path as the former header buttons and the panel's own tabs.
+    pub(super) fn render_sidebar_surface_dock(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        div()
-            .id("surface-bar")
-            .tab_group()
-            .tab_stop(false)
+        let mut dock = div()
+            .w_full()
             .flex_none()
             .flex()
-            .items_center()
+            .flex_col()
             .gap(px(2.0))
-            .children(
-                SurfaceKind::PINNED
-                    .into_iter()
-                    .map(|kind| self.render_surface_button(kind, theme, cx)),
-            )
-            // AgentTeams: the Team surface, while the session leads a team.
-            .children(self.render_team_surface_button(theme, cx))
-            // The Plan surface, once the session has submitted a plan.
-            .children(self.render_plan_surface_button(theme, cx))
-            .child(self.render_surface_more_menu(theme, cx))
-    }
-
-    /// Browser, session details, side chat and trajectory, without spending a
-    /// permanent header button on each one.
-    fn render_surface_more_menu(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
-        let menu_handle = self.menu_handle("surface-bar-more", cx);
-        let menu_open = menu_handle.is_open();
-        let weak = cx.entity().downgrade();
-        let has_session = self.selected_session().is_some();
-        let session_rail_shown = self.session_rail_on_screen();
-        let trajectory_available = self
+            .pb(px(8.0))
+            .child(
+                div()
+                    .px(px(6.0))
+                    .pb(px(4.0))
+                    .text_size(sp(11.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("agent.tools")),
+            );
+        for kind in SurfaceKind::ALL {
+            dock = dock.child(self.render_sidebar_surface_kind(kind, cx));
+        }
+        if self.selected_session_has_team() {
+            dock = dock.child(self.render_sidebar_team_surface(cx));
+        }
+        if self.selected_session_has_plan() {
+            dock = dock.child(self.render_sidebar_plan_surface(cx));
+        }
+        if self.selected_session().is_some() {
+            dock = dock.child(self.render_sidebar_side_chat(cx));
+            dock = dock.child(self.render_sidebar_session_rail(cx));
+        }
+        if self
             .state
             .selected_session
-            .is_some_and(|session_id| self.trajectory_capable(session_id));
-        let browser = SurfaceKind::Browser.new_surface();
-        let browser_shown = self.right_panel_visible
-            && self
-                .active_right_panel_surface()
-                .is_some_and(|surface| matches!(surface, RightPanelSurface::Browser(_)));
-        let side_chat_shown = self.right_panel_visible
-            && self.active_right_panel_surface() == Some(&RightPanelSurface::SideChat);
-        let trajectory_shown = self.right_panel_visible
-            && self.active_right_panel_surface() == Some(&RightPanelSurface::Trajectory);
-
-        dropdown_menu(
-            div()
-                .id("surface-bar-more-trigger")
-                .w(px(26.0))
-                .h(px(26.0))
-                .flex_none()
-                .rounded(px(6.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_default()
-                .when(menu_open, |element| element.bg(theme.overlay))
-                .hover(|element| element.bg(theme.overlay))
-                .active(|element| element.bg(theme.overlay_strong))
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
-                .child(icon("icons/ellipsis.svg", 14.0, theme.text_tertiary))
-                .tooltip(Tooltip::text(tr!("surface_bar.more"))),
-            "surface-bar-more-menu",
-            &menu_handle,
-            MenuAlign::BelowRight,
-            move |_| {
-                let mut items = vec![more_surface_item(
-                    &weak,
-                    browser.clone(),
-                    browser_shown,
-                    |this, cx| this.activate_surface_kind(SurfaceKind::Browser, cx),
-                )];
-                if has_session {
-                    let session_weak = weak.clone();
-                    items.push(
-                        UiMenuItem::new(tr!("session_rail.surface"), move |_, cx| {
-                            let _ = session_weak.update(cx, |this, cx| {
-                                this.toggle_session_rail(cx);
-                            });
-                        })
-                        .icon("icons/panel-right.svg")
-                        .selected(session_rail_shown),
-                    );
-                    items.push(more_surface_item(
-                        &weak,
-                        RightPanelSurface::SideChat,
-                        side_chat_shown,
-                        |this, cx| this.open_side_chat(cx),
-                    ));
-                }
-                if trajectory_available {
-                    items.push(more_surface_item(
-                        &weak,
-                        RightPanelSurface::Trajectory,
-                        trajectory_shown,
-                        |this, cx| this.open_trajectory(cx),
-                    ));
-                }
-                items
-            },
-        )
+            .is_some_and(|session_id| self.trajectory_capable(session_id))
+        {
+            dock = dock.child(self.render_sidebar_trajectory(cx));
+        }
+        dock
     }
 
-    fn render_surface_button(
+    fn render_sidebar_surface_kind(
         &self,
         kind: SurfaceKind,
-        theme: Theme,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let plan = surface_plan(
@@ -365,11 +280,8 @@ impl Waku {
             self.right_panel_active_surface,
             self.right_panel_visible,
         );
-        let shown = plan == SurfacePlan::Hide;
-        let open_behind = matches!(plan, SurfacePlan::Activate(_));
         let label = kind.label();
         let shortcut = kind.shortcut_label();
-        // The words carry the state; the colour only echoes it.
         let tooltip: SharedString = match plan {
             SurfacePlan::Hide => tr!("surface_bar.hide", surface = label, shortcut = shortcut),
             SurfacePlan::Activate(_) => {
@@ -378,49 +290,164 @@ impl Waku {
             SurfacePlan::OpenNew => tr!("surface_bar.open", surface = label, shortcut = shortcut),
         }
         .into();
+        self.render_sidebar_surface_entry(
+            kind.element_id(),
+            kind.icon_path(),
+            kind.label(),
+            tooltip,
+            plan == SurfacePlan::Hide,
+            matches!(plan, SurfacePlan::Activate(_)),
+            cx,
+            move |this, cx| this.activate_surface_kind(kind, cx),
+        )
+    }
 
-        div()
-            .id(kind.element_id())
-            .tab_index(0)
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .w(px(26.0))
-            .h(px(26.0))
-            .flex_none()
-            .relative()
-            .rounded(px(6.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .when(shown, |element| element.bg(theme.overlay))
-            .hover(|element| element.bg(theme.overlay))
-            .active(|element| element.bg(theme.overlay_strong))
-            .child(icon(
-                kind.icon_path(),
-                14.0,
+    fn render_sidebar_team_surface(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let shown = self.right_panel_visible
+            && matches!(
+                self.active_right_panel_surface(),
+                Some(RightPanelSurface::Team)
+            );
+        let tooltip: SharedString = if shown {
+            tr!("team.surface_hide")
+        } else {
+            tr!("team.surface_open")
+        }
+        .into();
+        self.render_sidebar_surface_entry(
+            "surface-sidebar-team",
+            "icons/users.svg",
+            tr!("team.surface"),
+            tooltip,
+            shown,
+            false,
+            cx,
+            move |this, cx| {
                 if shown {
-                    theme.accent
+                    this.set_right_panel_visible(false, cx);
                 } else {
-                    theme.text_tertiary
-                },
-            ))
-            .when(open_behind, |element| {
-                element.child(
-                    div()
-                        .absolute()
-                        .bottom(px(3.0))
-                        .left(px(11.5))
-                        .w(px(3.0))
-                        .h(px(3.0))
-                        .rounded_full()
-                        .bg(theme.text_tertiary),
-                )
-            })
+                    this.open_right_panel_surface(RightPanelSurface::Team, cx);
+                }
+            },
+        )
+    }
+
+    fn render_sidebar_plan_surface(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let shown = self.right_panel_visible
+            && matches!(
+                self.active_right_panel_surface(),
+                Some(RightPanelSurface::Plan)
+            );
+        let waiting = self
+            .state
+            .selected_session
+            .is_some_and(|session_id| self.pending_plan(session_id).is_some());
+        let tooltip: SharedString = if shown {
+            tr!("plan.surface_hide")
+        } else {
+            tr!("plan.surface_open")
+        }
+        .into();
+        self.render_sidebar_surface_entry(
+            "surface-sidebar-plan",
+            "icons/list.svg",
+            tr!("plan.surface"),
+            tooltip,
+            shown,
+            waiting,
+            cx,
+            move |this, cx| {
+                if shown {
+                    this.set_right_panel_visible(false, cx);
+                } else {
+                    this.open_plan_surface(cx);
+                }
+            },
+        )
+    }
+
+    fn render_sidebar_side_chat(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let shown = self.right_panel_visible
+            && self.active_right_panel_surface() == Some(&RightPanelSurface::SideChat);
+        self.render_sidebar_surface_entry(
+            "surface-sidebar-side-chat",
+            "icons/corner-down-right.svg",
+            tr!("side_chat.surface"),
+            tr!("side_chat.surface").into(),
+            shown,
+            false,
+            cx,
+            move |this, cx| {
+                if shown {
+                    this.set_right_panel_visible(false, cx);
+                } else {
+                    this.open_side_chat(cx);
+                }
+            },
+        )
+    }
+
+    fn render_sidebar_trajectory(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let shown = self.right_panel_visible
+            && self.active_right_panel_surface() == Some(&RightPanelSurface::Trajectory);
+        self.render_sidebar_surface_entry(
+            "surface-sidebar-trajectory",
+            "icons/chart-column.svg",
+            tr!("trajectory.surface"),
+            tr!("trajectory.surface").into(),
+            shown,
+            false,
+            cx,
+            move |this, cx| {
+                if shown {
+                    this.set_right_panel_visible(false, cx);
+                } else {
+                    this.open_trajectory(cx);
+                }
+            },
+        )
+    }
+
+    fn render_sidebar_session_rail(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let shown = self.session_rail_on_screen();
+        self.render_sidebar_surface_entry(
+            "surface-sidebar-session-rail",
+            "icons/panel-right.svg",
+            tr!("session_rail.surface"),
+            tr!("session_rail.surface").into(),
+            shown,
+            false,
+            cx,
+            move |this, cx| this.toggle_session_rail(cx),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_sidebar_surface_entry(
+        &self,
+        id: &'static str,
+        icon_path: &'static str,
+        label: String,
+        tooltip: SharedString,
+        shown: bool,
+        marked: bool,
+        cx: &mut Context<Self>,
+        activate: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+    ) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        self.render_sidebar_action_row(id, icon_path, label, cx)
             .tooltip(Tooltip::text(tooltip))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                cx.stop_propagation();
+            .when(shown, |element| element.bg(theme.sidebar_item_background))
+            .when(shown || marked, |element| {
+                element.child(div().ml_auto().size(px(5.0)).flex_none().rounded_full().bg(
+                    if shown {
+                        theme.accent
+                    } else {
+                        theme.text_tertiary
+                    },
+                ))
             })
-            .on_activation(cx, move |this, _, cx| this.activate_surface_kind(kind, cx))
+            .on_activation(cx, move |this, _, cx| activate(this, cx))
     }
 }
 
@@ -437,16 +464,16 @@ mod tests {
     }
 
     #[test]
-    fn only_high_frequency_surfaces_are_pinned_in_the_header() {
+    fn every_surface_has_a_sidebar_entry() {
         assert_eq!(
-            SurfaceKind::PINNED,
+            SurfaceKind::ALL,
             [
                 SurfaceKind::Terminal,
                 SurfaceKind::Files,
+                SurfaceKind::Browser,
                 SurfaceKind::Review,
             ]
         );
-        assert!(!SurfaceKind::PINNED.contains(&SurfaceKind::Browser));
     }
 
     #[test]

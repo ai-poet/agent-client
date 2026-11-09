@@ -31,22 +31,11 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 12] = [
-        // First, and first in the model picker: the one that works with
-        // nothing installed.
-        Self::Native,
-        Self::Amp,
-        Self::Claude,
-        Self::Codex,
-        Self::Cursor,
-        Self::DeepSeek,
-        Self::Fx,
-        Self::OpenCode,
-        Self::Grok,
-        Self::Kimi,
-        Self::OhMyPi,
-        Self::Pi,
-    ];
+    /// Providers that can be selected and started by this build.
+    ///
+    /// The other variants remain in the wire type so existing installations
+    /// can still deserialize their saved sessions and settings.
+    pub const ALL: [Self; 1] = [Self::Native];
 
     pub fn id(self) -> &'static str {
         match self {

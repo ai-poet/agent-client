@@ -8,23 +8,19 @@ pub fn provider_probe(provider: ProviderKind, binary_override: Option<&str>) -> 
     // A built-in provider is installed by construction and has no path. It
     // must not reach `find_executable`, whose command name for it is empty —
     // searching PATH for "" would walk every search directory to no purpose.
-    if provider.is_builtin() {
+    if !provider.is_builtin() {
         return ProviderProbe {
             provider,
-            installed: true,
+            installed: false,
             path: None,
-            models: crate::model_catalog::fallback_models(provider),
-            agent_presets: crate::model_catalog::fallback_agent_presets(provider),
+            models: Vec::new(),
+            agent_presets: Vec::new(),
         };
     }
-    let path = match binary_override {
-        Some(binary) => crate::command_env::resolve_binary_override(binary),
-        None => crate::command_env::find_executable(provider.command()),
-    };
     ProviderProbe {
         provider,
-        installed: path.is_some(),
-        path,
+        installed: true,
+        path: None,
         models: crate::model_catalog::fallback_models(provider),
         agent_presets: crate::model_catalog::fallback_agent_presets(provider),
     }

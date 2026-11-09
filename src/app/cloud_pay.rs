@@ -178,7 +178,7 @@ impl Waku {
         let locale = self.state.language.locale();
         let lang = locale.split('-').next().unwrap_or(locale).to_owned();
         Some((
-            PayClient::new(credentials.endpoint.clone(), lang),
+            PayClient::new(sub2api::api_origin(credentials), lang),
             credentials.clone(),
         ))
     }

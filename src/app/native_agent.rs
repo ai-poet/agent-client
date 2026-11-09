@@ -208,51 +208,41 @@ pub(super) fn migrate_bare_endpoint_ids(
     changed
 }
 
-/// Move someone who never chose a provider onto the built-in agent.
+/// Adopt the built-in-only provider policy without discarding existing history.
 ///
-/// Upstream's new-session default was Codex, and the first launch wrote it
-/// into the app state before anyone picked anything — so a newcomer's first
-/// task opened on a CLI they most likely do not have, instead of on the
-/// agent that works with nothing installed. New state now starts on the
-/// built-in agent (`client::persistence`); this carries over a state
-/// written by an earlier build, but only while it still reads as untouched:
-/// the old default provider, no model ever picked, no task ever started on a
-/// CLI, and the built-in agent not switched off. Unstarted drafts on the old
-/// default move with it. Returns whether anything changed.
+/// Started external-CLI sessions remain readable, while the new-session default
+/// and every unstarted draft move to the built-in agent. The legacy provider
+/// variants stay deserializable, but can no longer be selected for new work.
 pub(super) fn adopt_built_in_default(state: &mut PersistedState) -> bool {
-    let untouched = state.last_provider == ProviderKind::Codex
-        && state.last_model.is_none()
-        && !state.disabled_providers.contains(&ProviderKind::Native)
-        && !state
-            .sessions
-            .iter()
-            .any(|session| !session.provider.is_builtin() && session.has_started());
-    if !untouched {
-        return false;
+    let mut changed = false;
+    let disabled_before = state.disabled_providers.len();
+    state
+        .disabled_providers
+        .retain(|provider| *provider != ProviderKind::Native);
+    changed |= state.disabled_providers.len() != disabled_before;
+
+    if state.last_provider != ProviderKind::Native {
+        state.last_provider = ProviderKind::Native;
+        state.last_model = None;
+        state.last_reasoning_effort = None;
+        state.last_service_tier = None;
+        state.last_context_window = None;
+        changed = true;
     }
-    state.last_provider = ProviderKind::Native;
-    state.last_reasoning_effort = None;
-    state.last_service_tier = None;
-    state.last_context_window = None;
-    let drafts: Vec<Uuid> = state
-        .sessions
-        .iter()
-        .filter(|session| {
-            session.provider == ProviderKind::Codex
-                && session.model.is_none()
-                && !session.has_started()
-        })
-        .map(|session| session.id)
-        .collect();
-    for id in drafts {
-        if let Some(session) = state.session_mut(id) {
-            session.provider = ProviderKind::Native;
-            session.reasoning_effort = None;
-            session.service_tier = None;
-            session.context_window = None;
+
+    for session in &mut state.sessions {
+        if session.provider.is_builtin() || session.has_started() {
+            continue;
         }
+        session.provider = ProviderKind::Native;
+        session.model = None;
+        session.reasoning_effort = None;
+        session.service_tier = None;
+        session.context_window = None;
+        session.provider_cursor = None;
+        changed = true;
     }
-    true
+    changed
 }
 
 /// A picker id taken apart: the platform ahead of the `::` (lowercased,

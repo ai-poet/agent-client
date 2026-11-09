@@ -51,7 +51,7 @@ impl Waku {
                 .spawn(async move {
                     let mut credentials = credentials;
                     sub2api::refresh_if_needed(&mut credentials)?;
-                    let statuses = sub2api::Client::new(credentials.endpoint.clone())
+                    let statuses = sub2api::api_client(&credentials)
                         .group_statuses(&credentials.access_token)?;
                     anyhow::Ok(statuses)
                 })

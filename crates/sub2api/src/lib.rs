@@ -204,15 +204,36 @@ pub fn refresh_if_needed_with(
     Ok(true)
 }
 
-/// Renew the session if needed, then hand back a client bound to it.
+/// The origin for account and catalog APIs, following the selected gateway
+/// node without rewriting the credential's authentication endpoint.
 ///
-/// Every authenticated call goes through here. Calling the API with a token
-/// that expired minutes ago is the common case for a desktop app that sits
-/// open — without this, the first action after lunch fails with a 401 and the
-/// user has no idea why.
+/// With no explicit choice, a self-hosted credential keeps its own endpoint
+/// instead of being redirected to the build's branded service.
+pub fn api_origin_with(
+    credentials: &Credentials,
+    gateway_origin: &gateway_origin::GatewayOriginConfig,
+) -> String {
+    gateway_origin
+        .selected_origin()
+        .unwrap_or_else(|| credentials.endpoint.clone())
+}
+
+/// Resolve the current business-API origin from the persisted node choice.
+pub fn api_origin(credentials: &Credentials) -> String {
+    api_origin_with(credentials, &gateway_origin::GatewayOriginConfig::load())
+}
+
+/// Build a business-API client without refreshing or otherwise changing the
+/// authentication session.
+pub fn api_client(credentials: &Credentials) -> Client {
+    Client::new(api_origin(credentials))
+}
+
+/// Renew the session if needed, then hand back a client bound to the selected
+/// gateway origin. Token renewal itself always uses the login origin.
 pub fn authenticated(credentials: &mut Credentials) -> anyhow::Result<Client> {
     refresh_if_needed(credentials)?;
-    Ok(Client::new(credentials.endpoint.clone()))
+    Ok(api_client(credentials))
 }
 
 /// Find or mint a gateway key bound to `group_id`.

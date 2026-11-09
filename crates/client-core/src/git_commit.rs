@@ -88,62 +88,14 @@ pub fn generate_message(
     include_unstaged: bool,
     invocation: &AgentInvocation,
 ) -> anyhow::Result<String> {
+    if !invocation.provider.is_builtin() {
+        bail!("external agent CLIs are not supported");
+    }
     let prompt = commit_prompt(cwd, include_unstaged)?;
-    // The built-in agent is a library, not a command line: ask it directly.
-    // Same prompt, same normalization, no process.
-    if invocation.provider.is_builtin() {
-        let output = agent_bridge::one_shot(cwd, invocation.model.as_deref(), &prompt)
-            .context("the built-in agent could not generate a commit message")?;
-        return normalize_message(&output)
-            .ok_or_else(|| anyhow::anyhow!("the built-in agent returned no usable message"));
-    }
-    let amp_settings = if invocation.provider == ProviderKind::Amp {
-        let path = std::env::temp_dir().join(format!("waku-amp-commit-{}.json", Uuid::new_v4()));
-        fs::write(
-            &path,
-            r#"{"amp.tools.enable":[],"amp.notifications.enabled":false,"amp.skills.disableClaudeCodeSkills":true}"#,
-        )
-        .context("could not prepare Amp commit-message settings")?;
-        Some(path)
-    } else {
-        None
-    };
-    let args = agent_arguments(
-        invocation.provider,
-        invocation.model.as_deref(),
-        invocation.reasoning_effort.as_deref(),
-        &prompt,
-        amp_settings.as_deref(),
-    );
-    let mut command = crate::command_env::command(&invocation.binary);
-    command
-        .args(args)
-        .current_dir(cwd)
-        .env("NO_COLOR", "1")
-        .env("CI", "1");
-    let result = run_capture(&mut command, AGENT_TIMEOUT).with_context(|| {
-        format!(
-            "{} could not generate a commit message",
-            invocation.provider.display_name()
-        )
-    });
-    if let Some(path) = amp_settings {
-        let _ = fs::remove_file(path);
-    }
-    let output = result?;
-    if !output.status.success() {
-        bail!(
-            "{} could not generate a commit message: {}",
-            invocation.provider.display_name(),
-            command_error(&output)
-        );
-    }
-    normalize_message(&String::from_utf8_lossy(&output.stdout)).ok_or_else(|| {
-        anyhow!(
-            "{} returned no commit message",
-            invocation.provider.display_name()
-        )
-    })
+    let output = agent_bridge::one_shot(cwd, invocation.model.as_deref(), &prompt)
+        .context("the built-in agent could not generate a commit message")?;
+    normalize_message(&output)
+        .ok_or_else(|| anyhow::anyhow!("the built-in agent returned no usable message"))
 }
 
 pub fn commit(cwd: &Path, message: &str, include_unstaged: bool) -> anyhow::Result<()> {
