@@ -718,6 +718,13 @@ impl Waku {
         let provider = session.map(|session| session.provider).unwrap_or_default();
         let selected_model = session.and_then(|session| self.model_for_session(session));
         let selected_model_name = self.model_display_name(provider, selected_model);
+        let selected_vendor = picker_model_vendor(provider, selected_model);
+        let selected_icon = selected_vendor
+            .map(|vendor| vendor.icon)
+            .unwrap_or_else(|| provider_icon(provider));
+        let selected_icon_color = selected_vendor
+            .map(|vendor| native_vendor_color(&theme, vendor))
+            .unwrap_or_else(|| provider_color(&theme, provider));
         let locked_provider = session
             .filter(|session| !session.messages.is_empty())
             .map(|session| session.provider);
@@ -732,11 +739,7 @@ impl Waku {
                 .flex()
                 .items_center()
                 .gap(px(6.0))
-                .child(icon(
-                    provider_icon(provider),
-                    10.5,
-                    provider_color(&theme, provider).opacity(0.9),
-                ))
+                .child(icon(selected_icon, 10.5, selected_icon_color.opacity(0.9)))
                 .child(
                     div()
                         .max_w(px(210.0))
@@ -869,10 +872,7 @@ impl Waku {
                 .label(tr!("models.no_providers"))
         } else {
             MenuChip::new("composer-provider-model")
-                .icon(
-                    provider_icon(provider),
-                    provider_color(&theme, provider).opacity(0.9),
-                )
+                .icon(selected_icon, selected_icon_color.opacity(0.9))
                 .label(selected_model_name)
         };
 
@@ -3981,6 +3981,20 @@ fn native_vendor_column(
         );
     }
     column
+}
+
+/// The selected model owns the trigger's mark. With no model selected, the
+/// caller falls back to the provider's icon instead.
+pub(super) fn picker_model_vendor(
+    provider: ProviderKind,
+    selected_model: Option<&str>,
+) -> Option<&'static super::native_agent::NativeVendor> {
+    if !provider.is_builtin() {
+        return None;
+    }
+    selected_model.map(|model| {
+        super::native_agent::native_vendor(super::native_agent::native_vendor_of_id(model))
+    })
 }
 
 fn native_vendor_color(theme: &Theme, vendor: &super::native_agent::NativeVendor) -> Hsla {

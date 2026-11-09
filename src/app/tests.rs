@@ -2427,6 +2427,27 @@ fn model_picker_subtitle_brands_the_built_in_agent() {
 }
 
 #[test]
+fn model_picker_trigger_uses_the_selected_models_vendor() {
+    use super::composer::picker_model_vendor;
+
+    let icon = |provider, model| picker_model_vendor(provider, model).map(|vendor| vendor.icon);
+    assert_eq!(
+        icon(ProviderKind::Native, Some("anthropic::claude-sonnet-5")),
+        Some("icons/provider-claude.svg")
+    );
+    assert_eq!(
+        icon(ProviderKind::Native, Some("composite::glm-5")),
+        Some("icons/provider-zhipu.svg")
+    );
+    assert_eq!(
+        icon(ProviderKind::Native, Some("custom:pr-1::my-model")),
+        Some("icons/server.svg")
+    );
+    assert_eq!(icon(ProviderKind::Native, None), None);
+    assert_eq!(icon(ProviderKind::Claude, Some("claude-sonnet-5")), None);
+}
+
+#[test]
 fn the_built_in_agents_api_is_decided_by_the_model() {
     use super::composer::native_wire_format;
 
