@@ -24,6 +24,8 @@ pub(super) enum PromptOrigin {
     User,
     /// Team mail waking the captain.
     Team,
+    /// A detached background task's terminal report.
+    Background,
 }
 
 pub(super) struct Port(pub Weak<Inner>);

@@ -592,6 +592,39 @@ impl Waku {
                     )
                 },
             )
+            .when(snapshot.staged, |element| {
+                let models: HashSet<String> = snapshot
+                    .members
+                    .iter()
+                    .map(|member| member.route_label())
+                    .filter(|route| !route.is_empty())
+                    .collect();
+                let inherited = snapshot
+                    .members
+                    .iter()
+                    .filter(|member| member.route_label().is_empty())
+                    .count();
+                let summary = if inherited > 0 {
+                    tr!(
+                        "team.draft_models_inherited",
+                        members = snapshot.members.len(),
+                        models = models.len(),
+                        inherited = inherited
+                    )
+                } else {
+                    tr!(
+                        "team.draft_models",
+                        members = snapshot.members.len(),
+                        models = models.len()
+                    )
+                };
+                element.child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_secondary)
+                        .child(summary),
+                )
+            })
             .child(
                 div()
                     .text_size(sp(11.5))
@@ -768,14 +801,16 @@ impl Waku {
                     &BackgroundWorkKey::new(BackgroundWorkKind::Subagent, member.id.clone()),
                 );
             let member_id = member.id.clone();
+            let route = member.route_label();
+            let model = if route.is_empty() {
+                tr!("team.member_model_inherited")
+            } else {
+                tr!("team.member_model", model = route)
+            };
             let detail = {
                 let mut parts = Vec::new();
                 if !member.role.is_empty() {
                     parts.push(member.role.clone());
-                }
-                let route = member.route_label();
-                if !route.is_empty() {
-                    parts.push(route);
                 }
                 parts.push(tr!(
                     "team.member_tasks",
@@ -829,6 +864,13 @@ impl Waku {
                                         .text_color(status_color)
                                         .child(status_label),
                                 ),
+                        )
+                        .child(
+                            div()
+                                .text_size(sp(11.5))
+                                .font_family(md::render::MONO_FAMILY)
+                                .text_color(theme.text_secondary)
+                                .child(model),
                         )
                         .child(
                             div()

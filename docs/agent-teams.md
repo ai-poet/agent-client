@@ -7,7 +7,8 @@ It is a translation of dsh-agent-teams (`@nanmicoder/dsh-agent-teams` 0.1.22, MI
 ## Scope
 
 - **Built-in agent only** (`ProviderKind::Native`). Claude Code, Codex and the other CLI providers do not get it.
-- **No wire protocol change.** Members reach the desktop as ordinary `Subagent` background-work records of the captain's session. The Team panel reads the state files through the daemon's existing `WorkspaceOperation::{BrowseDirectory, ReadTextFile}`, so a remote daemon works too.
+- **No team-specific member wire format.** Members reach the desktop as ordinary `Subagent` background-work records of the captain's session. The generic `SuspendBackgroundWork` command is additive and carries the existing background-work key/control id. The Team panel reads state files through the daemon's existing `WorkspaceOperation::{BrowseDirectory, ReadTextFile}`, so a remote daemon works too.
+- **V1 boundary:** no nested sub-agent tree in the left sidebar and no new member-to-member UI or wire protocol. Non-native providers do not join teams. The existing Team panel and BackgroundWork surface remain the entry points.
 - **Fully ported:**
   - every tool and its rules;
   - the quality gates: seven task kinds, contracts, completion checks, automatic repair and re-review follow-ups, limits and escalation, delivery audit;
@@ -17,7 +18,11 @@ It is a translation of dsh-agent-teams (`@nanmicoder/dsh-agent-teams` 0.1.22, MI
 
 ## Using it
 
-1. In a built-in agent task, send `/agent-teams <goal>`. Two other forms pick a profile:
+1. In a built-in agent task, either send `/agent-teams <goal>` or say an explicit Chinese formation request such as `组队审查这个仓库`, `组建团队` or `开个队`. Natural-language activation is a conservative keyword rule: questions and feature discussions such as `组队功能怎么用` remain ordinary chat. It is controlled by the Teams enable switch, independently of whether the slash-command menu is enabled.
+
+   The current session becomes the captain; no separate captain task is opened. Bare formation words make the captain ask for a goal. Named models and other constraints stay verbatim in the goal, and seat routes still come from the existing member / `memberModel` resolution. If this session already leads an active or staged team, the captain is told to inspect and continue it; the runtime refuses a silent second team.
+
+   Two other slash forms pick a profile:
    - `/agent-teams --profile <name> <goal>`;
    - `/agent-teams-<name> <goal>`.
 
@@ -26,7 +31,7 @@ It is a translation of dsh-agent-teams (`@nanmicoder/dsh-agent-teams` 0.1.22, MI
    engineer and solver seats with captain-planned tasks; assign a model to each
    seat under Settings → Agent → Teams → Roles & models, then start it with
    `/agent-teams-flagship <goal>`. Independent ready tasks run in parallel.
-2. The captain drafts the team and ends its turn. The Team surface opens in the right panel with the draft and three buttons:
+2. The captain drafts the team and ends its turn. The Team surface opens in the right panel with the draft and three buttons. The draft header summarizes member/model counts, and every draft or live member row keeps its resolved model route on its own line so a long responsibility cannot hide it:
    - **Approve and start.** Saying "approve" in the chat works too.
    - **Back to chat to revise.** The captain asks what to change, rewrites the draft as a whole, and waits again.
    - **Discard plan.** The draft is archived and the captain does not rebuild it.
@@ -91,7 +96,8 @@ Everything lives under `<workspace>/<stateDir>/`, where `stateDir` defaults to `
 
 A session starts with neither the team tools nor the captain protocol. It activates, for the rest of the session, when:
 
-- a user message starts with `/agent-teams` or `/agent-teams-<profile>` while the feature is enabled; or
+- a user message starts with `/agent-teams` or `/agent-teams-<profile>` while the feature and slash command are enabled;
+- a user message makes an explicit natural-language formation request while the feature is enabled; or
 - `attach` finds an unarchived team on disk whose `captainSessionId` is this session (cold recovery).
 
 Activation happens at the top of `run_turn`, before the tool list is read, so the turn that carried the command already has the 14 captain tools. Two consequences follow:
@@ -158,6 +164,14 @@ A captain cancel releases only the captain's own dialogs (`release_where(!is_mem
 
 While a member's turn runs, it appears in **every** background-work snapshot of the captain's session. If it is missing from a snapshot, `reconcile_live` marks the record lost. When the member goes idle, the record settles as `Finished`.
 
+Background work V1 uses **suspend = detach**, not SIGSTOP and not merely hiding the panel:
+
+- `Agent` accepts the existing `run_in_background` option. In addition, **挂起** on a live foreground sub-agent's BackgroundWork detail detaches that one child: its waiting tool call returns immediately, its run continues, and the main agent can take other instructions. Closing or hiding the panel alone never changes execution.
+- Long commands started with `Bash` / `run_in_background=true` are already detached and show **后台运行中 · 完成后通知 Agent**. There is no foreground-PTY conversion control in V1.
+- Detached sub-agents and background processes notify the parent agent on success, failure and user stop. Notices include the task name/id, outcome and a result or output summary; process notices include an exit code or failure reason. A busy agent parks the notice until its current turn reaches idle, while an idle session starts an internal turn immediately. Compaction and turn-settlement races re-dispatch parked notices rather than losing them.
+- A member's normal task report continues through the durable captain mailbox. Member failures already wake the captain; stopping one member now also sends an explicit stopped notice while parking its open attempt.
+- **停止此项** stops only the selected sub-agent, member or process. The composer's **停止** targets only the current foreground turn; detached children do not inherit that turn's cancellation. **停止团队** remains the separately confirmed whole-team control.
+
 These records also have two other effects:
 
 - A running member keeps the captain's runtime from being reclaimed.
@@ -201,7 +215,7 @@ The configuration is `agent-teams.json`, beside the engine's `settings.json` (`n
   "fallback": { "provider": "…", "model": "…" }, // stored, see Scope
   "memberMaxDepth": 0,             // 0..=1
   "maxMembers": 8,                 // 1..=16
-  "slashCommand": true,
+  "slashCommand": true,            // slash activation/menu; NL activation only needs enabled
   "profiles": { "<name>": { /* description, protocol, taskPlanning, members, tasks, … */ } }
 }
 ```

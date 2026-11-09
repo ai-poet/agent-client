@@ -295,29 +295,35 @@ impl TeamHost {
         });
     }
 
-    /// The text a person's message reaches the model with: `/agent-teams`
-    /// activates the team and gets the activation directive; a context the
-    /// Team panel parked (a discarded plan) goes along once.
+    /// The text a person's message reaches the model with: `/agent-teams` or
+    /// an explicit natural-language request activates the team and gets the
+    /// activation directive; a context the Team panel parked (a discarded
+    /// plan) goes along once.
     pub fn augment_prompt(&self, text: String) -> String {
         if !self.enabled {
             return text;
         }
         let mut extra = Vec::new();
-        if self.slash_command {
+        let parsed = if self.slash_command {
             let names = self.profiles.keys().map(String::as_str);
-            match agent_teams::command::parse_command_text(&text, names) {
-                Ok(Some(invocation)) => {
-                    self.activate();
-                    extra.push(agent_teams::command::directive_for_invocation(
-                        &invocation,
-                        &self.profiles,
-                    ));
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    self.activate();
-                    extra.push(agent_teams::command::parse_failure_directive(&error));
-                }
+            agent_teams::command::parse_activation_text(&text, names)
+        } else {
+            Ok(agent_teams::command::parse_natural_language_invocation(
+                &text,
+            ))
+        };
+        match parsed {
+            Ok(Some(invocation)) => {
+                self.activate();
+                extra.push(agent_teams::command::directive_for_invocation(
+                    &invocation,
+                    &self.profiles,
+                ));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.activate();
+                extra.push(agent_teams::command::parse_failure_directive(&error));
             }
         }
         extra.extend(self.parked_context.lock().drain(..));
@@ -444,6 +450,18 @@ impl TeamHost {
         match member {
             Some(member) => {
                 member.interrupt();
+                if let Some(port) = self.port() {
+                    let notice = format!(
+                        "<system-reminder>AgentTeams background member `{}` (task {}) was stopped by the user. Its open attempt was parked; inspect agent_teams_status, then continue or reassign it without stopping other members.</system-reminder>",
+                        member.name(),
+                        member.id(),
+                    );
+                    if port.is_busy() {
+                        self.defer_wake(notice);
+                    } else {
+                        port.wake(notice);
+                    }
+                }
                 true
             }
             None => false,
@@ -540,10 +558,58 @@ mod tests {
     }
 
     #[test]
+    fn natural_language_activates_the_same_staged_team_flow() {
+        let team = host(true);
+        let original = "用 kimi 和 sonnet 组队审查这个仓库";
+        let text = team.augment_prompt(original.into());
+        assert!(team.is_active());
+        assert!(text.starts_with(&format!("{original}\n\n")), "{text}");
+        assert!(text.contains("approval=\"required\""));
+        assert!(text.contains(original));
+        assert_eq!(
+            team.captain_tools()
+                .iter()
+                .map(|tool| tool.name().to_owned())
+                .collect::<Vec<_>>(),
+            agent_teams::prompts::TEAM_TOOL_NAMES
+        );
+
+        let discussion = host(true);
+        assert_eq!(
+            discussion.augment_prompt("组队功能怎么用".into()),
+            "组队功能怎么用"
+        );
+        assert!(!discussion.is_active());
+    }
+
+    #[test]
+    fn natural_language_does_not_depend_on_the_slash_menu_setting() {
+        let team = TeamHost::with_config(
+            TeamsConfig {
+                enabled: true,
+                slash_command: false,
+                ..TeamsConfig::default()
+            },
+            &AgentStartOptions::default(),
+            "captain",
+            EventSink::new(|_| {}),
+        );
+        assert!(
+            team.augment_prompt("组队修复测试".into())
+                .contains("AgentTeams")
+        );
+        assert!(team.is_active());
+
+        let team = host(true);
+        assert!(team.augment_prompt("组队功能怎么用".into()) == "组队功能怎么用");
+    }
+
+    #[test]
     fn a_switched_off_team_never_activates() {
         let team = host(false);
         let text = team.augment_prompt("/agent-teams audit".into());
         assert_eq!(text, "/agent-teams audit");
+        assert_eq!(team.augment_prompt("组队审查".into()), "组队审查");
         assert!(!team.activate());
         assert!(team.captain_tools().is_empty());
     }

@@ -29,6 +29,10 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- 内置 Agent 支持直接说「组队」加目标来发起 Agent Teams，当前会话担任队长并沿用草案审批；团队成员的模型路由在草案和成员行中清晰展示。后台子智能体可单项挂起或停止，后台命令、子智能体与团队成员在成功、失败或停止后主动通知 Agent，主会话忙碌时排队、空闲时自动唤醒
+
+  Built-in agents can now start Agent Teams from a natural-language “form a team” request, with the current session as captain and the same draft approval flow; member model routes stay visible in drafts and roster rows. Individual background subagents can be detached or stopped, and background commands, subagents and team members now notify the agent on success, failure or stop, queueing while it is busy and waking it when idle
+
 ## [0.3.5]
 
 - 云账户模型分组新增「福利」与「常驻」双轨分类：福利线路带「限时 · 波动」标识，切换前会提示确认，任务进行中也会给出状态提醒

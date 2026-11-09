@@ -230,6 +230,29 @@ fn a_staged_plan_spawns_nothing_until_approved() {
 }
 
 #[test]
+fn a_captain_cannot_silently_create_a_second_team() {
+    let (_dir, host, runtime) = setup();
+    let created = plan_team(&runtime, "required");
+    let before = serde_json::to_value(team(&runtime)).unwrap();
+    let error = runtime
+        .create(
+            CAPTAIN,
+            &json!({
+                "name": "Another",
+                "description": "a second team",
+                "approval": "required",
+                "plan": {"members": [{"name": "other"}], "tasks": []}
+            }),
+        )
+        .unwrap_err();
+    assert!(error.contains("already lead team \"Audit\""), "{error}");
+    assert!(error.contains("Use agent_teams_status"), "{error}");
+    assert_eq!(serde_json::to_value(team(&runtime)).unwrap(), before);
+    assert_eq!(created.team_id, "audit");
+    assert!(host.state.lock().spawned.is_empty());
+}
+
+#[test]
 fn completing_work_unlocks_the_next_member_and_wakes_the_captain() {
     let (_dir, host, runtime) = setup();
     plan_team(&runtime, "automatic");

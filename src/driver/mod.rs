@@ -282,6 +282,17 @@ impl DriverControl for RemoteDriverControl {
         self.notify(client::Command::RefreshBackgroundWork);
     }
 
+    fn suspend_background_work(&self, key: BackgroundWorkKey, control_id: String) {
+        match serde_json::to_value(key) {
+            Ok(key) => self.notify(client::Command::SuspendBackgroundWork { key, control_id }),
+            Err(error) => {
+                let _ = self.events.send(DriverEvent::Error(format!(
+                    "could not encode background-work command: {error}"
+                )));
+            }
+        }
+    }
+
     fn stop_background_work(&self, key: BackgroundWorkKey, control_id: String) {
         match serde_json::to_value(key) {
             Ok(key) => self.notify(client::Command::StopBackgroundWork { key, control_id }),

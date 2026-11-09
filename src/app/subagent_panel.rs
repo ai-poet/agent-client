@@ -17,6 +17,7 @@ impl Waku {
         item: &BackgroundWorkItem,
         record: Option<&SubagentTranscript>,
         selection: TranscriptSelection,
+        suspend: Option<Stateful<Div>>,
         stop: Option<Stateful<Div>>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -97,6 +98,9 @@ impl Waku {
                             ))
                             .child(super::background_work::work_status_label(item.status))
                             .when_some(elapsed, |line, elapsed| line.child("·").child(elapsed))
+                            .when(item.background && live, |line| {
+                                line.child("·").child(tr!("background.running_notify"))
+                            })
                             .when_some(
                                 item.model.clone().filter(|model| !model.is_empty()),
                                 |line, model| {
@@ -111,6 +115,7 @@ impl Waku {
                             ),
                     ),
             )
+            .when_some(suspend, |header, suspend| header.child(suspend))
             .when_some(stop, |header, stop| header.child(stop));
 
         let mut body = div()

@@ -105,6 +105,130 @@ where
     }))
 }
 
+/// Recognize an explicit natural-language request to form a team.
+///
+/// This intentionally uses a conservative keyword rule rather than asking the
+/// model to infer intent. Questions and documentation discussions stay ordinary
+/// chat; a matched invocation still goes through the staged-plan approval flow.
+pub fn parse_natural_language_invocation(text: &str) -> Option<CommandInvocation> {
+    const TRIGGERS: [&str; 12] = [
+        "组建一个团队",
+        "组建一个队",
+        "组一个团队",
+        "创建一个团队",
+        "组建团队",
+        "组个团队",
+        "创建团队",
+        "成立团队",
+        "开个队",
+        "开支队伍",
+        "组个队",
+        "组队",
+    ];
+    const DISCUSSION_MARKERS: [&str; 19] = [
+        "怎么",
+        "如何",
+        "什么是",
+        "是什么",
+        "为什么",
+        "教程",
+        "文档",
+        "介绍",
+        "解释",
+        "聊聊",
+        "讨论",
+        "原理",
+        "可行性",
+        "好不好",
+        "能不能",
+        "是否可以",
+        "怎么看",
+        "意义",
+        "吗",
+    ];
+
+    let trimmed = text.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with('/')
+        || trimmed.contains(['?', '？'])
+        || DISCUSSION_MARKERS
+            .iter()
+            .any(|marker| trimmed.contains(marker))
+    {
+        return None;
+    }
+
+    let trigger = TRIGGERS
+        .iter()
+        .filter(|trigger| trimmed.contains(**trigger))
+        .find(|trigger| {
+            !trimmed.match_indices(**trigger).all(|(index, _)| {
+                let prefix = &trimmed[..index];
+                let start = prefix.chars().count().saturating_sub(6);
+                let prefix: String = prefix.chars().skip(start).collect();
+                ["不要", "不用", "不需要", "别", "先不", "暂不", "禁止"]
+                    .iter()
+                    .any(|negation| prefix.contains(negation))
+            })
+        })?;
+    debug_assert!(!trigger.is_empty());
+
+    // Keep the original request as the goal so named models and constraints
+    // survive verbatim. Bare activation phrases instead ask for a goal, just
+    // like `/agent-teams` without an argument.
+    let mut remainder = trimmed.to_owned();
+    for prefix in [
+        "请",
+        "麻烦你",
+        "麻烦",
+        "帮我",
+        "请帮我",
+        "我想要",
+        "我想",
+        "我要",
+    ] {
+        if let Some(rest) = remainder.strip_prefix(prefix) {
+            remainder = rest.trim_start().to_owned();
+        }
+    }
+    for phrase in TRIGGERS {
+        remainder = remainder.replace(phrase, "");
+    }
+    let remainder = remainder.trim_matches(|ch: char| {
+        ch.is_whitespace()
+            || matches!(
+                ch,
+                '，' | ',' | '。' | '.' | '！' | '!' | '：' | ':' | '吧' | '呀' | '啊'
+            )
+    });
+    let goal = if remainder.is_empty() || remainder == "一下" {
+        String::new()
+    } else {
+        trimmed.to_owned()
+    };
+    Some(CommandInvocation {
+        goal,
+        profile: None,
+    })
+}
+
+/// Parse either the established slash command or an explicit natural-language
+/// team-formation request. Slash parsing remains the first and authoritative
+/// path, including its profile aliases and malformed-flag diagnostics.
+pub fn parse_activation_text<I, S>(
+    text: &str,
+    profile_names: I,
+) -> Result<Option<CommandInvocation>, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    match parse_command_text(text, profile_names)? {
+        Some(invocation) => Ok(Some(invocation)),
+        None => Ok(parse_natural_language_invocation(text)),
+    }
+}
+
 /// What the `/agent-teams` command handler checks before activating:
 /// a parsable flag, a configured profile, and a goal unless a profile is
 /// named. The error is the text to show the user.
@@ -182,8 +306,8 @@ pub fn build_activation_directive(
     task_planning: TaskPlanning,
 ) -> String {
     let mut lines = vec![
-        "The user invoked an AgentTeams slash command. Follow the AgentTeams protocol already in your system instructions. Inspect existing team state with agent_teams_status when needed.".to_owned(),
-        "Respect the current team state. Continue an existing plan or team without recreating it. Only when no current team exists, call agent_teams_create with approval=\"required\". Build the complete staged roster and DAG, then stop and ask the user to review the plan in the Team panel. Do not approve or start it in this same turn.".to_owned(),
+        "The user explicitly requested an AgentTeams team. Follow the AgentTeams protocol already in your system instructions. Inspect existing team state with agent_teams_status when needed.".to_owned(),
+        "Respect the current team state. Continue an existing plan or team without recreating it. Only when no current team exists, call agent_teams_create with approval=\"required\". Build the complete staged roster and DAG, then stop and ask the user to review the plan in the Team panel. Do not approve or start it in this same turn. When the request names models, override seats only for names you can map unambiguously to configured routes; otherwise keep the existing defaults or template routes and never invent a route.".to_owned(),
     ];
     if let Some(profile) = profile {
         lines.push(format!(
@@ -329,6 +453,66 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(parsed.profile.as_deref(), Some("Demo"));
+    }
+
+    #[test]
+    fn natural_language_activation_is_explicit_and_conservative() {
+        for (text, goal) in [
+            ("组队", ""),
+            ("请帮我组建团队", ""),
+            ("组建一个团队", ""),
+            ("开个队", ""),
+            ("组队审查这个仓库", "组队审查这个仓库"),
+            (
+                "用 kimi 和 sonnet 组队实现登录",
+                "用 kimi 和 sonnet 组队实现登录",
+            ),
+            ("请组建团队：修复失败测试", "请组建团队：修复失败测试"),
+        ] {
+            let parsed = parse_natural_language_invocation(text)
+                .unwrap_or_else(|| panic!("should activate: {text}"));
+            assert_eq!(parsed.goal, goal, "{text}");
+            assert_eq!(parsed.profile, None);
+        }
+
+        for text in [
+            "组队功能怎么用",
+            "如何组建团队？",
+            "什么是 Agent Teams 组队",
+            "介绍一下组队",
+            "我们讨论一下组队方案",
+            "组队的意义",
+            "组队吗",
+            "不要组队，先自己修复",
+            "别开个队",
+            "先不组队",
+            "普通团队协作",
+            "/agent-teams do not parse as prose here",
+        ] {
+            assert_eq!(parse_natural_language_invocation(text), None, "{text}");
+        }
+
+        let parsed = parse_activation_text("组队修复测试", LIVE)
+            .unwrap()
+            .unwrap();
+        assert_eq!(parsed.goal, "组队修复测试");
+        let parsed = parse_activation_text("/agent-teams-demo-delivery ship", LIVE)
+            .unwrap()
+            .unwrap();
+        assert_eq!(parsed.profile.as_deref(), Some("demo-delivery"));
+        assert_eq!(parsed.goal, "ship");
+    }
+
+    #[test]
+    fn natural_language_activation_keeps_mandatory_plan_approval() {
+        let invocation = parse_natural_language_invocation("组队发布这个版本").unwrap();
+        let directive = directive_for_invocation(&invocation, &crate::profiles::builtin_profiles());
+        assert!(directive.contains("explicitly requested"));
+        assert!(directive.contains("approval=\"required\""));
+        assert!(directive.contains("Continue an existing plan or team without recreating it"));
+        assert!(directive.contains("map unambiguously to configured routes"));
+        assert!(directive.contains("keep the existing defaults or template routes"));
+        assert!(!directive.contains("slash command"));
     }
 
     #[test]

@@ -1465,6 +1465,12 @@ fn handle_driver_command(
         Command::Cancel => driver.cancel(),
         Command::CancelComputerUse => driver.cancel_computer_use(),
         Command::RefreshBackgroundWork => driver.refresh_background_work(),
+        Command::SuspendBackgroundWork { key, control_id } => {
+            driver.suspend_background_work(
+                serde_json::from_value(key).context("invalid background-work key")?,
+                control_id,
+            );
+        }
         Command::StopBackgroundWork { key, control_id } => {
             driver.stop_background_work(
                 serde_json::from_value(key).context("invalid background-work key")?,

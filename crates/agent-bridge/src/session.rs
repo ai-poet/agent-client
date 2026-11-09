@@ -333,6 +333,10 @@ impl AgentSession {
             trajectory,
         });
 
+        inner.subagents.set_session_shutdown(inner.shutdown.clone());
+        inner
+            .subagents
+            .set_completion_notifier(background_notifier(&inner));
         inner
             .team
             .attach(Box::new(team_seam::Port(Arc::downgrade(&inner))));
@@ -559,6 +563,18 @@ impl AgentSession {
         self.inner
             .events
             .emit(AgentEvent::BackgroundWork(team_seam::snapshot(&self.inner)));
+    }
+
+    /// Detach one foreground sub-agent. Its run continues, its waiting tool
+    /// call returns, and its terminal report comes back through the session's
+    /// background notifier. Other work and the captain's turn are untouched.
+    pub fn suspend_background_work(&self, id: &str) -> Result<(), String> {
+        let outcome = match self.inner.subagents.detach(id) {
+            Some(_) => Ok(()),
+            None => Err("only a live foreground sub-agent can be suspended".to_owned()),
+        };
+        self.refresh_background_work();
+        outcome
     }
 
     /// Stop one piece of background work by the id the snapshot reported —
@@ -1092,52 +1108,94 @@ fn settle_crashed_turn(inner: &Arc<Inner>, claimed: &Arc<Mutex<Vec<String>>>, de
     // Fork (AgentTeams): team mail the turn never took goes again.
     let leftovers = keep_background_notices(inner, team_seam::queued_texts(&turn.queue));
     inner.team.after_turn(leftovers, false);
+    wake_background_notices(inner);
 }
 
-/// Fork: tell the model when a background command it started has ended.
+/// Fork: tell the model when detached background work has ended.
 ///
-/// The engine's `run_in_background` reports through this; it used to say
-/// nothing, so the agent either polled `monitor` or never learned that a
-/// build had failed. A turn that is running takes the notice at its next
-/// step, silently, as it takes team mail — never through `push_steer`, which
-/// would echo it into the transcript as the person's own words. With nothing
-/// running, it waits for the next turn. The background-work panel refreshes
-/// either way.
+/// A busy turn never takes the notice mid-turn: it waits for the idle edge.
+/// An idle session starts an internal turn immediately; compaction likewise
+/// parks the notice until the slot is released. Notices never go through
+/// `push_steer`, which would echo them as the person's own words. The
+/// background-work panel refreshes in every case.
 fn background_notifier(inner: &Arc<Inner>) -> agent_core_tools::CompletionNotifier {
     let weak = Arc::downgrade(inner);
     agent_core_tools::CompletionNotifier::new(move |notice| {
-        let Some(inner) = weak.upgrade() else {
-            return;
-        };
-        let parked = {
-            let guard = inner.turn.lock();
-            match guard.as_ref() {
-                Some(turn) if !turn.compacting => {
-                    turn.queue.push(
-                        QueuedCommand::InjectUserMessage(notice),
-                        CommandPriority::Normal,
-                    );
-                    None
-                }
-                _ => Some(notice),
-            }
-        };
-        if let Some(notice) = parked {
-            inner.background_notices.lock().push(notice);
+        if let Some(inner) = weak.upgrade() {
+            dispatch_background_notice(&inner, notice);
         }
-        inner
-            .events
-            .emit(AgentEvent::BackgroundWork(team_seam::snapshot(&inner)));
     })
+}
+
+fn dispatch_background_notice(inner: &Arc<Inner>, notice: String) {
+    if inner.shutdown.is_cancelled() {
+        return;
+    }
+    let mut start = None;
+    let mut parked = None;
+    {
+        let mut guard = inner.turn.lock();
+        match guard.as_mut() {
+            Some(_) => parked = Some(notice),
+            None if inner.shutdown.is_cancelled() => return,
+            None => match runtime::shared() {
+                Ok(rt) => {
+                    let cancel = CancellationToken::new();
+                    let queue = CommandQueue::new();
+                    *guard = Some(Turn {
+                        cancel: cancel.clone(),
+                        queue: queue.clone(),
+                        steers: Arc::new(Mutex::new(Vec::new())),
+                        watching: false,
+                        compacting: false,
+                    });
+                    start = Some((rt, cancel, queue, notice));
+                }
+                Err(_) => parked = Some(notice),
+            },
+        }
+    }
+    if let Some((rt, cancel, queue, notice)) = start {
+        spawn_turn(
+            rt,
+            inner.clone(),
+            notice,
+            team_seam::PromptOrigin::Background,
+            cancel,
+            queue,
+        );
+    }
+    if let Some(notice) = parked
+        && !inner.shutdown.is_cancelled()
+    {
+        inner.background_notices.lock().push(notice);
+    }
+    inner
+        .events
+        .emit(AgentEvent::BackgroundWork(team_seam::snapshot(inner)));
+}
+
+/// Deliver notices parked by compaction or by the short turn-settlement race.
+/// Joining them makes one internal turn, and dispatch's turn-slot lock prevents
+/// a second idle wake when another notice arrives concurrently.
+fn wake_background_notices(inner: &Arc<Inner>) {
+    if inner.shutdown.is_cancelled() {
+        return;
+    }
+    let notices: Vec<String> = inner.background_notices.lock().drain(..).collect();
+    if !notices.is_empty() {
+        dispatch_background_notice(inner, notices.join("\n\n"));
+    }
 }
 
 /// The queued texts a turn left behind, less the background notices among
 /// them, which are kept for the next turn instead of being handed to the
 /// team as mail it never sent.
 fn keep_background_notices(inner: &Inner, leftovers: Vec<String>) -> Vec<String> {
-    let (notices, rest): (Vec<String>, Vec<String>) = leftovers
-        .into_iter()
-        .partition(|text| text.starts_with(agent_core_tools::pty_bash::BACKGROUND_NOTICE_OPEN));
+    let (notices, rest): (Vec<String>, Vec<String>) = leftovers.into_iter().partition(|text| {
+        text.starts_with(agent_core_tools::pty_bash::BACKGROUND_NOTICE_OPEN)
+            || text.starts_with(crate::subagent::SUBAGENT_NOTICE_OPEN)
+    });
     inner.background_notices.lock().extend(notices);
     rest
 }
@@ -1157,7 +1215,7 @@ async fn run_turn(
             inner.memory.note_user_prompt(&prompt);
             inner.team.augment_prompt(prompt)
         }
-        team_seam::PromptOrigin::Team => prompt,
+        team_seam::PromptOrigin::Team | team_seam::PromptOrigin::Background => prompt,
     };
     // Work on a copy. The engine mutates it — appending the assistant turn,
     // tool calls, tool results, and synthetic results for anything abandoned
@@ -1473,8 +1531,12 @@ async fn run_turn(
 
     // Last, so the next turn starts after this one has fully reported.
     if let Some(prompt) = goal_follow_up {
-        AgentSession { inner }.prompt(prompt);
+        AgentSession {
+            inner: inner.clone(),
+        }
+        .prompt(prompt);
     }
+    wake_background_notices(&inner);
 }
 
 /// The body of [`AgentSession::compact`].
@@ -1590,6 +1652,7 @@ async fn compact_now(inner: Arc<Inner>, instructions: Option<String>, cancel: Ca
     }
     // Fork (AgentTeams): team mail that waited for the compaction.
     inner.team.after_turn(Vec::new(), false);
+    wake_background_notices(&inner);
 }
 
 /// The provider adapter a summary goes through on a route that is not the

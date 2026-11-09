@@ -65,6 +65,10 @@ impl DriverHandle {
         self.inner.refresh_background_work();
     }
 
+    pub fn suspend_background_work(&self, key: BackgroundWorkKey, control_id: String) {
+        self.inner.suspend_background_work(key, control_id);
+    }
+
     pub fn stop_background_work(&self, key: BackgroundWorkKey, control_id: String) {
         self.inner.stop_background_work(key, control_id);
     }
@@ -122,6 +126,7 @@ pub trait DriverControl: Send + Sync {
     fn cancel(&self);
     fn cancel_computer_use(&self) {}
     fn refresh_background_work(&self) {}
+    fn suspend_background_work(&self, _key: BackgroundWorkKey, _control_id: String) {}
     fn stop_background_work(&self, _key: BackgroundWorkKey, _control_id: String) {}
     fn respond(&self, request_id: String, option_id: String);
     fn respond_user_input(&self, _request_id: String, _answers: Vec<UserInputAnswer>) {}

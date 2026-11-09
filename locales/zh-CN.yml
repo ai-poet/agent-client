@@ -1243,7 +1243,9 @@ subagent.empty_retried: "模型返回了空回复 · 已重新提问"
 background.no_work: 暂无后台工作
 background.no_work_description: 长时间运行的命令和子智能体显示在这里。
 background.view: 查看
-background.stop: 停止
+background.suspend: 挂起
+background.running_notify: 后台运行中 · 完成后通知 Agent
+background.stop: 停止此项
 background.stop_named: 停止 %{name}
 background.stop_all: 全部停止
 background.stop_not_running: 该进程已不再运行。
@@ -2349,7 +2351,7 @@ team.command.profile_description: "用 %{profile} 模板组建智能体团队"
 team.command.hint: "目标"
 team.empty.no_session: "选择一个任务以查看它的团队。"
 team.empty.not_native: "智能体团队只在内置 Agent 的任务中运行。"
-team.empty.no_team: "这个任务还没有团队。输入 /agent-teams 加上目标，Agent 会先拟好团队计划，等你审批。"
+team.empty.no_team: "这个任务还没有团队。输入 /agent-teams 加上目标，Agent 会先拟好团队计划，等你审批。也可以直接在对话里说「组队」+ 目标。"
 team.action.start: "组建团队…"
 team.action.approve: "确认并启动"
 team.action.revise: "返回对话修改"
@@ -2358,6 +2360,8 @@ team.action.stop: "停止团队"
 team.action.stop_confirm: "再按一次确认停止"
 team.action.continue: "继续"
 team.stats: "%{members} 名成员中 %{working} 名在工作 · 任务完成 %{done}/%{tasks} · %{messages} 条消息"
+team.draft_models: "将使用 %{members} 个成员 · %{models} 个模型"
+team.draft_models_inherited: "将使用 %{members} 个成员 · %{models} 个模型 · %{inherited} 个继承默认席位"
 team.profile: "模板：%{name}"
 team.notice.archived: "团队已结束，保留以供查看。"
 team.notice.awaiting_feedback: "等待你在对话中回复修改意见。"
@@ -2366,6 +2370,8 @@ team.notice.escalated: "审查循环已达上限，需要你来决定。"
 team.members: "成员"
 team.members_empty: "还没有成员。"
 team.member_tasks: "任务 %{done}/%{total}"
+team.member_model: "模型：%{model}"
+team.member_model_inherited: "模型：继承默认席位"
 team.member_unread: "%{count} 条未读"
 team.member_current: "正在处理 %{task}"
 team.member_start_failed: "启动失败：%{error}"

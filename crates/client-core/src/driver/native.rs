@@ -301,6 +301,12 @@ impl DriverControl for NativeDriver {
         self.session.refresh_background_work();
     }
 
+    fn suspend_background_work(&self, _key: BackgroundWorkKey, control_id: String) {
+        if let Err(message) = self.session.suspend_background_work(&control_id) {
+            let _ = self.events.send(DriverEvent::Error(message));
+        }
+    }
+
     fn stop_background_work(&self, key: BackgroundWorkKey, control_id: String) {
         if let Err(message) = self.session.stop_background_work(&control_id) {
             let _ = self.events.send(DriverEvent::BackgroundWork(
