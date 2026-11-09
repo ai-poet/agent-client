@@ -63,6 +63,7 @@ lines below.
 | `crates/client-core/src/model_catalog.rs`, `crates/client-protocol/src/model_catalog.rs` | client-core carries only the built-in agent's offline Claude fallback; authoritative models come from the selected gateway origin, and no CLI catalog discovery or cache remains | reduced to native fallback |
 | `crates/client-core/src/driver/mod.rs` | only `NativeDriver` is registered; legacy external provider variants return an error before any process can launch | native-only |
 | `crates/client-core/src/git_commit.rs` | commit-message generation always uses `agent_bridge::one_shot`; external CLI argument construction and spawn paths are removed | native-only |
+| `apps/web/src/{components/waku-icon.tsx,components/settings-view.tsx,lib/composer-preferences.ts}` | Web exposes only Native as a selectable provider and defaults old external preferences back to it; legacy names/icons remain for history display | native-only |
 | `crates/client-core/src/model.rs` | provider probes are native-only: legacy provider variants deserialize, but external paths, cached CLI catalogs and model discovery are never consulted | native-only |
 | `src/lib.rs` | `init_confirm_dialog_keys(cx)` beside the other dialog key inits; `cx.bind_keys(surface_key_bindings())` right after the upstream bindings; the View menu's `items` chained with `surface_menu_items()` | 5 |
 | `src/app/components.rs` | `resend_action` threaded through `MessageRender`, `render_message_footer`, `message_menu_items`; one footer child and one menu item from `message_resend` | ~10 |

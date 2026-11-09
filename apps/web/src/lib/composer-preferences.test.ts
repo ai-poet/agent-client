@@ -22,13 +22,13 @@ describe('composer preferences', () => {
     writeComposerPreferences(storage, 'ws://first', remembered)
 
     expect(readComposerPreferences(storage, 'ws://first')).toMatchObject({
-      lastProvider: 'codex',
-      lastModel: 'gpt-5.6-sol',
+      lastProvider: 'native',
+      lastModel: 'claude-sonnet-5-5',
       lastReasoningEffort: 'high',
       lastServiceTier: 'fast',
       lastContextWindow: '1m',
     })
-    expect(rememberedModelTraits(remembered, 'codex', 'gpt-5.6-sol')).toEqual({
+    expect(rememberedModelTraits(remembered, 'native', 'claude-sonnet-5-5')).toEqual({
       reasoningEffort: 'high',
       serviceTier: 'fast',
       contextWindow: '1m',
@@ -54,7 +54,7 @@ describe('composer preferences', () => {
     })).toBe(preferences)
   })
 
-  test('restores Fx as a valid remembered provider', () => {
+  test('moves a legacy external provider preference back to the built-in agent', () => {
     const storage = memoryStorage()
     const preferences = rememberComposerSession(
       readComposerPreferences(storage, 'ws://first'),
@@ -67,7 +67,7 @@ describe('composer preferences', () => {
     )
     writeComposerPreferences(storage, 'ws://first', preferences)
 
-    expect(readComposerPreferences(storage, 'ws://first').lastProvider).toBe('fx')
+    expect(readComposerPreferences(storage, 'ws://first').lastProvider).toBe('native')
   })
 })
 
