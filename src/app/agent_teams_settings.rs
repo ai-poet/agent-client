@@ -41,7 +41,7 @@ pub(super) struct AgentTeamsPageState {
     /// The profile editor, while open.
     pub profile_editor: Option<ProfileEditor>,
     /// The structured role/model editor, while open.
-    pub roster_editor: Option<agent_team_roster::RosterEditor>,
+    roster_editor: Option<agent_team_roster::RosterEditor>,
 }
 
 pub(super) struct ProfileEditor {
