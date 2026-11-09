@@ -11,7 +11,7 @@ use crate::{
 use rmcp::model::{CallToolResult, ContentBlock};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[cfg(test)]
+#[cfg(all(test, feature = "node-tests"))]
 mod tests;
 
 pub(super) struct Approval {

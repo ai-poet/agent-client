@@ -243,5 +243,5 @@ pub(super) fn reference(call: &str, result: &CallToolResult, saved: Option<&Valu
     json!({"call":call,"revision":revision})
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "node-tests"))]
 mod tests;

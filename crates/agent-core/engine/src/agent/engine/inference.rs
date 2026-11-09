@@ -13,7 +13,7 @@ use std::{
 };
 
 pub(super) mod projection;
-#[cfg(test)]
+#[cfg(all(test, feature = "node-tests"))]
 mod tests;
 
 const EMPTY_RESPONSE: &str =

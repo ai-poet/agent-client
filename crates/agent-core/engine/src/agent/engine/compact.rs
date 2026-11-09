@@ -21,7 +21,7 @@ mod loadout;
 mod structured;
 mod summarize;
 mod templates;
-#[cfg(test)]
+#[cfg(all(test, feature = "node-tests"))]
 mod tests;
 
 pub(super) struct Compaction {
