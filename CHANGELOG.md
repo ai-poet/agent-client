@@ -29,6 +29,32 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.3.6]
+
+- 内置 Agent 移植 Sailry 执行内核：加入新的执行状态机、流式响应对应关系、工具并发、取消与中途转向、状态恢复和请求恢复；现有模型、工具、权限与历史数据保持兼容
+
+  The built-in agent now uses Sailry's execution core, bringing its state machine, stream/tool pairing, bounded tool concurrency, cancellation, steering, state restoration and request recovery while preserving existing models, tools, permissions and history
+
+- 自动压缩支持自定义百分比阈值，并完善压缩阶段与重试通知，让长任务的上下文处理和恢复过程更清楚
+
+  Automatic compaction now accepts a custom percentage threshold, with clearer compaction-stage and retry notifications for long-running tasks
+
+- 工具调用会保存完整原始输出，支持按页读取历史结果和命令的 stdout / stderr，无需重新执行命令；分页不会截断中文等多字节字符
+
+  Tool calls now retain their complete original output, with paginated access to previous results and command stdout / stderr without re-running commands; paging preserves multibyte characters such as Chinese text
+
+- 内置 Agent 成为唯一使用的 Agent，无需安装或配置外部 CLI；移除外部 CLI 的自动配置、会话接入、命令发现和旧用量统计页，输入框仅保留实际支持的斜杠命令与技能
+
+  The built-in agent is now the only agent, with no external CLI installation or configuration required; external CLI auto-configuration, session integration, command discovery and the legacy usage page are removed, leaving only supported slash commands and skills in the composer
+
+- 模型选择器直接打开内置 Agent 并按厂商分类，支持跨厂商搜索、键盘切换和自定义接口管理；选中模型后显示对应厂商图标，侧栏项目区不再被工具入口挤到下方
+
+  The model picker opens the built-in agent directly with vendor grouping, cross-vendor search, keyboard navigation and custom endpoint management; the selected model shows its vendor icon, and sidebar tools no longer push the project section down
+
+- 底部源站切换现在会联动模型目录、余额、用量、订阅、公告和充值等业务请求，旧源站的迟到响应不会覆盖新数据；登录与令牌刷新仍使用认证域名
+
+  Switching the gateway origin now updates model catalogs, balances, usage, subscriptions, announcements and payments together, while late responses from the previous origin are discarded; sign-in and token refresh remain on the authentication origin
+
 ## [0.3.5]
 
 - 云账户模型分组新增「福利」与「常驻」双轨分类：福利线路带「限时 · 波动」标识，切换前会提示确认，任务进行中也会给出状态提醒
