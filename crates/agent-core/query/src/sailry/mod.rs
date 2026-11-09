@@ -20,7 +20,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::{QueryConfig, QueryEvent, QueryOutcome};
+use crate::{CompactionPhase, QueryConfig, QueryEvent, QueryOutcome};
 
 pub async fn run(
     client: &AnthropicClient,
@@ -72,7 +72,14 @@ pub async fn run(
         Ok(model) => Arc::new(model),
         Err(error) => return QueryOutcome::Error(ClaudeError::Other(error.message)),
     };
-    let invocation = invocation(&query);
+    let invocation = invocation(&query, compaction_percent(&tool_ctx.config));
+    let context_window = query.context_window.unwrap_or_else(|| {
+        crate::resolve_context_window(
+            query.model_registry.as_deref(),
+            tool_ctx.config.provider.as_deref().unwrap_or("anthropic"),
+            &query.model,
+        )
+    });
     let session = RuntimeSession::new(
         invocation.turn.session,
         messages.iter().map(history::to_engine).collect(),
@@ -94,7 +101,7 @@ pub async fn run(
     };
     let main_config = core::Config {
         model_name: query.model.clone(),
-        context_limit: query.context_window.map(|value| value as usize),
+        context_limit: Some(context_window as usize),
         max_tokens: Some(query.max_tokens as u64),
         temperature: query.temperature.map(f64::from),
         thinking_effort: engine_effort(query.effort_level),
@@ -130,7 +137,7 @@ pub async fn run(
         catalog: tools,
         callbacks: Vec::new(),
         deferred: BTreeSet::new(),
-        context_limit: query.context_window.unwrap_or(0) as usize,
+        context_limit: context_window as usize,
         max_turns: Some(query.max_turns),
         steering,
     };
@@ -142,6 +149,24 @@ pub async fn run(
         let Some(events) = &events else { return };
         match event {
             EngineEvent::Message(message) => forward_message(events, message),
+            EngineEvent::Compaction {
+                phase,
+                automatic,
+                tokens_before,
+                tokens_after,
+            } => {
+                let phase = match phase {
+                    engine::CompactionPhase::Started => CompactionPhase::Started,
+                    engine::CompactionPhase::Finished => CompactionPhase::Finished,
+                    engine::CompactionPhase::Failed => CompactionPhase::Failed,
+                };
+                let _ = events.send(QueryEvent::Compaction {
+                    phase,
+                    automatic,
+                    tokens_before,
+                    tokens_after,
+                });
+            }
             EngineEvent::Checkpoint(session) => {
                 if checkpoint {
                     let _ = events.send(QueryEvent::Checkpoint(
@@ -219,7 +244,16 @@ pub async fn run(
     }
 }
 
-fn invocation(config: &QueryConfig) -> Arc<Invocation> {
+fn compaction_percent(config: &agent_core::config::Config) -> u8 {
+    if !config.auto_compact {
+        return 100;
+    }
+    (config.effective_compact_threshold() * 100.0)
+        .round()
+        .clamp(1.0, 99.0) as u8
+}
+
+fn invocation(config: &QueryConfig, compaction_percent: u8) -> Arc<Invocation> {
     Arc::new(Invocation {
         turn: sailry_protocol::QueuedTurn {
             id: TurnId::new(),
@@ -242,7 +276,7 @@ fn invocation(config: &QueryConfig) -> Arc<Invocation> {
             roles: Default::default(),
             plugins: Vec::new(),
         },
-        compaction_percent: 80,
+        compaction_percent,
         child: None,
     })
 }
@@ -337,5 +371,20 @@ fn forward_commands(
     Forwarder {
         cancel: local,
         task,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn uses_the_configured_compaction_policy() {
+        let mut config = agent_core::config::Config::default();
+        config.auto_compact = true;
+        config.compact_threshold = 0.63;
+        assert_eq!(super::compaction_percent(&config), 63);
+        config.compact_threshold = 0.01;
+        assert_eq!(super::compaction_percent(&config), 1);
+        config.auto_compact = false;
+        assert_eq!(super::compaction_percent(&config), 100);
     }
 }

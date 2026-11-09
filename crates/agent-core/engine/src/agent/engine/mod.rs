@@ -30,7 +30,32 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 pub enum EngineEvent {
     Message(model::Message),
+    Retry(model::retry::RetryNotice),
     Checkpoint(Session),
+    Compaction {
+        phase: CompactionPhase,
+        automatic: bool,
+        tokens_before: u64,
+        tokens_after: Option<u64>,
+    },
+}
+
+#[derive(Clone, Copy)]
+pub enum CompactionPhase {
+    Started,
+    Finished,
+    Failed,
+}
+
+pub enum HostEvent {
+    Message(model::Message),
+    Retry(model::retry::RetryNotice),
+    Compaction {
+        phase: CompactionPhase,
+        automatic: bool,
+        tokens_before: u64,
+        tokens_after: Option<u64>,
+    },
 }
 
 pub trait EngineEvents: Send + Sync {
@@ -86,22 +111,32 @@ pub async fn run(run: Run, events: &dyn EngineEvents) -> Result<RunOutcome, Faul
         max_turns,
         steering,
     } = run;
+    let (tx, mut messages) = tokio::sync::mpsc::unbounded_channel();
+    let retry = tx.clone();
     binding.provider = model::request::wrap(
         binding.provider,
         model::request::Purpose::Main,
         stop.clone(),
         stop.clone(),
+        Some(Arc::new(move |notice| {
+            let _ = retry.send(HostEvent::Retry(notice));
+        })),
     );
+    let retry = tx.clone();
     summary.provider = model::request::wrap(
         summary.provider,
         model::request::Purpose::Compaction,
         stop.clone(),
         stop.clone(),
+        Some(Arc::new(move |notice| {
+            let _ = retry.send(HostEvent::Retry(notice));
+        })),
     );
     let preparer = Arc::new(prompt::Preparer {
         stop: stop.clone(),
         deferred,
         output: Default::default(),
+        events: tx.clone(),
     });
     let manual = invocation.turn.kind == sailry_protocol::conversation::RunKind::Compaction;
     let threshold = if context_limit == 0 {
@@ -136,7 +171,6 @@ pub async fn run(run: Run, events: &dyn EngineEvents) -> Result<RunOutcome, Faul
         inference: inference::Inference::new(binding, preparer),
     };
     let id = invocation.turn.session.to_string();
-    let (tx, mut messages) = tokio::sync::mpsc::unbounded_channel();
     let emit = Emitter::new(tx, stop.clone());
     let execution = async {
         loop {
@@ -158,8 +192,13 @@ pub async fn run(run: Run, events: &dyn EngineEvents) -> Result<RunOutcome, Faul
         tokio::select! {
             result = &mut execution => break result,
             message = messages.recv() => {
-                if let Some(message) = message {
-                    events.emit(EngineEvent::Message(message));
+                match message {
+                    Some(HostEvent::Message(message)) => events.emit(EngineEvent::Message(message)),
+                    Some(HostEvent::Retry(notice)) => events.emit(EngineEvent::Retry(notice)),
+                    Some(HostEvent::Compaction { phase, automatic, tokens_before, tokens_after }) => {
+                        events.emit(EngineEvent::Compaction { phase, automatic, tokens_before, tokens_after });
+                    }
+                    None => {}
                 }
             }
         }
@@ -182,7 +221,15 @@ pub async fn run(run: Run, events: &dyn EngineEvents) -> Result<RunOutcome, Faul
     let session = sessions.load(&id).await?;
     let error = session.conversation.last().and_then(|message| {
         let kind = message.error_kind()?;
-        Some(model::Error::new(kind, message.as_concat_text()))
+        let text = message
+            .content
+            .iter()
+            .find_map(|content| match content {
+                model::Content::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| message.as_concat_text());
+        Some(model::Error::new(kind, text))
     });
     Ok(RunOutcome {
         status,

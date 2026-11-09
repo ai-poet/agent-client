@@ -3980,7 +3980,9 @@ agent.auto_compact_description:
 agent.compact_threshold:
   en: "Compact at"
 agent.compact_threshold_description:
-  en: "How full the context window is when compaction runs."
+  en: "How full the context window is when compaction runs. Enter any percentage greater than 0 and less than 100."
+agent.compact_threshold_invalid:
+  en: "Enter a percentage greater than 0 and less than 100."
 agent.tools:
   en: "Tools"
 agent.tools_description:

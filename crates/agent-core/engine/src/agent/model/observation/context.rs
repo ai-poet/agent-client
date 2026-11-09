@@ -11,14 +11,14 @@ pub struct Context {
     persisted: bool,
 }
 
-pub(super) struct Location<'a> {
+pub struct Location<'a> {
     pub text: &'a str,
     pub start: usize,
     pub context: &'a Context,
 }
 
 impl Context {
-    pub(in crate::agent) fn new(parts: Vec<Source>) -> Option<Self> {
+    pub fn new(parts: Vec<Source>) -> Option<Self> {
         if parts.is_empty() {
             return None;
         }
@@ -38,7 +38,7 @@ impl Context {
         Some(context)
     }
 
-    pub(in crate::agent) fn persisted(text: String, skills: &[String]) -> Self {
+    pub fn persisted(text: String, skills: &[String]) -> Self {
         let mut ranges = skills
             .iter()
             .filter(|source| !source.is_empty())
@@ -66,7 +66,7 @@ impl Context {
         context
     }
 
-    pub(in crate::agent) fn text(&self) -> &str {
+    pub fn text(&self) -> &str {
         &self.text
     }
 
@@ -85,11 +85,11 @@ impl Context {
         }
     }
 
-    pub(super) fn contains(&self, kind: CategoryKind) -> bool {
+    pub fn contains(&self, kind: CategoryKind) -> bool {
         self.ranges.iter().any(|(_, source)| *source == kind)
     }
 
-    pub(super) fn locate<'a>(&'a self, body: &'a Value) -> Option<Location<'a>> {
+    pub fn locate<'a>(&'a self, body: &'a Value) -> Option<Location<'a>> {
         let mut collections = ["messages", "contents", "input"]
             .iter()
             .filter_map(|field| body.get(field).and_then(Value::as_array));

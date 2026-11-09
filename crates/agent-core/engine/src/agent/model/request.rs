@@ -16,11 +16,13 @@ pub fn wrap(
     purpose: Purpose,
     _cancel: CancellationToken,
     stop: CancellationToken,
+    on_retry: Option<Arc<dyn Fn(retry::RetryNotice) + Send + Sync>>,
 ) -> Arc<dyn Model> {
     Arc::new(Recovered {
         inner,
         purpose,
         stop,
+        on_retry,
     })
 }
 
@@ -28,6 +30,7 @@ struct Recovered {
     inner: Arc<dyn Model>,
     purpose: Purpose,
     stop: CancellationToken,
+    on_retry: Option<Arc<dyn Fn(retry::RetryNotice) + Send + Sync>>,
 }
 
 #[async_trait]
@@ -43,12 +46,13 @@ impl Model for Recovered {
             }
             Purpose::Main => retry::Policy::new(5, Duration::from_secs(60), false),
         };
-        Ok(retry::stream(
+        Ok(retry::stream_observed(
             self.inner.clone(),
             request,
             policy,
             cancel,
             self.stop.clone(),
+            self.on_retry.clone(),
         ))
     }
 }

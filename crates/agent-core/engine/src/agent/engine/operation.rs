@@ -1,4 +1,4 @@
-use super::{Effect, Session};
+use super::{Effect, HostEvent, Session};
 use crate::agent::model::Message;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
@@ -45,18 +45,18 @@ pub fn yielded_with(effects: impl IntoIterator<Item = Effect>) -> anyhow::Result
 
 #[derive(Clone)]
 pub struct Emitter {
-    sender: mpsc::UnboundedSender<Message>,
+    sender: mpsc::UnboundedSender<HostEvent>,
     stop: CancellationToken,
 }
 
 impl Emitter {
-    pub fn new(sender: mpsc::UnboundedSender<Message>, stop: CancellationToken) -> Self {
+    pub fn new(sender: mpsc::UnboundedSender<HostEvent>, stop: CancellationToken) -> Self {
         Self { sender, stop }
     }
 
     pub fn message(&self, mut message: Message) -> Message {
         message.ensure_id();
-        let _ = self.sender.send(message.clone());
+        let _ = self.sender.send(HostEvent::Message(message.clone()));
         message
     }
 

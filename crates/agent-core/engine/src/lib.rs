@@ -2,5 +2,5 @@
 //! Sailry and retained Goose-derived portions are Apache-2.0.
 
 pub mod agent;
-mod process;
+pub mod process;
 pub mod store;

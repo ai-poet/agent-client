@@ -154,6 +154,8 @@ This fork remains licensed under GPL-3.0-only.
 | 2026-11-04 | Added stream-identity regression coverage inspired by T3 Code's coalescing boundaries (behavioral reference only): text batches stop at reasoning and tool identities, new assistant parts and tool blocks cannot overwrite one another, and daemon replay cursors dedupe by epoch/runtime without dropping unrelated runtimes. The daemon's sequence decision was extracted unchanged into a testable pure helper. |
 | 2026-11-09 | AgentTeams profiles gained a structured role/model editor: each seat can have its own name, responsibilities, model and reasoning effort without hand-editing the whole profile JSON, while advanced prompts, fallbacks and task graphs remain intact. Added the opt-in `flagship` planner/engineer/solver template with captain planning and parallel ready-task dispatch, plus per-role route summaries. No scheduler, permission or wire-protocol change (`crates/agent-teams`, `src/app/{agent_teams_settings,agent_team_roster}.rs`). |
 
+| 2026-11-09 | Ported Sailry's Agent execution core at `cfc0a06ceaa14fad16f1b1b1ee6957bd53b0610e` into `crates/agent-core/engine`, retaining its `agent/{engine,model,canonical}` structure and its state machine, stream/tool pairing, bounded tool concurrency, structured compaction, cancellation, steering, and request recovery. Node admission, Turso, GPUI, Rig, and plugin hosts are not included; existing providers, tools, permissions, and history remain in `agent-core-query` / `agent-bridge`. Sailry and retained Goose-derived code are Apache-2.0; rmcp is MIT. Their notices are preserved in `third_party_licenses/`. |
+
 ## Upstream attribution
 
 Waku is developed by egoist and contributors. Upstream source, issue tracker,
@@ -171,6 +173,12 @@ The agent engine vendored under `crates/agent-core` is Claurst by
 kuberwastaken and contributors, licensed GPL-3.0:
 <https://github.com/kuberwastaken/claurst>. Its licence text is preserved
 alongside the vendored sources; the modifications listed above are this fork's.
+
+The Agent execution core in `crates/agent-core/engine` is adapted from Sailry
+(<https://github.com/sailry/sailry-harness>) and retains Goose-derived operations
+(<https://github.com/block/goose>). Sailry and Goose are Apache-2.0; the pinned
+rmcp transport types are MIT. Licence and provenance files are in
+`third_party_licenses/`.
 
 ## Third-party notices
 

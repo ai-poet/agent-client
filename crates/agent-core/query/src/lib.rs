@@ -3208,7 +3208,7 @@ mod tests {
         let prompt = build_system_prompt(&cfg);
         if let SystemPrompt::Text(text) = prompt {
             assert!(
-                text.contains("Claurst") || text.contains("Claude agent"),
+                text.contains("CheapRouter Agent"),
                 "Default prompt should contain attribution: {}",
                 text
             );
@@ -3233,7 +3233,7 @@ mod tests {
                 "Custom prompt text should appear in the output"
             );
             assert!(
-                text.contains("Claurst") || text.contains("Claude agent"),
+                text.contains("CheapRouter Agent"),
                 "Default attribution should still be present"
             );
         } else {

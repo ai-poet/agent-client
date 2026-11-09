@@ -46,6 +46,8 @@ pub(super) struct AgentPageState {
     pub saved_at: Option<Instant>,
     /// The system-prompt editor, while open.
     pub prompt_input: Option<Entity<TextInput>>,
+    /// Custom compaction percentage editor, while open.
+    pub compact_input: Option<Entity<TextInput>>,
     /// The add-server form, while open.
     pub mcp_form: Option<McpForm>,
     /// The add-rule form, while open.
@@ -222,6 +224,42 @@ impl Waku {
         let text = input.read(cx).content().trim().to_owned();
         self.update_agent_settings(cx, move |settings| {
             settings.append_system_prompt = (!text.is_empty()).then_some(text);
+        });
+    }
+
+    fn open_agent_compact_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.agent_page.compact_input.is_some() {
+            return;
+        }
+        let current = self
+            .agent_page
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.compact_threshold)
+            .unwrap_or(0.8);
+        let input = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx).placeholder("80%");
+            input.set_content(format!("{}%", current * 100.0), cx);
+            input
+        });
+        cx.subscribe(&input, |_: &mut Self, _, _: &InputEvent, cx| cx.notify())
+            .detach();
+        self.agent_page.compact_input = Some(input);
+        cx.notify();
+    }
+
+    fn commit_agent_compact_editor(&mut self, cx: &mut Context<Self>) {
+        let Some(input) = self.agent_page.compact_input.take() else {
+            return;
+        };
+        let text = input.read(cx).content().trim().to_owned();
+        let Some(percent) = parse_compact_percent(&text) else {
+            self.agent_page.error = Some(tr!("agent.compact_threshold_invalid").to_string());
+            cx.notify();
+            return;
+        };
+        self.update_agent_settings(cx, move |settings| {
+            settings.compact_threshold = Some(percent / 100.0);
         });
     }
 
@@ -772,6 +810,46 @@ impl Waku {
             ));
         }
 
+        let mut threshold_control = threshold_presets;
+        if let Some(input) = self.agent_page.compact_input.clone() {
+            threshold_control = div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(TextField::new("agent-compact-custom", input))
+                .child(card_button(
+                    theme,
+                    SharedString::from("agent-compact-save"),
+                    tr!("common.save"),
+                    true,
+                    false,
+                    cx,
+                    |this, _, cx| this.commit_agent_compact_editor(cx),
+                ))
+                .child(card_button(
+                    theme,
+                    SharedString::from("agent-compact-cancel"),
+                    tr!("common.cancel"),
+                    false,
+                    false,
+                    cx,
+                    |this, _, cx| {
+                        this.agent_page.compact_input = None;
+                        cx.notify();
+                    },
+                ));
+        } else {
+            threshold_control = threshold_control.child(card_button(
+                theme,
+                SharedString::from("agent-compact-customize"),
+                tr!("common.edit"),
+                false,
+                false,
+                cx,
+                |this, window, cx| this.open_agent_compact_editor(window, cx),
+            ));
+        }
+
         section_card(theme)
             .child(section_title(theme, tr!("agent.behaviour")))
             .child(setting_row(
@@ -803,7 +881,7 @@ impl Waku {
                     theme,
                     tr!("agent.compact_threshold"),
                     tr!("agent.compact_threshold_description"),
-                    threshold_presets.into_any_element(),
+                    threshold_control.into_any_element(),
                 ))
             })
     }
@@ -1324,4 +1402,27 @@ pub(super) fn preset_button(
         .hover(|element| element.bg(theme.overlay))
         .child(label)
         .on_click(cx.listener(move |this, _, window, cx| activate(this, window, cx)))
+}
+
+fn parse_compact_percent(text: &str) -> Option<f32> {
+    let percent = text
+        .trim()
+        .trim_end_matches('%')
+        .trim()
+        .parse::<f32>()
+        .ok()?;
+    (percent.is_finite() && percent > 0.0 && percent < 100.0).then_some(percent)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn accepts_custom_compact_percentages() {
+        for (text, expected) in [("60%", 60.0), ("0.5", 0.5), (" 99.9% ", 99.9)] {
+            assert_eq!(super::parse_compact_percent(text), Some(expected));
+        }
+        for text in ["0", "100%", "NaN", "abc"] {
+            assert_eq!(super::parse_compact_percent(text), None);
+        }
+    }
 }

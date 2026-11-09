@@ -2,6 +2,7 @@
 use super::Session;
 use crate::agent::model::Message;
 use std::collections::BTreeSet;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 mod contexts;
@@ -70,9 +71,24 @@ pub struct Preparer {
     pub stop: CancellationToken,
     pub deferred: BTreeSet<String>,
     pub output: tokio::sync::Mutex<crate::agent::output::Cache>,
+    pub events: mpsc::UnboundedSender<super::HostEvent>,
 }
 
 impl Preparer {
+    pub fn compaction(
+        &self,
+        phase: super::CompactionPhase,
+        automatic: bool,
+        tokens_before: u64,
+        tokens_after: Option<u64>,
+    ) {
+        let _ = self.events.send(super::HostEvent::Compaction {
+            phase,
+            automatic,
+            tokens_before,
+            tokens_after,
+        });
+    }
     pub async fn prepare_messages(&self, session: &Session) -> anyhow::Result<Vec<Message>> {
         let mut messages = session
             .conversation

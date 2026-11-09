@@ -26,12 +26,32 @@ impl Policy {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct RetryNotice {
+    pub attempt: u32,
+    pub max_attempts: Option<u32>,
+    pub delay: Duration,
+    pub kind: ErrorKind,
+    pub message: String,
+}
+
 pub(super) fn stream(
     model: Arc<dyn Model>,
     request: Request,
     policy: Policy,
     cancel: CancellationToken,
     stop: CancellationToken,
+) -> ModelStream {
+    stream_observed(model, request, policy, cancel, stop, None)
+}
+
+pub(super) fn stream_observed(
+    model: Arc<dyn Model>,
+    request: Request,
+    policy: Policy,
+    cancel: CancellationToken,
+    stop: CancellationToken,
+    notify: Option<Arc<dyn Fn(RetryNotice) + Send + Sync>>,
 ) -> ModelStream {
     let cancel = cancel.child_token();
     let state = State {
@@ -44,6 +64,7 @@ pub(super) fn stream(
         stream: None,
         pending: VecDeque::new(),
         attempt: 0,
+        notify,
         emitted: false,
         done: false,
     };
@@ -121,6 +142,7 @@ struct State {
     stream: Option<ModelStream>,
     pending: VecDeque<Result<Event, Error>>,
     attempt: usize,
+    notify: Option<Arc<dyn Fn(RetryNotice) + Send + Sync>>,
     emitted: bool,
     done: bool,
 }
@@ -136,6 +158,15 @@ impl State {
             return false;
         }
         self.attempt += 1;
+        if let Some(notify) = &self.notify {
+            notify(RetryNotice {
+                attempt: self.attempt as u32,
+                max_attempts: Some(self.policy.retries as u32),
+                delay: self.policy.delay,
+                kind: error.kind,
+                message: error.message.clone(),
+            });
+        }
         let delay = self.policy.delay;
         tokio::select! {
             biased;

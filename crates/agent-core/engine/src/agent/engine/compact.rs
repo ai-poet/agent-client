@@ -297,6 +297,13 @@ impl Compaction {
             last.metadata.agent_visible = false;
         }
         let id = Message::assistant().with_generated_id().id.unwrap();
+        let tokens_before = self.context_tokens(conversation) as u64;
+        self.preparer.compaction(
+            super::CompactionPhase::Started,
+            !self.manual,
+            tokens_before,
+            None,
+        );
         let result = tokio::select! {
             biased;
             _ = emit.cancelled() => return Ok(Outcome::Applied(Transition {
@@ -306,9 +313,33 @@ impl Compaction {
             result = self.compact(session, &input, &id) => result,
         };
         match result {
-            Ok(effects) if self.manual => yielded_with(effects),
-            Ok(effects) => applied(effects),
-            Err(error) => yielded_with([
+            Ok(effects) => {
+                let tokens_after = effects.iter().find_map(|effect| match effect {
+                    Effect::Compaction { summary, .. } => {
+                        Some(tokens::chat("", std::slice::from_ref(summary)) as u64)
+                    }
+                    _ => None,
+                });
+                self.preparer.compaction(
+                    super::CompactionPhase::Finished,
+                    !self.manual,
+                    tokens_before,
+                    tokens_after,
+                );
+                if self.manual {
+                    yielded_with(effects)
+                } else {
+                    applied(effects)
+                }
+            }
+            Err(error) => {
+                self.preparer.compaction(
+                    super::CompactionPhase::Failed,
+                    !self.manual,
+                    tokens_before,
+                    None,
+                );
+                yielded_with([
                 emit.message(Message::assistant().with_error(
                     error
                         .downcast_ref::<Error>()
@@ -319,7 +350,8 @@ impl Compaction {
                     ),
                 ))
                 .into(),
-            ]),
+                ])
+            }
         }
     }
 }

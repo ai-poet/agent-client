@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Default)]
-pub(in crate::agent) struct Cache {
+pub struct Cache {
     entries: Vec<Entry>,
     reads: files::Reads,
 }

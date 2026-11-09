@@ -11,7 +11,7 @@ pub(super) const RETRIES: usize = 1;
 pub(super) const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The summary keeps the captured provider, model and credential and only lowers effort.
-pub(super) fn config(provider: &Provider, config: &SessionConfig) -> SessionConfig {
+pub fn config(provider: &Provider, config: &SessionConfig) -> SessionConfig {
     let effort = match effort(model(provider, config)) {
         Effort::Budget(tokens) => Effort::Budget(tokens.min(max_tokens(provider, config) / 2)),
         effort => effort,
@@ -23,7 +23,7 @@ pub(super) fn config(provider: &Provider, config: &SessionConfig) -> SessionConf
 }
 
 /// Output limit for the summary request; no additional reasoning allowance.
-pub(super) fn max_tokens(provider: &Provider, config: &SessionConfig) -> i32 {
+pub fn max_tokens(provider: &Provider, config: &SessionConfig) -> i32 {
     output_limit(model(provider, config).map_or(0, |model| model.output)) as i32
 }
 
@@ -44,7 +44,7 @@ fn model<'a>(provider: &'a Provider, config: &SessionConfig) -> Option<&'a Metad
 
 /// The lowest configured reasoning choice. `Default` omits the parameter when
 /// the model declares no choices.
-pub(super) fn effort(model: Option<&Metadata>) -> Effort {
+pub fn effort(model: Option<&Metadata>) -> Effort {
     model
         .filter(|model| model.reasoning)
         .and_then(|model| {

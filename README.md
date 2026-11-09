@@ -75,7 +75,7 @@ CheapRouter 把「低价模型网关」和「原生 Agent 工作台」合成了�
 外部 agent CLI 依然可以接（设置 → 服务商），但那是可选项，不再是跑起来的前提。
 
 进阶：设置 → 模型接口 统一登记你自己的接口——地址、密钥、接口格式、模型列表，
-以及可测速自动选优的备用域名；内置 Agent 的三种接口格式和各个 CLI 各自选用其中
+以及可测速自动选优的备用域名；内置 Agent 的四种接口格式和各个 CLI 各自选用其中
 一个。已登录时 CLI 优先走云路由，内置 Agent 的某种接口格式指向了自定义接口时
 则以自定义接口为准。`cargo run -p sub2api --example routing_doctor` 可以随时对照
 期望路由与磁盘上的实际配置。
@@ -130,12 +130,14 @@ PowerShell（有 7 就用 7），工作目录在多次调用之间保持，中�
 **不设步数上限。** 一条消息可以连续执行任意多步，长任务不会被中途截断；想停的时候
 随时取消。
 
-**可配置项。** 设置 → 内置 Agent：三种接口格式各用哪个接口、系统提示、自动压缩
-与阈值、内置工具开关、MCP 服务器、权限规则，以及启用开关。
+**可配置项。** 设置 → 内置 Agent：四种接口格式各用哪个接口、系统提示、自动压缩
+与自定义百分比阈值、内置工具开关、MCP 服务器、权限规则，以及启用开关。
 
-内置 Agent 的引擎基于 [Claurst](https://github.com/kuberwastaken/claurst)
-（GPL-3.0），以 vendored 形式放在 [`crates/agent-core`](crates/agent-core)，
-所做的修改逐条记录在 [NOTICE.md](NOTICE.md)。
+内置 Agent 的执行内核移植自 [Sailry](https://github.com/sailry/sailry-harness)，
+现有 Provider、工具、权限和历史适配继续复用 Claurst 层。代码统一位于
+[`crates/agent-core`](crates/agent-core)，其中 `engine` 保留 Sailry 的
+`agent/engine`、`agent/model`、`agent/canonical` 结构；所做的修改逐条记录在
+[NOTICE.md](NOTICE.md)。
 
 ## 画图
 
@@ -196,11 +198,11 @@ always refer to the daemon host. The desktop retains only presentation state
 and a disposable preview cache.
 
 The built-in agent (`ProviderKind::Native`) runs inside the daemon rather than
-as a child process: a vendored copy of the Claurst engine in
-[`crates/agent-core`](crates/agent-core), driven through
-[`crates/agent-bridge`](crates/agent-bridge) (engine lifecycle,
-permissions, history, MCP, routing) and translated into the provider contract
-by `crates/client-core/src/driver/native.rs`. Its transcript is owned by the
+as a child process: Sailry's execution state machine in
+[`crates/agent-core/engine`](crates/agent-core/engine), with the existing
+provider, tool, permission, and history adapters in `crates/agent-core/query`,
+driven through [`crates/agent-bridge`](crates/agent-bridge) and translated into
+the provider contract by `crates/client-core/src/driver/native.rs`. Its transcript is owned by the
 daemon, which is what makes rewind, branch and resume plain truncations.
 
 All fork functionality lives in [`crates/sub2api`](crates/sub2api) plus a

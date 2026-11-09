@@ -147,6 +147,14 @@ struct Run {
 
 /// Run the loop over `steps` in `workspace`, with every real tool.
 async fn run(workspace: &Path, session: &str, steps: Vec<Step>) -> Run {
+    run_with_engine(workspace, session, steps, false).await
+}
+
+async fn run_core(workspace: &Path, session: &str, steps: Vec<Step>) -> Run {
+    run_with_engine(workspace, session, steps, true).await
+}
+
+async fn run_with_engine(workspace: &Path, session: &str, steps: Vec<Step>, core: bool) -> Run {
     let mut registry = agent_core_api::ProviderRegistry::new();
     registry.register(Arc::new(Script {
         id: agent_core::provider_id::ProviderId::new("scripted"),
@@ -189,21 +197,39 @@ async fn run(workspace: &Path, session: &str, steps: Vec<Step>) -> Run {
     let tools = agent_core_tools::all_tools();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut messages = vec![Message::user("go")];
-    let outcome = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        run_query_loop(
-            &client,
-            &mut messages,
-            &tools,
-            &ctx,
-            &config,
-            agent_core::cost::CostTracker::new(),
-            Some(tx),
-            tokio_util::sync::CancellationToken::new(),
-            None,
-        ),
-    )
-    .await
+    let outcome = if core {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            run_agent_core_loop(
+                &client,
+                &mut messages,
+                Arc::new(tools),
+                &ctx,
+                &config,
+                agent_core::cost::CostTracker::new(),
+                Some(tx),
+                tokio_util::sync::CancellationToken::new(),
+                None,
+            ),
+        )
+        .await
+    } else {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            run_query_loop(
+                &client,
+                &mut messages,
+                &tools,
+                &ctx,
+                &config,
+                agent_core::cost::CostTracker::new(),
+                Some(tx),
+                tokio_util::sync::CancellationToken::new(),
+                None,
+            ),
+        )
+        .await
+    }
     .expect("the loop must not hang");
     let mut checkpoints = Vec::new();
     while let Ok(event) = rx.try_recv() {
@@ -238,6 +264,31 @@ fn results(messages: &[Message]) -> Vec<(String, bool)> {
             _ => None,
         })
         .collect()
+}
+
+#[tokio::test]
+async fn sailry_core_executes_real_tools_and_checkpoints() {
+    let workspace = tempfile::tempdir().unwrap();
+    let path = workspace.path().join("created.txt");
+    let run = run_core(
+        workspace.path(),
+        "e2e-sailry-core",
+        vec![
+            call(
+                "Write",
+                json!({"file_path": path, "content": "from sailry\n"}),
+            ),
+            answer("Done."),
+        ],
+    )
+    .await;
+    assert!(
+        matches!(&run.outcome, QueryOutcome::EndTurn { .. }),
+        "{:?}",
+        run.outcome
+    );
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "from sailry\n");
+    assert!(run.checkpoints > 0);
 }
 
 #[tokio::test]

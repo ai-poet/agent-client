@@ -3,10 +3,10 @@ use agent_core::config::Config as ClientConfig;
 use agent_core::types::{ToolDefinition, UsageInfo};
 use agent_core_api::provider::LlmProvider;
 use agent_core_api::provider_types::{ProviderRequest, StopReason, StreamEvent};
-use agent_core_api::{ProviderRegistry, SystemPrompt, ThinkingConfig};
+use agent_core_api::{SystemPrompt, ThinkingConfig};
 use agent_core_engine::agent::model as engine;
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::Stream;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, VecDeque};
 use std::pin::Pin;
@@ -21,7 +21,6 @@ pub struct ExistingModel {
     provider_id: String,
     model_id: String,
     query: QueryConfig,
-    config: ClientConfig,
     session_id: String,
     events: Option<mpsc::UnboundedSender<QueryEvent>>,
 }
@@ -76,7 +75,6 @@ impl ExistingModel {
             provider_id,
             model_id,
             query: query.clone(),
-            config: config.clone(),
             session_id: session_id.into(),
             events,
         })
@@ -320,7 +318,9 @@ impl Stream for ConvertStream {
                             PartialTool {
                                 id,
                                 name,
-                                json: if input.is_null() {
+                                json: if input.is_null()
+                                    || input.as_object().is_some_and(|object| object.is_empty())
+                                {
                                     String::new()
                                 } else {
                                     input.to_string()

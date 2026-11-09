@@ -464,6 +464,17 @@ otherwise outrank everything above, after saving them under
 `~/.cheaprouter/env-backups/`; machine-wide Windows variables are never
 touched, only reported with the elevated command.
 
+## Agent core
+
+`crates/agent-core/engine` vendors Sailry's execution state machine, model/stream
+contracts, canonical history types, bounded output projection, and their original
+host-neutral tests. `store` applies Sailry effects to an in-memory session for the
+embedding host. `agent-core/query/src/sailry` adapts the existing ProviderRegistry,
+`ToolContext`, tools, `QueryEvent`, checkpoints, and persisted history; the
+`agent-bridge` facade and daemon/UI contracts stay unchanged. Node admission,
+Turso, Rig, GPUI, and Sailry plugin hosts are outside the port. Copied Node-only
+integration tests remain behind `node-tests` and are not a standalone configuration.
+
 ## License
 
 Fork stays GPL-3.0-only. Record every modification in [NOTICE.md](../NOTICE.md)
