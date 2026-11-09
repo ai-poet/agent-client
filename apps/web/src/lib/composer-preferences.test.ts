@@ -12,8 +12,8 @@ describe('composer preferences', () => {
     const remembered = rememberComposerSession(
       readComposerPreferences(storage, 'ws://first'),
       {
-        provider: 'codex',
-        model: 'gpt-5.6-sol',
+        provider: 'native',
+        model: 'claude-sonnet-5-5',
         reasoning_effort: 'high',
         service_tier: 'fast',
         context_window: '1m',

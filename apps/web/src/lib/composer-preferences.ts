@@ -28,19 +28,7 @@ const DEFAULT_PREFERENCES: ComposerPreferences = {
   modelTraits: {},
 }
 
-const PROVIDERS = new Set<ProviderKind>([
-  'amp',
-  'claude',
-  'codex',
-  'cursor',
-  'deepSeek',
-  'fx',
-  'openCode',
-  'grok',
-  'kimi',
-  'ohMyPi',
-  'pi',
-])
+const PROVIDERS = new Set<ProviderKind>(['native'])
 
 export function browserComposerPreferenceStorage(): StorageLike | null {
   if (typeof window === 'undefined') return null

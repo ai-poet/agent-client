@@ -350,14 +350,16 @@ function ProvidersSettings() {
                 </span>
                 {provider.id !== 'native' && (
                   <button
-                  aria-label={t(open ? 'providers.hide_settings' : 'providers.show_settings', { provider: provider.name })}
+                    aria-expanded={open}
+                    aria-label={t(open ? 'providers.hide_settings' : 'providers.show_settings', { provider: provider.name })}
                   className="grid size-7 shrink-0 place-items-center rounded-[7px] text-[var(--text-tertiary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
                   type="button"
                   onClick={() => toggleExpandedProvider(provider.id)}
                 >
                   <WakuIcon className="size-2.5" name={open ? 'chevronDown' : 'chevronRight'} />
                 </button>
-                {installed && (
+                )}
+                {installed && provider.id !== 'native' && (
                   <Toggle
                     checked={!disabled}
                     label={t(disabled ? 'providers.enable' : 'providers.disable', { provider: provider.name })}
