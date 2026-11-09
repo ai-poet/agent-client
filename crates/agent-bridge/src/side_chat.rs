@@ -110,7 +110,7 @@ pub fn ask_streaming(
         let run = agent_core_query::run_agent_core_loop(
             client.as_ref(),
             &mut messages,
-            tools,
+            Arc::new(tools),
             &tool_ctx,
             &query,
             cost_tracker,

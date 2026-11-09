@@ -25,26 +25,30 @@ use crate::{QueryConfig, QueryEvent, QueryOutcome};
 pub async fn run(
     client: &AnthropicClient,
     messages: &mut Vec<Message>,
-    tools: Vec<Box<dyn Tool>>,
+    tools: Arc<Vec<Box<dyn Tool>>>,
     tool_ctx: &ToolContext,
     config: &QueryConfig,
     cost_tracker: Arc<CostTracker>,
     event_tx: Option<mpsc::UnboundedSender<QueryEvent>>,
     cancel: CancellationToken,
+    pending_messages: Option<&mut Vec<String>>,
 ) -> QueryOutcome {
     if config.provider_registry.is_none() {
         return crate::run_query_loop(
             client,
             messages,
-            &tools,
+            tools.as_slice(),
             tool_ctx,
             config,
             cost_tracker,
             event_tx,
             cancel,
-            None,
+            pending_messages,
         )
         .await;
+    }
+    if let Some(pending) = pending_messages {
+        messages.extend(pending.drain(..).map(Message::user));
     }
     let mut query = config.clone();
     query

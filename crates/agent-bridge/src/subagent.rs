@@ -675,7 +675,7 @@ impl ChildRun {
         let outcome = agent_core_query::run_agent_core_loop(
             self.client.as_ref(),
             &mut messages,
-            self.tools,
+            Arc::new(self.tools),
             &self.ctx,
             &self.query,
             self.ctx.cost_tracker.clone(),

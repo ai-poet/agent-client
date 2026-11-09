@@ -14,14 +14,14 @@ use tokio::sync::mpsc;
 use crate::QueryEvent;
 
 pub struct ExistingTools {
-    tools: Vec<Box<dyn Tool>>,
+    tools: Arc<Vec<Box<dyn Tool>>>,
     context: ToolContext,
     events: Option<mpsc::UnboundedSender<QueryEvent>>,
 }
 
 impl ExistingTools {
     pub fn new(
-        tools: Vec<Box<dyn Tool>>,
+        tools: Arc<Vec<Box<dyn Tool>>>,
         context: ToolContext,
         events: Option<mpsc::UnboundedSender<QueryEvent>>,
     ) -> Self {

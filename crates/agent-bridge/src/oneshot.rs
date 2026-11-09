@@ -124,7 +124,7 @@ pub(crate) async fn ask_once(
     let outcome = agent_core_query::run_agent_core_loop(
         client,
         &mut messages,
-        tools,
+        Arc::new(tools),
         &tool_ctx,
         query,
         cost_tracker,

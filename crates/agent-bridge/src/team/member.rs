@@ -519,7 +519,7 @@ impl MemberRuntime {
         let outcome = agent_core_query::run_agent_core_loop(
             engine.client.as_ref(),
             &mut messages,
-            tools,
+            Arc::new(tools),
             &tool_ctx,
             &query,
             shared.cost_tracker.clone(),
