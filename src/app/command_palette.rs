@@ -917,12 +917,6 @@ impl Waku {
                 "settings preferences skills library create disable agent skill",
             ),
             (
-                SettingsPage::Usage,
-                "settings.usage",
-                "icons/chart-column.svg",
-                "settings preferences usage tokens cost history",
-            ),
-            (
                 SettingsPage::Agent,
                 "settings.agent",
                 "icons/provider-waku.svg",

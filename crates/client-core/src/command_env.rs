@@ -944,9 +944,13 @@ mod tests {
     fn dedicated_provider_thread_can_normalize_sigchld() {
         let _restore_original = block_sigchld().expect("block SIGCHLD for the fixture");
 
-        unblock_sigchld_for_current_thread().expect("unblock provider thread");
+        with_sigchld_unblocked(|| {
+            assert!(!sigchld_is_blocked().expect("read normalized signal mask"));
+            Ok(())
+        })
+        .expect("unblock provider thread");
 
-        assert!(!sigchld_is_blocked().expect("read normalized signal mask"));
+        assert!(sigchld_is_blocked().expect("read restored signal mask"));
     }
 
     #[cfg(unix)]

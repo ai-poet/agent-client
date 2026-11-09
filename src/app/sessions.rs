@@ -479,9 +479,6 @@ impl Waku {
             .try_global::<crate::updater::UpdaterState>()
             .and_then(|updater| updater.0.as_ref())
             .is_some_and(|updater| updater.automatically_checks_for_updates());
-        // Warm the Usage page's transcript scan while the user is still on
-        // General, so clicking Usage lands on data instead of a spinner.
-        self.ensure_usage_history(false, cx);
         window.focus(&self.settings_focus, cx);
         cx.notify();
     }
@@ -1044,6 +1041,44 @@ impl Waku {
             }
             crate::ui::menu::toggle_popover(&handle, MenuAlign::AboveLeft, window, cx);
         });
+    }
+
+    /// Open one vendor of the built-in agent's model list. This only filters
+    /// the picker; the session changes when a model is picked.
+    pub(super) fn show_model_picker_vendor(&mut self, vendor: &str, cx: &mut Context<Self>) {
+        if self.model_picker_vendor == vendor {
+            return;
+        }
+        self.model_picker_vendor = vendor.to_owned();
+        self.model_picker_highlight = None;
+        self.reveal_selected_picker_model();
+        cx.notify();
+    }
+
+    /// Open the vendor holding the current model, or the first available one.
+    pub(super) fn sync_model_picker_vendor(&mut self) {
+        let model = self
+            .selected_session()
+            .and_then(|session| self.model_for_session(session))
+            .map(str::to_owned);
+        let Some(models) = self
+            .probes
+            .iter()
+            .find(|probe| probe.provider == ProviderKind::Native)
+            .map(|probe| &probe.models)
+        else {
+            return;
+        };
+        let current = model
+            .as_deref()
+            .map(|id| super::native_agent::native_vendor_of_id(id).to_owned());
+        let present = super::native_agent::native_vendors_present(models);
+        let vendor = current
+            .filter(|id| present.iter().any(|entry| entry.id == *id))
+            .or_else(|| present.first().map(|entry| entry.id.clone()));
+        if let Some(vendor) = vendor {
+            self.model_picker_vendor = vendor;
+        }
     }
 
     pub(super) fn toggle_favorite_model(

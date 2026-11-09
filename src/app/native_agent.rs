@@ -786,6 +786,86 @@ fn vendor_by_name(model: &str) -> Option<&'static str> {
     (name.starts_with("qwen") || name.starts_with("qwq")).then_some("qwen")
 }
 
+/// One entry of the vendor column as drawn: a vendor of the table, or one
+/// of the user's own endpoints, which the table cannot name in advance.
+#[derive(Clone)]
+pub(super) struct VendorEntry {
+    /// What the column filters by — a table id, or `custom:<provider id>`.
+    pub id: String,
+    /// The name shown, already in the UI's language.
+    pub label: String,
+    /// The mark and hue drawn beside it.
+    pub vendor: &'static NativeVendor,
+    pub count: usize,
+}
+
+/// The vendors the column draws for a list: the table's vendors that hold
+/// models, in table order, then each of the user's own endpoints under its
+/// own name, in the order the list has them. With no endpoint listed, a
+/// `custom` entry stands in their place, to say where models of the user's
+/// own go.
+pub(super) fn native_vendors_present(models: &[ProviderModel]) -> Vec<VendorEntry> {
+    let mut counts = vec![0usize; NATIVE_VENDORS.len()];
+    let mut endpoints: Vec<VendorEntry> = Vec::new();
+    for model in models {
+        let id = native_vendor_of(model);
+        if id.starts_with(AGENT_MODEL_PREFIX) {
+            match endpoints.iter_mut().find(|entry| entry.id == id) {
+                Some(entry) => entry.count += 1,
+                None => endpoints.push(VendorEntry {
+                    id: id.to_owned(),
+                    label: model
+                        .sub_provider
+                        .clone()
+                        .filter(|label| !label.trim().is_empty())
+                        .unwrap_or_else(|| tr!("model_providers.unnamed")),
+                    vendor: native_vendor(CUSTOM_VENDOR),
+                    count: 1,
+                }),
+            }
+        } else if let Some(index) = NATIVE_VENDORS.iter().position(|vendor| vendor.id == id) {
+            counts[index] += 1;
+        }
+    }
+    let mut present: Vec<VendorEntry> = NATIVE_VENDORS
+        .iter()
+        .zip(counts)
+        .filter(|(vendor, count)| *count > 0 && vendor.id != CUSTOM_VENDOR)
+        .map(|(vendor, count)| VendorEntry {
+            id: vendor.id.to_owned(),
+            label: crate::i18n::translate(vendor.label),
+            vendor,
+            count,
+        })
+        .collect();
+    if endpoints.is_empty() {
+        let custom = native_vendor(CUSTOM_VENDOR);
+        present.push(VendorEntry {
+            id: custom.id.to_owned(),
+            label: crate::i18n::translate(custom.label),
+            vendor: custom,
+            count: 0,
+        });
+    } else {
+        present.extend(endpoints);
+    }
+    present
+}
+
+/// Whether the column entry `id` is where models of the user's own go —
+/// the placeholder, or one of their endpoints — which is where the picker
+/// offers a way to manage them.
+pub(super) fn is_endpoint_vendor(id: &str) -> bool {
+    id == CUSTOM_VENDOR || id.starts_with(AGENT_MODEL_PREFIX)
+}
+
+/// The provider id behind an endpoint's column entry (`custom:<id>`), or
+/// `None` for a vendor of the table and for the placeholder.
+pub(super) fn endpoint_of_vendor(id: &str) -> Option<&str> {
+    id.strip_prefix(AGENT_MODEL_PREFIX)
+        .filter(|provider| sub2api::providers::is_safe_endpoint_id(provider))
+}
+
 fn reasoning_effort_label(effort: &str) -> String {
     match effort {
         "low" => tr!("model_option.low"),

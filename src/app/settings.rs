@@ -3,10 +3,6 @@ use super::*;
 
 const SETTINGS_CONTENT_MAX_WIDTH: f32 = 760.0;
 
-/// The Usage page is a dashboard, not a form; it mirrors T3 Code's wide
-/// two-column layout and needs the extra room for the chart.
-const SETTINGS_USAGE_MAX_WIDTH: f32 = 1024.0;
-
 /// Key context the settings sidebar declares around its search field.
 const SETTINGS_SIDEBAR_CONTEXT: &str = "SettingsSidebar";
 
@@ -19,7 +15,7 @@ const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 12] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 11] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -49,12 +45,6 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 12] = [
         "settings.skills",
         "icons/package.svg",
         "settings.skills_keywords",
-    ),
-    (
-        SettingsPage::Usage,
-        "settings.usage",
-        "icons/chart-column.svg",
-        "settings.usage_keywords",
     ),
     (
         SettingsPage::CloudAccount,
@@ -119,6 +109,22 @@ pub(super) fn visible_settings_pages(
 }
 
 impl Waku {
+    pub(super) fn open_settings_page(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
+        if page == SettingsPage::Agent {
+            self.ensure_agent_settings_loaded(cx);
+            self.ensure_agent_teams_loaded(cx);
+            self.ensure_agent_memory_loaded(cx);
+        }
+        // Secrets are revealed only for the current visit to the page.
+        self.daemon_token_revealed = false;
+        self.settings_page = Some(page);
+        self.settings_scroll.set_offset(gpui::Point::default());
+        if page == SettingsPage::Skills {
+            self.ensure_skills_catalog(false, cx);
+        }
+        cx.notify();
+    }
+
     pub(super) fn render_settings(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
 
@@ -359,29 +365,15 @@ impl Waku {
                         }),
                 );
         }
-        // The Monthly and Projects list views own their own scrolling, so
-        // their pages fill the viewport instead of riding the shared scroll
-        // container.
-        let fills_viewport = page == SettingsPage::Usage
-            && matches!(
-                self.usage_view,
-                UsageViewMode::Monthly | UsageViewMode::Projects
-            );
         // The titlebar strip is transparent; once content slides under it, a
         // hairline marks the boundary so the clip edge reads as a header
         // rather than a glitch.
-        let content_scrolled = !fills_viewport && self.settings_scroll.offset().y < px(-1.0);
+        let content_scrolled = self.settings_scroll.offset().y < px(-1.0);
 
         let inner = div()
             .w_full()
-            .max_w(px(match page {
-                SettingsPage::Usage => SETTINGS_USAGE_MAX_WIDTH,
-                _ => SETTINGS_CONTENT_MAX_WIDTH,
-            }))
+            .max_w(px(SETTINGS_CONTENT_MAX_WIDTH))
             .mx_auto()
-            .when(fills_viewport, |element| {
-                element.h_full().min_h_0().flex().flex_col()
-            })
             .child(
                 div()
                     .pt(px(2.0))
@@ -393,7 +385,6 @@ impl Waku {
                         SettingsPage::General => tr!("settings.general"),
                         SettingsPage::ModelProviders => tr!("settings.model_providers"),
                         SettingsPage::Skills => tr!("settings.skills"),
-                        SettingsPage::Usage => tr!("settings.usage"),
                         SettingsPage::Daemon => tr!("settings.daemon"),
                         SettingsPage::ComputerUse => tr!("settings.computer_use"),
                         SettingsPage::Appearance => tr!("settings.appearance"),
@@ -410,7 +401,6 @@ impl Waku {
                 // total.
                 SettingsPage::ModelProviders => self.render_model_providers_page(cx),
                 SettingsPage::Skills => self.render_skills_settings(cx),
-                SettingsPage::Usage => self.render_usage_settings(cx),
                 SettingsPage::Daemon => self.render_daemon_settings(cx),
                 SettingsPage::ComputerUse => self.render_computer_use_settings(cx),
                 SettingsPage::Appearance => self.render_appearance_settings(cx),
@@ -449,24 +439,16 @@ impl Waku {
                         div()
                             .id("settings-content-scroll")
                             .size_full()
-                            .when(!fills_viewport, |element| {
-                                element
-                                    .overflow_y_scroll()
-                                    .track_scroll(&self.settings_scroll)
-                                    .pb(px(48.0))
-                            })
-                            .when(fills_viewport, |element| {
-                                element.min_h_0().flex().flex_col()
-                            })
+                            .overflow_y_scroll()
+                            .track_scroll(&self.settings_scroll)
+                            .pb(px(48.0))
                             .px(px(32.0))
                             .child(inner),
                     )
-                    .when(!fills_viewport, |element| {
-                        element.child(scrollbar::vertical(
-                            &self.settings_scroll,
-                            &self.settings_scrollbar,
-                        ))
-                    }),
+                    .child(scrollbar::vertical(
+                        &self.settings_scroll,
+                        &self.settings_scrollbar,
+                    )),
             )
     }
 
@@ -2697,9 +2679,6 @@ impl Waku {
         });
         self.provider_path_input.update(cx, |input, cx| {
             input.set_placeholder(tr!("input.detected_automatically"), cx)
-        });
-        self.usage_project_filter.update(cx, |input, cx| {
-            input.set_placeholder(tr!("input.filter_projects"), cx)
         });
         self.refresh_command_palette_localized_text(cx);
         self.refresh_file_search_localized_text(cx);

@@ -650,38 +650,14 @@ impl Waku {
             None
         };
 
-        // The built-in agent is the only provider with no card on the
-        // Providers page — everything about it lives here — so its
-        // enable switch does too. Off, it stops offering models to new
-        // sessions; ones already locked to it keep working.
-        let disabled = self
-            .state
-            .disabled_providers
-            .contains(&crate::model::ProviderKind::Native);
-        let enable = crate::ui::toggle_switch(
-            SharedString::from("agent-enabled"),
-            !disabled,
-            false,
-            theme,
-            cx,
-            move |this, _, cx| {
-                this.set_provider_enabled(crate::model::ProviderKind::Native, disabled, cx)
-            },
-        );
-
         section_card(theme)
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(section_title(theme, tr!("agent.title_hint"))),
-                    )
-                    .child(enable),
+                div().flex().items_center().gap(px(10.0)).child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(section_title(theme, tr!("agent.title_hint"))),
+                ),
             )
             .child(section_description(theme, tr!("agent.description")))
             .child(

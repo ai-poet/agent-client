@@ -297,6 +297,81 @@ impl Waku {
         self.open_right_panel_surface(RightPanelSurface::Plan, cx);
     }
 
+    /// The header's Plan button remains available after the approval card is
+    /// answered; a dot marks a plan still waiting for an answer.
+    pub(super) fn render_plan_surface_button(
+        &self,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
+        if !self.selected_session_has_plan() {
+            return None;
+        }
+        let shown = self.right_panel_visible
+            && matches!(
+                self.active_right_panel_surface(),
+                Some(RightPanelSurface::Plan)
+            );
+        let waiting = self
+            .state
+            .selected_session
+            .is_some_and(|session_id| self.pending_plan(session_id).is_some());
+        let tooltip: SharedString = if shown {
+            tr!("plan.surface_hide")
+        } else {
+            tr!("plan.surface_open")
+        }
+        .into();
+        Some(
+            div()
+                .id("surface-bar-plan")
+                .tab_index(0)
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .relative()
+                .w(px(26.0))
+                .h(px(26.0))
+                .flex_none()
+                .rounded(px(6.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_default()
+                .when(shown, |element| element.bg(theme.overlay))
+                .hover(|element| element.bg(theme.overlay))
+                .child(icon(
+                    "icons/list.svg",
+                    14.0,
+                    if shown || waiting {
+                        theme.accent
+                    } else {
+                        theme.text_tertiary
+                    },
+                ))
+                .when(waiting && !shown, |element| {
+                    element.child(
+                        div()
+                            .absolute()
+                            .top(px(4.0))
+                            .right(px(4.0))
+                            .size(px(6.0))
+                            .rounded_full()
+                            .bg(theme.accent),
+                    )
+                })
+                .tooltip(Tooltip::text(tooltip))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation();
+                })
+                .on_activation(cx, move |this, _, cx| {
+                    if shown {
+                        this.set_right_panel_visible(false, cx);
+                    } else {
+                        this.open_plan_surface(cx);
+                    }
+                }),
+        )
+    }
+
     /// The plan approval the session is waiting on, if any.
     pub(super) fn pending_plan(&self, session_id: Uuid) -> Option<PendingPermission> {
         self.runtimes

@@ -2283,7 +2283,6 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::ModelProviders,
         SettingsPage::Agent,
         SettingsPage::Skills,
-        SettingsPage::Usage,
         SettingsPage::CloudAccount,
         SettingsPage::Plans,
         SettingsPage::ModelPlaza,
@@ -2299,7 +2298,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
     assert_eq!(pages("skill"), vec![SettingsPage::Skills]);
 
     // A keyword shared across pages keeps them all reachable.
-    let mut codex_pages = vec![SettingsPage::Skills, SettingsPage::Usage];
+    let mut codex_pages = vec![SettingsPage::Skills];
     if cfg!(any(target_os = "macos", windows)) {
         codex_pages.push(SettingsPage::ComputerUse);
     }
@@ -2488,12 +2487,13 @@ fn the_built_in_agents_api_is_decided_by_the_model() {
     assert_eq!(native_wire_format(None, None), "chat");
 }
 
-/// The signed-out fallback participates in the same flat model list as a
-/// fetched catalog; there is no vendor submenu to open first.
+/// The signed-out fallback is filed by model family, so the vendor column
+/// works before the first gateway catalog arrives.
 #[test]
-fn the_signed_out_fallback_uses_the_flat_model_list() {
+fn the_signed_out_fallback_is_filed_under_anthropic() {
     use super::ModelPickerTab;
     use super::composer::visible_picker_models;
+    use super::native_agent::native_vendors_present;
     use crate::model::ProviderProbe;
 
     let fallback = crate::model_catalog::fallback_models(ProviderKind::Native);
@@ -2517,13 +2517,24 @@ fn the_signed_out_fallback_uses_the_flat_model_list() {
     };
 
     assert_eq!(vendor("anthropic").len(), fallback.len());
-    assert_eq!(vendor("custom").len(), fallback.len());
+    assert!(vendor("custom").is_empty());
+    let column: Vec<(String, usize)> = native_vendors_present(&fallback)
+        .into_iter()
+        .map(|entry| (entry.id, entry.count))
+        .collect();
+    assert_eq!(
+        column,
+        [
+            ("anthropic".to_owned(), fallback.len()),
+            ("custom".to_owned(), 0)
+        ]
+    );
 }
 
-/// The primary list contains every vendor at once; search narrows that same
-/// flat list by model, vendor, or custom endpoint name.
+/// Native is the picker's only provider, but its models remain filed by
+/// vendor. Search deliberately crosses those vendor boundaries.
 #[test]
-fn the_built_in_agents_list_is_flat_and_searchable() {
+fn the_built_in_agents_list_is_filed_by_vendor() {
     use super::ModelPickerTab;
     use super::composer::visible_picker_models;
     use crate::model::{ProviderModel, ProviderProbe};
@@ -2558,10 +2569,9 @@ fn the_built_in_agents_list_is_flat_and_searchable() {
         .collect()
     };
 
-    assert_eq!(list("zhipu", "").len(), 5);
-    assert_eq!(list("custom:pr-1", "").len(), 5);
-    assert_eq!(list("deepseek", "").len(), 5);
-    // Search crosses vendors and finds an endpoint's models by its name.
+    assert_eq!(list("zhipu", ""), ["zhipu::glm-5", "composite::glm-4.6"]);
+    assert_eq!(list("deepseek", ""), ["deepseek::deepseek-v4"]);
+    assert_eq!(list("custom:pr-1", ""), ["custom:pr-1::deepseek-local"]);
     assert_eq!(
         list("zhipu", "deepseek"),
         ["deepseek::deepseek-v4", "custom:pr-1::deepseek-local"]

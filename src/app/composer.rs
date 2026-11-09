@@ -776,6 +776,7 @@ impl Waku {
                         empty = this.model_picker_has_no_providers();
                         this.model_picker_tab = ModelPickerTab::Provider(ProviderKind::Native);
                         this.refresh_native_catalog(false, cx);
+                        this.sync_model_picker_vendor();
                         this.model_picker_highlight = None;
                         reset_search.update(cx, |search, cx| search.clear(cx));
                         this.reveal_selected_picker_model();
@@ -821,6 +822,7 @@ impl Waku {
         // `picker_vendor` is which vendor of the built-in agent's list the
         // vendor column has open. The filter belongs here so the keyboard
         // cursor and the drawn rows agree about what is in the section.
+        let picker_vendor = self.model_picker_vendor.clone();
         let available_models = Rc::new(if handle.is_open() {
             visible_picker_models(
                 &probes,
@@ -828,15 +830,28 @@ impl Waku {
                 &disabled_providers,
                 locked_provider,
                 selected_tab,
-                "",
+                &picker_vendor,
                 &normalized_query,
             )
         } else {
             Vec::new()
         });
-        // The gateway catalog and the user's own endpoints share one flat list;
-        // search filters across every vendor.
-        let manage_models = (handle.is_open() && !searching).then_some(None);
+        // The vendor column is the picker's first level now; search hides it
+        // and matches across every vendor instead.
+        let native_vendors = if handle.is_open() && !searching {
+            probes
+                .iter()
+                .find(|probe| probe.provider == ProviderKind::Native)
+                .map(|probe| super::native_agent::native_vendors_present(&probe.models))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        // Custom endpoints end in a manage row, targeting the open endpoint.
+        let manage_models = (handle.is_open()
+            && !searching
+            && super::native_agent::is_endpoint_vendor(&picker_vendor))
+        .then(|| super::native_agent::endpoint_of_vendor(&picker_vendor).map(str::to_owned));
         let row_count = available_models.len() + usize::from(manage_models.is_some());
         let highlight = self
             .model_picker_highlight
@@ -895,6 +910,10 @@ impl Waku {
                             .child(div().flex_1().min_w_0().child(search.clone())),
                     );
 
+                // Which vendor of the built-in agent's list is open. Search
+                // temporarily replaces the column with cross-vendor results.
+                let native_vendor = (!searching).then(|| picker_vendor.clone());
+
                 let mut rows = div()
                     .id("model-picker-list")
                     .size_full()
@@ -912,6 +931,8 @@ impl Waku {
                             if pending_discoveries.contains(&provider)
                     ) {
                         tr!("models.loading")
+                    } else if native_vendor.as_deref() == Some(super::native_agent::CUSTOM_VENDOR) {
+                        tr!("models.declare_your_own")
                     } else {
                         tr!("models.none_reported")
                     };
@@ -1122,10 +1143,12 @@ impl Waku {
                 let confirm_manage = manage_models.clone();
                 let next_weak = weak.clone();
                 let previous_weak = weak.clone();
+                let next_vendor_weak = weak.clone();
+                let previous_vendor_weak = weak.clone();
                 let confirm_weak = weak.clone();
                 let confirm_popover = popover.clone();
                 div()
-                    .w(px(440.0))
+                    .w(px(560.0))
                     // Fork: taller than upstream's 390 so rows carrying a
                     // description line still show five at a time.
                     .h(px(440.0))
@@ -1149,6 +1172,16 @@ impl Waku {
                     .on_action(move |_: &SelectPreviousEntry, _, cx| {
                         let _ = previous_weak.update(cx, |this, cx| {
                             this.move_model_picker_highlight("up", row_count, cx);
+                        });
+                    })
+                    .on_action(move |_: &SelectNextTab, _, cx| {
+                        let _ = next_vendor_weak.update(cx, |this, cx| {
+                            this.cycle_model_picker_vendor("down", cx);
+                        });
+                    })
+                    .on_action(move |_: &SelectPreviousTab, _, cx| {
+                        let _ = previous_vendor_weak.update(cx, |this, cx| {
+                            this.cycle_model_picker_vendor("up", cx);
                         });
                     })
                     .on_action(move |_: &ConfirmEntry, window, cx| {
@@ -1191,9 +1224,24 @@ impl Waku {
                                 div()
                                     .flex_1()
                                     .min_h_0()
-                                    .relative()
-                                    .child(rows)
-                                    .child(scrollbar::vertical(&scroll, &scrollbar_state)),
+                                    .flex()
+                                    .children(native_vendor.as_deref().map(|active| {
+                                        native_vendor_column(
+                                            theme,
+                                            &native_vendors,
+                                            active,
+                                            weak.clone(),
+                                        )
+                                    }))
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .flex_1()
+                                            .h_full()
+                                            .relative()
+                                            .child(rows)
+                                            .child(scrollbar::vertical(&scroll, &scrollbar_state)),
+                                    ),
                             ),
                     )
                     .into_any_element()
@@ -1213,6 +1261,32 @@ impl Waku {
         self.model_picker_highlight = Some(next);
         self.model_picker_scroll.scroll_to_item(next);
         cx.notify();
+    }
+
+    /// Cycle the vendor column from the focused filter field. A live query
+    /// searches across vendors, so tab cycling resumes after it is cleared.
+    fn cycle_model_picker_vendor(&mut self, key: &str, cx: &mut Context<Self>) {
+        if !self.model_search.read(cx).content().trim().is_empty() {
+            return;
+        }
+        let vendors: Vec<String> = self
+            .probes
+            .iter()
+            .find(|probe| probe.provider == ProviderKind::Native)
+            .map(|probe| {
+                super::native_agent::native_vendors_present(&probe.models)
+                    .into_iter()
+                    .map(|entry| entry.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let current = vendors
+            .iter()
+            .position(|vendor| *vendor == self.model_picker_vendor);
+        let Some(next) = next_picker_highlight(current, vendors.len(), key) else {
+            return;
+        };
+        self.show_model_picker_vendor(&vendors[next], cx);
     }
 
     /// Bring the current model's row into view whenever the picker shows the
@@ -1236,7 +1310,7 @@ impl Waku {
             &self.state.disabled_providers,
             locked_provider,
             self.model_picker_tab,
-            "",
+            &self.model_picker_vendor,
             "",
         )
         .iter()
@@ -3824,6 +3898,91 @@ pub(super) fn native_wire_format(
         .to_owned()
 }
 
+/// The column beside the built-in agent's model list: one row per vendor
+/// that has models, plus the user's own endpoints. It stays outside the model
+/// list's scroll area and scrolls independently when the vendors outgrow it.
+fn native_vendor_column(
+    theme: Theme,
+    vendors: &[super::native_agent::VendorEntry],
+    active: &str,
+    weak: gpui::WeakEntity<Waku>,
+) -> impl IntoElement {
+    let mut column = div()
+        .id("model-vendor-column")
+        .w(px(132.0))
+        .h_full()
+        .flex_none()
+        .flex()
+        .flex_col()
+        .gap(px(2.0))
+        .p(px(6.0))
+        .overflow_y_scroll()
+        .border_r_1()
+        .border_color(theme.border);
+    for entry in vendors {
+        let vendor = entry.vendor;
+        let count = entry.count;
+        let id = entry.id.clone();
+        let selected = id == active;
+        let weak = weak.clone();
+        column = column.child(
+            div()
+                .id(SharedString::from(format!("model-vendor-{id}")))
+                .h(px(32.0))
+                .flex_none()
+                .px(px(8.0))
+                .rounded(px(7.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .cursor_default()
+                .when(selected, |element| element.bg(theme.overlay_strong))
+                .when(!selected, |element| {
+                    element
+                        .hover(|element| element.bg(theme.overlay))
+                        .on_click(move |_, _, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.show_model_picker_vendor(&id, cx);
+                            });
+                        })
+                })
+                .child(icon(
+                    vendor.icon,
+                    15.0,
+                    native_vendor_color(&theme, vendor).opacity(if selected { 1.0 } else { 0.82 }),
+                ))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .font_weight(if selected {
+                            FontWeight::SEMIBOLD
+                        } else {
+                            FontWeight::NORMAL
+                        })
+                        .text_color(if selected {
+                            theme.text
+                        } else {
+                            theme.text_secondary
+                        })
+                        .child(SharedString::from(entry.label.clone())),
+                )
+                .when(count > 0, |element| {
+                    element.child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_ghost)
+                            .child(SharedString::from(count.to_string())),
+                    )
+                }),
+        );
+    }
+    column
+}
+
 fn native_vendor_color(theme: &Theme, vendor: &super::native_agent::NativeVendor) -> Hsla {
     match vendor.color {
         Some(hex) => rgb(hex).into(),
@@ -3864,7 +4023,7 @@ pub(super) fn visible_picker_models(
     disabled_providers: &[ProviderKind],
     locked_provider: Option<ProviderKind>,
     selected_tab: ModelPickerTab,
-    _native_vendor: &str,
+    native_vendor: &str,
     normalized_query: &str,
 ) -> Vec<(ProviderKind, ProviderModel)> {
     let searching = !normalized_query.is_empty();
@@ -3915,7 +4074,10 @@ pub(super) fn visible_picker_models(
                 ModelPickerTab::Favorites => favorites
                     .iter()
                     .any(|favorite| favorite.provider == *kind && favorite.model == model.id),
-                ModelPickerTab::Provider(provider) if provider.is_builtin() => provider == *kind,
+                ModelPickerTab::Provider(provider) if provider.is_builtin() => {
+                    provider == *kind
+                        && super::native_agent::native_vendor_of(model) == native_vendor
+                }
                 ModelPickerTab::Provider(provider) => provider == *kind,
             }
         })

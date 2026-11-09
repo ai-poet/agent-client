@@ -8,7 +8,7 @@ use super::ui_theme;
 
 pub use client_ui::menu::{
     ConfirmEntry, ContextMenuHandle, DismissMenu, MenuAlign, MenuItem, SelectNextEntry,
-    SelectPreviousEntry, init, popover, toggle_popover,
+    SelectNextTab, SelectPreviousEntry, SelectPreviousTab, init, popover, toggle_popover,
 };
 
 pub fn dropdown_menu<E>(

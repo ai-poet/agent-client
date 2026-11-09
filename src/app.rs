@@ -46,7 +46,7 @@ use crate::md::render::{
 };
 use crate::ui::menu::{
     ConfirmEntry, ContextMenuHandle, DismissMenu, MenuAlign, MenuItem, SelectNextEntry,
-    SelectPreviousEntry, context_menu, dropdown_menu, popover,
+    SelectNextTab, SelectPreviousEntry, SelectPreviousTab, context_menu, dropdown_menu, popover,
 };
 use crate::ui::scrollbar::{self, ScrollbarState};
 use crate::ui::tooltip::Tooltip;
@@ -215,7 +215,6 @@ enum BranchPickerAction {
 enum SettingsPage {
     General,
     Skills,
-    Usage,
     Daemon,
     ComputerUse,
     Appearance,
@@ -247,29 +246,6 @@ impl SettingsPage {
     fn is_visible_in_navigation(self) -> bool {
         self != Self::ComputerUse || cfg!(any(target_os = "macos", windows))
     }
-}
-
-/// Which presentation the Usage page shows: the daily dashboard, the monthly
-/// statement, or the per-project ranking.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum UsageViewMode {
-    Daily,
-    Monthly,
-    Projects,
-}
-
-/// Which unit the Usage page's headline and chart read in.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum UsageMetric {
-    Cost,
-    Tokens,
-}
-
-/// Which table the Usage page's breakdown section shows.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum UsageBreakdown {
-    Model,
-    Day,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1230,43 +1206,6 @@ pub struct Waku {
     /// Providers whose turn settled since the last fetch, so the meters have
     /// moved.
     plan_usage_stale: HashSet<ProviderKind>,
-    /// The settings Usage page's snapshot: historical token/cost usage
-    /// scanned from provider transcripts off-thread. Frames read only this.
-    usage_history: Option<crate::usage_history::UsageHistory>,
-    /// The window a scan is currently in flight for, so a repeat request for
-    /// the same window coalesces while a changed window supersedes it.
-    usage_history_pending_for: Option<crate::usage_history::UsageWindow>,
-    /// Bumped per scan; a result from a superseded scan is discarded.
-    usage_history_generation: u64,
-    /// When the current snapshot landed, for the reopen-staleness check.
-    usage_history_scanned_at: Option<Instant>,
-    usage_view: UsageViewMode,
-    /// The selected window for the daily and project views; the statement
-    /// view fixes its own.
-    usage_window: crate::usage_history::UsageWindow,
-    usage_metric: UsageMetric,
-    usage_breakdown: UsageBreakdown,
-    /// Scroll position of the monthly statement card, which scrolls
-    /// internally like the projects card so the two list views feel alike.
-    usage_months_scroll: ScrollHandle,
-    usage_months_scrollbar: Rc<ScrollbarState>,
-    /// Filter query over the Usage page's project rows.
-    usage_project_filter: Entity<TextInput>,
-    /// Virtualized list over the filtered project rows, so only visible rows
-    /// build elements no matter how many working directories have usage.
-    usage_projects_list: ListState,
-    usage_projects_scrollbar: Rc<ScrollbarState>,
-    /// Indices into `usage_history.projects` the filter leaves visible — the
-    /// row builder reads only this.
-    usage_projects_rows: RefCell<Vec<usize>>,
-    /// `(peak value, rank-by-cost)` for the visible rows' bars, refreshed
-    /// once per frame rather than per row.
-    usage_projects_scale: Cell<(f64, bool)>,
-    /// Hovered or keyboard-selected day index on the Usage page's chart.
-    usage_chart_hover: Option<usize>,
-    /// The chart plot's window bounds, written during paint so the mouse-move
-    /// handler can map positions to day indices.
-    usage_chart_bounds: Rc<Cell<Option<gpui::Bounds<Pixels>>>>,
     computer_use_app_icons: RefCell<HashMap<String, Option<std::sync::Arc<gpui::Image>>>>,
     computer_use_app_icon_loads: RefCell<HashSet<String>>,
     /// Installed folder-capable apps for the header's "open project in"
@@ -1571,6 +1510,9 @@ pub struct Waku {
     model_providers: model_providers_page::ModelProvidersPageState,
     /// Fork addition: provider processes warmed while the user types.
     runtime_prewarms: runtime_prewarm::RuntimePrewarms,
+    /// Which vendor of the built-in agent's model list the picker has open.
+    /// Picker state, not session state, and not persisted.
+    model_picker_vendor: String,
     /// Fork addition: cloud usage view state.
     cloud_usage: cloud_usage::CloudUsageState,
     /// Fork addition: model plaza view state.
@@ -1910,7 +1852,6 @@ mod transcript_view;
 mod turn_status;
 mod turn_undo;
 mod usage_meter;
-mod usage_page;
 mod wallpaper;
 mod wallpaper_settings;
 mod wallpaper_view;
@@ -2370,8 +2311,6 @@ impl Waku {
                 .select_all_on_focus_click()
                 .placeholder(tr!("input.detected_automatically"))
         });
-        let usage_project_filter =
-            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.filter_projects")));
         let right_panel_diff_filter =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("diff.filter_files")));
         let right_panel_diff_search = cx.new(|cx| {
@@ -2591,7 +2530,6 @@ impl Waku {
         let transcript_rows = ListState::new(0, ListAlignment::Bottom, px(2048.0));
         let anchored_transcript_rows = ListState::new(0, ListAlignment::Top, px(2048.0));
         let sidebar_list_state = ListState::new(0, ListAlignment::Top, px(256.0));
-        let usage_projects_list = ListState::new(0, ListAlignment::Top, px(256.0));
         let branch_picker_list_state = ListState::new(0, ListAlignment::Top, px(152.0));
         let transcript_is_scrolled = Rc::new(Cell::new(false));
         let transcript_anchor_following = Rc::new(Cell::new(false));
@@ -2969,15 +2907,6 @@ impl Waku {
             )
             .detach();
             cx.subscribe(
-                &usage_project_filter,
-                |_: &mut Self, _, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Edited) {
-                        cx.notify();
-                    }
-                },
-            )
-            .detach();
-            cx.subscribe(
                 &right_panel_diff_filter,
                 |this: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
@@ -3223,23 +3152,6 @@ impl Waku {
                 plan_usage_unconfigured: HashSet::new(),
                 plan_usage_checked_at: HashMap::new(),
                 plan_usage_stale: HashSet::new(),
-                usage_history: None,
-                usage_history_pending_for: None,
-                usage_history_generation: 0,
-                usage_history_scanned_at: None,
-                usage_view: UsageViewMode::Daily,
-                usage_window: crate::usage_history::UsageWindow::TrailingDays(30),
-                usage_metric: UsageMetric::Cost,
-                usage_breakdown: UsageBreakdown::Model,
-                usage_months_scroll: ScrollHandle::new(),
-                usage_months_scrollbar: ScrollbarState::new(),
-                usage_project_filter,
-                usage_projects_list,
-                usage_projects_scrollbar: ScrollbarState::new(),
-                usage_projects_rows: RefCell::new(Vec::new()),
-                usage_projects_scale: Cell::new((0.0, true)),
-                usage_chart_hover: None,
-                usage_chart_bounds: Rc::default(),
                 computer_use_app_icons: RefCell::new(HashMap::new()),
                 computer_use_app_icon_loads: RefCell::new(HashSet::new()),
                 open_in_apps: Rc::new(Vec::new()),
@@ -3400,6 +3312,7 @@ impl Waku {
                     custom_api,
                 ),
                 runtime_prewarms: runtime_prewarm::RuntimePrewarms::default(),
+                model_picker_vendor: "anthropic".to_owned(),
                 cloud_usage: cloud_usage::CloudUsageState::default(),
                 model_plaza: model_plaza::ModelPlazaState::default(),
                 content_translations: content_translations::ContentTranslationsState::default(),

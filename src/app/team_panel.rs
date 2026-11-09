@@ -1360,3 +1360,64 @@ mod tests {
         assert!((head[1].1 + head[2].1).abs() < 1e-4);
     }
 }
+
+impl Waku {
+    /// The header's Team button: present while the selected session leads a
+    /// team; one click opens the surface and another puts it away.
+    pub(super) fn render_team_surface_button(
+        &self,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
+        if !self.selected_session_has_team() {
+            return None;
+        }
+        let shown = self.right_panel_visible
+            && matches!(
+                self.active_right_panel_surface(),
+                Some(RightPanelSurface::Team)
+            );
+        let tooltip: SharedString = if shown {
+            tr!("team.surface_hide")
+        } else {
+            tr!("team.surface_open")
+        }
+        .into();
+        Some(
+            div()
+                .id("surface-bar-team")
+                .tab_index(0)
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .w(px(26.0))
+                .h(px(26.0))
+                .flex_none()
+                .rounded(px(6.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_default()
+                .when(shown, |element| element.bg(theme.overlay))
+                .hover(|element| element.bg(theme.overlay))
+                .child(icon(
+                    "icons/users.svg",
+                    14.0,
+                    if shown {
+                        theme.accent
+                    } else {
+                        theme.text_tertiary
+                    },
+                ))
+                .tooltip(Tooltip::text(tooltip))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation();
+                })
+                .on_activation(cx, move |this, _, cx| {
+                    if shown {
+                        this.set_right_panel_visible(false, cx);
+                    } else {
+                        this.open_right_panel_surface(RightPanelSurface::Team, cx);
+                    }
+                }),
+        )
+    }
+}
