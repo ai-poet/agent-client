@@ -29,9 +29,9 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
-- 内置 Agent 支持直接说「组队」加目标来发起 Agent Teams，当前会话担任队长并沿用草案审批；团队成员的模型路由在草案和成员行中清晰展示。后台子智能体可单项挂起或停止，后台命令、子智能体与团队成员在成功、失败或停止后主动通知 Agent，主会话忙碌时排队、空闲时自动唤醒
+- 内置 Agent 支持用中英文自然语言发起 Agent Teams：消息发送前不再按关键词预解析，由模型调用组队工具，当前会话担任队长并沿用草案强制审批；斜杠命令及模板别名保留。团队成员的模型路由在草案和成员行中清晰展示。后台子智能体可单项挂起或停止，后台命令、子智能体与团队成员在成功、失败或停止后主动通知 Agent，主会话忙碌时排队、空闲时自动唤醒
 
-  Built-in agents can now start Agent Teams from a natural-language “form a team” request, with the current session as captain and the same draft approval flow; member model routes stay visible in drafts and roster rows. Individual background subagents can be detached or stopped, and background commands, subagents and team members now notify the agent on success, failure or stop, queueing while it is busy and waking it when idle
+  Built-in agents can start Agent Teams from natural-language requests in Chinese or English: messages are no longer pre-parsed for keywords, and the model calls the team tools itself, with the current session as captain and the same mandatory draft approval flow; slash commands and profile aliases remain available. Member model routes stay visible in drafts and roster rows. Individual background subagents can be detached or stopped, and background commands, subagents and team members now notify the agent on success, failure or stop, queueing while it is busy and waking it when idle
 
 ## [0.3.5]
 

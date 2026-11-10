@@ -849,7 +849,7 @@ fn builtin_tools_with(
     {
         tools.push(Box::new(SubagentTool::new(subagents.clone())));
     }
-    // Fork: the team tools, once the session leads a team (`crate::team`).
+    // Fork: the team tools when AgentTeams is enabled (`crate::team`).
     if let Some(team) = team {
         tools.extend(team.captain_tools());
     }
@@ -1207,8 +1207,8 @@ async fn run_turn(
     cancel: CancellationToken,
     queue: CommandQueue,
 ) {
-    // Fork (AgentTeams): `/agent-teams` activates the team and carries its
-    // directive; before anything below reads the tool set.
+    // Fork (AgentTeams): `/agent-teams` carries its directive; natural
+    // language stays untouched for the model to handle with the team tools.
     let prompt = match origin {
         team_seam::PromptOrigin::User => {
             // Fork (auto-memory): what the person asked, for consolidation.
@@ -1246,7 +1246,7 @@ async fn run_turn(
     // only at its end (`forward_events`). After the sub-agent's copy is
     // taken: a child's history is not persisted.
     query.checkpoint_history = true;
-    // Fork: the captain protocol, once active; sub-agents never get it.
+    // Fork: the captain protocol when AgentTeams is enabled; sub-agents never get it.
     inner.team.extend_rules(&mut query);
     // Fork: the memory index, root session only (`crate::memory`).
     inner.memory.extend_rules(&mut query);

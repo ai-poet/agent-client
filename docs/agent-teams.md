@@ -18,9 +18,9 @@ It is a translation of dsh-agent-teams (`@nanmicoder/dsh-agent-teams` 0.1.22, MI
 
 ## Using it
 
-1. In a built-in agent task, either send `/agent-teams <goal>` or say an explicit Chinese formation request such as `组队审查这个仓库`, `组建团队` or `开个队`. Natural-language activation is a conservative keyword rule: questions and feature discussions such as `组队功能怎么用` remain ordinary chat. It is controlled by the Teams enable switch, independently of whether the slash-command menu is enabled.
+1. In a built-in agent task, either send `/agent-teams <goal>` or ask in any language, for example `组队审查这个仓库` or `form a team to review this repository`. When Teams is enabled, the model receives the `agent_teams_*` tools and captain protocol from the first turn and decides whether to call `agent_teams_create`; the app never pre-parses Chinese or English keywords/regular expressions to force activation. Questions and feature discussions such as `组队功能怎么用` and `how do agent teams work?` therefore remain ordinary user messages for the model to answer. Natural-language tool use is controlled by the Teams enable switch, independently of whether the slash-command menu is enabled.
 
-   The current session becomes the captain; no separate captain task is opened. Bare formation words make the captain ask for a goal. Named models and other constraints stay verbatim in the goal, and seat routes still come from the existing member / `memberModel` resolution. If this session already leads an active or staged team, the captain is told to inspect and continue it; the runtime refuses a silent second team.
+   The current session becomes the captain; no separate captain task is opened. Natural-language creation uses the same staged plan and mandatory approval as the slash command. Bare formation requests make the captain ask for a goal. Named models and other constraints stay verbatim in the goal, and seat routes still come from the existing member / `memberModel` resolution. Before creation the captain checks `agent_teams_status`; if this session already leads an active or staged team, it continues that team or revises the staged plan, and the runtime refuses a silent second team.
 
    Two other slash forms pick a profile:
    - `/agent-teams --profile <name> <goal>`;
@@ -92,17 +92,13 @@ Everything lives under `<workspace>/<stateDir>/`, where `stateDir` defaults to `
   - the key of its background-work record;
   - the key of its feed in `native.rs`.
 
-## Lazy activation and the prompt cache
+## Tool availability and the prompt cache
 
-A session starts with neither the team tools nor the captain protocol. It activates, for the rest of the session, when:
+When the feature is enabled, a built-in agent session starts with all 14 captain tools and the captain protocol. The model can therefore handle Chinese, English and other natural-language formation requests itself; user messages are not intercepted by a keyword parser. `/agent-teams` and `/agent-teams-<profile>` still add the explicit activation directive when the slash command is enabled. A disabled feature exposes neither the tools nor slash activation.
 
-- a user message starts with `/agent-teams` or `/agent-teams-<profile>` while the feature and slash command are enabled;
-- a user message makes an explicit natural-language formation request while the feature is enabled; or
-- `attach` finds an unarchived team on disk whose `captainSessionId` is this session (cold recovery).
+`attach` also picks up an unarchived team on disk whose `captainSessionId` belongs to this session (cold recovery). Two consequences follow:
 
-Activation happens at the top of `run_turn`, before the tool list is read, so the turn that carried the command already has the 14 captain tools. Two consequences follow:
-
-- The captain protocol section is rendered once, when the session starts, and appended only while the session is active. It is therefore byte-identical on every turn, and activation costs exactly one prompt-cache miss.
+- The captain protocol section is rendered once, when the session starts, and appended whenever the feature is enabled. It is byte-identical on every turn, so ordinary and team turns use the same cached prefix.
 - Sub-agents spawned with `Agent` never see the protocol. `extend_rules` runs after the sub-agent query template is cloned.
 
 A member gets the four member tools and nothing else from the team:
@@ -193,7 +189,7 @@ The panel polls every 2 s while the team is active and every 15 s otherwise. It 
 
 ## Recovery
 
-After a restart, `attach` finds the session's unarchived team, activates the session, and calls `resume_after_start`:
+After a restart, `attach` finds the session's unarchived team and calls `resume_after_start`:
 
 - attempts that were open become parked;
 - members' conversations are read back from `sessions/<key>.json`;
@@ -215,7 +211,7 @@ The configuration is `agent-teams.json`, beside the engine's `settings.json` (`n
   "fallback": { "provider": "…", "model": "…" }, // stored, see Scope
   "memberMaxDepth": 0,             // 0..=1
   "maxMembers": 8,                 // 1..=16
-  "slashCommand": true,            // slash activation/menu; NL activation only needs enabled
+  "slashCommand": true,            // slash activation/menu; model-driven NL tools only need enabled
   "profiles": { "<name>": { /* description, protocol, taskPlanning, members, tasks, … */ } }
 }
 ```
