@@ -35,7 +35,7 @@ use agent_core_tools::Tool;
 use agent_teams::command::{ControlAction, decode_control};
 use agent_teams::config::TeamsConfig;
 use agent_teams::profiles::TeamProfileConfig;
-use agent_teams::runtime::{RuntimeConfig, TeamRuntime};
+use agent_teams::runtime::{ModelTurn, RuntimeConfig, TeamRuntime};
 use parking_lot::Mutex;
 use tokio_util::sync::CancellationToken;
 
@@ -109,6 +109,8 @@ pub(crate) struct TeamHost {
     pending_wake: Mutex<Vec<String>>,
     /// Appended to the next message the person writes.
     parked_context: Mutex<Vec<String>>,
+    /// The currently running captain turn, for model-only plan approval.
+    model_turn: Mutex<ModelTurn>,
     this: OnceLock<Weak<TeamHost>>,
 }
 
@@ -178,6 +180,7 @@ impl TeamHost {
             injected: Mutex::new(Vec::new()),
             pending_wake: Mutex::new(Vec::new()),
             parked_context: Mutex::new(Vec::new()),
+            model_turn: Mutex::new(ModelTurn::default()),
             this: OnceLock::new(),
         });
         let _ = host.this.set(Arc::downgrade(&host));
@@ -292,6 +295,18 @@ impl TeamHost {
             Some(rules) if !rules.trim().is_empty() => format!("{rules}\n\n{}", self.section),
             _ => self.section.clone(),
         });
+    }
+
+    /// Start a new model-turn generation. A user message steered into an
+    /// existing turn does not call this, so it cannot approve that turn's draft.
+    pub fn begin_turn(&self, user_initiated: bool) {
+        let mut current = self.model_turn.lock();
+        current.id = current.id.saturating_add(1);
+        current.user_initiated = user_initiated;
+    }
+
+    pub(crate) fn current_model_turn(&self) -> ModelTurn {
+        *self.model_turn.lock()
     }
 
     /// The text a person's message reaches the model with. `/agent-teams`

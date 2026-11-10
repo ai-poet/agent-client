@@ -40,8 +40,8 @@ use super::render::{
     StatusInboxItem, StatusInboxSummary, StatusMember, StatusProfile, StatusTask, StatusView,
 };
 use super::{
-    CaptainRoute, DeliveryMode, Identity, MemberRoute, OpResult, RouteRequest, TeamRuntime,
-    global_locks, require_member, require_member_mut, require_task, task_index, text,
+    CaptainRoute, DeliveryMode, Identity, MemberRoute, ModelTurn, OpResult, RouteRequest,
+    TeamRuntime, global_locks, require_member, require_member_mut, require_task, task_index, text,
     trimmed_optional,
 };
 
@@ -1240,7 +1240,48 @@ impl TeamRuntime {
         Ok(edit_plan_summary(&updated))
     }
 
-    /// `agent_teams_approve`.
+    /// `agent_teams_approve` through the model-facing tool path. The panel
+    /// calls `approve_staged` directly; a model needs a later user turn.
+    fn approve_from_model(
+        &self,
+        caller: &str,
+        input: &Value,
+        turn: ModelTurn,
+    ) -> OpResult<ApproveResult> {
+        let args = Args::new("agent_teams_approve", input)?;
+        if args.req_str("confirmation")?.trim().is_empty() {
+            return Err("explicit user approval text is required".to_owned());
+        }
+        let team = self.require_captain_team(caller)?;
+        if !turn.user_initiated {
+            return Err(
+                "staged plan approval requires explicit user approval in a new user turn"
+                    .to_owned(),
+            );
+        }
+        if self
+            .model_plan_turns
+            .lock()
+            .get(&team.id)
+            .is_some_and(|planned| *planned >= turn.id)
+        {
+            return Err(
+                "the plan was created or edited in this model turn; wait for explicit user approval in a later user turn"
+                    .to_owned(),
+            );
+        }
+        self.approve_staged(&team.id)
+    }
+
+    fn note_model_plan_turn(&self, team_id: &str, turn_id: u64) {
+        self.model_plan_turns
+            .lock()
+            .entry(team_id.to_owned())
+            .and_modify(|current| *current = (*current).max(turn_id))
+            .or_insert(turn_id);
+    }
+
+    /// `agent_teams_approve` for a legacy direct runtime caller.
     pub fn approve(&self, caller: &str, input: &Value) -> OpResult<ApproveResult> {
         let args = Args::new("agent_teams_approve", input)?;
         if args.req_str("confirmation")?.trim().is_empty() {
@@ -1285,6 +1326,7 @@ impl TeamRuntime {
             })
         })?;
         self.kick_team(team_id);
+        self.model_plan_turns.lock().remove(team_id);
         Ok(approved)
     }
 
@@ -2620,11 +2662,46 @@ impl TeamRuntime {
         })
     }
 
-    /// Run one tool by name and render its result for the model.
-    pub fn call_tool(&self, name: &str, caller: &str, input: &Value) -> OpResult<String> {
+    /// Run one model-facing tool by name and render its result. Creation is
+    /// always staged here, even when a model omits `approval` or asks for
+    /// `automatic`; the public `create` method retains the legacy direct API.
+    pub fn call_tool(
+        &self,
+        name: &str,
+        caller: &str,
+        input: &Value,
+        turn: ModelTurn,
+    ) -> OpResult<String> {
+        if name == "agent_teams_create" {
+            // Mark before running so a parallel approve from this same model
+            // turn cannot slip between creating the draft and recording it.
+            if let Some(team_name) = input.get("name").and_then(Value::as_str) {
+                self.note_model_plan_turn(&sanitize_key(team_name), turn.id);
+            }
+            let mut staged = input.clone();
+            if let Some(arguments) = staged.as_object_mut() {
+                arguments.insert("approval".to_owned(), Value::from("required"));
+            }
+            return self.create(caller, &staged).map(|result| result.render());
+        }
+        if name == "agent_teams_approve" {
+            return self
+                .approve_from_model(caller, input, turn)
+                .map(|result| result.render());
+        }
+        if matches!(
+            name,
+            "agent_teams_edit_plan"
+                | "agent_teams_add_member"
+                | "agent_teams_remove_member"
+                | "agent_teams_create_task"
+                | "agent_teams_amend_task"
+        ) && let Ok(team) = self.require_captain_team(caller)
+            && team.is_staged()
+        {
+            self.note_model_plan_turn(&team.id, turn.id);
+        }
         match name {
-            "agent_teams_create" => self.create(caller, input).map(|result| result.render()),
-            "agent_teams_approve" => self.approve(caller, input).map(|result| result.render()),
             "agent_teams_edit_plan" => self.edit_plan(caller, input).map(|result| result.render()),
             "agent_teams_add_member" => {
                 self.add_member(caller, input).map(|result| result.render())

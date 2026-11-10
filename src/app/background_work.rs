@@ -510,6 +510,13 @@ pub(super) fn work_status_color(status: BackgroundWorkStatus, theme: Theme) -> H
     }
 }
 
+pub(super) fn can_suspend_background_work(item: &BackgroundWorkItem) -> bool {
+    item.key.kind == BackgroundWorkKind::Subagent
+        && !item.background
+        && item.status.is_stoppable()
+        && item.control_id.is_some()
+}
+
 pub(super) fn work_kind_icon(kind: BackgroundWorkKind) -> &'static str {
     match kind {
         BackgroundWorkKind::Subagent => "icons/bot.svg",
@@ -736,11 +743,7 @@ impl Waku {
             .background_work
             .get(&session_id)
             .and_then(|registry| registry.items.get(&key))
-            .filter(|item| {
-                item.key.kind == BackgroundWorkKind::Subagent
-                    && !item.background
-                    && item.status.is_stoppable()
-            })
+            .filter(|item| can_suspend_background_work(item))
             .and_then(|item| item.control_id.clone());
         let Some(control_id) = control_id else {
             return;
@@ -1221,11 +1224,7 @@ impl Waku {
             .unwrap_or_default();
         let status_color = work_status_color(item.status, theme);
         let suspend = session_id.and_then(|session_id| {
-            (item.key.kind == BackgroundWorkKind::Subagent
-                && !item.background
-                && item.status.is_stoppable()
-                && item.control_id.is_some())
-            .then(|| {
+            can_suspend_background_work(item).then(|| {
                 let focus = self.transcript_control_focus(
                     format!(
                         "background-surface-suspend-{}-{}",
@@ -2131,6 +2130,31 @@ mod tests {
         );
         item.background = background;
         item
+    }
+
+    #[test]
+    fn only_live_foreground_subagents_can_be_suspended() {
+        let mut agent = BackgroundWorkItem::new(
+            BackgroundWorkKind::Subagent,
+            "agent-1",
+            "Inspect",
+            BackgroundWorkStatus::Running,
+        );
+        agent.control_id = Some("toolu_1".to_owned());
+        agent.can_stop = true;
+        assert!(can_suspend_background_work(&agent));
+
+        agent.background = true;
+        assert!(!can_suspend_background_work(&agent));
+        agent.background = false;
+        agent.status = BackgroundWorkStatus::Completed;
+        assert!(!can_suspend_background_work(&agent));
+
+        let mut process = item("process-1", BackgroundWorkStatus::Running, true);
+        process.control_id = Some("process-1".to_owned());
+        process.can_stop = true;
+        assert!(!can_suspend_background_work(&process));
+        assert!(process.status.is_stoppable() && process.can_stop);
     }
 
     #[test]

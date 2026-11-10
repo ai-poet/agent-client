@@ -165,6 +165,34 @@ fn plan_team(runtime: &TeamRuntime, approval: &str) -> CreateResult {
         .unwrap()
 }
 
+fn model_plan_team(runtime: &TeamRuntime, approval: Option<&str>, turn_id: u64) -> String {
+    let mut input = json!({
+        "name": "Audit",
+        "description": "组队审查这个仓库",
+        "plan": {
+            "members": [{"name": "dev", "role": "engineer"}, {"name": "qa"}],
+            "tasks": [
+                {"id": "a", "subject": "survey", "assignee": "dev"},
+                {"id": "b", "subject": "check", "assignee": "qa", "dependencies": ["a"]}
+            ]
+        }
+    });
+    if let Some(approval) = approval {
+        input["approval"] = json!(approval);
+    }
+    runtime
+        .call_tool(
+            "agent_teams_create",
+            CAPTAIN,
+            &input,
+            ModelTurn {
+                id: turn_id,
+                user_initiated: true,
+            },
+        )
+        .unwrap()
+}
+
 fn team(runtime: &TeamRuntime) -> TeamState {
     runtime.current_team().unwrap().unwrap()
 }
@@ -227,6 +255,100 @@ fn a_staged_plan_spawns_nothing_until_approved() {
     assert_eq!(state.spawned[0].0, "dev");
     assert!(state.spawned[0].1.contains("Task: t1 [a] — survey"));
     assert!(state.steered[0].contains("approved the staged AgentTeams plan \"Audit\""));
+}
+
+#[test]
+fn model_creation_cannot_bypass_staged_review() {
+    for approval in [None, Some("automatic")] {
+        let (_dir, host, runtime) = setup();
+        let rendered = model_plan_team(&runtime, approval, 1);
+        assert!(rendered.contains("It is staged"), "{rendered}");
+        assert_eq!(team(&runtime).phase_or_running().as_str(), "staged");
+        assert!(host.state.lock().spawned.is_empty());
+    }
+}
+
+#[test]
+fn model_approval_requires_a_later_explicit_user_turn() {
+    let (_dir, host, runtime) = setup();
+    model_plan_team(&runtime, None, 1);
+    let confirmation = json!({"confirmation": "用户明确批准这个草案"});
+    let same_turn = runtime
+        .call_tool(
+            "agent_teams_approve",
+            CAPTAIN,
+            &confirmation,
+            ModelTurn {
+                id: 1,
+                user_initiated: true,
+            },
+        )
+        .unwrap_err();
+    assert!(same_turn.contains("later user turn"), "{same_turn}");
+    assert!(team(&runtime).is_staged());
+    assert!(host.state.lock().spawned.is_empty());
+
+    let background_turn = runtime
+        .call_tool(
+            "agent_teams_approve",
+            CAPTAIN,
+            &confirmation,
+            ModelTurn {
+                id: 2,
+                user_initiated: false,
+            },
+        )
+        .unwrap_err();
+    assert!(
+        background_turn.contains("explicit user approval"),
+        "{background_turn}"
+    );
+    assert!(team(&runtime).is_staged());
+
+    let approved = runtime
+        .call_tool(
+            "agent_teams_approve",
+            CAPTAIN,
+            &confirmation,
+            ModelTurn {
+                id: 2,
+                user_initiated: true,
+            },
+        )
+        .unwrap();
+    assert!(approved.contains("approved and running"), "{approved}");
+    assert!(!team(&runtime).is_staged());
+    assert_eq!(host.state.lock().spawned.len(), 1);
+}
+
+#[test]
+fn a_plan_edited_in_the_approval_turn_still_needs_another_review() {
+    let (_dir, _host, runtime) = setup();
+    model_plan_team(&runtime, None, 1);
+    runtime
+        .call_tool(
+            "agent_teams_edit_plan",
+            CAPTAIN,
+            &json!({"operations": [{"action": "add_task", "subject": "extra"}]}),
+            ModelTurn {
+                id: 2,
+                user_initiated: true,
+            },
+        )
+        .unwrap();
+    let error = runtime
+        .call_tool(
+            "agent_teams_approve",
+            CAPTAIN,
+            &json!({"confirmation": "approve"}),
+            ModelTurn {
+                id: 2,
+                user_initiated: true,
+            },
+        )
+        .unwrap_err();
+    assert!(error.contains("created or edited"), "{error}");
+    assert!(team(&runtime).is_staged());
 }
 
 #[test]
@@ -791,7 +913,17 @@ fn member_routes_follow_the_reference_rules() {
 fn every_tool_name_dispatches() {
     let (_dir, _host, runtime) = setup();
     for spec in super::schema::tool_specs() {
-        let error = runtime.call_tool(spec.name, "nobody", &json!({})).err();
+        let error = runtime
+            .call_tool(
+                spec.name,
+                "nobody",
+                &json!({}),
+                ModelTurn {
+                    id: 1,
+                    user_initiated: true,
+                },
+            )
+            .err();
         // Each reaches its own argument or identity checks, never "unknown".
         assert!(
             error.is_none_or(|error| !error.starts_with("unknown AgentTeams tool")),
@@ -801,7 +933,12 @@ fn every_tool_name_dispatches() {
     }
     assert!(
         runtime
-            .call_tool("agent_teams_nope", CAPTAIN, &json!({}))
+            .call_tool(
+                "agent_teams_nope",
+                CAPTAIN,
+                &json!({}),
+                ModelTurn::default(),
+            )
             .is_err()
     );
 }

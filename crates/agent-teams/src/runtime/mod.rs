@@ -174,10 +174,22 @@ pub struct TeamRuntime {
     /// `team\0member`. Empty after a restart, which is what lets each durable
     /// open attempt be recovered exactly once.
     parked: Mutex<HashMap<String, String>>,
+    /// Latest model turn that created or edited each staged plan. This is
+    /// process-local review evidence, not durable team state: a restored draft
+    /// can be approved by the first explicit user turn after reopening it.
+    model_plan_turns: Mutex<HashMap<String, u64>>,
 }
 
 /// The model-visible error of a tool call.
 pub type OpResult<T> = Result<T, String>;
+
+/// The model turn issuing a team tool call. Only a later user-originated turn
+/// may approve a plan staged or edited by an earlier call.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ModelTurn {
+    pub id: u64,
+    pub user_initiated: bool,
+}
 
 fn text<E: std::fmt::Display>(error: E) -> String {
     error.to_string()
@@ -275,6 +287,7 @@ impl TeamRuntime {
             config,
             root,
             parked: Mutex::new(HashMap::new()),
+            model_plan_turns: Mutex::new(HashMap::new()),
         }
     }
 

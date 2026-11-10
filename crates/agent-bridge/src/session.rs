@@ -1127,52 +1127,88 @@ fn background_notifier(inner: &Arc<Inner>) -> agent_core_tools::CompletionNotifi
     })
 }
 
+enum BackgroundNoticeClaim {
+    Parked,
+    Shutdown,
+    Start {
+        cancel: CancellationToken,
+        queue: CommandQueue,
+        notice: String,
+    },
+}
+
+/// Claim the turn slot for a notice, or park it while still holding the slot
+/// lock. Turn settlement takes that same lock before draining, which closes
+/// the busy-decision → enqueue race.
+fn claim_background_notice_turn(
+    slot: &Mutex<Option<Turn>>,
+    notices: &Mutex<Vec<String>>,
+    shutdown: bool,
+    can_start: bool,
+    notice: String,
+) -> BackgroundNoticeClaim {
+    let mut guard = slot.lock();
+    if shutdown {
+        return BackgroundNoticeClaim::Shutdown;
+    }
+    if guard.is_some() || !can_start {
+        notices.lock().push(notice);
+        return BackgroundNoticeClaim::Parked;
+    }
+    let cancel = CancellationToken::new();
+    let queue = CommandQueue::new();
+    *guard = Some(Turn {
+        cancel: cancel.clone(),
+        queue: queue.clone(),
+        steers: Arc::new(Mutex::new(Vec::new())),
+        watching: false,
+        compacting: false,
+    });
+    BackgroundNoticeClaim::Start {
+        cancel,
+        queue,
+        notice,
+    }
+}
+
 fn dispatch_background_notice(inner: &Arc<Inner>, notice: String) {
     if inner.shutdown.is_cancelled() {
         return;
     }
-    let mut start = None;
-    let mut parked = None;
-    {
-        let mut guard = inner.turn.lock();
-        match guard.as_mut() {
-            Some(_) => parked = Some(notice),
-            None if inner.shutdown.is_cancelled() => return,
-            None => match runtime::shared() {
-                Ok(rt) => {
-                    let cancel = CancellationToken::new();
-                    let queue = CommandQueue::new();
-                    *guard = Some(Turn {
-                        cancel: cancel.clone(),
-                        queue: queue.clone(),
-                        steers: Arc::new(Mutex::new(Vec::new())),
-                        watching: false,
-                        compacting: false,
-                    });
-                    start = Some((rt, cancel, queue, notice));
-                }
-                Err(_) => parked = Some(notice),
-            },
-        }
-    }
-    if let Some((rt, cancel, queue, notice)) = start {
-        spawn_turn(
-            rt,
-            inner.clone(),
-            notice,
-            team_seam::PromptOrigin::Background,
+    let rt = runtime::shared().ok();
+    match claim_background_notice_turn(
+        &inner.turn,
+        &inner.background_notices,
+        inner.shutdown.is_cancelled(),
+        rt.is_some(),
+        notice,
+    ) {
+        BackgroundNoticeClaim::Start {
             cancel,
             queue,
-        );
-    }
-    if let Some(notice) = parked
-        && !inner.shutdown.is_cancelled()
-    {
-        inner.background_notices.lock().push(notice);
+            notice,
+        } => {
+            if let Some(rt) = rt {
+                spawn_turn(
+                    rt,
+                    inner.clone(),
+                    notice,
+                    team_seam::PromptOrigin::Background,
+                    cancel,
+                    queue,
+                );
+            }
+        }
+        BackgroundNoticeClaim::Parked | BackgroundNoticeClaim::Shutdown => {}
     }
     inner
         .events
         .emit(AgentEvent::BackgroundWork(team_seam::snapshot(inner)));
+}
+
+fn take_background_notice_wake(notices: &Mutex<Vec<String>>) -> Option<String> {
+    let notices: Vec<String> = notices.lock().drain(..).collect();
+    (!notices.is_empty()).then(|| notices.join("\n\n"))
 }
 
 /// Deliver notices parked by compaction or by the short turn-settlement race.
@@ -1182,9 +1218,8 @@ fn wake_background_notices(inner: &Arc<Inner>) {
     if inner.shutdown.is_cancelled() {
         return;
     }
-    let notices: Vec<String> = inner.background_notices.lock().drain(..).collect();
-    if !notices.is_empty() {
-        dispatch_background_notice(inner, notices.join("\n\n"));
+    if let Some(notice) = take_background_notice_wake(&inner.background_notices) {
+        dispatch_background_notice(inner, notice);
     }
 }
 
@@ -1209,6 +1244,9 @@ async fn run_turn(
 ) {
     // Fork (AgentTeams): `/agent-teams` carries its directive; natural
     // language stays untouched for the model to handle with the team tools.
+    inner
+        .team
+        .begin_turn(origin == team_seam::PromptOrigin::User);
     let prompt = match origin {
         team_seam::PromptOrigin::User => {
             // Fork (auto-memory): what the person asked, for consolidation.
@@ -1933,6 +1971,47 @@ fn describe(outcome: QueryOutcome, produced_output: bool, route: &Route) -> (boo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_notice_parked_at_the_busy_edge_wakes_the_idle_session() {
+        let cancel = CancellationToken::new();
+        let slot = Mutex::new(Some(Turn {
+            cancel: cancel.clone(),
+            queue: CommandQueue::new(),
+            steers: Arc::new(Mutex::new(Vec::new())),
+            watching: false,
+            compacting: false,
+        }));
+        let notices = Mutex::new(Vec::new());
+
+        // The busy decision and enqueue are one slot-lock critical section:
+        // settlement cannot drain an empty queue between those two steps.
+        assert!(matches!(
+            claim_background_notice_turn(
+                &slot,
+                &notices,
+                false,
+                true,
+                "background command finished".to_owned(),
+            ),
+            BackgroundNoticeClaim::Parked
+        ));
+        assert!(!cancel.is_cancelled());
+        assert_eq!(notices.lock().as_slice(), ["background command finished"]);
+
+        // The current turn settles without interruption. Its idle-edge wake
+        // finds the late notice and claims a new turn instead of losing it.
+        slot.lock().take();
+        let notice = take_background_notice_wake(&notices).expect("settlement sees the notice");
+        match claim_background_notice_turn(&slot, &notices, false, true, notice) {
+            BackgroundNoticeClaim::Start { notice, .. } => {
+                assert_eq!(notice, "background command finished");
+            }
+            _ => panic!("an idle session must start a background-notification turn"),
+        }
+        assert!(slot.lock().is_some());
+        assert!(notices.lock().is_empty());
+    }
 
     #[test]
     fn mcp_cleanup_waits_for_tracked_tasks() {

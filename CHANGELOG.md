@@ -29,9 +29,9 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
-- 内置 Agent 支持用中英文自然语言发起 Agent Teams：消息发送前不再按关键词预解析，由模型调用组队工具，当前会话担任队长并沿用草案强制审批；斜杠命令及模板别名保留。团队成员的模型路由在草案和成员行中清晰展示。后台子智能体可单项挂起或停止，后台命令、子智能体与团队成员在成功、失败或停止后主动通知 Agent，主会话忙碌时排队、空闲时自动唤醒
+- 内置 Agent 支持用中英文自然语言发起 Agent Teams：消息发送前不再按关键词预解析，由模型调用组队工具，当前会话担任队长；模型调用无论省略审批参数还是传入 automatic 都只能先建草案，同回合不能自行批准，须在后续用户回合明确批准或点击团队面板按钮后才会启动。斜杠命令及模板别名保留。团队成员的模型路由在草案和成员行中清晰展示。会话详情栏的后台子智能体可单项挂起或停止，长进程可单项停止；后台命令、子智能体与团队成员在成功、失败或停止后主动通知 Agent，主会话忙碌时排队、空闲时自动唤醒，回合收尾竞态下也不会丢失通知
 
-  Built-in agents can start Agent Teams from natural-language requests in Chinese or English: messages are no longer pre-parsed for keywords, and the model calls the team tools itself, with the current session as captain and the same mandatory draft approval flow; slash commands and profile aliases remain available. Member model routes stay visible in drafts and roster rows. Individual background subagents can be detached or stopped, and background commands, subagents and team members now notify the agent on success, failure or stop, queueing while it is busy and waking it when idle
+  Built-in agents can start Agent Teams from natural-language requests in Chinese or English: messages are no longer pre-parsed for keywords, and the model calls the team tools itself, with the current session as captain. Model calls always stage a draft, even when approval is omitted or automatic is supplied; same-turn self-approval is rejected, and work starts only after explicit approval in a later user turn or from the Team panel. Slash commands and profile aliases remain available. Member model routes stay visible in drafts and roster rows. Session-detail rows can detach or stop individual background subagents and stop long processes. Background commands, subagents and team members notify the agent on success, failure or stop, queueing while it is busy and waking it when idle without losing notices at the turn-settlement boundary
 
 ## [0.3.5]
 
