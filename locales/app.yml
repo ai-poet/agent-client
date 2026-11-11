@@ -1004,6 +1004,12 @@ trajectory.mode.actual:
   en: "Actual time"
 trajectory.clear_focus:
   en: "Show all"
+trajectory.export:
+  en: "Export"
+trajectory.exported:
+  en: "Trajectory log exported to %{path}"
+trajectory.export_failed:
+  en: "Could not export trajectory log: %{error}"
 trajectory.lane.input:
   en: "Input"
 trajectory.lane.model:
