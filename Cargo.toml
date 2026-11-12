@@ -117,7 +117,7 @@ which = "7"
 # a GPUI client. Listed because the vendored manifests reference them behind
 # `optional = true`.
 enigo = "0.2"
-image = { version = "0.25", features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "pnm"] }
 xcap = "0.0.13"
 
 # Unix-only, declared by `agent-core/tools` under its own `cfg(unix)` block.

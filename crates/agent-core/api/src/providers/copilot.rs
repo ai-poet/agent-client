@@ -354,6 +354,24 @@ impl CopilotProvider {
                                     "call_id": tool_use_id,
                                     "output": Self::tool_result_to_response_output(content),
                                 }));
+                                if let ToolResultContent::Blocks(blocks) = content {
+                                    let images = blocks
+                                        .iter()
+                                        .enumerate()
+                                        .filter_map(|(index, block)| match block {
+                                            ContentBlock::Image { .. } => {
+                                                Self::user_block_to_responses_part(block, index)
+                                            }
+                                            _ => None,
+                                        })
+                                        .collect::<Vec<_>>();
+                                    if !images.is_empty() {
+                                        input.push(json!({
+                                            "role": "user",
+                                            "content": images,
+                                        }));
+                                    }
+                                }
                             }
                         }
                         flush_user_content(&mut input, &mut message_parts);
@@ -1350,5 +1368,55 @@ impl LlmProvider for CopilotProvider {
             structured_output: true,
             system_prompt_style: SystemPromptStyle::SystemMessage,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_core::types::Message;
+
+    #[test]
+    fn responses_tool_images_follow_the_call_output_as_input_images() {
+        let request = ProviderRequest {
+            model: "gpt-5.4".into(),
+            messages: vec![Message::user_blocks(vec![ContentBlock::ToolResult {
+                tool_use_id: "call_image".into(),
+                content: ToolResultContent::Blocks(vec![
+                    ContentBlock::Text {
+                        text: "captured".into(),
+                    },
+                    ContentBlock::Image {
+                        source: ImageSource {
+                            source_type: "base64".into(),
+                            media_type: Some("image/png".into()),
+                            data: Some("aGVsbG8=".into()),
+                            url: None,
+                        },
+                    },
+                ]),
+                is_error: None,
+            }])],
+            system_prompt: None,
+            tools: Vec::new(),
+            max_tokens: 512,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: Vec::new(),
+            thinking: None,
+            provider_options: json!({}),
+        };
+
+        let input = CopilotProvider::to_responses_input(&request);
+        assert_eq!(input.len(), 2);
+        assert_eq!(input[0]["type"], "function_call_output");
+        assert_eq!(input[0]["output"], "captured");
+        assert_eq!(input[1]["role"], "user");
+        assert_eq!(input[1]["content"][0]["type"], "input_image");
+        assert_eq!(
+            input[1]["content"][0]["image_url"],
+            "data:image/png;base64,aGVsbG8="
+        );
     }
 }

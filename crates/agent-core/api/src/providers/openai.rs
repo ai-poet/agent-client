@@ -182,9 +182,10 @@ impl OpenAiProvider {
                 };
 
                 for block in blocks {
-                    if let Some(tool_result) = Self::tool_result_to_openai_message(block) {
+                    let tool_messages = Self::tool_result_to_openai_messages(block);
+                    if !tool_messages.is_empty() {
                         flush_user_parts(result, &mut user_parts);
-                        result.push(tool_result);
+                        result.extend(tool_messages);
                     } else if let Some(part) = Self::user_block_to_openai_part(block) {
                         user_parts.push(part);
                     }
@@ -281,40 +282,56 @@ impl OpenAiProvider {
 
         blocks
             .iter()
-            .filter_map(Self::tool_result_to_openai_message)
+            .flat_map(Self::tool_result_to_openai_messages)
             .collect()
     }
 
-    fn tool_result_to_openai_message(block: &ContentBlock) -> Option<Value> {
+    fn tool_result_to_openai_messages(block: &ContentBlock) -> Vec<Value> {
         let ContentBlock::ToolResult {
             tool_use_id,
             content,
             ..
         } = block
         else {
-            return None;
+            return Vec::new();
         };
 
-        let text = match content {
-            ToolResultContent::Text(t) => t.clone(),
-            ToolResultContent::Blocks(inner) => inner
-                .iter()
-                .filter_map(|b| {
-                    if let ContentBlock::Text { text } = b {
-                        Some(text.as_str())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
+        let (text, images) = match content {
+            ToolResultContent::Text(text) => (text.clone(), Vec::new()),
+            ToolResultContent::Blocks(blocks) => {
+                let text = blocks
+                    .iter()
+                    .filter_map(|block| match block {
+                        ContentBlock::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let images = blocks
+                    .iter()
+                    .filter_map(|block| match block {
+                        ContentBlock::Image { source } => Some(json!({
+                            "type": "image_url",
+                            "image_url": { "url": Self::image_source_to_url(source) }
+                        })),
+                        _ => None,
+                    })
+                    .collect();
+                (text, images)
+            }
         };
 
-        Some(json!({
+        // Chat Completions tool messages carry the call's text. Image content
+        // follows as a user message containing real image_url parts.
+        let mut messages = vec![json!({
             "role": "tool",
             "tool_call_id": tool_use_id,
             "content": text,
-        }))
+        })];
+        if !images.is_empty() {
+            messages.push(json!({ "role": "user", "content": images }));
+        }
+        messages
     }
 
     /// Convert tool definitions to the OpenAI `tools` array format.
@@ -661,6 +678,58 @@ mod tests {
         assert_eq!(
             wire[1].get("content").and_then(|v| v.as_str()),
             Some("done")
+        );
+    }
+
+    #[test]
+    fn user_images_are_sent_as_inline_data_urls() {
+        let messages = vec![Message::user_blocks(vec![ContentBlock::Image {
+            source: ImageSource {
+                source_type: "base64".into(),
+                media_type: Some("image/png".into()),
+                data: Some("aGVsbG8=".into()),
+                url: None,
+            },
+        }])];
+
+        let wire = OpenAiProvider::to_openai_messages(&messages, None);
+        assert_eq!(wire[0]["role"], "user");
+        assert_eq!(wire[0]["content"][0]["type"], "image_url");
+        assert_eq!(
+            wire[0]["content"][0]["image_url"]["url"],
+            "data:image/png;base64,aGVsbG8="
+        );
+    }
+
+    #[test]
+    fn tool_result_images_follow_the_tool_message_as_image_content() {
+        let messages = vec![Message::user_blocks(vec![ContentBlock::ToolResult {
+            tool_use_id: "call_image".into(),
+            content: ToolResultContent::Blocks(vec![
+                ContentBlock::Text {
+                    text: "captured".into(),
+                },
+                ContentBlock::Image {
+                    source: ImageSource {
+                        source_type: "base64".into(),
+                        media_type: Some("image/png".into()),
+                        data: Some("aGVsbG8=".into()),
+                        url: None,
+                    },
+                },
+            ]),
+            is_error: None,
+        }])];
+
+        let wire = OpenAiProvider::to_openai_messages(&messages, None);
+        assert_eq!(wire.len(), 2);
+        assert_eq!(wire[0]["role"], "tool");
+        assert_eq!(wire[0]["content"], "captured");
+        assert_eq!(wire[1]["role"], "user");
+        assert_eq!(wire[1]["content"][0]["type"], "image_url");
+        assert_eq!(
+            wire[1]["content"][0]["image_url"]["url"],
+            "data:image/png;base64,aGVsbG8="
         );
     }
 

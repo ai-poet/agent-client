@@ -1,7 +1,9 @@
 // FileRead tool: read files with optional line range, image support, PDF page ranges.
 
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
+use agent_core::types::ImageSource;
 use async_trait::async_trait;
+use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tracing::debug;
@@ -129,10 +131,26 @@ impl Tool for FileReadTool {
 
         let image_exts = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "ico"];
         if image_exts.contains(&ext.as_str()) {
-            return ToolResult::success(format!(
+            let text = format!(
                 "[Image file: {}. The image content has been captured for visual analysis.]",
                 path.display()
-            ));
+            );
+            if ext == "svg" {
+                return ToolResult::success(text);
+            }
+            let bytes = match tokio::fs::read(&path).await {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    return ToolResult::error(format!("Failed to read image: {error}"));
+                }
+            };
+            return match image_source(bytes) {
+                Some(source) => ToolResult::success(text).with_images(vec![source]),
+                None => ToolResult::error(format!(
+                    "Failed to decode image {} as a supported raster format",
+                    path.display()
+                )),
+            };
         }
 
         if ext == "pdf" {
@@ -269,10 +287,77 @@ impl Tool for FileReadTool {
     }
 }
 
+/// Convert an image file to the base64 content block the model receives.
+/// Formats providers do not consistently accept are decoded and rewritten as PNG.
+fn image_source(bytes: Vec<u8>) -> Option<ImageSource> {
+    let direct_type = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    };
+    let (bytes, media_type) = match direct_type {
+        Some(media_type) => (bytes, media_type),
+        None => {
+            let decoded = image::load_from_memory(&bytes).ok()?;
+            let mut encoded = std::io::Cursor::new(Vec::new());
+            decoded
+                .write_to(&mut encoded, image::ImageFormat::Png)
+                .ok()?;
+            (encoded.into_inner(), "image/png")
+        }
+    };
+    Some(ImageSource {
+        source_type: "base64".into(),
+        media_type: Some(media_type.into()),
+        data: Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
+        url: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::allow_all_context;
+
+    #[tokio::test]
+    async fn image_reads_return_real_bytes_and_transcode_bmp_to_png() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = allow_all_context(dir.path().to_path_buf());
+        for (name, format) in [
+            ("picture.png", image::ImageFormat::Png),
+            ("picture.bmp", image::ImageFormat::Bmp),
+        ] {
+            let path = dir.path().join(name);
+            let mut encoded = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::new_rgb8(2, 1)
+                .write_to(&mut encoded, format)
+                .unwrap();
+            std::fs::write(&path, encoded.into_inner()).unwrap();
+
+            let result = FileReadTool
+                .execute(json!({"file_path": path.to_string_lossy()}), &ctx)
+                .await;
+            assert!(!result.is_error, "{}", result.content);
+            assert_eq!(result.images.len(), 1);
+            let source = &result.images[0];
+            assert_eq!(source.source_type, "base64");
+            assert_eq!(source.media_type.as_deref(), Some("image/png"));
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(source.data.as_deref().unwrap())
+                .unwrap();
+            assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+            assert_eq!(
+                image::guess_format(&bytes).unwrap(),
+                image::ImageFormat::Png
+            );
+        }
+    }
 
     /// Fork (Waku): a limit big enough to overflow `start + limit` reads to
     /// the end instead of panicking.

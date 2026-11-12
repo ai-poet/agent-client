@@ -10,7 +10,7 @@
 use agent_core::config::PermissionMode;
 use agent_core::cost::CostTracker;
 use agent_core::permissions::{PermissionDecision, PermissionHandler, PermissionRequest};
-use agent_core::types::ToolDefinition;
+use agent_core::types::{ImageSource, ToolDefinition};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
@@ -132,8 +132,10 @@ pub struct UserQuestionEvent {
 /// The result of executing a tool.
 #[derive(Debug, Clone)]
 pub struct ToolResult {
-    /// Content to send back to the model as the tool result.
+    /// Text to send back to the model as the tool result.
     pub content: String,
+    /// Images returned by the tool, sent beside the text as real content blocks.
+    pub images: Vec<ImageSource>,
     /// Whether this invocation was an error.
     pub is_error: bool,
     /// Optional canonical data used by the Sailry output projections.
@@ -146,6 +148,7 @@ impl ToolResult {
     pub fn success(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
+            images: Vec::new(),
             is_error: false,
             structured_content: None,
             metadata: None,
@@ -155,10 +158,16 @@ impl ToolResult {
     pub fn error(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
+            images: Vec::new(),
             is_error: true,
             structured_content: None,
             metadata: None,
         }
+    }
+
+    pub fn with_images(mut self, images: Vec<ImageSource>) -> Self {
+        self.images = images;
+        self
     }
 
     pub fn with_metadata(mut self, meta: Value) -> Self {
