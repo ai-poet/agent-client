@@ -46,6 +46,7 @@ import {
   type PendingPermission,
   type PendingUserInput,
 } from './event-reducer'
+import { isExternalProvider } from './provider-policy'
 
 interface RuntimeSummary {
   runtimeId: string
@@ -631,6 +632,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const currentSession = queryClient.getQueryData<AgentSession>(
         daemonKeys.session(config.address, inputSession.id),
       ) ?? inputSession
+      if (isExternalProvider(currentSession.provider)) {
+        throw new Error(translate(localeRef.current, 'errors.external_cli_unavailable'))
+      }
       if (
         currentSession.status === 'connecting' ||
         currentSession.status === 'working' ||
@@ -803,6 +807,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const currentSession = queryClient.getQueryData<AgentSession>(
         daemonKeys.session(config.address, inputSession.id),
       ) ?? inputSession
+      if (isExternalProvider(currentSession.provider)) {
+        throw new Error(translate(localeRef.current, 'errors.external_cli_unavailable'))
+      }
       // Activating a goal on an idle thread makes Codex pursue it right away,
       // so begin its turn optimistically — the way a submission's turn begins
       // at accept — instead of showing the empty-task page until the
@@ -1179,6 +1186,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
   const forkSessionFromResponse = useCallback(
     async (session: AgentSession, turnCount: number) => {
+      if (isExternalProvider(session.provider)) {
+        throw new Error(translate(localeRef.current, 'errors.external_cli_unavailable'))
+      }
       if (!client || !config || phase !== 'connected') {
         throw new Error(translate(localeRef.current, 'errors.daemon_disconnected'))
       }

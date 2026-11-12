@@ -1139,6 +1139,7 @@ errors.provider_native_thread_cursor_unavailable: "%{provider} のネイティ�
 errors.provider_waku_task_unavailable: "%{provider} のタスクは利用できません"
 errors.provider_not_installed: "%{provider} はインストールされていません。設定 → Providers からインストールできます"
 errors.provider_not_found: "%{provider} はインストールされていないか、見つかりませんでした。設定 → Providers を確認してください"
+errors.external_cli_unavailable: Waku は外部 Agent CLI に接続しなくなりました。内蔵 Agent のモデルを選び直して新しい作業を開始してください。このタスクの履歴は引き続き確認できます。
 errors.claude_fork_checkpoint_missing: Claude からフォーク用チェックポイントが返されませんでした
 errors.claude_turn_checkpoint_unavailable: "そのターンの Claude ネイティブチェックポイントは利用できません：%{error}"
 errors.provider_session_file_unavailable: "%{provider} のネイティブセッションファイルは利用できません"

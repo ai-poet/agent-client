@@ -1762,6 +1762,7 @@ mod composer;
 mod confirm_dialog;
 mod content_translations;
 mod drafts;
+mod external_provider;
 mod goal_dialog;
 // Fork: the Effort slider card (a dsh-effort-slider port) and Claude Code's
 // relaunch for a new effort.
@@ -2040,6 +2041,13 @@ impl Waku {
 
     fn show_toast_with_tone(&mut self, message: impl Into<String>, tone: ToastTone) {
         let mut message = message.into();
+        if tone == ToastTone::Alert
+            && let Some(localized) = external_provider::localized_external_cli_error(&message)
+        {
+            // Legacy sessions can still reach a daemon refusal from a path
+            // added before the built-in-only policy. Never expose its bail.
+            message = localized;
+        }
         if tone == ToastTone::Alert && client::is_daemon_transport_error(&message) {
             // Fork addition: a dropped daemon socket is one condition with one
             // notice. The connection banner owns it while it shows; otherwise

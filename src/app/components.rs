@@ -338,11 +338,12 @@ pub(super) fn render_message_footer(
             footer = footer.child(if action.enabled {
                 fork_button
                     .hover(|element| element.bg(theme.overlay_strong))
-                    .on_click(move |_, _, cx| {
+                    .on_click(move |_, window, cx| {
                         let _ = fork_waku.update(cx, |this, cx| {
                             this.fork_session_from_response(
                                 action.session_id,
                                 action.turn_count,
+                                window,
                                 cx,
                             );
                         });
@@ -945,9 +946,14 @@ fn message_menu_items(
                 } else {
                     tr!("session.forking_task_title")
                 },
-                move |_, cx| {
+                move |window, cx| {
                     let _ = waku.update(cx, |this, cx| {
-                        this.fork_session_from_response(action.session_id, action.turn_count, cx);
+                        this.fork_session_from_response(
+                            action.session_id,
+                            action.turn_count,
+                            window,
+                            cx,
+                        );
                     });
                 },
             )

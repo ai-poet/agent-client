@@ -2243,6 +2243,8 @@ errors.provider_not_installed:
   en: "%{provider} is not installed — install it in Settings → Providers"
 errors.provider_not_found:
   en: "%{provider} is not installed or could not be found — check Settings → Providers"
+errors.external_cli_unavailable:
+  en: Waku no longer connects to external agent CLIs. Choose a built-in Agent model to start new work; this task’s history remains available.
 errors.claude_fork_checkpoint_missing:
   en: Claude omitted the fork checkpoint
 errors.claude_turn_checkpoint_unavailable:

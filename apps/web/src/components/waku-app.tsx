@@ -9,6 +9,7 @@ import type {
   ComposerDraftTarget,
   MessageAttachment,
   Project,
+  ProviderModel,
   ProviderSessionSummary,
   ReviewDiffSource,
 } from 'client'
@@ -66,7 +67,11 @@ import { useI18n } from '@/lib/i18n'
 import {
   browserComposerPreferenceStorage,
   readComposerPreferences,
+  rememberComposerSession,
+  rememberedModelTraits,
+  writeComposerPreferences,
 } from '@/lib/composer-preferences'
+import { isExternalProvider, localizedErrorMessage } from '@/lib/provider-policy'
 import {
   browserNavigationStorage,
   readRememberedNavigation,
@@ -476,7 +481,7 @@ export function WakuApp() {
   const composerDraftsReady = Boolean(config && composerDraftAddress === config.address)
   if (!taskState.data || !composerDraftsReady) {
     const startupError = taskState.error ?? loadedComposerDrafts.error
-    return <StartupScreen error={startupError ? errorMessage(startupError) : undefined} onRetry={() => {
+    return <StartupScreen error={startupError ? localizedErrorMessage(startupError, t) : undefined} onRetry={() => {
       void taskState.refetch()
       void loadedComposerDrafts.refetch()
     }} />
@@ -487,7 +492,7 @@ export function WakuApp() {
   }
 
   if (search.session && !newTaskMode && !displayed && !hydratedSelected && selected.error) {
-    return <StartupScreen error={errorMessage(selected.error)} onRetry={() => void selected.refetch()} />
+    return <StartupScreen error={localizedErrorMessage(selected.error, t)} onRetry={() => void selected.refetch()} />
   }
 
   function openProjectPicker() {
@@ -629,6 +634,51 @@ export function WakuApp() {
     void navigate({ search: { session: undefined }, replace: false })
   }
 
+  function showExternalProviderNotice() {
+    toast.error(t('errors.external_cli_unavailable'))
+    setModelPickerSignal((value) => value + 1)
+  }
+
+  function continueWithNativeModel(
+    source: AgentSession,
+    _provider: 'native',
+    model: ProviderModel,
+  ) {
+    const project = taskState.data?.projects.find((item) => item.id === source.project_id)
+    if (!project) {
+      showExternalProviderNotice()
+      return
+    }
+    const preferences = readComposerPreferences(
+      browserComposerPreferenceStorage(),
+      config?.address ?? 'disconnected',
+    )
+    const remembered = rememberedModelTraits(preferences, 'native', model.id)
+    const next = {
+      ...createRememberedSession(project.id),
+      provider: 'native' as const,
+      model: model.id,
+      runtime_mode: source.runtime_mode,
+      reasoning_effort: remembered?.reasoningEffort ?? model.default_reasoning_effort ?? null,
+      service_tier: remembered?.serviceTier ?? model.default_service_tier ?? null,
+      context_window: remembered?.contextWindow ?? null,
+    }
+    moveStoredComposerDraft(
+      { type: 'session', sessionId: source.id },
+      { type: 'newSession', projectId: project.id },
+    )
+    startNewTask(project)
+    setDraft(next)
+    if (config) {
+      const storage = browserComposerPreferenceStorage()
+      writeComposerPreferences(
+        storage,
+        config.address,
+        rememberComposerSession(preferences, next),
+      )
+    }
+  }
+
   function selectSession(sessionId: string) {
     if (sessionId === search.session && !newTaskMode) return
     if (newTaskMode && draft && draft.id !== sessionId) forgetRightPanelSession(draft.id)
@@ -655,6 +705,13 @@ export function WakuApp() {
       return
     }
 
+    if (isExternalProvider(summary.cursor.provider)) {
+      const project = taskState.data.projects.find((item) => item.path === summary.cwd)
+      if (project) startNewTask(project)
+      showExternalProviderNotice()
+      return
+    }
+
     const history = await loadProviderSessionHistory(client, summary)
     const existingProject = taskState.data.projects.find((project) => project.path === summary.cwd)
     const project = existingProject ?? createProject(summary.cwd)
@@ -670,6 +727,10 @@ export function WakuApp() {
   }
 
   async function forkResponse(session: AgentSession, turnCount: number) {
+    if (isExternalProvider(session.provider)) {
+      showExternalProviderNotice()
+      return
+    }
     try {
       const result = await forkSessionFromResponse(session, turnCount)
       selectSession(result.session.id)
@@ -681,7 +742,7 @@ export function WakuApp() {
         toast.success(t('session.forked_from_response'))
       }
     } catch (error) {
-      toast.error(t('errors.fork_task', { error: errorMessage(error) }))
+      toast.error(t('errors.fork_task', { error: localizedErrorMessage(error, t) }))
     }
   }
 
@@ -707,7 +768,7 @@ export function WakuApp() {
         toast(t('session.rewound', { turn: turnCount }))
       }
     } catch (error) {
-      toast.error(t('errors.rewind_task', { error: errorMessage(error) }))
+      toast.error(t('errors.rewind_task', { error: localizedErrorMessage(error, t) }))
       throw error
     }
   }
@@ -753,7 +814,7 @@ export function WakuApp() {
           updated_at: previousHydrated.updated_at,
         }))
       }
-      toast.error(t('errors.rename_task', { error: errorMessage(error) }))
+      toast.error(t('errors.rename_task', { error: localizedErrorMessage(error, t) }))
       throw error
     }
   }
@@ -806,7 +867,7 @@ export function WakuApp() {
           return { ...currentState, sessions }
         })
       }
-      toast.error(t('errors.remove_task', { error: errorMessage(error) }))
+      toast.error(t('errors.remove_task', { error: localizedErrorMessage(error, t) }))
       throw error
     }
   }
@@ -837,7 +898,7 @@ export function WakuApp() {
       chooseProject(saved.project)
       return true
     } catch (error) {
-      toast.error(errorMessage(error))
+      toast.error(localizedErrorMessage(error, t))
       return false
     }
   }
@@ -846,7 +907,7 @@ export function WakuApp() {
     try {
       return await persistAndChooseProject(createProject(path))
     } catch (error) {
-      toast.error(errorMessage(error))
+      toast.error(localizedErrorMessage(error, t))
       return false
     }
   }
@@ -859,7 +920,7 @@ export function WakuApp() {
       const path = await createProjectlessWorkspace(client)
       await persistAndChooseProject({ ...createProject(path), name: 'No project' })
     } catch (error) {
-      toast.error(errorMessage(error))
+      toast.error(localizedErrorMessage(error, t))
     } finally {
       projectlessRequest.current = false
       setProjectlessPending(false)
@@ -933,7 +994,7 @@ export function WakuApp() {
       .catch(() => {})
       .then(() => applyComposerDraftChanges(client, changes))
       .catch((error) => {
-        toast.error(t('errors.save_draft', { error: errorMessage(error) }))
+        toast.error(t('errors.save_draft', { error: localizedErrorMessage(error, t) }))
       })
   }
 
@@ -1124,6 +1185,7 @@ export function WakuApp() {
                     value?.sessionId === current.id ? null : value)}
                   onProjectless={() => void createProjectlessTask()}
                   onResume={() => openCommandPalette('resume')}
+                  onExternalModelChange={continueWithNativeModel}
                   onUsagePanelSignalHandled={() => setUsagePanelSignal(0)}
                   project={currentProject}
                   projects={taskState.data.projects}
@@ -1142,7 +1204,7 @@ export function WakuApp() {
             )}
             {selected.error && selectedReady && (
               <div role="alert" className="absolute left-1/2 top-14 z-20 -translate-x-1/2 rounded-lg bg-destructive px-3 py-2 text-xs text-white shadow-lg">
-                {errorMessage(selected.error)}
+                {localizedErrorMessage(selected.error, t)}
               </div>
             )}
           </>
@@ -1159,7 +1221,7 @@ export function WakuApp() {
             className="absolute left-1/2 top-14 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg bg-destructive px-3 py-2 text-xs text-white shadow-lg"
             role="alert"
           >
-            <span>{errorMessage(selected.error)}</span>
+            <span>{localizedErrorMessage(selected.error, t)}</span>
             <button
               className="rounded px-1.5 py-0.5 font-medium hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white"
               type="button"
@@ -1203,6 +1265,7 @@ export function WakuApp() {
         returnFocus={commitDialogReturnFocus}
         session={activeSession}
         onOpenChange={setCommitDialogOpen}
+        onExternalProviderRedirect={showExternalProviderNotice}
       />
 
       {projectPickerOpen && (
@@ -1684,8 +1747,4 @@ function NoProjectState({
       </div>
     </div>
   )
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error)
 }

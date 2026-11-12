@@ -1104,6 +1104,7 @@ errors.provider_native_thread_cursor_unavailable: "%{provider} 的原生线程�
 errors.provider_waku_task_unavailable: "%{provider} 对应的任务不可用"
 errors.provider_not_installed: "尚未安装 %{provider}——可在 设置 → Providers 一键安装"
 errors.provider_not_found: "尚未安装 %{provider} 或无法找到该程序——请检查 设置 → Providers"
+errors.external_cli_unavailable: Waku 已不再连接外部 Agent CLI。请重新选择内置 Agent 模型以开始新工作；此任务的历史记录仍可查看。
 errors.claude_fork_checkpoint_missing: Claude 未返回派生任务所需的检查点
 errors.claude_turn_checkpoint_unavailable: "Claude 中该轮任务的原生检查点不可用：%{error}"
 errors.provider_session_file_unavailable: "%{provider} 的原生会话文件不可用"

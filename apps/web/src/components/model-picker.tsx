@@ -9,6 +9,7 @@ import {
   selectedModelPickerIndex,
 } from '@/lib/model-picker-presentation'
 import { cn } from '@/lib/utils'
+import { parseNativeFavoriteModels } from '@/lib/provider-policy'
 
 type PickerTab = 'favorites' | ProviderKind
 
@@ -30,21 +31,29 @@ export function ModelPicker({
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [tab, setTab] = useState<PickerTab>(session.provider)
+  const [tab, setTab] = useState<PickerTab>('native')
   const [highlight, setHighlight] = useState<number | null>(null)
   const [favorites, setFavorites] = useState<string[]>(() => {
     if (typeof window === 'undefined') return []
-    try { return JSON.parse(window.localStorage.getItem('waku.favorite-models') ?? '[]') as string[] }
+    try {
+      return parseNativeFavoriteModels(JSON.parse(
+        window.localStorage.getItem('waku.favorite-models') ?? '[]',
+      ))
+    }
     catch { return [] }
   })
   const search = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const settings = useDaemonSettings()
   const probes = useProviderProbes(open)
-  const lockedProvider = session.messages.length ? session.provider : null
-  const currentModel = currentProbe?.models.find((model) => model.id === session.model)
-    ?? currentProbe?.models.find((model) => model.is_default)
-    ?? currentProbe?.models[0]
+  const lockedProvider = session.provider === 'native' && session.messages.length
+    ? session.provider
+    : null
+  const currentModel = session.provider === 'native'
+    ? currentProbe?.models.find((model) => model.id === session.model)
+      ?? currentProbe?.models.find((model) => model.is_default)
+      ?? currentProbe?.models[0]
+    : undefined
   const selectedModelId = session.model ?? currentModel?.id
   const selectedName = currentModel?.name ?? session.model ?? providerMeta(session.provider).shortName
 
@@ -57,13 +66,13 @@ export function ModelPicker({
   useEffect(() => {
     if (!open) return
     setQuery('')
-    setTab(session.provider)
+    setTab('native')
     setHighlight(null)
   }, [open, session.provider])
 
   const probeMap = ({
     ...(probes.data ?? {}),
-    ...(currentProbe ? { [session.provider]: currentProbe } : {}),
+    ...(currentProbe ? { native: currentProbe } : {}),
   }) as Partial<Record<ProviderKind, ProviderProbe>>
 
   const usable = PROVIDERS.filter(({ id }) => {

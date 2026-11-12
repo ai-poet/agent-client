@@ -55,7 +55,7 @@ impl Waku {
                     .child(icon("icons/arrow-up.svg", 16.0, theme.on_inverse))
                     .tooltip(Tooltip::text(tr!("composer.queue_followup")))
                     .on_activation(cx, |this, window, cx| {
-                        this.submit_composer_draft(cx);
+                        this.submit_composer_draft(window, cx);
                         this.refocus_composer(window, cx);
                     })
             }
@@ -106,14 +106,32 @@ impl Waku {
                     element.tooltip(Tooltip::text(tr!("composer.no_providers")))
                 })
                 .on_activation(cx, |this, window, cx| {
-                    this.submit_composer_draft(cx);
+                    this.submit_composer_draft(window, cx);
                     this.refocus_composer(window, cx);
                 }),
         }
     }
 
     /// Send, or queue behind a running turn, whatever the composer holds.
-    fn submit_composer_draft(&mut self, cx: &mut Context<Self>) {
+    fn submit_composer_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((session_id, started)) = self
+            .selected_session()
+            .filter(|session| !session.provider.is_builtin())
+            .map(|session| (session.id, session.has_started()))
+        {
+            if started {
+                self.show_external_cli_notice_and_picker(window, cx);
+                return;
+            }
+            self.redirect_unstarted_session_to_builtin(session_id, cx);
+            if self
+                .selected_session()
+                .is_some_and(|session| session.model.is_none())
+            {
+                self.show_external_cli_notice_and_picker(window, cx);
+                return;
+            }
+        }
         let prompt = self.composer.read(cx).content(cx).to_owned();
         if let Some(submission) = self.submission_with_attachments(&prompt, cx) {
             self.composer.update(cx, |input, cx| input.clear(cx));

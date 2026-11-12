@@ -101,7 +101,7 @@ impl Waku {
     /// A project choice in the composer changes where the current unsent task
     /// will run; it is not ordinary task navigation. Carry its draft into a
     /// blank destination instead of letting session activation clear it.
-    fn move_composer_draft_after_project_change(
+    pub(super) fn move_composer_draft_after_project_change(
         &mut self,
         source: Option<crate::persistence::ComposerDraftKey>,
         cx: &mut Context<Self>,

@@ -1648,7 +1648,7 @@ impl Waku {
     pub(super) fn model_picker_has_no_providers(&self) -> bool {
         let locked_provider = self
             .selected_session()
-            .filter(|session| !session.messages.is_empty())
+            .filter(|session| session.provider.is_builtin() && !session.messages.is_empty())
             .map(|session| session.provider);
         super::composer::picker_has_no_providers(
             &self.probes,
@@ -1919,6 +1919,7 @@ impl Waku {
         &mut self,
         session_id: Uuid,
         turn_count: usize,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.response_fork_preparations.contains_key(&session_id)
@@ -1939,6 +1940,10 @@ impl Waku {
             cx.notify();
             return;
         };
+        if !source.provider.is_builtin() {
+            self.show_external_cli_notice_and_picker(window, cx);
+            return;
+        }
         if self.state.selected_session != Some(session_id)
             || !matches!(source.status, SessionStatus::Idle | SessionStatus::Failed)
             || !source.provider.supports_conversation_fork()
@@ -3374,6 +3379,38 @@ impl Waku {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
+        if let Some(started) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id && !session.provider.is_builtin())
+            .map(|session| session.has_started())
+        {
+            let selected = self.state.selected_session == Some(session_id);
+            if started {
+                if selected {
+                    self.restore_composer_submission(submission, cx);
+                }
+                self.show_external_cli_notice();
+                cx.notify();
+                return;
+            }
+            self.redirect_unstarted_session_to_builtin(session_id, cx);
+            if self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .is_some_and(|session| session.model.is_none())
+            {
+                if selected {
+                    self.restore_composer_submission(submission, cx);
+                }
+                self.show_external_cli_notice();
+                cx.notify();
+                return;
+            }
+        }
         if self.response_fork_preparations.contains_key(&session_id) {
             return;
         }

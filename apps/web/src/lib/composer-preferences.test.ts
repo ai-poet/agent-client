@@ -40,7 +40,7 @@ describe('composer preferences', () => {
     const preferences = rememberComposerSession(
       readComposerPreferences(null, 'ws://first'),
       {
-        provider: 'claude',
+        provider: 'native',
         model: 'claude-opus-4-1',
         reasoning_effort: null,
         service_tier: null,
@@ -65,6 +65,8 @@ describe('composer preferences', () => {
         service_tier: null,
       },
     )
+    expect(preferences.lastProvider).toBe('native')
+    expect(preferences.lastModel).toBeNull()
     writeComposerPreferences(storage, 'ws://first', preferences)
 
     expect(readComposerPreferences(storage, 'ws://first').lastProvider).toBe('native')

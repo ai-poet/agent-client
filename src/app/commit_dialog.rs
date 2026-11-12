@@ -111,6 +111,13 @@ impl Waku {
         if self.commit_operation.is_some() {
             return;
         }
+        if let Some(session_id) = self
+            .selected_session()
+            .filter(|session| !session.provider.is_builtin() && !session.has_started())
+            .map(|session| session.id)
+        {
+            self.redirect_unstarted_session_to_builtin(session_id, cx);
+        }
         let Some((workspace, provider, model, reasoning_effort)) =
             self.selected_session().and_then(|session| {
                 Some((
@@ -262,6 +269,14 @@ impl Waku {
         let window_handle = window.window_handle();
 
         if action != CommitAction::Push && message.is_empty() {
+            if self
+                .selected_session()
+                .is_some_and(|session| !session.provider.is_builtin())
+            {
+                self.close_commit_dialog(window, cx);
+                self.show_external_cli_notice_and_picker(window, cx);
+                return;
+            }
             let Some(invocation) = invocation else {
                 if let Some(dialog) = self.commit_dialog.as_mut() {
                     dialog.error = Some(tr!("commit.agent_unavailable"));
@@ -379,6 +394,8 @@ impl Waku {
                         );
                     }
                     Err(error) => {
+                        let error = super::external_provider::localized_external_cli_error(&error)
+                            .unwrap_or(error);
                         waku.commit_operation = None;
                         if let Some(dialog) =
                             waku.commit_dialog.as_mut().filter(|dialog| dialog.id == id)

@@ -17,6 +17,7 @@ import {
 import { useDaemon } from '@/lib/daemon-context'
 import { useI18n } from '@/lib/i18n'
 import { usePrimaryShortcut } from '@/lib/platform'
+import { isExternalProvider, localizedErrorMessage } from '@/lib/provider-policy'
 import { cn } from '@/lib/utils'
 
 type CommitAction = 'commit' | 'commitAndPush' | 'push'
@@ -27,12 +28,14 @@ export function CommitDialog({
   project,
   returnFocus,
   onOpenChange,
+  onExternalProviderRedirect,
 }: {
   open: boolean
   session: AgentSession | null
   project?: Project
   returnFocus?: RefObject<HTMLElement | null>
   onOpenChange: (open: boolean) => void
+  onExternalProviderRedirect?: () => void
 }) {
   const { t } = useI18n()
   const { client, config, phase } = useDaemon()
@@ -71,6 +74,16 @@ export function CommitDialog({
 
   async function run(action: CommitAction) {
     if (!client || !config || !cwd || pending) return
+    if (
+      action !== 'push'
+      && !message.trim()
+      && session
+      && isExternalProvider(session.provider)
+    ) {
+      onOpenChange(false)
+      onExternalProviderRedirect?.()
+      return
+    }
     setPending(action)
     setError(null)
     try {
@@ -112,7 +125,7 @@ export function CommitDialog({
           : 'commit.pushed'))
       onOpenChange(false)
     } catch (cause) {
-      setError(errorMessage(cause))
+      setError(localizedErrorMessage(cause, t))
       void snapshot.refetch()
     } finally {
       setPending(null)
@@ -166,7 +179,7 @@ export function CommitDialog({
         </div>
         {(error || snapshot.error) && (
           <p className="px-5 pb-2 text-[11.5px] leading-4 text-destructive">
-            {error ?? errorMessage(snapshot.error)}
+            {error ?? localizedErrorMessage(snapshot.error, t)}
           </p>
         )}
         <div className="mx-2 mt-1 border-t" />
@@ -235,8 +248,4 @@ function CommitActionRow({
 function requireClient<T>(client: T | null): T {
   if (!client) throw new Error('Waku daemon is disconnected')
   return client
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error)
 }
