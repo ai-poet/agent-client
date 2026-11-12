@@ -1554,6 +1554,12 @@ impl Waku {
             return;
         }
 
+        if !summary.cursor.provider().is_builtin() {
+            self.close_command_palette(window, cx);
+            self.show_external_cli_notice_and_picker(window, cx);
+            return;
+        }
+
         self.command_palette.provider_session_import = Some(summary.cursor.clone());
         self.command_palette.provider_session_error = None;
         self.command_palette.provider_session_generation = self
@@ -1586,6 +1592,8 @@ impl Waku {
                     Ok(history) => Some((summary, history)),
                     Err(error) => {
                         let error = error.to_string();
+                        let error = super::external_provider::localized_external_cli_error(&error)
+                            .unwrap_or(error);
                         waku.command_palette.provider_session_import = None;
                         waku.command_palette.provider_session_error = Some(error.clone());
                         waku.show_toast(tr!("command_palette.resume_failed", error = error));

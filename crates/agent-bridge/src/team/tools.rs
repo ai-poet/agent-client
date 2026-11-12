@@ -47,8 +47,14 @@ impl Tool for TeamTool {
         };
         let name = self.spec.name;
         let caller = ctx.session_id.clone();
+        let turn = self
+            .host
+            .upgrade()
+            .map(|host| host.current_model_turn())
+            .unwrap_or_default();
         let outcome =
-            tokio::task::spawn_blocking(move || runtime.call_tool(name, &caller, &input)).await;
+            tokio::task::spawn_blocking(move || runtime.call_tool(name, &caller, &input, turn))
+                .await;
         if let Some(host) = self.host.upgrade() {
             host.refresh_snapshot();
         }

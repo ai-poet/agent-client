@@ -39,7 +39,7 @@ use agent_core::config::Config;
 use agent_core::types::Message;
 use agent_core_api::AnthropicClient;
 use agent_core_query::{QueryConfig, QueryEvent, QueryOutcome};
-use agent_core_tools::{PermissionLevel, Tool, ToolContext, ToolResult};
+use agent_core_tools::{CompletionNotifier, PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
@@ -145,6 +145,8 @@ struct PendingCall {
 struct ChildHandle {
     cancel: CancellationToken,
     background: bool,
+    description: String,
+    detach: Arc<Notify>,
     stopped_by_user: Arc<AtomicBool>,
 }
 
@@ -167,6 +169,12 @@ pub(crate) struct SubagentHost {
     /// had the turn not been stopped first — with whether it is an error.
     /// See [`SubagentHost::restore_answers`].
     answers: Mutex<HashMap<String, (String, bool)>>,
+    /// Root-session lifetime, rather than one composer turn's cancellation.
+    /// Member-owned hosts leave this unset and retain their member turn token.
+    session_shutdown: Mutex<Option<CancellationToken>>,
+    /// Completion reports for detached children go to the parent session's
+    /// notifier; member-owned hosts leave this unset.
+    completion_notifier: Mutex<Option<CompletionNotifier>>,
     /// Fork: the parent session's trajectory, where children's requests and
     /// tool calls are recorded under the call that started them.
     trajectory: Mutex<Option<Arc<crate::trajectory::Recorder>>>,
@@ -183,8 +191,24 @@ impl SubagentHost {
             background: Mutex::new(HashSet::new()),
             progress: Mutex::new(HashMap::new()),
             answers: Mutex::new(HashMap::new()),
+            session_shutdown: Mutex::new(None),
+            completion_notifier: Mutex::new(None),
             trajectory: Mutex::new(None),
         })
+    }
+
+    pub fn set_session_shutdown(&self, shutdown: CancellationToken) {
+        *self.session_shutdown.lock() = Some(shutdown);
+    }
+
+    pub fn set_completion_notifier(&self, notifier: CompletionNotifier) {
+        *self.completion_notifier.lock() = Some(notifier);
+    }
+
+    fn notify_completion(&self, notice: String) {
+        if let Some(notifier) = self.completion_notifier.lock().as_ref() {
+            notifier.notify(notice);
+        }
     }
 
     /// Fork: record children into the session's trajectory.
@@ -330,6 +354,22 @@ impl SubagentHost {
             agent_core::tasks::global_registry().cancel(id);
         }
         true
+    }
+
+    /// Detach one foreground child without cancelling it. The waiting tool
+    /// call returns immediately; the child keeps its token and run task.
+    /// `None` means the id is not a live child, `Some(false)` means it was
+    /// already detached.
+    pub fn detach(&self, id: &str) -> Option<bool> {
+        let mut children = self.children.lock();
+        let child = children.get_mut(id)?;
+        if child.background {
+            return Some(false);
+        }
+        child.background = true;
+        register_background(self, id, &child.description, child.cancel.clone());
+        child.detach.notify_one();
+        Some(true)
     }
 
     /// The background children this session started.
@@ -480,8 +520,9 @@ impl Tool for SubagentTool {
                 "run_in_background": {
                     "type": "boolean",
                     "description": "If true, the agent starts immediately and this call returns an \
-                                    agent_id without waiting for completion. Use the monitor tool \
-                                    with action=status/output and task_id=agent_id. Default: false."
+                                    agent_id without waiting for completion. Completion, failure \
+                                    and user stop are reported back automatically; monitor remains \
+                                    available with action=status/output and task_id=agent_id. Default: false."
                 }
             },
             "required": ["description", "prompt"]
@@ -524,7 +565,17 @@ impl Tool for SubagentTool {
         );
         query.enabled_tools = Some(tools.iter().map(|tool| tool.name().to_owned()).collect());
 
-        let cancel = ctx.cancel_token.child_token();
+        // A detached root-session child must not inherit a later composer
+        // Stop aimed only at the parent's current turn. Its token instead
+        // follows session shutdown, which also closes the claim/insert race.
+        // Member-owned hosts keep the member turn's token as before.
+        let cancel = self
+            .host
+            .session_shutdown
+            .lock()
+            .as_ref()
+            .map(|shutdown| shutdown.child_token())
+            .unwrap_or_else(|| ctx.cancel_token.child_token());
         let mut child_ctx = ctx.clone();
         // Not the parent's: a background child holding it would keep the
         // turn's question forwarder — and with it the turn — open.
@@ -538,14 +589,21 @@ impl Tool for SubagentTool {
         child_ctx.cancel_token = cancel.clone();
 
         let stopped_by_user = Arc::new(AtomicBool::new(false));
+        let detach = Arc::new(Notify::new());
         self.host.children.lock().insert(
             parent_id.clone(),
             ChildHandle {
                 cancel: cancel.clone(),
                 background: params.run_in_background,
+                description: params.description.clone(),
+                detach: detach.clone(),
                 stopped_by_user: stopped_by_user.clone(),
             },
         );
+        if cancel.is_cancelled() {
+            self.host.children.lock().remove(&parent_id);
+            return ToolResult::error("Sub-agent was not started because the session is closed");
+        }
         let started = Instant::now();
         self.host.emit(
             &parent_id,
@@ -570,56 +628,17 @@ impl Tool for SubagentTool {
         };
 
         if params.run_in_background {
-            let mut task =
-                agent_core::tasks::BackgroundTask::new(format!("subagent: {}", params.description));
-            task.id = parent_id.clone();
-            task.cancel_token = Some(cancel);
-            let _ = agent_core::tasks::global_registry().register(task);
-            self.host.background.lock().insert(parent_id.clone());
+            register_background(&self.host, &parent_id, &params.description, cancel);
 
             let host = self.host.clone();
             let id = parent_id.clone();
+            let description = params.description.clone();
             tokio::spawn(async move {
                 let outcome = run.run().await;
-                let stopped = stopped_by_user.load(Ordering::Acquire);
-                let progress = host.take_progress(&id);
-                let registry = agent_core::tasks::global_registry();
-                let text = format_outcome(&outcome);
-                // What `monitor` reads back: with the progress when the run
-                // did not finish, as a foreground call's answer has it.
-                let output = if ran_to_an_end(&outcome) {
-                    text.clone()
-                } else {
-                    with_progress(text.clone(), progress.as_ref())
-                };
-                registry.append_output(&id, &output);
-                let cancelled = matches!(
-                    registry.get(&id).map(|task| task.status),
-                    Some(agent_core::tasks::TaskStatus::Cancelled)
-                );
-                if !cancelled {
-                    registry.update_status(
-                        &id,
-                        match status_of(&outcome, stopped) {
-                            SubagentStatus::Completed => agent_core::tasks::TaskStatus::Completed,
-                            _ => agent_core::tasks::TaskStatus::Failed(text.clone()),
-                        },
-                    );
-                }
-                finish(&host, &id, &outcome, stopped, started);
+                finish_background(host, id, description, outcome, stopped_by_user, started);
             });
 
-            return ToolResult::success(
-                json!({
-                    "agent_id": parent_id,
-                    "status": "running",
-                    "message": format!(
-                        "Agent '{}' started in background. Use monitor with action=status/output and task_id='{}'.",
-                        params.description, parent_id
-                    )
-                })
-                .to_string(),
-            );
+            return background_tool_result(&parent_id, &params.description);
         }
 
         // Cancelling the parent's turn drops this future where it stands;
@@ -636,11 +655,32 @@ impl Tool for SubagentTool {
         // there froze its siblings whenever it waited on something blocking —
         // an approval dialog, a tool that reads the disk synchronously — and
         // sub-agents asked for together did not run together.
-        let outcome = match tokio::spawn(run.run()).await {
-            Ok(outcome) => outcome,
-            Err(error) => QueryOutcome::Error(agent_core::error::ClaudeError::Other(format!(
-                "the sub-agent stopped unexpectedly: {error}"
-            ))),
+        let mut child_run = tokio::spawn(run.run());
+        let joined = tokio::select! {
+            outcome = &mut child_run => Some(outcome.unwrap_or_else(|error| {
+                QueryOutcome::Error(agent_core::error::ClaudeError::Other(format!(
+                    "the sub-agent stopped unexpectedly: {error}"
+                )))
+            })),
+            _ = detach.notified() => None,
+        };
+        let Some(outcome) = joined else {
+            // Detach transfers ownership of the run to the same finalizer a
+            // child launched in the background uses. Disarm the foreground
+            // drop guard: detaching must not cancel the child.
+            guard.armed = false;
+            let host = self.host.clone();
+            let id = parent_id.clone();
+            let description = params.description.clone();
+            tokio::spawn(async move {
+                let outcome = child_run.await.unwrap_or_else(|error| {
+                    QueryOutcome::Error(agent_core::error::ClaudeError::Other(format!(
+                        "the sub-agent stopped unexpectedly: {error}"
+                    )))
+                });
+                finish_background(host, id, description, outcome, stopped_by_user, started);
+            });
+            return background_tool_result(&parent_id, &params.description);
         };
         guard.armed = false;
         let stopped = stopped_by_user.load(Ordering::Acquire);
@@ -770,6 +810,109 @@ pub(crate) fn child_event(event: AgentEvent) -> Option<SubagentEvent> {
         }),
         _ => None,
     }
+}
+
+fn register_background(
+    host: &SubagentHost,
+    parent_id: &str,
+    description: &str,
+    cancel: CancellationToken,
+) {
+    let mut task = agent_core::tasks::BackgroundTask::new(format!("subagent: {description}"));
+    task.id = parent_id.to_owned();
+    task.cancel_token = Some(cancel);
+    let _ = agent_core::tasks::global_registry().register(task);
+    host.background.lock().insert(parent_id.to_owned());
+}
+
+fn background_tool_result(parent_id: &str, description: &str) -> ToolResult {
+    ToolResult::success(
+        json!({
+            "agent_id": parent_id,
+            "status": "running",
+            "message": format!(
+                "Agent '{}' is running in the background. It will notify you when it completes, fails, or is stopped. Use monitor with action=status/output and task_id='{}' for interim output.",
+                description, parent_id
+            )
+        })
+        .to_string(),
+    )
+}
+
+/// Marker shared with the session's leftover-queue handling.
+pub(crate) const SUBAGENT_NOTICE_OPEN: &str = "<system-reminder>The background subagent";
+
+fn background_completion_notice(
+    parent_id: &str,
+    description: &str,
+    status: SubagentStatus,
+    output: &str,
+) -> String {
+    let outcome = match status {
+        SubagentStatus::Completed => "completed successfully",
+        SubagentStatus::Failed => "failed",
+        SubagentStatus::Stopped => "was stopped",
+    };
+    let tail: String = output
+        .chars()
+        .rev()
+        .take(2_000)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    let summary = if tail.trim().is_empty() {
+        "No final report was produced.".to_owned()
+    } else {
+        format!("Result summary:\n{tail}")
+    };
+    format!(
+        "{SUBAGENT_NOTICE_OPEN} `{description}` (task {parent_id}) {outcome}. {summary}</system-reminder>"
+    )
+}
+
+fn finish_background(
+    host: Arc<SubagentHost>,
+    parent_id: String,
+    description: String,
+    outcome: QueryOutcome,
+    stopped_by_user: Arc<AtomicBool>,
+    started: Instant,
+) {
+    let stopped = stopped_by_user.load(Ordering::Acquire);
+    let progress = host.take_progress(&parent_id);
+    let registry = agent_core::tasks::global_registry();
+    let text = format_outcome(&outcome);
+    // What `monitor` reads back: with the progress when the run did not
+    // finish, as a foreground call's answer has it.
+    let output = if ran_to_an_end(&outcome) {
+        text.clone()
+    } else {
+        with_progress(text.clone(), progress.as_ref())
+    };
+    registry.append_output(&parent_id, &output);
+    let cancelled = matches!(
+        registry.get(&parent_id).map(|task| task.status),
+        Some(agent_core::tasks::TaskStatus::Cancelled)
+    );
+    let status = status_of(&outcome, stopped);
+    if !cancelled {
+        registry.update_status(
+            &parent_id,
+            match status {
+                SubagentStatus::Completed => agent_core::tasks::TaskStatus::Completed,
+                SubagentStatus::Stopped => agent_core::tasks::TaskStatus::Cancelled,
+                _ => agent_core::tasks::TaskStatus::Failed(text.clone()),
+            },
+        );
+    }
+    finish(&host, &parent_id, &outcome, stopped, started);
+    host.notify_completion(background_completion_notice(
+        &parent_id,
+        &description,
+        status,
+        &output,
+    ));
 }
 
 /// Sends `Finished { Stopped }` if dropped while armed — the one way a
@@ -1192,6 +1335,113 @@ mod tests {
         );
         assert_eq!(input.max_turns, Some(4));
         assert!(input.run_in_background);
+    }
+
+    #[test]
+    fn detaching_keeps_one_child_running_and_stop_still_targets_only_it() {
+        let (host, _) = host();
+        let cancel = CancellationToken::new();
+        let detach = Arc::new(Notify::new());
+        host.children.lock().insert(
+            "detach-me".into(),
+            ChildHandle {
+                cancel: cancel.clone(),
+                background: false,
+                description: "inspect the diff".into(),
+                detach: detach.clone(),
+                stopped_by_user: Arc::new(AtomicBool::new(false)),
+            },
+        );
+        assert_eq!(host.detach("missing"), None);
+        assert_eq!(host.detach("detach-me"), Some(true));
+        assert!(!cancel.is_cancelled());
+        assert!(host.owned_background().contains("detach-me"));
+        assert_eq!(
+            agent_core::tasks::global_registry()
+                .get("detach-me")
+                .map(|task| task.status),
+            Some(agent_core::tasks::TaskStatus::Running)
+        );
+        assert_eq!(host.detach("detach-me"), Some(false));
+        assert!(host.stop("detach-me"));
+        assert!(cancel.is_cancelled());
+        assert_eq!(
+            agent_core::tasks::global_registry()
+                .get("detach-me")
+                .map(|task| task.status),
+            Some(agent_core::tasks::TaskStatus::Cancelled)
+        );
+    }
+
+    #[test]
+    fn detached_children_notify_every_terminal_outcome_with_a_summary() {
+        let (host, _) = host();
+        let notices = Arc::new(Mutex::new(Vec::new()));
+        let captured = notices.clone();
+        host.set_completion_notifier(CompletionNotifier::new(move |notice| {
+            captured.lock().push(notice);
+        }));
+        for (id, outcome, stopped, expected) in [
+            (
+                "notify-done",
+                QueryOutcome::EndTurn {
+                    message: Message::assistant("review found two issues"),
+                    usage: Default::default(),
+                },
+                false,
+                "completed successfully",
+            ),
+            (
+                "notify-failed",
+                QueryOutcome::Error(agent_core::error::ClaudeError::Other("provider 500".into())),
+                false,
+                "failed",
+            ),
+            (
+                "notify-stopped",
+                QueryOutcome::Cancelled,
+                true,
+                "was stopped",
+            ),
+        ] {
+            register_background(&host, id, "background review", CancellationToken::new());
+            let stopped_by_user = Arc::new(AtomicBool::new(stopped));
+            if stopped {
+                host.children.lock().insert(
+                    id.into(),
+                    ChildHandle {
+                        cancel: CancellationToken::new(),
+                        background: true,
+                        description: "background review".into(),
+                        detach: Arc::new(Notify::new()),
+                        stopped_by_user: stopped_by_user.clone(),
+                    },
+                );
+                assert!(host.stop(id));
+            }
+            finish_background(
+                host.clone(),
+                id.into(),
+                "background review".into(),
+                outcome,
+                stopped_by_user,
+                Instant::now(),
+            );
+            let notices = notices.lock();
+            let notice = notices.last().unwrap();
+            assert!(notice.starts_with(SUBAGENT_NOTICE_OPEN), "{notice}");
+            assert!(notice.contains("background review"), "{notice}");
+            assert!(notice.contains(id), "{notice}");
+            assert!(notice.contains(expected), "{notice}");
+            assert!(notice.contains("Result summary:"), "{notice}");
+        }
+        assert_eq!(notices.lock().len(), 3);
+        assert_eq!(
+            agent_core::tasks::global_registry()
+                .get("notify-stopped")
+                .map(|task| task.status),
+            Some(agent_core::tasks::TaskStatus::Cancelled)
+        );
     }
 
     /// A foreground child dropped mid-run — its parent's turn was stopped —

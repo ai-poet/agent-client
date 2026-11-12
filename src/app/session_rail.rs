@@ -29,7 +29,8 @@ use client_protocol::todo::{TodoItem, current_todo};
 use crate::ui::ActivationExt as _;
 
 use super::background_work::{
-    rendered_work_status_icon, work_elapsed, work_kind_icon, work_status_color,
+    can_suspend_background_work, rendered_work_status_icon, work_elapsed, work_kind_icon,
+    work_status_color,
 };
 use super::providers_page::card_button;
 use super::todo_list::render_todo_list;
@@ -531,7 +532,9 @@ impl Waku {
         let open = self.session_rail.finished_open;
         let row = |item: &BackgroundWorkItem, cx: &mut Context<Self>| {
             let key = item.key.clone();
+            let suspend_key = item.key.clone();
             let stop_key = item.key.clone();
+            let suspendable = can_suspend_background_work(item);
             let stoppable = item.status.is_stoppable() && item.can_stop;
             let id = SharedString::from(format!("session-rail-work-{}", item.key.provider_id));
             div()
@@ -575,6 +578,28 @@ impl Waku {
                     11.0,
                     work_status_color(item.status, *theme),
                 ))
+                .when(suspendable, |row| {
+                    row.child(
+                        div()
+                            .id(SharedString::from(format!("{id}-suspend")))
+                            .tab_index(0)
+                            .size(px(18.0))
+                            .flex_none()
+                            .rounded(px(4.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .hover(|style| style.bg(theme.overlay_strong))
+                            .focus_visible(|style| style.border_1().border_color(theme.accent))
+                            .tooltip(Tooltip::text(tr!("background.suspend")))
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_activation(cx, move |this, _, cx| {
+                                cx.stop_propagation();
+                                this.suspend_background_work(session_id, suspend_key.clone(), cx);
+                            })
+                            .child(icon("icons/arrow-up-right.svg", 10.0, theme.text_secondary)),
+                    )
+                })
                 .when(stoppable, |row| {
                     row.child(
                         div()
@@ -588,7 +613,7 @@ impl Waku {
                             .justify_center()
                             .hover(|style| style.bg(theme.overlay_strong))
                             .focus_visible(|style| style.border_1().border_color(theme.accent))
-                            .tooltip(Tooltip::text(tr!("session_rail.stop")))
+                            .tooltip(Tooltip::text(tr!("background.stop")))
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_activation(cx, move |this, _, cx| {
                                 cx.stop_propagation();
@@ -836,6 +861,25 @@ mod tests {
             &pending,
             &completed
         ));
+    }
+
+    #[test]
+    fn background_rows_have_suspend_and_stop_controls_that_do_not_open_details() {
+        let source = include_str!("session_rail.rs");
+        let row = source
+            .split_once("        let row = |item: &BackgroundWorkItem")
+            .expect("background row renderer")
+            .1
+            .split_once("        let mut body = card(theme)")
+            .expect("background row renderer end")
+            .0;
+        assert!(row.contains("can_suspend_background_work(item)"));
+        assert!(row.contains("this.suspend_background_work"));
+        assert!(row.contains("this.stop_background_work"));
+        assert!(row.contains("tr!(\"background.suspend\")"));
+        assert!(row.contains("tr!(\"background.stop\")"));
+        assert!(row.contains("on_mouse_down(MouseButton::Left"));
+        assert!(row.contains("cx.stop_propagation()"));
     }
 
     #[test]

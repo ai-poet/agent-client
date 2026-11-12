@@ -200,12 +200,14 @@ impl Waku {
             )
         }) {
             self.state.selected_project = Some(project_id);
-            self.state.last_provider = provider;
             self.state.last_runtime_mode = runtime_mode;
-            self.state.last_model = model;
-            self.state.last_reasoning_effort = reasoning_effort;
-            self.state.last_service_tier = service_tier;
-            self.state.last_context_window = context_window;
+            if provider.is_builtin() {
+                self.state.last_provider = provider;
+                self.state.last_model = model;
+                self.state.last_reasoning_effort = reasoning_effort;
+                self.state.last_service_tier = service_tier;
+                self.state.last_context_window = context_window;
+            }
         }
         if self
             .selected_session()
@@ -274,6 +276,7 @@ impl Waku {
             .find(|session| session.project_id == project_id && !session.has_started())
             .map(|session| session.id)
         {
+            self.redirect_unstarted_session_to_builtin(draft_id, cx);
             self.select_session(draft_id, cx);
             return;
         }
@@ -287,6 +290,7 @@ impl Waku {
         let id = session.id;
         self.state.push_session(session);
         self.select_session(id, cx);
+        self.redirect_unstarted_session_to_builtin(id, cx);
     }
 
     pub(super) fn select_workspace(&mut self, workspace: SessionWorkspace, cx: &mut Context<Self>) {
@@ -937,6 +941,27 @@ impl Waku {
         model: String,
         cx: &mut Context<Self>,
     ) {
+        if !provider.is_builtin() {
+            let session_id = self.selected_session().map(|session| session.id);
+            if let Some(session_id) = session_id {
+                self.redirect_unstarted_session_to_builtin(session_id, cx);
+            }
+            return;
+        }
+
+        // Choosing a model from started external history begins new built-in
+        // work. Never rewrite the source session's provider or transcript.
+        if let Some((source_id, project_id)) = self
+            .selected_session()
+            .filter(|session| !session.provider.is_builtin() && session.has_started())
+            .map(|session| (session.id, session.project_id))
+        {
+            let source_draft = self.selected_composer_draft_key();
+            self.create_session_for(project_id, ProviderKind::Native, cx);
+            self.move_composer_draft_after_project_change(source_draft, cx);
+            debug_assert_ne!(self.state.selected_session, Some(source_id));
+        }
+
         let Some((session_id, provider_changed)) = self
             .selected_session()
             .filter(|session| {
@@ -1015,10 +1040,10 @@ impl Waku {
         if self.settings_page.is_some() || self.main_page_open() {
             return;
         }
-        if !self
-            .selected_session()
-            .is_some_and(|session| session.can_choose_model(session.provider))
-        {
+        if !self.selected_session().is_some_and(|session| {
+            session.can_choose_model(session.provider)
+                || (!session.provider.is_builtin() && !session.status.is_busy())
+        }) {
             return;
         }
         let menus = self.menus.borrow();

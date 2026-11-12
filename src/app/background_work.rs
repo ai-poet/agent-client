@@ -510,6 +510,13 @@ pub(super) fn work_status_color(status: BackgroundWorkStatus, theme: Theme) -> H
     }
 }
 
+pub(super) fn can_suspend_background_work(item: &BackgroundWorkItem) -> bool {
+    item.key.kind == BackgroundWorkKind::Subagent
+        && !item.background
+        && item.status.is_stoppable()
+        && item.control_id.is_some()
+}
+
 pub(super) fn work_kind_icon(kind: BackgroundWorkKind) -> &'static str {
     match kind {
         BackgroundWorkKind::Subagent => "icons/bot.svg",
@@ -724,6 +731,34 @@ impl Waku {
             self.last_background_work_tick = Instant::now();
             cx.notify();
         }
+    }
+
+    pub(super) fn suspend_background_work(
+        &mut self,
+        session_id: Uuid,
+        key: BackgroundWorkKey,
+        cx: &mut Context<Self>,
+    ) {
+        let control_id = self
+            .background_work
+            .get(&session_id)
+            .and_then(|registry| registry.items.get(&key))
+            .filter(|item| can_suspend_background_work(item))
+            .and_then(|item| item.control_id.clone());
+        let Some(control_id) = control_id else {
+            return;
+        };
+        let Some(driver) = self
+            .runtimes
+            .get(&session_id)
+            .map(|runtime| runtime.driver.clone())
+        else {
+            self.mark_background_work_lost(session_id);
+            cx.notify();
+            return;
+        };
+        driver.suspend_background_work(key, control_id);
+        cx.notify();
     }
 
     pub(super) fn stop_background_work(
@@ -1188,6 +1223,62 @@ impl Waku {
             .map(|registry| registry.selection.clone())
             .unwrap_or_default();
         let status_color = work_status_color(item.status, theme);
+        let suspend = session_id.and_then(|session_id| {
+            can_suspend_background_work(item).then(|| {
+                let focus = self.transcript_control_focus(
+                    format!(
+                        "background-surface-suspend-{}-{}",
+                        item.key.provider_id, item.key.kind as u8
+                    ),
+                    cx,
+                );
+                let click_key = item.key.clone();
+                let click_weak = cx.entity().downgrade();
+                let key_key = item.key.clone();
+                let key_weak = cx.entity().downgrade();
+                div()
+                    .id(SharedString::from(format!(
+                        "background-surface-suspend-{}-{}",
+                        item.key.provider_id, item.key.kind as u8
+                    )))
+                    .track_focus(&focus)
+                    .tab_index(0)
+                    .h(px(26.0))
+                    .px(px(9.0))
+                    .rounded(px(6.0))
+                    .border_1()
+                    .border_color(theme.border_strong)
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(5.0))
+                    .cursor_default()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .hover(|style| style.bg(theme.overlay))
+                    .active(|style| style.bg(theme.overlay_strong))
+                    .focus_visible(|style| style.border_color(theme.accent))
+                    .tooltip(Tooltip::text(tr!("background.suspend")))
+                    .child(icon("icons/arrow-up-right.svg", 11.0, theme.text_secondary))
+                    .child(tr!("background.suspend"))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        let _ = click_weak.update(cx, |this, cx| {
+                            this.suspend_background_work(session_id, click_key.clone(), cx);
+                        });
+                    })
+                    .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            let _ = key_weak.update(cx, |this, cx| {
+                                this.suspend_background_work(session_id, key_key.clone(), cx);
+                            });
+                            cx.stop_propagation();
+                        }
+                    })
+            })
+        });
         let stop = session_id.and_then(|session_id| {
             (item.status.is_stoppable() && item.can_stop).then(|| {
                 let focus = self.transcript_control_focus(
@@ -1247,7 +1338,8 @@ impl Waku {
         // Fork: a sub-agent opens onto its live record (`subagent_panel.rs`).
         if item.key.kind == BackgroundWorkKind::Subagent {
             let record = registry.and_then(|registry| registry.transcripts.get(key));
-            return self.render_subagent_surface(item, record, selection, stop, window, cx);
+            return self
+                .render_subagent_surface(item, record, selection, suspend, stop, window, cx);
         }
         let card = div()
             .w_full()
@@ -1300,9 +1392,13 @@ impl Waku {
                                     ))
                                     .child(work_status_label(item.status))
                                     .child("·")
-                                    .child(work_elapsed(item)),
+                                    .child(work_elapsed(item))
+                                    .when(item.background && item.status.is_live(), |line| {
+                                        line.child("·").child(tr!("background.running_notify"))
+                                    }),
                             ),
                     )
+                    .when_some(suspend, |header, suspend| header.child(suspend))
                     .when_some(stop, |header, stop| header.child(stop)),
             )
             .child(self.render_background_work_detail(
@@ -2034,6 +2130,31 @@ mod tests {
         );
         item.background = background;
         item
+    }
+
+    #[test]
+    fn only_live_foreground_subagents_can_be_suspended() {
+        let mut agent = BackgroundWorkItem::new(
+            BackgroundWorkKind::Subagent,
+            "agent-1",
+            "Inspect",
+            BackgroundWorkStatus::Running,
+        );
+        agent.control_id = Some("toolu_1".to_owned());
+        agent.can_stop = true;
+        assert!(can_suspend_background_work(&agent));
+
+        agent.background = true;
+        assert!(!can_suspend_background_work(&agent));
+        agent.background = false;
+        agent.status = BackgroundWorkStatus::Completed;
+        assert!(!can_suspend_background_work(&agent));
+
+        let mut process = item("process-1", BackgroundWorkStatus::Running, true);
+        process.control_id = Some("process-1".to_owned());
+        process.can_stop = true;
+        assert!(!can_suspend_background_work(&process));
+        assert!(process.status.is_stoppable() && process.can_stop);
     }
 
     #[test]

@@ -1,12 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query'
 import type {
   AgentSession,
-  DaemonSettings,
   GoalOperation,
   MessageAttachment,
   PlanUsage,
   Project,
-  ProviderProbe,
   SequencedEvent,
   UserInputAnswer,
 } from 'client'
@@ -46,6 +44,7 @@ import {
   type PendingPermission,
   type PendingUserInput,
 } from './event-reducer'
+import { isExternalProvider, runtimeBinaryForProbe } from './provider-policy'
 
 interface RuntimeSummary {
   runtimeId: string
@@ -631,6 +630,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const currentSession = queryClient.getQueryData<AgentSession>(
         daemonKeys.session(config.address, inputSession.id),
       ) ?? inputSession
+      if (isExternalProvider(currentSession.provider)) {
+        throw new Error(translate(localeRef.current, 'errors.external_cli_unavailable'))
+      }
       if (
         currentSession.status === 'connecting' ||
         currentSession.status === 'working' ||
@@ -652,7 +654,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
       let project: Project
       let runtime = entries.current.get(currentSession.id)
-      let startup: { probe: ProviderProbe; settings: DaemonSettings } | null = null
+      let startup: { binary: string } | null = null
       try {
         const state = await loadTaskState(client)
         const foundProject = state.projects.find((item) => item.id === currentSession.project_id)
@@ -681,12 +683,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             },
             staleTime: PROVIDER_PROBE_CACHE_STALE_TIME,
           })
-          if (!providerProbe.installed || !providerProbe.path) {
+          const binary = runtimeBinaryForProbe(providerProbe)
+          if (binary === null) {
             throw new Error(translate(localeRef.current, 'errors.provider_not_installed', {
               provider: providerName(currentSession.provider),
             }))
           }
-          startup = { probe: providerProbe, settings }
+          startup = { binary }
         }
 
         session = await materializeWorktree(
@@ -726,7 +729,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               type: 'start',
               options: {
                 provider: session.provider,
-                binary: startup!.probe.path!,
+                binary: startup!.binary,
                 cwd: sessionCwd(session, project),
                 mode: session.runtime_mode,
                 interactionMode: session.interaction_mode,
@@ -803,6 +806,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const currentSession = queryClient.getQueryData<AgentSession>(
         daemonKeys.session(config.address, inputSession.id),
       ) ?? inputSession
+      if (isExternalProvider(currentSession.provider)) {
+        throw new Error(translate(localeRef.current, 'errors.external_cli_unavailable'))
+      }
       // Activating a goal on an idle thread makes Codex pursue it right away,
       // so begin its turn optimistically — the way a submission's turn begins
       // at accept — instead of showing the empty-task page until the
@@ -921,7 +927,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         },
         staleTime: PROVIDER_PROBE_CACHE_STALE_TIME,
       })
-      if (!providerProbe.installed || !providerProbe.path) {
+      const binary = runtimeBinaryForProbe(providerProbe)
+      if (binary === null) {
         throw new Error(translate(localeRef.current, 'errors.provider_not_installed', {
           provider: providerName(currentSession.provider),
         }))
@@ -947,7 +954,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             type: 'start',
             options: {
               provider: session.provider,
-              binary: providerProbe.path,
+              binary,
               cwd: sessionCwd(session, project),
               mode: session.runtime_mode,
               interactionMode: session.interaction_mode,
@@ -1179,6 +1186,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
   const forkSessionFromResponse = useCallback(
     async (session: AgentSession, turnCount: number) => {
+      if (isExternalProvider(session.provider)) {
+        throw new Error(translate(localeRef.current, 'errors.external_cli_unavailable'))
+      }
       if (!client || !config || phase !== 'connected') {
         throw new Error(translate(localeRef.current, 'errors.daemon_disconnected'))
       }

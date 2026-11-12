@@ -157,6 +157,24 @@ fn pretty_json(text: &str) -> String {
         .unwrap_or_else(|| text.to_owned())
 }
 
+fn trajectory_export_name(session_id: Uuid, at: chrono::DateTime<chrono::Utc>) -> String {
+    let id = session_id.simple().to_string();
+    format!(
+        "trajectory-{}-{}.jsonl",
+        &id[..8],
+        at.format("%Y%m%d-%H%M%S")
+    )
+}
+
+fn trajectory_records_jsonl(records: &[Record]) -> Result<String, serde_json::Error> {
+    let mut output = String::new();
+    for record in records {
+        output.push_str(&serde_json::to_string(record)?);
+        output.push('\n');
+    }
+    Ok(output)
+}
+
 /// One row of the ledger.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Row {
@@ -370,6 +388,71 @@ impl Waku {
                 self.active_right_panel_surface(),
                 Some(RightPanelSurface::Trajectory)
             )
+    }
+
+    fn export_trajectory(&self, cx: &mut Context<Self>) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        if !self.trajectory_capable(session_id) {
+            return;
+        }
+        let Some(records) = self
+            .trajectory_panel
+            .views
+            .get(&session_id)
+            .map(|view| view.records.clone())
+        else {
+            return;
+        };
+        let directory = dirs::document_dir()
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(std::env::temp_dir);
+        let suggested_name = trajectory_export_name(session_id, chrono::Utc::now());
+        let receiver = cx.prompt_for_new_path(&directory, Some(&suggested_name));
+        cx.spawn(async move |this, cx| {
+            let path = match receiver.await {
+                Ok(Ok(Some(path))) => path,
+                Ok(Ok(None)) => return,
+                Ok(Err(error)) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.show_toast(tr!("trajectory.export_failed", error = error));
+                        cx.notify();
+                    });
+                    return;
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.show_toast(tr!("trajectory.export_failed", error = error));
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client::validate_destination(&path)?;
+                    let jsonl = trajectory_records_jsonl(&records)?;
+                    std::fs::write(&path, jsonl)?;
+                    Ok::<_, anyhow::Error>(path)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(path) => this.show_success_toast(tr!(
+                        "trajectory.exported",
+                        path = path.display().to_string()
+                    )),
+                    Err(error) => this.show_toast(tr!(
+                        "trajectory.export_failed",
+                        error = format!("{error:#}")
+                    )),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Read the session's trajectory again, off the UI thread.
@@ -925,6 +1008,15 @@ impl Waku {
                         cx,
                     ))
                     .child(div().flex_1())
+                    .child(card_button(
+                        theme,
+                        SharedString::from("trajectory-export"),
+                        tr!("trajectory.export"),
+                        false,
+                        false,
+                        cx,
+                        |this, _, cx| this.export_trajectory(cx),
+                    ))
                     .child(
                         div()
                             .id("trajectory-diagnostics-toggle")
@@ -2350,6 +2442,32 @@ mod tests {
                 at: 2,
             },
         ]
+    }
+
+    #[test]
+    fn export_name_has_a_short_session_id_and_timestamp() {
+        let session_id = Uuid::parse_str("12345678-1234-5678-1234-567812345678").unwrap();
+        let at = chrono::DateTime::parse_from_rfc3339("2026-11-11T12:34:56Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(
+            trajectory_export_name(session_id, at),
+            "trajectory-12345678-20261111-123456.jsonl"
+        );
+    }
+
+    #[test]
+    fn export_writes_every_record_as_one_json_line() {
+        let records = records();
+        let exported = trajectory_records_jsonl(&records).unwrap();
+        assert!(exported.ends_with('\n'));
+        assert_eq!(exported.lines().count(), records.len());
+        let decoded: Vec<Record> = exported
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(decoded, records);
+        assert_eq!(trajectory_records_jsonl(&[]).unwrap(), "");
     }
 
     #[test]

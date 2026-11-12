@@ -259,25 +259,37 @@ async fn run_in_background(
                             }
                         },
                     );
-                    match c.wait().await {
-                        Ok(status) if status.success() => {
-                            global_registry().complete(&task_id_clone);
-                        }
-                        Ok(status) => {
-                            let code = status.code().unwrap_or(-1);
-                            global_registry().update_status(
-                                &task_id_clone,
-                                agent_core::tasks::TaskStatus::Failed(format!(
-                                    "exit code {}",
-                                    code
-                                )),
-                            );
-                        }
-                        Err(e) => {
-                            global_registry().update_status(
-                                &task_id_clone,
-                                agent_core::tasks::TaskStatus::Failed(e.to_string()),
-                            );
+                    let outcome = c.wait().await;
+                    // A user stop is authoritative even when the shell reports
+                    // its signal as a non-zero exit (or exits cleanly while
+                    // shutting down); never relabel it as completed/failed.
+                    let was_cancelled = matches!(
+                        global_registry()
+                            .get(&task_id_clone)
+                            .map(|task| task.status),
+                        Some(agent_core::tasks::TaskStatus::Cancelled)
+                    );
+                    if !was_cancelled {
+                        match outcome {
+                            Ok(status) if status.success() => {
+                                global_registry().complete(&task_id_clone);
+                            }
+                            Ok(status) => {
+                                let code = status.code().unwrap_or(-1);
+                                global_registry().update_status(
+                                    &task_id_clone,
+                                    agent_core::tasks::TaskStatus::Failed(format!(
+                                        "exit code {}",
+                                        code
+                                    )),
+                                );
+                            }
+                            Err(e) => {
+                                global_registry().update_status(
+                                    &task_id_clone,
+                                    agent_core::tasks::TaskStatus::Failed(e.to_string()),
+                                );
+                            }
                         }
                     }
                 }
@@ -319,7 +331,7 @@ pub const BACKGROUND_NOTICE_OPEN: &str = "<system-reminder>The background comman
 pub fn background_completion_notice(task_id: &str, command: &str, task: &BackgroundTask) -> String {
     use agent_core::tasks::TaskStatus;
     let outcome = match &task.status {
-        TaskStatus::Completed => "finished successfully".to_string(),
+        TaskStatus::Completed => "finished successfully (exit code 0)".to_string(),
         TaskStatus::Failed(reason) => format!("failed ({reason})"),
         TaskStatus::Cancelled => "was stopped".to_string(),
         TaskStatus::Running => "stopped reporting".to_string(),
@@ -1350,6 +1362,27 @@ mod tests {
             );
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+    }
+    #[test]
+    fn background_notices_carry_success_failure_and_stop_outcomes() {
+        let mut task = agent_core::tasks::BackgroundTask::new("bg: cargo test");
+        task.output = vec!["12 tests passed".into()];
+        task.status = agent_core::tasks::TaskStatus::Completed;
+        let notice = background_completion_notice("task-1", "cargo test", &task);
+        assert!(
+            notice.contains("finished successfully (exit code 0)"),
+            "{notice}"
+        );
+        assert!(notice.contains("12 tests passed"), "{notice}");
+
+        task.status = agent_core::tasks::TaskStatus::Failed("exit code 101".into());
+        let notice = background_completion_notice("task-1", "cargo test", &task);
+        assert!(notice.contains("failed (exit code 101)"), "{notice}");
+
+        task.status = agent_core::tasks::TaskStatus::Cancelled;
+        let notice = background_completion_notice("task-1", "cargo test", &task);
+        assert!(notice.contains("was stopped"), "{notice}");
+        assert!(!notice.contains("failed"), "{notice}");
     }
 }
 

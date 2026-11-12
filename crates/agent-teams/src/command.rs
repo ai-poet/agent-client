@@ -182,8 +182,8 @@ pub fn build_activation_directive(
     task_planning: TaskPlanning,
 ) -> String {
     let mut lines = vec![
-        "The user invoked an AgentTeams slash command. Follow the AgentTeams protocol already in your system instructions. Inspect existing team state with agent_teams_status when needed.".to_owned(),
-        "Respect the current team state. Continue an existing plan or team without recreating it. Only when no current team exists, call agent_teams_create with approval=\"required\". Build the complete staged roster and DAG, then stop and ask the user to review the plan in the Team panel. Do not approve or start it in this same turn.".to_owned(),
+        "The user explicitly requested an AgentTeams team. Follow the AgentTeams protocol already in your system instructions. Inspect existing team state with agent_teams_status when needed.".to_owned(),
+        "Respect the current team state. Continue an existing plan or team without recreating it. Only when no current team exists, call agent_teams_create with approval=\"required\". Build the complete staged roster and DAG, then stop and ask the user to review the plan in the Team panel. Do not approve or start it in this same turn. When the request names models, override seats only for names you can map unambiguously to configured routes; otherwise keep the existing defaults or template routes and never invent a route.".to_owned(),
     ];
     if let Some(profile) = profile {
         lines.push(format!(
@@ -329,6 +329,46 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(parsed.profile.as_deref(), Some("Demo"));
+    }
+
+    #[test]
+    fn natural_language_is_never_pre_parsed_as_activation() {
+        for text in [
+            "组队",
+            "请帮我组建团队",
+            "组建一个团队",
+            "开个队",
+            "组队审查这个仓库",
+            "用 kimi 和 sonnet 组队实现登录",
+            "请组建团队：修复失败测试",
+            "form a team to review this repository",
+            "please create a team to fix the failing tests",
+            "组队功能怎么用",
+            "如何组建团队？",
+            "how do agent teams work?",
+            "不要组队，先自己修复",
+        ] {
+            assert_eq!(parse(text), None, "{text}");
+        }
+
+        let parsed = parse("/agent-teams-demo-delivery ship").unwrap();
+        assert_eq!(parsed.profile.as_deref(), Some("demo-delivery"));
+        assert_eq!(parsed.goal, "ship");
+    }
+
+    #[test]
+    fn activation_directive_keeps_mandatory_plan_approval() {
+        let invocation = CommandInvocation {
+            goal: "组队发布这个版本".to_owned(),
+            profile: None,
+        };
+        let directive = directive_for_invocation(&invocation, &crate::profiles::builtin_profiles());
+        assert!(directive.contains("explicitly requested"));
+        assert!(directive.contains("approval=\"required\""));
+        assert!(directive.contains("Continue an existing plan or team without recreating it"));
+        assert!(directive.contains("map unambiguously to configured routes"));
+        assert!(directive.contains("keep the existing defaults or template routes"));
+        assert!(!directive.contains("slash command"));
     }
 
     #[test]

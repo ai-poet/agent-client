@@ -230,6 +230,15 @@ pub(super) fn adopt_built_in_default(state: &mut PersistedState) -> bool {
         changed = true;
     }
 
+    // A star saved for an external CLI must not keep offering that CLI in a
+    // later picker or web sync. Built-in stars are independent of history and
+    // stay exactly as they were.
+    let favorites_before = state.favorite_models.len();
+    state
+        .favorite_models
+        .retain(|favorite| favorite.provider.is_builtin());
+    changed |= state.favorite_models.len() != favorites_before;
+
     for session in &mut state.sessions {
         if session.provider.is_builtin() || session.has_started() {
             continue;
@@ -1752,12 +1761,28 @@ mod tests {
 
         let mut switched_off = codex();
         switched_off.disabled_providers.push(ProviderKind::Native);
+        switched_off.favorite_models = vec![
+            crate::model::FavoriteModel {
+                provider: ProviderKind::Codex,
+                model: "gpt-5.6-sol".into(),
+            },
+            crate::model::FavoriteModel {
+                provider: ProviderKind::Native,
+                model: "anthropic::claude-sonnet-5-5".into(),
+            },
+        ];
         assert!(adopt_built_in_default(&mut switched_off));
         assert!(
             !switched_off
                 .disabled_providers
                 .contains(&ProviderKind::Native)
         );
+        assert_eq!(switched_off.favorite_models.len(), 1);
+        assert_eq!(
+            switched_off.favorite_models[0].provider,
+            ProviderKind::Native
+        );
+        assert!(!adopt_built_in_default(&mut switched_off));
     }
 
     #[test]

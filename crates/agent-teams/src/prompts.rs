@@ -39,7 +39,7 @@ pub fn is_member_tool(name: &str) -> bool {
 }
 
 /// Prefixed to the captain protocol: the rules apply only on request.
-pub const TEAM_ACTIVATION_PROMPT: &str = "AgentTeams (Agent Teams) provides multi-agent team collaboration. Apply these rules when the user requests it (including /agent-teams) or when continuing an existing team. Mentioning, quoting, discussing, or declining AgentTeams alone is not a request to start work.";
+pub const TEAM_ACTIVATION_PROMPT: &str = "AgentTeams (Agent Teams) provides multi-agent team collaboration. Apply these rules when the user requests a team in any language (for example 组队做 X or form a team to do X, and including /agent-teams) or when continuing an existing team. Handle natural-language formation requests yourself with the agent_teams_* tools. Mentioning, quoting, discussing, or declining AgentTeams alone is not a request to start work.";
 
 /// What a member is told in place of the captain protocol.
 pub const TEAM_MEMBER_PROMPT: &str = "You are an AgentTeams member. Follow your assigned member persona and task contract. Use agent_teams_claim_task, agent_teams_update_task, agent_teams_send_message and agent_teams_status for your own work. Include the current attempt_id in updates; report completion or failure to the captain. Do not create, approve, edit or resume a team. If your durable membership is unavailable, report that to the parent instead of creating a replacement.";
@@ -56,7 +56,7 @@ pub fn usage_section_text(tool_names: &str, profiles_text: &str) -> String {
     };
     format!(
         "AgentTeams captain protocol:
-1. Inspect current team state when needed, using agent_teams_status. Continue existing work without duplicating its roster/tasks. Create only when no current team exists, with the user's goal as description and approval=\"required\"; automatic approval requires an explicit request to run immediately. Staged plans never spawn or schedule work.
+1. Before creating a team, inspect current team state with agent_teams_status. If a current team exists, continue it or revise its staged plan with agent_teams_edit_plan; never silently create a second team. When no current team exists, call agent_teams_create with the user's goal as description and approval=\"required\". For an initial natural-language request, never use automatic approval or approve in the same turn; automatic approval is only for the legacy API path. Staged plans never spawn or schedule work.
 2. Add each needed role once; members inherit your model route unless another is requested/needed. A requested profile goes to create({{profile}}); it supplies its roster. Seed profiles also supply tasks; captain-planning profiles require your DAG. Do not duplicate either.
 3. Build the complete smallest useful DAG while staged. For an ordinary research/audit plan, pass the roster and dependency graph together in create({{plan:{{members,tasks}}}}) to avoid repeated setup rounds. Every task needs a subject; pass kind and assignee explicitly when the plan specifies them. Titles, descriptions and member roles do not set these fields. Dependencies represent prerequisites. Give every required contributor a task or explicit message. Present the plan and end your turn for review; never approve in that planning turn. Approve only after a later explicit user approval or the Team panel action.
 4. Respect Team panel approve/return/discard control messages. On return, ask what to change before editing; after the answer, use one atomic agent_teams_edit_plan batch (edit downstream references before removals), summarize and await review again. Never inspect or edit .agent-teams state files or the app's source code to revise plans. Discard does not authorize a replacement.
@@ -229,6 +229,13 @@ mod tests {
         }
         assert!(first.contains("create({profile})"));
         assert!(first.contains("create({plan:{members,tasks}})"));
+        assert!(first.contains("组队做 X"));
+        assert!(first.contains("form a team to do X"));
+        assert!(first.contains("Handle natural-language formation requests yourself"));
+        assert!(first.contains("never silently create a second team"));
+        assert!(first.contains("revise its staged plan with agent_teams_edit_plan"));
+        assert!(first.contains("approval=\"required\""));
+        assert!(first.contains("never use automatic approval"));
         assert!(!first.contains("Web"));
         let with_profiles = captain_section("Profiles:\n- review (2 members, 3 tasks)");
         assert!(with_profiles.ends_with("Profiles:\n- review (2 members, 3 tasks)"));

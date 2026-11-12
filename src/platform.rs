@@ -47,8 +47,7 @@ fn windows_background_for_build(build: Option<u32>) -> WindowBackgroundAppearanc
     match build {
         // DWMWA_SYSTEMBACKDROP_TYPE is available from Windows 11 22H2.
         Some(build) if build >= 22621 => WindowBackgroundAppearance::MicaBackdrop,
-        // SetWindowCompositionAttribute's acrylic path starts at Windows 10 1809.
-        Some(build) if build >= 17763 => WindowBackgroundAppearance::Blurred,
+        // Legacy Acrylic can leave window movement lagging behind mouse release.
         _ => WindowBackgroundAppearance::Opaque,
     }
 }
@@ -696,23 +695,29 @@ mod material_tests {
     use super::windows_background_for_build;
 
     #[test]
-    fn windows_material_uses_mica_then_acrylic_then_opaque() {
-        assert_eq!(
-            windows_background_for_build(Some(22621)),
-            WindowBackgroundAppearance::MicaBackdrop
-        );
-        assert_eq!(
-            windows_background_for_build(Some(22620)),
-            WindowBackgroundAppearance::Blurred
-        );
-        assert_eq!(
-            windows_background_for_build(Some(17763)),
-            WindowBackgroundAppearance::Blurred
-        );
-        assert_eq!(
-            windows_background_for_build(Some(17762)),
-            WindowBackgroundAppearance::Opaque
-        );
+    fn windows_material_keeps_mica_on_supported_builds() {
+        for build in [22621, 22631, 26100, u32::MAX] {
+            assert_eq!(
+                windows_background_for_build(Some(build)),
+                WindowBackgroundAppearance::MicaBackdrop,
+                "Windows build {build} should retain Mica"
+            );
+        }
+    }
+
+    #[test]
+    fn windows_material_avoids_acrylic_on_older_builds() {
+        for build in [0, 17762, 17763, 18362, 19045, 22000, 22620] {
+            assert_eq!(
+                windows_background_for_build(Some(build)),
+                WindowBackgroundAppearance::Opaque,
+                "Windows build {build} should not enable Acrylic"
+            );
+        }
+    }
+
+    #[test]
+    fn windows_material_uses_opaque_when_version_is_unknown() {
         assert_eq!(
             windows_background_for_build(None),
             WindowBackgroundAppearance::Opaque

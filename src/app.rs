@@ -1762,6 +1762,7 @@ mod composer;
 mod confirm_dialog;
 mod content_translations;
 mod drafts;
+mod external_provider;
 mod goal_dialog;
 // Fork: the Effort slider card (a dsh-effort-slider port) and Claude Code's
 // relaunch for a new effort.
@@ -2040,6 +2041,13 @@ impl Waku {
 
     fn show_toast_with_tone(&mut self, message: impl Into<String>, tone: ToastTone) {
         let mut message = message.into();
+        if tone == ToastTone::Alert
+            && let Some(localized) = external_provider::localized_external_cli_error(&message)
+        {
+            // Legacy sessions can still reach a daemon refusal from a path
+            // added before the built-in-only policy. Never expose its bail.
+            message = localized;
+        }
         if tone == ToastTone::Alert && client::is_daemon_transport_error(&message) {
             // Fork addition: a dropped daemon socket is one condition with one
             // notice. The connection banner owns it while it shows; otherwise
@@ -2673,9 +2681,10 @@ impl Waku {
             // and selection changes, and none of the app chrome depends on
             // those — re-rendering the window twice a second for a blinking
             // caret is exactly what the Performance guidance forbids.
-            cx.subscribe(
+            cx.subscribe_in(
                 &composer,
-                |this: &mut Self, _, event: &ComposerEvent, cx| match event {
+                window,
+                |this: &mut Self, _, event: &ComposerEvent, window, cx| match event {
                     ComposerEvent::Submit(prompt) => {
                         if let Some(session_id) = this.selected_session().and_then(|session| {
                             this.response_fork_preparations
@@ -2683,10 +2692,8 @@ impl Waku {
                                 .then_some(session.id)
                         }) {
                             this.defer_restore_composer_after_fork(session_id, prompt.clone(), cx);
-                        } else if let Some(submission) =
-                            this.submission_with_attachments(prompt, cx)
-                        {
-                            this.submit_composer_submission(submission, cx);
+                        } else {
+                            this.submit_composer_prompt(prompt, false, window, cx);
                         }
                     }
                     ComposerEvent::SubmitSteer(prompt) => {
@@ -2696,10 +2703,8 @@ impl Waku {
                                 .then_some(session.id)
                         }) {
                             this.defer_restore_composer_after_fork(session_id, prompt.clone(), cx);
-                        } else if let Some(submission) =
-                            this.submission_with_attachments(prompt, cx)
-                        {
-                            this.steer_composer_submission(submission, cx);
+                        } else {
+                            this.submit_composer_prompt(prompt, true, window, cx);
                         }
                     }
                     ComposerEvent::SteerQueued => {

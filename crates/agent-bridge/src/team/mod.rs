@@ -14,12 +14,11 @@
 //! - `member.rs` runs one member's turns.
 //! - `tools.rs` exposes the runtime's operations as engine tools.
 //!
-//! **Loaded on demand.** A session starts without the team tools and the
-//! captain protocol, so a session that never uses a team pays nothing. The
-//! first message that starts with `/agent-teams` — or a team already on disk
-//! for this captain — activates them for the rest of the session; that
-//! costs one prompt-cache miss, after which the section is byte-identical on
-//! every turn.
+//! **Available whenever enabled.** A built-in agent session starts with the
+//! team tools and captain protocol, so the model itself can handle a
+//! natural-language team request in any language. `/agent-teams` still adds its
+//! explicit activation directive, and a team already on disk resumes here. The
+//! captain section is rendered once and stays byte-identical on every turn.
 
 mod host;
 mod member;
@@ -36,7 +35,7 @@ use agent_core_tools::Tool;
 use agent_teams::command::{ControlAction, decode_control};
 use agent_teams::config::TeamsConfig;
 use agent_teams::profiles::TeamProfileConfig;
-use agent_teams::runtime::{RuntimeConfig, TeamRuntime};
+use agent_teams::runtime::{ModelTurn, RuntimeConfig, TeamRuntime};
 use parking_lot::Mutex;
 use tokio_util::sync::CancellationToken;
 
@@ -110,6 +109,8 @@ pub(crate) struct TeamHost {
     pending_wake: Mutex<Vec<String>>,
     /// Appended to the next message the person writes.
     parked_context: Mutex<Vec<String>>,
+    /// The currently running captain turn, for model-only plan approval.
+    model_turn: Mutex<ModelTurn>,
     this: OnceLock<Weak<TeamHost>>,
 }
 
@@ -167,8 +168,8 @@ impl TeamHost {
             slash_command: config.slash_command,
             section: agent_teams::prompts::captain_section(&profiles_text),
             profiles,
+            active: AtomicBool::new(config.enabled),
             config,
-            active: AtomicBool::new(false),
             events,
             captain_id: captain_id.to_owned(),
             cwd: options.cwd.clone(),
@@ -179,6 +180,7 @@ impl TeamHost {
             injected: Mutex::new(Vec::new()),
             pending_wake: Mutex::new(Vec::new()),
             parked_context: Mutex::new(Vec::new()),
+            model_turn: Mutex::new(ModelTurn::default()),
             this: OnceLock::new(),
         });
         let _ = host.this.set(Arc::downgrade(&host));
@@ -295,29 +297,45 @@ impl TeamHost {
         });
     }
 
-    /// The text a person's message reaches the model with: `/agent-teams`
-    /// activates the team and gets the activation directive; a context the
-    /// Team panel parked (a discarded plan) goes along once.
+    /// Start a new model-turn generation. A user message steered into an
+    /// existing turn does not call this, so it cannot approve that turn's draft.
+    pub fn begin_turn(&self, user_initiated: bool) {
+        let mut current = self.model_turn.lock();
+        current.id = current.id.saturating_add(1);
+        current.user_initiated = user_initiated;
+    }
+
+    pub(crate) fn current_model_turn(&self) -> ModelTurn {
+        *self.model_turn.lock()
+    }
+
+    /// The text a person's message reaches the model with. `/agent-teams`
+    /// adds its activation directive; natural language is never pre-parsed and
+    /// reaches the model unchanged. A context the Team panel parked (a
+    /// discarded plan) goes along once.
     pub fn augment_prompt(&self, text: String) -> String {
         if !self.enabled {
             return text;
         }
         let mut extra = Vec::new();
-        if self.slash_command {
+        let parsed = if self.slash_command {
             let names = self.profiles.keys().map(String::as_str);
-            match agent_teams::command::parse_command_text(&text, names) {
-                Ok(Some(invocation)) => {
-                    self.activate();
-                    extra.push(agent_teams::command::directive_for_invocation(
-                        &invocation,
-                        &self.profiles,
-                    ));
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    self.activate();
-                    extra.push(agent_teams::command::parse_failure_directive(&error));
-                }
+            agent_teams::command::parse_command_text(&text, names)
+        } else {
+            Ok(None)
+        };
+        match parsed {
+            Ok(Some(invocation)) => {
+                self.activate();
+                extra.push(agent_teams::command::directive_for_invocation(
+                    &invocation,
+                    &self.profiles,
+                ));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.activate();
+                extra.push(agent_teams::command::parse_failure_directive(&error));
             }
         }
         extra.extend(self.parked_context.lock().drain(..));
@@ -444,6 +462,18 @@ impl TeamHost {
         match member {
             Some(member) => {
                 member.interrupt();
+                if let Some(port) = self.port() {
+                    let notice = format!(
+                        "<system-reminder>AgentTeams background member `{}` (task {}) was stopped by the user. Its open attempt was parked; inspect agent_teams_status, then continue or reassign it without stopping other members.</system-reminder>",
+                        member.name(),
+                        member.id(),
+                    );
+                    if port.is_busy() {
+                        self.defer_wake(notice);
+                    } else {
+                        port.wake(notice);
+                    }
+                }
                 true
             }
             None => false,
@@ -502,16 +532,22 @@ mod tests {
     }
 
     #[test]
-    fn a_session_starts_without_the_team() {
+    fn an_enabled_session_exposes_the_team_to_the_model() {
         let team = host(true);
-        assert!(!team.is_active());
-        assert!(team.captain_tools().is_empty());
+        assert!(team.is_active());
+        let names: Vec<String> = team
+            .captain_tools()
+            .iter()
+            .map(|tool| tool.name().to_owned())
+            .collect();
+        assert_eq!(names, agent_teams::prompts::TEAM_TOOL_NAMES);
         let mut query = QueryConfig::default();
         query.append_system_prompt = Some("house rules".into());
         team.extend_rules(&mut query);
-        assert_eq!(query.append_system_prompt.as_deref(), Some("house rules"));
+        let rules = query.append_system_prompt.unwrap();
+        assert!(rules.starts_with("house rules\n\n"));
+        assert!(rules.contains(agent_teams::prompts::TEAM_ACTIVATION_PROMPT));
         assert_eq!(team.augment_prompt("hello".into()), "hello");
-        assert!(!team.is_active());
     }
 
     #[test]
@@ -540,10 +576,64 @@ mod tests {
     }
 
     #[test]
+    fn natural_language_reaches_the_model_without_pre_activation() {
+        let team = host(true);
+        for original in [
+            "用 kimi 和 sonnet 组队审查这个仓库",
+            "组队修复测试",
+            "form a team to review this repository",
+            "please create a team to fix the failing tests",
+            "组队功能怎么用",
+            "how do agent teams work?",
+        ] {
+            assert_eq!(team.augment_prompt(original.into()), original, "{original}");
+        }
+        assert_eq!(
+            team.captain_tools()
+                .iter()
+                .map(|tool| tool.name().to_owned())
+                .collect::<Vec<_>>(),
+            agent_teams::prompts::TEAM_TOOL_NAMES
+        );
+        let mut query = QueryConfig::default();
+        team.extend_rules(&mut query);
+        let rules = query.append_system_prompt.unwrap();
+        assert!(rules.contains("组队做 X"));
+        assert!(rules.contains("form a team to do X"));
+        assert!(rules.contains("approval=\"required\""));
+    }
+
+    #[test]
+    fn natural_language_tools_do_not_depend_on_the_slash_menu_setting() {
+        let team = TeamHost::with_config(
+            TeamsConfig {
+                enabled: true,
+                slash_command: false,
+                ..TeamsConfig::default()
+            },
+            &AgentStartOptions::default(),
+            "captain",
+            EventSink::new(|_| {}),
+        );
+        assert_eq!(team.augment_prompt("组队修复测试".into()), "组队修复测试");
+        assert_eq!(
+            team.augment_prompt("form a team to fix tests".into()),
+            "form a team to fix tests"
+        );
+        assert_eq!(
+            team.augment_prompt("/agent-teams audit".into()),
+            "/agent-teams audit"
+        );
+        assert!(team.is_active());
+        assert!(!team.captain_tools().is_empty());
+    }
+
+    #[test]
     fn a_switched_off_team_never_activates() {
         let team = host(false);
         let text = team.augment_prompt("/agent-teams audit".into());
         assert_eq!(text, "/agent-teams audit");
+        assert_eq!(team.augment_prompt("组队审查".into()), "组队审查");
         assert!(!team.activate());
         assert!(team.captain_tools().is_empty());
     }

@@ -22,6 +22,17 @@ pub(super) const PLAN_USAGE_PROVIDERS: [ProviderKind; 4] = [
     ProviderKind::Grok,
 ];
 
+/// Legacy external providers remain in saved state, but this build only starts
+/// the built-in agent. Do not ask the daemon for account meters it must refuse.
+fn plan_usage_fetch_supported(provider: ProviderKind) -> bool {
+    provider.is_builtin() && PLAN_USAGE_PROVIDERS.contains(&provider)
+}
+
+fn display_plan_usage_error(error: &str) -> String {
+    super::external_provider::localized_external_cli_error(error)
+        .unwrap_or_else(|| error.to_owned())
+}
+
 /// Refresh cadences for the plan snapshots. Quota moves only when turns run,
 /// so idle refreshes stay rare; a settled turn or a just-opened panel asks
 /// sooner. Grok's fetch spawns a probe process, so its idle cadence is wider.
@@ -35,14 +46,10 @@ impl Waku {
     /// The slow maintenance clock and explicit panel-open requests call this;
     /// guards keep it to one in-flight fetch per provider.
     pub(super) fn maybe_refresh_plan_usage(&mut self, cx: &mut Context<Self>) {
-        // Disabling a provider only stops it backing new sessions; a session
-        // already locked to it keeps running, and while one is selected its
-        // usage panel still owes the account meters. Without this the panel
-        // would show its loading skeleton forever: fetchable provider, no
-        // snapshot, and no fetch ever allowed to start.
         let selected_provider = self.selected_session().map(|session| session.provider);
         for provider in PLAN_USAGE_PROVIDERS {
-            if self.plan_usage_pending.contains(&provider)
+            if !plan_usage_fetch_supported(provider)
+                || self.plan_usage_pending.contains(&provider)
                 || (!self.provider_enabled(provider) && selected_provider != Some(provider))
             {
                 continue;
@@ -185,13 +192,16 @@ impl Waku {
         let context = self.ring_context_usage(session);
         let theme = Theme::current(cx);
         let plan = self.plan_usage.get(&provider).cloned();
-        let error = self.plan_usage_error.get(&provider).cloned();
+        let error = self
+            .plan_usage_error
+            .get(&provider)
+            .map(|error| display_plan_usage_error(error));
         // Fetchable but nothing cached yet: the panel shows a skeleton
         // whether the fetch is already in flight or lands on the next tick.
         let plan_loading = plan.is_none()
             && error.is_none()
             && !self.plan_usage_unconfigured.contains(&provider)
-            && PLAN_USAGE_PROVIDERS.contains(&provider);
+            && plan_usage_fetch_supported(provider);
 
         let weak = cx.entity().downgrade();
         let handle = self.menu_handle_with(USAGE_METER_MENU_ID, cx, move |open, window, cx| {
@@ -203,7 +213,7 @@ impl Waku {
                     if let Some(provider) = this
                         .selected_session()
                         .map(|session| session.provider)
-                        .filter(|provider| PLAN_USAGE_PROVIDERS.contains(provider))
+                        .filter(|provider| plan_usage_fetch_supported(*provider))
                     {
                         this.plan_usage_stale.insert(provider);
                     }
@@ -677,4 +687,30 @@ pub(super) fn meter_bar(theme: &Theme, percent: f64) -> Div {
         .rounded_full()
         .bg(theme.overlay_strong)
         .child(div().h_full().w(relative(fraction)).rounded_full().bg(fill))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PLAN_USAGE_PROVIDERS, display_plan_usage_error, plan_usage_fetch_supported};
+    use crate::model::ProviderKind;
+
+    #[test]
+    fn never_fetches_plan_usage_for_legacy_external_providers() {
+        for provider in PLAN_USAGE_PROVIDERS {
+            assert!(!provider.is_builtin());
+            assert!(!plan_usage_fetch_supported(provider));
+        }
+        assert!(!plan_usage_fetch_supported(ProviderKind::Native));
+    }
+
+    #[test]
+    fn localizes_external_plan_usage_refusals_before_display() {
+        let raw = "external provider plan usage is not supported";
+        let displayed = display_plan_usage_error(raw);
+        assert!(!displayed.contains(raw));
+        assert_eq!(
+            display_plan_usage_error("the daemon is disconnected"),
+            "the daemon is disconnected"
+        );
+    }
 }

@@ -1004,6 +1004,12 @@ trajectory.mode.actual:
   en: "Actual time"
 trajectory.clear_focus:
   en: "Show all"
+trajectory.export:
+  en: "Export"
+trajectory.exported:
+  en: "Trajectory log exported to %{path}"
+trajectory.export_failed:
+  en: "Could not export trajectory log: %{error}"
 trajectory.lane.input:
   en: "Input"
 trajectory.lane.model:
@@ -2237,6 +2243,8 @@ errors.provider_not_installed:
   en: "%{provider} is not installed — install it in Settings → Providers"
 errors.provider_not_found:
   en: "%{provider} is not installed or could not be found — check Settings → Providers"
+errors.external_cli_unavailable:
+  en: Waku no longer connects to external agent CLIs. Choose a built-in Agent model to start new work; this task’s history remains available.
 errors.claude_fork_checkpoint_missing:
   en: Claude omitted the fork checkpoint
 errors.claude_turn_checkpoint_unavailable:
@@ -2527,8 +2535,12 @@ background.no_work_description:
   en: Long-running commands and subagents will appear here.
 background.view:
   en: View
+background.suspend:
+  en: Suspend
+background.running_notify:
+  en: Running in background · Agent will be notified on completion
 background.stop:
-  en: Stop
+  en: Stop this item
 background.stop_named:
   en: Stop %{name}
 background.stop_all:
@@ -4733,7 +4745,7 @@ team.empty.no_session:
 team.empty.not_native:
   en: "Agent teams run in the built-in agent's tasks."
 team.empty.no_team:
-  en: "This task leads no team yet. Type /agent-teams followed by a goal and the agent plans a team for you to review."
+  en: "This task leads no team yet. Type /agent-teams followed by a goal, or say 'form a team' plus the goal in chat. The agent plans a team for you to review."
 team.action.start:
   en: "Start a team…"
 team.action.approve:
@@ -4750,6 +4762,10 @@ team.action.continue:
   en: "Continue"
 team.stats:
   en: "%{working} of %{members} members working · %{done} of %{tasks} tasks done · %{messages} messages"
+team.draft_models:
+  en: "%{members} members · %{models} models"
+team.draft_models_inherited:
+  en: "%{members} members · %{models} models · %{inherited} inherit the default seat"
 team.profile:
   en: "Template: %{name}"
 team.notice.archived:
@@ -4766,6 +4782,10 @@ team.members_empty:
   en: "No members yet."
 team.member_tasks:
   en: "%{done}/%{total} tasks"
+team.member_model:
+  en: "Model: %{model}"
+team.member_model_inherited:
+  en: "Model: inherit the default seat"
 team.member_unread:
   en: "%{count} unread"
 team.member_current:

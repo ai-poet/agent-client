@@ -71,7 +71,9 @@ impl Waku {
         let theme = Theme::current(cx);
         let session_id = session.id;
         let turn_id = turn.id;
-        let message = error.message.trim().to_owned();
+        let raw_message = error.message.trim().to_owned();
+        let message = super::external_provider::localized_external_cli_error(&raw_message)
+            .unwrap_or(raw_message);
         let long = message.lines().count() > 2 || message.chars().count() > COLLAPSED_CHARS;
         let details_open = self.error_details_open == Some(turn_id);
         let copy_text = message.clone();

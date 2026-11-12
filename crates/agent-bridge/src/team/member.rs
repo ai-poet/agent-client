@@ -209,6 +209,10 @@ impl MemberRuntime {
         &self.id
     }
 
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn activity(&self) -> MemberActivity {
         if self.state.lock().running {
             MemberActivity::Running

@@ -726,10 +726,11 @@ impl Waku {
             .map(|vendor| native_vendor_color(&theme, vendor))
             .unwrap_or_else(|| provider_color(&theme, provider));
         let locked_provider = session
-            .filter(|session| !session.messages.is_empty())
+            .filter(|session| session.provider.is_builtin() && !session.messages.is_empty())
             .map(|session| session.provider);
         let picker_enabled = session.is_some_and(|session| {
-            session.provider.is_builtin() && session.can_choose_model(provider)
+            session.can_choose_model(provider)
+                || (!session.provider.is_builtin() && !session.status.is_busy())
         });
 
         if !picker_enabled {
@@ -1302,7 +1303,7 @@ impl Waku {
         let provider = session.map(|session| session.provider).unwrap_or_default();
         let selected_model = session.and_then(|session| self.model_for_session(session));
         let locked_provider = session
-            .filter(|session| !session.messages.is_empty())
+            .filter(|session| session.provider.is_builtin() && !session.messages.is_empty())
             .map(|session| session.provider);
         let index = visible_picker_models(
             &self.probes,

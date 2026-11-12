@@ -36,7 +36,7 @@ pub fn tool_specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
             name: "agent_teams_create",
-            description: "Create a team. Use approval=required for a two-phase plan: members and tasks remain unspawned/unclaimed until the user reviews the plan in the Team panel and explicitly approves it. Optional profiles expand their configured roster; seed profiles also expand template tasks, while captain profiles leave the graph for the Captain to design. approval=automatic preserves the legacy immediate-execution path.",
+            description: "Create a team for an explicit user request in any language, such as 组队做 X or 'form a team to do X'. First call agent_teams_status; if a current team exists, continue it or revise its staged plan instead of creating another. Every model call creates a staged plan, even when approval is omitted or automatic: members and tasks remain unspawned/unclaimed until the user reviews the plan in the Team panel and explicitly approves it. Never approve in the creation turn. Optional profiles expand their configured roster; seed profiles also expand template tasks, while captain profiles leave the graph for the Captain to design. approval=automatic is retained only for legacy direct-runtime API compatibility and cannot bypass review through this tool.",
             input_schema: object(
                 json!({
                     "name": string("Name for the new team (used as its stable id)."),
@@ -73,7 +73,7 @@ pub fn tool_specs() -> Vec<ToolSpec> {
                     "approval": {
                         "type": "string",
                         "enum": ["required", "automatic"],
-                        "description": "required stages the plan for explicit user review; automatic starts immediately. Defaults to automatic for API compatibility.",
+                        "description": "Model calls always stage the plan, including omitted or automatic values. The legacy direct-runtime API alone retains automatic's immediate start.",
                     },
                 }),
                 &["name"],
@@ -337,5 +337,27 @@ mod tests {
             assert_eq!(spec.input_schema["type"], "object", "{}", spec.name);
             assert!(!spec.description.contains("Web"), "{}", spec.name);
         }
+    }
+
+    #[test]
+    fn create_schema_guides_natural_language_requests_through_review() {
+        let specs = tool_specs();
+        let create = specs
+            .iter()
+            .find(|spec| spec.name == "agent_teams_create")
+            .unwrap();
+        assert!(create.description.contains("组队做 X"));
+        assert!(create.description.contains("form a team to do X"));
+        assert!(create.description.contains("agent_teams_status"));
+        assert!(
+            create
+                .description
+                .contains("Every model call creates a staged plan")
+        );
+        assert!(create.description.contains("cannot bypass review"));
+        assert_eq!(
+            create.input_schema["properties"]["approval"]["enum"],
+            json!(["required", "automatic"])
+        );
     }
 }

@@ -1,4 +1,5 @@
 import type { AgentSession, ProviderKind } from 'client'
+import { isExternalProvider } from './provider-policy'
 
 const STORAGE_KEY = 'waku.composer-preferences.v1'
 
@@ -80,7 +81,7 @@ export function rememberComposerSession(
     'provider' | 'model' | 'reasoning_effort' | 'service_tier' | 'context_window'
   >,
 ): ComposerPreferences {
-  if (!session.model) return preferences
+  if (!session.model || isExternalProvider(session.provider)) return preferences
   const reasoningEffort = session.reasoning_effort ?? null
   const serviceTier = session.service_tier ?? null
   const contextWindow = session.context_window ?? null

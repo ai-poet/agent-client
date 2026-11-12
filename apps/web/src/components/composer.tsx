@@ -78,6 +78,12 @@ import { isProjectlessProject, projectDisplayName } from '@/lib/project-presenta
 import type { PendingUserInput } from '@/lib/event-reducer'
 import { useRuntime } from '@/lib/runtime-context'
 import { sessionHasStarted } from '@/lib/sidebar-presentation'
+import {
+  isExternalProvider,
+  localizedErrorMessage,
+  preferredNativeModel,
+  redirectDraftToNative,
+} from '@/lib/provider-policy'
 import { cn } from '@/lib/utils'
 
 type Translator = (key: string, params?: Record<string, string | number>) => string
@@ -131,6 +137,7 @@ export function Composer({
   onAddProject,
   onProjectless,
   onResume,
+  onExternalModelChange,
   onFocusSignalHandled,
   onModelPickerSignalHandled,
   onUsagePanelSignalHandled,
@@ -153,6 +160,11 @@ export function Composer({
   onAddProject?: () => void
   onProjectless?: () => void
   onResume?: () => void
+  onExternalModelChange?: (
+    session: AgentSession,
+    provider: 'native',
+    model: ProviderModel,
+  ) => void
   onFocusSignalHandled?: () => void
   onModelPickerSignalHandled?: () => void
   onUsagePanelSignalHandled?: () => void
@@ -174,7 +186,7 @@ export function Composer({
     userInputs,
     runtimes,
   } = useRuntime()
-  const probe = useProviderProbe(session.provider)
+  const probe = useProviderProbe('native')
   const cwd = sessionCwd(session, project)
   const branches = useWorkspaceBranches(cwd)
   const composerFiles = useComposerFiles(cwd)
@@ -187,6 +199,7 @@ export function Composer({
     () => initialComposerDraft?.attachments ?? [],
   )
   const [submitting, setSubmitting] = useState(false)
+  const [redirectPickerSignal, setRedirectPickerSignal] = useState(0)
   const [uploading, setUploading] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const [branchPending, setBranchPending] = useState(false)
@@ -209,9 +222,11 @@ export function Composer({
   const permission = permissions[session.id]
   const userInput = userInputs[session.id]
   const runtime = runtimes[session.id]
-  const selectedModel = probe.data?.models.find((model) => model.id === session.model)
-    ?? probe.data?.models.find((model) => model.is_default)
-    ?? probe.data?.models[0]
+  const selectedModel = session.provider === 'native'
+    ? probe.data?.models.find((model) => model.id === session.model)
+      ?? probe.data?.models.find((model) => model.is_default)
+      ?? probe.data?.models[0]
+    : undefined
   const hasDraft = Boolean(prompt.trim() || attachments.length)
   const canSteer = busy && session.status !== 'connecting' && runtime?.supportsSteer
   const workspace = session.workspace ?? { kind: 'local' as const }
@@ -259,7 +274,7 @@ export function Composer({
 
   function stopTurn() {
     clearEscapeStop()
-    void cancel(session.id).catch((error) => toast.error(errorMessage(error)))
+    void cancel(session.id).catch((error) => toast.error(localizedErrorMessage(error, t)))
   }
 
   useEffect(() => {
@@ -349,17 +364,23 @@ export function Composer({
     draftChange.current?.({ text: prompt, attachments })
   }, [attachments, prompt])
 
-  async function activateDraft() {
-    if (!draft) return session
-    return saveSession(session, project)
+  function showExternalProviderNotice() {
+    toast.error(t('errors.external_cli_unavailable'))
+    setRedirectPickerSignal((value) => value + 1)
+  }
+
+  async function activateDraft(targetSession: AgentSession) {
+    if (!draft) return targetSession
+    return saveSession(targetSession, project)
   }
 
   function providerPromptOverride(
     submittedPrompt: string,
     submittedAttachments: MessageAttachment[],
+    provider = session.provider,
   ): string | undefined {
     const expanded = expandedComposerSubmission(
-      session.provider,
+      provider,
       submittedPrompt.trim(),
       availableCommands,
     )
@@ -405,7 +426,7 @@ export function Composer({
   }
 
   function dispatchGoal(operation: GoalOperation) {
-    void sendGoalOperation(session, operation).catch((error) => toast.error(errorMessage(error)))
+    void sendGoalOperation(session, operation).catch((error) => toast.error(localizedErrorMessage(error, t)))
   }
 
   /** Codex's native `/goal` command, bridged to app-server without starting a
@@ -450,18 +471,56 @@ export function Composer({
 
   async function submit() {
     if (submitting || (!prompt.trim() && attachments.length === 0)) return
+    let submissionSession = session
+    if (isExternalProvider(session.provider)) {
+      if (sessionHasStarted(session)) {
+        showExternalProviderNotice()
+        return
+      }
+      const preferences = config
+        ? readComposerPreferences(browserComposerPreferenceStorage(), config.address)
+        : readComposerPreferences(null, 'disconnected')
+      const model = preferredNativeModel(preferences.lastModel, probe.data?.models ?? [])
+      submissionSession = redirectDraftToNative(session, model)
+      const remembered = model
+        ? rememberedModelTraits(preferences, 'native', model)
+        : undefined
+      const defaults = probe.data?.models.find((candidate) => candidate.id === model)
+      submissionSession = {
+        ...submissionSession,
+        reasoning_effort: remembered?.reasoningEffort
+          ?? defaults?.default_reasoning_effort
+          ?? null,
+        service_tier: remembered?.serviceTier ?? defaults?.default_service_tier ?? null,
+        context_window: remembered?.contextWindow ?? null,
+      }
+      savePatch({
+        provider: 'native',
+        model,
+        reasoning_effort: submissionSession.reasoning_effort,
+        service_tier: submissionSession.service_tier,
+        context_window: submissionSession.context_window,
+        provider_cursor: null,
+        agent_preset: null,
+      })
+      if (!model) {
+        showExternalProviderNotice()
+        return
+      }
+      toast(t('errors.external_cli_unavailable'))
+    }
     if (executeLocalComposerCommand()) return
     const submittedPrompt = prompt
     const submittedAttachments = attachments
     let cleared = false
     setSubmitting(true)
     try {
-      const target = await activateDraft()
+      const target = await activateDraft(submissionSession)
       const pending = sendPrompt(
         target,
         submittedPrompt,
         submittedAttachments,
-        providerPromptOverride(submittedPrompt, submittedAttachments),
+        providerPromptOverride(submittedPrompt, submittedAttachments, target.provider),
       )
       onComposerDraftSubmitted?.()
       setPrompt('')
@@ -481,7 +540,7 @@ export function Composer({
         setPrompt((current) => current || submittedPrompt)
         setAttachments((current) => current.length ? current : submittedAttachments)
       }
-      toast.error(errorMessage(error))
+      toast.error(localizedErrorMessage(error, t))
     } finally {
       setSubmitting(false)
     }
@@ -513,7 +572,7 @@ export function Composer({
         setPrompt((current) => current || submittedPrompt)
         setAttachments((current) => current.length ? current : submittedAttachments)
       }
-      toast.error(errorMessage(error))
+      toast.error(localizedErrorMessage(error, t))
     } finally {
       setSubmitting(false)
     }
@@ -527,7 +586,7 @@ export function Composer({
       if (!mounted.current) return
       setAttachments((current) => [...current, ...imported])
     } catch (error) {
-      toast.error(errorMessage(error))
+      toast.error(localizedErrorMessage(error, t))
     } finally {
       setUploading(false)
     }
@@ -545,7 +604,7 @@ export function Composer({
         : [...current, imported])
       return true
     } catch (error) {
-      toast.error(errorMessage(error))
+      toast.error(localizedErrorMessage(error, t))
       return false
     } finally {
       setUploading(false)
@@ -563,7 +622,7 @@ export function Composer({
       writeComposerPreferences(storage, config.address, preferences)
     }
     if (draft) onDraftChange?.(next)
-    else void saveSession(next).catch((error) => toast.error(errorMessage(error)))
+    else void saveSession(next).catch((error) => toast.error(localizedErrorMessage(error, t)))
   }
 
   function acceptAutocomplete(index = autocompleteHighlight) {
@@ -626,7 +685,7 @@ export function Composer({
         queryKey: daemonKeys.workspace(config.address, cwd),
       })
     } catch (error) {
-      toast.error(errorMessage(error))
+      toast.error(localizedErrorMessage(error, t))
     } finally {
       setBranchPending(false)
     }
@@ -651,7 +710,7 @@ export function Composer({
                   variant={option.allow ? 'default' : 'outline'}
                   onClick={() => {
                     void respond(session.id, permission.requestId, option.id).catch((error) =>
-                      toast.error(errorMessage(error)),
+                      toast.error(localizedErrorMessage(error, t)),
                     )
                   }}
                 >
@@ -681,24 +740,24 @@ export function Composer({
             setPrompt(message.display_content ?? message.content)
             setAttachments(message.attachments ?? [])
             void removeQueuedMessage(session.id, message.id).catch((error) =>
-              toast.error(errorMessage(error)),
+              toast.error(localizedErrorMessage(error, t)),
             )
           }}
           onRemove={(messageId) =>
             void removeQueuedMessage(session.id, messageId).catch((error) =>
-              toast.error(errorMessage(error)),
+              toast.error(localizedErrorMessage(error, t)),
             )
           }
           onSteer={(message) => {
             void removeQueuedMessage(session.id, message.id).catch((error) =>
-              toast.error(errorMessage(error)),
+              toast.error(localizedErrorMessage(error, t)),
             )
             void steerPrompt(
               session,
               message.display_content ?? message.content,
               message.attachments ?? [],
               message.content,
-            ).catch((error) => toast.error(errorMessage(error)))
+            ).catch((error) => toast.error(localizedErrorMessage(error, t)))
           }}
         />
 
@@ -770,11 +829,18 @@ export function Composer({
           >
             <ModelPicker
               currentProbe={probe.data}
-              openSignal={modelPickerSignal}
-              onOpenSignalHandled={onModelPickerSignalHandled}
+              openSignal={modelPickerSignal || redirectPickerSignal}
+              onOpenSignalHandled={() => {
+                setRedirectPickerSignal(0)
+                onModelPickerSignalHandled?.()
+              }}
               returnFocus={composerInput}
               session={session}
               onChange={(provider, model) => {
+                if (isExternalProvider(session.provider) && sessionHasStarted(session)) {
+                  onExternalModelChange?.(session, 'native', model)
+                  return
+                }
                 const preferences = config
                   ? readComposerPreferences(browserComposerPreferenceStorage(), config.address)
                   : null
@@ -1045,7 +1111,7 @@ function UserInputPanel({
         }
       }))
     } catch (error) {
-      toast.error(errorMessage(error))
+      toast.error(localizedErrorMessage(error, t))
       setSubmitting(false)
     }
   }
@@ -1955,7 +2021,7 @@ function UsageMeter({
     onOpenSignalHandled?.()
   }, [openSignal, onOpenSignalHandled])
 
-  const error = plan.error ? errorMessage(plan.error) : null
+  const error = plan.error ? localizedErrorMessage(plan.error, t) : null
   const tooltip = error
     ? t('usage.refresh_failed', { error })
     : contextPercent == null
@@ -2167,8 +2233,4 @@ function resetLabel(resetsAt: number, locale: string, t: Translator) {
 function formatTokens(tokens: number) {
   if (tokens >= 999_500) return `${(tokens / 1_000_000).toFixed(1)}M`
   return tokens >= 1_000 ? `${(tokens / 1_000).toFixed(1)}k` : `${tokens}`
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error)
 }

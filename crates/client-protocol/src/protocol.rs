@@ -95,6 +95,10 @@ pub enum Command {
     Cancel,
     CancelComputerUse,
     RefreshBackgroundWork,
+    SuspendBackgroundWork {
+        key: Value,
+        control_id: String,
+    },
     StopBackgroundWork {
         key: Value,
         control_id: String,
@@ -537,6 +541,19 @@ mod tests {
             panic!("unexpected command variant");
         };
         assert_eq!(data, vec![0, 1, 2, 255]);
+    }
+
+    #[test]
+    fn background_suspend_command_uses_the_existing_key_and_control_id() {
+        let command = Command::SuspendBackgroundWork {
+            key: serde_json::json!({"kind": "subagent", "providerId": "call-1"}),
+            control_id: "call-1".into(),
+        };
+        let json = serde_json::to_value(&command).unwrap();
+        assert_eq!(json["type"], "suspendBackgroundWork");
+        assert_eq!(json["controlId"], "call-1");
+        let decoded: Command = serde_json::from_value(json).unwrap();
+        assert!(matches!(decoded, Command::SuspendBackgroundWork { .. }));
     }
 
     #[test]

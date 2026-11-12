@@ -18,6 +18,23 @@ use super::composer::ComposerSubmitAction;
 use super::*;
 use crate::ui::ActivationExt as _;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ComposerProviderAction {
+    Submit,
+    RedirectToBuiltin,
+    ShowExternalCliPicker,
+}
+
+fn composer_provider_action(provider: ProviderKind, has_started: bool) -> ComposerProviderAction {
+    if provider.is_builtin() {
+        ComposerProviderAction::Submit
+    } else if has_started {
+        ComposerProviderAction::ShowExternalCliPicker
+    } else {
+        ComposerProviderAction::RedirectToBuiltin
+    }
+}
+
 impl Waku {
     pub(super) fn render_submit_controls(
         &self,
@@ -55,7 +72,7 @@ impl Waku {
                     .child(icon("icons/arrow-up.svg", 16.0, theme.on_inverse))
                     .tooltip(Tooltip::text(tr!("composer.queue_followup")))
                     .on_activation(cx, |this, window, cx| {
-                        this.submit_composer_draft(cx);
+                        this.submit_composer_draft(window, cx);
                         this.refocus_composer(window, cx);
                     })
             }
@@ -106,19 +123,69 @@ impl Waku {
                     element.tooltip(Tooltip::text(tr!("composer.no_providers")))
                 })
                 .on_activation(cx, |this, window, cx| {
-                    this.submit_composer_draft(cx);
+                    this.submit_composer_draft(window, cx);
                     this.refocus_composer(window, cx);
                 }),
         }
     }
 
     /// Send, or queue behind a running turn, whatever the composer holds.
-    fn submit_composer_draft(&mut self, cx: &mut Context<Self>) {
+    fn submit_composer_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let prompt = self.composer.read(cx).content(cx).to_owned();
-        if let Some(submission) = self.submission_with_attachments(&prompt, cx) {
-            self.composer.update(cx, |input, cx| input.clear(cx));
-            self.submit_composer_submission(submission, cx);
+        self.submit_composer_prompt(&prompt, false, window, cx);
+    }
+
+    /// The send button and keyboard events share the external-provider redirect
+    /// and picker. Keyboard input clears its field before emitting, so a refused
+    /// submission puts the prompt back without consuming staged attachments.
+    pub(super) fn submit_composer_prompt(
+        &mut self,
+        prompt: &str,
+        steer: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let action = self
+            .selected_session()
+            .map(|session| composer_provider_action(session.provider, session.has_started()))
+            .unwrap_or(ComposerProviderAction::Submit);
+        match action {
+            ComposerProviderAction::Submit => {}
+            ComposerProviderAction::ShowExternalCliPicker => {
+                self.restore_composer_prompt(prompt, cx);
+                self.show_external_cli_notice_and_picker(window, cx);
+                return;
+            }
+            ComposerProviderAction::RedirectToBuiltin => {
+                let Some(session_id) = self.selected_session().map(|session| session.id) else {
+                    return;
+                };
+                self.redirect_unstarted_session_to_builtin(session_id, cx);
+                if self
+                    .selected_session()
+                    .is_some_and(|session| session.model.is_none())
+                {
+                    self.restore_composer_prompt(prompt, cx);
+                    self.show_external_cli_notice_and_picker(window, cx);
+                    return;
+                }
+            }
         }
+        if let Some(submission) = self.submission_with_attachments(prompt, cx) {
+            self.composer.update(cx, |input, cx| input.clear(cx));
+            if steer {
+                self.steer_composer_submission(submission, cx);
+            } else {
+                self.submit_composer_submission(submission, cx);
+            }
+        }
+    }
+
+    fn restore_composer_prompt(&mut self, prompt: &str, cx: &mut Context<Self>) {
+        self.composer
+            .update(cx, |input, cx| input.set_content(prompt, cx));
+        self.schedule_composer_draft_save(cx);
+        cx.notify();
     }
 
     fn refocus_composer(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -142,4 +209,30 @@ fn submit_button(id: &'static str, theme: Theme) -> Stateful<Div> {
         .border_1()
         .border_color(gpui::transparent_black())
         .focus_visible(|style| style.border_color(theme.accent))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ComposerProviderAction, composer_provider_action};
+    use crate::model::ProviderKind;
+
+    #[test]
+    fn started_external_submissions_open_the_picker_for_every_composer_trigger() {
+        assert_eq!(
+            composer_provider_action(ProviderKind::Claude, true),
+            ComposerProviderAction::ShowExternalCliPicker
+        );
+        assert_eq!(
+            composer_provider_action(ProviderKind::Codex, false),
+            ComposerProviderAction::RedirectToBuiltin
+        );
+        assert_eq!(
+            composer_provider_action(ProviderKind::Native, true),
+            ComposerProviderAction::Submit
+        );
+        assert_eq!(
+            composer_provider_action(ProviderKind::Native, false),
+            ComposerProviderAction::Submit
+        );
+    }
 }
