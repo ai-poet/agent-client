@@ -29,6 +29,24 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.3.7]
+
+- 内置 Agent 支持用中英文自然语言发起 Agent Teams：消息发送前不再按关键词预解析，由模型调用组队工具，当前会话担任队长；模型调用无论省略审批参数还是传入 automatic 都只能先建草案，同回合不能自行批准，须在后续用户回合明确批准或点击团队面板按钮后才会启动。斜杠命令及模板别名保留。团队成员的模型路由在草案和成员行中清晰展示。会话详情栏的后台子智能体可单项挂起或停止，长进程可单项停止；后台命令、子智能体与团队成员在成功、失败或停止后主动通知 Agent，主会话忙碌时排队、空闲时自动唤醒，回合收尾竞态下也不会丢失通知
+
+  Built-in agents can start Agent Teams from natural-language requests in Chinese or English: messages are no longer pre-parsed for keywords, and the model calls the team tools itself, with the current session as captain. Model calls always stage a draft, even when approval is omitted or automatic is supplied; same-turn self-approval is rejected, and work starts only after explicit approval in a later user turn or from the Team panel. Slash commands and profile aliases remain available. Member model routes stay visible in drafts and roster rows. Session-detail rows can detach or stop individual background subagents and stop long processes. Background commands, subagents and team members notify the agent on success, failure or stop, queueing while it is busy and waking it when idle without losing notices at the turn-settlement boundary
+
+- 轨迹面板支持导出当前会话的轨迹日志，便于留存记录与排查问题
+
+  The trajectory panel can now export the current session's trajectory logs, making it easier to retain records and investigate issues
+
+- 旧外部 CLI 会话与草稿现在会友好引导至内置 Agent：历史会话仍可阅读，新工作转由内置 Agent 处理，相关操作不再暴露内部错误
+
+  Legacy external CLI sessions and drafts now guide users smoothly to the built-in agent: old transcripts remain readable, new work is handled by the built-in agent, and related actions no longer expose internal errors
+
+- 旧版 Windows 默认改用不透明背景，避免 Acrylic 材质造成窗口漂移；新版 Windows 的 Mica 材质保持不变
+
+  Older Windows versions now use an opaque background by default to prevent window drift caused by Acrylic, while Mica remains unchanged on newer Windows versions
+
 ## [0.3.6]
 
 - 内置 Agent 移植 Sailry 执行内核：加入新的执行状态机、流式响应对应关系、工具并发、取消与中途转向、状态恢复和请求恢复；现有模型、工具、权限与历史数据保持兼容
