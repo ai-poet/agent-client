@@ -1,4 +1,4 @@
-import type { AgentSession, ProviderKind, ProviderModel } from 'client'
+import type { AgentSession, ProviderKind, ProviderModel, ProviderProbe } from 'client'
 import { sessionHasStarted } from './sidebar-presentation'
 
 const EXTERNAL_CLI_ERRORS = [
@@ -10,6 +10,16 @@ const EXTERNAL_CLI_ERRORS = [
 
 export function isExternalProvider(provider: ProviderKind): boolean {
   return provider !== 'native'
+}
+
+/** The built-in agent needs no executable path; legacy providers still do. */
+export function runtimeBinaryForProbe(
+  probe: Pick<ProviderProbe, 'provider' | 'installed' | 'path'>,
+): string | null {
+  if (!probe.installed || (isExternalProvider(probe.provider) && !probe.path)) {
+    return null
+  }
+  return probe.path ?? ''
 }
 
 export function isExternalCliError(error: unknown): boolean {

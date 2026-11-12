@@ -7,6 +7,7 @@ import {
   parseNativeFavoriteModels,
   preferredNativeModel,
   redirectDraftToNative,
+  runtimeBinaryForProbe,
 } from './provider-policy'
 
 describe('built-in provider policy', () => {
@@ -50,6 +51,22 @@ describe('built-in provider policy', () => {
       42,
     ])).toEqual(['native:anthropic::claude-sonnet-5-5'])
     expect(parseNativeFavoriteModels(null)).toEqual([])
+  })
+
+  test('allows native runtime startup without a binary path only when installed', () => {
+    expect(runtimeBinaryForProbe({ provider: 'native', installed: true, path: null })).toBe('')
+    expect(runtimeBinaryForProbe({ provider: 'native', installed: true, path: '/native' }))
+      .toBe('/native')
+    expect(runtimeBinaryForProbe({ provider: 'native', installed: false, path: null })).toBeNull()
+  })
+
+  test('still requires an installed executable path for external runtimes', () => {
+    expect(runtimeBinaryForProbe({ provider: 'codex', installed: true, path: null })).toBeNull()
+    expect(runtimeBinaryForProbe({ provider: 'codex', installed: true, path: '' })).toBeNull()
+    expect(runtimeBinaryForProbe({ provider: 'codex', installed: false, path: '/codex' }))
+      .toBeNull()
+    expect(runtimeBinaryForProbe({ provider: 'codex', installed: true, path: '/codex' }))
+      .toBe('/codex')
   })
 
   test('maps direct and wrapped daemon refusals to the friendly locale key', () => {

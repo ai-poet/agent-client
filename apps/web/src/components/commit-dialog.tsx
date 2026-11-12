@@ -17,7 +17,11 @@ import {
 import { useDaemon } from '@/lib/daemon-context'
 import { useI18n } from '@/lib/i18n'
 import { usePrimaryShortcut } from '@/lib/platform'
-import { isExternalProvider, localizedErrorMessage } from '@/lib/provider-policy'
+import {
+  isExternalProvider,
+  localizedErrorMessage,
+  runtimeBinaryForProbe,
+} from '@/lib/provider-policy'
 import { cn } from '@/lib/utils'
 
 type CommitAction = 'commit' | 'commitAndPush' | 'push'
@@ -95,7 +99,8 @@ export function CommitDialog({
           if (!session) throw new Error(t('commit.no_task'))
           const settings = await loadDaemonSettings(client)
           const probe = await probeProvider(client, session.provider, settings)
-          if (!probe.installed || !probe.path) {
+          const binary = runtimeBinaryForProbe(probe)
+          if (binary === null) {
             throw new Error(t('commit.agent_unavailable'))
           }
           commitMessage = await generateWorkspaceCommitMessage(
@@ -104,7 +109,7 @@ export function CommitDialog({
             includeUnstaged,
             {
               provider: session.provider,
-              binary: probe.path,
+              binary,
               model: session.model ?? null,
               reasoning_effort: session.reasoning_effort ?? null,
             },
