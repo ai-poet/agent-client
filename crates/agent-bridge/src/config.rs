@@ -39,7 +39,8 @@ pub enum WireFormat {
 /// The Gemini models the built-in agent speaks Gemini's own API to. Every
 /// other `gemini-*` stays unoffered rather than guessed at. Kept in step with
 /// the desktop's `native_format_for_model`.
-pub const GEMINI_NATIVE_MODELS: [&str; 2] = ["gemini-4-argon", "gemini-4-carbon"];
+pub const GEMINI_NATIVE_MODELS: [&str; 3] =
+    ["gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"];
 
 /// Whether `model` (lowercased) is one of [`GEMINI_NATIVE_MODELS`].
 fn is_gemini_native(model: &str) -> bool {
@@ -2439,6 +2440,10 @@ mod tests {
             None
         );
         assert_eq!(
+            WireFormat::for_model(Some("gemini"), "gemini-4-hydrogen-high"),
+            None
+        );
+        assert_eq!(
             WireFormat::for_model(Some("gemini"), "gemini-3.1-pro"),
             None
         );
@@ -2484,6 +2489,10 @@ mod tests {
         assert_eq!(
             WireFormat::Gemini.request_url("https://gw.example/antigravity", "gemini-4-carbon"),
             "https://gw.example/antigravity/v1beta/models/gemini-4-carbon:streamGenerateContent"
+        );
+        assert_eq!(
+            WireFormat::Gemini.request_url("https://gw.example/antigravity", "gemini-4-hydrogen"),
+            "https://gw.example/antigravity/v1beta/models/gemini-4-hydrogen:streamGenerateContent"
         );
         assert_eq!(
             WireFormat::Chat.request_url("https://gw.example", "glm-5.1"),
