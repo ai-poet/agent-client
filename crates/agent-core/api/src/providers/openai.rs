@@ -172,6 +172,7 @@ impl OpenAiProvider {
             }
             MessageContent::Blocks(blocks) => {
                 let mut user_parts: Vec<Value> = Vec::new();
+                let mut tool_images: Vec<Value> = Vec::new();
                 let flush_user_parts = |result: &mut Vec<Value>, parts: &mut Vec<Value>| {
                     if !parts.is_empty() {
                         result.push(json!({
@@ -182,16 +183,19 @@ impl OpenAiProvider {
                 };
 
                 for block in blocks {
-                    let tool_messages = Self::tool_result_to_openai_messages(block);
-                    if !tool_messages.is_empty() {
+                    if let Some((tool_message, images)) = Self::tool_result_to_openai_message(block)
+                    {
                         flush_user_parts(result, &mut user_parts);
-                        result.extend(tool_messages);
+                        result.push(tool_message);
+                        tool_images.extend(images);
                     } else if let Some(part) = Self::user_block_to_openai_part(block) {
+                        Self::flush_tool_result_images(result, &mut tool_images);
                         user_parts.push(part);
                     }
                 }
 
                 flush_user_parts(result, &mut user_parts);
+                Self::flush_tool_result_images(result, &mut tool_images);
             }
         }
     }
@@ -280,20 +284,38 @@ impl OpenAiProvider {
             MessageContent::Blocks(b) => b,
         };
 
-        blocks
+        let mut messages = Vec::new();
+        let mut tool_images = Vec::new();
+        for (tool_message, images) in blocks
             .iter()
-            .flat_map(Self::tool_result_to_openai_messages)
-            .collect()
+            .filter_map(Self::tool_result_to_openai_message)
+        {
+            messages.push(tool_message);
+            tool_images.extend(images);
+        }
+        Self::flush_tool_result_images(&mut messages, &mut tool_images);
+        messages
     }
 
-    fn tool_result_to_openai_messages(block: &ContentBlock) -> Vec<Value> {
+    fn flush_tool_result_images(result: &mut Vec<Value>, images: &mut Vec<Value>) {
+        if !images.is_empty() {
+            result.push(json!({
+                "role": "user",
+                "content": std::mem::take(images),
+            }));
+        }
+    }
+
+    /// Convert a tool result to its tool message and any image parts. Callers
+    /// defer the images until the whole contiguous tool-result batch is emitted.
+    fn tool_result_to_openai_message(block: &ContentBlock) -> Option<(Value, Vec<Value>)> {
         let ContentBlock::ToolResult {
             tool_use_id,
             content,
             ..
         } = block
         else {
-            return Vec::new();
+            return None;
         };
 
         let (text, images) = match content {
@@ -322,16 +344,15 @@ impl OpenAiProvider {
         };
 
         // Chat Completions tool messages carry the call's text. Image content
-        // follows as a user message containing real image_url parts.
-        let mut messages = vec![json!({
-            "role": "tool",
-            "tool_call_id": tool_use_id,
-            "content": text,
-        })];
-        if !images.is_empty() {
-            messages.push(json!({ "role": "user", "content": images }));
-        }
-        messages
+        // follows the complete tool-result batch as one user message.
+        Some((
+            json!({
+                "role": "tool",
+                "tool_call_id": tool_use_id,
+                "content": text,
+            }),
+            images,
+        ))
     }
 
     /// Convert tool definitions to the OpenAI `tools` array format.
@@ -648,6 +669,32 @@ mod tests {
     use super::*;
     use agent_core::types::Message;
 
+    fn image_source(data: &str) -> ImageSource {
+        ImageSource {
+            source_type: "base64".into(),
+            media_type: Some("image/png".into()),
+            data: Some(data.into()),
+            url: None,
+        }
+    }
+
+    fn tool_result(id: &str, text: &str, image_data: Option<&str>) -> ContentBlock {
+        let content = match image_data {
+            Some(data) => ToolResultContent::Blocks(vec![
+                ContentBlock::Text { text: text.into() },
+                ContentBlock::Image {
+                    source: image_source(data),
+                },
+            ]),
+            None => ToolResultContent::Text(text.into()),
+        };
+        ContentBlock::ToolResult {
+            tool_use_id: id.into(),
+            content,
+            is_error: None,
+        }
+    }
+
     #[test]
     fn user_tool_results_become_tool_messages() {
         let messages = vec![
@@ -703,23 +750,11 @@ mod tests {
 
     #[test]
     fn tool_result_images_follow_the_tool_message_as_image_content() {
-        let messages = vec![Message::user_blocks(vec![ContentBlock::ToolResult {
-            tool_use_id: "call_image".into(),
-            content: ToolResultContent::Blocks(vec![
-                ContentBlock::Text {
-                    text: "captured".into(),
-                },
-                ContentBlock::Image {
-                    source: ImageSource {
-                        source_type: "base64".into(),
-                        media_type: Some("image/png".into()),
-                        data: Some("aGVsbG8=".into()),
-                        url: None,
-                    },
-                },
-            ]),
-            is_error: None,
-        }])];
+        let messages = vec![Message::user_blocks(vec![tool_result(
+            "call_image",
+            "captured",
+            Some("aGVsbG8="),
+        )])];
 
         let wire = OpenAiProvider::to_openai_messages(&messages, None);
         assert_eq!(wire.len(), 2);
@@ -730,6 +765,50 @@ mod tests {
         assert_eq!(
             wire[1]["content"][0]["image_url"]["url"],
             "data:image/png;base64,aGVsbG8="
+        );
+    }
+
+    #[test]
+    fn tool_result_images_wait_for_a_following_text_tool_result() {
+        let messages = vec![Message::user_blocks(vec![
+            tool_result("call_image", "captured", Some("aGVsbG8=")),
+            tool_result("call_text", "done", None),
+        ])];
+
+        let wire = OpenAiProvider::to_openai_messages(&messages, None);
+        assert_eq!(wire.len(), 3);
+        assert_eq!(wire[0]["role"], "tool");
+        assert_eq!(wire[0]["tool_call_id"], "call_image");
+        assert_eq!(wire[1]["role"], "tool");
+        assert_eq!(wire[1]["tool_call_id"], "call_text");
+        assert_eq!(wire[1]["content"], "done");
+        assert_eq!(wire[2]["role"], "user");
+        assert_eq!(wire[2]["content"].as_array().map(Vec::len), Some(1));
+        assert_eq!(wire[2]["content"][0]["type"], "image_url");
+    }
+
+    #[test]
+    fn images_from_multiple_tool_results_share_one_trailing_user_message() {
+        let messages = vec![Message::user_blocks(vec![
+            tool_result("call_image_1", "first", Some("aGVsbG8=")),
+            tool_result("call_image_2", "second", Some("d29ybGQ=")),
+        ])];
+
+        let wire = OpenAiProvider::to_openai_messages(&messages, None);
+        assert_eq!(wire.len(), 3);
+        assert_eq!(wire[0]["role"], "tool");
+        assert_eq!(wire[0]["tool_call_id"], "call_image_1");
+        assert_eq!(wire[1]["role"], "tool");
+        assert_eq!(wire[1]["tool_call_id"], "call_image_2");
+        assert_eq!(wire[2]["role"], "user");
+        assert_eq!(wire[2]["content"].as_array().map(Vec::len), Some(2));
+        assert_eq!(
+            wire[2]["content"][0]["image_url"]["url"],
+            "data:image/png;base64,aGVsbG8="
+        );
+        assert_eq!(
+            wire[2]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,d29ybGQ="
         );
     }
 
