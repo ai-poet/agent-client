@@ -31,15 +31,15 @@ pub enum WireFormat {
     Responses,
     /// OpenAI Chat Completions.
     Chat,
-    /// Fork: Google's Gemini `streamGenerateContent`, for the one Gemini
-    /// model the gateway serves to the built-in agent ([`GEMINI_NATIVE_MODELS`]).
+    /// Fork: Google's Gemini `streamGenerateContent`, for the Gemini
+    /// models the gateway serves to the built-in agent ([`GEMINI_NATIVE_MODELS`]).
     Gemini,
 }
 
-/// The Gemini models the built-in agent speaks Gemini's own API to. One for
-/// now, on purpose: every other `gemini-*` stays unoffered rather than
-/// guessed at. Kept in step with the desktop's `native_format_for_model`.
-pub const GEMINI_NATIVE_MODELS: [&str; 1] = ["gemini-4-argon"];
+/// The Gemini models the built-in agent speaks Gemini's own API to. Every
+/// other `gemini-*` stays unoffered rather than guessed at. Kept in step with
+/// the desktop's `native_format_for_model`.
+pub const GEMINI_NATIVE_MODELS: [&str; 2] = ["gemini-4-argon", "gemini-4-carbon"];
 
 /// Whether `model` (lowercased) is one of [`GEMINI_NATIVE_MODELS`].
 fn is_gemini_native(model: &str) -> bool {
@@ -2417,19 +2417,25 @@ mod tests {
         assert_eq!(WireFormat::for_model(None, "my-local-model"), None);
     }
 
-    /// Gemini 4 Argon, and only it, speaks Gemini's own API — whatever
-    /// platform its group reports.
+    /// The supported Gemini 4 models speak Gemini's own API — whatever
+    /// platform their groups report.
     #[test]
-    fn only_gemini_4_argon_speaks_gemini() {
-        for platform in [Some("gemini"), Some("antigravity"), Some("composite"), None] {
-            assert_eq!(
-                WireFormat::for_model(platform, "gemini-4-argon"),
-                Some(WireFormat::Gemini),
-                "{platform:?}"
-            );
+    fn supported_gemini_4_models_speak_gemini() {
+        for model in GEMINI_NATIVE_MODELS {
+            for platform in [Some("gemini"), Some("antigravity"), Some("composite"), None] {
+                assert_eq!(
+                    WireFormat::for_model(platform, model),
+                    Some(WireFormat::Gemini),
+                    "{model} on {platform:?}"
+                );
+            }
         }
         assert_eq!(
             WireFormat::for_model(Some("gemini"), "gemini-4-argon-high"),
+            None
+        );
+        assert_eq!(
+            WireFormat::for_model(Some("gemini"), "gemini-4-carbon-high"),
             None
         );
         assert_eq!(
@@ -2474,6 +2480,10 @@ mod tests {
         assert_eq!(
             WireFormat::Gemini.request_url("https://gw.example/antigravity", "gemini-4-argon"),
             "https://gw.example/antigravity/v1beta/models/gemini-4-argon:streamGenerateContent"
+        );
+        assert_eq!(
+            WireFormat::Gemini.request_url("https://gw.example/antigravity", "gemini-4-carbon"),
+            "https://gw.example/antigravity/v1beta/models/gemini-4-carbon:streamGenerateContent"
         );
         assert_eq!(
             WireFormat::Chat.request_url("https://gw.example", "glm-5.1"),
