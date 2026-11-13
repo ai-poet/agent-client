@@ -431,6 +431,7 @@ impl GoogleProvider {
 
             let mut regular_parts: Vec<Value> = Vec::new();
             let mut tool_result_parts: Vec<Value> = Vec::new();
+            let mut tool_result_image_parts: Vec<Value> = Vec::new();
             let flush_regular_parts = |contents: &mut Vec<Value>, parts: &mut Vec<Value>| {
                 if !parts.is_empty() {
                     contents.push(json!({
@@ -462,14 +463,24 @@ impl GoogleProvider {
                         .or_else(|| Self::infer_tool_name_from_id(tool_use_id))
                         .unwrap_or_else(|| tool_use_id.clone());
                     tool_result_parts.push(Self::tool_result_to_part(&tool_name, content));
+                    if let ToolResultContent::Blocks(blocks) = content {
+                        tool_result_image_parts.extend(blocks.iter().filter_map(
+                            |block| match block {
+                                ContentBlock::Image { .. } => Self::content_block_to_part(block),
+                                _ => None,
+                            },
+                        ));
+                    }
                 } else if let Some(part) = Self::content_block_to_part(block) {
                     flush_tool_result_parts(&mut contents, &mut tool_result_parts);
+                    flush_tool_result_parts(&mut contents, &mut tool_result_image_parts);
                     regular_parts.push(part);
                 }
             }
 
             flush_regular_parts(&mut contents, &mut regular_parts);
             flush_tool_result_parts(&mut contents, &mut tool_result_parts);
+            flush_tool_result_parts(&mut contents, &mut tool_result_image_parts);
         }
 
         // ---- System instruction ----
@@ -1172,6 +1183,42 @@ mod tests {
             contents[1]["parts"][0]["functionResponse"]["name"],
             json!("search")
         );
+    }
+
+    #[test]
+    fn tool_result_images_follow_the_function_response_as_inline_data() {
+        let provider = GoogleProvider::new("test".to_string());
+        let request = test_request(vec![Message::user_blocks(vec![ContentBlock::ToolResult {
+            tool_use_id: "call_search".into(),
+            content: ToolResultContent::Blocks(vec![
+                ContentBlock::Text {
+                    text: "captured".into(),
+                },
+                ContentBlock::Image {
+                    source: agent_core::types::ImageSource {
+                        source_type: "base64".into(),
+                        media_type: Some("image/png".into()),
+                        data: Some("aGVsbG8=".into()),
+                        url: None,
+                    },
+                },
+            ]),
+            is_error: None,
+        }])]);
+
+        let body = provider.build_request_body(&request);
+        let contents = body["contents"].as_array().expect("contents array");
+        assert_eq!(contents.len(), 2);
+        assert_eq!(
+            contents[0]["parts"][0]["functionResponse"]["response"]["content"],
+            "captured"
+        );
+        assert_eq!(contents[1]["role"], "user");
+        assert_eq!(
+            contents[1]["parts"][0]["inlineData"]["mimeType"],
+            "image/png"
+        );
+        assert_eq!(contents[1]["parts"][0]["inlineData"]["data"], "aGVsbG8=");
     }
 
     #[test]

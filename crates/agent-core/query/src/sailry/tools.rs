@@ -145,13 +145,22 @@ impl ToolProvider<RuntimeSession> for ExistingTools {
                 metadata: result.metadata.clone(),
             });
         }
-        let content = vec![ContentBlock::text(
+        let mut content = vec![ContentBlock::text(
             result
                 .structured_content
                 .as_ref()
                 .map(Value::to_string)
                 .unwrap_or_else(|| result.content.clone()),
         )];
+        content.extend(result.images.iter().filter_map(|source| {
+            Some(ContentBlock::Image(rmcp::model::ImageContent::new(
+                source.data.clone()?,
+                source
+                    .media_type
+                    .clone()
+                    .unwrap_or_else(|| "image/png".into()),
+            )))
+        }));
         let mut output = if result.is_error {
             CallToolResult::error(content)
         } else {

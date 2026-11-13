@@ -868,8 +868,8 @@ fn decode_image_reference(reference: &str) -> anyhow::Result<EmittedImage> {
             mime_type: mime_type.into(),
         });
     }
-    if let Some(path) = reference.strip_prefix("file://") {
-        let path = percent_decode_path(path)?;
+    if reference.starts_with("file:") {
+        let path = file_url_path(reference)?;
         let bytes =
             fs::read(&path).with_context(|| format!("could not read image {}", path.display()))?;
         let mime_type = image_mime_type(&path, &bytes)?;
@@ -879,6 +879,47 @@ fn decode_image_reference(reference: &str) -> anyhow::Result<EmittedImage> {
         });
     }
     bail!("emitImage expects a base64 data URL or file URL")
+}
+
+fn file_url_path(reference: &str) -> anyhow::Result<PathBuf> {
+    let url = url::Url::parse(reference).context("invalid file URL")?;
+    if url.scheme() != "file" {
+        bail!("emitImage expects a file URL");
+    }
+    file_url_path_for_platform(&url, cfg!(windows))
+}
+
+fn file_url_path_for_platform(url: &url::Url, windows: bool) -> anyhow::Result<PathBuf> {
+    if !windows {
+        return url
+            .to_file_path()
+            .map_err(|_| anyhow!("file URL is not a local path"));
+    }
+
+    let decoded = percent_decode_path(url.path())?;
+    let decoded = decoded
+        .to_str()
+        .ok_or_else(|| anyhow!("file URL is not UTF-8"))?;
+    if let Some(host) = url
+        .host_str()
+        .filter(|host| !host.is_empty() && !host.eq_ignore_ascii_case("localhost"))
+    {
+        return Ok(PathBuf::from(format!(
+            "\\\\{host}{}",
+            decoded.replace('/', "\\")
+        )));
+    }
+    let path = decoded
+        .strip_prefix('/')
+        .filter(|path| {
+            let bytes = path.as_bytes();
+            bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+        })
+        .unwrap_or(decoded);
+    if path.is_empty() {
+        bail!("file URL has no path");
+    }
+    Ok(PathBuf::from(path.replace('/', "\\")))
 }
 
 fn percent_decode_path(path: &str) -> anyhow::Result<PathBuf> {
@@ -1380,6 +1421,53 @@ mod tests {
         assert_eq!(result["content"][1]["type"], "image");
         assert_eq!(result["content"][1]["data"], "aGVsbG8=");
         assert_eq!(result["_meta"]["source"], "quickjs");
+    }
+
+    #[test]
+    fn file_urls_use_windows_and_posix_path_rules() {
+        let windows = url::Url::parse(
+            "file:///C:/Users/yuanshenplayer/AppData/Local/Temp/cheaprouter-image-%20a.png",
+        )
+        .unwrap();
+        assert_eq!(
+            file_url_path_for_platform(&windows, true).unwrap(),
+            PathBuf::from(
+                "C:\\Users\\yuanshenplayer\\AppData\\Local\\Temp\\cheaprouter-image- a.png"
+            )
+        );
+        let localhost = url::Url::parse("file://localhost/C:/work/image.png").unwrap();
+        assert_eq!(
+            file_url_path_for_platform(&localhost, true).unwrap(),
+            PathBuf::from("C:\\work\\image.png")
+        );
+        let unc = url::Url::parse("file://server/share/a%20b.png").unwrap();
+        assert_eq!(
+            file_url_path_for_platform(&unc, true).unwrap(),
+            PathBuf::from("\\\\server\\share\\a b.png")
+        );
+        let posix = url::Url::parse("file:///tmp/a%20b.png").unwrap();
+        assert_eq!(
+            file_url_path_for_platform(&posix, false).unwrap(),
+            PathBuf::from("/tmp/a b.png")
+        );
+    }
+
+    #[test]
+    fn file_url_images_become_mcp_image_content() {
+        let path =
+            std::env::temp_dir().join(format!("waku-file-url-image-{}.png", uuid::Uuid::new_v4()));
+        let bytes = b"\x89PNG\r\n\x1a\nhello";
+        fs::write(&path, bytes).unwrap();
+        let url = url::Url::from_file_path(&path).unwrap();
+        let image = decode_image_reference(url.as_str()).unwrap();
+        assert_eq!(image.mime_type, "image/png");
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(image.data)
+                .unwrap(),
+            bytes
+        );
+        fs::remove_file(path).unwrap();
     }
 
     #[test]

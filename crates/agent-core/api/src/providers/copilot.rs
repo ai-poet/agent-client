@@ -330,6 +330,7 @@ impl CopilotProvider {
                 MessageContent::Blocks(blocks) => match &message.role {
                     Role::User => {
                         let mut message_parts = Vec::new();
+                        let mut pending_tool_images = Vec::new();
                         let flush_user_content =
                             |input: &mut Vec<Value>, content: &mut Vec<Value>| {
                                 if !content.is_empty() {
@@ -339,8 +340,18 @@ impl CopilotProvider {
                                     }));
                                 }
                             };
+                        let flush_tool_images =
+                            |input: &mut Vec<Value>, images: &mut Vec<Value>| {
+                                if !images.is_empty() {
+                                    input.push(json!({
+                                        "role": "user",
+                                        "content": std::mem::take(images),
+                                    }));
+                                }
+                            };
                         for (index, block) in blocks.iter().enumerate() {
                             if let Some(part) = Self::user_block_to_responses_part(block, index) {
+                                flush_tool_images(&mut input, &mut pending_tool_images);
                                 message_parts.push(part);
                             } else if let ContentBlock::ToolResult {
                                 tool_use_id,
@@ -354,9 +365,22 @@ impl CopilotProvider {
                                     "call_id": tool_use_id,
                                     "output": Self::tool_result_to_response_output(content),
                                 }));
+                                if let ToolResultContent::Blocks(blocks) = content {
+                                    pending_tool_images.extend(
+                                        blocks.iter().enumerate().filter_map(|(index, block)| {
+                                            match block {
+                                                ContentBlock::Image { .. } => {
+                                                    Self::user_block_to_responses_part(block, index)
+                                                }
+                                                _ => None,
+                                            }
+                                        }),
+                                    );
+                                }
                             }
                         }
                         flush_user_content(&mut input, &mut message_parts);
+                        flush_tool_images(&mut input, &mut pending_tool_images);
                     }
                     Role::Assistant => {
                         let mut message_parts = Vec::new();
@@ -1350,5 +1374,117 @@ impl LlmProvider for CopilotProvider {
             structured_output: true,
             system_prompt_style: SystemPromptStyle::SystemMessage,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_core::types::Message;
+
+    fn image_source(data: &str) -> ImageSource {
+        ImageSource {
+            source_type: "base64".into(),
+            media_type: Some("image/png".into()),
+            data: Some(data.into()),
+            url: None,
+        }
+    }
+
+    fn tool_result(id: &str, text: &str, image_data: Option<&str>) -> ContentBlock {
+        let content = match image_data {
+            Some(data) => ToolResultContent::Blocks(vec![
+                ContentBlock::Text { text: text.into() },
+                ContentBlock::Image {
+                    source: image_source(data),
+                },
+            ]),
+            None => ToolResultContent::Text(text.into()),
+        };
+        ContentBlock::ToolResult {
+            tool_use_id: id.into(),
+            content,
+            is_error: None,
+        }
+    }
+
+    fn responses_request(blocks: Vec<ContentBlock>) -> ProviderRequest {
+        ProviderRequest {
+            model: "gpt-5.4".into(),
+            messages: vec![Message::user_blocks(blocks)],
+            system_prompt: None,
+            tools: Vec::new(),
+            max_tokens: 512,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: Vec::new(),
+            thinking: None,
+            provider_options: json!({}),
+        }
+    }
+
+    #[test]
+    fn responses_tool_images_follow_the_call_output_as_input_images() {
+        let request = responses_request(vec![tool_result(
+            "call_image",
+            "captured",
+            Some("aGVsbG8="),
+        )]);
+
+        let input = CopilotProvider::to_responses_input(&request);
+        assert_eq!(input.len(), 2);
+        assert_eq!(input[0]["type"], "function_call_output");
+        assert_eq!(input[0]["output"], "captured");
+        assert_eq!(input[1]["role"], "user");
+        assert_eq!(input[1]["content"][0]["type"], "input_image");
+        assert_eq!(
+            input[1]["content"][0]["image_url"],
+            "data:image/png;base64,aGVsbG8="
+        );
+    }
+
+    #[test]
+    fn responses_tool_images_wait_for_a_following_text_call_output() {
+        let request = responses_request(vec![
+            tool_result("call_image", "captured", Some("aGVsbG8=")),
+            tool_result("call_text", "done", None),
+        ]);
+
+        let input = CopilotProvider::to_responses_input(&request);
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[0]["type"], "function_call_output");
+        assert_eq!(input[0]["call_id"], "call_image");
+        assert_eq!(input[1]["type"], "function_call_output");
+        assert_eq!(input[1]["call_id"], "call_text");
+        assert_eq!(input[1]["output"], "done");
+        assert_eq!(input[2]["role"], "user");
+        assert_eq!(input[2]["content"].as_array().map(Vec::len), Some(1));
+        assert_eq!(input[2]["content"][0]["type"], "input_image");
+    }
+
+    #[test]
+    fn responses_images_from_multiple_results_share_one_trailing_user_item() {
+        let request = responses_request(vec![
+            tool_result("call_image_1", "first", Some("aGVsbG8=")),
+            tool_result("call_image_2", "second", Some("d29ybGQ=")),
+        ]);
+
+        let input = CopilotProvider::to_responses_input(&request);
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[0]["type"], "function_call_output");
+        assert_eq!(input[0]["call_id"], "call_image_1");
+        assert_eq!(input[1]["type"], "function_call_output");
+        assert_eq!(input[1]["call_id"], "call_image_2");
+        assert_eq!(input[2]["role"], "user");
+        assert_eq!(input[2]["content"].as_array().map(Vec::len), Some(2));
+        assert_eq!(
+            input[2]["content"][0]["image_url"],
+            "data:image/png;base64,aGVsbG8="
+        );
+        assert_eq!(
+            input[2]["content"][1]["image_url"],
+            "data:image/png;base64,d29ybGQ="
+        );
     }
 }

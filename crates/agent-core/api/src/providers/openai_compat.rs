@@ -1120,7 +1120,46 @@ impl LlmProvider for OpenAiCompatProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_core::types::{ImageSource, Message, ToolResultContent};
     use serde_json::json;
+
+    fn tool_result(id: &str, text: &str, image_data: Option<&str>) -> ContentBlock {
+        let content = match image_data {
+            Some(data) => ToolResultContent::Blocks(vec![
+                ContentBlock::Text { text: text.into() },
+                ContentBlock::Image {
+                    source: ImageSource {
+                        source_type: "base64".into(),
+                        media_type: Some("image/png".into()),
+                        data: Some(data.into()),
+                        url: None,
+                    },
+                },
+            ]),
+            None => ToolResultContent::Text(text.into()),
+        };
+        ContentBlock::ToolResult {
+            tool_use_id: id.into(),
+            content,
+            is_error: None,
+        }
+    }
+
+    fn request_with_tool_results(results: Vec<ContentBlock>) -> ProviderRequest {
+        ProviderRequest {
+            model: "test-model".into(),
+            messages: vec![Message::user_blocks(results)],
+            system_prompt: None,
+            tools: Vec::new(),
+            max_tokens: 512,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: Vec::new(),
+            thinking: None,
+            provider_options: json!({}),
+        }
+    }
 
     #[test]
     fn mistral_tool_ids_match_opencode_style() {
@@ -1147,6 +1186,50 @@ mod tests {
         assert_eq!(messages.len(), 3);
         assert_eq!(messages[1]["role"], json!("assistant"));
         assert_eq!(messages[1]["content"], json!("Done."));
+    }
+
+    #[test]
+    fn multi_tool_images_keep_the_batch_contiguous_with_or_without_sequence_fix() {
+        for fix_tool_user_sequence in [false, true] {
+            for second_has_image in [false, true] {
+                let provider = OpenAiCompatProvider::new("test", "Test", "https://example.com")
+                    .with_quirks(ProviderQuirks {
+                        fix_tool_user_sequence,
+                        ..Default::default()
+                    });
+                let request = request_with_tool_results(vec![
+                    tool_result("call_image_1", "first", Some("aGVsbG8=")),
+                    tool_result("call_2", "second", second_has_image.then_some("d29ybGQ=")),
+                ]);
+
+                let messages = provider.build_messages(&request);
+                let roles = messages
+                    .iter()
+                    .map(|message| message["role"].as_str().unwrap())
+                    .collect::<Vec<_>>();
+                let expected_roles = if fix_tool_user_sequence {
+                    vec!["tool", "tool", "assistant", "user"]
+                } else {
+                    vec!["tool", "tool", "user"]
+                };
+                assert_eq!(
+                    roles, expected_roles,
+                    "fix={fix_tool_user_sequence}, second_has_image={second_has_image}"
+                );
+                assert_eq!(messages[0]["tool_call_id"], "call_image_1");
+                assert_eq!(messages[1]["tool_call_id"], "call_2");
+
+                let image_message = messages.last().unwrap();
+                assert_eq!(image_message["role"], "user");
+                assert_eq!(
+                    image_message["content"].as_array().map(Vec::len),
+                    Some(if second_has_image { 2 } else { 1 })
+                );
+                if fix_tool_user_sequence {
+                    assert_eq!(messages[2]["content"], "Done.");
+                }
+            }
+        }
     }
 
     #[test]

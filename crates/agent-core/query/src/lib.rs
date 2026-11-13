@@ -66,7 +66,7 @@ pub use skill_prefetch::{
 use agent_core::config::Config;
 use agent_core::cost::CostTracker;
 use agent_core::error::ClaudeError;
-use agent_core::types::{ContentBlock, Message, Role, ToolResultContent, UsageInfo};
+use agent_core::types::{ContentBlock, ImageSource, Message, Role, ToolResultContent, UsageInfo};
 use agent_core_api::{
     AnthropicStreamEvent, ApiMessage, ApiToolDefinition, CreateMessageRequest, StreamAccumulator,
     StreamHandler, SystemPrompt,
@@ -416,6 +416,22 @@ fn is_visible_delta(delta: &agent_core_api::streaming::ContentDelta) -> bool {
 /// outstanding `tool_use` still receives a matching `tool_result` carrying this
 /// text so the message history stays well-formed.
 const TOOL_CANCELLED_MSG: &str = "Tool execution was cancelled by the user before it completed.";
+
+fn tool_result_content(text: String, images: Vec<ImageSource>) -> ToolResultContent {
+    if images.is_empty() {
+        return ToolResultContent::Text(text);
+    }
+    let mut blocks = Vec::with_capacity(images.len() + 1);
+    if !text.is_empty() {
+        blocks.push(ContentBlock::Text { text });
+    }
+    blocks.extend(
+        images
+            .into_iter()
+            .map(|source| ContentBlock::Image { source }),
+    );
+    ToolResultContent::Blocks(blocks)
+}
 
 fn merge_provider_stream_usage(current: &mut UsageInfo, update: &UsageInfo) {
     if update.total_input() > 0 {
@@ -1729,7 +1745,7 @@ pub async fn run_query_loop(
                             let (results, cancelled) =
                                 run_tool_batch(exec_futures, &tool_ctx.cancel_token).await;
                             batch_cancelled = cancelled;
-                            for ((tool_id, tool_name, tool_input), result) in
+                            for ((tool_id, tool_name, tool_input), mut result) in
                                 calls.iter().zip(results)
                             {
                                 if let Some(ref tx) = event_tx {
@@ -1743,6 +1759,7 @@ pub async fn run_query_loop(
                                 }
                                 // Fork (Waku): the model's copy carries the
                                 // repeat reminder; the transcript's does not.
+                                let images = std::mem::take(&mut result.images);
                                 let content = runner::repeat_guard::with_repeat_note(
                                     &mut repeat_guard,
                                     tool_name,
@@ -1751,7 +1768,7 @@ pub async fn run_query_loop(
                                 );
                                 tool_results.push(ContentBlock::ToolResult {
                                     tool_use_id: tool_id.clone(),
-                                    content: agent_core::types::ToolResultContent::Text(content),
+                                    content: tool_result_content(content, images),
                                     is_error: Some(result.is_error),
                                 });
                             }
@@ -2630,7 +2647,7 @@ pub async fn run_query_loop(
                 // returning promptly) but still emit ToolEnd + build every result
                 // block so the conversation and TUI stay consistent.
                 let mut result_blocks: Vec<ContentBlock> = Vec::with_capacity(prepared.len());
-                for (p, result) in prepared.iter().zip(exec_results) {
+                for (p, mut result) in prepared.iter().zip(exec_results) {
                     if !batch_cancelled {
                         let hooks = &tool_ctx.config.hooks;
                         let post_ctx = agent_core::hooks::HookContext {
@@ -2669,6 +2686,7 @@ pub async fn run_query_loop(
 
                     // Fork (Waku): the model's copy carries the repeat
                     // reminder; the transcript's does not.
+                    let images = std::mem::take(&mut result.images);
                     let content = runner::repeat_guard::with_repeat_note(
                         &mut repeat_guard,
                         &p.name,
@@ -2677,7 +2695,7 @@ pub async fn run_query_loop(
                     );
                     result_blocks.push(ContentBlock::ToolResult {
                         tool_use_id: p.id.clone(),
-                        content: ToolResultContent::Text(content),
+                        content: tool_result_content(content, images),
                         is_error: if result.is_error { Some(true) } else { None },
                     });
                 }
@@ -2997,6 +3015,32 @@ mod tests {
     use super::*;
     use agent_core_api::SystemPrompt;
 
+    #[test]
+    fn tool_images_become_model_content_blocks_without_losing_text() {
+        let content = tool_result_content(
+            "captured".into(),
+            vec![ImageSource {
+                source_type: "base64".into(),
+                media_type: Some("image/png".into()),
+                data: Some("aGVsbG8=".into()),
+                url: None,
+            }],
+        );
+        let ToolResultContent::Blocks(blocks) = content else {
+            panic!("expected typed tool content");
+        };
+        assert!(matches!(&blocks[0], ContentBlock::Text { text } if text == "captured"));
+        assert!(matches!(
+            &blocks[1],
+            ContentBlock::Image { source }
+                if source.media_type.as_deref() == Some("image/png")
+                    && source.data.as_deref() == Some("aGVsbG8=")
+        ));
+        assert!(matches!(
+            tool_result_content("plain".into(), Vec::new()),
+            ToolResultContent::Text(text) if text == "plain"
+        ));
+    }
     /// Waku: the provider branch sizes the next request from what the last
     /// one reported plus the tool results added since — not from the chars/4
     /// estimate of everything, which a cached prompt makes meaningless.

@@ -106,7 +106,8 @@ fn picture_path(mention: &str, cwd: &Path) -> Option<PathBuf> {
     None
 }
 
-/// The raster formats every image API reads.
+/// The raster formats image APIs read directly, plus local formats we can
+/// losslessly transcode to PNG before constructing the content block.
 fn has_picture_extension(name: &str) -> bool {
     Path::new(name)
         .extension()
@@ -114,7 +115,19 @@ fn has_picture_extension(name: &str) -> bool {
         .is_some_and(|extension| {
             matches!(
                 extension.to_ascii_lowercase().as_str(),
-                "png" | "jpg" | "jpeg" | "gif" | "webp"
+                "png"
+                    | "jpg"
+                    | "jpeg"
+                    | "gif"
+                    | "webp"
+                    | "bmp"
+                    | "ico"
+                    | "tif"
+                    | "tiff"
+                    | "pnm"
+                    | "pbm"
+                    | "pgm"
+                    | "ppm"
             )
         })
 }
@@ -125,7 +138,21 @@ fn image_block(path: &Path) -> Option<ContentBlock> {
         return None;
     }
     let bytes = std::fs::read(path).ok()?;
-    let media_type = media_type(&bytes)?;
+    let (bytes, media_type) = match media_type(&bytes) {
+        Some(media_type) => (bytes, media_type),
+        None => {
+            let decoded = image::load_from_memory(&bytes).ok()?;
+            let mut encoded = std::io::Cursor::new(Vec::new());
+            decoded
+                .write_to(&mut encoded, image::ImageFormat::Png)
+                .ok()?;
+            let bytes = encoded.into_inner();
+            if bytes.len() as u64 > MAX_IMAGE_BYTES {
+                return None;
+            }
+            (bytes, "image/png")
+        }
+    };
     Some(ContentBlock::Image {
         source: ImageSource {
             source_type: "base64".to_owned(),
@@ -212,6 +239,34 @@ mod tests {
         std::fs::write(dir.path().join("photo.png"), JPEG).unwrap();
         let message = user_message("see @photo.png, then fix the layout".into(), dir.path());
         assert_eq!(media_types(&message), ["image/jpeg"]);
+    }
+
+    #[test]
+    fn bmp_attachments_are_sent_as_real_png_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("picture.bmp");
+        let mut bmp = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(2, 1)
+            .write_to(&mut bmp, image::ImageFormat::Bmp)
+            .unwrap();
+        std::fs::write(&path, bmp.into_inner()).unwrap();
+
+        let message = user_message("what does @picture.bmp say?".into(), dir.path());
+        let MessageContent::Blocks(blocks) = &message.content else {
+            panic!("expected image blocks");
+        };
+        let ContentBlock::Image { source } = &blocks[0] else {
+            panic!("expected an image first");
+        };
+        assert_eq!(source.media_type.as_deref(), Some("image/png"));
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(source.data.as_deref().unwrap())
+            .unwrap();
+        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert_eq!(
+            image::guess_format(&bytes).unwrap(),
+            image::ImageFormat::Png
+        );
     }
 
     #[test]

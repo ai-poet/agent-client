@@ -583,9 +583,9 @@ pub(super) static NATIVE_WIRE_FORMATS: [WireFormatOption; 4] = [
 ];
 
 /// The Gemini models offered over Gemini's own API. Kept in step with
-/// `agent_bridge::GEMINI_NATIVE_MODELS`: one for now, and every other
-/// `gemini-*` stays unoffered rather than sent somewhere that cannot serve it.
-const NATIVE_GEMINI_MODELS: [&str; 1] = ["gemini-4-argon"];
+/// `agent_bridge::GEMINI_NATIVE_MODELS`: every other `gemini-*` stays
+/// unoffered rather than sent somewhere that cannot serve it.
+const NATIVE_GEMINI_MODELS: [&str; 3] = ["gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"];
 
 fn is_native_gemini(model: &str) -> bool {
     let model = model.trim().to_ascii_lowercase();
@@ -1071,8 +1071,7 @@ mod tests {
         let models = native_models_from_catalog(&[
             item("claude-sonnet-5", "anthropic"),
             item("gpt-5.6-sol", "openai"),
-            // Gemini's own API carries Gemini 4 Argon alone; any other
-            // Gemini model has no route here.
+            // Only explicitly supported Gemini models have a route here.
             item("gemini-3-pro", "gemini"),
             item("gemini-4-argon", "antigravity"),
         ]);
@@ -1150,8 +1149,8 @@ mod tests {
 
     #[test]
     fn a_model_with_no_api_to_send_it_over_is_not_offered() {
-        // Gemini's own API is wired for Gemini 4 Argon alone; any other
-        // Gemini model would be listed and then fail on the wire.
+        // Only explicitly supported Gemini models have an API here; any
+        // other Gemini model would be listed and then fail on the wire.
         assert!(native_models_from_catalog(&[item("gemini-3-pro", "gemini")]).is_empty());
         let argon = native_models_from_catalog(&[item("gemini-4-argon", "gemini")]);
         assert_eq!(argon.len(), 1);
@@ -1165,6 +1164,34 @@ mod tests {
             Some(vec!["low", "medium", "high"])
         );
         assert!(native_models_from_catalog(&[item("some-unknown-model", "")]).is_empty());
+    }
+
+    #[test]
+    fn gemini_4_carbon_is_offered_with_its_exact_id() {
+        let models = native_models_from_catalog(&[item("gemini-4-carbon", "antigravity")]);
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "gemini::gemini-4-carbon");
+        assert_eq!(models[0].name, "gemini-4-carbon");
+        assert_eq!(models[0].default_service_tier.as_deref(), Some("gemini"));
+        assert_eq!(
+            native_format_for_model("composite", "gemini-4-carbon"),
+            Some("gemini")
+        );
+        assert!(native_models_from_catalog(&[item("gemini-4-carbon-high", "gemini")]).is_empty());
+    }
+
+    #[test]
+    fn gemini_4_hydrogen_is_offered_with_its_exact_id() {
+        let models = native_models_from_catalog(&[item("gemini-4-hydrogen", "antigravity")]);
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "gemini::gemini-4-hydrogen");
+        assert_eq!(models[0].name, "gemini-4-hydrogen");
+        assert_eq!(models[0].default_service_tier.as_deref(), Some("gemini"));
+        assert_eq!(
+            native_format_for_model("composite", "gemini-4-hydrogen"),
+            Some("gemini")
+        );
+        assert!(native_models_from_catalog(&[item("gemini-4-hydrogen-high", "gemini")]).is_empty());
     }
 
     fn endpoint(id: &str, name: &str, format: ApiFormat, models: &[&str]) -> ProviderEntry {
@@ -1445,8 +1472,8 @@ mod tests {
             );
         }
 
-        // A conversational model is caught by none of that. (Of the Gemini
-        // family only Gemini 4 Argon has an API here.)
+        // A conversational model is caught by none of that. (Only explicitly
+        // supported Gemini models have an API here.)
         for name in ["gpt-5.6-sol", "claude-sonnet-5", "gemini-4-argon"] {
             assert_eq!(
                 native_models_from_catalog(&[item(name, "openai")]).len(),

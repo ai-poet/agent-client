@@ -38,7 +38,7 @@ base64 = { workspace = true }
 open = { workspace = true }
 enigo = { workspace = true, optional = true }
 xcap = { workspace = true, optional = true }
-image = { workspace = true, optional = true }
+image = { workspace = true }
 
 # PTY support — used by PtyBashTool on Unix
 portable-pty = "0.9"
@@ -50,4 +50,4 @@ nix = { workspace = true }
 libc = "0.2"
 
 [features]
-computer-use = ["dep:enigo", "dep:xcap", "dep:image"]
+computer-use = ["dep:enigo", "dep:xcap"]

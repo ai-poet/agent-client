@@ -381,6 +381,35 @@ mod tests {
         }])
     }
 
+    #[test]
+    fn image_bytes_survive_history_round_trips() {
+        let message = Message::user_blocks(vec![
+            ContentBlock::Image {
+                source: agent_core::types::ImageSource {
+                    source_type: "base64".into(),
+                    media_type: Some("image/png".into()),
+                    data: Some("aGVsbG8=".into()),
+                    url: None,
+                },
+            },
+            ContentBlock::Text {
+                text: "read this".into(),
+            },
+        ]);
+
+        let loaded = deserialize(&serialize(&[message]));
+        let MessageContent::Blocks(blocks) = &loaded[0].content else {
+            panic!("expected content blocks");
+        };
+        assert!(matches!(
+            &blocks[0],
+            ContentBlock::Image { source }
+                if source.source_type == "base64"
+                    && source.media_type.as_deref() == Some("image/png")
+                    && source.data.as_deref() == Some("aGVsbG8=")
+        ));
+    }
+
     /// Fork: a session the turn's checkpoint left on unanswered calls loads
     /// with each answered as interrupted, and a finished one loads as it was.
     #[test]

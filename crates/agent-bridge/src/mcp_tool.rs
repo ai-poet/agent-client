@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use agent_core::ToolDefinition;
+use agent_core::types::ImageSource;
 use async_trait::async_trait;
 // `PermissionLevel` exists in both `agent_core` and `agent_core_tools` as
 // distinct types; the `Tool` trait is written against the tools crate's.
@@ -111,17 +112,17 @@ impl Tool for McpTool {
         };
         match outcome {
             Ok(result) => {
-                // The text is the engine's own rendering, which reduces an
-                // image to a 32-character preview so the context is never
-                // flooded. The pixels take the metadata sideband instead,
-                // which reaches the transcript and not the model.
+                // Keep the engine's short text rendering, but carry the actual
+                // image content to the model as typed blocks as well as to the
+                // transcript's metadata sideband.
                 let text = agent_core_mcp::mcp_result_to_string(&result);
                 if result.is_error {
                     ToolResult::error(text)
                 } else {
+                    let output = ToolResult::success(text).with_images(image_sources(&result));
                     match image_metadata(&result) {
-                        Some(images) => ToolResult::success(text).with_metadata(images),
-                        None => ToolResult::success(text),
+                        Some(images) => output.with_metadata(images),
+                        None => output,
                     }
                 }
             }
@@ -132,6 +133,23 @@ impl Tool for McpTool {
             )),
         }
     }
+}
+
+/// The image content an MCP tool returned, without reducing it to a text preview.
+fn image_sources(result: &agent_core_mcp::CallToolResult) -> Vec<ImageSource> {
+    result
+        .content
+        .iter()
+        .filter_map(|item| match item {
+            agent_core_mcp::McpContent::Image { data, mime_type } => Some(ImageSource {
+                source_type: "base64".into(),
+                media_type: Some(mime_type.clone()),
+                data: Some(data.clone()),
+                url: None,
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The images an MCP result carried, in the shape the transcript reads.
@@ -163,7 +181,7 @@ mod tests {
     use agent_core_mcp::{CallToolResult, McpContent};
 
     #[test]
-    fn an_image_in_the_result_becomes_transcript_metadata() {
+    fn an_image_in_the_result_reaches_the_model_and_transcript() {
         let result = CallToolResult {
             content: vec![
                 McpContent::Text {
@@ -176,6 +194,12 @@ mod tests {
             ],
             is_error: false,
         };
+        let sources = image_sources(&result);
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].source_type, "base64");
+        assert_eq!(sources[0].media_type.as_deref(), Some("image/png"));
+        assert_eq!(sources[0].data.as_deref(), Some("aGVsbG8="));
+
         let meta = image_metadata(&result).expect("one image");
         let items = meta["content"].as_array().expect("array");
         assert_eq!(items.len(), 1);

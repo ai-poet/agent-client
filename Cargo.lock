@@ -145,6 +145,7 @@ dependencies = [
  "auto-memory",
  "base64 0.22.1",
  "crossbeam-channel",
+ "image",
  "parking_lot",
  "reqwest",
  "serde_json",
