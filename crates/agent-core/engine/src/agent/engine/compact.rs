@@ -11,7 +11,7 @@ use crate::agent::{
     canonical::CompactedFile,
     model::{self, Config, Content, Error, ErrorKind, Event, Finish, Message, Role, Usage},
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use tokio_util::sync::CancellationToken;
 
 mod format;
@@ -36,7 +36,9 @@ pub(super) struct Compaction {
 const PROMPT: &str = include_str!("compact/prompt.md");
 /// Renders the structured fields as Goal, Constraints, State, Decisions,
 /// Next Steps and Essential Context.
-const RENDER: &str = include_str!("compact/render.md");
+// Git may check out text files with CRLF on Windows; keep rendered output LF-only.
+static RENDER: LazyLock<String> =
+    LazyLock::new(|| include_str!("compact/render.md").replace("\r\n", "\n"));
 
 pub(super) struct Model {
     pub provider: Arc<dyn model::Model>,

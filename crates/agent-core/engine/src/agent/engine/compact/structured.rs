@@ -53,7 +53,7 @@ impl Summary {
     }
 
     pub(super) fn render(&self) -> Result<String, minijinja::Error> {
-        templates::render(RENDER, self)
+        templates::render(RENDER.as_str(), self)
     }
 
     fn normalize(&mut self) {
