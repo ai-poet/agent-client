@@ -29,6 +29,16 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.3.8]
+
+- 修复图片输入的若干问题：本地 BMP、ICO、TIFF、PNM 等格式现在会先无损转换为 PNG 再发送，内置 Agent 能正确回传工具调用产生的图片，多工具同时返回带图结果时消息顺序不再错乱
+
+  Fixed several image input issues: local BMP, ICO, TIFF and PNM files are now losslessly transcoded to PNG before sending, the built-in agent correctly passes back images produced by tool calls, and message ordering stays correct when several tools return image results at once
+
+- 内置 Agent 新增 Gemini 4 Carbon 与 Gemini 4 Hydrogen，与 Argon 一样走 Gemini 原生接口
+
+  The built-in agent now supports Gemini 4 Carbon and Gemini 4 Hydrogen, both served over Gemini's native API the same way as Argon
+
 ## [0.3.7]
 
 - 内置 Agent 支持用中英文自然语言发起 Agent Teams：消息发送前不再按关键词预解析，由模型调用组队工具，当前会话担任队长；模型调用无论省略审批参数还是传入 automatic 都只能先建草案，同回合不能自行批准，须在后续用户回合明确批准或点击团队面板按钮后才会启动。斜杠命令及模板别名保留。团队成员的模型路由在草案和成员行中清晰展示。会话详情栏的后台子智能体可单项挂起或停止，长进程可单项停止；后台命令、子智能体与团队成员在成功、失败或停止后主动通知 Agent，主会话忙碌时排队、空闲时自动唤醒，回合收尾竞态下也不会丢失通知
