@@ -60,3 +60,36 @@ jobs:
           bun run protocol:check
           bun run --filter client check
           bun run --filter client test
+
+  go-desktop:
+    name: Go desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # No Linux runner: this fork ships no Linux build.
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      CGO_ENABLED: "0"
+      GOTOOLCHAIN: go1.27.3
+    defaults:
+      run:
+        working-directory: desktop
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.27.3
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - name: Run desktop tests
+        run: go test ./...
+
+      - name: Build desktop shell
+        run: go build ./...
