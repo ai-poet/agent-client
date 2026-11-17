@@ -8,6 +8,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ai-poet/agent-client/desktop/internal/daemon"
@@ -77,11 +78,42 @@ type pendingResults struct {
 	services ui.Services
 }
 
+// ownedConnections tracks which connection the model owns, so that a replaced
+// or superseded connection is closed on the connecting goroutine rather than
+// queued behind a frame that may never come (headless windows never drain).
+type ownedConnections struct {
+	mu      sync.Mutex
+	current daemon.Connection
+}
+
+func (o *ownedConnections) install(connection daemon.Connection) (old daemon.Connection) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	old = o.current
+	o.current = connection
+	return old
+}
+
+func (o *ownedConnections) take() daemon.Connection {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	connection := o.current
+	o.current = nil
+	return connection
+}
+
 // Model owns connection and workbench state. Except for pending, every field
 // is confined to the UI thread. Network and process work always runs off it.
 type Model struct {
 	connector Connector
 	pending   pendingResults
+
+	// gen and closedFlag mirror generation and closed for goroutines that run
+	// off the UI thread (connection ownership decisions must not wait for a
+	// frame to drain).
+	gen        atomic.Uint64
+	closedFlag atomic.Bool
+	owned      ownedConnections
 
 	snapshot             Snapshot
 	connection           daemon.Connection
@@ -172,6 +204,7 @@ func (m *Model) beginConnectState() (context.Context, uint64, bool) {
 	m.saveActiveDraft()
 	m.sendingText = ""
 	m.generation++
+	m.gen.Store(m.generation)
 	m.sessionGeneration++
 	m.hydratedGeneration = 0
 	m.hydratedSessionID = ""
@@ -214,12 +247,29 @@ func (m *Model) connect(ctx context.Context, generation uint64, previous daemon.
 		version = connection.DaemonVersion()
 	}
 
+	// Ownership is decided here, off the UI thread: a superseded attempt closes
+	// its own connection at once, and a successful install closes whatever it
+	// replaced at once. Waiting for a queued callback would leak both whenever
+	// no frame is drawn (tests, background windows, idle headless runs).
+	stale := m.closedFlag.Load() || m.gen.Load() != generation
+	if connection != nil {
+		if stale || err != nil {
+			if !stale {
+				go closeConnection(connection)
+			}
+			connection = nil
+		} else if replaced := m.owned.install(connection); replaced != nil && replaced != connection {
+			go closeConnection(replaced)
+		}
+	}
+	if stale {
+		return
+	}
+
 	m.enqueue(func() {
 		if m.closed || generation != m.generation {
-			go closeConnection(connection)
 			return
 		}
-		var replaced daemon.Connection
 		if err != nil {
 			if m.cancel != nil {
 				m.cancel()
@@ -238,9 +288,6 @@ func (m *Model) connect(ctx context.Context, generation uint64, previous daemon.
 			m.snapshot.SessionsLoading = false
 		} else {
 			m.connection = connection
-			if previous != nil && previous != connection {
-				replaced = previous
-			}
 			m.snapshot.Status = Connected
 			m.snapshot.DaemonVersion = version
 			m.snapshot.Detail = ""
@@ -248,9 +295,6 @@ func (m *Model) connect(ctx context.Context, generation uint64, previous daemon.
 			m.snapshot.SessionsError = ""
 			m.snapshot.SessionLoading = false
 			m.snapshot.SessionError = ""
-		}
-		if replaced != nil {
-			go closeConnection(replaced)
 		}
 		if err == nil && connection != nil {
 			go m.loadSessions(ctx, generation, connection, m.snapshot.SelectedSessionID, m.sessionGeneration)
@@ -768,6 +812,7 @@ func (m *Model) Close() error {
 	}
 	m.closed = true
 	m.generation++
+	m.gen.Store(m.generation)
 	m.sessionGeneration++
 	if m.cancel != nil {
 		m.cancel()
