@@ -303,8 +303,7 @@ func TestWorkbenchBuffersEventsUntilHydrateAndUsesSnapshotCursor(t *testing.T) {
 	connection.events <- transcriptTextEvent("session-a", "runtime-session-a", 3, "二")
 	connection.events <- transcriptTextEvent("session-a", "runtime-session-a", 4, "三")
 	waitFor(t, func() bool {
-		model.mu.Lock()
-		defer model.mu.Unlock()
+		model.drainPending()
 		return len(model.pendingEvents) == 4
 	})
 	if got := model.Snapshot(); len(got.Transcript) != 0 {
@@ -319,9 +318,7 @@ func TestWorkbenchBuffersEventsUntilHydrateAndUsesSnapshotCursor(t *testing.T) {
 	if strings.Contains(snapshot.Transcript[1].Text, "不应重复") {
 		t.Fatalf("snapshot event was replayed twice: %+v", snapshot.Transcript)
 	}
-	model.mu.Lock()
 	pending := len(model.pendingEvents)
-	model.mu.Unlock()
 	if pending != 0 {
 		t.Fatalf("pending events after replay = %d, want 0", pending)
 	}
@@ -346,12 +343,20 @@ func TestWorkbenchEventBufferOverflowForcesRehydrate(t *testing.T) {
 	for sequence := uint64(1); sequence <= pendingEventLimit+1; sequence++ {
 		connection.events <- transcriptTextEvent("session-a", "runtime-session-a", sequence, "增量")
 	}
-	if got := receiveString(t, connection.hydrateStarted); got != "session-a" {
-		t.Fatalf("rehydrate session = %q", got)
+	var rehydrated string
+	waitFor(t, func() bool {
+		tester.Frame()
+		select {
+		case rehydrated = <-connection.hydrateStarted:
+			return true
+		default:
+			return false
+		}
+	})
+	if rehydrated != "session-a" {
+		t.Fatalf("rehydrate session = %q", rehydrated)
 	}
-	model.mu.Lock()
 	pending := len(model.pendingEvents)
-	model.mu.Unlock()
 	if pending > pendingEventLimit {
 		t.Fatalf("pending event buffer length = %d, limit %d", pending, pendingEventLimit)
 	}
@@ -383,9 +388,7 @@ func TestWorkbenchStaleSessionLoadCannotOverrideSelection(t *testing.T) {
 		return snapshot.SelectedSessionID == "session-b" && !snapshot.SessionLoading && snapshot.MessageCount == 1
 	})
 
-	model.mu.Lock()
 	generation := model.generation
-	model.mu.Unlock()
 	model.startSessionLoad(generation, connection, "session-a")
 	if got := model.Snapshot(); got.SelectedSessionID != "session-b" || got.SessionLoading || got.MessageCount != 1 {
 		t.Fatalf("stale session load changed selection: %+v", got)
@@ -414,7 +417,10 @@ func TestWorkbenchReconnectSendsResumeFromAndRehydrates(t *testing.T) {
 	if err := oldConnection.Close(); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, func() bool { return len(connector.resumeAttempts()) == 2 })
+	waitFor(t, func() bool {
+		model.drainPending()
+		return len(connector.resumeAttempts()) == 2
+	})
 	attempts := connector.resumeAttempts()
 	if !reflect.DeepEqual(attempts[1], []daemon.ReplayCursor{cursor}) {
 		t.Fatalf("reconnect resumeFrom = %#v, want %#v", attempts[1], cursor)

@@ -95,26 +95,23 @@ func TestModelStaleWatcherCannotCancelNewerConnection(t *testing.T) {
 	connector := &fakeConnector{}
 	model := NewModel(connector)
 	t.Cleanup(func() { _ = model.Close() })
+	previous := model.connection
 	ctx, generation, ok := model.beginConnect()
 	if !ok {
 		t.Fatal("could not begin connection")
 	}
-	model.connect(ctx, generation)
+	model.connect(ctx, generation, previous)
 	current := model.Snapshot()
 	if current.Status != Connected {
 		t.Fatalf("initial snapshot = %+v", current)
 	}
 
-	model.mu.Lock()
 	currentGeneration := model.generation
-	model.mu.Unlock()
 	model.reconnect(currentGeneration - 1)
 	if got := model.Snapshot(); got.Status != current.Status || got.DaemonVersion != current.DaemonVersion {
 		t.Fatalf("stale watcher changed connection: before %+v; after %+v", current, got)
 	}
-	model.mu.Lock()
 	gotGeneration := model.generation
-	model.mu.Unlock()
 	if gotGeneration != currentGeneration {
 		t.Fatalf("generation after stale reconnect = %d, want %d", gotGeneration, currentGeneration)
 	}
@@ -178,21 +175,23 @@ func TestStatusLabels(t *testing.T) {
 func TestModelConnectionResults(t *testing.T) {
 	connector := &fakeConnector{}
 	model := NewModel(connector)
+	previous := model.connection
 	ctx, generation, ok := model.beginConnect()
 	if !ok {
 		t.Fatal("could not begin connection")
 	}
-	model.connect(ctx, generation)
+	model.connect(ctx, generation, previous)
 	if got := model.Snapshot(); got.Status != Connected || got.DaemonVersion != "test-daemon" {
 		t.Fatalf("connected snapshot = %+v", got)
 	}
 
 	connector.err = errors.New("bad token")
+	previous = model.connection
 	ctx, generation, ok = model.beginConnect()
 	if !ok {
 		t.Fatal("could not begin retry")
 	}
-	model.connect(ctx, generation)
+	model.connect(ctx, generation, previous)
 	if got := model.Snapshot(); got.Status != Failed || got.Detail != "bad token" {
 		t.Fatalf("failed snapshot = %+v", got)
 	}
@@ -203,11 +202,13 @@ func TestModelReconnectsWithReplayCursors(t *testing.T) {
 	model := NewModel(connector)
 	connect := func() {
 		t.Helper()
+		previous := model.connection
 		ctx, generation, ok := model.beginConnect()
 		if !ok {
 			t.Fatal("could not begin connection")
 		}
-		model.connect(ctx, generation)
+		model.connect(ctx, generation, previous)
+		model.drainPending()
 	}
 
 	connect()
@@ -273,8 +274,9 @@ func TestNativeViewStates(t *testing.T) {
 func TestRetryButtonReconnectsWithoutAWindow(t *testing.T) {
 	connector := &fakeConnector{err: errors.New("offline")}
 	model := NewModel(connector)
+	previous := model.connection
 	ctx, generation, _ := model.beginConnect()
-	model.connect(ctx, generation)
+	model.connect(ctx, generation, previous)
 	tester := ui.NewTester(model.View, 720, 480)
 
 	connector.err = nil

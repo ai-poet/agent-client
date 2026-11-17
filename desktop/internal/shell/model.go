@@ -69,13 +69,20 @@ type Connector interface {
 	Close() error
 }
 
-// Model owns connection and workbench state. Network and process work always
-// runs off the UI thread; frames only read the in-memory snapshot.
+// pendingResults is the Model's only cross-goroutine state. Background workers
+// append immutable results; the UI thread drains and applies them.
+type pendingResults struct {
+	mu       sync.Mutex
+	results  []func()
+	services ui.Services
+}
+
+// Model owns connection and workbench state. Except for pending, every field
+// is confined to the UI thread. Network and process work always runs off it.
 type Model struct {
 	connector Connector
+	pending   pendingResults
 
-	mu                   sync.Mutex
-	services             ui.Services
 	snapshot             Snapshot
 	connection           daemon.Connection
 	generation           uint64
@@ -111,41 +118,38 @@ func NewModel(connector Connector) *Model {
 // Connect starts one asynchronous connection attempt. A generation counter
 // prevents a superseded attempt from replacing newer state.
 func (m *Model) Connect() {
+	previous := m.connection
 	ctx, generation, ok := m.beginConnect()
 	if !ok {
 		return
 	}
-	go m.connect(ctx, generation)
+	go m.connect(ctx, generation, previous)
 }
 
 func (m *Model) beginConnect() (context.Context, uint64, bool) {
-	m.mu.Lock()
-	ctx, generation, ok := m.beginConnectLocked()
-	m.mu.Unlock()
+	ctx, generation, ok := m.beginConnectState()
 	if ok {
 		m.invalidate()
 	}
 	return ctx, generation, ok
 }
 
-// reconnect invalidates a disconnected watcher and starts its replacement in
-// one critical section, so a stale watcher cannot cancel a newer connection.
+// reconnect runs on the UI thread. Validating and starting the replacement in
+// one turn prevents a stale watcher from cancelling a newer connection.
 func (m *Model) reconnect(generation uint64) {
-	m.mu.Lock()
-	if !m.connectionCurrentLocked(generation) {
-		m.mu.Unlock()
+	if !m.connectionCurrent(generation) {
 		return
 	}
-	ctx, nextGeneration, ok := m.beginConnectLocked()
-	m.mu.Unlock()
+	previous := m.connection
+	ctx, nextGeneration, ok := m.beginConnectState()
 	if !ok {
 		return
 	}
 	m.invalidate()
-	go m.connect(ctx, nextGeneration)
+	go m.connect(ctx, nextGeneration, previous)
 }
 
-func (m *Model) beginConnectLocked() (context.Context, uint64, bool) {
+func (m *Model) beginConnectState() (context.Context, uint64, bool) {
 	if m.closed {
 		return nil, 0, false
 	}
@@ -160,7 +164,7 @@ func (m *Model) beginConnectLocked() (context.Context, uint64, bool) {
 		m.sendCancel()
 		m.sendCancel = nil
 	}
-	m.saveActiveDraftLocked()
+	m.saveActiveDraft()
 	m.sendingText = ""
 	m.generation++
 	m.sessionGeneration++
@@ -183,19 +187,14 @@ func (m *Model) beginConnectLocked() (context.Context, uint64, bool) {
 	m.snapshot.Transcript = nil
 	m.snapshot.Sending = false
 	m.snapshot.SendError = ""
-	m.restoreActiveDraftLocked()
+	m.restoreActiveDraft()
 	return ctx, generation, true
 }
 
-func (m *Model) connect(ctx context.Context, generation uint64) {
-	m.mu.Lock()
-	if !m.connectionCurrentLocked(generation) || ctx.Err() != nil {
-		m.mu.Unlock()
+func (m *Model) connect(ctx context.Context, generation uint64, previous daemon.Connection) {
+	if ctx.Err() != nil {
 		return
 	}
-	previous := m.connection
-	m.mu.Unlock()
-
 	var resume []daemon.ReplayCursor
 	if previous != nil {
 		resume = previous.ReplayCursors()
@@ -204,133 +203,120 @@ func (m *Model) connect(ctx context.Context, generation uint64) {
 		}
 	}
 	connection, err := m.connector.Connect(ctx, resume)
-	var replaced daemon.Connection
+	version := ""
+	if connection != nil {
+		version = connection.DaemonVersion()
+	}
 
-	m.mu.Lock()
-	if m.closed || generation != m.generation {
-		m.mu.Unlock()
-		if connection != nil {
-			_ = connection.Close()
+	m.enqueue(func() {
+		if m.closed || generation != m.generation {
+			go closeConnection(connection)
+			return
 		}
-		return
-	}
-	if err != nil {
-		if m.cancel != nil {
-			m.cancel()
-			m.cancel = nil
+		var replaced daemon.Connection
+		if err != nil {
+			if m.cancel != nil {
+				m.cancel()
+				m.cancel = nil
+			}
+			m.snapshot.Status = Failed
+			m.snapshot.Detail = err.Error()
+			m.snapshot.SessionsLoading = false
+		} else if connection == nil {
+			if m.cancel != nil {
+				m.cancel()
+				m.cancel = nil
+			}
+			m.snapshot.Status = Failed
+			m.snapshot.Detail = "client-daemon 返回了空连接"
+			m.snapshot.SessionsLoading = false
+		} else {
+			m.connection = connection
+			if previous != nil && previous != connection {
+				replaced = previous
+			}
+			m.snapshot.Status = Connected
+			m.snapshot.DaemonVersion = version
+			m.snapshot.Detail = ""
+			m.snapshot.SessionsLoading = true
+			m.snapshot.SessionsError = ""
+			m.snapshot.SessionLoading = false
+			m.snapshot.SessionError = ""
 		}
-		m.snapshot.Status = Failed
-		m.snapshot.Detail = err.Error()
-		m.snapshot.SessionsLoading = false
-	} else if connection == nil {
-		if m.cancel != nil {
-			m.cancel()
-			m.cancel = nil
+		if replaced != nil {
+			go closeConnection(replaced)
 		}
-		m.snapshot.Status = Failed
-		m.snapshot.Detail = "client-daemon 返回了空连接"
-		m.snapshot.SessionsLoading = false
-	} else {
-		m.connection = connection
-		if previous != nil && previous != connection {
-			replaced = previous
+		if err == nil && connection != nil {
+			go m.loadSessions(ctx, generation, connection, m.snapshot.SelectedSessionID, m.sessionGeneration)
+			go m.watchConnection(ctx, generation, connection)
 		}
-		m.snapshot.Status = Connected
-		m.snapshot.DaemonVersion = connection.DaemonVersion()
-		m.snapshot.Detail = ""
-		m.snapshot.SessionsLoading = true
-		m.snapshot.SessionsError = ""
-		m.snapshot.SessionLoading = false
-		m.snapshot.SessionError = ""
-	}
-	m.mu.Unlock()
-	if replaced != nil {
-		_ = replaced.Close()
-	}
-	m.invalidate()
-	if err == nil && connection != nil {
-		go m.loadSessions(ctx, generation, connection)
-		go m.watchConnection(ctx, generation, connection)
+	})
+}
+
+func closeConnection(connection daemon.Connection) {
+	if connection != nil {
+		_ = connection.Close()
 	}
 }
 
-func (m *Model) loadSessions(ctx context.Context, generation uint64, connection daemon.Connection) {
-	m.mu.Lock()
-	if !m.connectionCurrentLocked(generation) {
-		m.mu.Unlock()
+func (m *Model) loadSessions(ctx context.Context, generation uint64, connection daemon.Connection, selectedBeforeLoad string, sessionGenerationBeforeLoad uint64) {
+	if ctx.Err() != nil {
 		return
 	}
-	selectedBeforeLoad := m.snapshot.SelectedSessionID
-	sessionGenerationBeforeLoad := m.sessionGeneration
-	m.mu.Unlock()
-
 	state, err := connection.LoadTaskState(ctx)
 
-	m.mu.Lock()
-	if !m.connectionCurrentLocked(generation) {
-		m.mu.Unlock()
-		return
-	}
-	m.snapshot.SessionsLoading = false
-	if err != nil {
-		m.snapshot.SessionsError = err.Error()
-		m.mu.Unlock()
-		m.invalidate()
-		return
-	}
-	m.snapshot.Sessions = append([]SessionSummary(nil), state.Sessions...)
-	m.snapshot.SessionsError = ""
-	selected := m.snapshot.SelectedSessionID
-	if selected != "" && !sessionExists(m.snapshot.Sessions, selected) {
-		m.clearSelectionLocked()
-		selected = ""
-	}
-	rehydrate := selected != "" && selected == selectedBeforeLoad &&
-		m.sessionGeneration == sessionGenerationBeforeLoad
-	m.mu.Unlock()
-	m.invalidate()
-
-	if rehydrate {
-		m.startSessionLoad(generation, connection, selected)
-	}
+	m.enqueue(func() {
+		if !m.connectionCurrent(generation) {
+			return
+		}
+		m.snapshot.SessionsLoading = false
+		if err != nil {
+			m.snapshot.SessionsError = err.Error()
+			return
+		}
+		m.snapshot.Sessions = append([]SessionSummary(nil), state.Sessions...)
+		m.snapshot.SessionsError = ""
+		selected := m.snapshot.SelectedSessionID
+		if selected != "" && !sessionExists(m.snapshot.Sessions, selected) {
+			m.clearSelection()
+			selected = ""
+		}
+		if selected != "" && selected == selectedBeforeLoad &&
+			m.sessionGeneration == sessionGenerationBeforeLoad {
+			m.startSessionLoad(generation, connection, selected)
+		}
+	})
 }
 
 // SelectSession starts attach and hydrate asynchronously. Its session
 // generation prevents a late response for an earlier selection from landing.
 func (m *Model) SelectSession(sessionID string) {
-	m.mu.Lock()
 	if m.closed || m.snapshot.Status != Connected || m.connection == nil ||
 		!sessionExists(m.snapshot.Sessions, sessionID) {
-		m.mu.Unlock()
 		return
 	}
 	if m.snapshot.SelectedSessionID == sessionID &&
 		(m.snapshot.SessionLoading || m.hydratedSessionID == sessionID) {
-		m.mu.Unlock()
 		return
 	}
-	ctx, generation, sessionGeneration, connection := m.startSessionLoadLocked(sessionID)
-	m.mu.Unlock()
+	ctx, generation, sessionGeneration, connection := m.beginSessionLoad(sessionID)
 	m.invalidate()
 	go m.hydrateSession(ctx, generation, sessionGeneration, connection, sessionID)
 }
 
 func (m *Model) startSessionLoad(generation uint64, connection daemon.Connection, sessionID string) {
-	m.mu.Lock()
-	if !m.connectionCurrentLocked(generation) ||
+	if !m.connectionCurrent(generation) ||
 		m.snapshot.SelectedSessionID != sessionID ||
 		!sessionExists(m.snapshot.Sessions, sessionID) {
-		m.mu.Unlock()
 		return
 	}
-	ctx, generation, sessionGeneration, connection := m.startSessionLoadLocked(sessionID)
-	m.mu.Unlock()
+	ctx, generation, sessionGeneration, connection := m.beginSessionLoad(sessionID)
 	m.invalidate()
 	go m.hydrateSession(ctx, generation, sessionGeneration, connection, sessionID)
 }
 
-func (m *Model) startSessionLoadLocked(sessionID string) (context.Context, uint64, uint64, daemon.Connection) {
-	m.saveActiveDraftLocked()
+func (m *Model) beginSessionLoad(sessionID string) (context.Context, uint64, uint64, daemon.Connection) {
+	m.saveActiveDraft()
 	if m.sessionCancel != nil {
 		m.sessionCancel()
 	}
@@ -348,7 +334,7 @@ func (m *Model) startSessionLoadLocked(sessionID string) (context.Context, uint6
 	ctx, cancel := context.WithCancel(context.Background())
 	m.sessionCancel = cancel
 	m.snapshot.SelectedSessionID = sessionID
-	m.restoreActiveDraftLocked()
+	m.restoreActiveDraft()
 	m.snapshot.SessionLoading = true
 	m.snapshot.SessionError = ""
 	m.snapshot.MessageCount = 0
@@ -364,16 +350,17 @@ func (m *Model) hydrateSession(ctx context.Context, generation, sessionGeneratio
 		m.finishSessionError(ctx, generation, sessionGeneration, sessionID, err)
 		return
 	}
-
-	m.mu.Lock()
-	if !m.sessionCurrentLocked(generation, sessionGeneration, sessionID) || ctx.Err() != nil {
-		m.mu.Unlock()
+	if runtime != nil {
+		runtimeID := runtime.RuntimeID
+		m.enqueue(func() {
+			if m.sessionCurrent(generation, sessionGeneration, sessionID) && ctx.Err() == nil {
+				m.attachedRuntimeID = runtimeID
+			}
+		})
+	}
+	if ctx.Err() != nil {
 		return
 	}
-	if runtime != nil {
-		m.attachedRuntimeID = runtime.RuntimeID
-	}
-	m.mu.Unlock()
 
 	session, err := connection.HydrateSession(ctx, sessionID)
 	if err != nil {
@@ -387,43 +374,39 @@ func (m *Model) hydrateSession(ctx context.Context, generation, sessionGeneratio
 	transcript := projectTranscript(session)
 	messageCount := len(session.Messages)
 
-	m.mu.Lock()
-	if !m.sessionCurrentLocked(generation, sessionGeneration, sessionID) || ctx.Err() != nil {
-		m.mu.Unlock()
-		return
-	}
-	m.snapshot.SessionLoading = false
-	m.snapshot.SessionError = ""
-	m.snapshot.MessageCount = messageCount
-	m.snapshot.Transcript = transcript
-	m.hydratedGeneration = sessionGeneration
-	m.hydratedSessionID = sessionID
-	if session.RuntimeEventCursor != nil {
-		cursor := *session.RuntimeEventCursor
-		m.eventCursor = &cursor
-	}
-	pending := m.pendingEvents
-	m.pendingEvents = nil
-	for _, event := range pending {
-		if event.SessionID == sessionID &&
-			(m.attachedRuntimeID == "" || m.attachedRuntimeID == event.RuntimeID) {
-			m.applyTranscriptEventLocked(event)
+	m.enqueue(func() {
+		if !m.sessionCurrent(generation, sessionGeneration, sessionID) || ctx.Err() != nil {
+			return
 		}
-	}
-	m.mu.Unlock()
-	m.invalidate()
+		m.snapshot.SessionLoading = false
+		m.snapshot.SessionError = ""
+		m.snapshot.MessageCount = messageCount
+		m.snapshot.Transcript = transcript
+		m.hydratedGeneration = sessionGeneration
+		m.hydratedSessionID = sessionID
+		if session.RuntimeEventCursor != nil {
+			cursor := *session.RuntimeEventCursor
+			m.eventCursor = &cursor
+		}
+		pending := m.pendingEvents
+		m.pendingEvents = nil
+		for _, event := range pending {
+			if event.SessionID == sessionID &&
+				(m.attachedRuntimeID == "" || m.attachedRuntimeID == event.RuntimeID) {
+				m.applyTranscriptEvent(event)
+			}
+		}
+	})
 }
 
 func (m *Model) finishSessionError(ctx context.Context, generation, sessionGeneration uint64, sessionID string, err error) {
-	m.mu.Lock()
-	if !m.sessionCurrentLocked(generation, sessionGeneration, sessionID) || ctx.Err() != nil {
-		m.mu.Unlock()
-		return
-	}
-	m.snapshot.SessionLoading = false
-	m.snapshot.SessionError = err.Error()
-	m.mu.Unlock()
-	m.invalidate()
+	m.enqueue(func() {
+		if !m.sessionCurrent(generation, sessionGeneration, sessionID) || ctx.Err() != nil {
+			return
+		}
+		m.snapshot.SessionLoading = false
+		m.snapshot.SessionError = err.Error()
+	})
 }
 
 func (m *Model) watchConnection(ctx context.Context, generation uint64, connection daemon.Connection) {
@@ -439,39 +422,37 @@ func (m *Model) watchConnection(ctx context.Context, generation uint64, connecti
 			}
 			m.applyEvent(generation, event)
 		case <-connection.Done():
-			m.reconnect(generation)
+			m.enqueue(func() { m.reconnect(generation) })
 			return
 		}
 	}
 }
 
+// applyEvent may be called by a watcher goroutine; only its queued closure
+// touches the Model, and drainPending runs that closure on the UI thread.
 func (m *Model) applyEvent(generation uint64, event daemon.SequencedEvent) {
-	m.mu.Lock()
-	if !m.connectionCurrentLocked(generation) ||
-		m.snapshot.SelectedSessionID != event.SessionID ||
-		(m.attachedRuntimeID != "" && m.attachedRuntimeID != event.RuntimeID) {
-		m.mu.Unlock()
-		return
-	}
-	if m.hydratedGeneration == m.sessionGeneration && m.hydratedSessionID == event.SessionID {
-		m.applyTranscriptEventLocked(event)
-		m.mu.Unlock()
-		m.invalidate()
-		return
-	}
-	if len(m.pendingEvents) >= pendingEventLimit {
-		m.pendingEvents = nil
-		connection := m.connection
-		m.mu.Unlock()
-		log.Printf("WARN desktop: hydrate event buffer overflow; forcing session rehydrate")
-		m.startSessionLoad(generation, connection, event.SessionID)
-		return
-	}
-	m.pendingEvents = append(m.pendingEvents, event)
-	m.mu.Unlock()
+	m.enqueue(func() {
+		if !m.connectionCurrent(generation) ||
+			m.snapshot.SelectedSessionID != event.SessionID ||
+			(m.attachedRuntimeID != "" && m.attachedRuntimeID != event.RuntimeID) {
+			return
+		}
+		if m.hydratedGeneration == m.sessionGeneration && m.hydratedSessionID == event.SessionID {
+			m.applyTranscriptEvent(event)
+			return
+		}
+		if len(m.pendingEvents) >= pendingEventLimit {
+			m.pendingEvents = nil
+			connection := m.connection
+			log.Printf("WARN desktop: hydrate event buffer overflow; forcing session rehydrate")
+			m.startSessionLoad(generation, connection, event.SessionID)
+			return
+		}
+		m.pendingEvents = append(m.pendingEvents, event)
+	})
 }
 
-func (m *Model) applyTranscriptEventLocked(event daemon.SequencedEvent) {
+func (m *Model) applyTranscriptEvent(event daemon.SequencedEvent) {
 	if cursor := m.eventCursor; cursor != nil &&
 		cursor.RuntimeID == event.RuntimeID && cursor.Epoch == event.Epoch &&
 		event.Sequence <= cursor.Sequence {
@@ -485,7 +466,7 @@ func (m *Model) applyTranscriptEventLocked(event daemon.SequencedEvent) {
 	}
 }
 
-func (m *Model) saveActiveDraftLocked() {
+func (m *Model) saveActiveDraft() {
 	sessionID := m.snapshot.SelectedSessionID
 	if sessionID == "" {
 		return
@@ -494,15 +475,15 @@ func (m *Model) saveActiveDraftLocked() {
 	if m.snapshot.Sending && m.sendingText != "" {
 		draft = m.sendingText
 	}
-	m.setSessionDraftLocked(sessionID, draft)
+	m.setSessionDraft(sessionID, draft)
 }
 
-func (m *Model) restoreActiveDraftLocked() {
+func (m *Model) restoreActiveDraft() {
 	m.draft = m.drafts[m.snapshot.SelectedSessionID]
 	m.snapshot.Draft = m.draft
 }
 
-func (m *Model) setSessionDraftLocked(sessionID, draft string) {
+func (m *Model) setSessionDraft(sessionID, draft string) {
 	if sessionID == "" {
 		return
 	}
@@ -516,8 +497,8 @@ func (m *Model) setSessionDraftLocked(sessionID, draft string) {
 	m.drafts[sessionID] = draft
 }
 
-func (m *Model) clearSelectionLocked() {
-	m.saveActiveDraftLocked()
+func (m *Model) clearSelection() {
+	m.saveActiveDraft()
 	if m.sessionCancel != nil {
 		m.sessionCancel()
 		m.sessionCancel = nil
@@ -534,7 +515,7 @@ func (m *Model) clearSelectionLocked() {
 	m.eventCursor = nil
 	m.attachedRuntimeID = ""
 	m.snapshot.SelectedSessionID = ""
-	m.restoreActiveDraftLocked()
+	m.restoreActiveDraft()
 	m.snapshot.SessionLoading = false
 	m.snapshot.SessionError = ""
 	m.snapshot.MessageCount = 0
@@ -543,12 +524,12 @@ func (m *Model) clearSelectionLocked() {
 	m.snapshot.SendError = ""
 }
 
-func (m *Model) connectionCurrentLocked(generation uint64) bool {
+func (m *Model) connectionCurrent(generation uint64) bool {
 	return !m.closed && generation == m.generation
 }
 
-func (m *Model) sessionCurrentLocked(generation, sessionGeneration uint64, sessionID string) bool {
-	return m.connectionCurrentLocked(generation) &&
+func (m *Model) sessionCurrent(generation, sessionGeneration uint64, sessionID string) bool {
+	return m.connectionCurrent(generation) &&
 		sessionGeneration == m.sessionGeneration && m.snapshot.SelectedSessionID == sessionID
 }
 
@@ -563,11 +544,10 @@ func sessionExists(sessions []SessionSummary, sessionID string) bool {
 
 // View draws native GPU UI through MyGo; there is no HTML or webview.
 func (m *Model) View(c *ui.Context) {
-	m.mu.Lock()
-	m.services = c.Services()
+	m.drainPending()
+	m.setServices(c.Services())
 	m.snapshot.Draft = m.draft
 	snapshot := cloneSnapshot(m.snapshot)
-	m.mu.Unlock()
 
 	if snapshot.Status != Connected {
 		m.connectionView(c, snapshot)
@@ -698,25 +678,56 @@ func cloneSnapshot(snapshot Snapshot) Snapshot {
 	return snapshot
 }
 
-// Snapshot returns a race-free copy for logic tests and embedding code.
+// Snapshot applies completed work and returns a copy. Like View, it must be
+// called from the UI thread; background workers only use enqueue.
 func (m *Model) Snapshot() Snapshot {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.drainPending()
 	m.snapshot.Draft = m.draft
 	return cloneSnapshot(m.snapshot)
 }
 
+// enqueue is the only Model method a background worker may use to deliver
+// state. Invalidate is explicitly goroutine-safe in MyGo.
+func (m *Model) enqueue(apply func()) {
+	m.pending.mu.Lock()
+	m.pending.results = append(m.pending.results, apply)
+	services := m.pending.services
+	m.pending.mu.Unlock()
+	services.Invalidate()
+}
+
+// drainPending applies completed I/O results on the UI thread. Testers reach
+// it through View on every frame; Snapshot also drives headless state tests.
+func (m *Model) drainPending() {
+	m.pending.mu.Lock()
+	pending := m.pending.results
+	m.pending.results = nil
+	services := m.pending.services
+	m.pending.mu.Unlock()
+	if len(pending) == 0 {
+		return
+	}
+	for _, apply := range pending {
+		apply()
+	}
+	services.Invalidate()
+}
+
+func (m *Model) setServices(services ui.Services) {
+	m.pending.mu.Lock()
+	m.pending.services = services
+	m.pending.mu.Unlock()
+}
+
 func (m *Model) invalidate() {
-	m.mu.Lock()
-	services := m.services
-	m.mu.Unlock()
+	m.pending.mu.Lock()
+	services := m.pending.services
+	m.pending.mu.Unlock()
 	services.Invalidate()
 }
 
 func (m *Model) Close() error {
-	m.mu.Lock()
 	if m.closed {
-		m.mu.Unlock()
 		return nil
 	}
 	m.closed = true
@@ -731,7 +742,6 @@ func (m *Model) Close() error {
 	if m.sendCancel != nil {
 		m.sendCancel()
 	}
-	m.mu.Unlock()
 	if err := m.connector.Close(); err != nil {
 		return fmt.Errorf("could not close client-daemon connection: %w", err)
 	}

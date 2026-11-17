@@ -77,6 +77,45 @@ func TestComposerFailureRestoresInput(t *testing.T) {
 	}
 }
 
+func TestComposerSendResultDrainsDuringConcurrentFrames(t *testing.T) {
+	model, connection, tester := readyComposer(t)
+	connection.promptStarted = make(chan promptCall, 1)
+	connection.promptRelease = make(chan struct{})
+	connection.promptErr = errors.New("offline")
+
+	if err := tester.Click("消息输入"); err != nil {
+		t.Fatal(err)
+	}
+	const original = "并发渲染期间也要保留"
+	tester.Type(original)
+	if err := tester.Click("发送"); err != nil {
+		t.Fatal(err)
+	}
+	receivePrompt(t, connection.promptStarted)
+	tester.Frame()
+	if !tester.HasText("发送中…") {
+		t.Fatalf("view before Prompt completed = %q", tester.Texts())
+	}
+
+	close(connection.promptRelease)
+	deadline := time.Now().Add(3 * time.Second)
+	const failure = "发送失败，已保留输入：offline"
+	for !tester.HasText(failure) && time.Now().Before(deadline) {
+		tester.Frame()
+		time.Sleep(time.Millisecond)
+	}
+	if !tester.HasText(failure) {
+		t.Fatalf("send result was not rendered; view texts = %q", tester.Texts())
+	}
+	snapshot := model.Snapshot()
+	if snapshot.Sending || snapshot.Draft != original || snapshot.SendError == "" {
+		t.Fatalf("drained send state = %+v", snapshot)
+	}
+	if got := connection.prompts(); len(got) != 1 {
+		t.Fatalf("Prompt calls = %d, want 1", len(got))
+	}
+}
+
 func TestSendErrorCategory(t *testing.T) {
 	tests := []struct {
 		name string
@@ -181,9 +220,7 @@ func TestComposerEnterSendsAndShiftEnterBreaksLine(t *testing.T) {
 
 func TestComposerAttachesBeforePromptWhenRuntimeIsMissing(t *testing.T) {
 	model, connection, tester := readyComposer(t)
-	model.mu.Lock()
 	model.attachedRuntimeID = ""
-	model.mu.Unlock()
 
 	if err := tester.Click("消息输入"); err != nil {
 		t.Fatal(err)

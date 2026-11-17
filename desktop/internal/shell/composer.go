@@ -54,24 +54,21 @@ func (m *Model) sendText(text string) bool {
 		return false
 	}
 
-	m.mu.Lock()
 	sessionID := m.snapshot.SelectedSessionID
 	if m.closed || m.snapshot.Status != Connected || m.connection == nil || m.snapshot.Sending ||
 		sessionID == "" || m.hydratedGeneration != m.sessionGeneration || m.hydratedSessionID != sessionID {
-		m.mu.Unlock()
 		return false
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.sendCancel = cancel
 	m.sendingText = text
 	m.draft = ""
-	m.setSessionDraftLocked(sessionID, "")
+	m.setSessionDraft(sessionID, "")
 	m.snapshot.Draft = ""
 	m.snapshot.Sending = true
 	m.snapshot.SendError = ""
 	generation, sessionGeneration := m.generation, m.sessionGeneration
 	connection, runtimeID := m.connection, m.attachedRuntimeID
-	m.mu.Unlock()
 	m.invalidate()
 	go m.send(ctx, generation, sessionGeneration, connection, sessionID, runtimeID, text)
 	return true
@@ -87,15 +84,14 @@ func (m *Model) send(ctx context.Context, generation, sessionGeneration uint64, 
 		if runtime != nil {
 			runtimeID = runtime.RuntimeID
 		}
-		m.mu.Lock()
-		current := m.sessionCurrentLocked(generation, sessionGeneration, sessionID) && ctx.Err() == nil
-		if current && runtimeID != "" {
-			m.attachedRuntimeID = runtimeID
-		}
-		m.mu.Unlock()
-		if !current {
+		if ctx.Err() != nil {
 			return
 		}
+		m.enqueue(func() {
+			if m.sessionCurrent(generation, sessionGeneration, sessionID) && ctx.Err() == nil && runtimeID != "" {
+				m.attachedRuntimeID = runtimeID
+			}
+		})
 	}
 	if runtimeID == "" {
 		runtimeID = daemon.NilUUID
@@ -105,29 +101,25 @@ func (m *Model) send(ctx context.Context, generation, sessionGeneration uint64, 
 }
 
 func (m *Model) finishSend(ctx context.Context, generation, sessionGeneration uint64, sessionID, text string, err error) {
-	failureCategory := ""
-	m.mu.Lock()
-	if !m.sessionCurrentLocked(generation, sessionGeneration, sessionID) || ctx.Err() != nil {
-		m.mu.Unlock()
-		return
-	}
-	m.sendCancel = nil
-	m.sendingText = ""
-	m.snapshot.Sending = false
 	if err != nil {
-		m.draft = text
-		m.setSessionDraftLocked(sessionID, text)
-		m.snapshot.Draft = text
-		m.snapshot.SendError = sendErrorMessage(err)
-		failureCategory = sendErrorCategory(err)
-	} else {
-		m.snapshot.SendError = ""
+		log.Printf("WARN desktop: send failed; category=%s", sendErrorCategory(err))
 	}
-	m.mu.Unlock()
-	if failureCategory != "" {
-		log.Printf("WARN desktop: send failed; category=%s", failureCategory)
-	}
-	m.invalidate()
+	m.enqueue(func() {
+		if !m.sessionCurrent(generation, sessionGeneration, sessionID) || ctx.Err() != nil {
+			return
+		}
+		m.sendCancel = nil
+		m.sendingText = ""
+		m.snapshot.Sending = false
+		if err != nil {
+			m.draft = text
+			m.setSessionDraft(sessionID, text)
+			m.snapshot.Draft = text
+			m.snapshot.SendError = sendErrorMessage(err)
+		} else {
+			m.snapshot.SendError = ""
+		}
+	})
 }
 
 func sendErrorCategory(err error) string {
