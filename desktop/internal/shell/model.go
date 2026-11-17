@@ -11,6 +11,7 @@ import (
 
 	"github.com/ai-poet/agent-client/desktop/internal/daemon"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
 )
 
 // Status is the user-visible daemon connection state.
@@ -81,6 +82,9 @@ type Model struct {
 	closed               bool
 	sessionList          ui.ListState
 	selectedSessionIndex int
+	transcriptList       ui.ListState
+	transcriptSessionID  string
+	markdown             markdown.Options
 }
 
 func NewModel(connector Connector) *Model {
@@ -355,17 +359,17 @@ func (m *Model) watchConnection(ctx context.Context, generation uint64, connecti
 
 func (m *Model) applyEvent(generation uint64, event daemon.SequencedEvent) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if !m.connectionCurrentLocked(generation) ||
 		m.snapshot.SelectedSessionID != event.SessionID ||
 		m.hydratedGeneration != m.sessionGeneration ||
 		m.hydratedSessionID != event.SessionID ||
 		(m.attachedRuntimeID != "" && m.attachedRuntimeID != event.RuntimeID) {
+		m.mu.Unlock()
 		return
 	}
-	// The transcript is projected now, but streaming rows are deliberately not
-	// rendered in this phase, so an event does not need to invalidate the view.
 	m.snapshot.Transcript = applyTranscriptEvent(m.snapshot.Transcript, event)
+	m.mu.Unlock()
+	m.invalidate()
 }
 
 func (m *Model) clearSelectionLocked() {
@@ -465,20 +469,17 @@ func (m *Model) workbenchView(c *ui.Context, snapshot Snapshot) {
 			}
 		})
 
-		ui.Column(c).Grow(1).Fill().Center().Padding(32).Children(func() {
+		ui.Column(c).Grow(1).Fill().Children(func() {
 			if snapshot.SelectedSessionID == "" {
-				ui.Text(c, "请选择一个会话").TextColor(theme.TextMuted)
+				ui.Column(c).Fill().Center().Children(func() {
+					ui.Text(c, "请选择一个会话").TextColor(theme.TextMuted)
+				})
 				return
 			}
-			name := selectedSessionName(snapshot)
-			switch {
-			case snapshot.SessionLoading:
-				ui.Text(c, "正在打开会话…").TextColor(theme.TextMuted).Role(ui.RoleStatus)
-			case snapshot.SessionError != "":
-				ui.Textf(c, "打开会话失败：%s", snapshot.SessionError).TextColor(theme.Danger).Role(ui.RoleAlert)
-			default:
-				ui.Textf(c, "已选中 %s，共 %d 条消息", name, snapshot.MessageCount)
-			}
+			ui.Row(c).Padding(16, 24).BorderWidth(0, 0, 1, 0).BorderColor(theme.Border).Children(func() {
+				ui.Text(c, selectedSessionName(snapshot)).FontSize(18).Bold()
+			})
+			m.transcriptView(c, snapshot)
 		})
 	})
 }

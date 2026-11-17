@@ -221,7 +221,7 @@ func TestWorkbenchSelectionHydratesAndSwitches(t *testing.T) {
 		return snapshot.SelectedSessionID == "session-a" && !snapshot.SessionLoading && snapshot.MessageCount == 2
 	})
 	tester.Frame()
-	if !tester.HasText("已选中 会话甲，共 2 条消息") {
+	if !tester.HasText("会话甲") || !tester.HasText("已有消息") {
 		t.Fatalf("first hydrate view texts = %q", tester.Texts())
 	}
 
@@ -235,7 +235,7 @@ func TestWorkbenchSelectionHydratesAndSwitches(t *testing.T) {
 		t.Fatalf("second transcript length = %d, want 1", len(snapshot.Transcript))
 	}
 	tester.Frame()
-	if !tester.HasText("已选中 会话乙，共 1 条消息") {
+	if !tester.HasText("会话乙") || !tester.HasText("已有消息") {
 		t.Fatalf("switched hydrate view texts = %q", tester.Texts())
 	}
 	attach, hydrate := connection.calls()
@@ -277,7 +277,7 @@ func TestWorkbenchReconnectSendsResumeFromAndRehydrates(t *testing.T) {
 			snapshot.SelectedSessionID == "session-a" && snapshot.MessageCount == 1
 	})
 	tester.Frame()
-	if !tester.HasText("client-daemon 版本：new-daemon") || !tester.HasText("已选中 会话甲，共 1 条消息") {
+	if !tester.HasText("client-daemon 版本：new-daemon") || !tester.HasText("已有消息") {
 		t.Fatalf("reconnected view texts = %q", tester.Texts())
 	}
 }
@@ -338,7 +338,8 @@ func TestWorkbenchDropsLateHydrateAndEvents(t *testing.T) {
 		t.Fatalf("old-generation event entered transcript: %+v", got)
 	}
 	tester.Frame()
-	if !tester.HasText("已选中 会话乙，共 1 条消息") {
+	tester.Advance(2 * time.Second)
+	if !tester.HasText("已有消息") || !tester.HasText("当前内容") {
 		t.Fatalf("view after late results = %q", tester.Texts())
 	}
 }
