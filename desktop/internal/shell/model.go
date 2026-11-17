@@ -89,6 +89,7 @@ type Model struct {
 	sessionGeneration    uint64
 	hydratedGeneration   uint64
 	hydratedSessionID    string
+	rehydrating          bool
 	pendingEvents        []daemon.SequencedEvent
 	eventCursor          *daemon.RuntimeEventCursor
 	attachedRuntimeID    string
@@ -170,6 +171,7 @@ func (m *Model) beginConnectState() (context.Context, uint64, bool) {
 	m.sessionGeneration++
 	m.hydratedGeneration = 0
 	m.hydratedSessionID = ""
+	m.rehydrating = false
 	m.pendingEvents = nil
 	m.eventCursor = nil
 	m.attachedRuntimeID = ""
@@ -331,6 +333,7 @@ func (m *Model) beginSessionLoad(sessionID string) (context.Context, uint64, uin
 	m.sessionGeneration++
 	m.hydratedGeneration = 0
 	m.hydratedSessionID = ""
+	m.rehydrating = false
 	m.pendingEvents = nil
 	m.eventCursor = nil
 	m.attachedRuntimeID = ""
@@ -387,6 +390,7 @@ func (m *Model) hydrateSession(ctx context.Context, generation, sessionGeneratio
 		m.snapshot.Transcript = transcript
 		m.hydratedGeneration = sessionGeneration
 		m.hydratedSessionID = sessionID
+		m.rehydrating = false
 		// The selection may have changed while I/O was in flight. The guard above
 		// rejects stale writes; restore only from the still-current selection.
 		m.restoreActiveDraft()
@@ -412,6 +416,7 @@ func (m *Model) finishSessionError(ctx context.Context, generation, sessionGener
 		}
 		m.snapshot.SessionLoading = false
 		m.snapshot.SessionError = err.Error()
+		m.rehydrating = false
 	})
 }
 
@@ -449,9 +454,17 @@ func (m *Model) applyEvent(generation uint64, event daemon.SequencedEvent) {
 		}
 		if len(m.pendingEvents) >= pendingEventLimit {
 			m.pendingEvents = nil
+			if m.rehydrating {
+				log.Printf("WARN desktop: hydrate event buffer overflow during rehydrate; dropping buffered events")
+				return
+			}
 			connection := m.connection
 			log.Printf("WARN desktop: hydrate event buffer overflow; forcing session rehydrate")
 			m.startSessionLoad(generation, connection, event.SessionID)
+			// beginSessionLoad clears the previous attempt's flag. Set ours only
+			// after the replacement is launched; its result cannot drain until
+			// this UI-thread closure returns. Later overflows only log and drop.
+			m.rehydrating = true
 			return
 		}
 		m.pendingEvents = append(m.pendingEvents, event)
@@ -525,6 +538,7 @@ func (m *Model) clearSelection() {
 	m.sessionGeneration++
 	m.hydratedGeneration = 0
 	m.hydratedSessionID = ""
+	m.rehydrating = false
 	m.pendingEvents = nil
 	m.eventCursor = nil
 	m.attachedRuntimeID = ""
