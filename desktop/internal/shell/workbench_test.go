@@ -530,6 +530,39 @@ func TestWorkbenchReconnectSendsResumeFromAndRehydrates(t *testing.T) {
 	}
 }
 
+func TestWorkbenchDeletedSessionLateHydrateDoesNotWriteTranscript(t *testing.T) {
+	connection := newFakeWorkbenchConnection("test-daemon", daemon.AgentSession{ID: "session-a", Title: "会话甲"})
+	connection.sessions["session-a"] = hydratedSession("session-a", "会话甲", 1)
+	connection.hydrateStarted = make(chan string, 1)
+	connection.hydrateReturned = make(chan string, 1)
+	connection.hydrateRelease = map[string]chan struct{}{"session-a": make(chan struct{})}
+	connector := &fakeWorkbenchConnector{connections: []*fakeWorkbenchConnection{connection}}
+	model := NewModel(connector)
+	t.Cleanup(func() { _ = model.Close() })
+	model.Connect()
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool { return len(snapshot.Sessions) == 1 })
+	tester := ui.NewTester(model.View, 900, 600)
+	if err := tester.Click("会话甲"); err != nil {
+		t.Fatal(err)
+	}
+	receiveString(t, connection.hydrateStarted)
+
+	// Isolate catalog membership from the other two guards: the connection and
+	// session generations and the selected ID all remain unchanged here.
+	model.snapshot.Sessions = nil
+	close(connection.hydrateRelease["session-a"])
+	if got := receiveString(t, connection.hydrateReturned); got != "session-a" {
+		t.Fatalf("late hydrate session = %q", got)
+	}
+	snapshot := model.Snapshot()
+	if snapshot.SelectedSessionID != "session-a" || len(snapshot.Transcript) != 0 || snapshot.MessageCount != 0 {
+		t.Fatalf("deleted session hydrate wrote transcript: %+v", snapshot)
+	}
+	if model.hydratedSessionID != "" || model.hydratedGeneration != 0 {
+		t.Fatalf("deleted session was marked hydrated: generation=%d ID=%q", model.hydratedGeneration, model.hydratedSessionID)
+	}
+}
+
 func TestWorkbenchDropsLateHydrateAndEvents(t *testing.T) {
 	connection := newFakeWorkbenchConnection("test-daemon",
 		daemon.AgentSession{ID: "session-a", Title: "会话甲"},

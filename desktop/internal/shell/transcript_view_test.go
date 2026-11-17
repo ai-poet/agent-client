@@ -76,7 +76,9 @@ func TestTranscriptViewHydrateOrderAndCount(t *testing.T) {
 func TestTranscriptViewStreamingAppendDoesNotDuplicate(t *testing.T) {
 	model := NewModel(&fakeWorkbenchConnector{})
 	model.markdown.Reveal = &markdown.Reveal{Unit: markdown.AtOnce}
-	model.snapshot = Snapshot{Status: Connected, SelectedSessionID: "s"}
+	model.snapshot = Snapshot{
+		Status: Connected, SelectedSessionID: "s", Sessions: []SessionSummary{{ID: "s"}},
+	}
 	model.hydratedSessionID = "s"
 	tester := ui.NewTester(model.View, 900, 600)
 

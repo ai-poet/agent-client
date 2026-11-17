@@ -107,7 +107,7 @@ func TestModelStaleWatcherCannotCancelNewerConnection(t *testing.T) {
 	}
 
 	currentGeneration := model.generation
-	model.reconnect(currentGeneration - 1)
+	model.reconnect(currentGeneration-1, connector.connection)
 	if got := model.Snapshot(); got.Status != current.Status || got.DaemonVersion != current.DaemonVersion {
 		t.Fatalf("stale watcher changed connection: before %+v; after %+v", current, got)
 	}
@@ -136,6 +136,58 @@ func TestModelSessionRefreshPrunesDeletedSessionDrafts(t *testing.T) {
 	}
 	if draft, ok := model.drafts["deleted-session"]; ok {
 		t.Fatalf("deleted session draft survived refresh: %q", draft)
+	}
+}
+
+func TestModelConcurrentWatchersCannotCloseReplacement(t *testing.T) {
+	first := newFakeWorkbenchConnection("first")
+	second := newFakeWorkbenchConnection("second")
+	connector := &fakeWorkbenchConnector{connections: []*fakeWorkbenchConnection{first, second}}
+	model := NewModel(connector)
+	t.Cleanup(func() { _ = model.Close() })
+	model.Connect()
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool {
+		return snapshot.Status == Connected && snapshot.DaemonVersion == "first"
+	})
+	oldGeneration := model.generation
+
+	// The real watcher and this second watcher observe the same disconnect and
+	// enqueue competing reconnects. Only the first drained callback is current.
+	watcherDone := make(chan struct{})
+	go func() {
+		model.watchConnection(context.Background(), oldGeneration, first)
+		close(watcherDone)
+	}()
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool {
+		model.Snapshot()
+		return len(connector.resumeAttempts()) == 2
+	})
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool {
+		return snapshot.Status == Connected && snapshot.DaemonVersion == "second"
+	})
+	select {
+	case <-watcherDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second old watcher did not exit")
+	}
+
+	// Model a stale watcher callback that was queued behind the replacement.
+	// It must neither start another reconnect nor close the new connection.
+	model.enqueue(func() { model.reconnect(oldGeneration, first) })
+	model.Snapshot()
+	if got := len(connector.resumeAttempts()); got != 2 {
+		t.Fatalf("connection attempts after stale watcher = %d, want 2", got)
+	}
+	select {
+	case <-second.Done():
+		t.Fatal("stale watcher closed the replacement connection")
+	default:
+	}
+	if model.connection != second {
+		t.Fatal("stale watcher replaced the current connection")
 	}
 }
 

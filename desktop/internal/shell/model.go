@@ -135,13 +135,17 @@ func (m *Model) beginConnect() (context.Context, uint64, bool) {
 	return ctx, generation, ok
 }
 
-// reconnect runs on the UI thread. Validating and starting the replacement in
-// one turn prevents a stale watcher from cancelling a newer connection.
-func (m *Model) reconnect(generation uint64) {
-	if !m.connectionCurrent(generation) {
+// reconnect runs inside one drained UI callback, the connection-state critical
+// section. Generation and identity validation, capturing previous, and starting
+// its replacement are atomic with respect to every other Model state change.
+// A watcher never closes m.connection: connect closes only its own stale result
+// or the previous connection captured by this validated turn. Consequently a
+// stale watcher cannot close a newer connection between a check and Close.
+func (m *Model) reconnect(generation uint64, watched daemon.Connection) {
+	if !m.connectionCurrent(generation) || m.connection != watched {
 		return
 	}
-	previous := m.connection
+	previous := watched
 	ctx, nextGeneration, ok := m.beginConnectState()
 	if !ok {
 		return
@@ -433,7 +437,9 @@ func (m *Model) watchConnection(ctx context.Context, generation uint64, connecti
 			}
 			m.applyEvent(generation, event)
 		case <-connection.Done():
-			m.enqueue(func() { m.reconnect(generation) })
+			// Carry the watcher's own token and connection into the serialized UI
+			// turn. This goroutine neither inspects nor closes current Model state.
+			m.enqueue(func() { m.reconnect(generation, connection) })
 			return
 		}
 	}
@@ -443,8 +449,7 @@ func (m *Model) watchConnection(ctx context.Context, generation uint64, connecti
 // touches the Model, and drainPending runs that closure on the UI thread.
 func (m *Model) applyEvent(generation uint64, event daemon.SequencedEvent) {
 	m.enqueue(func() {
-		if !m.connectionCurrent(generation) ||
-			m.snapshot.SelectedSessionID != event.SessionID ||
+		if !m.sessionCurrent(generation, m.sessionGeneration, event.SessionID) ||
 			(m.attachedRuntimeID != "" && m.attachedRuntimeID != event.RuntimeID) {
 			return
 		}
@@ -556,9 +561,12 @@ func (m *Model) connectionCurrent(generation uint64) bool {
 	return !m.closed && generation == m.generation
 }
 
+// sessionCurrent also requires catalog membership: a deletion can race a late
+// callback while both generation tokens and the selected ID still match.
 func (m *Model) sessionCurrent(generation, sessionGeneration uint64, sessionID string) bool {
 	return m.connectionCurrent(generation) &&
-		sessionGeneration == m.sessionGeneration && m.snapshot.SelectedSessionID == sessionID
+		sessionGeneration == m.sessionGeneration && m.snapshot.SelectedSessionID == sessionID &&
+		sessionExists(m.snapshot.Sessions, sessionID)
 }
 
 func sessionExists(sessions []SessionSummary, sessionID string) bool {
