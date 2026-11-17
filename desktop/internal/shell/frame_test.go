@@ -38,18 +38,7 @@ func TestCrychicFrame(t *testing.T) {
 	tester := ui.NewTester(model.View, 1200, 800)
 	tester.Advance(time.Second)
 
-	file, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	if err := png.Encode(file, tester.Image()); err != nil {
-		t.Fatal(err)
-	}
+	writeFrame(t, tester, path)
 }
 
 func TestCrychicTranscriptLayout(t *testing.T) {
@@ -91,5 +80,64 @@ func TestCrychicTranscriptLayout(t *testing.T) {
 	}
 	if role.X < assistant.X || role.Y < assistant.Y || role.X+role.W > assistant.X+assistant.W || role.Y+role.H > assistant.Y+assistant.H {
 		t.Fatalf("role label is outside its bubble: role=%v, bubble=%v", role, assistant)
+	}
+}
+
+func TestCrychicTranscriptLongStringWrapping(t *testing.T) {
+	longASCII := strings.Repeat("A", 120)
+	longURL := "https://example.com/" + strings.Repeat("very-long-path-segment/", 12) + "?query=" + strings.Repeat("x", 120)
+	chinese := strings.Repeat("中文内容应当按字符正常换行，不能撑破消息气泡。", 4)
+	model := NewModel(&fakeWorkbenchConnector{})
+	setModelSnapshot(model, Snapshot{
+		Status: Connected, SelectedSessionID: "session-a",
+		Transcript: []TranscriptEntry{
+			{
+				ID: "assistant-long-string", Kind: TranscriptAssistant, Title: "助手",
+				Text: longASCII + "\n\n" + longURL + "\n\n" + chinese,
+			},
+		},
+	})
+	tester := ui.NewTester(model.View, 1200, 800)
+	tester.Advance(time.Second)
+
+	list, ok := tester.Find("会话转录")
+	if !ok {
+		t.Fatal("transcript list has no bounds")
+	}
+	bubble, ok := tester.Find("转录消息：assistant-long-string")
+	if !ok {
+		t.Fatal("long-string bubble has no bounds")
+	}
+	if maxWidth := list.W * 0.78; bubble.W > maxWidth+1 {
+		t.Fatalf("long-string bubble width = %v, exceeds 78%% of transcript width %v", bubble.W, list.W)
+	}
+	for _, text := range []string{longASCII, longURL, chinese} {
+		bounds, ok := tester.Find(text)
+		if !ok {
+			t.Fatalf("long-string paragraph has no bounds: %.40q", text)
+		}
+		if bounds.X < bubble.X-1 || bounds.Y < bubble.Y-1 || bounds.X+bounds.W > bubble.X+bubble.W+1 || bounds.Y+bounds.H > bubble.Y+bubble.H+1 {
+			t.Errorf("paragraph overflows its bubble: text=%v, bubble=%v, content=%.40q", bounds, bubble, text)
+		}
+	}
+
+	if path := os.Getenv("CHEAPROUTER_LONGSTRING_FRAME_PATH"); path != "" {
+		writeFrame(t, tester, path)
+	}
+}
+
+func writeFrame(t *testing.T, tester *ui.Tester, path string) {
+	t.Helper()
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := png.Encode(file, tester.Image()); err != nil {
+		t.Fatal(err)
 	}
 }

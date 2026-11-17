@@ -105,21 +105,65 @@ func TestTranscriptViewFollowsEndOnlyUntilUserScrollsUp(t *testing.T) {
 	model := NewModel(&fakeWorkbenchConnector{})
 	model.markdown.Reveal = &markdown.Reveal{Unit: markdown.AtOnce}
 	setModelSnapshot(model, Snapshot{Status: Connected, SelectedSessionID: "s"})
-	for index := range 40 {
+	for index := range 2 {
+		model.state.Transcript = append(model.state.Transcript, TranscriptEntry{
+			ID: fmt.Sprintf("message-%d", index), Kind: TranscriptAssistant, Title: "助手",
+			Text: fmt.Sprintf("短消息 %d", index),
+		})
+	}
+	tester := ui.NewTester(model.View, 1000, 500)
+	if !model.transcriptList.AtEnd() {
+		t.Fatal("short transcript is not at its end")
+	}
+	before := make([]ui.Rect, len(model.state.Transcript))
+	for index := range before {
+		var ok bool
+		before[index], ok = tester.Find(fmt.Sprintf("转录消息：message-%d", index))
+		if !ok {
+			t.Fatalf("message-%d has no bounds before the append", index)
+		}
+	}
+
+	model.state.Transcript = append(model.state.Transcript, TranscriptEntry{
+		ID: "message-2", Kind: TranscriptAssistant, Title: "助手", Text: "短消息 2",
+	})
+	tester.Frame()
+	for index, want := range before {
+		got, ok := tester.Find(fmt.Sprintf("转录消息：message-%d", index))
+		if !ok {
+			t.Fatalf("message-%d has no bounds after the append", index)
+		}
+		if got != want {
+			t.Errorf("short transcript moved message-%d when appending: %v -> %v", index, want, got)
+		}
+	}
+	if !model.transcriptList.AtEnd() {
+		t.Fatal("short transcript did not remain at its end after an append")
+	}
+
+	for index := 3; index < 53; index++ {
 		model.state.Transcript = append(model.state.Transcript, TranscriptEntry{
 			ID: fmt.Sprintf("message-%d", index), Kind: TranscriptAssistant, Title: "助手",
 			Text: fmt.Sprintf("消息 %d\n\n%s", index, strings.Repeat("用于滚动的内容。", 4)),
 		})
 	}
-	tester := ui.NewTester(model.View, 1000, 500)
-	if !model.transcriptList.AtEnd() {
-		t.Fatal("transcript did not start at its end")
+	tester.Frame()
+	if _, last := model.transcriptList.Visible(); last != len(model.state.Transcript)-1 || !model.transcriptList.AtEnd() {
+		t.Fatalf("overflowing transcript did not start at its end: last=%d, want=%d, atEnd=%v", last, len(model.state.Transcript)-1, model.transcriptList.AtEnd())
 	}
 
 	model.state.Transcript = append(model.state.Transcript, TranscriptEntry{ID: "bottom-addition", Kind: TranscriptAssistant, Title: "助手", Text: "底部新增"})
 	tester.Frame()
-	if !model.transcriptList.AtEnd() {
-		t.Fatal("transcript did not follow a new entry while at its end")
+	if _, last := model.transcriptList.Visible(); last != len(model.state.Transcript)-1 || !model.transcriptList.AtEnd() {
+		t.Fatalf("transcript did not follow a new entry while at its end: last=%d, atEnd=%v", last, model.transcriptList.AtEnd())
+	}
+
+	lastEntry := &model.state.Transcript[len(model.state.Transcript)-1]
+	lastEntry.Text += "\n\n" + strings.Repeat("流式追加让最后一行继续增高。", 4)
+	lastEntry.Streaming = true
+	tester.Frame()
+	if _, last := model.transcriptList.Visible(); last != len(model.state.Transcript)-1 || !model.transcriptList.AtEnd() {
+		t.Fatalf("transcript did not follow a growing streaming entry: last=%d, atEnd=%v", last, model.transcriptList.AtEnd())
 	}
 
 	listBounds, ok := tester.Find("会话转录")
@@ -144,7 +188,7 @@ func TestTranscriptViewFollowsEndOnlyUntilUserScrollsUp(t *testing.T) {
 	tester.Frame()
 	model.state.Transcript = append(model.state.Transcript, TranscriptEntry{ID: "resumed-addition", Kind: TranscriptAssistant, Title: "助手", Text: "恢复跟随"})
 	tester.Frame()
-	if !model.transcriptList.AtEnd() {
-		t.Fatal("transcript did not resume following after returning to its end")
+	if _, last := model.transcriptList.Visible(); last != len(model.state.Transcript)-1 || !model.transcriptList.AtEnd() {
+		t.Fatalf("transcript did not resume following after returning to its end: last=%d, atEnd=%v", last, model.transcriptList.AtEnd())
 	}
 }
