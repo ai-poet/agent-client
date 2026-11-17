@@ -1,6 +1,10 @@
 package shell
 
 import (
+	"time"
+
+	"github.com/ELY-Open-Source/CrychicUI/chat"
+	"github.com/ELY-Open-Source/CrychicUI/feedback"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
@@ -9,14 +13,14 @@ func (m *Model) transcriptView(c *ui.Context, snapshot Snapshot) {
 	theme := c.Theme()
 	switch {
 	case snapshot.SessionLoading:
-		ui.Column(c).Grow(1).Center().Children(func() {
+		ui.Column(c).Grow(1).Center().Gap(12).Children(func() {
 			ui.Text(c, "载入会话…").TextColor(theme.TextMuted).Role(ui.RoleStatus)
+			feedback.IndeterminateBar(c, "正在载入会话").Width(240)
 		})
 		return
 	case snapshot.SessionError != "":
-		ui.Column(c).Grow(1).Center().Gap(12).Children(func() {
-			ui.Text(c, "载入失败，可重试").TextColor(theme.Danger).Role(ui.RoleAlert)
-			ui.Text(c, snapshot.SessionError).TextColor(theme.TextMuted)
+		ui.Column(c).Grow(1).Center().Gap(12).Padding(24).Children(func() {
+			feedback.Alert(c, feedback.ToneDanger, "载入失败，可重试", snapshot.SessionError).Role(ui.RoleAlert)
 			if ui.Button(c.Key("retry-session"), "重试").Clicked() {
 				m.SelectSession(snapshot.SelectedSessionID)
 			}
@@ -24,7 +28,7 @@ func (m *Model) transcriptView(c *ui.Context, snapshot Snapshot) {
 		return
 	case len(snapshot.Transcript) == 0:
 		ui.Column(c).Grow(1).Center().Children(func() {
-			ui.Text(c, "这个会话还没有消息").TextColor(theme.TextMuted)
+			feedback.EmptyState(c, "message-circle", "这个会话还没有消息", "", "")
 		})
 		return
 	}
@@ -58,18 +62,23 @@ func (m *Model) transcriptEntryView(c *ui.Context, entry TranscriptEntry) {
 			}
 		})
 		if entry.Text != "" {
-			m.transcriptMarkdown(c, entry.Text, entry.Streaming)
+			m.transcriptMarkdown(c, entry, entry.Text, entry.Streaming)
 		}
 		if entry.Detail != "" {
-			m.transcriptMarkdown(c, entry.Detail, false)
+			m.transcriptMarkdown(c, entry, entry.Detail, false)
 		}
 	})
 }
 
-func (m *Model) transcriptMarkdown(c *ui.Context, text string, streaming bool) {
+func (m *Model) transcriptMarkdown(c *ui.Context, entry TranscriptEntry, text string, streaming bool) {
 	if streaming {
 		markdown.Stream(c, text, &m.markdown)
 		return
 	}
-	markdown.View(c, text, &m.markdown)
+	chat.MarkdownMessage(c, chat.Message{
+		Sender: entry.Title,
+		Text:   text,
+		Mine:   entry.Kind == TranscriptUser,
+		At:     time.Unix(0, 0),
+	})
 }

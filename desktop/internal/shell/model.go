@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ELY-Open-Source/CrychicUI/data"
+	"github.com/ELY-Open-Source/CrychicUI/feedback"
 	"github.com/ai-poet/agent-client/desktop/internal/daemon"
 	"github.com/ai-poet/agent-client/desktop/internal/workbench"
 	"github.com/egoist/mygo/ui"
@@ -72,7 +74,6 @@ type Model struct {
 	sessionCancel        context.CancelFunc
 	sendCancel           context.CancelFunc
 	closed               bool
-	sessionList          ui.ListState
 	selectedSessionIndex int
 	transcriptList       ui.ListState
 	transcriptSessionID  string
@@ -361,11 +362,12 @@ func (m *Model) connectionView(c *ui.Context, snapshot Snapshot) {
 
 			switch snapshot.Status {
 			case Failed:
-				ui.Text(c, snapshot.Detail).TextColor(theme.Danger).Role(ui.RoleAlert)
+				feedback.Alert(c, feedback.ToneDanger, "连接失败", snapshot.Detail).Role(ui.RoleAlert)
 			case Connecting:
 				ui.Text(c, "正在与现有 client-daemon 握手…").TextColor(theme.TextMuted)
+				feedback.IndeterminateBar(c, "正在连接 client-daemon")
 			default:
-				ui.Text(c, "尚未连接到 client-daemon。").TextColor(theme.TextMuted)
+				feedback.EmptyState(c, "message-circle", "尚未连接", "尚未连接到 client-daemon。", "")
 			}
 
 			if snapshot.Status == Failed || snapshot.Status == Disconnected {
@@ -380,7 +382,7 @@ func (m *Model) connectionView(c *ui.Context, snapshot Snapshot) {
 func (m *Model) workbenchView(c *ui.Context, snapshot Snapshot) {
 	theme := c.Theme()
 	ui.Row(c).Fill().Children(func() {
-		ui.Column(c).Width(300).Fill().Padding(16).Gap(12).Background(theme.Surface).Children(func() {
+		ui.Column(c).Width(300).FillHeight().Shrink(0).Padding(16).Gap(12).Background(theme.Surface).Children(func() {
 			ui.Text(c, "CheapRouter").FontSize(22).Bold()
 			ui.Row(c).Gap(8).Children(func() {
 				ui.Text(c, "会话").FontSize(18).Bold().Grow(1)
@@ -391,19 +393,20 @@ func (m *Model) workbenchView(c *ui.Context, snapshot Snapshot) {
 			switch {
 			case snapshot.SessionsLoading:
 				ui.Text(c, "正在加载会话…").TextColor(theme.TextMuted).Role(ui.RoleStatus)
+				feedback.IndeterminateBar(c, "正在加载会话")
 			case snapshot.SessionsError != "":
-				ui.Textf(c, "会话加载失败：%s", snapshot.SessionsError).TextColor(theme.Danger).Role(ui.RoleAlert)
+				feedback.Alert(c, feedback.ToneDanger, "会话加载失败："+snapshot.SessionsError, "").Role(ui.RoleAlert)
 			case len(snapshot.Sessions) == 0:
-				ui.Text(c, "还没有会话").TextColor(theme.TextMuted)
+				feedback.EmptyState(c, "messages-square", "还没有会话", "", "")
 			default:
 				m.sessionListView(c, snapshot)
 			}
 		})
 
-		ui.Column(c).Grow(1).Fill().Children(func() {
+		ui.Column(c).Grow(1).FillHeight().MinWidth(0).Children(func() {
 			if snapshot.SelectedSessionID == "" {
 				ui.Column(c).Fill().Center().Children(func() {
-					ui.Text(c, "请选择一个会话").TextColor(theme.TextMuted)
+					feedback.EmptyState(c, "message-circle", "请选择一个会话", "", "")
 				})
 				return
 			}
@@ -424,16 +427,13 @@ func (m *Model) sessionListView(c *ui.Context, snapshot Snapshot) {
 			break
 		}
 	}
-	m.sessionList.Selected = &m.selectedSessionIndex
-	m.sessionList.Key = func(index int) any { return snapshot.Sessions[index].ID }
-	m.sessionList.Label = func(index int) string { return sessionName(snapshot.Sessions[index]) }
-	list := ui.List(c, &m.sessionList, len(snapshot.Sessions), func(index int) {
+	list := data.VirtualList(c, "会话列表", len(snapshot.Sessions), &m.selectedSessionIndex, func(index int) {
 		session := snapshot.Sessions[index]
-		ui.Column(c).Padding(10, 12).Gap(4).Children(func() {
+		ui.Column(c).Gap(4).Children(func() {
 			ui.Text(c, sessionName(session)).Bold()
 			ui.Text(c, sessionLastMessageTime(session)).FontSize(12)
 		})
-	}).Grow(1).Label("会话列表")
+	}, data.VirtualListOptions{}).Grow(1)
 	if list.Changed() && m.selectedSessionIndex >= 0 && m.selectedSessionIndex < len(snapshot.Sessions) {
 		m.SelectSession(snapshot.Sessions[m.selectedSessionIndex].ID)
 	}

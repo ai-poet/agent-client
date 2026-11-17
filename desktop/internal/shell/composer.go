@@ -6,6 +6,8 @@ import (
 	"log"
 	"strings"
 
+	"github.com/ELY-Open-Source/CrychicUI/feedback"
+	crychicinput "github.com/ELY-Open-Source/CrychicUI/input"
 	"github.com/ai-poet/agent-client/desktop/internal/daemon"
 	"github.com/ai-poet/agent-client/desktop/internal/workbench"
 	"github.com/egoist/mygo/ui"
@@ -16,16 +18,17 @@ func (m *Model) composerView(c *ui.Context, snapshot Snapshot) {
 	ui.Column(c).Padding(12, 24, 16).Gap(8).BorderWidth(1, 0, 0, 0).BorderColor(theme.Border).Children(func() {
 		switch {
 		case snapshot.Sending:
-			ui.Text(c, "发送中…").FontSize(12).TextColor(theme.TextMuted).Role(ui.RoleStatus)
+			feedback.Busy(c, true, "发送中…", "发送中…")
 		case snapshot.SendError != "":
-			ui.Text(c, snapshot.SendError).FontSize(12).TextColor(theme.Danger).Role(ui.RoleAlert)
+			feedback.Alert(c, feedback.ToneDanger, "", snapshot.SendError).Role(ui.RoleAlert)
 		}
 		ui.Row(c).Gap(12).AlignItems(ui.End).Children(func() {
-			input := ui.TextArea(c.Key("composer"), &m.state.Draft).
-				Placeholder("输入消息，Enter 发送，Shift+Enter 换行").
-				Label("消息输入").Lines(3, 8).Grow(1).
+			c.Key("composer")
+			composerInput := crychicinput.AutoTextArea(c, &m.state.Draft, crychicinput.AutoTextAreaOptions{
+				MinLines: 3, MaxLines: 8, Placeholder: "输入消息，Enter 发送，Shift+Enter 换行",
+			}).Label("消息输入").Grow(1).
 				Disabled(snapshot.Sending || snapshot.SessionLoading || snapshot.SessionError != "")
-			input.OnTextKey(func(key ui.TextKey) bool {
+			composerInput.OnTextKey(func(key ui.TextKey) bool {
 				if key.Key != ui.KeyEnter || key.Mods != 0 {
 					return false // Shift+Enter and other modified Enter keys insert a newline.
 				}

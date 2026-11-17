@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	"github.com/ELY-Open-Source/CrychicUI/sound"
 	"github.com/ai-poet/agent-client/desktop/internal/daemon"
 	"github.com/ai-poet/agent-client/desktop/internal/shell"
 	"github.com/egoist/mygo"
@@ -10,6 +11,7 @@ import (
 )
 
 func main() {
+	sound.SetEnabled(false)
 	model := shell.NewModel(daemon.NewSupervisor())
 	defer func() {
 		if err := model.Close(); err != nil {
