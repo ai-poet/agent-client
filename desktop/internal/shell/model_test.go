@@ -155,7 +155,7 @@ func TestNativeViewStates(t *testing.T) {
 	}{
 		{name: "disconnected", snapshot: Snapshot{Status: Disconnected}, want: []string{"未连接", "重新连接"}},
 		{name: "connecting", snapshot: Snapshot{Status: Connecting}, want: []string{"连接中", "正在与现有 client-daemon 握手…"}},
-		{name: "connected", snapshot: Snapshot{Status: Connected, DaemonVersion: "1.2.3"}, want: []string{"已连接", "client-daemon 版本：1.2.3", "工作台尚未迁移"}},
+		{name: "connected", snapshot: Snapshot{Status: Connected, DaemonVersion: "1.2.3"}, want: []string{"已连接", "client-daemon 版本：1.2.3", "还没有会话", "请选择一个会话"}},
 		{name: "failed", snapshot: Snapshot{Status: Failed, Detail: "bad token"}, want: []string{"连接失败", "bad token", "重新连接"}},
 	}
 	for _, test := range tests {
@@ -163,7 +163,7 @@ func TestNativeViewStates(t *testing.T) {
 			model := NewModel(&fakeConnector{})
 			model.snapshot = test.snapshot
 			tester := ui.NewTester(model.View, 720, 480)
-			for _, text := range append([]string{"CheapRouter", "MyGo 原生桌面壳 · 第一阶段"}, test.want...) {
+			for _, text := range append([]string{"CheapRouter"}, test.want...) {
 				if !tester.HasText(text) {
 					t.Errorf("view does not contain %q; texts: %q", text, tester.Texts())
 				}

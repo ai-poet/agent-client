@@ -1,8 +1,10 @@
 # CheapRouter MyGo desktop shell
 
-这是渐进迁移的第一期脚手架：MyGo `package ui` 绘制原生 GPU 界面，Go
-客户端沿用现有 Rust `client-daemon` 的 WebSocket `/v1` JSON 协议。当前窗口只展示
-未连接、连接中、已连接或失败原因，并支持失败后重新连接；**它不是完整工作台**。
+这是渐进迁移中的 MyGo 原生工作台：`package ui` 绘制原生 GPU 界面，Go
+客户端沿用现有 Rust `client-daemon` 的 WebSocket `/v1` JSON 协议。当前窗口具备
+连接状态、失败重连、会话列表（名称与最后消息时间）、选中会话，以及
+`attachSession` / `hydrateSession` 后的消息数占位；重连会携带已消费事件的
+`resumeFrom` 游标。**它还不是完整工作台**。
 
 ## 本地运行
 
@@ -48,6 +50,10 @@ GitHub Actions 的 **Tests** workflow 在 macOS 和 Windows 上分别运行上�
 当前自动发版仍只发布现有 Rust/GPUI 客户端。`release.yml`、`sync-release.yml`、
 产物、升级通道和 appcast 均未改；Go 壳只随 Tests 自动测试和构建，不进入发布产物。
 
-第一期只实现连接、握手、协议错误识别和 daemon 生命周期边界。协议客户端（RPC、事件去重、`resumeFrom`、会话封装）和转录内存投影已在后续提交中补上，但工作台 UI 尚未完成，且当前 `go test ./...` / `go build ./...` 因壳层接口未跟上而编译失败。
+当前已接通连接/重连、握手、协议错误识别、daemon 生命周期、会话目录和会话
+hydrate；目录与 RPC 都在后台执行，界面帧只读内存快照。右侧暂只显示所选会话的
+消息数，流式 Markdown 转录渲染、输入框、终端和 diff 仍未迁移。没有新增协议或
+wire 类型，会话列表直接复用 `internal/daemon` 暴露的持久化结构。
 
-接手时请先读 [HANDOFF.md](HANDOFF.md)：里面写了迁移背景与分期、已完成项、必须先修的编译断裂、本阶段剩余工作（会话列表、流式转录、输入框，稳定后再补终端和 diff）、不要做的后续阶段，以及协议 / 现有代码 / MyGo API 的参考路径。
+接手时请先读 [HANDOFF.md](HANDOFF.md)：里面写了迁移背景与分期、协议 / 现有代码 /
+MyGo API 的参考路径，以及不要提前实施的后续阶段。

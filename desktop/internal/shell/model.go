@@ -1,11 +1,13 @@
 // Package shell contains the native MyGo desktop shell's testable state and
-// views. The workbench itself is intentionally outside this first phase.
+// views. Network and process work stays outside the UI thread.
 package shell
 
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/ai-poet/agent-client/desktop/internal/daemon"
 	"github.com/egoist/mygo/ui"
@@ -34,11 +36,24 @@ func (s Status) Label() string {
 	}
 }
 
+// SessionSummary is the daemon's existing lightweight session representation,
+// not a second wire type owned by the UI.
+type SessionSummary = daemon.AgentSession
+
 // Snapshot is an immutable copy of what a frame should render.
 type Snapshot struct {
 	Status        Status
 	DaemonVersion string
 	Detail        string
+
+	Sessions          []SessionSummary
+	SelectedSessionID string
+	SessionsLoading   bool
+	SessionsError     string
+	SessionLoading    bool
+	SessionError      string
+	MessageCount      int
+	Transcript        []TranscriptEntry
 }
 
 // Connector is implemented by daemon.Supervisor and by headless test fakes.
@@ -47,24 +62,32 @@ type Connector interface {
 	Close() error
 }
 
-// Model owns connection state. Network and process work always runs off the
-// UI thread; frames only read the in-memory snapshot.
+// Model owns connection and workbench state. Network and process work always
+// runs off the UI thread; frames only read the in-memory snapshot.
 type Model struct {
 	connector Connector
 
-	mu         sync.Mutex
-	services   ui.Services
-	snapshot   Snapshot
-	connection daemon.Connection
-	generation uint64
-	cancel     context.CancelFunc
-	closed     bool
+	mu                   sync.Mutex
+	services             ui.Services
+	snapshot             Snapshot
+	connection           daemon.Connection
+	generation           uint64
+	sessionGeneration    uint64
+	hydratedGeneration   uint64
+	hydratedSessionID    string
+	attachedRuntimeID    string
+	cancel               context.CancelFunc
+	sessionCancel        context.CancelFunc
+	closed               bool
+	sessionList          ui.ListState
+	selectedSessionIndex int
 }
 
 func NewModel(connector Connector) *Model {
 	return &Model{
-		connector: connector,
-		snapshot:  Snapshot{Status: Disconnected},
+		connector:            connector,
+		snapshot:             Snapshot{Status: Disconnected},
+		selectedSessionIndex: -1,
 	}
 }
 
@@ -87,11 +110,27 @@ func (m *Model) beginConnect() (context.Context, uint64, bool) {
 	if m.cancel != nil {
 		m.cancel()
 	}
+	if m.sessionCancel != nil {
+		m.sessionCancel()
+		m.sessionCancel = nil
+	}
 	m.generation++
+	m.sessionGeneration++
+	m.hydratedGeneration = 0
+	m.hydratedSessionID = ""
+	m.attachedRuntimeID = ""
 	generation := m.generation
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
-	m.snapshot = Snapshot{Status: Connecting}
+	m.snapshot.Status = Connecting
+	m.snapshot.Detail = ""
+	m.snapshot.DaemonVersion = ""
+	m.snapshot.SessionsLoading = false
+	m.snapshot.SessionsError = ""
+	m.snapshot.SessionLoading = false
+	m.snapshot.SessionError = ""
+	m.snapshot.MessageCount = 0
+	m.snapshot.Transcript = nil
 	m.mu.Unlock()
 	m.invalidate()
 	return ctx, generation, true
@@ -119,40 +158,273 @@ func (m *Model) connect(ctx context.Context, generation uint64) {
 		}
 		return
 	}
-	m.cancel = nil
 	if err != nil {
-		m.snapshot = Snapshot{Status: Failed, Detail: err.Error()}
+		if m.cancel != nil {
+			m.cancel()
+			m.cancel = nil
+		}
+		m.snapshot.Status = Failed
+		m.snapshot.Detail = err.Error()
+		m.snapshot.SessionsLoading = false
 	} else if connection == nil {
-		m.snapshot = Snapshot{Status: Failed, Detail: "client-daemon 返回了空连接"}
+		if m.cancel != nil {
+			m.cancel()
+			m.cancel = nil
+		}
+		m.snapshot.Status = Failed
+		m.snapshot.Detail = "client-daemon 返回了空连接"
+		m.snapshot.SessionsLoading = false
 	} else {
 		m.connection = connection
-		m.snapshot = Snapshot{
-			Status:        Connected,
-			DaemonVersion: connection.DaemonVersion(),
-		}
+		m.snapshot.Status = Connected
+		m.snapshot.DaemonVersion = connection.DaemonVersion()
+		m.snapshot.Detail = ""
+		m.snapshot.SessionsLoading = true
+		m.snapshot.SessionsError = ""
+		m.snapshot.SessionLoading = false
+		m.snapshot.SessionError = ""
 	}
 	m.mu.Unlock()
 	m.invalidate()
+	if err == nil && connection != nil {
+		go m.loadSessions(ctx, generation, connection)
+		go m.watchConnection(ctx, generation, connection)
+	}
+}
+
+func (m *Model) loadSessions(ctx context.Context, generation uint64, connection daemon.Connection) {
+	state, err := connection.LoadTaskState(ctx)
+
+	m.mu.Lock()
+	if !m.connectionCurrentLocked(generation) {
+		m.mu.Unlock()
+		return
+	}
+	m.snapshot.SessionsLoading = false
+	if err != nil {
+		m.snapshot.SessionsError = err.Error()
+		m.mu.Unlock()
+		m.invalidate()
+		return
+	}
+	m.snapshot.Sessions = append([]SessionSummary(nil), state.Sessions...)
+	m.snapshot.SessionsError = ""
+	selected := m.snapshot.SelectedSessionID
+	if selected != "" && !sessionExists(m.snapshot.Sessions, selected) {
+		m.clearSelectionLocked()
+		selected = ""
+	}
+	m.mu.Unlock()
+	m.invalidate()
+
+	if selected != "" {
+		m.startSessionLoad(generation, connection, selected)
+	}
+}
+
+// SelectSession starts attach and hydrate asynchronously. Its session
+// generation prevents a late response for an earlier selection from landing.
+func (m *Model) SelectSession(sessionID string) {
+	m.mu.Lock()
+	if m.closed || m.snapshot.Status != Connected || m.connection == nil ||
+		!sessionExists(m.snapshot.Sessions, sessionID) {
+		m.mu.Unlock()
+		return
+	}
+	if m.snapshot.SelectedSessionID == sessionID &&
+		(m.snapshot.SessionLoading || m.hydratedSessionID == sessionID) {
+		m.mu.Unlock()
+		return
+	}
+	ctx, generation, sessionGeneration, connection := m.startSessionLoadLocked(sessionID)
+	m.mu.Unlock()
+	m.invalidate()
+	go m.hydrateSession(ctx, generation, sessionGeneration, connection, sessionID)
+}
+
+func (m *Model) startSessionLoad(generation uint64, connection daemon.Connection, sessionID string) {
+	m.mu.Lock()
+	if !m.connectionCurrentLocked(generation) ||
+		!sessionExists(m.snapshot.Sessions, sessionID) {
+		m.mu.Unlock()
+		return
+	}
+	ctx, generation, sessionGeneration, connection := m.startSessionLoadLocked(sessionID)
+	m.mu.Unlock()
+	m.invalidate()
+	go m.hydrateSession(ctx, generation, sessionGeneration, connection, sessionID)
+}
+
+func (m *Model) startSessionLoadLocked(sessionID string) (context.Context, uint64, uint64, daemon.Connection) {
+	if m.sessionCancel != nil {
+		m.sessionCancel()
+	}
+	m.sessionGeneration++
+	m.hydratedGeneration = 0
+	m.hydratedSessionID = ""
+	m.attachedRuntimeID = ""
+	ctx, cancel := context.WithCancel(context.Background())
+	m.sessionCancel = cancel
+	m.snapshot.SelectedSessionID = sessionID
+	m.snapshot.SessionLoading = true
+	m.snapshot.SessionError = ""
+	m.snapshot.MessageCount = 0
+	m.snapshot.Transcript = nil
+	return ctx, m.generation, m.sessionGeneration, m.connection
+}
+
+func (m *Model) hydrateSession(ctx context.Context, generation, sessionGeneration uint64, connection daemon.Connection, sessionID string) {
+	runtime, err := connection.AttachSession(ctx, sessionID)
+	if err != nil {
+		m.finishSessionError(ctx, generation, sessionGeneration, sessionID, err)
+		return
+	}
+
+	m.mu.Lock()
+	if !m.sessionCurrentLocked(generation, sessionGeneration, sessionID) || ctx.Err() != nil {
+		m.mu.Unlock()
+		return
+	}
+	if runtime != nil {
+		m.attachedRuntimeID = runtime.RuntimeID
+	}
+	m.mu.Unlock()
+
+	session, err := connection.HydrateSession(ctx, sessionID)
+	if err != nil {
+		m.finishSessionError(ctx, generation, sessionGeneration, sessionID, err)
+		return
+	}
+	if session == nil {
+		m.finishSessionError(ctx, generation, sessionGeneration, sessionID, fmt.Errorf("client-daemon 返回了空会话"))
+		return
+	}
+	transcript := projectTranscript(session)
+	messageCount := len(session.Messages)
+
+	m.mu.Lock()
+	if !m.sessionCurrentLocked(generation, sessionGeneration, sessionID) || ctx.Err() != nil {
+		m.mu.Unlock()
+		return
+	}
+	m.snapshot.SessionLoading = false
+	m.snapshot.SessionError = ""
+	m.snapshot.MessageCount = messageCount
+	m.snapshot.Transcript = transcript
+	m.hydratedGeneration = sessionGeneration
+	m.hydratedSessionID = sessionID
+	m.mu.Unlock()
+	m.invalidate()
+}
+
+func (m *Model) finishSessionError(ctx context.Context, generation, sessionGeneration uint64, sessionID string, err error) {
+	m.mu.Lock()
+	if !m.sessionCurrentLocked(generation, sessionGeneration, sessionID) || ctx.Err() != nil {
+		m.mu.Unlock()
+		return
+	}
+	m.snapshot.SessionLoading = false
+	m.snapshot.SessionError = err.Error()
+	m.mu.Unlock()
+	m.invalidate()
+}
+
+func (m *Model) watchConnection(ctx context.Context, generation uint64, connection daemon.Connection) {
+	events := connection.Events()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-events:
+			if !ok {
+				events = nil
+				continue
+			}
+			m.applyEvent(generation, event)
+		case <-connection.Done():
+			m.mu.Lock()
+			current := m.connectionCurrentLocked(generation)
+			m.mu.Unlock()
+			if current {
+				m.Connect()
+			}
+			return
+		}
+	}
+}
+
+func (m *Model) applyEvent(generation uint64, event daemon.SequencedEvent) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.connectionCurrentLocked(generation) ||
+		m.snapshot.SelectedSessionID != event.SessionID ||
+		m.hydratedGeneration != m.sessionGeneration ||
+		m.hydratedSessionID != event.SessionID ||
+		(m.attachedRuntimeID != "" && m.attachedRuntimeID != event.RuntimeID) {
+		return
+	}
+	// The transcript is projected now, but streaming rows are deliberately not
+	// rendered in this phase, so an event does not need to invalidate the view.
+	m.snapshot.Transcript = applyTranscriptEvent(m.snapshot.Transcript, event)
+}
+
+func (m *Model) clearSelectionLocked() {
+	if m.sessionCancel != nil {
+		m.sessionCancel()
+		m.sessionCancel = nil
+	}
+	m.sessionGeneration++
+	m.hydratedGeneration = 0
+	m.hydratedSessionID = ""
+	m.attachedRuntimeID = ""
+	m.snapshot.SelectedSessionID = ""
+	m.snapshot.SessionLoading = false
+	m.snapshot.SessionError = ""
+	m.snapshot.MessageCount = 0
+	m.snapshot.Transcript = nil
+}
+
+func (m *Model) connectionCurrentLocked(generation uint64) bool {
+	return !m.closed && generation == m.generation
+}
+
+func (m *Model) sessionCurrentLocked(generation, sessionGeneration uint64, sessionID string) bool {
+	return m.connectionCurrentLocked(generation) &&
+		sessionGeneration == m.sessionGeneration && m.snapshot.SelectedSessionID == sessionID
+}
+
+func sessionExists(sessions []SessionSummary, sessionID string) bool {
+	for _, session := range sessions {
+		if session.ID == sessionID {
+			return true
+		}
+	}
+	return false
 }
 
 // View draws native GPU UI through MyGo; there is no HTML or webview.
 func (m *Model) View(c *ui.Context) {
 	m.mu.Lock()
 	m.services = c.Services()
-	snapshot := m.snapshot
+	snapshot := cloneSnapshot(m.snapshot)
 	m.mu.Unlock()
-	theme := c.Theme()
 
+	if snapshot.Status != Connected {
+		m.connectionView(c, snapshot)
+		return
+	}
+	m.workbenchView(c, snapshot)
+}
+
+func (m *Model) connectionView(c *ui.Context, snapshot Snapshot) {
+	theme := c.Theme()
 	ui.Column(c).Fill().Center().Padding(32).Children(func() {
 		ui.Column(c).Width(440).Padding(28).Gap(16).Background(theme.Surface).Radius(12).Children(func() {
 			ui.Text(c, "CheapRouter").FontSize(28).Bold()
-			ui.Text(c, "MyGo 原生桌面壳 · 第一阶段").TextColor(theme.TextMuted)
+			ui.Text(c, "MyGo 原生桌面壳").TextColor(theme.TextMuted)
 			ui.Text(c, snapshot.Status.Label()).FontSize(20).Bold().Role(ui.RoleStatus)
 
 			switch snapshot.Status {
-			case Connected:
-				ui.Textf(c, "client-daemon 版本：%s", snapshot.DaemonVersion)
-				ui.Text(c, "握手已完成。工作台尚未迁移到此客户端。").TextColor(theme.TextMuted)
 			case Failed:
 				ui.Text(c, snapshot.Detail).TextColor(theme.Danger).Role(ui.RoleAlert)
 			case Connecting:
@@ -170,11 +442,109 @@ func (m *Model) View(c *ui.Context) {
 	})
 }
 
+func (m *Model) workbenchView(c *ui.Context, snapshot Snapshot) {
+	theme := c.Theme()
+	ui.Row(c).Fill().Children(func() {
+		ui.Column(c).Width(300).Fill().Padding(16).Gap(12).Background(theme.Surface).Children(func() {
+			ui.Text(c, "CheapRouter").FontSize(22).Bold()
+			ui.Row(c).Gap(8).Children(func() {
+				ui.Text(c, "会话").FontSize(18).Bold().Grow(1)
+				ui.Text(c, snapshot.Status.Label()).FontSize(12).TextColor(theme.TextMuted).Role(ui.RoleStatus)
+			})
+			ui.Textf(c, "client-daemon 版本：%s", snapshot.DaemonVersion).FontSize(11).TextColor(theme.TextMuted)
+
+			switch {
+			case snapshot.SessionsLoading:
+				ui.Text(c, "正在加载会话…").TextColor(theme.TextMuted).Role(ui.RoleStatus)
+			case snapshot.SessionsError != "":
+				ui.Textf(c, "会话加载失败：%s", snapshot.SessionsError).TextColor(theme.Danger).Role(ui.RoleAlert)
+			case len(snapshot.Sessions) == 0:
+				ui.Text(c, "还没有会话").TextColor(theme.TextMuted)
+			default:
+				m.sessionListView(c, snapshot)
+			}
+		})
+
+		ui.Column(c).Grow(1).Fill().Center().Padding(32).Children(func() {
+			if snapshot.SelectedSessionID == "" {
+				ui.Text(c, "请选择一个会话").TextColor(theme.TextMuted)
+				return
+			}
+			name := selectedSessionName(snapshot)
+			switch {
+			case snapshot.SessionLoading:
+				ui.Text(c, "正在打开会话…").TextColor(theme.TextMuted).Role(ui.RoleStatus)
+			case snapshot.SessionError != "":
+				ui.Textf(c, "打开会话失败：%s", snapshot.SessionError).TextColor(theme.Danger).Role(ui.RoleAlert)
+			default:
+				ui.Textf(c, "已选中 %s，共 %d 条消息", name, snapshot.MessageCount)
+			}
+		})
+	})
+}
+
+func (m *Model) sessionListView(c *ui.Context, snapshot Snapshot) {
+	m.selectedSessionIndex = -1
+	for index, session := range snapshot.Sessions {
+		if session.ID == snapshot.SelectedSessionID {
+			m.selectedSessionIndex = index
+			break
+		}
+	}
+	m.sessionList.Selected = &m.selectedSessionIndex
+	m.sessionList.Key = func(index int) any { return snapshot.Sessions[index].ID }
+	m.sessionList.Label = func(index int) string { return sessionName(snapshot.Sessions[index]) }
+	list := ui.List(c, &m.sessionList, len(snapshot.Sessions), func(index int) {
+		session := snapshot.Sessions[index]
+		ui.Column(c).Padding(10, 12).Gap(4).Children(func() {
+			ui.Text(c, sessionName(session)).Bold()
+			ui.Text(c, sessionLastMessageTime(session)).FontSize(12)
+		})
+	}).Grow(1).Label("会话列表")
+	if list.Changed() && m.selectedSessionIndex >= 0 && m.selectedSessionIndex < len(snapshot.Sessions) {
+		m.SelectSession(snapshot.Sessions[m.selectedSessionIndex].ID)
+	}
+}
+
+func selectedSessionName(snapshot Snapshot) string {
+	for _, session := range snapshot.Sessions {
+		if session.ID == snapshot.SelectedSessionID {
+			return sessionName(session)
+		}
+	}
+	return "未命名会话"
+}
+
+func sessionName(session SessionSummary) string {
+	if title := strings.TrimSpace(session.Title); title != "" {
+		return title
+	}
+	if session.AutoTitle != nil {
+		if title := strings.TrimSpace(*session.AutoTitle); title != "" {
+			return title
+		}
+	}
+	return "未命名会话"
+}
+
+func sessionLastMessageTime(session SessionSummary) string {
+	if session.LastReplyAt == nil {
+		return "最后消息：暂无"
+	}
+	return "最后消息：" + time.Unix(int64(*session.LastReplyAt), 0).Local().Format("2006-01-02 15:04")
+}
+
+func cloneSnapshot(snapshot Snapshot) Snapshot {
+	snapshot.Sessions = append([]SessionSummary(nil), snapshot.Sessions...)
+	snapshot.Transcript = append([]TranscriptEntry(nil), snapshot.Transcript...)
+	return snapshot
+}
+
 // Snapshot returns a race-free copy for logic tests and embedding code.
 func (m *Model) Snapshot() Snapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.snapshot
+	return cloneSnapshot(m.snapshot)
 }
 
 func (m *Model) invalidate() {
@@ -192,8 +562,12 @@ func (m *Model) Close() error {
 	}
 	m.closed = true
 	m.generation++
+	m.sessionGeneration++
 	if m.cancel != nil {
 		m.cancel()
+	}
+	if m.sessionCancel != nil {
+		m.sessionCancel()
 	}
 	m.mu.Unlock()
 	if err := m.connector.Close(); err != nil {
