@@ -1,7 +1,9 @@
 package shell
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -67,11 +69,30 @@ func TestComposerFailureRestoresInput(t *testing.T) {
 	if got := model.Snapshot().Draft; got != "请保留这段输入" {
 		t.Fatalf("draft after failed send = %q, want original", got)
 	}
-	if !tester.HasText("发送失败，已保留输入") {
+	if !tester.HasText("发送失败，已保留输入：offline") {
 		t.Fatalf("failed send view texts = %q", tester.Texts())
 	}
 	if got := connection.prompts(); len(got) != 1 {
 		t.Fatalf("Prompt calls = %d, want 1", len(got))
+	}
+}
+
+func TestSendErrorCategory(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "rejected", err: &daemon.RPCError{Message: "prompt rejected"}, want: "rejected"},
+		{name: "timeout", err: fmt.Errorf("request failed: %w", context.DeadlineExceeded), want: "timeout"},
+		{name: "other", err: errors.New("offline"), want: "other"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := sendErrorCategory(test.err); got != test.want {
+				t.Fatalf("send error category = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

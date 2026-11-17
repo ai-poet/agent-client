@@ -2,6 +2,9 @@ package shell
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"log"
 	"strings"
 
 	"github.com/ai-poet/agent-client/desktop/internal/daemon"
@@ -102,6 +105,7 @@ func (m *Model) send(ctx context.Context, generation, sessionGeneration uint64, 
 }
 
 func (m *Model) finishSend(ctx context.Context, generation, sessionGeneration uint64, sessionID, text string, err error) {
+	failureCategory := ""
 	m.mu.Lock()
 	if !m.sessionCurrentLocked(generation, sessionGeneration, sessionID) || ctx.Err() != nil {
 		m.mu.Unlock()
@@ -114,10 +118,38 @@ func (m *Model) finishSend(ctx context.Context, generation, sessionGeneration ui
 		m.draft = text
 		m.setSessionDraftLocked(sessionID, text)
 		m.snapshot.Draft = text
-		m.snapshot.SendError = "发送失败，已保留输入"
+		m.snapshot.SendError = sendErrorMessage(err)
+		failureCategory = sendErrorCategory(err)
 	} else {
 		m.snapshot.SendError = ""
 	}
 	m.mu.Unlock()
+	if failureCategory != "" {
+		log.Printf("WARN desktop: send failed; category=%s", failureCategory)
+	}
 	m.invalidate()
+}
+
+func sendErrorCategory(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var rpcError *daemon.RPCError
+	if errors.As(err, &rpcError) {
+		return "rejected"
+	}
+	return "other"
+}
+
+func sendErrorMessage(err error) string {
+	detail := strings.Join(strings.Fields(err.Error()), " ")
+	if detail == "" {
+		detail = "未知错误"
+	}
+	const detailLimit = 240
+	runes := []rune(detail)
+	if len(runes) > detailLimit {
+		detail = string(runes[:detailLimit]) + "…"
+	}
+	return fmt.Sprintf("发送失败，已保留输入：%s", detail)
 }

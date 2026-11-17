@@ -120,8 +120,33 @@ func (m *Model) Connect() {
 
 func (m *Model) beginConnect() (context.Context, uint64, bool) {
 	m.mu.Lock()
-	if m.closed {
+	ctx, generation, ok := m.beginConnectLocked()
+	m.mu.Unlock()
+	if ok {
+		m.invalidate()
+	}
+	return ctx, generation, ok
+}
+
+// reconnect invalidates a disconnected watcher and starts its replacement in
+// one critical section, so a stale watcher cannot cancel a newer connection.
+func (m *Model) reconnect(generation uint64) {
+	m.mu.Lock()
+	if !m.connectionCurrentLocked(generation) {
 		m.mu.Unlock()
+		return
+	}
+	ctx, nextGeneration, ok := m.beginConnectLocked()
+	m.mu.Unlock()
+	if !ok {
+		return
+	}
+	m.invalidate()
+	go m.connect(ctx, nextGeneration)
+}
+
+func (m *Model) beginConnectLocked() (context.Context, uint64, bool) {
+	if m.closed {
 		return nil, 0, false
 	}
 	if m.cancel != nil {
@@ -159,13 +184,15 @@ func (m *Model) beginConnect() (context.Context, uint64, bool) {
 	m.snapshot.Sending = false
 	m.snapshot.SendError = ""
 	m.restoreActiveDraftLocked()
-	m.mu.Unlock()
-	m.invalidate()
 	return ctx, generation, true
 }
 
 func (m *Model) connect(ctx context.Context, generation uint64) {
 	m.mu.Lock()
+	if !m.connectionCurrentLocked(generation) || ctx.Err() != nil {
+		m.mu.Unlock()
+		return
+	}
 	previous := m.connection
 	m.mu.Unlock()
 
@@ -177,6 +204,7 @@ func (m *Model) connect(ctx context.Context, generation uint64) {
 		}
 	}
 	connection, err := m.connector.Connect(ctx, resume)
+	var replaced daemon.Connection
 
 	m.mu.Lock()
 	if m.closed || generation != m.generation {
@@ -204,6 +232,9 @@ func (m *Model) connect(ctx context.Context, generation uint64) {
 		m.snapshot.SessionsLoading = false
 	} else {
 		m.connection = connection
+		if previous != nil && previous != connection {
+			replaced = previous
+		}
 		m.snapshot.Status = Connected
 		m.snapshot.DaemonVersion = connection.DaemonVersion()
 		m.snapshot.Detail = ""
@@ -213,6 +244,9 @@ func (m *Model) connect(ctx context.Context, generation uint64) {
 		m.snapshot.SessionError = ""
 	}
 	m.mu.Unlock()
+	if replaced != nil {
+		_ = replaced.Close()
+	}
 	m.invalidate()
 	if err == nil && connection != nil {
 		go m.loadSessions(ctx, generation, connection)
@@ -405,12 +439,7 @@ func (m *Model) watchConnection(ctx context.Context, generation uint64, connecti
 			}
 			m.applyEvent(generation, event)
 		case <-connection.Done():
-			m.mu.Lock()
-			current := m.connectionCurrentLocked(generation)
-			m.mu.Unlock()
-			if current {
-				m.Connect()
-			}
+			m.reconnect(generation)
 			return
 		}
 	}

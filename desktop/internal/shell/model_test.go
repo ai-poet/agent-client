@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -62,6 +63,103 @@ func (c *fakeConnector) Close() error {
 		return c.connection.Close()
 	}
 	return nil
+}
+
+type concurrentConnector struct {
+	mu          sync.Mutex
+	connections []*fakeWorkbenchConnection
+	calls       int
+	started     chan struct{}
+	release     chan struct{}
+}
+
+func (c *concurrentConnector) Connect(context.Context, []daemon.ReplayCursor) (daemon.Connection, error) {
+	c.mu.Lock()
+	index := c.calls
+	c.calls++
+	connection := c.connections[index]
+	c.mu.Unlock()
+	c.started <- struct{}{}
+	<-c.release
+	return connection, nil
+}
+
+func (c *concurrentConnector) Close() error {
+	for _, connection := range c.connections {
+		_ = connection.Close()
+	}
+	return nil
+}
+
+func TestModelStaleWatcherCannotCancelNewerConnection(t *testing.T) {
+	connector := &fakeConnector{}
+	model := NewModel(connector)
+	t.Cleanup(func() { _ = model.Close() })
+	ctx, generation, ok := model.beginConnect()
+	if !ok {
+		t.Fatal("could not begin connection")
+	}
+	model.connect(ctx, generation)
+	current := model.Snapshot()
+	if current.Status != Connected {
+		t.Fatalf("initial snapshot = %+v", current)
+	}
+
+	model.mu.Lock()
+	currentGeneration := model.generation
+	model.mu.Unlock()
+	model.reconnect(currentGeneration - 1)
+	if got := model.Snapshot(); got.Status != current.Status || got.DaemonVersion != current.DaemonVersion {
+		t.Fatalf("stale watcher changed connection: before %+v; after %+v", current, got)
+	}
+	model.mu.Lock()
+	gotGeneration := model.generation
+	model.mu.Unlock()
+	if gotGeneration != currentGeneration {
+		t.Fatalf("generation after stale reconnect = %d, want %d", gotGeneration, currentGeneration)
+	}
+	if len(connector.resume) != 1 {
+		t.Fatalf("connection attempts = %d, want 1", len(connector.resume))
+	}
+}
+
+func TestModelConcurrentConnectClosesSupersededConnection(t *testing.T) {
+	first := newFakeWorkbenchConnection("first")
+	second := newFakeWorkbenchConnection("second")
+	connector := &concurrentConnector{
+		connections: []*fakeWorkbenchConnection{first, second},
+		started:     make(chan struct{}, 2),
+		release:     make(chan struct{}),
+	}
+	model := NewModel(connector)
+	t.Cleanup(func() { _ = model.Close() })
+	model.Connect()
+	select {
+	case <-connector.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first Connect did not start")
+	}
+	model.Connect()
+	select {
+	case <-connector.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second Connect did not start")
+	}
+	close(connector.release)
+
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool {
+		return snapshot.Status == Connected && snapshot.DaemonVersion == "second"
+	})
+	select {
+	case <-first.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("superseded connection was not closed")
+	}
+	select {
+	case <-second.Done():
+		t.Fatal("current connection was closed")
+	default:
+	}
 }
 
 func TestStatusLabels(t *testing.T) {
