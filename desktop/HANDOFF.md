@@ -2,14 +2,29 @@
 
 本文档说明 `feat/mygo-desktop` 上工作台核心做到了哪、还差什么，方便接手继续做。不要把 Go 桌面设为默认发版客户端，也不要合入 `test`/`main`，除非老板另有原话。
 
+## 背景
+
+CheapRouter 客户端（`ai-poet/agent-client`，现网是 Rust + GPUI，根包名 `waku`，数据目录默认 `~/.cheaprouter`）已敲定按渐进方案迁到 MyGo（[egoist/mygo](https://github.com/egoist/mygo)）地基。lobe-mygo 最多以后做 Lobe 视觉层，**不当地基**。钉死一个 MyGo 小版本推进（当前为 `v0.9.2`），不天天追 `main`。以现有 `client-protocol` 为界：现网继续用 GPUI 客户端，新 UI 先内部狗食。
+
+分期如下。本交接只覆盖第 2 阶段未完成部分，不要跳到 3 以后。
+
+1. **第一期（已完成并已推 `d47fc2b7`）**：Go 桌面壳连现有 Rust `client-daemon`，并把 Go 构建/测试接入 Tests。不替换发版产物和升级通道。分支从当时最新的 `origin/test`（`04a8f049`）拉出。远程开发环境已验证：窗口能出现；指定 `WAKU_DAEMON_PATH` 指向刚编译的 `target/debug/client-daemon` 后可显示「已连接」，壳会按约定拉起本地 daemon（`--bind 127.0.0.1:0 --parent-pid`）。
+2. **本阶段（正在交接）**：在同一分支补工作台核心。仍只连现有 Rust daemon，协议不变。优先级是先协议 RPC / 事件 / `resumeFrom`，再登录态、会话列表、流式转录、输入框；这些可测且稳定后再补终端和 diff。
+3. **其后补齐桌面**：设置、充值与扫码（不够就嵌 WebView）、公告、模型广场、teams、画图、电脑操作入口；更新器再视情况切到 MyGo 自带方案。
+4. **再其后**：协议不变，把 daemon 换成 Go Node，并分批替换执行层。
+5. **最后**才切默认客户端。升级时用 MyGo native modules（Go 调 Rust、无 cgo）跑迁移器，把 `~/.cheaprouter` 中的会话、设置、登录态、自定义接口、技能和项目配置迁入新存储并归档；作为付费客户端必须承接旧数据。电脑操作等原生辅助若一时迁不完，可暂时留在该 Rust 模块。
+
+进程拆分维持现状：UI 经 WebSocket `/v1` JSON 连 `client-daemon`；内置 agent 在 daemon 进程。协议版本 6。新客户端不要另造协议。
+
 ## 仓库与提交
 
 - 仓库：`ai-poet/agent-client`，本地路径 `/workspace/repos/agent-client`
 - 分支：`feat/mygo-desktop`（跟踪 `origin/feat/mygo-desktop`）
 - 已推到远程的最新提交：`d47fc2b7`（第一期薄壳 + Tests 里的 `go-desktop` job）
-- 本机后续提交（交接时可能尚未 push）：
+- 本机后续提交（交接时可能尚未 push，以 `git log` 为准）：
   - `40157d34` `feat(desktop): 补齐协议客户端与转录投影（工作台 UI 未完成）`
-  - 本说明文档的提交
+  - `e61250b6` `docs(desktop): 补充工作台交接说明`
+  - 以及后续补充背景与参考的文档提交
 
 先 `git status` / `git log` 确认本地是否仍 ahead，需要从 GitHub 拉时再 push，不要 force。
 
@@ -84,6 +99,43 @@ GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0 go build ./...
 - 把 daemon 换成 Go Node，或分批替换执行层
 - `~/.cheaprouter` 数据迁移器（会话、设置、登录态、自定义接口、技能、项目配置）
 - 把该分支合入 `test`/`main`，或把 Go 桌面设为默认安装包 / 发版产物
+
+## 参考（接手时先读这些）
+
+### 协议唯一真相
+
+不要发明新的 wire type。JSON 字段名必须与现有 Serde / TS 契约一致；持久化结构（如 `Project` / `AgentSession` / `Message`）是 snake_case。
+
+- `crates/client-protocol/src/protocol.rs`：`PROTOCOL_VERSION = 6`，以及 `ClientMessage` / `Request` / `Command` / `ServerMessage` / `SequencedEvent` / `ResponsePayload` / `RpcError`
+- `crates/client-protocol/src/composer.rs`：输入与发送相关命令
+- `crates/client-protocol/src/identity.rs`：身份相关类型。现有协议没有独立账号登录命令，本期只展示 daemon 握手认证与连接身份
+- `crates/client-protocol/src/persistence.rs`、`crates/client-protocol/src/model.rs`、`crates/client-protocol/src/driver_wire.rs`：会话、消息、转录块与事件 payload
+- `packages/client/src/client.ts`：现有 TypeScript 客户端契约（`requestId` / `sessionId` / `runtimeId`、`loadTaskState` / `hydrateSession` / `attachSession` / `prompt` 等）
+- `apps/web/src/lib/event-reducer.ts`：事件归并参考
+- `src/app/streaming.rs`：现有 GPUI 流式呈现顺序，只作参考，**不要改**
+
+### 本分支已有桌面代码
+
+- `desktop/cmd/cheaprouter-desktop/main.go`：入口
+- `desktop/internal/daemon/`：协议客户端与进程监督（`client.go`、`protocol.go`、`replay.go`、`supervisor.go`、`workbench.go`、`process.go` 及对应测试）
+- `desktop/internal/shell/`：UI 状态。`model.go` 仍是第一期薄壳；`transcript.go` 是已写好、尚未接到界面的转录内存投影
+- `desktop/go.mod`：module `github.com/ai-poet/agent-client/desktop`，`go 1.27.3`，依赖 `github.com/egoist/mygo v0.9.2` 与 `github.com/coder/websocket v1.8.14`
+- `desktop/README.md`：运行与 CI 说明（能力描述待工作台完成后再更新）
+
+### MyGo v0.9.2 API（以模块源码为准，不要臆造）
+
+本地在 `desktop/` 下 `GOTOOLCHAIN=go1.27.3 go mod download` 后，看模块缓存里的源码与文档：
+
+- `github.com/egoist/mygo/ui`：原生 GPU UI；界面测试用 `ui.NewTester` / `ui.NewTesterWith`
+- `github.com/egoist/mygo/ui/markdown`：官方流式 Markdown，入口为 `markdown.Stream`
+- `github.com/egoist/mygo/plugins/terminal`：官方终端 / Ghostty 插件
+- `github.com/egoist/mygo/ui/editor`：diff / 编辑器相关能力
+- 模块内 `examples/`、`docs/`、`docs-zh/` 也可对照
+
+### CI
+
+- `.github/workflows/test.yml`：已有 `go-desktop` job（`macos-latest`、`windows-latest`，`CGO_ENABLED=0`，`GOTOOLCHAIN=go1.27.3`）。可以小幅补充，不要改 Rust 测试矩阵
+- `.github/workflows/release.yml`、`sync-release.yml`：**不要改**
 
 ## 本地运行（编译修复之后）
 
