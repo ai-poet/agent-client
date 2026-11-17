@@ -28,6 +28,10 @@ type fakeWorkbenchConnection struct {
 	hydrateStarted  chan string
 	hydrateRelease  map[string]chan struct{}
 	hydrateReturned chan string
+	promptCalls     []promptCall
+	promptErr       error
+	promptStarted   chan promptCall
+	promptRelease   chan struct{}
 	events          chan daemon.SequencedEvent
 	done            chan struct{}
 	closeOnce       sync.Once
@@ -85,8 +89,35 @@ func (c *fakeWorkbenchConnection) AttachSession(_ context.Context, sessionID str
 	return &daemon.SessionRuntime{RuntimeID: "runtime-" + sessionID, SupportsSteer: true}, nil
 }
 
-func (c *fakeWorkbenchConnection) Prompt(context.Context, string, string, string) error {
-	return nil
+type promptCall struct {
+	sessionID string
+	runtimeID string
+	text      string
+}
+
+func (c *fakeWorkbenchConnection) Prompt(ctx context.Context, sessionID, runtimeID, text string) error {
+	call := promptCall{sessionID: sessionID, runtimeID: runtimeID, text: text}
+	c.mu.Lock()
+	c.promptCalls = append(c.promptCalls, call)
+	started, release, err := c.promptStarted, c.promptRelease, c.promptErr
+	c.mu.Unlock()
+	if started != nil {
+		started <- call
+	}
+	if release != nil {
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return err
+}
+
+func (c *fakeWorkbenchConnection) prompts() []promptCall {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]promptCall(nil), c.promptCalls...)
 }
 
 func (c *fakeWorkbenchConnection) Events() <-chan daemon.SequencedEvent { return c.events }

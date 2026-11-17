@@ -55,6 +55,9 @@ type Snapshot struct {
 	SessionError      string
 	MessageCount      int
 	Transcript        []TranscriptEntry
+	Draft             string
+	Sending           bool
+	SendError         string
 }
 
 // Connector is implemented by daemon.Supervisor and by headless test fakes.
@@ -79,6 +82,10 @@ type Model struct {
 	attachedRuntimeID    string
 	cancel               context.CancelFunc
 	sessionCancel        context.CancelFunc
+	sendCancel           context.CancelFunc
+	sendingText          string
+	restoreDraft         string
+	draft                string
 	closed               bool
 	sessionList          ui.ListState
 	selectedSessionIndex int
@@ -118,6 +125,14 @@ func (m *Model) beginConnect() (context.Context, uint64, bool) {
 		m.sessionCancel()
 		m.sessionCancel = nil
 	}
+	if m.sendCancel != nil {
+		m.sendCancel()
+		m.sendCancel = nil
+	}
+	if m.snapshot.Sending && m.sendingText != "" {
+		m.restoreDraft = m.sendingText
+	}
+	m.sendingText = ""
 	m.generation++
 	m.sessionGeneration++
 	m.hydratedGeneration = 0
@@ -135,6 +150,8 @@ func (m *Model) beginConnect() (context.Context, uint64, bool) {
 	m.snapshot.SessionError = ""
 	m.snapshot.MessageCount = 0
 	m.snapshot.Transcript = nil
+	m.snapshot.Sending = false
+	m.snapshot.SendError = ""
 	m.mu.Unlock()
 	m.invalidate()
 	return ctx, generation, true
@@ -263,6 +280,11 @@ func (m *Model) startSessionLoadLocked(sessionID string) (context.Context, uint6
 	if m.sessionCancel != nil {
 		m.sessionCancel()
 	}
+	if m.sendCancel != nil {
+		m.sendCancel()
+		m.sendCancel = nil
+	}
+	m.sendingText = ""
 	m.sessionGeneration++
 	m.hydratedGeneration = 0
 	m.hydratedSessionID = ""
@@ -274,6 +296,8 @@ func (m *Model) startSessionLoadLocked(sessionID string) (context.Context, uint6
 	m.snapshot.SessionError = ""
 	m.snapshot.MessageCount = 0
 	m.snapshot.Transcript = nil
+	m.snapshot.Sending = false
+	m.snapshot.SendError = ""
 	return ctx, m.generation, m.sessionGeneration, m.connection
 }
 
@@ -377,6 +401,11 @@ func (m *Model) clearSelectionLocked() {
 		m.sessionCancel()
 		m.sessionCancel = nil
 	}
+	if m.sendCancel != nil {
+		m.sendCancel()
+		m.sendCancel = nil
+	}
+	m.sendingText = ""
 	m.sessionGeneration++
 	m.hydratedGeneration = 0
 	m.hydratedSessionID = ""
@@ -386,6 +415,8 @@ func (m *Model) clearSelectionLocked() {
 	m.snapshot.SessionError = ""
 	m.snapshot.MessageCount = 0
 	m.snapshot.Transcript = nil
+	m.snapshot.Sending = false
+	m.snapshot.SendError = ""
 }
 
 func (m *Model) connectionCurrentLocked(generation uint64) bool {
@@ -410,6 +441,11 @@ func sessionExists(sessions []SessionSummary, sessionID string) bool {
 func (m *Model) View(c *ui.Context) {
 	m.mu.Lock()
 	m.services = c.Services()
+	if m.restoreDraft != "" {
+		m.draft = m.restoreDraft
+		m.restoreDraft = ""
+	}
+	m.snapshot.Draft = m.draft
 	snapshot := cloneSnapshot(m.snapshot)
 	m.mu.Unlock()
 
@@ -480,6 +516,7 @@ func (m *Model) workbenchView(c *ui.Context, snapshot Snapshot) {
 				ui.Text(c, selectedSessionName(snapshot)).FontSize(18).Bold()
 			})
 			m.transcriptView(c, snapshot)
+			m.composerView(c, snapshot)
 		})
 	})
 }
@@ -545,6 +582,7 @@ func cloneSnapshot(snapshot Snapshot) Snapshot {
 func (m *Model) Snapshot() Snapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.snapshot.Draft = m.draft
 	return cloneSnapshot(m.snapshot)
 }
 
@@ -569,6 +607,9 @@ func (m *Model) Close() error {
 	}
 	if m.sessionCancel != nil {
 		m.sessionCancel()
+	}
+	if m.sendCancel != nil {
+		m.sendCancel()
 	}
 	m.mu.Unlock()
 	if err := m.connector.Close(); err != nil {
