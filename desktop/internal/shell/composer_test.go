@@ -75,6 +75,65 @@ func TestComposerFailureRestoresInput(t *testing.T) {
 	}
 }
 
+func TestComposerSwitchingSessionRestoresInFlightDraft(t *testing.T) {
+	connection := newFakeWorkbenchConnection("test-daemon",
+		daemon.AgentSession{ID: "session-a", Title: "会话甲"},
+		daemon.AgentSession{ID: "session-b", Title: "会话乙"},
+	)
+	connection.sessions["session-a"] = hydratedSession("session-a", "会话甲", 0)
+	connection.sessions["session-b"] = hydratedSession("session-b", "会话乙", 0)
+	connection.promptStarted = make(chan promptCall, 1)
+	connection.promptRelease = make(chan struct{})
+	connector := &fakeWorkbenchConnector{connections: []*fakeWorkbenchConnection{connection}}
+	model := NewModel(connector)
+	t.Cleanup(func() { _ = model.Close() })
+	model.Connect()
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool { return len(snapshot.Sessions) == 2 })
+	tester := ui.NewTester(model.View, 900, 600)
+	if err := tester.Click("会话甲"); err != nil {
+		t.Fatal(err)
+	}
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool {
+		return snapshot.SelectedSessionID == "session-a" && !snapshot.SessionLoading
+	})
+	tester.Frame()
+	if err := tester.Click("消息输入"); err != nil {
+		t.Fatal(err)
+	}
+	const original = "发送途中切会话也要保留"
+	tester.Type(original)
+	if err := tester.Click("发送"); err != nil {
+		t.Fatal(err)
+	}
+	receivePrompt(t, connection.promptStarted)
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool { return snapshot.Sending })
+
+	if err := tester.Click("会话乙"); err != nil {
+		t.Fatal(err)
+	}
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool {
+		return snapshot.SelectedSessionID == "session-b" && !snapshot.SessionLoading
+	})
+	tester.Frame()
+	if got := model.Snapshot().Draft; got != "" {
+		t.Fatalf("session-b draft = %q, want empty", got)
+	}
+
+	if err := tester.Click("会话甲"); err != nil {
+		t.Fatal(err)
+	}
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool {
+		return snapshot.SelectedSessionID == "session-a" && !snapshot.SessionLoading
+	})
+	tester.Frame()
+	if got := model.Snapshot().Draft; got != original {
+		t.Fatalf("restored in-flight draft = %q, want %q", got, original)
+	}
+	if got := connection.prompts(); len(got) != 1 {
+		t.Fatalf("Prompt calls = %d, want 1", len(got))
+	}
+}
+
 func TestComposerEnterSendsAndShiftEnterBreaksLine(t *testing.T) {
 	model, connection, tester := readyComposer(t)
 	if err := tester.Click("消息输入"); err != nil {

@@ -62,6 +62,7 @@ func (m *Model) sendText(text string) bool {
 	m.sendCancel = cancel
 	m.sendingText = text
 	m.draft = ""
+	m.setSessionDraftLocked(sessionID, "")
 	m.snapshot.Draft = ""
 	m.snapshot.Sending = true
 	m.snapshot.SendError = ""
@@ -110,7 +111,8 @@ func (m *Model) finishSend(ctx context.Context, generation, sessionGeneration ui
 	m.sendingText = ""
 	m.snapshot.Sending = false
 	if err != nil {
-		m.restoreDraft = text
+		m.draft = text
+		m.setSessionDraftLocked(sessionID, text)
 		m.snapshot.Draft = text
 		m.snapshot.SendError = "发送失败，已保留输入"
 	} else {

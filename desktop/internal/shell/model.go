@@ -84,7 +84,7 @@ type Model struct {
 	sessionCancel        context.CancelFunc
 	sendCancel           context.CancelFunc
 	sendingText          string
-	restoreDraft         string
+	drafts               map[string]string
 	draft                string
 	closed               bool
 	sessionList          ui.ListState
@@ -98,6 +98,7 @@ func NewModel(connector Connector) *Model {
 	return &Model{
 		connector:            connector,
 		snapshot:             Snapshot{Status: Disconnected},
+		drafts:               make(map[string]string),
 		selectedSessionIndex: -1,
 	}
 }
@@ -129,9 +130,7 @@ func (m *Model) beginConnect() (context.Context, uint64, bool) {
 		m.sendCancel()
 		m.sendCancel = nil
 	}
-	if m.snapshot.Sending && m.sendingText != "" {
-		m.restoreDraft = m.sendingText
-	}
+	m.saveActiveDraftLocked()
 	m.sendingText = ""
 	m.generation++
 	m.sessionGeneration++
@@ -152,6 +151,7 @@ func (m *Model) beginConnect() (context.Context, uint64, bool) {
 	m.snapshot.Transcript = nil
 	m.snapshot.Sending = false
 	m.snapshot.SendError = ""
+	m.restoreActiveDraftLocked()
 	m.mu.Unlock()
 	m.invalidate()
 	return ctx, generation, true
@@ -277,6 +277,7 @@ func (m *Model) startSessionLoad(generation uint64, connection daemon.Connection
 }
 
 func (m *Model) startSessionLoadLocked(sessionID string) (context.Context, uint64, uint64, daemon.Connection) {
+	m.saveActiveDraftLocked()
 	if m.sessionCancel != nil {
 		m.sessionCancel()
 	}
@@ -292,6 +293,7 @@ func (m *Model) startSessionLoadLocked(sessionID string) (context.Context, uint6
 	ctx, cancel := context.WithCancel(context.Background())
 	m.sessionCancel = cancel
 	m.snapshot.SelectedSessionID = sessionID
+	m.restoreActiveDraftLocked()
 	m.snapshot.SessionLoading = true
 	m.snapshot.SessionError = ""
 	m.snapshot.MessageCount = 0
@@ -396,7 +398,39 @@ func (m *Model) applyEvent(generation uint64, event daemon.SequencedEvent) {
 	m.invalidate()
 }
 
+func (m *Model) saveActiveDraftLocked() {
+	sessionID := m.snapshot.SelectedSessionID
+	if sessionID == "" {
+		return
+	}
+	draft := m.draft
+	if m.snapshot.Sending && m.sendingText != "" {
+		draft = m.sendingText
+	}
+	m.setSessionDraftLocked(sessionID, draft)
+}
+
+func (m *Model) restoreActiveDraftLocked() {
+	m.draft = m.drafts[m.snapshot.SelectedSessionID]
+	m.snapshot.Draft = m.draft
+}
+
+func (m *Model) setSessionDraftLocked(sessionID, draft string) {
+	if sessionID == "" {
+		return
+	}
+	if draft == "" {
+		delete(m.drafts, sessionID)
+		return
+	}
+	if m.drafts == nil {
+		m.drafts = make(map[string]string)
+	}
+	m.drafts[sessionID] = draft
+}
+
 func (m *Model) clearSelectionLocked() {
+	m.saveActiveDraftLocked()
 	if m.sessionCancel != nil {
 		m.sessionCancel()
 		m.sessionCancel = nil
@@ -411,6 +445,7 @@ func (m *Model) clearSelectionLocked() {
 	m.hydratedSessionID = ""
 	m.attachedRuntimeID = ""
 	m.snapshot.SelectedSessionID = ""
+	m.restoreActiveDraftLocked()
 	m.snapshot.SessionLoading = false
 	m.snapshot.SessionError = ""
 	m.snapshot.MessageCount = 0
@@ -441,10 +476,6 @@ func sessionExists(sessions []SessionSummary, sessionID string) bool {
 func (m *Model) View(c *ui.Context) {
 	m.mu.Lock()
 	m.services = c.Services()
-	if m.restoreDraft != "" {
-		m.draft = m.restoreDraft
-		m.restoreDraft = ""
-	}
 	m.snapshot.Draft = m.draft
 	snapshot := cloneSnapshot(m.snapshot)
 	m.mu.Unlock()
