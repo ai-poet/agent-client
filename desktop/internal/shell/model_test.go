@@ -12,10 +12,27 @@ import (
 
 type fakeConnection struct {
 	version string
+	cursors []daemon.ReplayCursor
 	closed  bool
 }
 
 func (c *fakeConnection) DaemonVersion() string { return c.version }
+func (c *fakeConnection) LoadTaskState(context.Context) (daemon.TaskState, error) {
+	return daemon.TaskState{}, nil
+}
+func (c *fakeConnection) HydrateSession(context.Context, string) (*daemon.AgentSession, error) {
+	return nil, nil
+}
+func (c *fakeConnection) AttachSession(context.Context, string) (*daemon.SessionRuntime, error) {
+	return nil, nil
+}
+func (c *fakeConnection) Prompt(context.Context, string, string, string) error { return nil }
+func (c *fakeConnection) Events() <-chan daemon.SequencedEvent                 { return nil }
+func (c *fakeConnection) ReplayCursors() []daemon.ReplayCursor {
+	return append([]daemon.ReplayCursor(nil), c.cursors...)
+}
+func (c *fakeConnection) Done() <-chan struct{} { return nil }
+func (c *fakeConnection) Err() error            { return nil }
 func (c *fakeConnection) Close() error {
 	c.closed = true
 	return nil
@@ -24,10 +41,12 @@ func (c *fakeConnection) Close() error {
 type fakeConnector struct {
 	connection *fakeConnection
 	err        error
+	resume     [][]daemon.ReplayCursor
 	closed     bool
 }
 
-func (c *fakeConnector) Connect(context.Context) (daemon.Connection, error) {
+func (c *fakeConnector) Connect(_ context.Context, resume []daemon.ReplayCursor) (daemon.Connection, error) {
+	c.resume = append(c.resume, append([]daemon.ReplayCursor(nil), resume...))
 	if c.err != nil {
 		return nil, c.err
 	}
@@ -78,6 +97,53 @@ func TestModelConnectionResults(t *testing.T) {
 	model.connect(ctx, generation)
 	if got := model.Snapshot(); got.Status != Failed || got.Detail != "bad token" {
 		t.Fatalf("failed snapshot = %+v", got)
+	}
+}
+
+func TestModelReconnectsWithReplayCursors(t *testing.T) {
+	connector := &fakeConnector{}
+	model := NewModel(connector)
+	connect := func() {
+		t.Helper()
+		ctx, generation, ok := model.beginConnect()
+		if !ok {
+			t.Fatal("could not begin connection")
+		}
+		model.connect(ctx, generation)
+	}
+
+	connect()
+	if len(connector.resume) != 1 || connector.resume[0] != nil {
+		t.Fatalf("initial resume cursors = %#v, want nil", connector.resume)
+	}
+
+	cursor := daemon.ReplayCursor{
+		SessionID: "session-1",
+		RuntimeID: "runtime-1",
+		Epoch:     "epoch-1",
+		Sequence:  42,
+	}
+	connector.connection.cursors = []daemon.ReplayCursor{cursor}
+	connector.err = errors.New("offline")
+	connect()
+	if got := model.Snapshot(); got.Status != Failed {
+		t.Fatalf("failed reconnect snapshot = %+v", got)
+	}
+
+	connector.err = nil
+	connector.connection = &fakeConnection{version: "new-daemon"}
+	connect()
+	if len(connector.resume) != 3 {
+		t.Fatalf("connection attempts = %d, want 3", len(connector.resume))
+	}
+	for _, attempt := range []int{1, 2} {
+		got := connector.resume[attempt]
+		if len(got) != 1 || got[0] != cursor {
+			t.Errorf("reconnect attempt %d resume cursors = %#v, want %#v", attempt+1, got, []daemon.ReplayCursor{cursor})
+		}
+	}
+	if got := model.Snapshot(); got.Status != Connected || got.DaemonVersion != "new-daemon" {
+		t.Fatalf("reconnected snapshot = %+v", got)
 	}
 }
 

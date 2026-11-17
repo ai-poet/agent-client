@@ -43,7 +43,7 @@ type Snapshot struct {
 
 // Connector is implemented by daemon.Supervisor and by headless test fakes.
 type Connector interface {
-	Connect(context.Context) (daemon.Connection, error)
+	Connect(context.Context, []daemon.ReplayCursor) (daemon.Connection, error)
 	Close() error
 }
 
@@ -98,7 +98,18 @@ func (m *Model) beginConnect() (context.Context, uint64, bool) {
 }
 
 func (m *Model) connect(ctx context.Context, generation uint64) {
-	connection, err := m.connector.Connect(ctx)
+	m.mu.Lock()
+	previous := m.connection
+	m.mu.Unlock()
+
+	var resume []daemon.ReplayCursor
+	if previous != nil {
+		resume = previous.ReplayCursors()
+		if len(resume) == 0 {
+			resume = nil
+		}
+	}
+	connection, err := m.connector.Connect(ctx, resume)
 
 	m.mu.Lock()
 	if m.closed || generation != m.generation {
