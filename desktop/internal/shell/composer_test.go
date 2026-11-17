@@ -219,28 +219,8 @@ func TestComposerSwitchingSessionRestoresInFlightDraft(t *testing.T) {
 	if got := model.Snapshot().Draft; got != "" {
 		t.Fatalf("successful send restored stale draft %q", got)
 	}
-	if _, ok := model.drafts["session-a"]; ok {
-		t.Fatalf("successful send kept session-a draft %q", model.drafts["session-a"])
-	}
-}
-
-func TestFinishSendSuccessDeletesSavedSessionDraft(t *testing.T) {
-	model := NewModel(&fakeConnector{})
-	model.generation = 1
-	model.sessionGeneration = 1
-	model.snapshot.SelectedSessionID = "session-a"
-	model.snapshot.Sessions = []SessionSummary{{ID: "session-a"}}
-	model.snapshot.Sending = true
-	model.sendingText = "旧稿"
-	model.drafts["session-a"] = "旧稿"
-
-	model.finishSend(context.Background(), 1, 1, "session-a", "旧稿", nil)
-	snapshot := model.Snapshot()
-	if snapshot.Sending || snapshot.Draft != "" {
-		t.Fatalf("successful send state = %+v", snapshot)
-	}
-	if draft, ok := model.drafts["session-a"]; ok {
-		t.Fatalf("successful send kept saved draft %q", draft)
+	if got := model.Snapshot(); got.Draft != "" || got.Sending || got.SendError != "" {
+		t.Fatalf("successful send left stale state: %+v", got)
 	}
 }
 
@@ -269,8 +249,13 @@ func TestComposerEnterSendsAndShiftEnterBreaksLine(t *testing.T) {
 }
 
 func TestComposerAttachesBeforePromptWhenRuntimeIsMissing(t *testing.T) {
-	model, connection, tester := readyComposer(t)
-	model.attachedRuntimeID = ""
+	connection := newFakeWorkbenchConnection("test-daemon", daemon.AgentSession{ID: "session-a", Title: "会话甲"})
+	connection.sessions["session-a"] = hydratedSession("session-a", "会话甲", 0)
+	connection.attachResponses = []attachResponse{
+		{runtime: nil},
+		{runtime: &daemon.SessionRuntime{RuntimeID: "runtime-session-a", SupportsSteer: true}},
+	}
+	_, connection, tester := readyComposerWithConnection(t, connection)
 
 	if err := tester.Click("消息输入"); err != nil {
 		t.Fatal(err)
@@ -293,6 +278,11 @@ func readyComposer(t *testing.T) (*Model, *fakeWorkbenchConnection, *ui.Tester) 
 	t.Helper()
 	connection := newFakeWorkbenchConnection("test-daemon", daemon.AgentSession{ID: "session-a", Title: "会话甲"})
 	connection.sessions["session-a"] = hydratedSession("session-a", "会话甲", 0)
+	return readyComposerWithConnection(t, connection)
+}
+
+func readyComposerWithConnection(t *testing.T, connection *fakeWorkbenchConnection) (*Model, *fakeWorkbenchConnection, *ui.Tester) {
+	t.Helper()
 	connector := &fakeWorkbenchConnector{connections: []*fakeWorkbenchConnection{connection}}
 	model := NewModel(connector)
 	t.Cleanup(func() { _ = model.Close() })

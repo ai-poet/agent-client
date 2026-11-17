@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ai-poet/agent-client/desktop/internal/daemon"
+	"github.com/ai-poet/agent-client/desktop/internal/workbench"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
@@ -23,9 +24,9 @@ func TestTranscriptViewLoadingEmptyAndErrorStates(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			model := NewModel(&fakeWorkbenchConnector{})
-			model.snapshot = test.snapshot
-			model.snapshot.Status = Connected
-			model.snapshot.SelectedSessionID = "session-a"
+			setModelSnapshot(model, test.snapshot)
+			model.state.Status = Connected
+			model.state.SelectedSessionID = "session-a"
 			tester := ui.NewTester(model.View, 900, 600)
 			for _, text := range test.want {
 				if !tester.HasText(text) {
@@ -49,12 +50,12 @@ func TestTranscriptViewHydrateOrderAndCount(t *testing.T) {
 		},
 	}
 	model := NewModel(&fakeWorkbenchConnector{})
-	model.snapshot = Snapshot{
+	setModelSnapshot(model, Snapshot{
 		Status: Connected, SelectedSessionID: session.ID,
 		Sessions:   []SessionSummary{{ID: session.ID, Title: "会话甲"}},
-		Transcript: projectTranscript(session), MessageCount: len(session.Messages),
-	}
-	if got := len(model.snapshot.Transcript); got != 4 {
+		Transcript: workbench.ProjectTranscript(session), MessageCount: len(session.Messages),
+	})
+	if got := len(model.state.Transcript); got != 4 {
 		t.Fatalf("hydrated entry count = %d, want 4", got)
 	}
 	tester := ui.NewTester(model.View, 900, 600)
@@ -76,10 +77,13 @@ func TestTranscriptViewHydrateOrderAndCount(t *testing.T) {
 func TestTranscriptViewStreamingAppendDoesNotDuplicate(t *testing.T) {
 	model := NewModel(&fakeWorkbenchConnector{})
 	model.markdown.Reveal = &markdown.Reveal{Unit: markdown.AtOnce}
-	model.snapshot = Snapshot{
+	setModelSnapshot(model, Snapshot{
 		Status: Connected, SelectedSessionID: "s", Sessions: []SessionSummary{{ID: "s"}},
-	}
-	model.hydratedSessionID = "s"
+	})
+	load := model.state.SelectSession("s")
+	model.state.ApplyHydrate(workbench.NewHydrateResult(
+		load.Generation, load.SessionGeneration, "s", &daemon.AgentSession{ID: "s"}, nil,
+	))
 	tester := ui.NewTester(model.View, 900, 600)
 
 	model.applyEvent(0, transcriptTextEvent("s", "r", 1, "你好"))
@@ -100,9 +104,9 @@ func TestTranscriptViewStreamingAppendDoesNotDuplicate(t *testing.T) {
 func TestTranscriptViewFollowsEndOnlyUntilUserScrollsUp(t *testing.T) {
 	model := NewModel(&fakeWorkbenchConnector{})
 	model.markdown.Reveal = &markdown.Reveal{Unit: markdown.AtOnce}
-	model.snapshot = Snapshot{Status: Connected, SelectedSessionID: "s"}
+	setModelSnapshot(model, Snapshot{Status: Connected, SelectedSessionID: "s"})
 	for index := range 40 {
-		model.snapshot.Transcript = append(model.snapshot.Transcript, TranscriptEntry{
+		model.state.Transcript = append(model.state.Transcript, TranscriptEntry{
 			ID: fmt.Sprintf("message-%d", index), Kind: TranscriptAssistant, Title: "助手",
 			Text: fmt.Sprintf("消息 %d\n\n%s", index, strings.Repeat("用于滚动的内容。", 4)),
 		})
@@ -112,7 +116,7 @@ func TestTranscriptViewFollowsEndOnlyUntilUserScrollsUp(t *testing.T) {
 		t.Fatal("transcript did not start at its end")
 	}
 
-	model.snapshot.Transcript = append(model.snapshot.Transcript, TranscriptEntry{ID: "bottom-addition", Kind: TranscriptAssistant, Title: "助手", Text: "底部新增"})
+	model.state.Transcript = append(model.state.Transcript, TranscriptEntry{ID: "bottom-addition", Kind: TranscriptAssistant, Title: "助手", Text: "底部新增"})
 	tester.Frame()
 	if !model.transcriptList.AtEnd() {
 		t.Fatal("transcript did not follow a new entry while at its end")
@@ -126,7 +130,7 @@ func TestTranscriptViewFollowsEndOnlyUntilUserScrollsUp(t *testing.T) {
 	tester.Move(x, y)
 	tester.Scroll(x, y, 0, -1e6)
 	first, last := model.transcriptList.Visible()
-	model.snapshot.Transcript = append(model.snapshot.Transcript,
+	model.state.Transcript = append(model.state.Transcript,
 		TranscriptEntry{ID: "above-addition-1", Kind: TranscriptAssistant, Title: "助手", Text: "上滑后新增一"},
 		TranscriptEntry{ID: "above-addition-2", Kind: TranscriptAssistant, Title: "助手", Text: "上滑后新增二"},
 	)
@@ -138,7 +142,7 @@ func TestTranscriptViewFollowsEndOnlyUntilUserScrollsUp(t *testing.T) {
 
 	model.transcriptList.ScrollToEnd()
 	tester.Frame()
-	model.snapshot.Transcript = append(model.snapshot.Transcript, TranscriptEntry{ID: "resumed-addition", Kind: TranscriptAssistant, Title: "助手", Text: "恢复跟随"})
+	model.state.Transcript = append(model.state.Transcript, TranscriptEntry{ID: "resumed-addition", Kind: TranscriptAssistant, Title: "助手", Text: "恢复跟随"})
 	tester.Frame()
 	if !model.transcriptList.AtEnd() {
 		t.Fatal("transcript did not resume following after returning to its end")

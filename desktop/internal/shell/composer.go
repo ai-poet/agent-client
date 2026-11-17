@@ -3,11 +3,11 @@ package shell
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"strings"
 
 	"github.com/ai-poet/agent-client/desktop/internal/daemon"
+	"github.com/ai-poet/agent-client/desktop/internal/workbench"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -21,7 +21,7 @@ func (m *Model) composerView(c *ui.Context, snapshot Snapshot) {
 			ui.Text(c, snapshot.SendError).FontSize(12).TextColor(theme.Danger).Role(ui.RoleAlert)
 		}
 		ui.Row(c).Gap(12).AlignItems(ui.End).Children(func() {
-			input := ui.TextArea(c.Key("composer"), &m.draft).
+			input := ui.TextArea(c.Key("composer"), &m.state.Draft).
 				Placeholder("输入消息，Enter 发送，Shift+Enter 换行").
 				Label("消息输入").Lines(3, 8).Grow(1).
 				Disabled(snapshot.Sending || snapshot.SessionLoading || snapshot.SessionError != "")
@@ -35,7 +35,7 @@ func (m *Model) composerView(c *ui.Context, snapshot Snapshot) {
 				return true
 			})
 			canSend := !snapshot.Sending && !snapshot.SessionLoading && snapshot.SessionError == "" &&
-				strings.TrimSpace(m.draft) != ""
+				strings.TrimSpace(m.state.Draft) != ""
 			if ui.PrimaryButton(c.Key("send"), "发送").Disabled(!canSend).Clicked() {
 				m.Send()
 			}
@@ -46,39 +46,31 @@ func (m *Model) composerView(c *ui.Context, snapshot Snapshot) {
 // Send submits the current draft asynchronously. The input is cleared and
 // disabled while the RPC is in flight; a failure restores the exact draft.
 func (m *Model) Send() {
-	m.sendText(m.draft)
+	m.sendText(m.state.Draft)
 }
 
 func (m *Model) sendText(text string) bool {
-	if strings.TrimSpace(text) == "" {
+	if m.closed || m.connection == nil {
 		return false
 	}
-
-	sessionID := m.snapshot.SelectedSessionID
-	if m.closed || m.snapshot.Status != Connected || m.connection == nil || m.snapshot.Sending ||
-		sessionID == "" || m.hydratedGeneration != m.sessionGeneration || m.hydratedSessionID != sessionID {
+	action, ok := m.state.BeginSend(text)
+	if !ok {
 		return false
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.sendCancel = cancel
-	m.sendingText = text
-	m.draft = ""
-	m.setSessionDraft(sessionID, "")
-	m.snapshot.Draft = ""
-	m.snapshot.Sending = true
-	m.snapshot.SendError = ""
-	generation, sessionGeneration := m.generation, m.sessionGeneration
-	connection, runtimeID := m.connection, m.attachedRuntimeID
+	connection := m.connection
 	m.invalidate()
-	go m.send(ctx, generation, sessionGeneration, connection, sessionID, runtimeID, text)
+	go m.send(ctx, action, connection)
 	return true
 }
 
-func (m *Model) send(ctx context.Context, generation, sessionGeneration uint64, connection daemon.Connection, sessionID, runtimeID, text string) {
+func (m *Model) send(ctx context.Context, action workbench.SendAction, connection daemon.Connection) {
+	runtimeID := action.RuntimeID
 	if runtimeID == "" {
-		runtime, err := connection.AttachSession(ctx, sessionID)
+		runtime, err := connection.AttachSession(ctx, action.SessionID)
 		if err != nil {
-			m.finishSend(ctx, generation, sessionGeneration, sessionID, text, err)
+			m.finishSend(ctx, action, err)
 			return
 		}
 		if runtime != nil {
@@ -87,40 +79,37 @@ func (m *Model) send(ctx context.Context, generation, sessionGeneration uint64, 
 		if ctx.Err() != nil {
 			return
 		}
-		m.enqueue(func() {
-			if m.sessionCurrent(generation, sessionGeneration, sessionID) && ctx.Err() == nil && runtimeID != "" {
-				m.attachedRuntimeID = runtimeID
-			}
-		})
+		if runtimeID != "" {
+			m.enqueue(func() {
+				if ctx.Err() == nil {
+					m.state.ApplyAttach(workbench.AttachResult{
+						Generation: action.Generation, SessionGeneration: action.SessionGeneration,
+						SessionID: action.SessionID, Runtime: runtime,
+					})
+				}
+			})
+		}
 	}
 	if runtimeID == "" {
 		runtimeID = daemon.NilUUID
 	}
-	err := connection.Prompt(ctx, sessionID, runtimeID, text)
-	m.finishSend(ctx, generation, sessionGeneration, sessionID, text, err)
+	err := connection.Prompt(ctx, action.SessionID, runtimeID, action.Text)
+	m.finishSend(ctx, action, err)
 }
 
-func (m *Model) finishSend(ctx context.Context, generation, sessionGeneration uint64, sessionID, text string, err error) {
+func (m *Model) finishSend(ctx context.Context, action workbench.SendAction, err error) {
 	if err != nil {
 		log.Printf("WARN desktop: send failed; category=%s", sendErrorCategory(err))
 	}
 	m.enqueue(func() {
-		if !m.sessionCurrent(generation, sessionGeneration, sessionID) || ctx.Err() != nil {
+		if ctx.Err() != nil {
 			return
 		}
-		m.sendCancel = nil
-		m.sendingText = ""
-		m.snapshot.Sending = false
-		if err != nil {
-			m.draft = text
-			m.setSessionDraft(sessionID, text)
-			m.snapshot.Draft = text
-			m.snapshot.SendError = sendErrorMessage(err)
-		} else {
-			// The in-flight text is also saved when switching sessions. Clear that
-			// per-session copy on success so a later restore cannot resurrect it.
-			delete(m.drafts, sessionID)
-			m.snapshot.SendError = ""
+		if m.state.FinishSend(workbench.SendResult{
+			Generation: action.Generation, SessionGeneration: action.SessionGeneration,
+			SessionID: action.SessionID, Text: action.Text, Err: err,
+		}) {
+			m.sendCancel = nil
 		}
 	})
 }
@@ -134,17 +123,4 @@ func sendErrorCategory(err error) string {
 		return "rejected"
 	}
 	return "other"
-}
-
-func sendErrorMessage(err error) string {
-	detail := strings.Join(strings.Fields(err.Error()), " ")
-	if detail == "" {
-		detail = "未知错误"
-	}
-	const detailLimit = 240
-	runes := []rune(detail)
-	if len(runes) > detailLimit {
-		detail = string(runes[:detailLimit]) + "…"
-	}
-	return fmt.Sprintf("发送失败，已保留输入：%s", detail)
 }
