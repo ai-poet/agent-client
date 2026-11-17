@@ -48,9 +48,6 @@ GitHub Actions 的 **Tests** workflow 在 macOS 和 Windows 上分别运行上�
 当前自动发版仍只发布现有 Rust/GPUI 客户端。`release.yml`、`sync-release.yml`、
 产物、升级通道和 appcast 均未改；Go 壳只随 Tests 自动测试和构建，不进入发布产物。
 
-本期只实现连接、握手、协议错误识别和 daemon 生命周期边界。后续还需补全：
+第一期只实现连接、握手、协议错误识别和 daemon 生命周期边界。协议客户端（RPC、事件去重、`resumeFrom`、会话封装）和转录内存投影已在后续提交中补上，但工作台 UI 尚未完成，且当前 `go test ./...` / `go build ./...` 因壳层接口未跟上而编译失败。
 
-- `request` / `response` 路由、RPC 错误和超时；
-- sequenced `event` 订阅、去重、断线恢复与 `resumeFrom`；
-- task/project 状态、settings 等消息以及完整工作台 UI；
-- 执行层向 Go 的迁移，以及升级后对 `~/.cheaprouter` 数据的迁移器。
+接手时请先读 [HANDOFF.md](HANDOFF.md)：里面写了已完成项、必须先修的编译断裂、本阶段剩余工作（会话列表、流式转录、输入框，稳定后再补终端和 diff），以及不要做的后续阶段。
