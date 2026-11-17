@@ -32,6 +32,11 @@ MyGo 自带的 `ui` 是布局与渲染底座，CrychicUI 是其上的控件层�
 - **MyGo `ui`**：`Column` / `Row` 负责布局，`List` 负责转录虚拟列表与滚动；流式 Markdown 使用 `markdown.Stream`，完成后切换为 `markdown.View`。
 - **CrychicUI**：`data` 提供会话列表，`chat` 对应聊天气泡与 composer，`feedback` 提供空、加载、错误三态，`input` 提供输入框。
 
+这两处看起来“可以统一”，但故意不统一，理由是：
+
+- **转录区继续用 `ui.List`**：每个气泡的行内内容是 `markdown.Stream` 的增量渲染结果，需要和列表的行身份、滚动锚点在同一层绑定（`ListState.Key` 按消息 ID 保持滚动位置，流式追加时只增长当前行）。换成 `data` 的列表会把 Markdown 的增量状态和行状态拆到两层，滚动跟随和「流式不重复」都会退化。
+- **会话列表用 `data` 包**：它只需要「虚拟化 + 选中态 + 点击」，没有富文本绑定，用 CrychicUI 的列表能直接拿到选中强调样式与键盘导航，不必自己实现。
+
 `go.mod` 中锁定的直接依赖版本：
 
 ```text
