@@ -40,6 +40,13 @@ type RPCError struct {
 
 func (e *RPCError) Error() string { return e.Message }
 
+// RuntimeEventCursor is the last event incorporated into a hydrated session.
+type RuntimeEventCursor struct {
+	RuntimeID string `json:"runtime_id"`
+	Epoch     string `json:"epoch"`
+	Sequence  uint64 `json:"sequence"`
+}
+
 // ReplayCursor is the last sequence consumed for one sequenced event stream.
 // A reconnect sends all known cursors in hello.resumeFrom.
 type ReplayCursor struct {
@@ -115,18 +122,19 @@ type Project struct {
 // AgentSession is the persisted task projection used by list and hydrate.
 // Detail-only fields are absent from loadTaskState's lightweight sessions.
 type AgentSession struct {
-	ID               string            `json:"id"`
-	Title            string            `json:"title"`
-	AutoTitle        *string           `json:"auto_title"`
-	ProjectID        string            `json:"project_id"`
-	Provider         string            `json:"provider"`
-	Model            *string           `json:"model"`
-	Status           string            `json:"status"`
-	CreatedAt        uint64            `json:"created_at"`
-	UpdatedAt        uint64            `json:"updated_at"`
-	LastReplyAt      *uint64           `json:"last_reply_at"`
-	Messages         []Message         `json:"messages"`
-	TranscriptBlocks []TranscriptBlock `json:"transcript_blocks"`
+	ID                 string              `json:"id"`
+	Title              string              `json:"title"`
+	AutoTitle          *string             `json:"auto_title"`
+	ProjectID          string              `json:"project_id"`
+	Provider           string              `json:"provider"`
+	Model              *string             `json:"model"`
+	Status             string              `json:"status"`
+	CreatedAt          uint64              `json:"created_at"`
+	UpdatedAt          uint64              `json:"updated_at"`
+	LastReplyAt        *uint64             `json:"last_reply_at"`
+	RuntimeEventCursor *RuntimeEventCursor `json:"runtime_event_cursor"`
+	Messages           []Message           `json:"messages"`
+	TranscriptBlocks   []TranscriptBlock   `json:"transcript_blocks"`
 }
 
 // Message mirrors client-protocol's persisted Message, including its

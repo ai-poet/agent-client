@@ -5,6 +5,7 @@ package shell
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
+
+const pendingEventLimit = 256
 
 // Status is the user-visible daemon connection state.
 type Status uint8
@@ -79,6 +82,8 @@ type Model struct {
 	sessionGeneration    uint64
 	hydratedGeneration   uint64
 	hydratedSessionID    string
+	pendingEvents        []daemon.SequencedEvent
+	eventCursor          *daemon.RuntimeEventCursor
 	attachedRuntimeID    string
 	cancel               context.CancelFunc
 	sessionCancel        context.CancelFunc
@@ -136,6 +141,8 @@ func (m *Model) beginConnect() (context.Context, uint64, bool) {
 	m.sessionGeneration++
 	m.hydratedGeneration = 0
 	m.hydratedSessionID = ""
+	m.pendingEvents = nil
+	m.eventCursor = nil
 	m.attachedRuntimeID = ""
 	generation := m.generation
 	ctx, cancel := context.WithCancel(context.Background())
@@ -214,6 +221,15 @@ func (m *Model) connect(ctx context.Context, generation uint64) {
 }
 
 func (m *Model) loadSessions(ctx context.Context, generation uint64, connection daemon.Connection) {
+	m.mu.Lock()
+	if !m.connectionCurrentLocked(generation) {
+		m.mu.Unlock()
+		return
+	}
+	selectedBeforeLoad := m.snapshot.SelectedSessionID
+	sessionGenerationBeforeLoad := m.sessionGeneration
+	m.mu.Unlock()
+
 	state, err := connection.LoadTaskState(ctx)
 
 	m.mu.Lock()
@@ -235,10 +251,12 @@ func (m *Model) loadSessions(ctx context.Context, generation uint64, connection 
 		m.clearSelectionLocked()
 		selected = ""
 	}
+	rehydrate := selected != "" && selected == selectedBeforeLoad &&
+		m.sessionGeneration == sessionGenerationBeforeLoad
 	m.mu.Unlock()
 	m.invalidate()
 
-	if selected != "" {
+	if rehydrate {
 		m.startSessionLoad(generation, connection, selected)
 	}
 }
@@ -266,6 +284,7 @@ func (m *Model) SelectSession(sessionID string) {
 func (m *Model) startSessionLoad(generation uint64, connection daemon.Connection, sessionID string) {
 	m.mu.Lock()
 	if !m.connectionCurrentLocked(generation) ||
+		m.snapshot.SelectedSessionID != sessionID ||
 		!sessionExists(m.snapshot.Sessions, sessionID) {
 		m.mu.Unlock()
 		return
@@ -289,6 +308,8 @@ func (m *Model) startSessionLoadLocked(sessionID string) (context.Context, uint6
 	m.sessionGeneration++
 	m.hydratedGeneration = 0
 	m.hydratedSessionID = ""
+	m.pendingEvents = nil
+	m.eventCursor = nil
 	m.attachedRuntimeID = ""
 	ctx, cancel := context.WithCancel(context.Background())
 	m.sessionCancel = cancel
@@ -343,6 +364,18 @@ func (m *Model) hydrateSession(ctx context.Context, generation, sessionGeneratio
 	m.snapshot.Transcript = transcript
 	m.hydratedGeneration = sessionGeneration
 	m.hydratedSessionID = sessionID
+	if session.RuntimeEventCursor != nil {
+		cursor := *session.RuntimeEventCursor
+		m.eventCursor = &cursor
+	}
+	pending := m.pendingEvents
+	m.pendingEvents = nil
+	for _, event := range pending {
+		if event.SessionID == sessionID &&
+			(m.attachedRuntimeID == "" || m.attachedRuntimeID == event.RuntimeID) {
+			m.applyTranscriptEventLocked(event)
+		}
+	}
 	m.mu.Unlock()
 	m.invalidate()
 }
@@ -387,15 +420,40 @@ func (m *Model) applyEvent(generation uint64, event daemon.SequencedEvent) {
 	m.mu.Lock()
 	if !m.connectionCurrentLocked(generation) ||
 		m.snapshot.SelectedSessionID != event.SessionID ||
-		m.hydratedGeneration != m.sessionGeneration ||
-		m.hydratedSessionID != event.SessionID ||
 		(m.attachedRuntimeID != "" && m.attachedRuntimeID != event.RuntimeID) {
 		m.mu.Unlock()
 		return
 	}
-	m.snapshot.Transcript = applyTranscriptEvent(m.snapshot.Transcript, event)
+	if m.hydratedGeneration == m.sessionGeneration && m.hydratedSessionID == event.SessionID {
+		m.applyTranscriptEventLocked(event)
+		m.mu.Unlock()
+		m.invalidate()
+		return
+	}
+	if len(m.pendingEvents) >= pendingEventLimit {
+		m.pendingEvents = nil
+		connection := m.connection
+		m.mu.Unlock()
+		log.Printf("WARN desktop: hydrate event buffer overflow; forcing session rehydrate")
+		m.startSessionLoad(generation, connection, event.SessionID)
+		return
+	}
+	m.pendingEvents = append(m.pendingEvents, event)
 	m.mu.Unlock()
-	m.invalidate()
+}
+
+func (m *Model) applyTranscriptEventLocked(event daemon.SequencedEvent) {
+	if cursor := m.eventCursor; cursor != nil &&
+		cursor.RuntimeID == event.RuntimeID && cursor.Epoch == event.Epoch &&
+		event.Sequence <= cursor.Sequence {
+		return
+	}
+	m.snapshot.Transcript = applyTranscriptEvent(m.snapshot.Transcript, event)
+	m.eventCursor = &daemon.RuntimeEventCursor{
+		RuntimeID: event.RuntimeID,
+		Epoch:     event.Epoch,
+		Sequence:  event.Sequence,
+	}
 }
 
 func (m *Model) saveActiveDraftLocked() {
@@ -443,6 +501,8 @@ func (m *Model) clearSelectionLocked() {
 	m.sessionGeneration++
 	m.hydratedGeneration = 0
 	m.hydratedSessionID = ""
+	m.pendingEvents = nil
+	m.eventCursor = nil
 	m.attachedRuntimeID = ""
 	m.snapshot.SelectedSessionID = ""
 	m.restoreActiveDraftLocked()

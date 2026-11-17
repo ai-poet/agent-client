@@ -276,6 +276,122 @@ func TestWorkbenchSelectionHydratesAndSwitches(t *testing.T) {
 	}
 }
 
+func TestWorkbenchBuffersEventsUntilHydrateAndUsesSnapshotCursor(t *testing.T) {
+	connection := newFakeWorkbenchConnection("test-daemon", daemon.AgentSession{ID: "session-a", Title: "会话甲"})
+	session := hydratedSession("session-a", "会话甲", 1)
+	session.RuntimeEventCursor = &daemon.RuntimeEventCursor{
+		RuntimeID: "runtime-session-a", Epoch: "epoch-test", Sequence: 1,
+	}
+	connection.sessions["session-a"] = session
+	connection.hydrateStarted = make(chan string, 1)
+	connection.hydrateRelease = map[string]chan struct{}{"session-a": make(chan struct{})}
+	connector := &fakeWorkbenchConnector{connections: []*fakeWorkbenchConnection{connection}}
+	model := NewModel(connector)
+	t.Cleanup(func() { _ = model.Close() })
+	model.Connect()
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool { return len(snapshot.Sessions) == 1 })
+	tester := ui.NewTester(model.View, 900, 600)
+	if err := tester.Click("会话甲"); err != nil {
+		t.Fatal(err)
+	}
+	if got := receiveString(t, connection.hydrateStarted); got != "session-a" {
+		t.Fatalf("hydrate session = %q", got)
+	}
+
+	connection.events <- transcriptTextEvent("session-a", "runtime-session-a", 1, "不应重复")
+	connection.events <- transcriptTextEvent("session-a", "runtime-session-a", 2, "一")
+	connection.events <- transcriptTextEvent("session-a", "runtime-session-a", 3, "二")
+	connection.events <- transcriptTextEvent("session-a", "runtime-session-a", 4, "三")
+	waitFor(t, func() bool {
+		model.mu.Lock()
+		defer model.mu.Unlock()
+		return len(model.pendingEvents) == 4
+	})
+	if got := model.Snapshot(); len(got.Transcript) != 0 {
+		t.Fatalf("events applied before hydrate: %+v", got.Transcript)
+	}
+	close(connection.hydrateRelease["session-a"])
+
+	snapshot := waitForSnapshot(t, model, func(snapshot Snapshot) bool {
+		return !snapshot.SessionLoading && len(snapshot.Transcript) == 2 &&
+			snapshot.Transcript[1].Text == "一二三"
+	})
+	if strings.Contains(snapshot.Transcript[1].Text, "不应重复") {
+		t.Fatalf("snapshot event was replayed twice: %+v", snapshot.Transcript)
+	}
+	model.mu.Lock()
+	pending := len(model.pendingEvents)
+	model.mu.Unlock()
+	if pending != 0 {
+		t.Fatalf("pending events after replay = %d, want 0", pending)
+	}
+}
+
+func TestWorkbenchEventBufferOverflowForcesRehydrate(t *testing.T) {
+	connection := newFakeWorkbenchConnection("test-daemon", daemon.AgentSession{ID: "session-a", Title: "会话甲"})
+	connection.sessions["session-a"] = hydratedSession("session-a", "会话甲", 0)
+	connection.hydrateStarted = make(chan string, 4)
+	connection.hydrateRelease = map[string]chan struct{}{"session-a": make(chan struct{})}
+	connector := &fakeWorkbenchConnector{connections: []*fakeWorkbenchConnection{connection}}
+	model := NewModel(connector)
+	t.Cleanup(func() { _ = model.Close() })
+	model.Connect()
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool { return len(snapshot.Sessions) == 1 })
+	tester := ui.NewTester(model.View, 900, 600)
+	if err := tester.Click("会话甲"); err != nil {
+		t.Fatal(err)
+	}
+	receiveString(t, connection.hydrateStarted)
+
+	for sequence := uint64(1); sequence <= pendingEventLimit+1; sequence++ {
+		connection.events <- transcriptTextEvent("session-a", "runtime-session-a", sequence, "增量")
+	}
+	if got := receiveString(t, connection.hydrateStarted); got != "session-a" {
+		t.Fatalf("rehydrate session = %q", got)
+	}
+	model.mu.Lock()
+	pending := len(model.pendingEvents)
+	model.mu.Unlock()
+	if pending > pendingEventLimit {
+		t.Fatalf("pending event buffer length = %d, limit %d", pending, pendingEventLimit)
+	}
+	close(connection.hydrateRelease["session-a"])
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool { return !snapshot.SessionLoading })
+}
+
+func TestWorkbenchStaleSessionLoadCannotOverrideSelection(t *testing.T) {
+	connection := newFakeWorkbenchConnection("test-daemon",
+		daemon.AgentSession{ID: "session-a", Title: "会话甲"},
+		daemon.AgentSession{ID: "session-b", Title: "会话乙"},
+	)
+	connection.sessions["session-a"] = hydratedSession("session-a", "会话甲", 2)
+	connection.sessions["session-b"] = hydratedSession("session-b", "会话乙", 1)
+	connector := &fakeWorkbenchConnector{connections: []*fakeWorkbenchConnection{connection}}
+	model := NewModel(connector)
+	t.Cleanup(func() { _ = model.Close() })
+	model.Connect()
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool { return len(snapshot.Sessions) == 2 })
+	tester := ui.NewTester(model.View, 900, 600)
+	if err := tester.Click("会话甲"); err != nil {
+		t.Fatal(err)
+	}
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool { return snapshot.MessageCount == 2 })
+	if err := tester.Click("会话乙"); err != nil {
+		t.Fatal(err)
+	}
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool {
+		return snapshot.SelectedSessionID == "session-b" && !snapshot.SessionLoading && snapshot.MessageCount == 1
+	})
+
+	model.mu.Lock()
+	generation := model.generation
+	model.mu.Unlock()
+	model.startSessionLoad(generation, connection, "session-a")
+	if got := model.Snapshot(); got.SelectedSessionID != "session-b" || got.SessionLoading || got.MessageCount != 1 {
+		t.Fatalf("stale session load changed selection: %+v", got)
+	}
+}
+
 func TestWorkbenchReconnectSendsResumeFromAndRehydrates(t *testing.T) {
 	summary := daemon.AgentSession{ID: "session-a", Title: "会话甲"}
 	oldConnection := newFakeWorkbenchConnection("old-daemon", summary)
