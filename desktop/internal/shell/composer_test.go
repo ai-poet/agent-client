@@ -192,6 +192,56 @@ func TestComposerSwitchingSessionRestoresInFlightDraft(t *testing.T) {
 	if got := connection.prompts(); len(got) != 1 {
 		t.Fatalf("Prompt calls = %d, want 1", len(got))
 	}
+
+	// Let a subsequent send succeed, then switch away and back. Neither the
+	// visible input nor the saved per-session draft may resurrect the old text.
+	close(connection.promptRelease)
+	if err := tester.Click("发送"); err != nil {
+		t.Fatal(err)
+	}
+	receivePrompt(t, connection.promptStarted)
+	waitForSnapshot(t, model, func(snapshot Snapshot) bool {
+		return !snapshot.Sending && snapshot.SendError == ""
+	})
+	for _, title := range []string{"会话乙", "会话甲"} {
+		if err := tester.Click(title); err != nil {
+			t.Fatal(err)
+		}
+		waitForSnapshot(t, model, func(snapshot Snapshot) bool {
+			wantID := "session-a"
+			if title == "会话乙" {
+				wantID = "session-b"
+			}
+			return snapshot.SelectedSessionID == wantID && !snapshot.SessionLoading
+		})
+		tester.Frame()
+	}
+	if got := model.Snapshot().Draft; got != "" {
+		t.Fatalf("successful send restored stale draft %q", got)
+	}
+	if _, ok := model.drafts["session-a"]; ok {
+		t.Fatalf("successful send kept session-a draft %q", model.drafts["session-a"])
+	}
+}
+
+func TestFinishSendSuccessDeletesSavedSessionDraft(t *testing.T) {
+	model := NewModel(&fakeConnector{})
+	model.generation = 1
+	model.sessionGeneration = 1
+	model.snapshot.SelectedSessionID = "session-a"
+	model.snapshot.Sessions = []SessionSummary{{ID: "session-a"}}
+	model.snapshot.Sending = true
+	model.sendingText = "旧稿"
+	model.drafts["session-a"] = "旧稿"
+
+	model.finishSend(context.Background(), 1, 1, "session-a", "旧稿", nil)
+	snapshot := model.Snapshot()
+	if snapshot.Sending || snapshot.Draft != "" {
+		t.Fatalf("successful send state = %+v", snapshot)
+	}
+	if draft, ok := model.drafts["session-a"]; ok {
+		t.Fatalf("successful send kept saved draft %q", draft)
+	}
 }
 
 func TestComposerEnterSendsAndShiftEnterBreaksLine(t *testing.T) {

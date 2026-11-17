@@ -275,6 +275,9 @@ func (m *Model) loadSessions(ctx context.Context, generation uint64, connection 
 			return
 		}
 		m.snapshot.Sessions = append([]SessionSummary(nil), state.Sessions...)
+		// Selection is limited to this list, so successful refreshes are a simple
+		// bounded-drain point for drafts whose sessions no longer exist.
+		m.pruneDrafts(m.snapshot.Sessions)
 		m.snapshot.SessionsError = ""
 		selected := m.snapshot.SelectedSessionID
 		if selected != "" && !sessionExists(m.snapshot.Sessions, selected) {
@@ -384,6 +387,9 @@ func (m *Model) hydrateSession(ctx context.Context, generation, sessionGeneratio
 		m.snapshot.Transcript = transcript
 		m.hydratedGeneration = sessionGeneration
 		m.hydratedSessionID = sessionID
+		// The selection may have changed while I/O was in flight. The guard above
+		// rejects stale writes; restore only from the still-current selection.
+		m.restoreActiveDraft()
 		if session.RuntimeEventCursor != nil {
 			cursor := *session.RuntimeEventCursor
 			m.eventCursor = &cursor
@@ -495,6 +501,14 @@ func (m *Model) setSessionDraft(sessionID, draft string) {
 		m.drafts = make(map[string]string)
 	}
 	m.drafts[sessionID] = draft
+}
+
+func (m *Model) pruneDrafts(sessions []SessionSummary) {
+	for sessionID := range m.drafts {
+		if !sessionExists(sessions, sessionID) {
+			delete(m.drafts, sessionID)
+		}
+	}
 }
 
 func (m *Model) clearSelection() {

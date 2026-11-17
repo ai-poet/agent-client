@@ -120,6 +120,25 @@ func TestModelStaleWatcherCannotCancelNewerConnection(t *testing.T) {
 	}
 }
 
+func TestModelSessionRefreshPrunesDeletedSessionDrafts(t *testing.T) {
+	connection := newFakeWorkbenchConnection("test-daemon", daemon.AgentSession{ID: "session-a"})
+	model := NewModel(&fakeConnector{})
+	model.generation = 1
+	model.drafts["session-a"] = "保留"
+	model.drafts["deleted-session"] = "清理"
+
+	model.loadSessions(context.Background(), 1, connection, "", model.sessionGeneration)
+	if got := model.Snapshot(); len(got.Sessions) != 1 || got.Sessions[0].ID != "session-a" {
+		t.Fatalf("loaded sessions = %+v", got.Sessions)
+	}
+	if got := model.drafts["session-a"]; got != "保留" {
+		t.Fatalf("existing session draft = %q, want 保留", got)
+	}
+	if draft, ok := model.drafts["deleted-session"]; ok {
+		t.Fatalf("deleted session draft survived refresh: %q", draft)
+	}
+}
+
 func TestModelConcurrentConnectClosesSupersededConnection(t *testing.T) {
 	first := newFakeWorkbenchConnection("first")
 	second := newFakeWorkbenchConnection("second")

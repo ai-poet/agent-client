@@ -117,6 +117,9 @@ func (m *Model) finishSend(ctx context.Context, generation, sessionGeneration ui
 			m.snapshot.Draft = text
 			m.snapshot.SendError = sendErrorMessage(err)
 		} else {
+			// The in-flight text is also saved when switching sessions. Clear that
+			// per-session copy on success so a later restore cannot resurrect it.
+			delete(m.drafts, sessionID)
 			m.snapshot.SendError = ""
 		}
 	})
