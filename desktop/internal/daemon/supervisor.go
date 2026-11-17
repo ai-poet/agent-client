@@ -65,20 +65,39 @@ func NewSupervisor() *Supervisor {
 	}
 }
 
-// Connect implements shell.Connector.
-func (s *Supervisor) Connect(ctx context.Context) (Connection, error) {
+// Connect implements shell.Connector. Reconnects reuse a still-running local
+// child and pass the last consumed event cursors to the daemon.
+func (s *Supervisor) Connect(ctx context.Context, resume []ReplayCursor) (Connection, error) {
+	if s.client != nil {
+		_ = s.client.Close()
+		s.client = nil
+	}
 	env := s.getenv()
 	endpoint, external, err := EndpointFromEnv(func(key string) string { return env[key] })
 	if err != nil {
 		return nil, err
 	}
 	if external {
-		client, err := Connect(ctx, endpoint.Address, endpoint.Token)
+		client, err := ConnectWithResume(ctx, endpoint.Address, endpoint.Token, resume)
 		if err != nil {
 			return nil, err
 		}
 		s.client = client
 		return client, nil
+	}
+
+	if s.process != nil {
+		select {
+		case <-s.process.done:
+			s.process = nil
+		default:
+			client, err := ConnectWithResume(ctx, s.process.Endpoint.Address, s.process.Endpoint.Token, resume)
+			if err != nil {
+				return nil, err
+			}
+			s.client = client
+			return client, nil
+		}
 	}
 
 	path, err := DaemonExecutable(func(key string) string { return env[key] }, s.executable)
@@ -89,7 +108,7 @@ func (s *Supervisor) Connect(ctx context.Context) (Connection, error) {
 	if err != nil {
 		return nil, err
 	}
-	client, err := Connect(ctx, process.Endpoint.Address, process.Endpoint.Token)
+	client, err := ConnectWithResume(ctx, process.Endpoint.Address, process.Endpoint.Token, resume)
 	if err != nil {
 		process.Stop(context.Background(), nil)
 		return nil, err
