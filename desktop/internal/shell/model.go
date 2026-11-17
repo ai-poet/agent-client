@@ -388,7 +388,7 @@ func (m *Model) workbenchView(c *ui.Context, snapshot Snapshot) {
 				ui.Text(c, "会话").FontSize(18).Bold().Grow(1)
 				ui.Text(c, snapshot.Status.Label()).FontSize(12).TextColor(theme.TextMuted).Role(ui.RoleStatus)
 			})
-			ui.Textf(c, "client-daemon 版本：%s", snapshot.DaemonVersion).FontSize(11).TextColor(theme.TextMuted)
+			ui.Textf(c, "client-daemon 版本：%s", snapshot.DaemonVersion).FontSize(12).TextColor(theme.TextMuted)
 
 			switch {
 			case snapshot.SessionsLoading:

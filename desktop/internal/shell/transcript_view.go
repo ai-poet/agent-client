@@ -1,9 +1,6 @@
 package shell
 
 import (
-	"time"
-
-	"github.com/ELY-Open-Source/CrychicUI/chat"
 	"github.com/ELY-Open-Source/CrychicUI/feedback"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
@@ -44,13 +41,21 @@ func (m *Model) transcriptView(c *ui.Context, snapshot Snapshot) {
 	m.transcriptList.FollowEnd = true
 	ui.List(c, &m.transcriptList, len(snapshot.Transcript), func(index int) {
 		m.transcriptEntryView(c, snapshot.Transcript[index])
-	}).Grow(1).Padding(16, 24).Gap(18).Justify(ui.End).Label("会话转录")
+	}).Grow(1).Padding(16, 24).Gap(18).Justify(ui.Start).Label("会话转录")
 }
 
 func (m *Model) transcriptEntryView(c *ui.Context, entry TranscriptEntry) {
 	theme := c.Theme()
-	ui.Column(c).Gap(6).Children(func() {
-		ui.Row(c).Gap(8).Children(func() {
+	bubble := ui.Column(c).MaxWidthPercent(78).Padding(10, 12).Gap(6).
+		Radius(theme.Radius*2).Background(theme.Surface).Border(1, theme.Border).
+		Label("转录消息：" + entry.ID)
+	if entry.Kind == TranscriptUser {
+		bubble.AlignSelf(ui.End)
+	} else {
+		bubble.AlignSelf(ui.Start)
+	}
+	bubble.Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, entry.Title).FontSize(12).Bold().TextColor(theme.TextMuted)
 			switch {
 			case entry.Failed:
@@ -62,23 +67,30 @@ func (m *Model) transcriptEntryView(c *ui.Context, entry TranscriptEntry) {
 			}
 		})
 		if entry.Text != "" {
-			m.transcriptMarkdown(c, entry, entry.Text, entry.Streaming)
+			m.transcriptMarkdown(c, entry.Text, entry.Streaming)
 		}
 		if entry.Detail != "" {
-			m.transcriptMarkdown(c, entry, entry.Detail, false)
+			m.transcriptMarkdown(c, entry.Detail, false)
 		}
 	})
 }
 
-func (m *Model) transcriptMarkdown(c *ui.Context, entry TranscriptEntry, text string, streaming bool) {
+func (m *Model) transcriptMarkdown(c *ui.Context, text string, streaming bool) {
+	theme := c.Theme()
+	// Code shares the bubble's surface instead of introducing an unrelated
+	// editor-colored island. The remaining Markdown colors inherit the same
+	// CrychicUI window theme tokens as the bubble itself.
+	m.markdown.Theme = &markdown.Theme{
+		Text:                theme.Text,
+		Strong:              theme.Text,
+		Code:                theme.Text,
+		CodeBackground:      theme.Surface,
+		CodeBlockBackground: theme.Surface,
+		CodeBlockBorder:     theme.Border,
+	}
 	if streaming {
 		markdown.Stream(c, text, &m.markdown)
 		return
 	}
-	chat.MarkdownMessage(c, chat.Message{
-		Sender: entry.Title,
-		Text:   text,
-		Mine:   entry.Kind == TranscriptUser,
-		At:     time.Unix(0, 0),
-	})
+	markdown.View(c, text, &m.markdown)
 }
