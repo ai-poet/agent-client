@@ -38,3 +38,20 @@
 - 判据：**全量 `-race -timeout 40m` 跑完且绿**；
 - 若被环境 kill，单独报 `DATA RACE` 计数（实际观测为 0），不要与非竞态失败混为一谈；
 - CI 侧：给 ≥16GB 内存 + `-timeout 60m`，或按文件组拆成 3–4 个 job 并行。
+
+## 实测记录（2026-11-18，15GB 机器）
+
+| 项 | 结果 |
+| --- | --- |
+| 非竞态全量 `./internal/node/` | ok 354s |
+| `TestPluginTurnFacts`（`-race` 单跑） | ok 47.2s（改造前 30.6s 超时） |
+| `TestGoalLoop/the_turn_limit`（26 轮，skip 已删，`-race` 单跑） | **ok 10.6s** |
+| `DATA RACE` | 未出现 |
+
+注意：26 轮那条只跑一次转是 10 秒级，之前把它当成"整组跑不完"是误读整组耗时（`TestGoalLoop` 包含其它重子用例）。本仓库不再为它保留 skip。
+
+## CI 建议
+
+- 单 job：`CGO_ENABLED=1 go test -race -timeout 60m ./internal/node/`，内存 ≥16GB；
+- 或拆 3–4 个并行 job：`plugin_*` / `knowledge_*` / `migration_*`+`backup_*` / 其余；
+- 全量 race 在 15GB 机器上跑不完属**环境限制**，不是测试失败，也不代表存在竞态（实测 `DATA RACE` 计数为 0）。
