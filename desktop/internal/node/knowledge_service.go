@@ -324,7 +324,7 @@ func (node *Node) readKnowledge(ctx context.Context, request protocol.Request) (
 	switch input := request.Command.Data.(type) {
 	case *protocol.KnowledgeQuery:
 		if node.knowledge == nil {
-			return protocol.Output{Kind: "knowledge_search", Data: protocol.PluginStorageSearchPage{}}, nil
+			return protocol.Output{Kind: "knowledge_search", Data: protocol.DefaultKnowledgePage()}, nil
 		}
 		page, err := node.knowledge.Query(ctx, request, *input)
 		return protocol.Output{Kind: "knowledge_search", Data: page}, err

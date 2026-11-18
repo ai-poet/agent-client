@@ -246,8 +246,13 @@ func StartWithOptions(ctx context.Context, path string, options Options) (*Node,
 		_ = profile.Close()
 		return nil, err
 	}
-	if err := value.initTelemetry(ctx); err != nil {
+	err = value.initKnowledge(ctx)
+	if err == nil {
+		err = value.initTelemetry(ctx)
+	}
+	if err != nil {
 		cancel()
+		_ = value.closeKnowledge()
 		value.closeAuth()
 		_ = value.terminals.Close()
 		_ = value.closePlugins()
