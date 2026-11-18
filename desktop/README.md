@@ -1,3 +1,5 @@
+本目录派生自 sailry-harness，见 NOTICE。
+
 <p align="center">
   <img src="assets/readme/hero.svg" width="100%" alt="Sailry: any computer becomes your AI workstation. A desktop and a phone connect to a MacBook, a Linux server and a GPU box over end-to-end encrypted peer-to-peer links.">
 </p>
