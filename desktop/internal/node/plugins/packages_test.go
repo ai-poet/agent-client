@@ -24,10 +24,10 @@ import (
 	"testing/fstest"
 	"time"
 
-	git "github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	sailry "github.com/ai-poet/agent-client/desktop"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 func packageFixture(t *testing.T, directory, name, text string) {
@@ -273,7 +273,7 @@ func TestBundledPackageContracts(t *testing.T) {
 			}
 		}
 	})
-	if len(BundledDefaults()) != 27 {
+	if len(BundledDefaults()) != 24 {
 		t.Fatal("initial distribution changed")
 	}
 	for _, selection := range BundledDefaults() {

@@ -19,9 +19,8 @@ func TestAssistantPreferencesKeepOrdinaryToolDiscovery(t *testing.T) {
 		packageTool("assistant", "preferred", "", false, done),
 		packageTool("other", "discoverable", "", false, done),
 	}
-	x.inv.Turn.Config.Resource = &protocol.ConnectionResource{Kind: "ssh", Data: protocol.SshID{1}}
-	x.inv.Turn.Config.Assistant = &protocol.PluginConversationBinding{Package: protocol.PluginReference{Name: "assistant"}, ID: "ssh"}
-	legacy := "Work only with the primary connection. Never access another connection."
+	x.inv.Turn.Config.Assistant = &protocol.PluginConversationBinding{Package: protocol.PluginReference{Name: "assistant"}, ID: "notes"}
+	legacy := "Use the preferred tools."
 	x.inv.Assistant = &protocol.PluginConversationDeclaration{Context: legacy, Tools: []protocol.PluginConversationTool{
 		{Kind: "plugin", Data: &protocol.PluginConversationToolPluginPayload{Name: "preferred"}},
 		{Kind: "builtin", Data: &protocol.PluginConversationToolBuiltinPayload{Name: "read_session"}},
@@ -38,8 +37,7 @@ func TestAssistantPreferencesKeepOrdinaryToolDiscovery(t *testing.T) {
 		t.Fatal("the assistant removed ordinary discovery or eagerly injected the whole catalog")
 	}
 	if !strings.HasPrefix(x.assistantContext, legacy+"\n\nAssistant runtime capabilities\n") ||
-		!strings.Contains(x.assistantContext, "do not restrict the ordinary conversation catalog or skills") ||
-		!strings.Contains(x.assistantContext, "bound resource is the default target") || x.inv.Assistant.Context != legacy {
+		!strings.Contains(x.assistantContext, "do not restrict the ordinary conversation catalog or skills") || x.inv.Assistant.Context != legacy {
 		t.Fatal("the assistant lost immutable context or retained its obsolete capability restriction")
 	}
 }

@@ -237,8 +237,6 @@ func testToolDeclarations(t *testing.T) {
 			protocol.ToolOperationWriteArtifact:   protocol.PluginActionWriteArtifacts,
 			protocol.ToolOperationRunCommand:      protocol.PluginActionControlCommands,
 			protocol.ToolOperationWriteCommand:    protocol.PluginActionControlCommands,
-			protocol.ToolOperationExecuteDatabase: protocol.PluginActionControlDatabases,
-			protocol.ToolOperationRunSsh:          protocol.PluginActionControlSsh,
 			protocol.ToolOperationRemoveWorktree:  protocol.PluginActionWriteWorktrees,
 			protocol.ToolOperationSaveRole:        protocol.PluginActionWriteRoles,
 			protocol.ToolOperationKnowledgeCreate: protocol.PluginActionWriteKnowledge,

@@ -12,7 +12,7 @@ import (
 )
 
 func TestPluginTurnInput(t *testing.T) {
-	delegate, apply, query, transfer := protocol.ToolOperationDelegateAgent, protocol.ToolOperationApplyRoles, protocol.ToolOperationQueryDatabase, protocol.ToolOperationTransferSsh
+	delegate, apply, read, write := protocol.ToolOperationDelegateAgent, protocol.ToolOperationApplyRoles, protocol.ToolOperationReadFile, protocol.ToolOperationWriteFile
 	options := json.RawMessage(`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"depth":{"type":"string","default":"quick"},"strict":{"type":"boolean"}},"required":[],"additionalProperties":false}`)
 	extension := protocol.DefaultPluginExtension()
 	extension.Actions = []protocol.PluginAction{protocol.PluginActionReadConversation, protocol.PluginActionReadMessage}
@@ -20,7 +20,7 @@ func TestPluginTurnInput(t *testing.T) {
 	extension.Tools = []protocol.ToolDeclaration{
 		{Name: "delegate", Handler: &protocol.ToolHandler{Name: "delegate", Operation: &delegate}},
 		{Name: "roster", Handler: &protocol.ToolHandler{Name: "roster", Operation: &apply}},
-		{Name: "report", Handler: &protocol.ToolHandler{Name: "report", Flow: &protocol.ToolFlow{Operations: []protocol.ToolOperation{query, transfer}}}},
+		{Name: "report", Handler: &protocol.ToolHandler{Name: "report", Flow: &protocol.ToolFlow{Operations: []protocol.ToolOperation{read, write}}}},
 		{Name: "plain", Handler: &protocol.ToolHandler{Name: "plain"}},
 	}
 	info := protocol.PluginInfo{Summary: protocol.PluginSummary{Name: "review-fixture", Digest: "digest"}, Extension: &extension}
@@ -66,7 +66,7 @@ func TestPluginTurnInput(t *testing.T) {
 
 	t.Run("selected operations include handler and flow operations", func(t *testing.T) {
 		selected := pluginSelectedOperations(info, names)
-		for _, operation := range []protocol.ToolOperation{delegate, apply, query, transfer} {
+		for _, operation := range []protocol.ToolOperation{delegate, apply, read, write} {
 			if !slices.Contains(selected, operation) {
 				t.Fatalf("%s missing from %v", operation, selected)
 			}

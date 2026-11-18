@@ -24,11 +24,11 @@ func TestChildStandardTools(t *testing.T) {
 		{"standard operation", Tool{Definition: named("fixture__tool"), Binding: bound(protocol.ToolOperationReadFile)}, true},
 		{"code search operation", Tool{Definition: named("fixture__tool"), Binding: bound(protocol.ToolOperationSearchCode)}, true},
 		{"artifact revisions operation", Tool{Definition: named("fixture__tool"), Binding: bound(protocol.ToolOperationListArtifactRevisions)}, true},
-		{"other operation", Tool{Definition: named("fixture__tool"), Binding: bound(protocol.ToolOperationQueryDatabase)}, false},
+		{"other operation", Tool{Definition: named("fixture__tool"), Binding: bound(protocol.ToolOperationApplyRoles)}, false},
 		{"read-only hosted script", Tool{Definition: named("fixture__tool"), Binding: script, Hosted: true, ReadOnly: true}, true},
 		{"writing hosted script", Tool{Definition: named("fixture__tool"), Binding: script, Hosted: true}, false},
 		{"flow of standard operations", Tool{Definition: named("fixture__tool"), Binding: script, Flow: []protocol.ToolOperation{protocol.ToolOperationReadFile, protocol.ToolOperationRunCommand}}, true},
-		{"flow with another operation", Tool{Definition: named("fixture__tool"), Binding: script, ReadOnly: true, Flow: []protocol.ToolOperation{protocol.ToolOperationReadFile, protocol.ToolOperationQueryDatabase}}, false},
+		{"flow with another operation", Tool{Definition: named("fixture__tool"), Binding: script, ReadOnly: true, Flow: []protocol.ToolOperation{protocol.ToolOperationReadFile, protocol.ToolOperationApplyRoles}}, false},
 		{"flow without operations", Tool{Definition: named("fixture__tool"), Binding: script, ReadOnly: true, Flow: []protocol.ToolOperation{}}, false},
 		{"unbound package tool", Tool{Definition: named("fixture__server__tool"), Binding: script, ReadOnly: true}, false},
 	} {

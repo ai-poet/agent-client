@@ -85,7 +85,7 @@ func pluginAssistantAcceptance(t *testing.T) {
 	source := t.TempDir()
 	entry := "dev.sailry.platform/desktop/main.js"
 	for name, body := range map[string]string{
-		"plugin.json": `{"$schema":"` + plugins.ManifestSchema + `","name":"assistant-fixture","version":"0.1.0","extensions":{"dev.sailry.platform":{"api_version":"v1","actions":["files.read"],"tools":[{"name":"read_note","operation":"files.read"},{"name":"list_notes","operation":"files.list"}],"desktop":{"entry":"` + entry + `","resources":["` + entry + `"],"conversations":[{"id":"notes","resource":"plugin","context":"Fixture assistant context","tools":[{"kind":"plugin","name":"read_note"},{"kind":"package","package":"native-approval-fixture","name":"write"},{"kind":"builtin","name":"ask_user"}]},{"id":"project","resource":"workspace","context":"","tools":[]},{"id":"delegating","resource":"plugin","context":"","tools":[{"kind":"builtin","name":"spawn_agent"}]},{"id":"ssh","resource":"ssh","context":"Fixture SSH context","tools":[]}]}}}}`,
+		"plugin.json": `{"$schema":"` + plugins.ManifestSchema + `","name":"assistant-fixture","version":"0.1.0","extensions":{"dev.sailry.platform":{"api_version":"v1","actions":["files.read"],"tools":[{"name":"read_note","operation":"files.read"},{"name":"list_notes","operation":"files.list"}],"desktop":{"entry":"` + entry + `","resources":["` + entry + `"],"conversations":[{"id":"notes","resource":"plugin","context":"Fixture assistant context","tools":[{"kind":"plugin","name":"read_note"},{"kind":"package","package":"native-approval-fixture","name":"write"},{"kind":"builtin","name":"ask_user"}]},{"id":"project","resource":"workspace","context":"","tools":[]},{"id":"delegating","resource":"plugin","context":"","tools":[{"kind":"builtin","name":"spawn_agent"}]}]}}}}`,
 		entry:         `export default function main(){return null;}`,
 	} {
 		filename := filepath.Join(source, filepath.FromSlash(name))
@@ -236,23 +236,8 @@ func pluginAssistantAcceptance(t *testing.T) {
 		t.Fatalf("assistant workspace is not its private profile directory: %s, %v", path, err)
 	}
 
-	// A bound SSH assistant can use ordinary local tools with normal approvals.
-	ssh := commandFixture(t, node, protocol.Command{Kind: "save_ssh", Data: protocol.CommandSaveSshPayload{
-		Profile:    protocol.SshProfile{ID: protocol.NewSshID(), Name: "Fixture", Host: "fixture.invalid", Port: 22, Username: "fixture", Authentication: protocol.SshAuthenticationPassword},
-		Credential: &protocol.SshCredential{Kind: "password", Data: &protocol.SshCredentialPasswordPayload{Password: protocol.NewSecret("fixture-password")}},
-	}}).Data.(protocol.SshProfile)
-	sshConfig := config
-	sshConfig.Assistant = &protocol.PluginConversationBinding{Package: binding.Package, ID: "ssh"}
-	sshConfig.Resource = &protocol.ConnectionResource{Kind: "ssh", Data: ssh.ID}
-	sshSession, failure := create(sshConfig, nil)
-	if failure != nil {
-		t.Fatal(failure)
-	}
-	sshRoot, err := node.workspaceRoot(t.Context(), sshSession.Worktree, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sshRoot, "local.txt"), []byte("Inherited local file"), 0o600); err != nil {
+	// A plugin assistant can use ordinary local tools with normal approvals.
+	if err := os.WriteFile(filepath.Join(expected, "local.txt"), []byte("Inherited local file"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	script.mu.Lock()
@@ -261,13 +246,13 @@ func pluginAssistantAcceptance(t *testing.T) {
 		{Type: fantasy.StreamPartTypeToolCall, ID: "local-command", ToolCallName: "run_command", ToolCallInput: `{"command":"fixture inherited command","access":"unrestricted"}`},
 	}
 	script.mu.Unlock()
-	commandFixture(t, node, protocol.Command{Kind: "submit_turn", Data: protocol.CommandSubmitTurnPayload{Session: sshSession.ID, ExpectedRevision: sshSession.Revision, Message: protocol.ConversationInput{Text: "Read local.txt and run the local fixture command"}}})
+	commandFixture(t, node, protocol.Command{Kind: "submit_turn", Data: protocol.CommandSubmitTurnPayload{Session: second.ID, ExpectedRevision: second.Revision, Message: protocol.ConversationInput{Text: "Read local.txt and run the local fixture command"}}})
 	approved := false
 	for completed := false; !completed; {
 		var history protocol.ConversationHistory
 		if err := node.profile.Store.Node.Read(t.Context(), func(db *sql.Conn) error {
 			var err error
-			history, err = store.ReadConversation(t.Context(), db, sshSession.ID, nil, 100)
+			history, err = store.ReadConversation(t.Context(), db, second.ID, nil, 100)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -277,7 +262,7 @@ func pluginAssistantAcceptance(t *testing.T) {
 				if launches.Load() != 0 {
 					t.Fatal("the inherited command ran before ordinary approval")
 				}
-				commandFixture(t, node, protocol.Command{Kind: "resolve_approval", Data: protocol.CommandResolveApprovalPayload{Session: sshSession.ID, Approval: approval.ID, Decision: protocol.ConversationDecision{Kind: "approve"}}})
+				commandFixture(t, node, protocol.Command{Kind: "resolve_approval", Data: protocol.CommandResolveApprovalPayload{Session: second.ID, Approval: approval.ID, Decision: protocol.ConversationDecision{Kind: "approve"}}})
 				approved = true
 			}
 		}
@@ -298,7 +283,7 @@ func pluginAssistantAcceptance(t *testing.T) {
 	inherited := script.prompt
 	script.mu.Unlock()
 	if !approved || launches.Load() != 1 || !strings.Contains(inherited, "Inherited local file") || !strings.Contains(inherited, "Inherited command ran") {
-		t.Fatalf("SSH assistant did not execute ordinary tools with normal authority: approved=%t launches=%d prompt=%s", approved, launches.Load(), inherited)
+		t.Fatalf("plugin assistant did not execute ordinary tools with normal authority: approved=%t launches=%d prompt=%s", approved, launches.Load(), inherited)
 	}
 	// Agent references use the ordinary roster even without a preferred delegation tool.
 	delegating := config

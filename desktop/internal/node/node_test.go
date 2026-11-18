@@ -16,14 +16,14 @@ import (
 	"testing"
 	"time"
 
-	git "github.com/go-git/go-git/v5"
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/node/admission"
 	"github.com/ai-poet/agent-client/desktop/internal/node/mcp"
 	"github.com/ai-poet/agent-client/desktop/internal/node/process"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	git "github.com/go-git/go-git/v5"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"lukechampine.com/blake3"
 )
 
@@ -191,6 +191,10 @@ func TestAdmissionSameRequestID(t *testing.T) {
 		}
 		commands := secretCommands("ledger-canary")
 		for _, kind := range protocol.CommandKinds() {
+			// Deleted connection commands remain in the wire protocol only.
+			if kind == "save_ssh" || kind == "save_database" {
+				continue
+			}
 			if _, built := commands[kind]; admission.DigestOnly(kind) != built {
 				t.Errorf("%s: kept by digest = %t, exercised here = %t", kind, admission.DigestOnly(kind), built)
 			}
@@ -615,7 +619,7 @@ func TestOutcomeUnknownAfterCrash(t *testing.T) {
 	}
 	interrupted := protocol.NewRequest(id, secretCommands("interrupted-ledger-key")["save_provider"])
 	completed := protocol.NewRequest(id, secretCommands(secret)["save_provider"])
-	admitted := protocol.NewRequest(id, secretCommands(secret)["save_ssh"])
+	admitted := protocol.NewRequest(id, secretCommands(secret)["save_search_settings"])
 	interruptedBody, completedBody, admittedBody := encode(interrupted), encode(completed), encode(admitted)
 	recorded := link.Response{Fault: &protocol.Fault{Code: protocol.ErrorCodeConflict, Message: "recorded before the restart"}}
 	if err := node.profile.Store.Node.Write(ctx, func(db *sql.Conn) error {
@@ -706,7 +710,7 @@ func TestOutcomeUnknownAfterCrash(t *testing.T) {
 			t.Fatalf("retained %s body = %q, %v", keptRequest.Command.Kind, kept, err)
 		}
 		inspection := commandFixture(t, restarted, protocol.Command{Kind: "inspect_request", Data: protocol.CommandInspectRequestPayload{ID: keptRequest.ID, Digest: hex.EncodeToString(digest[:])}})
-		if want := map[string]string{"save_provider": "completed", "save_ssh": "unknown"}[keptRequest.Command.Kind]; inspection.Data.(protocol.OutputRequestOutcomePayload).Outcome.Kind != want {
+		if want := map[string]string{"save_provider": "completed", "save_search_settings": "unknown"}[keptRequest.Command.Kind]; inspection.Data.(protocol.OutputRequestOutcomePayload).Outcome.Kind != want {
 			t.Fatalf("retained %s inspection = %#v, want %s", keptRequest.Command.Kind, inspection, want)
 		}
 	}
@@ -1195,15 +1199,6 @@ func secretCommands(canary string) map[string]protocol.Command {
 	provider := protocol.DefaultConversationProvider()
 	provider.ID, provider.Name, provider.Api = protocol.NewProviderID(), "Ledger", protocol.ConversationModelApiChatCompletions
 	provider.Authentication, provider.Endpoint = protocol.AuthenticationApiKey, "https://ledger.invalid/v1"
-	database := protocol.DefaultCommandSaveDatabasePayload()
-	database.Profile.ID, database.Profile.Name, database.Password = protocol.NewDatabaseID(), "Ledger", &secret
-	database.Profile.Connection = protocol.DatabaseConnection{Kind: "network", Data: &protocol.DatabaseConnectionNetworkPayload{
-		Engine: protocol.DatabaseEnginePostgres, Host: "ledger.invalid", Port: 5432, Database: "app", Username: "reader", Tls: protocol.DatabaseTlsRequire,
-	}}
-	ssh := protocol.DefaultCommandSaveSshPayload()
-	ssh.Profile.ID, ssh.Profile.Name, ssh.Profile.Host, ssh.Profile.Username = protocol.NewSshID(), "Ledger", "ledger.invalid", "ledger"
-	ssh.Profile.Authentication = protocol.SshAuthenticationPassword
-	ssh.Credential = &protocol.SshCredential{Kind: "password", Data: &protocol.SshCredentialPasswordPayload{Password: secret}}
 	search := protocol.DefaultSearchUpdate()
 	search.Credentials = map[protocol.SearchDriver]protocol.SearchCredentials{protocol.SearchDriverExa: {Key: replace, Basic: protocol.PluginSettingsSecretUpdate{Kind: "keep"}}}
 	backup := protocol.DefaultBackupUpdate()
@@ -1231,7 +1226,7 @@ func secretCommands(canary string) map[string]protocol.Command {
 	file.Passphrase = &secret
 	handler := protocol.DefaultDispatchHandler()
 	handler.Name, handler.Queue = "ledger", "ledger"
-	handler.Callback.Completion, handler.Callback.Command = protocol.DispatchCompletionCommand, &protocol.Command{Kind: "save_database", Data: &database}
+	handler.Callback.Completion, handler.Callback.Command = protocol.DispatchCompletionCommand, &protocol.Command{Kind: "save_provider", Data: &protocol.CommandSaveProviderPayload{Provider: provider, Secret: &secret}}
 	schedule := protocol.DispatchCommand{Kind: "save_handler", Data: &handler}
 	dispatch := protocol.DefaultCommandDispatchPayload()
 	dispatch.Package.Name, dispatch.Action = "ledger", schedule
@@ -1244,8 +1239,6 @@ func secretCommands(canary string) map[string]protocol.Command {
 		"save_provider":           {Kind: "save_provider", Data: &protocol.CommandSaveProviderPayload{Provider: provider, Secret: &secret}},
 		"complete_provider_login": {Kind: "complete_provider_login", Data: &protocol.CommandCompleteProviderLoginPayload{Attempt: protocol.NewRequestID(), Callback: secret}},
 		"import_session":          {Kind: "import_session", Data: &imported},
-		"save_ssh":                {Kind: "save_ssh", Data: &ssh},
-		"save_database":           {Kind: "save_database", Data: &database},
 		"save_search_settings":    {Kind: "save_search_settings", Data: &search},
 		"save_plugin_settings":    {Kind: "save_plugin_settings", Data: &settings},
 		"save_plugin_mcp":         {Kind: "save_plugin_mcp", Data: &servers},

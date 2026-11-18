@@ -175,62 +175,53 @@ func TestTerminalInventory(t *testing.T) {
 		{Kind: "exited", Data: protocol.TerminalStatusExitedPayload{Code: 3}},
 		{Kind: "stopped"},
 		{Kind: "closed"},
-		{Kind: "failed", Data: protocol.TerminalStatusFailedPayload{Message: "SSH terminal ended without an exit status"}},
+		{Kind: "failed", Data: protocol.TerminalStatusFailedPayload{Message: "terminal ended without an exit status"}},
 	}
-	for _, ssh := range []bool{false, true} {
-		for _, final := range finals {
-			owner, title, access := node.ID(), "", protocol.ProcessAccessUnrestricted
-			directory, profile := t.TempDir(), protocol.NewSshID()
-			running := protocol.TerminalInfo{ID: protocol.NewTerminalID(), Worktree: &session.Worktree, Access: &access, Status: protocol.TerminalStatus{Kind: "running"}, Title: &title, Directory: &directory, Owner: &owner, Revision: 1}
-			if ssh {
-				running.Worktree, running.Access, running.Directory, running.Ssh = nil, nil, nil, &profile
-			}
-			node.terminalChanged(running)
-			if info := changed(running.ID); info.Status.Kind != "running" || info.Owner == nil {
-				t.Fatalf("running event = %#v", info)
-			}
-			if values := snapshotFixture(t, node).Terminals; len(values) != 1 || values[0].ID != running.ID {
-				t.Fatalf("running inventory = %#v", values)
-			}
-			ended := running
-			ended.Status, ended.Owner, ended.Revision = final, nil, 2
-			node.terminalChanged(ended)
-			if info := changed(running.ID); info.Status.Kind != final.Kind || info.Owner != nil || info.Revision != 2 {
-				t.Fatalf("final event = %#v", info)
-			}
-			if err := node.profile.Store.Node.Write(ctx, func(db *sql.Conn) error {
-				for _, event := range []bool{false, true} {
-					for _, revision := range []uint64{1, 2, 3} {
-						running.Revision = revision
-						changes, err := store.SaveTerminal(ctx, db, running, event)
-						if err != nil {
-							return err
-						}
-						if len(changes) != 0 {
-							return fmt.Errorf("late running update resurrected %s: %#v", final.Kind, changes)
-						}
+	for _, final := range finals {
+		owner, title, access := node.ID(), "", protocol.ProcessAccessUnrestricted
+		directory := t.TempDir()
+		running := protocol.TerminalInfo{ID: protocol.NewTerminalID(), Worktree: &session.Worktree, Access: &access, Status: protocol.TerminalStatus{Kind: "running"}, Title: &title, Directory: &directory, Owner: &owner, Revision: 1}
+		node.terminalChanged(running)
+		if info := changed(running.ID); info.Status.Kind != "running" || info.Owner == nil {
+			t.Fatalf("running event = %#v", info)
+		}
+		if values := snapshotFixture(t, node).Terminals; len(values) != 1 || values[0].ID != running.ID {
+			t.Fatalf("running inventory = %#v", values)
+		}
+		ended := running
+		ended.Status, ended.Owner, ended.Revision = final, nil, 2
+		node.terminalChanged(ended)
+		if info := changed(running.ID); info.Status.Kind != final.Kind || info.Owner != nil || info.Revision != 2 {
+			t.Fatalf("final event = %#v", info)
+		}
+		if err := node.profile.Store.Node.Write(ctx, func(db *sql.Conn) error {
+			for _, event := range []bool{false, true} {
+				for _, revision := range []uint64{1, 2, 3} {
+					running.Revision = revision
+					changes, err := store.SaveTerminal(ctx, db, running, event)
+					if err != nil {
+						return err
+					}
+					if len(changes) != 0 {
+						return fmt.Errorf("late running update resurrected %s: %#v", final.Kind, changes)
 					}
 				}
-				return nil
-			}); err != nil {
-				t.Fatal(err)
 			}
-			if values := snapshotFixture(t, node).Terminals; len(values) != 0 {
-				t.Fatalf("ended inventory = %#v", values)
-			}
-			local := commandFixture(t, node, protocol.Command{Kind: "list_terminals", Data: protocol.CommandListTerminalsPayload{Worktree: session.Worktree}})
-			remote := commandFixture(t, node, protocol.Command{Kind: "list_ssh_terminals", Data: protocol.CommandListSshTerminalsPayload{Profile: profile}})
-			if len(local.Data.([]protocol.TerminalInfo)) != 0 || len(remote.Data.([]protocol.TerminalInfo)) != 0 {
-				t.Fatalf("ended terminal remained listed: %#v %#v", local, remote)
-			}
-			command := protocol.Command{Kind: "close_terminal", Data: protocol.CommandCloseTerminalPayload{Worktree: session.Worktree, Terminal: running.ID}}
-			if ssh {
-				command = protocol.Command{Kind: "close_ssh_terminal", Data: protocol.CommandCloseSshTerminalPayload{Terminal: running.ID}}
-			}
-			response := dispatchFixture(t, node, owner, protocol.NewRequest(owner, command))
-			if response.Fault == nil || response.Fault.Code != protocol.ErrorCodeNotFound {
-				t.Fatalf("close ended terminal = %#v", response)
-			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if values := snapshotFixture(t, node).Terminals; len(values) != 0 {
+			t.Fatalf("ended inventory = %#v", values)
+		}
+		listed := commandFixture(t, node, protocol.Command{Kind: "list_terminals", Data: protocol.CommandListTerminalsPayload{Worktree: session.Worktree}})
+		if len(listed.Data.([]protocol.TerminalInfo)) != 0 {
+			t.Fatalf("ended terminal remained listed: %#v", listed)
+		}
+		command := protocol.Command{Kind: "close_terminal", Data: protocol.CommandCloseTerminalPayload{Worktree: session.Worktree, Terminal: running.ID}}
+		response := dispatchFixture(t, node, owner, protocol.NewRequest(owner, command))
+		if response.Fault == nil || response.Fault.Code != protocol.ErrorCodeNotFound {
+			t.Fatalf("close ended terminal = %#v", response)
 		}
 	}
 }

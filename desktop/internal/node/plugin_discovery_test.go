@@ -52,9 +52,4 @@ func TestUnassignedReminderToolKeepsDiscoveryLabels(t *testing.T) {
 	if len(tools) != 1 || tools[0].Definition.Name != plugins.ToolAlias("reminders", "reminders") || !slices.Contains(tools[0].SearchLabels, "待办提醒") {
 		t.Fatalf("captured reminder discovery = %+v", tools)
 	}
-	// A label cannot make a tool available outside its declared contexts.
-	invocation.Turn.Config.Resource = &protocol.ConnectionResource{Kind: "ssh", Data: protocol.NewSshID()}
-	if tools, err = node.pluginTools(t.Context(), invocation); err != nil || len(tools) != 0 {
-		t.Fatalf("discovery bypassed resource admission: %+v, %v", tools, err)
-	}
 }

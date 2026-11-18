@@ -122,20 +122,20 @@ func TestUndeclaredSummaryDoesNotAcquireOutput(t *testing.T) {
 }
 
 func TestFailureOverridesSuccessPreview(t *testing.T) {
-	const message = "bound conversations cannot create another connection"
-	const original = `{"error":{"code":"permission_denied","message":"bound conversations cannot create another connection"}}`
+	const message = "the file could not be written"
+	const original = `{"error":{"code":"permission_denied","message":"the file could not be written"}}`
 	result := json.RawMessage(original)
 	punctuation := "@:"
 	for _, mode := range []protocol.ToolPresentation{protocol.ToolPresentationDetails, protocol.ToolPresentationContent} {
 		t.Run(string(mode), func(t *testing.T) {
-			raw := &rawAgentTool{Name: "ssh_save_connection", Arguments: json.RawMessage(`{"name":"Another host"}`), Result: &result,
+			raw := &rawAgentTool{Name: "write_file", Arguments: json.RawMessage(`{"path":"notes.txt"}`), Result: &result,
 				Presentation: mode, Grouping: protocol.ToolGroupingSequence, Failure: &protocol.ToolFailure{Origin: protocol.ToolFailureOriginRuntime},
-				Display: &protocol.ToolDisplay{Label: "Save SSH connection", Input: &protocol.ToolDisplayInput{Summary: &protocol.ToolDisplayField{Path: "/name"}},
+				Display: &protocol.ToolDisplay{Label: "Write file", Input: &protocol.ToolDisplayInput{Summary: &protocol.ToolDisplayField{Path: "/path"}},
 					Output: &protocol.ToolDisplayProjectionOutput{Preview: &protocol.ToolDisplayProjectionText{Parts: []protocol.ToolDisplayProjectionPart{{Text: &punctuation}}}}},
 			}
 			for _, full := range []bool{false, true} {
 				resolved := raw.resolved(full)
-				if resolved.Output == nil || resolved.Output.Preview != message || resolved.Output.Body != nil || resolved.Input.Summary == nil || resolved.Input.Summary.Text != "Another host" {
+				if resolved.Output == nil || resolved.Output.Preview != message || resolved.Output.Body != nil || resolved.Input.Summary == nil || resolved.Input.Summary.Text != "notes.txt" {
 					t.Fatalf("failure was replaced by a success recipe: %+v", resolved)
 				}
 			}

@@ -302,12 +302,6 @@ func TestTelemetryOffSendsNothing(t *testing.T) {
 		provider.Authentication, provider.Endpoint = protocol.AuthenticationApiKey, "https://SECRET.test/v1"
 		worktree := protocol.NewWorktreeID()
 		change(protocol.Command{Kind: "save_provider", Data: protocol.CommandSaveProviderPayload{Provider: provider, Secret: &secret}})
-		change(protocol.Command{Kind: "save_database", Data: protocol.CommandSaveDatabasePayload{Password: &secret, Profile: protocol.DatabaseProfile{
-			ID: protocol.NewDatabaseID(), Name: "SECRET database", ReadOnly: true, Connection: protocol.DatabaseConnection{Kind: "network", Data: &protocol.DatabaseConnectionNetworkPayload{
-				Engine: protocol.DatabaseEnginePostgres, Host: "SECRET.test", Port: 5432, Database: "SECRET", Username: "SECRET", Tls: protocol.DatabaseTlsRequire}}}}})
-		change(protocol.Command{Kind: "save_ssh", Data: protocol.CommandSaveSshPayload{
-			Profile:    protocol.SshProfile{ID: protocol.NewSshID(), Name: "SECRET host", Host: "SECRET.test", Port: 22, Username: "SECRET", Authentication: protocol.SshAuthenticationPassword},
-			Credential: &protocol.SshCredential{Kind: "password", Data: &protocol.SshCredentialPasswordPayload{Password: secret}}}})
 		backup := protocol.BackupUpdate{Settings: commandFixture(t, node, protocol.Command{Kind: "read_backup_settings"}).Data.(protocol.BackupSettings),
 			Identity: backupFixtureKeep(), Secret: backupFixtureKeep(), SessionToken: backupFixtureKeep(), Passphrase: protocol.PluginSettingsSecretUpdate{Kind: "replace", Data: &secret}}
 		change(protocol.Command{Kind: "save_backup_settings", Data: backup})
