@@ -8,6 +8,18 @@ This document describes the implemented system. Engineering guidance is in
 [sdk/plugins.md](sdk/plugins.md). Dependency versions are recorded in `go.mod`
 and the native and application lockfiles.
 
+## Desktop fork scope
+
+This fork removes the Flutter application (`apps/`), its Go adapter
+(`cmd/sailry-mobile` and `internal/mobile`), and the standalone pairing service
+(`services/`). Mobile and pairing-service descriptions below document the
+upstream architecture, not components shipped by this checkout.
+
+The shared Link implementation still depends on `internal/link/iroh` and its
+native library source in `native/iroh`. Node resource services still depend on
+`internal/office`, `internal/ssh` and `internal/databases`. These dependencies
+remain until their callers can be separated without breaking Desktop or Host.
+
 ## System context
 
 ```text

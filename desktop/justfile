@@ -78,8 +78,7 @@ native-fetch:
 tools:
     @echo "Go: go1.27.3 pinned"; go version
     @echo "Rust: 1.98.0 pinned in native/iroh/rust-toolchain.toml"; cd native/iroh && (rustc --version || echo "rustc is not installed")
-    @echo "Flutter: $(cat apps/mobile/.flutter-version) pinned in apps/mobile/.flutter-version"; flutter --version || echo "flutter is not installed"
-    @echo "Node.js: 22.13.0 or newer for services/pairing-relay and plugin tests"; node --version || echo "node is not installed"
+    @echo "Node.js: 22.13.0 or newer for plugin tests"; node --version || echo "node is not installed"
     @just --version
 
 # Generate the desktop catalogs from the source catalogs in locales/.
@@ -122,40 +121,3 @@ bench:
 test-plugins:
     node --experimental-vm-modules scripts/check-packages.mjs
     python3 scripts/test.py
-
-# Typecheck and test the pairing service.
-[working-directory('services/pairing-relay')]
-test-pairing-relay:
-    pnpm install --frozen-lockfile --ignore-scripts
-    pnpm typecheck
-    pnpm test
-
-# List phones and running simulators recognized by Flutter.
-mobile-devices:
-    flutter devices
-
-# Fetch the pinned Flutter dependencies.
-[working-directory('apps/mobile')]
-mobile-deps:
-    flutter pub get --enforce-lockfile
-
-# Run the mobile app; the Flutter build runs the native adapter build itself.
-[working-directory('apps/mobile')]
-mobile device="": mobile-deps
-    flutter run --no-pub --target lib/main.dart {{ if device == "" { "" } else { "-d " + quote(device) } }}
-
-# Vet the mobile C ABI with cgo, then analyze and test the Flutter application.
-check-mobile: mobile-deps
-    CGO_ENABLED=1 go vet ./cmd/sailry-mobile
-    cd apps/mobile && flutter analyze
-    cd apps/mobile && flutter test
-
-# Build the Android arm64 debug APK.
-[working-directory('apps/mobile')]
-mobile-apk: mobile-deps
-    flutter build apk --debug --no-pub --target lib/main.dart --target-platform android-arm64
-
-# Build the iOS Simulator application.
-[working-directory('apps/mobile')]
-mobile-ios: mobile-deps
-    flutter build ios --simulator --debug --no-pub --target lib/main.dart
