@@ -1038,13 +1038,13 @@ updates_channel: Канал обновлений
 updates_channel_experience: Ознакомительный
 updates_channel_stable: Стабильный
 updates_check: Проверка на наличие обновлений
-updates_automatic: Check automatically
-updates_prereleases: Include prereleases
-updates_install: Install
-updates_not_configured: Updates are off until a feed and public key are configured
-updates_build_unsupported: This build or installation cannot update itself
-updates_not_found: The update manifest was not found
-updates_save_failed: Could not save update settings
+updates_automatic: Проверять автоматически
+updates_prereleases: Включать предварительные версии
+updates_install: Установить
+updates_not_configured: Обновления отключены, пока не настроены источник и открытый ключ
+updates_build_unsupported: Эта сборка или способ установки не поддерживает самообновление
+updates_not_found: Манифест обновления не найден
+updates_save_failed: Не удалось сохранить настройки обновлений
 updates_version: Версия
 settings_notify_system_description: Получение системных уведомлений из приложения
 settings_notify_approval_description: Уведомлять, когда задачи требуют подтверждения или авторизации

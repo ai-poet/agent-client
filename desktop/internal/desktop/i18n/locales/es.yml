@@ -1038,13 +1038,13 @@ updates_channel: Canal de actualización
 updates_channel_experience: Experiencia
 updates_channel_stable: Estable
 updates_check: Buscar actualizaciones
-updates_automatic: Check automatically
-updates_prereleases: Include prereleases
-updates_install: Install
-updates_not_configured: Updates are off until a feed and public key are configured
-updates_build_unsupported: This build or installation cannot update itself
-updates_not_found: The update manifest was not found
-updates_save_failed: Could not save update settings
+updates_automatic: Buscar actualizaciones automáticamente
+updates_prereleases: Incluir versiones preliminares
+updates_install: Instalar
+updates_not_configured: Las actualizaciones están desactivadas hasta que se configure un origen y una clave pública
+updates_build_unsupported: Esta compilación o instalación no puede actualizarse por sí misma
+updates_not_found: No se encontró el manifiesto de actualización
+updates_save_failed: No se pudo guardar la configuración de actualizaciones
 updates_version: Versión
 settings_notify_system_description: Recibir notificaciones del sistema desde la aplicación
 settings_notify_approval_description: Notificar cuando las tareas necesitan confirmación o autorización

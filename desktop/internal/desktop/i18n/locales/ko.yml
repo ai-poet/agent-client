@@ -1038,13 +1038,13 @@ updates_channel: 업데이트 채널
 updates_channel_experience: 체험 버전
 updates_channel_stable: 정식 버전
 updates_check: 업데이트 확인
-updates_automatic: Check automatically
-updates_prereleases: Include prereleases
-updates_install: Install
-updates_not_configured: Updates are off until a feed and public key are configured
-updates_build_unsupported: This build or installation cannot update itself
-updates_not_found: The update manifest was not found
-updates_save_failed: Could not save update settings
+updates_automatic: 자동으로 확인
+updates_prereleases: 사전 릴리스 포함
+updates_install: 설치
+updates_not_configured: 업데이트 소스와 공개 키를 설정해야 업데이트를 확인할 수 있습니다
+updates_build_unsupported: 이 빌드 또는 설치 방식은 자체 업데이트를 지원하지 않습니다
+updates_not_found: 업데이트 매니페스트를 찾을 수 없습니다
+updates_save_failed: 업데이트 설정을 저장하지 못했습니다
 updates_version: 버전
 settings_notify_system_description: 앱에서 시스템 알림 받기
 settings_notify_approval_description: 작업이 확인 또는 승인이 필요할 때 알림
