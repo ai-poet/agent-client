@@ -42,8 +42,7 @@ type liveHost struct {
 	// metrics is the last sample as the page shows it, whose history the
 	// next one continues (host.Metrics.Follow).
 	metrics        *host.Metrics
-	install        *sshInstallation
-	update         *hostUpdate
+	install        *wslInstallation
 	active         []hostActivity
 	activeOwner    *Runtime
 	activeRevision uint64
@@ -87,8 +86,6 @@ func (r *Runtime) ensureHost(id string, owner *Runtime, local bool) *liveHost {
 			state.view.Name = "local_host_name"
 		} else {
 			state.view.Name = id
-			state.view.Update = &host.Update{Phase: host.Idle, Progress: -1}
-			state.update = &hostUpdate{}
 		}
 		r.hosts[id] = state
 	}
@@ -181,7 +178,7 @@ func (r *Runtime) projectHosts(d *viewmodel.Data) {
 		state := r.hosts[id]
 		r.projectHost(state, d)
 		present[id] = state.view
-		d.Hosts = append(d.Hosts, viewmodel.Host{ID: id, Name: state.view.Name, Platform: state.view.OS, Local: state.view.Local, Update: state.view.Update != nil && hostUpdateAvailable(state.view.Runtime.Version)})
+		d.Hosts = append(d.Hosts, viewmodel.Host{ID: id, Name: state.view.Name, Platform: state.view.OS, Local: state.view.Local})
 	}
 	for id, state := range r.hosts {
 		if present[id] == nil && (state.install == nil || !state.install.active) {
@@ -339,15 +336,8 @@ func (r *Runtime) hostsFrame(c *ui.Context) {
 		}
 		r.hostMetricsFrame(c, state, demand, detailed)
 		if state.install != nil {
-			r.sshFrame(c, state.install)
-		}
-		if state.update != nil && state.update.form && (r.App.Page != shell.HostPage || r.App.Host != id) {
-			state.update.form = false
-			if state.install != nil && state.install.active {
-				r.cancelSSH(state.install)
-				state.view.Update.Phase = host.Staged
-			}
-		}
+            r.wslInstallFrame(c, state.install)
+        }
 	}
 	r.projectSidebarMetrics(selected, footer)
 }
@@ -381,18 +371,12 @@ func (r *Runtime) readHostInfo(state *liveHost) {
 
 func (r *Runtime) hostActions(id string) host.Actions {
 	actions := r.portActions(id)
-	actions.Update = func(expected host.Update) { r.advanceHostUpdate(id, expected) }
 	root := r.localRuntime()
 	if state := root.hosts[id]; state != nil && !state.view.Local && root.connections != nil && root.connections.endpoint != nil {
 		actions.Revoke = func() { root.revokeHost(state) }
 	}
 	if state := root.hosts[id]; state != nil {
 		actions.StopProcess = func(process host.Process, force bool) { root.stopHostProcess(state, process, force) }
-	}
-	actions.Dialogs = func(c *ui.Context) {
-		if state := r.hostState(id); state != nil && state.update != nil {
-			r.hostUpdateFrame(c, state)
-		}
 	}
 	return actions
 }

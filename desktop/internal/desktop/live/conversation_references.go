@@ -1,7 +1,6 @@
 package live
 
 import (
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
@@ -9,6 +8,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/shell"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 func (r *Runtime) bindReferences(session string, page protocol.ConversationPage) {
@@ -65,15 +65,7 @@ func (r *Runtime) openReference(session string, turn protocol.TurnID, ref protoc
 			r.App.Host = snapshot.Node.String()
 			r.App.Navigate(shell.HostPage)
 			return
-		case "ssh", "database":
-			scope := connectionScope{}
-			if current, ok := r.session(session); ok {
-				scope.project, scope.resource = current.Project, current.Config.Resource
-			}
-			if key, body, ok := connectionReferenceDetails(snapshot, scope, ref.Target); ok {
-				r.App.Messages.ShowReference(session, ref.Label, i18n.T(c, key), "```text\n"+body+"\n```")
-				return
-			}
+
 		case "project", "worktree":
 			if id, err := protocol.ParseSessionID(session); err == nil {
 				if state, ok := r.controller.Conversation(id); ok {

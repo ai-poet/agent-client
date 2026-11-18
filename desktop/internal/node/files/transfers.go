@@ -38,7 +38,6 @@ type transferEntry struct {
 	upload     *protocol.FileUploadSpec
 	attachment *protocol.Attachment
 	plugin     *protocol.PluginUploadSpec
-	ssh        *protocol.SshUploadSpec
 	format     *protocol.PluginSkillsArchiveFormat
 	backup     bool
 	download   bool

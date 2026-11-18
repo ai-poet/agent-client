@@ -3,15 +3,15 @@
 package tokens
 
 import (
+	"github.com/pkoukk/tiktoken-go"
 	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 	"sync"
 
-	"github.com/pkoukk/tiktoken-go"
-	loader "github.com/pkoukk/tiktoken-go-loader"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
+	loader "github.com/pkoukk/tiktoken-go-loader"
 )
 
 var tokenizer = sync.OnceValue(func() *tiktoken.Tiktoken {

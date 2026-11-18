@@ -134,33 +134,3 @@ func (r *Runtime) renderFilePreview(c *ui.Context) {
 		preview.cancel = nil
 	}
 }
-
-// readPreview reads a remote file for the preview, refusing one past
-// fileview.Limit before its bytes are sent.
-func (access sshTransferAccess) readPreview(ctx context.Context, path string, progress func(copied, size uint64)) ([]byte, error) {
-	profile := access.profile
-	output, err := access.execute(ctx, protocol.Command{Kind: "download_ssh_file", Data: protocol.CommandDownloadSshFilePayload{Profile: profile.ID, ExpectedRevision: profile.Revision, Path: path}})
-	if err != nil {
-		return nil, err
-	}
-	outcome, ok := detail[protocol.SshOutcome](output.Data)
-	if !ok || output.Kind != "ssh_outcome" || outcome.Kind != "download" {
-		return nil, sshTransferUnavailable()
-	}
-	download, ok := detail[protocol.SshDownload](outcome.Data)
-	if !ok {
-		return nil, sshTransferUnavailable()
-	}
-	if download.Path != path || download.Size > fileview.Limit {
-		access.release(download.Stream)
-		if download.Path != path {
-			return nil, sshTransferUnavailable()
-		}
-		return nil, errPreviewLarge
-	}
-	buffer := &previewBuffer{}
-	if err := access.owner.controller.Download(ctx, download.Stream, download.Size, download.Revision, buffer, func(copied uint64) { progress(copied, download.Size) }); err != nil {
-		return nil, err
-	}
-	return buffer.Bytes(), nil
-}

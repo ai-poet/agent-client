@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
@@ -28,6 +27,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 func TestConversationProjection(t *testing.T) {
@@ -453,7 +453,7 @@ func TestConversationProjection(t *testing.T) {
 			})
 		}
 	})
-	t.Run("connection references", testConnectionReferences)
+
 	t.Run("context_estimate_and_bound_mentions", func(t *testing.T) {
 		count, estimate := uint64(80), uint64(20)
 		limit := uint32(100)

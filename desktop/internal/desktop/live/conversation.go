@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
@@ -20,6 +19,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 func (r *Runtime) SetReadAloud(f func(string, string, string)) {
@@ -382,7 +382,6 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 	}
 	r.projectWorkspaceComposer(cv, comp, ctx)
 	r.projectComposerFiles(cv, comp, ctx)
-	r.projectConnectionReferences(cv, comp, ctx)
 	r.projectCommands(cv.ID, comp, &ctx.Activity)
 	r.projectTeamComposer(cv, comp, ctx, c.Locale())
 	r.projectChildComposer(cv, comp, ctx, c.Locale())
@@ -572,13 +571,8 @@ func conversationInput(m composer.Message) protocol.ConversationInput {
 		case composer.Location:
 			if ref.ID == "host" || ref.ID == "project" || ref.ID == "worktree" {
 				target.Kind = ref.ID
-			} else if ssh, ok := sshReferenceTarget(ref.ID); ok {
-				target = ssh
 			}
-		case composer.Database:
-			if database, ok := databaseReferenceTarget(ref.ID); ok {
-				target = database
-			}
+
 		case composer.Element:
 			// One reference per file behind the chip, named as the chip, so
 			// they read as one selection.
@@ -635,18 +629,7 @@ func composerReference(ref protocol.ConversationReference) (composer.Reference, 
 			return value, false
 		}
 		value.ID, value.Kind, value.Icon = name, composer.Plugin, icons.Puzzle
-	case "ssh":
-		id, ok := detail[protocol.SshID](ref.Target.Data)
-		if !ok {
-			return value, false
-		}
-		value.ID, value.Kind, value.Icon = sshReferencePrefix+id.String(), composer.Location, icons.Network
-	case "database":
-		payload, ok := detail[protocol.ConversationReferenceTargetDatabasePayload](ref.Target.Data)
-		if !ok {
-			return value, false
-		}
-		value.ID, value.Kind, value.Icon = databaseReferenceID(payload), composer.Database, icons.HardDrive
+
 	case "host", "project", "worktree":
 		value.ID, value.Kind, value.Icon = ref.Target.Kind, composer.Location, icons.Folder
 		if ref.Target.Kind == "host" {

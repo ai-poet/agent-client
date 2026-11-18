@@ -118,11 +118,6 @@ func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvoca
 		if err != nil {
 			return nil, err
 		}
-		connections, err := node.connectionTurnInput(ctx, invocation, selected)
-		if err != nil {
-			return nil, err
-		}
-		input["connections"] = connections
 		body, err := owner.evaluate(ctx, host.Turn.Initialize, "turn.initialize", host.Turn.Initialize, input, false)
 		if err != nil {
 			return nil, err

@@ -4,6 +4,7 @@
 package logging
 
 import (
+	"gopkg.in/natefinch/lumberjack.v2"
 	"context"
 	"errors"
 	"fmt"
@@ -17,7 +18,6 @@ import (
 	"time"
 
 	"github.com/ai-poet/agent-client/desktop/internal/core"
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // Bounded at 100 MiB per application while retaining several days of

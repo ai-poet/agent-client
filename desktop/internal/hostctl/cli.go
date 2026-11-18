@@ -1,6 +1,7 @@
 package hostctl
 
 import (
+	"github.com/mattn/go-isatty"
 	"bufio"
 	"context"
 	"errors"
@@ -12,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattn/go-isatty"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 )
 

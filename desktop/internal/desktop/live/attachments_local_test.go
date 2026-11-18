@@ -13,13 +13,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/transfers"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 	"lukechampine.com/blake3"
 )
 
@@ -51,7 +51,7 @@ func TestAttachmentLocalIO(t *testing.T) {
 	t.Run("workspace uploads", testWorkspaceUploads)
 	t.Run("workspace git busy", testWorkspaceGitBusy)
 	t.Run("queued read repeated", testQueuedReadRepeated)
-	t.Run("ssh transfers", testSshTransferBridge)
+
 	t.Parallel()
 	t.Run("source evidence and limits", func(t *testing.T) {
 		root := t.TempDir()

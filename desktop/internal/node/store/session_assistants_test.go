@@ -20,7 +20,7 @@ func TestAssistantTurnPackageUpdates(t *testing.T) {
 		info := pluginMessageInfo("assistant-update-fixture", 'a', "fixture")
 		info.Extension.Desktop = new(protocol.DefaultPluginDesktopManifest())
 		info.Extension.Desktop.Conversations = []protocol.PluginConversationDeclaration{{
-			ID: "ssh", Resource: protocol.PluginConversationResourceSsh, Context: "Old SSH assistant context",
+			ID: "fixture", Resource: protocol.PluginConversationResourcePlugin, Context: "Old plugin assistant context",
 		}}
 		info.Extension.Host.Entry = "old-host.js"
 		owner, err := InstallPlugin(ctx, db, info, 0, true)
@@ -28,18 +28,9 @@ func TestAssistantTurnPackageUpdates(t *testing.T) {
 			return err
 		}
 		oldReference := plugins.PackageReference(owner)
-		output, _, err := ExecuteSshCommand(ctx, db, protocol.Command{Kind: "save_ssh", Data: &protocol.CommandSaveSshPayload{
-			Profile:    protocol.SshProfile{ID: protocol.NewSshID(), Name: "Primary", Host: "fixture.invalid", Port: 22, Username: "fixture", Authentication: protocol.SshAuthenticationAgent},
-			Credential: &protocol.SshCredential{Kind: "agent"},
-		}})
-		if err != nil {
-			return err
-		}
-		primary := output.Data.(protocol.SshProfile)
 		config := ordinary.Config
-		config.Assistant = &protocol.PluginConversationBinding{Package: oldReference, ID: "ssh"}
-		config.Resource = &protocol.ConnectionResource{Kind: "ssh", Data: primary.ID}
-		output, _, err = createSession(ctx, db, node, storage.Profile, protocol.CommandCreateSessionPayload{Config: &config})
+		config.Assistant = &protocol.PluginConversationBinding{Package: oldReference, ID: "fixture"}
+		output, _, err := createSession(ctx, db, node, storage.Profile, protocol.CommandCreateSessionPayload{Config: &config})
 		if err != nil {
 			return err
 		}
@@ -50,7 +41,7 @@ func TestAssistantTurnPackageUpdates(t *testing.T) {
 		}
 		admit := func() (protocol.QueuedTurn, error) {
 			request := protocol.NewRequest(node, protocol.Command{Kind: "submit_turn", Data: &protocol.CommandSubmitTurnPayload{
-				Session: session.ID, ExpectedRevision: session.Revision, Message: protocol.ConversationInput{Text: "Inspect another saved SSH connection"},
+				Session: session.ID, ExpectedRevision: session.Revision, Message: protocol.ConversationInput{Text: "Inspect another saved plugin connection"},
 			}})
 			body, err := encode(request)
 			if err != nil {
@@ -66,7 +57,7 @@ func TestAssistantTurnPackageUpdates(t *testing.T) {
 			return err
 		}
 		running, _, err := claimAgentInvocation(ctx, db, first.ID, now)
-		if err != nil || running == nil || running.Assistant == nil || running.Assistant.Context != "Old SSH assistant context" {
+		if err != nil || running == nil || running.Assistant == nil || running.Assistant.Context != "Old plugin assistant context" {
 			return fmt.Errorf("old assistant did not start: %v", err)
 		}
 		queued, err := admit()
@@ -77,7 +68,7 @@ func TestAssistantTurnPackageUpdates(t *testing.T) {
 		version := "0.1.1"
 		info.Summary.Version = &version
 		info.Extension.Host.Entry = "new-host.js"
-		info.Extension.Desktop.Conversations[0].Context = "Current SSH assistant context"
+		info.Extension.Desktop.Conversations[0].Context = "Current plugin assistant context"
 		owner, err = InstallPlugin(ctx, db, info, owner.Summary.Revision, true)
 		if err != nil {
 			return err
@@ -96,9 +87,9 @@ func TestAssistantTurnPackageUpdates(t *testing.T) {
 			context   string
 			entry     string
 		}{
-			{first, oldReference, "Old SSH assistant context", "old-host.js"},
-			{queued, oldReference, "Old SSH assistant context", "old-host.js"},
-			{latest, current, "Current SSH assistant context", "new-host.js"},
+			{first, oldReference, "Old plugin assistant context", "old-host.js"},
+			{queued, oldReference, "Old plugin assistant context", "old-host.js"},
+			{latest, current, "Current plugin assistant context", "new-host.js"},
 		} {
 			captured, err := readTurnCapture(ctx, db, expected.turn.ID)
 			if err != nil {
@@ -112,8 +103,8 @@ func TestAssistantTurnPackageUpdates(t *testing.T) {
 			if err != nil || inv.Turn.Config.Assistant.Package != expected.reference || inv.Assistant.Context != expected.context || packageInfo.Extension.Host.Entry != expected.entry {
 				return fmt.Errorf("turn did not retain its admitted assistant and script: %+v, %v", inv.Turn.Config.Assistant, err)
 			}
-			if inv.Turn.Config.Assistant.ID != "ssh" || !sameAssistant(inv.Turn.Config.Resource, session.Config.Resource) {
-				return fmt.Errorf("package refresh changed the assistant or its primary SSH resource")
+			if inv.Turn.Config.Assistant.ID != "fixture" || !sameAssistant(inv.Turn.Config.Resource, session.Config.Resource) {
+				return fmt.Errorf("package refresh changed the assistant or its resource")
 			}
 		}
 		// An inherited turn follows its frozen inventory even if the source
@@ -121,21 +112,21 @@ func TestAssistantTurnPackageUpdates(t *testing.T) {
 		inherited := latest
 		inherited.Plugins = slices.Clone(first.Plugins)
 		inv := AgentInvocation{Turn: inherited}
-		if err = captureAssistant(ctx, db, &inv); err != nil || inv.Turn.Config.Assistant.Package != oldReference || inv.Assistant.Context != "Old SSH assistant context" {
+		if err = captureAssistant(ctx, db, &inv); err != nil || inv.Turn.Config.Assistant.Package != oldReference || inv.Assistant.Context != "Old plugin assistant context" {
 			return fmt.Errorf("inherited capture read the live inventory: %v", err)
 		}
 		if _, _, err = FinishTurn(ctx, db, first.ID, protocol.ConversationStatusCompleted, nil, now); err != nil {
 			return err
 		}
 		claimed, _, err := claimAgentInvocation(ctx, db, queued.ID, now)
-		if err != nil || claimed == nil || claimed.Assistant.Context != "Old SSH assistant context" || claimed.Turn.Config.Assistant.Package != oldReference {
+		if err != nil || claimed == nil || claimed.Assistant.Context != "Old plugin assistant context" || claimed.Turn.Config.Assistant.Package != oldReference {
 			return fmt.Errorf("queued turn changed its assistant after an update: %v", err)
 		}
 		if _, _, err = FinishTurn(ctx, db, queued.ID, protocol.ConversationStatusCompleted, nil, now); err != nil {
 			return err
 		}
 		claimed, _, err = claimAgentInvocation(ctx, db, latest.ID, now)
-		if err != nil || claimed == nil || claimed.Assistant.Context != "Current SSH assistant context" || claimed.Turn.Config.Assistant.Package != current {
+		if err != nil || claimed == nil || claimed.Assistant.Context != "Current plugin assistant context" || claimed.Turn.Config.Assistant.Package != current {
 			return fmt.Errorf("new turn did not claim the upgraded assistant: %v", err)
 		}
 		stored, err := ReadSession(ctx, db, session.ID)

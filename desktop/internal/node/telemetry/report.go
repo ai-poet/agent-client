@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"github.com/getsentry/sentry-go"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -12,9 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getsentry/sentry-go"
-	"github.com/google/uuid"
 	"github.com/ai-poet/agent-client/desktop/internal/node/logging"
+	"github.com/google/uuid"
 	"lukechampine.com/blake3"
 )
 

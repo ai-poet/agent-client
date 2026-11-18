@@ -104,14 +104,7 @@ func pluginNativeToolContext(contexts []protocol.PluginConversationResource, pro
 			if project != nil && resource == nil {
 				return true
 			}
-		case protocol.PluginConversationResourceDatabase:
-			if project == nil && resource != nil && resource.Kind == "database" {
-				return true
-			}
-		case protocol.PluginConversationResourceSsh:
-			if project == nil && resource != nil && resource.Kind == "ssh" {
-				return true
-			}
+
 		}
 	}
 	return false
@@ -143,18 +136,7 @@ func pluginNativeOperationAction(operation protocol.ToolOperation) protocol.Plug
 		return protocol.PluginActionReadWorktrees
 	case protocol.ToolOperationCreateManagedWorktree, protocol.ToolOperationRegisterWorktree, protocol.ToolOperationRemoveWorktree:
 		return protocol.PluginActionWriteWorktrees
-	case protocol.ToolOperationListDatabaseConnections, protocol.ToolOperationBrowseDatabase, protocol.ToolOperationQueryDatabase:
-		return protocol.PluginActionReadDatabases
-	case protocol.ToolOperationSaveDatabaseConnection:
-		return protocol.PluginActionManageDatabases
-	case protocol.ToolOperationListSshConnections:
-		return protocol.PluginActionReadSsh
-	case protocol.ToolOperationSaveSshConnection:
-		return protocol.PluginActionManageSsh
-	case protocol.ToolOperationExecuteDatabase:
-		return protocol.PluginActionControlDatabases
-	case protocol.ToolOperationRunSsh, protocol.ToolOperationTransferSsh:
-		return protocol.PluginActionControlSsh
+
 	case protocol.ToolOperationDelegateAgent, protocol.ToolOperationGuideAgent, protocol.ToolOperationWaitAgent:
 		return protocol.PluginActionDelegateAgents
 	case protocol.ToolOperationListDirectory, protocol.ToolOperationReadFile, protocol.ToolOperationReadFileLines, protocol.ToolOperationFindFiles,

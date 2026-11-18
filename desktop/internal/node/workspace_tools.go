@@ -37,7 +37,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 	}
 	var tools []engine.Tool
 	for _, declaration := range catalog.Tools {
-		if !availableOperationTool(inv, declaration) || !slices.Contains(inv.Turn.Plugins, declaration.Owner) || operations.ConnectionOperation(declaration.Operation) || knowledgeOperation(declaration.Operation) || storageOperation(declaration.Operation) || operations.ScopedOperation(declaration.Operation) {
+		if !availableOperationTool(inv, declaration) || !slices.Contains(inv.Turn.Plugins, declaration.Owner) || knowledgeOperation(declaration.Operation) || storageOperation(declaration.Operation) || operations.ScopedOperation(declaration.Operation) {
 			continue
 		}
 		// A connection conversation without an assistant offers only tools that name a context.
@@ -219,10 +219,6 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 		}
 		tools = append(tools, tool)
 	}
-	connections, err := node.connectionTools(ctx, inv, catalog)
-	if err != nil {
-		return nil, err
-	}
 	indexed, err := node.knowledgeTools(inv, catalog)
 	if err != nil {
 		return nil, err
@@ -254,7 +250,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 	if err != nil {
 		return nil, err
 	}
-	bound, err := node.pluginTools(ctx, inv, append(append(append(tools, connections...), browsers...), managedBrowsers...))
+	bound, err := node.pluginTools(ctx, inv, append(append(tools, browsers...), managedBrowsers...))
 	return append(append(bound, media...), managed...), err
 }
 func workspaceToolFault(err error) engine.ToolResult {

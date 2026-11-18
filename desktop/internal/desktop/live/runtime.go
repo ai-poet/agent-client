@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
@@ -25,6 +24,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 type Runtime struct {
@@ -48,8 +48,6 @@ type Runtime struct {
 	nodeModels               []composer.Model
 	hosts                    map[string]*liveHost
 	connections              *connectionState
-	connectionReferences     map[string]*referenceCatalog
-	sshTransfers             *sshTransferStore
 	ports                    *livePorts
 	pickKeyFile              func(func(string))
 	teams                    *teamState

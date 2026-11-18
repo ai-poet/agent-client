@@ -36,7 +36,6 @@ var nativeModuleNames = []hostModuleNames{
 		"releaseWorktree", "openResource", "openFile", "openProjectCreation", "canInsertFileReferences",
 		"insertFileReferences", "confirmAction", "nextResourceTarget", "nextWindowActivation",
 	}},
-	{module: "sailry/ssh-transfers", sync: []string{"uploadDropped", "transferAction", "previewFile"}, async: []string{"selectUpload", "selectDownload", "nextTransfers"}},
 	{module: "sailry/file-transfers", sync: []string{"readClipboard", "systemFileManager", "readTransfers"}, async: []string{
 		"captureClipboard", "preparePaste", "prepareMove", "selectUpload", "startDownload", "openSystem", "revealSystem", "transferAction", "nextTransferChange",
 	}},
@@ -48,7 +47,7 @@ var nativeModuleNames = []hostModuleNames{
 func (owner *Host) Modules() ([]HostModule, error) {
 	modules := []HostModule{
 		owner.baseModule(), owner.sdkModule(), owner.connectorModule(), owner.installationModule(),
-		owner.connectionModule(), owner.settingsModule(), owner.searchModule(),
+		owner.settingsModule(), owner.searchModule(),
 	}
 	for _, names := range nativeModuleNames {
 		exports := make([]HostExport, 0, len(names.sync)+len(names.async))

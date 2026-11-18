@@ -224,17 +224,7 @@ func publicHostOutput(output protocol.Output) (any, error) {
 		hostRows(data, hostConnectionRevisions)
 	case "connection", "connector_login":
 		hostConnectionRevisions(data)
-	case "database_outcome":
-		if hostAt(data, "kind") == "query" {
-			hostStringRevision(data, "data", "affected_rows")
-			hostRows(hostAt(data, "data", "rows"), func(row any) {
-				hostRows(row, func(cell any) {
-					if hostAt(cell, "kind") == "integer" {
-						hostStringRevision(cell, "value")
-					}
-				})
-			})
-		}
+
 	case "installations":
 		hostRows(data, func(row any) {
 			hostStringRevision(row, "revision")

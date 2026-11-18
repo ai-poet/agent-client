@@ -30,10 +30,6 @@ type Launch struct {
 	// wrapped command, the variables that follow the terminal's own and the
 	// release of its private state.
 	Sandbox func(root string, command, environment []string) ([]string, []string, func(), error)
-	// SSH and Connection replace the local program with a remote shell. The
-	// terminal then has no worktree, access policy or directory.
-	SSH        *protocol.SshID
-	Connection *SSHConnection
 	Viewport   protocol.TerminalViewport
 	Appearance protocol.TerminalAppearance
 	Revision   uint64
@@ -109,7 +105,7 @@ func (service *Service) Start(ctx context.Context, launch Launch) (protocol.Term
 	if err := ValidateViewport(launch.Viewport); err != nil {
 		return protocol.TerminalInfo{}, err
 	}
-	if launch.Connection == nil && !filepath.IsAbs(launch.Root) {
+	if !filepath.IsAbs(launch.Root) {
 		return protocol.TerminalInfo{}, fault(protocol.ErrorCodeInvalidRequest, "terminal worktree root must be absolute")
 	}
 	if launch.ID == (protocol.TerminalID{}) {
@@ -121,7 +117,7 @@ func (service *Service) Start(ctx context.Context, launch Launch) (protocol.Term
 	command, directory := slices.Clone(launch.Command), launch.Root
 	environment := Environment(launch.Environment, launch.Settings)
 	switch {
-	case launch.Connection != nil || len(command) != 0:
+	case len(command) != 0:
 	case launch.Tool != nil:
 		path, err := resolveTool(launch.Root, environment, *launch.Tool)
 		if err != nil {
@@ -191,7 +187,7 @@ func (service *Service) Start(ctx context.Context, launch Launch) (protocol.Term
 		access = protocol.ProcessAccessUnrestricted
 	}
 	release := func() {}
-	if launch.Connection == nil && access == protocol.ProcessAccessWorkspace && process.SandboxSupported() {
+	if access == protocol.ProcessAccessWorkspace && process.SandboxSupported() {
 		confined, variables, free, err := launch.Sandbox(launch.Root, command, environment)
 		if err != nil {
 			finish(protocol.TerminalInfo{}, err)
@@ -208,13 +204,6 @@ func (service *Service) Start(ctx context.Context, launch Launch) (protocol.Term
 		Command: command, Dir: directory, Env: environment,
 		// Prompt marks belong to the default startup of a plain shell.
 		ShellIntegration: launch.Tool == nil && len(launch.Settings.ShellArguments) == 0,
-	}
-	if launch.Connection != nil {
-		value.info.Worktree, value.info.Access, value.info.Directory, value.info.Ssh = nil, nil, nil, launch.SSH
-		options = myterminal.Options{Conn: launch.Connection}
-		// Only a connection's output passes through this package; the
-		// plugin reads a local program's itself and reports no activity.
-		launch.Connection.observe = value.track
 	}
 	options.Theme = terminalTheme(launch.Appearance)
 	options.ClipboardRead = myterminal.ClipboardForward
@@ -269,8 +258,6 @@ func (service *Service) Start(ctx context.Context, launch Launch) (protocol.Term
 		<-terminal.Done()
 		status := protocol.TerminalStatus{Kind: "exited", Data: protocol.TerminalStatusExitedPayload{Code: uint32(terminal.ExitCode())}}
 		switch {
-		case launch.Connection != nil:
-			status = launch.Connection.status()
 		case terminal.ExitCode() < 0:
 			status = protocol.TerminalStatus{Kind: "failed", Data: protocol.TerminalStatusFailedPayload{Message: "terminal process could not start"}}
 		}

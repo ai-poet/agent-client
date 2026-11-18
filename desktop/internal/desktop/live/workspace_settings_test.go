@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/shell"
@@ -12,6 +11,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 func TestWorkspaceHookSettings(t *testing.T) {
@@ -27,7 +27,7 @@ func TestWorkspaceHookSettings(t *testing.T) {
 	t.Run("terminal tabs create", testTerminalTabsCreate)
 	t.Run("terminal tabs close", testTerminalTabsClose)
 	t.Run("terminal tabs close pending", testTerminalTabsClosePending)
-	t.Run("SSH host install", testSSHHostInstall)
+
 	t.Run("browser address", testBrowserAddress)
 	t.Run("browser capture", testBrowserCapture)
 	t.Run("browser call deadline", testBrowserDeadline)

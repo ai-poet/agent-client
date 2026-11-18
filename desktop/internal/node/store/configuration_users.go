@@ -21,7 +21,7 @@ func InitializeConfigurationUsers(ctx context.Context, db *sql.Conn) error {
 
 func configurationTable(table string) bool {
 	switch table {
-	case "roles", "teams", "ssh_profiles", "database_profiles":
+	case "roles", "teams":
 		return true
 	}
 	return false

@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"github.com/minio/minio-go/v7"
 	"bytes"
 	"context"
 	"errors"
@@ -10,9 +11,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/studio-b12/gowebdav"
 )
 

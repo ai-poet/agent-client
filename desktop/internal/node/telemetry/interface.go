@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"github.com/getsentry/sentry-go"
 	"bytes"
 	"os"
 	"path/filepath"
@@ -11,9 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/getsentry/sentry-go"
-	"github.com/jonboulle/clockwork"
 	"github.com/ai-poet/agent-client/desktop/internal/node/logging"
+	"github.com/jonboulle/clockwork"
 )
 
 // The interface's two failures are kept in the application's log directory

@@ -75,7 +75,7 @@ func MergeConfigurationFollowUsers(ctx context.Context, db *sql.Conn, source, ta
 		switch category {
 		case "providers":
 			owner = `EXISTS(SELECT 1 FROM providers p WHERE p.id=CASE WHEN r.local_id='' THEN r.id ELSE r.local_id END AND p.user=?2 AND json_type(p.body,'$.provider.source')='object')`
-		case "roles", "teams", "ssh_profiles", "database_profiles":
+		case "roles", "teams":
 			owner = `EXISTS(SELECT 1 FROM ` + category + ` p WHERE p.id=CASE WHEN r.local_id='' THEN r.id ELSE r.local_id END AND p.user=?2 AND json_type(p.body,'$.source')='object')`
 		case "plugins", "plugin_settings":
 			owner = `EXISTS(SELECT 1 FROM plugin_user_installations p WHERE p.name=r.id AND p.user=?2 AND json_type(p.body,'$.summary.source')='object' AND p.body=(SELECT body FROM plugin_user_installations WHERE user=?1 AND name=r.id))`

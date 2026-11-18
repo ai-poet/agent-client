@@ -93,10 +93,7 @@ func validateAssistant(ctx context.Context, db *sql.Conn, project *protocol.Proj
 		matches = matches && config.Resource == nil
 	case protocol.PluginConversationResourceWorkspace:
 		matches = project != nil && config.Resource == nil
-	case protocol.PluginConversationResourceDatabase:
-		matches = matches && config.Resource != nil && config.Resource.Kind == "database"
-	case protocol.PluginConversationResourceSsh:
-		matches = matches && config.Resource != nil && config.Resource.Kind == "ssh"
+
 	}
 	if !matches {
 		return fault(protocol.ErrorCodePermissionDenied, "conversation resource does not match the plugin assistant")

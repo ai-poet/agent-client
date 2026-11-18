@@ -17,8 +17,29 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
+type sharedSessionHeldModel struct {
+	fantasy.LanguageModel
+	once    sync.Once
+	started chan struct{}
+	release chan struct{}
+}
+
+func (held *sharedSessionHeldModel) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	held.once.Do(func() { close(held.started) })
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-held.release:
+	}
+	return func(yield func(fantasy.StreamPart) bool) {
+		if yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "answer", Delta: "Done"}) {
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+		}
+	}, nil
+}
+
 func TestSharedSessionQueuesUsersInCanonicalHistory(t *testing.T) {
-	held := &connectionHeldModel{started: make(chan struct{}), release: make(chan struct{})}
+	held := &sharedSessionHeldModel{started: make(chan struct{}), release: make(chan struct{})}
 	var once sync.Once
 	finish := func() { once.Do(func() { close(held.release) }) }
 	environment := process.NewEnvironment([]string{"PATH=/usr/bin:/bin"})

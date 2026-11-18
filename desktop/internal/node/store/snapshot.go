@@ -41,12 +41,6 @@ func Snapshot(ctx context.Context, db *sql.Conn, node protocol.NodeID) (protocol
 	if value.Terminals, err = ReadTerminals(ctx, db); err != nil {
 		return value, err
 	}
-	if value.Ssh, err = ListSsh(ctx, db); err != nil {
-		return value, err
-	}
-	if value.Databases, err = ListDatabases(ctx, db); err != nil {
-		return value, err
-	}
 	plugins, err := ReadPluginInfos(ctx, db)
 	if err != nil {
 		return value, err

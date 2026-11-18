@@ -19,12 +19,6 @@
             "web.settings.write",
             "activity.read",
             "usage.read",
-            "databases.read",
-            "databases.control",
-            "databases.manage",
-            "ssh.read",
-            "ssh.control",
-            "ssh.manage",
             "agents.delegate",
             "roles.read",
             "teams.read",
@@ -2679,15 +2673,6 @@
         "worktrees.create",
         "worktrees.register",
         "worktrees.remove",
-        "databases.connections",
-        "databases.save",
-        "ssh.connections",
-        "ssh.save",
-        "databases.catalog",
-        "databases.query",
-        "databases.execute",
-        "ssh.run",
-        "ssh.transfer",
         "agents.delegate",
         "agents.guide",
         "agents.wait",
@@ -3372,9 +3357,7 @@
     "Resource": {
       "enum": [
         "plugin",
-        "workspace",
-        "database",
-        "ssh"
+        "workspace"
       ],
       "type": "string"
     },

@@ -386,34 +386,7 @@ func (projection *Projection) reduce(event protocol.Event) (bool, error) {
 			return false, err
 		}
 		snapshot.Teams = slices.DeleteFunc(snapshot.Teams, func(item protocol.TeamProfile) bool { return item.ID == change.ID })
-	case "ssh_changed":
-		profile, err := payload[protocol.SshProfile](event.Data)
-		if err != nil {
-			return false, err
-		}
-		snapshot.Ssh = slices.DeleteFunc(snapshot.Ssh, func(item protocol.SshProfile) bool { return item.ID == profile.ID })
-		snapshot.Ssh = append(snapshot.Ssh, profile)
-		slices.SortFunc(snapshot.Ssh, func(a, b protocol.SshProfile) int { return bytes.Compare(a.ID[:], b.ID[:]) })
-	case "ssh_removed":
-		change, err := payload[protocol.EventSshRemovedPayload](event.Data)
-		if err != nil {
-			return false, err
-		}
-		snapshot.Ssh = slices.DeleteFunc(snapshot.Ssh, func(item protocol.SshProfile) bool { return item.ID == change.ID })
-	case "database_changed":
-		profile, err := payload[protocol.DatabaseProfile](event.Data)
-		if err != nil {
-			return false, err
-		}
-		snapshot.Databases = slices.DeleteFunc(snapshot.Databases, func(item protocol.DatabaseProfile) bool { return item.ID == profile.ID })
-		snapshot.Databases = append(snapshot.Databases, profile)
-		slices.SortFunc(snapshot.Databases, func(a, b protocol.DatabaseProfile) int { return bytes.Compare(a.ID[:], b.ID[:]) })
-	case "database_removed":
-		change, err := payload[protocol.EventDatabaseRemovedPayload](event.Data)
-		if err != nil {
-			return false, err
-		}
-		snapshot.Databases = slices.DeleteFunc(snapshot.Databases, func(item protocol.DatabaseProfile) bool { return item.ID == change.ID })
+
 	case "provider_changed":
 		provider, err := payload[protocol.ConversationProvider](event.Data)
 		if err != nil {

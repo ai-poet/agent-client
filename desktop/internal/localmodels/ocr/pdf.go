@@ -1,13 +1,13 @@
 package ocr
 
 import (
+	"github.com/klippa-app/go-pdfium"
 	"context"
 	"errors"
 	"fmt"
 	"math"
 	"sync"
 
-	"github.com/klippa-app/go-pdfium"
 	"github.com/klippa-app/go-pdfium/references"
 	"github.com/klippa-app/go-pdfium/requests"
 	"github.com/klippa-app/go-pdfium/webassembly"

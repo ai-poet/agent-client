@@ -49,7 +49,6 @@ func (state *teamState) retrySkillReads(packages []protocol.PluginReference) {
 
 func (r *Runtime) bindSkillReferences(cv *viewmodel.Conversation, comp *composer.State) {
 	comp.SetReferencePickerOpen(func() {
-		r.resetConnectionReferences(cv.ID)
 		if r.teams == nil {
 			return
 		}

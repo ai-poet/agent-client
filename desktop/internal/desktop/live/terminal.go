@@ -299,13 +299,11 @@ func (r *Runtime) closeLiveTerminal(id string) {
 		}
 		return
 	}
-	command := protocol.Command{Kind: "close_ssh_terminal", Data: protocol.CommandCloseSshTerminalPayload{Terminal: info.ID}}
-	if info.Worktree != nil {
-		command = protocol.Command{Kind: "close_terminal", Data: protocol.CommandCloseTerminalPayload{Worktree: *info.Worktree, Terminal: info.ID}}
-	} else if info.Ssh == nil {
+	if info.Worktree == nil {
 		root.Report(pluginNativeFault(protocol.ErrorCodeUnavailable, "terminal worktree is unavailable"))
 		return
 	}
+	command := protocol.Command{Kind: "close_terminal", Data: protocol.CommandCloseTerminalPayload{Worktree: *info.Worktree, Terminal: info.ID}}
 	owner.executeScoped("terminal-close/"+id, command, func(c *ui.Context, _ protocol.Output, err error) {
 		if err != nil && faultCode(err) != protocol.ErrorCodeNotFound {
 			root.reportKeys(c, err, "workspace_action_failed", "workspace_changed", "workspace_action_unknown")

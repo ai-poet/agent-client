@@ -211,29 +211,7 @@ func validateAgentReferences(ctx context.Context, db *sql.Conn, session protocol
 			if err = validateReferencedPlugin(ctx, db, session, skill.Package, &skill.Name, captured); err != nil {
 				return err
 			}
-		case "ssh":
-			id, _ := dispatchValue[protocol.SshID](reference.Target.Data)
-			available, err := ReadConnectionCatalog(ctx, db, session.ID)
-			if err != nil {
-				return err
-			}
-			if !slices.ContainsFunc(available.Ssh, func(profile protocol.SshProfile) bool { return profile.ID == id }) {
-				return fault(protocol.ErrorCodePermissionDenied, "referenced SSH connection is not available to this conversation")
-			}
-		case "database":
-			selected, _ := dispatchValue[protocol.ConversationReferenceTargetDatabasePayload](reference.Target.Data)
-			available, err := ReadConnectionCatalog(ctx, db, session.ID)
-			if err != nil {
-				return err
-			}
-			if !slices.ContainsFunc(available.Databases, func(profile protocol.DatabaseProfile) bool { return profile.ID == selected.Connection }) {
-				return fault(protocol.ErrorCodePermissionDenied, "referenced database is not available to this conversation")
-			}
-			bounded := func(name string) bool { return name != "" && len(name) <= 256 }
-			if selected.Database != nil && !bounded(*selected.Database) ||
-				selected.Table != nil && (selected.Database == nil || !bounded(selected.Table.Schema) || !bounded(selected.Table.Name)) {
-				return invalid("invalid database reference")
-			}
+
 		case "file", "directory":
 			path, _ := dispatchValue[string](reference.Target.Data)
 			if err = core.CheckFilePath(path); err != nil {

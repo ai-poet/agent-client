@@ -7,36 +7,36 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/node/admission"
 	"github.com/ai-poet/agent-client/desktop/internal/node/host"
-	"github.com/ai-poet/agent-client/desktop/internal/node/store"
+
 	"github.com/ai-poet/agent-client/desktop/internal/node/wsl"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
 func (node *Node) initHost() {
 	node.hostSampler = host.NewSampler()
-	node.hostInstalls = host.NewInstallations(host.DeploymentOptions{})
 	node.wsl = wsl.NewService()
 }
 
 func hostCommand(kind string) bool {
 	switch kind {
-	case "inspect_host", "read_host_metrics", "read_plugin_memory", "stop_host_process", "list_ssh", "save_ssh", "remove_ssh", "trust_ssh", "check_ssh", "install_host", "update_ssh_host", "read_host_install", "cancel_ssh":
+	case "inspect_host", "read_host_metrics", "read_plugin_memory", "stop_host_process":
 		return true
 	}
-	return sshResourceCommand(kind) || databaseCommand(kind) || wslCommand(kind)
+	return wslCommand(kind)
 }
 
-// dispatchResource runs the SSH resource, external database and WSL commands
-// that share the Host admission path. It performs remote work and must be
-// called outside any store writer.
+// dispatchResource executes WSL setup outside the store writer.
 func (node *Node) dispatchResource(ctx context.Context, caller protocol.NodeID, request protocol.Request) (bool, protocol.Output, error) {
-	if handled, output, err := node.dispatchSSHResource(ctx, caller, request); handled {
-		return true, output, err
-	}
-	if handled, output, err := node.dispatchDatabase(ctx, caller, request); handled {
-		return true, output, err
-	}
 	return node.dispatchWSL(ctx, node.wsl, host.ConfigureNetwork, caller, request)
+}
+
+func (node *Node) runHost(ctx context.Context, caller protocol.NodeID, request protocol.Request) (protocol.Output, error) {
+	if handled, output, err := node.dispatchResource(ctx, caller, request); handled {
+		return output, err
+	}
+	input := request.Command.Data.(*protocol.CommandStopHostProcessPayload)
+	err := host.StopProcess(ctx, input.Pid, input.StartedAtSecs, input.Force)
+	return protocol.Output{Kind: "host_process_signalled", Data: protocol.OutputHostProcessSignalledPayload{Pid: input.Pid, StartedAtSecs: input.StartedAtSecs}}, err
 }
 
 func (node *Node) dispatchHost(ctx context.Context, caller protocol.NodeID, request protocol.Request, body []byte) (link.Admission, error) {
@@ -99,78 +99,24 @@ func (node *Node) readHost(ctx context.Context, caller protocol.NodeID, request 
 	case "read_plugin_memory":
 		value, err := node.readPluginMemory(ctx)
 		return response(protocol.Output{Kind: "plugin_memory", Data: value}, err)
-	case "read_host_install":
-		input := request.Command.Data.(*protocol.CommandReadHostInstallPayload)
-		value, err := node.hostInstalls.Read(caller, input.Request, request.Plugin)
-		return response(protocol.Output{Kind: "host_install_progress", Data: value}, err)
-	case "list_ssh":
-		var values []protocol.SshProfile
-		err := node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {
-			var err error
-			values, err = store.ListSsh(ctx, db)
-			if err == nil && request.Plugin != nil {
-				values, err = store.FilterPluginSsh(ctx, db, *request.Plugin, values)
-			}
-			return err
-		})
-		return response(protocol.Output{Kind: "ssh_profiles", Data: values}, err)
+
 	}
 	return response(protocol.Output{}, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "Host read expected"})
 }
 
 func (node *Node) executeHost(ctx context.Context, caller protocol.NodeID, request protocol.Request) link.Response {
+	operationErr := node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {
+		return node.authorizeCommandDB(ctx, db, caller, request)
+	})
 	var output protocol.Output
-	var operationErr error
-	configuration := request.Command.Kind == "save_ssh" || request.Command.Kind == "trust_ssh" || request.Command.Kind == "remove_ssh"
-	if !configuration {
-		operationErr = node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {
-			return node.authorizeCommandDB(ctx, db, caller, request)
-		})
-		if operationErr == nil {
-			output, operationErr = node.runHost(ctx, caller, request)
-		}
+	if operationErr == nil {
+		output, operationErr = node.runHost(ctx, caller, request)
 	}
-	var events []protocol.Event
 	err := node.profile.Store.Node.Write(ctx, func(db *sql.Conn) error {
-		if configuration {
-			if _, err := db.ExecContext(ctx, "SAVEPOINT sailry_ssh_configuration"); err != nil {
-				return err
-			}
-			operationErr = node.authorizeCommandDB(ctx, db, caller, request)
-			if operationErr == nil {
-				operationErr = node.validatePluginRequestDB(ctx, db, caller, request)
-			}
-			if operationErr == nil && request.Command.Kind == "save_ssh" {
-				operationErr = store.RecordConnectionSave(ctx, db, request)
-			}
-			if operationErr == nil {
-				output, events, operationErr = store.ExecuteSshCommand(ctx, db, request.Command)
-			}
-			if operationErr != nil {
-				events = nil
-				if _, err := db.ExecContext(ctx, "ROLLBACK TO sailry_ssh_configuration"); err != nil {
-					return err
-				}
-			}
-			if _, err := db.ExecContext(ctx, "RELEASE sailry_ssh_configuration"); err != nil {
-				return err
-			}
-			if _, err := store.RecordEvents(ctx, db, node.ID(), events); err != nil {
-				return err
-			}
-		}
 		return admission.Complete(ctx, db, caller, request.ID, response(output, operationErr))
 	})
 	if err != nil {
-		if configuration {
-			return node.unapplied(caller, request.ID, err)
-		}
-		// The operation ran outside the transaction, so its result is what is stored.
 		return node.settle(caller, request.ID, response(output, operationErr))
-	}
-	if configuration && operationErr == nil {
-		node.NotifyConfigurationFollow(events)
-		node.publish()
 	}
 	return response(output, operationErr)
 }

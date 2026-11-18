@@ -2,18 +2,15 @@ package terminal
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
+
 	"errors"
-	"io"
-	"net"
+
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
-	cryptossh "golang.org/x/crypto/ssh"
 )
 
 // testShellCommand checks how saved settings become a terminal program. It is
@@ -141,82 +138,4 @@ func TestShellCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("ssh startup output", func(t *testing.T) {
-		viewport := protocol.TerminalViewport{Columns: 80, Rows: 24}
-		connection, err := OpenSSH(testShellServer(t, []byte("ready")), viewport)
-		if err != nil {
-			t.Fatal(err)
-		}
-		output, err := io.ReadAll(connection)
-		if err != nil || string(output) != "ready" {
-			t.Fatalf("output = %q %v", output, err)
-		}
-		if status := connection.status(); status.Kind != "exited" || status.Data != (protocol.TerminalStatusExitedPayload{Code: 3}) {
-			t.Fatalf("status = %+v", status)
-		}
-		_ = connection.Close()
-
-		// More than the limit and the channel window together: the server
-		// cannot confirm the shell before the limit is seen.
-		_, err = OpenSSH(testShellServer(t, make([]byte, 3<<20)), viewport)
-		var failure *protocol.Fault
-		if !errors.As(err, &failure) || failure.Code != protocol.ErrorCodeOutcomeUnknown || failure.Message != "SSH terminal startup output exceeds the limit" {
-			t.Fatalf("flooded opening = %v", err)
-		}
-	})
-}
-
-// testShellServer connects to a loopback SSH server whose shell writes
-// startup before confirming the request, then exits with status 3.
-func testShellServer(t *testing.T, startup []byte) *cryptossh.Client {
-	t.Helper()
-	_, key, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	signer, err := cryptossh.NewSignerFromKey(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	config := &cryptossh.ServerConfig{NoClientAuth: true}
-	config.AddHostKey(signer)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
-	go func() {
-		connection, err := listener.Accept()
-		if err != nil {
-			return
-		}
-		defer connection.Close()
-		_, channels, requests, err := cryptossh.NewServerConn(connection, config)
-		if err != nil {
-			return
-		}
-		go cryptossh.DiscardRequests(requests)
-		for offered := range channels {
-			channel, requests, err := offered.Accept()
-			if err != nil {
-				return
-			}
-			for request := range requests {
-				if request.Type != "shell" {
-					_ = request.Reply(true, nil)
-					continue
-				}
-				_, _ = channel.Write(startup)
-				_ = request.Reply(true, nil)
-				_, _ = channel.SendRequest("exit-status", false, cryptossh.Marshal(struct{ Status uint32 }{3}))
-				_ = channel.Close()
-			}
-		}
-	}()
-	client, err := cryptossh.Dial("tcp", listener.Addr().String(), &cryptossh.ClientConfig{User: "test", HostKeyCallback: cryptossh.InsecureIgnoreHostKey()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = client.Close() })
-	return client
 }

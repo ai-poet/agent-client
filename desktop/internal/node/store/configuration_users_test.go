@@ -290,30 +290,6 @@ func TestUserConfigurationPartitions(t *testing.T) {
 		if current, err := ReadTeamSettings(ownCtx, db); err != nil || current.Revision != 0 {
 			return fmt.Errorf("team settings crossed users: %v", err)
 		}
-		password := "profile-password"
-		ssh, err := databaseFixtureSsh(ownCtx, db, protocol.SshProfile{ID: protocol.NewSshID(), Name: "Owner SSH", Host: "bastion.example", Port: 22, Username: "deploy", Authentication: protocol.SshAuthenticationPassword}, 0, &password)
-		if err != nil {
-			return err
-		}
-		if _, _, err := ReadSsh(otherCtx, db, ssh.ID, ssh.Revision); !providerFixtureFault(err, protocol.ErrorCodeNotFound) {
-			return fmt.Errorf("SSH credential visibility: %v", err)
-		}
-		if _, err := databaseFixtureSsh(otherCtx, db, ssh, ssh.Revision, &password); !providerFixtureFault(err, protocol.ErrorCodeNotFound) {
-			return fmt.Errorf("SSH overwrite: %v", err)
-		}
-		profile := protocol.DatabaseProfile{ID: protocol.NewDatabaseID(), Name: "Owner database", Connection: databaseFixtureNetwork("database.example")}
-		if _, _, err := databaseFixtureSave(ownCtx, db, profile, 0, &password); err != nil {
-			return err
-		}
-		if current, err := ReadDatabase(otherCtx, db, profile.ID); err != nil || current != nil {
-			return fmt.Errorf("database visibility: %v", err)
-		}
-		if _, _, err := databaseFixtureSave(otherCtx, db, profile, 0, &password); !providerFixtureFault(err, protocol.ErrorCodeNotFound) {
-			return fmt.Errorf("database overwrite: %v", err)
-		}
-		if _, err := databaseTunnelProfile(otherCtx, db, databaseFixtureTunnel(ssh.ID)); !providerFixtureFault(err, protocol.ErrorCodeNotFound) {
-			return fmt.Errorf("foreign SSH tunnel: %v", err)
-		}
 		provider := providerFixture()
 		output, _, err := ExecuteProviderCommand(otherCtx, db, node, protocol.Request{Command: protocol.Command{Kind: "put_provider", Data: &protocol.CommandPutProviderPayload{Provider: provider}}}, nil)
 		if err != nil {

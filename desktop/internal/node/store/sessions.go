@@ -260,14 +260,8 @@ func createProfiledSession(ctx context.Context, db *sql.Conn, node protocol.Node
 		if err != nil {
 			return protocol.Output{}, nil, err
 		}
-	} else if config.Resource != nil {
-		value.Worktree, err = connectionWorkspace(ctx, db, profile, *config.Resource)
-		if err != nil {
-			return protocol.Output{}, nil, err
-		}
-		if input.Worktree != nil && *input.Worktree != value.Worktree {
-			return protocol.Output{}, nil, invalid("worktree does not belong to the connection")
-		}
+    } else if config.Resource != nil {
+        return protocol.Output{}, nil, invalid("session resource is not available")
 	} else if config.Assistant != nil {
 		value.Worktree, err = assistantWorkspace(ctx, db, profile, *config.Assistant)
 		if err != nil {

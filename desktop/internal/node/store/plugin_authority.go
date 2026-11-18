@@ -104,16 +104,10 @@ func checkPluginRequest(ctx context.Context, db *sql.Conn, request protocol.Requ
 		}
 		return nil
 	}
-	action, allowed, err := PluginConnectionAction(ctx, db, request)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		action, allowed, err = pluginExternalBrowserAction(ctx, db, request)
-		if err != nil {
-			return err
-		}
-	}
+	action, allowed, err := pluginExternalBrowserAction(ctx, db, request)
+    if err != nil {
+        return err
+    }
 	if !allowed {
 		action, allowed = pluginAction(request.Command.Kind)
 	}

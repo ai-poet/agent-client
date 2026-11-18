@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
@@ -17,6 +16,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/shell"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 type pluginNativeConversation struct {
@@ -397,22 +397,7 @@ func (state *pluginNativeState) conversationSession(request pluginNativeConversa
 		if !found || project == nil {
 			return protocol.Session{}, pluginNativeFault(protocol.ErrorCodeUnavailable, "assistant workspace is unavailable")
 		}
-	case protocol.PluginConversationResourceDatabase:
-		if request.Resource == nil || request.Resource.Kind != "database" {
-			return protocol.Session{}, pluginNativeFault(protocol.ErrorCodeInvalidRequest, "assistant requires a captured database")
-		}
-		id, valid := detail[protocol.DatabaseID](request.Resource.Data)
-		if !valid || !slices.ContainsFunc(snapshot.Databases, func(profile protocol.DatabaseProfile) bool { return profile.ID == id }) {
-			return protocol.Session{}, pluginNativeFault(protocol.ErrorCodeUnavailable, "assistant database is unavailable")
-		}
-	case protocol.PluginConversationResourceSsh:
-		if request.Resource == nil || request.Resource.Kind != "ssh" {
-			return protocol.Session{}, pluginNativeFault(protocol.ErrorCodeInvalidRequest, "assistant requires a captured SSH profile")
-		}
-		id, valid := detail[protocol.SshID](request.Resource.Data)
-		if !valid || !slices.ContainsFunc(snapshot.Ssh, func(profile protocol.SshProfile) bool { return profile.ID == id }) {
-			return protocol.Session{}, pluginNativeFault(protocol.ErrorCodeUnavailable, "assistant SSH profile is unavailable")
-		}
+
 	default:
 		return protocol.Session{}, pluginNativeFault(protocol.ErrorCodeInvalidRequest, "invalid assistant resource declaration")
 	}
@@ -447,14 +432,7 @@ func pluginNativeResourceEqual(first, second *protocol.ConnectionResource) bool 
 		return false
 	}
 	switch first.Kind {
-	case "database":
-		left, leftValid := detail[protocol.DatabaseID](first.Data)
-		right, rightValid := detail[protocol.DatabaseID](second.Data)
-		return leftValid && rightValid && left == right
-	case "ssh":
-		left, leftValid := detail[protocol.SshID](first.Data)
-		right, rightValid := detail[protocol.SshID](second.Data)
-		return leftValid && rightValid && left == right
+
 	default:
 		return false
 	}

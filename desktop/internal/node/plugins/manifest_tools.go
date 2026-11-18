@@ -39,18 +39,7 @@ func operationAction(operation protocol.ToolOperation) (protocol.PluginAction, b
 		return protocol.PluginActionReadWorktrees, true
 	case protocol.ToolOperationCreateManagedWorktree, protocol.ToolOperationRegisterWorktree, protocol.ToolOperationRemoveWorktree:
 		return protocol.PluginActionWriteWorktrees, true
-	case protocol.ToolOperationListDatabaseConnections, protocol.ToolOperationBrowseDatabase, protocol.ToolOperationQueryDatabase:
-		return protocol.PluginActionReadDatabases, true
-	case protocol.ToolOperationSaveDatabaseConnection:
-		return protocol.PluginActionManageDatabases, true
-	case protocol.ToolOperationListSshConnections:
-		return protocol.PluginActionReadSsh, true
-	case protocol.ToolOperationSaveSshConnection:
-		return protocol.PluginActionManageSsh, true
-	case protocol.ToolOperationExecuteDatabase:
-		return protocol.PluginActionControlDatabases, true
-	case protocol.ToolOperationRunSsh, protocol.ToolOperationTransferSsh:
-		return protocol.PluginActionControlSsh, true
+
 	case protocol.ToolOperationDelegateAgent, protocol.ToolOperationGuideAgent, protocol.ToolOperationWaitAgent:
 		return protocol.PluginActionDelegateAgents, true
 	case protocol.ToolOperationListDirectory, protocol.ToolOperationReadFile, protocol.ToolOperationReadFileLines, protocol.ToolOperationFindFiles,
@@ -97,8 +86,7 @@ func operationAction(operation protocol.ToolOperation) (protocol.PluginAction, b
 	return "", false
 }
 
-// retiredOperations and retiredActions belong to the language-server service
-// that no longer exists. A package may not declare them.
+// Retired protocol values remain decodable, but packages cannot declare removed services.
 var (
 	retiredOperations = []protocol.ToolOperation{
 		protocol.ToolOperationCodePackages, protocol.ToolOperationCodeCatalog, protocol.ToolOperationCodeServers,
@@ -107,6 +95,8 @@ var (
 		protocol.ToolOperationCodeReferences, protocol.ToolOperationCodeHover, protocol.ToolOperationCodeSymbols,
 	}
 	retiredActions = []protocol.PluginAction{
+        protocol.PluginActionReadDatabases, protocol.PluginActionControlDatabases, protocol.PluginActionManageDatabases,
+        protocol.PluginActionReadSsh, protocol.PluginActionControlSsh, protocol.PluginActionManageSsh,
 		protocol.PluginActionReadCode, protocol.PluginActionManageCode, protocol.PluginActionReadCodeSettings, protocol.PluginActionSaveCodeSettings,
 	}
 	// A flow step has no approval of its own, so it runs only the operations
@@ -115,7 +105,7 @@ var (
 	// that tool's approval.
 	flowActions = []protocol.PluginAction{
 		protocol.PluginActionReadRoles, protocol.PluginActionReadArtifacts, protocol.PluginActionReadCodeIndex, protocol.PluginActionReadGit,
-		protocol.PluginActionReadWorktrees, protocol.PluginActionReadDatabases, protocol.PluginActionReadSsh, protocol.PluginActionReadFiles,
+		protocol.PluginActionReadWorktrees, protocol.PluginActionReadFiles,
 		protocol.PluginActionReadWeb, protocol.PluginActionReadKnowledge, protocol.PluginActionReadCommands,
 		protocol.PluginActionReadStorage, protocol.PluginActionWriteStorage, protocol.PluginActionHttp,
 	}

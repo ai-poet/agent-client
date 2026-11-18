@@ -329,7 +329,6 @@ type Model struct {
 	ConnectionFailure    *ConnectionFailure
 	Share                ShareState
 	NetworkEditor        *NetworkEditor
-	HostTrust            *HostTrust
 	pairing              pairing
 	connectionGeneration uint64
 

@@ -163,27 +163,6 @@ func TestDraftChecks(t *testing.T) {
 		m := NewModel(preview.SettingsData())
 		tt := ui.NewTesterWith(func(c *ui.Context) { connectionDialogs(c, m) }, 900, 700, ui.TesterOptions{Preferences: ui.Preferences{ReduceTransparency: true}})
 		tt.SetLocale("en")
-		answer := func(key string) (confirmed bool) {
-			t.Helper()
-			m.ConnectionPending = true
-			m.HostTrust = &HostTrust{Host: "example.com:22", Algorithm: "ssh-ed25519", Fingerprint: "SHA256:abc", Confirm: func() { confirmed = true }}
-			tt.Frame()
-			tt.Advance(time.Second)
-			button, ok := tt.AccessByRole(ui.RoleButton, i18n.In("en", key))
-			if !ok {
-				t.Fatalf("no %s: %q", key, tt.Texts())
-			}
-			tt.ClickAt(button.Bounds.X+button.Bounds.W/2, button.Bounds.Y+button.Bounds.H/2)
-			tt.Frame()
-			tt.Advance(time.Second)
-			return confirmed
-		}
-		if !answer("ssh_trust") || m.HostTrust != nil || !m.ConnectionPending {
-			t.Errorf("trusted: prompt %v, pending %v", m.HostTrust, m.ConnectionPending)
-		}
-		if answer("settings_cancel") || m.HostTrust != nil || m.ConnectionPending {
-			t.Errorf("canceled: prompt %v, pending %v", m.HostTrust, m.ConnectionPending)
-		}
 		m.NetworkEditor = &NetworkEditor{Pending: true}
 		tt.Frame()
 		tt.Advance(time.Second)
@@ -323,10 +302,8 @@ func TestDraftChecks(t *testing.T) {
 		en := func(key string) string { return i18n.In("en", key) }
 		m := NewModel(preview.SettingsData())
 		var added []ConnectionDraft
-		checks := 0
 		m.ConnectionActions = &ConnectionActions{
 			Add:         func(draft ConnectionDraft, _ func(bool)) { added, m.ConnectionPending = append(added, draft), true },
-			CheckStatus: func(func(bool)) { checks, m.ConnectionPending = checks+1, true },
 		}
 		tt := ui.NewTesterWith(func(c *ui.Context) { connections(c, m) }, 900, 1000, ui.TesterOptions{Preferences: ui.Preferences{ReduceTransparency: true}})
 		tt.SetLocale("en")
@@ -355,98 +332,12 @@ func TestDraftChecks(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		alpha, beta := ProjectChoice{ID: "a", Name: "Alpha"}, ProjectChoice{ID: "b", Name: "Beta"}
 		m.openAddHost()
-		m.SetConnectionStatus(ConnectionStatus{Projects: []ProjectChoice{alpha, beta}})
 		tt.Frame()
 		tt.Advance(time.Second)
 		tt.Frame()
 		if tt.HasText(en("host_wsl")) || !tt.HasText(en("host_pairing_mode")) || tt.HasText(en("pairing_relay_server")) {
 			t.Fatalf("pairing mode or platform options: %q", tt.Texts())
-		}
-		// Pairing follows the invited Host's route and needs no local network
-		// selection. SSH installation chooses a network and authentication.
-		click(en("host_ssh_mode"))
-		if !tt.HasText(en("pairing_relay_server")) || !tt.HasText(en("ssh_authentication")) {
-			t.Fatalf("SSH installation fields: %q", tt.Texts())
-		}
-		click(en("host_pairing_mode"))
-		if tt.HasText(en("pairing_relay_server")) || !tt.HasText(en("pairing_pin_hint")) {
-			t.Fatalf("returning to pairing mode: %q", tt.Texts())
-		}
-		click(en("host_ssh_mode"))
-		click(en("ssh_agent_short"))
-		// The agent has no secret; a shared connection names its projects.
-		if Method(m.pairing.method) != ByAgent || tt.HasText(en("ssh_passphrase")) {
-			t.Fatalf("agent method %d: %q", m.pairing.method, tt.Texts())
-		}
-		if !tt.HasText(en("host_ssh_agent_hint")) {
-			t.Fatalf("SSH Agent is not explained as local SSH authentication: %q", tt.Texts())
-		}
-		click(en("connection_projects"))
-		shot("connections-add-agent-en")
-		click(en("host_install"))
-		if len(added) != 0 {
-			t.Fatalf("installed sharing with no project: %+v", added)
-		}
-		click(beta.Name)
-		click(en("host_install"))
-		if len(added) != 1 || added[0].Method != ByAgent || added[0].Scope != ScopeProjects || added[0].Projects != beta.ID {
-			t.Fatalf("agent install: %+v", added)
-		}
-		// The step under way cannot start again, and locks its draft.
-		click(en("host_install"))
-		click(en("ssh_private_key"))
-		if len(added) != 1 || Method(m.pairing.method) != ByAgent {
-			t.Fatalf("pending dialog acted: %d installs, method %d", len(added), m.pairing.method)
-		}
-		// An installation under way lists its steps.
-		m.ConnectionStage = "host_install_installing"
-		tt.Frame()
-		for _, key := range []string{"host_step_connect", "host_install_detecting", "host_install_installing", "host_step_pair"} {
-			if !tt.HasText(en(key)) {
-				t.Fatalf("no %q step under way: %q", key, tt.Texts())
-			}
-		}
-		shot("connections-add-progress-en")
-		// A failed one says why in the dialog, until the next attempt.
-		m.ConnectionPending, m.ConnectionStage = false, ""
-		m.ConnectionFailure = &ConnectionFailure{Tone: kit.Negative, Title: "host_install_failed", Detail: "permission denied (publickey)"}
-		tt.Frame()
-		if !slices.Contains(tt.Texts(), en("host_install_failed")+"\npermission denied (publickey)") || tt.HasText(en("host_step_connect")) {
-			t.Fatalf("the failure is not in the dialog: %q", tt.Texts())
-		}
-		shot("connections-add-failed-en")
-		click(en("host_install"))
-		if m.ConnectionFailure != nil || len(added) != 2 {
-			t.Fatalf("another attempt kept the failure %+v, %d installs", m.ConnectionFailure, len(added))
-		}
-		added = added[:1]
-		// An uncertain installation is checked, never sent again.
-		m.ConnectionPending = false
-		m.SetConnectionStatus(ConnectionStatus{Recovery: true, Projects: []ProjectChoice{alpha, beta}})
-		tt.Frame()
-		if tt.HasText(en("host_install")) || !tt.HasText(en("host_check_status")) {
-			t.Fatalf("uncertain installation: %q", tt.Texts())
-		}
-		shot("connections-add-check-en")
-		click(en("ssh_private_key"))
-		click(en("host_check_status"))
-		click(en("host_check_status"))
-		if checks != 1 || len(added) != 1 || Method(m.pairing.method) != ByAgent {
-			t.Fatalf("%d checks, %d installs, method %d", checks, len(added), m.pairing.method)
-		}
-		// A secret left blank keeps the one saved for the same method.
-		m.ConnectionPending = false
-		m.SetConnectionStatus(ConnectionStatus{Saved: ByPrivateKey})
-		click(en("ssh_private_key"))
-		if !tt.HasText(en("ssh_keep_credential")) {
-			t.Fatalf("no hint for the saved credential: %q", tt.Texts())
-		}
-		shot("connections-add-key-en")
-		click(en("ssh_key_file"))
-		if tt.HasText(en("ssh_keep_credential")) {
-			t.Fatal("another method offers to keep the saved credential")
 		}
 		// Windows offers WSL instead of the agent, with the distributions
 		// the Node found.
@@ -464,14 +355,14 @@ func TestDraftChecks(t *testing.T) {
 			t.Fatalf("WSL without distributions: %q", tt.Texts())
 		}
 		click(en("host_install"))
-		if len(added) != 1 {
+		if len(added) != 0 {
 			t.Fatalf("installed without a distribution: %+v", added)
 		}
 		m.SetConnectionStatus(ConnectionStatus{DistributionsLoaded: true, Distributions: []string{"Ubuntu", "Debian"}})
 		tt.Frame()
 		shot("connections-add-wsl-en")
 		click(en("host_install"))
-		if len(added) != 2 || added[1].Method != ByWSL || added[1].Distribution != "Ubuntu" {
+		if len(added) != 1 || added[0].Method != ByWSL || added[0].Distribution != "Ubuntu" {
 			t.Fatalf("WSL install: %+v", added)
 		}
 	})

@@ -65,23 +65,13 @@ func (r *Runtime) initConnectionActions() {
 	model.ConnectionActions = &settings.ConnectionActions{
 		Inspect:     func(device viewmodel.Device) { r.App.OpenHost(device.ID) },
 		Add:         r.addConnection,
-		CheckStatus: r.checkSSHHost,
+		CheckStatus: r.checkWSLHost,
 		Revoke:      r.revokeConnection,
 		Narrow:      r.narrowConnection,
 		EditNetwork: r.editConnectionNetwork,
 		SaveNetwork: r.saveConnectionNetwork,
 		RetryShare:  func() { r.startConnectionShare(0) },
-		BrowseKey: func(selected func(string)) {
-			if r.pickKeyFile == nil {
-				r.enqueue(func(c *ui.Context) { kit.Toast(c, kit.Failed, i18n.T(c, "unavailable")) })
-				return
-			}
-			r.pickKeyFile(func(path string) {
-				if path != "" {
-					r.enqueue(func(*ui.Context) { selected(path) })
-				}
-			})
-		},
+
 	}
 	r.App.Hooks.EditHost = func(id string) {
 		for _, device := range r.projectDevices() {
@@ -101,7 +91,7 @@ func (r *Runtime) connectionsFrame(c *ui.Context) {
 		return
 	}
 	model := r.App.Settings.Model
-	model.ConnectionStage = r.sshProgress()
+	model.ConnectionStage = r.wslInstallProgress()
 	if r.App.Page != shell.SettingsPage || r.App.Settings.Section != settings.Connections {
 		model.CloseConnectionDialogs()
 	}
@@ -187,24 +177,10 @@ func (r *Runtime) connectionStatus() settings.ConnectionStatus {
 	if !r.App.Settings.Adding() {
 		return status
 	}
-	local := r.controller.Target().String()
-	for _, project := range r.App.Data.Projects {
-		if project.Host == local {
-			status.Projects = append(status.Projects, settings.ProjectChoice{ID: project.ID, Name: project.Name})
-		}
-	}
-	if host := r.hostState(local); host != nil && host.install != nil {
-		operation := host.install
-		status.Recovery = sshRecoverable(operation)
-		if operation.profile != nil {
-			for _, method := range []settings.Method{settings.ByPassword, settings.ByPrivateKey, settings.ByKeyFile, settings.ByAgent} {
-				if sshAuthentication(method) == string(operation.profile.Authentication) {
-					status.Saved = method
-				}
-			}
-		}
-	}
-	return status
+	if local := r.hostState(r.controller.Target().String()); local != nil && local.install != nil {
+        status.Recovery = local.install.uncertain && !local.install.running
+    }
+    return status
 }
 
 // loadWSLDistributions asks the local Node for the WSL 2 distributions a
@@ -251,6 +227,18 @@ func (r *Runtime) closeConnections() {
 	}
 }
 
+func (r *Runtime) addFailed(outcome kit.Outcome, key string, err error) bool {
+	if !r.App.Settings.Adding() {
+		return false
+	}
+	tone := kit.Negative
+	if outcome != kit.Failed {
+		tone = kit.Caution
+	}
+	r.App.Settings.ConnectionFailure = &settings.ConnectionFailure{Tone: tone, Title: key, Detail: faultDetail(err)}
+	return true
+}
+
 func (r *Runtime) connectionSelection(draft settings.ConnectionDraft) (protocol.NetworkSelection, error) {
 	if state := r.connections; state != nil && state.picker != nil {
 		return state.picker.selection(draft.Relay, draft.Address)
@@ -266,9 +254,9 @@ func (r *Runtime) connectionSelection(draft settings.ConnectionDraft) (protocol.
 }
 
 func (r *Runtime) addConnection(draft settings.ConnectionDraft, completed func(bool)) {
-	// Every other method installs a Host: over SSH or into WSL.
+	// WSL setup is local; other hosts connect through pairing.
 	if draft.Method != settings.ByPairing {
-		r.addSSHHost(draft, completed)
+		r.addWSLHost(draft, completed)
 		return
 	}
 	state := r.connections

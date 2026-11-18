@@ -244,7 +244,7 @@ func AuthorizeLocalModelRemoval(ctx context.Context, db *sql.Conn, request proto
 	if scope.Turn == nil || scope.Invocation != nil {
 		return denied
 	}
-	run, err := ConnectionOwner(ctx, db, *scope.Turn)
+	run, err := activeAgentRun(ctx, db, *scope.Turn)
 	if err != nil {
 		return err
 	}

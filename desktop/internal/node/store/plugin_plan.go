@@ -36,12 +36,7 @@ func CheckPluginPlanAction(ctx context.Context, db *sql.Conn, request protocol.R
 	}
 	writes := false
 	switch request.Command.Kind {
-	case "query_database":
-		input, valid := dispatchValue[protocol.CommandQueryDatabasePayload](request.Command.Data)
-		if !valid {
-			return invalid("invalid database query")
-		}
-		writes = !input.ReadOnly
+
 	case "use_browser":
 		input, valid := dispatchValue[protocol.CommandUseBrowserPayload](request.Command.Data)
 		if !valid {

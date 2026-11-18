@@ -67,60 +67,6 @@ func exportTeamConfiguration(ctx context.Context, db *sql.Conn, _ ConfigurationE
 	return result, nil
 }
 
-func exportSshConfiguration(ctx context.Context, db *sql.Conn, options ConfigurationExport) ([]protocol.ConfigurationFollowRecord, error) {
-	values, err := ListSsh(ctx, db)
-	if err != nil {
-		return nil, err
-	}
-	result := []protocol.ConfigurationFollowRecord{}
-	for _, value := range values {
-		value.Source, value.HostKey = nil, nil
-		var secret *protocol.Secret
-		if options.Secrets {
-			_, credential, err := readSshRecord(ctx, db, value.ID, value.Revision)
-			if err != nil {
-				return nil, err
-			}
-			body, err := json.Marshal(credential)
-			if err != nil {
-				return nil, err
-			}
-			secret = pointerSecret(string(body))
-		}
-		record, err := configurationRecord(value.ID.String(), value.Revision, value, secret)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, record)
-	}
-	return result, nil
-}
-
-func exportDatabaseConfiguration(ctx context.Context, db *sql.Conn, options ConfigurationExport) ([]protocol.ConfigurationFollowRecord, error) {
-	values, err := ListDatabases(ctx, db)
-	if err != nil {
-		return nil, err
-	}
-	result := []protocol.ConfigurationFollowRecord{}
-	for _, value := range values {
-		value.Source = nil
-		var secret *protocol.Secret
-		if options.Secrets && value.Connection.Kind != "sqlite" {
-			password, err := readDatabasePassword(ctx, db, value.ID)
-			if err != nil {
-				return nil, err
-			}
-			secret = &password
-		}
-		record, err := configurationRecord(value.ID.String(), value.Revision, value, secret)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, record)
-	}
-	return result, nil
-}
-
 func exportDefaultsConfiguration(ctx context.Context, db *sql.Conn, options ConfigurationExport) ([]protocol.ConfigurationFollowRecord, error) {
 	value, err := ReadDefaults(ctx, db)
 	if err != nil || value.Config == nil {

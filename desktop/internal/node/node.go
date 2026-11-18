@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/jonboulle/clockwork"
 	"github.com/ai-poet/agent-client/desktop/internal/core"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
@@ -40,6 +39,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/node/web"
 	"github.com/ai-poet/agent-client/desktop/internal/node/wsl"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/jonboulle/clockwork"
 )
 
 // Node owns one profile, admitted operations and their committed event feed.
@@ -57,9 +57,7 @@ type Node struct {
 	networkDirectory  *networkDirectory
 	networkProbes     *networkProbes
 	hostSampler       *host.Sampler
-	hostInstalls      *host.Installations
 	wsl               *wsl.Service
-	databases         databaseOperations
 	ports             *ports.Service
 	browsers          browserRegistry
 	externalBrowser   *externalbrowser.Browsers
@@ -137,22 +135,21 @@ var _ link.Handler = (*Node)(nil)
 
 // Options injects native process and clock boundaries for deterministic owners.
 type Options struct {
-	Headless       bool
-	MCP            *mcp.Options
-	Python         *python.Options
-	DispatchClock  clockwork.Clock
-	Network        *link.NetworkScope
-	HostDeployment *host.DeploymentOptions
-	Model          func(context.Context, model.Binding) (fantasy.LanguageModel, error)
-	Fetch          web.FetchOptions
-	Search         web.SearchOptions
-	Environment    *process.Environment
-	Git            workspacegit.Options
-	Process        process.Options
-	LocalModels    localmodels.Options
-	Power          power.Backend
-	Telemetry      telemetry.Options
-	knowledge      func(*knowledgeservice.Options)
+	Headless      bool
+	MCP           *mcp.Options
+	Python        *python.Options
+	DispatchClock clockwork.Clock
+	Network       *link.NetworkScope
+	Model         func(context.Context, model.Binding) (fantasy.LanguageModel, error)
+	Fetch         web.FetchOptions
+	Search        web.SearchOptions
+	Environment   *process.Environment
+	Git           workspacegit.Options
+	Process       process.Options
+	LocalModels   localmodels.Options
+	Power         power.Backend
+	Telemetry     telemetry.Options
+	knowledge     func(*knowledgeservice.Options)
 }
 
 func Start(ctx context.Context, path string) (*Node, error) {
@@ -237,9 +234,6 @@ func StartWithOptions(ctx context.Context, path string, options Options) (*Node,
 	value.networkDirectory = &networkDirectory{listing: protocol.DefaultNetworkListing()}
 	value.networkProbes = &networkProbes{permits: make(chan struct{}, 4), now: time.Now}
 	value.initHost()
-	if options.HostDeployment != nil {
-		value.hostInstalls = host.NewInstallations(*options.HostDeployment)
-	}
 	value.modelFactory = options.Model
 	value.mediaPoll = model.MediaVideoPoll
 	value.telemetry = newTelemetry(options.Telemetry)
@@ -650,7 +644,7 @@ func supportedCommand(kind string) bool {
 		return true
 	case "deliver_background", "continue_turn":
 		return true
-	case "create_project", "update_project", "remove_project", "register_worktree", "create_session", "import_session", "list_databases", "save_database", "remove_database", "rename_session", "set_session_archived", "set_session_read", "archive_sessions", "remove_session", "remove_sessions", "set_session_order", "mark_notification_read", "mark_notifications_read", "dismiss_read_notifications", "dismiss_notifications", "publish_notification", "save_power_settings", "reset_telemetry_identity", "save_telemetry_settings":
+	case "create_project", "update_project", "remove_project", "register_worktree", "create_session", "import_session", "rename_session", "set_session_archived", "set_session_read", "archive_sessions", "remove_session", "remove_sessions", "set_session_order", "mark_notification_read", "mark_notifications_read", "dismiss_read_notifications", "dismiss_notifications", "publish_notification", "save_power_settings", "reset_telemetry_identity", "save_telemetry_settings":
 		return true
 	default:
 		return false
@@ -754,13 +748,7 @@ func (node *Node) read(ctx context.Context, caller protocol.NodeID, request prot
 			value, err := store.ReadPluginVersion(ctx, db, request.Command.Data.(*protocol.CommandReadPluginVersionPayload).Package)
 			output = protocol.Output{Kind: "plugin", Data: value}
 			return err
-		case "list_databases":
-			profiles, err := store.ListDatabases(ctx, db)
-			if err == nil && request.Plugin != nil {
-				profiles, err = store.FilterPluginDatabases(ctx, db, *request.Plugin, profiles)
-			}
-			output = protocol.Output{Kind: "database_profiles", Data: profiles}
-			return err
+
 		case "read_activity_catalog":
 			value, err := store.ReadActivityCatalog(ctx, db, node.ID())
 			output = protocol.Output{Kind: "activity_catalog", Data: value}

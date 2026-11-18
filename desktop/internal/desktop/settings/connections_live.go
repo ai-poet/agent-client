@@ -1,20 +1,17 @@
 package settings
 
 import (
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
+	"github.com/egoist/mygo/ui"
 )
 
 type ConnectionDraft struct {
 	Method                                    Method
 	Relay                                     int
-	Address, Code, Name, Host, Port, Username string
-	Password, Key, Passphrase                 string
-	Scope                                     int    // a sharing scope
-	Projects                                  string // shared project IDs, joined by commas
+	Address, Code string
 	Distribution                              string // WSL
 }
 
@@ -27,7 +24,6 @@ type ConnectionActions struct {
 	Narrow      func(viewmodel.Device, string)
 	EditNetwork func(viewmodel.Device)
 	SaveNetwork func(*NetworkEditor)
-	BrowseKey   func(func(string))
 	RetryShare  func()
 }
 
@@ -54,16 +50,9 @@ type NetworkEditor struct {
 	Unavailable bool
 }
 
-type HostTrust struct {
-	Host, Algorithm, Fingerprint string
-	Changed                      bool
-	Confirm                      func()
-}
-
 func (m *Model) ConnectionDraft() ConnectionDraft {
 	value := m.pairing
-	return ConnectionDraft{Method: Method(value.method), Relay: value.relay, Address: value.address, Code: value.code, Name: value.name, Host: value.host, Port: value.port, Username: value.user, Password: value.secret, Key: value.key, Passphrase: value.passphrase,
-		Scope: value.scope, Projects: value.sharedProjects(), Distribution: value.distributionName()}
+	return ConnectionDraft{Method: Method(value.method), Relay: value.relay, Address: value.address, Code: value.code, Distribution: value.distributionName()}
 }
 
 func (m *Model) Sharing() bool { return m.pairing.sharing }
@@ -115,21 +104,5 @@ func connectionDialogs(c *ui.Context, m *Model) {
 			m.NetworkEditor = nil
 		}
 	}
-	if trust := m.HostTrust; trust != nil {
-		open := true
-		title := i18n.T(c, "ssh_trust_title")
-		if trust.Changed {
-			title = i18n.T(c, "ssh_key_changed")
-		}
-		body := trust.Host + "\n" + trust.Algorithm + "\n" + trust.Fingerprint
-		// Trusting closes the prompt and the connection goes on, still
-		// pending; any other way out of the prompt ends it.
-		if kit.AlertDialog(c.Key("host-key"), &open, title, body, i18n.T(c, "settings_cancel"), i18n.T(c, "ssh_trust")) == 1 {
-			m.HostTrust = nil
-			trust.Confirm()
-		} else if !open {
-			m.HostTrust = nil
-			m.ConnectionPending = false
-		}
-	}
+
 }

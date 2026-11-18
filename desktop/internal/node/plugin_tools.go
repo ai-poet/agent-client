@@ -10,13 +10,13 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/engine"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/operations"
 	"github.com/ai-poet/agent-client/desktop/internal/node/mcp"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func (node *Node) pluginTools(ctx context.Context, invocation *store.AgentInvocation, native ...[]engine.Tool) (tools []engine.Tool, resultErr error) {
@@ -139,7 +139,7 @@ func selectedMCPTool(invocation *store.AgentInvocation, info protocol.PluginInfo
 // conversation context; it does not replace local workspace capabilities.
 func availableOperationTool(invocation *store.AgentInvocation, declaration operations.Declaration) bool {
 	project := invocation.Worktree.Project != nil
-	return declaration.Available(project, connectionBound(invocation)) ||
+	return declaration.Available(project) ||
 		invocation.Turn.Config.Assistant != nil && declaration.Available(project)
 }
 
@@ -159,10 +159,7 @@ func availablePluginTool(invocation *store.AgentInvocation, tool protocol.ToolDe
 	}
 	if invocation.Turn.Config.Resource != nil {
 		switch invocation.Turn.Config.Resource.Kind {
-		case "database":
-			resource = protocol.PluginConversationResourceDatabase
-		case "ssh":
-			resource = protocol.PluginConversationResourceSsh
+
 		}
 	}
 	return slices.Contains(tool.Contexts, resource)

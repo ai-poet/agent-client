@@ -214,18 +214,8 @@ func init() {
 		Changed:  changedConfiguration[protocol.TeamProfile]("team_changed"),
 		Removed:  removedConfiguration("team_removed", protocol.ParseTeamID, func(id protocol.TeamID) any { return protocol.EventTeamRemovedPayload{ID: id} }),
 	})
-	RegisterConfigurationKind(ConfigurationKind{
-		Name: "ssh_profiles", Events: []string{"ssh_changed", "ssh_removed"}, Export: exportSshConfiguration,
-		Validate: validateConfigurationIdentity(func(value protocol.SshProfile) string { return value.ID.String() }),
-		Changed:  changedConfiguration[protocol.SshProfile]("ssh_changed"),
-		Removed:  removedConfiguration("ssh_removed", protocol.ParseSshID, func(id protocol.SshID) any { return protocol.EventSshRemovedPayload{ID: id} }),
-	})
-	RegisterConfigurationKind(ConfigurationKind{
-		Name: "database_profiles", Events: []string{"database_changed", "database_removed"}, Export: exportDatabaseConfiguration,
-		Validate: validateConfigurationIdentity(func(value protocol.DatabaseProfile) string { return value.ID.String() }),
-		Changed:  changedConfiguration[protocol.DatabaseProfile]("database_changed"),
-		Removed:  removedConfiguration("database_removed", protocol.ParseDatabaseID, func(id protocol.DatabaseID) any { return protocol.EventDatabaseRemovedPayload{ID: id} }),
-	})
+
+
 	RegisterConfigurationKind(ConfigurationKind{
 		Name: "defaults", Events: []string{"defaults_changed"}, Export: exportDefaultsConfiguration,
 		Changed: changedConfiguration[protocol.Defaults]("defaults_changed"),

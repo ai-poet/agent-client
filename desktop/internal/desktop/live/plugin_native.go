@@ -7,10 +7,10 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/plugins"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 type pluginNativeState struct {
@@ -95,7 +95,6 @@ func (r *Runtime) pluginNativeResourceBinding(ctx context.Context, scope protoco
 		state.refreshAssistantTools()
 	}
 	state.locationOperations()
-	state.sshTransferOperations()
 	binding.Release = func() {
 		for identity, mounted := range state.terminals {
 			mounted.release()

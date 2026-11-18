@@ -97,12 +97,12 @@ func (state *pluginNativeState) renderTerminal(view *ui.Context, element plugins
 	}
 	mounted := state.terminals[identity]
 	suspended := state.native.Suspended()
-	var local, remote bool
+	var local bool
 	if suspended {
 		if mounted == nil || mounted.id != id {
 			return ui.Box(view).Size(0, 0), nil
 		}
-	} else if local, remote, err = state.terminalAuthority(); err != nil {
+	} else if local, err = state.terminalAuthority(); err != nil {
 		return ui.Element{}, err
 	}
 	if mounted != nil && mounted.id != id {
@@ -111,7 +111,7 @@ func (state *pluginNativeState) renderTerminal(view *ui.Context, element plugins
 		mounted = nil
 	}
 	if mounted == nil {
-		mounted = state.mountTerminal(identity, id, local, remote)
+		mounted = state.mountTerminal(identity, id, local)
 	}
 	if mounted.state.failed {
 		return ui.Element{}, pluginNativeFault(protocol.ErrorCodeUnavailable, "plugin terminal is unavailable")
@@ -131,31 +131,17 @@ func (state *pluginNativeState) renderTerminal(view *ui.Context, element plugins
 	return terminal, nil
 }
 
-// terminalAuthority reports the terminals a workspace view's package may
-// mount, as the reference does: a worktree's (local) with the terminal
-// actions, a saved SSH connection's (remote) with the SSH ones. The Node
-// checks each command of either kind against the same actions.
-func (state *pluginNativeState) terminalAuthority() (local, remote bool, err error) {
-	err = state.workspaceComponent(protocol.PluginActionReadTerminals, protocol.PluginActionControlTerminals)
-	local = err == nil
-	remote = state.workspaceComponent(protocol.PluginActionReadSsh, protocol.PluginActionControlSsh) == nil
-	if local || remote {
-		err = nil
-	}
-	return local, remote, err
+// terminalAuthority checks the package's local terminal actions.
+func (state *pluginNativeState) terminalAuthority() (bool, error) {
+    err := state.workspaceComponent(protocol.PluginActionReadTerminals, protocol.PluginActionControlTerminals)
+    return err == nil, err
 }
 
-// pluginTerminalInScope reports whether a view may show a terminal: an SSH
-// terminal with the SSH actions, any other in the view's own worktree with
-// the terminal actions.
-func pluginTerminalInScope(scope protocol.PluginContext, info protocol.TerminalInfo, local, remote bool) bool {
-	if info.Ssh != nil {
-		return remote
-	}
-	return local && scope.Worktree != nil && info.Worktree != nil && *info.Worktree == *scope.Worktree
+func pluginTerminalInScope(scope protocol.PluginContext, info protocol.TerminalInfo, local bool) bool {
+    return local && scope.Worktree != nil && info.Worktree != nil && *info.Worktree == *scope.Worktree
 }
 
-func (state *pluginNativeState) mountTerminal(identity string, id protocol.TerminalID, local, remote bool) *pluginNativeTerminal {
+func (state *pluginNativeState) mountTerminal(identity string, id protocol.TerminalID, local bool) *pluginNativeTerminal {
 	ctx, cancel := context.WithCancel(state.native.Context)
 	display := state.runtime.localRuntime().terminalDisplay()
 	mounted := &pluginNativeTerminal{id: id, cancel: cancel, display: display, state: &liveTerminal{owner: state.runtime, reading: true}}
@@ -164,7 +150,7 @@ func (state *pluginNativeState) mountTerminal(identity string, id protocol.Termi
 		output, err := state.execute(ctx, protocol.Command{Kind: "inspect_terminal", Data: protocol.CommandInspectTerminalPayload{Terminal: id}})
 		snapshot, valid := detail[protocol.TerminalSnapshot](output.Data)
 		if err == nil && (!valid || output.Kind != "terminal_snapshot" || snapshot.Node != state.runtime.controller.Target() || snapshot.Info.ID != id ||
-			snapshot.Info.Status.Kind == "closed" || !pluginTerminalInScope(state.scope, snapshot.Info, local, remote)) {
+			snapshot.Info.Status.Kind == "closed" || !pluginTerminalInScope(state.scope, snapshot.Info, local)) {
 			err = pluginNativeFault(protocol.ErrorCodePermissionDenied, "terminal does not match its captured scope")
 		}
 		var connection *terminalConn
