@@ -27,9 +27,34 @@
 
 | 位置 | 为什么必须保留原值 |
 | --- | --- |
-| `internal/node/multi_host_integration_test.go:425` | 断言「访问被撤销后远端调用以超时结束且不是取消」，超时是断言对象 |
+| `internal/node/multi_host_integration_test.go:425` | 断言「访问被撤销后远端调用以超时结束且不是取消」，超时是断言对象（该文件带 `//go:build integration`，见下节） |
 | `internal/node/computer/computer_test.go:316` | 桩实现返回 `context.DeadlineExceeded`，用于验证上层对超时的映射 |
 | `internal/node/agent/model/policy_test.go:214,377` | 分类表把 `DeadlineExceeded` 映射为 `Network`，超时是输入而非等待 |
+
+## integration 用例不在默认全量内
+
+`internal/node/multi_host_integration_test.go` 首行是 `//go:build integration`，**默认的 `go test ./internal/node/` 根本不会编译它**，所以「默认全量绿」不等于覆盖了这个文件。跑它需要：
+
+```bash
+SAILRY_IROH_LIB=$PWD/.runtime/native/linux-amd64/libsailry_iroh.so \
+LD_LIBRARY_PATH=$PWD/.runtime/native/linux-amd64 \
+go test -tags integration ./internal/node/ -run TestMultiHostControllerRoutesIntegration -count=1 -timeout 12m
+```
+
+它覆盖真实鉴权 loopback 链路：controller 路由、跨节点知识引用、插件作用域、撤销后订阅关闭。要把它纳入「全量」结论，CI 必须单开一个 `-tags integration` job，并备好 iroh / turso 动态库与足够内存。
+
+### 当前已知失败（2026-11-18，本机）
+
+`TestMultiHostControllerRoutesIntegration` 在第 215 行 `keyword index through executor controller storage route` 稳定失败，**不是慢**：把外层预算从 `2*testBudget()`（60s）提到 `6*testBudget()`（180s）后仍在同一行失败，整条用例跑了 183s。
+
+`query_knowledge`（keyword 模式，经 executor 的 controller storage 路由）返回的 `KnowledgePage` 三个来源全部带错误、`Hits` 为空，重复约 800 次完全一样：
+
+```
+outcome_unknown: completion unavailable; retry with the same request identifier   (×2)
+unavailable: knowledge source Node is unavailable                                (×1)
+```
+
+对应 `internal/link/remote.go:249` 与 `internal/node/resource_service.go:263`：远端 knowledge 读取没有拿到 completion，另有一个来源的 Node 不在候选地址里。这是路由/传输层的确定性缺口，不是预算问题，需要单独排查后再决定是否进 CI。在这条修好之前，「全量绿」只代表默认构建，不代表 integration 覆盖。
 
 ## race 全量
 
