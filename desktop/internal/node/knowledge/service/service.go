@@ -122,6 +122,9 @@ func (service *Service) Close() {
 
 // Refresh asks the worker for another pass.
 func (service *Service) Refresh() {
+	if service == nil {
+		return
+	}
 	select {
 	case service.wake <- struct{}{}:
 	default:

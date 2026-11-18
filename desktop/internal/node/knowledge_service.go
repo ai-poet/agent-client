@@ -80,7 +80,9 @@ func (node *Node) refreshKnowledgeStorage(command protocol.Command, changes []pr
 	case "identity":
 		if action, valid := dispatchPayload[protocol.IdentityCommand](command.Data); valid && (action.Kind == "confirm_sponsorship" || action.Kind == "assign_orphan_user") {
 			// A user merge changes the personal catalog and its captured sources.
-			node.knowledge.Invalidate()
+			if node.knowledge != nil {
+				node.knowledge.Invalidate()
+			}
 		}
 		return
 	case "install_plugin", "install_plugin_source", "install_catalog_plugin", "install_plugin_upload", "set_plugin_enabled", "save_plugin_settings":
@@ -91,7 +93,11 @@ func (node *Node) refreshKnowledgeStorage(command protocol.Command, changes []pr
 			return
 		}
 	}
-	node.knowledge.Refresh()
+	// A Node that has not started holds no knowledge index; there is nothing to
+	// refresh, and shutdown/close paths must not dereference it.
+	if node.knowledge != nil {
+		node.knowledge.Refresh()
+	}
 }
 
 // knowledgeOptions connects keyword retrieval to the profile.

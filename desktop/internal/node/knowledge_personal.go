@@ -19,6 +19,11 @@ func (node *Node) searchKnowledgeStorage(ctx context.Context, request protocol.R
 		return protocol.PluginStorageSearchPage{}, nodeFault(err)
 	}
 	if controller == nil {
+		// A Node that has not started has no knowledge index: an empty page is
+		// the honest answer, and searching must not dereference the nil service.
+		if node.knowledge == nil {
+			return protocol.PluginStorageSearchPage{}, nil
+		}
 		return node.knowledge.SearchStorage(ctx, request)
 	}
 	query, _ := request.Command.Data.(*protocol.PluginStorageSearch)

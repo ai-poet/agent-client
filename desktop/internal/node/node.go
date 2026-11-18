@@ -551,6 +551,9 @@ func (node *Node) admitCommand(ctx context.Context, caller protocol.NodeID, requ
 	err = node.profile.Store.Node.Write(ctx, func(db *sql.Conn) error {
 		var err error
 		previous, err = admission.Admit(ctx, db, caller, request, encoded)
+		if err != nil {
+			slog.Warn("admission write failed", "caller", caller, "request", request.ID, "kind", request.Command.Kind, "error", err)
+		}
 		return err
 	})
 	if err != nil {
@@ -955,6 +958,14 @@ func (node *Node) execute(job commandJob, prepared store.PreparedPaths, prepareE
 // answer OutcomeUnknown, and the next start marks the request unknown.
 func (node *Node) settle(caller protocol.NodeID, id protocol.RequestID, result link.Response) link.Response {
 	if err := admission.Settle(node.ctx, node.profile.Store.Node.Write, caller, id, result); err != nil {
+		// A request whose row is no longer admitted has already been settled
+		// (settle is idempotent by design), so its recorded answer stands.
+		if errors.Is(err, admission.ErrNotAdmitted) {
+			return result
+		}
+		// Keep the cause: without it an OutcomeUnknown is indistinguishable
+		// between a cancelled context, a closed store and a rejected write.
+		slog.Warn("operation result could not be recorded", "caller", caller, "request", id, "error", err)
 		return response(protocol.Output{}, &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "operation result could not be recorded; inspect the request before retrying"})
 	}
 	return result

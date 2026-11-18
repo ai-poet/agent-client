@@ -1,6 +1,8 @@
 package node
 
 import (
+	"log/slog"
+	"runtime/debug"
 	"context"
 	"database/sql"
 	"io"
@@ -93,7 +95,8 @@ func (node *Node) dispatchPlugins(ctx context.Context, caller protocol.NodeID, r
 	work := func(owner context.Context, report installations.Report) (result link.Response) {
 		defer node.work.Done()
 		defer func() {
-			if recover() != nil {
+			if recovered := recover(); recovered != nil {
+				slog.Error("plugin operation panicked", "request", request.ID, "panic", recovered, "stack", string(debug.Stack()))
 				result = response(protocol.Output{}, &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "plugin operation did not settle; inspect the resource before retrying"})
 				if accepted.Receipt.Durable {
 					result = node.settle(caller, request.ID, result)
