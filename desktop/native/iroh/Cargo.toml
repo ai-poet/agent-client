@@ -30,3 +30,5 @@ futures-util = "=0.3.34"
 [target.'cfg(target_os = "android")'.dependencies]
 jni = { version = "=0.22.4", default-features = false }
 rustls-platform-verifier = "=0.7.0"
+
+[workspace]

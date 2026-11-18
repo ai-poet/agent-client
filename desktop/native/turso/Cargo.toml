@@ -12,3 +12,5 @@ crate-type = ["cdylib"]
 [dependencies]
 turso_local = { package = "turso_sdk_kit", version = "=0.8.3", features = ["fts"] }
 turso_sync = { package = "turso_sync_sdk_kit", version = "=0.8.3" }
+
+[workspace]
