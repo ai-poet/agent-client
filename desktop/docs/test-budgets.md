@@ -43,29 +43,17 @@ go test -tags integration ./internal/node/ -run TestMultiHostControllerRoutesInt
 
 它覆盖真实鉴权 loopback 链路：controller 路由、跨节点知识引用、插件作用域、撤销后订阅关闭。要把它纳入「全量」结论，CI 必须单开一个 `-tags integration` job，并备好 iroh / turso 动态库与足够内存。
 
-### 当前已知失败（2026-11-18，本机）
+### 已修复（2026-11-19，`91b10309`）
 
-`TestMultiHostControllerRoutesIntegration` 在第 215 行 `keyword index through executor controller storage route` 稳定失败，**不是慢**：把外层预算从 `2*testBudget()`（60s）提到 `6*testBudget()`（180s）后仍在同一行失败，整条用例跑了 183s。
+`TestMultiHostControllerRoutesIntegration` 曾在第 215 行 `keyword index through executor controller storage route` 稳定超时，且把外层预算从 `2*testBudget()`（60s）提到 `6*testBudget()`（180s）仍在同一行失败（整条 183s），所以不是索引慢。
 
-`query_knowledge`（keyword 模式，经 executor 的 controller storage 路由）返回的 `KnowledgePage` 三个来源全部带错误、`Hits` 为空，重复约 800 次完全一样：
+真实链路（加日志后确认）：
 
-```
-outcome_unknown: completion unavailable; retry with the same request identifier   (×2)
-unavailable: knowledge source Node is unavailable                                (×1)
-```
+- `StartWithOptions` 从来没有调用 `initKnowledge`，`node.knowledge` 一直是 nil；
+- 查询因此走进 nil 分支，而该分支在 `knowledge_search` 这个 kind 下返回了 `PluginStorageSearchPage`，无法编码成 knowledge page；
+- 接收方发出 receipt 后编码 completion 失败，直接关闭流；发送方读到断流，最终报 `outcome_unknown`，三个候选来源全部空命中。
 
-对应 `internal/link/remote.go:249` 与 `internal/node/resource_service.go:263`：远端 knowledge 读取没有拿到 completion，另有一个来源的 Node 不在候选地址里。这是路由/传输层的确定性缺口，不是预算问题，需要单独排查后再决定是否进 CI。在这条修好之前，「全量绿」只代表默认构建，不代表 integration 覆盖。
-
-临时加日志复跑后（`aggregateKnowledge` 收结果处 + `dispatchCall` 的 completion 读取处），每次失败的实际链路是：
-
-```
-AGG result node=<A> err=unavailable: knowledge source Node is unavailable
-AGG result node=<B> err=outcome_unknown: completion unavailable; retry with the same request identifier
-AGG result node=<C> err=outcome_unknown: ...
-REMOTE completion err=unavailable: Link connection is unavailable kind= bound=true
-```
-
-即：候选集合本身是齐的（self + 两台对端都进了聚合），但**每一路远端读取都在 completion 阶段拿到 `Link connection is unavailable`**，另有一路是缓存来源但不在已知地址里。所以问题不在「executor 少收集了节点」，而在资源流打开、收到 receipt 之后，读 completion 时链路被判为不可用。复现时可用上面的两处日志定位。
+修复分两处：启动时调用 `initKnowledge`（失败则 `closeKnowledge` 后退出），nil 分支改回 `DefaultKnowledgePage()`。修复后原命令 20.2 秒通过，无 `outcome_unknown`；抽掉 `initKnowledge` 调用做变异会重新红在同一行。
 
 ## race 全量
 
