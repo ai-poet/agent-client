@@ -87,13 +87,17 @@ type nativeUpdater interface {
 
 // mygoNative serializes changes to MyGo's process-wide source and prerelease
 // settings. An installed release retains its own source after Check returns.
-type mygoNative struct{ mu sync.Mutex }
+type mygoNative struct{}
+
+// mygoMu protects MyGo's process-wide source and prerelease settings across
+// every Client instance.
+var mygoMu sync.Mutex
 
 func (m *mygoNative) Enabled() bool { return mygo.Updater.Enabled() }
 
 func (m *mygoNative) check(ctx context.Context, source mygo.UpdateSource, prereleases bool) (*nativeRelease, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	mygoMu.Lock()
+	defer mygoMu.Unlock()
 	mygo.Updater.SetSource(source)
 	mygo.Updater.SetPrereleases(prereleases)
 	found, err := mygo.Updater.Check(ctx)
@@ -129,6 +133,11 @@ func classifyInstall(err error) error {
 	}
 	if errors.Is(err, ErrSignature) {
 		return err
+	}
+	for _, class := range []error{ErrNetwork, ErrNotFound, ErrConfiguration, ErrInstall} {
+		if errors.Is(err, class) {
+			return err
+		}
 	}
 	message := strings.ToLower(err.Error())
 	if strings.Contains(message, "not signed") || strings.Contains(message, "signature") || strings.Contains(message, "invalid update public key") {
