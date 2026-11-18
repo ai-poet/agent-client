@@ -341,6 +341,10 @@ func (a *App) View(c *ui.Context) {
 	system := c.Theme().Dark
 	theme.Apply(c, a.Theme, a.Mode)
 	kit.SetEffects(a.Effects)
+	if a.Hooks.AuthGate != nil && a.Hooks.AuthGate(c) {
+		kit.ToastHost(c)
+		return
+	}
 	a.shortcuts(c)
 	a.MountPanel()
 	a.followSelection()

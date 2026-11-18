@@ -4,6 +4,7 @@
 package settings
 
 import (
+	cheapauthui "github.com/ai-poet/agent-client/desktop/internal/desktop/cheapauth"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
@@ -22,6 +23,7 @@ const (
 	Conversation Section = "settings_conversation"
 	Shortcuts    Section = "settings_shortcuts"
 	Providers    Section = "settings_providers"
+	CheapAccount Section = "cheaprouter_account"
 	Connectors   Section = "settings_connectors"
 	Teams        Section = "settings_teams"
 	Plugins      Section = "settings_plugins"
@@ -55,7 +57,7 @@ var Groups = []struct {
 		{Shortcuts, icons.ALargeSmall},
 	}},
 	{"settings_group_ai", []Item{
-		{Providers, icons.Cpu}, {Connectors, icons.Plug}, {Teams, icons.Users}, {Plugins, icons.Gallery},
+		{CheapAccount, icons.CircleUser}, {Providers, icons.Cpu}, {Connectors, icons.Plug}, {Teams, icons.Users}, {Plugins, icons.Gallery},
 		{Skills, icons.Bot}, {Knowledge, icons.BookOpen}, {Media, icons.Image},
 	}},
 	{"settings_group_tools", []Item{
@@ -77,6 +79,8 @@ type State struct {
 	Details     *Detail
 	pluginPages []PluginPage
 	*Model
+	// CheapRouter is the live account page; preview windows leave it nil.
+	CheapRouter *cheapauthui.State
 }
 
 // New opens on General, as Workspace does, over the preview's settings.
@@ -113,6 +117,9 @@ func (s *State) Open(sec Section) {
 
 // Title is the header's title for the section.
 func Title(c *ui.Context, s *State) string {
+	if s.Section == CheapAccount {
+		return "CheapRouter 账号"
+	}
 	for _, page := range s.pluginPages {
 		if page.Section == s.Section {
 			return page.Label
@@ -124,6 +131,10 @@ func Title(c *ui.Context, s *State) string {
 // Page builds the section's page in the settings frame: its title and
 // description over its groups (SettingsPage).
 func Page(c *ui.Context, s *State, d *preview.Data, look Look) {
+	if s.Section == CheapAccount {
+		cheapauthui.Page(c, s.CheapRouter)
+		return
+	}
 	for _, page := range s.pluginPages {
 		if page.Section == s.Section {
 			if page.Render != nil {

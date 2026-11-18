@@ -1,7 +1,6 @@
 package shell
 
 import (
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/host"
@@ -11,6 +10,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/panel"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/panes"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
+	"github.com/egoist/mygo/ui"
 	"slices"
 )
 
@@ -26,6 +26,9 @@ type Hooks struct {
 	FilePreview func(*ui.Context)
 	BeforeFrame func(*ui.Context)
 	AfterFrame  func()
+	// AuthGate draws the account sign-in gate and returns true while the
+	// ordinary workspace must remain hidden. Preview leaves it nil.
+	AuthGate func(*ui.Context) bool
 	// DemoChanged runs when Demo mode went on, off or into another
 	// language, before the frame's other hooks.
 	DemoChanged      func()

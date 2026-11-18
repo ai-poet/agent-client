@@ -39,6 +39,7 @@ type Runtime struct {
 	browser                  *browserState
 	browserSources           *browserSources // a test's Chrome profile, key and cookie store
 	authorizations           *authorizationState
+	cheapAuth                *cheapAuthRuntime
 	packages                 *packageState
 	parent                   *Runtime
 	network                  *Network
@@ -246,6 +247,7 @@ func NewWithPreferences(ctx context.Context, controller *client.Client, prefs *p
 	r.App.Hooks = shell.Hooks{BeforeFrame: r.drain, AfterFrame: r.afterFrame, Refresh: r.Refresh,
 		ReadNotice: r.markNotice, ReadNotices: r.readNotices, DismissRead: r.dismissRead, DismissNotices: r.dismissNotices, OpenKnowledge: r.openKnowledge,
 		CaptureSelection: func() { r.CaptureSelection(nil) }}
+	r.initCheapAuth()
 	r.App.Messages.OpenLink = r.openChatLink
 	r.App.Messages.Embed = r.chatEmbed
 	r.App.Messages.SessionLink = func(link string) bool { return client.SessionLink(normalizeLink(link)) != nil }
@@ -374,6 +376,9 @@ func (r *Runtime) Close() error {
 	r.closeAttachments()
 	r.invalidateFilePreview(nil)
 	r.closeWorkspace()
+	if r.cheapAuth != nil && r.cheapAuth.attempt != nil {
+		r.cheapAuth.attempt.flow.Close()
+	}
 	r.cancel()
 	r.workers.Wait()
 	r.observers.Wait()
