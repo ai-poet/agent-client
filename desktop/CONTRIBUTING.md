@@ -176,6 +176,10 @@ source, C ABI, dependency pins or target changes.
 `sh native/iroh/build.sh` builds the local Host/Desktop library into that
 directory. Use the pinned Rust toolchain in `PATH`; do not substitute another
 Cargo implementation.
+`native/iroh` and `native/turso` each declare an empty `[workspace]` so their
+build scripts use the crate's own lockfile instead of the enclosing Rust
+application workspace. Both pin Rust 1.98.0 in `rust-toolchain.toml`; an older
+system Cargo without rustup does not select that toolchain automatically.
 
 The Flutter build runs the Mobile adapter build itself: Gradle's
 `prepareSailryNative` task and the Xcode `Build Sailry Native` phase call

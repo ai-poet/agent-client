@@ -702,6 +702,14 @@ keyboard behavior. CrychicUI components use the adapters where external data or
 presentation needs them. Floating surfaces remain Kit's frost; right-click menus
 and confirmation-only dialogs use the operating system. Forms remain Kit surfaces.
 
+CheapRouter sign-in in `internal/desktop/cheapauth` uses the pinned lobe-mygo
+actions, fields and feedback with Lobe's semantic tokens. The full-window gate
+applies that theme only while authentication is required; sign-in embedded in
+account settings scopes it to a `ui.Themed` subtree. Connected account settings
+and other pages retain Kit. Presentation state and callbacks still belong to
+the existing CheapRouter controller; the component library owns no credentials
+or network work.
+
 Conversations center the messages and composer in the whole main pane. The
 transcript's scroll viewport fills that pane, with its scrollbar at the right
 edge. Wide panes show an activity card in the transcript's right margin, with a
