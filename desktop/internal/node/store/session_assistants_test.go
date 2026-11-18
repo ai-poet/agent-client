@@ -162,7 +162,7 @@ func TestAssistantTurnPackageUpdates(t *testing.T) {
 		info.Summary.Digest = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 		version = "0.1.2"
 		info.Summary.Version = &version
-		info.Extension.Desktop.Conversations[0].Resource = protocol.PluginConversationResourcePlugin
+		info.Extension.Desktop.Conversations[0].Resource = protocol.PluginConversationResourceWorkspace
 		if _, err = InstallPlugin(ctx, db, info, owner.Summary.Revision, true); err != nil {
 			return err
 		}

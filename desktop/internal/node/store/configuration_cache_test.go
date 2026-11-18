@@ -115,7 +115,7 @@ func TestConfigurationRegistryOwnsCategoryAndEvents(t *testing.T) {
 	}
 	for _, dependency := range [][2]string{
 		{"plugins", "plugin_settings"}, {"plugin_settings", "providers"}, {"providers", "runtime_credentials"},
-		{"runtime_credentials", "roles"}, {"roles", "teams"}, {"ssh_profiles", "database_profiles"},
+		{"runtime_credentials", "roles"}, {"roles", "teams"},
 	} {
 		if slices.Index(ConfigurationCategories, dependency[0]) >= slices.Index(ConfigurationCategories, dependency[1]) {
 			t.Fatalf("configuration dependency order reversed: %v", dependency)

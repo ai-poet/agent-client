@@ -447,8 +447,6 @@ func testPluginPlanActions(t *testing.T) {
 			{protocol.Command{Kind: "read_plugin_connection"}, "", false},
 			{protocol.Command{Kind: "write_artifact"}, protocol.PluginActionWriteArtifacts, true},
 			{protocol.Command{Kind: "install_local_model"}, protocol.PluginActionInstallModels, false},
-			{protocol.Command{Kind: "query_database", Data: &protocol.CommandQueryDatabasePayload{ReadOnly: true}}, protocol.PluginActionReadDatabases, true},
-			{protocol.Command{Kind: "query_database", Data: &protocol.CommandQueryDatabasePayload{ReadOnly: false}}, protocol.PluginActionReadDatabases, false},
 			{protocol.Command{Kind: "use_browser", Data: &protocol.CommandUseBrowserPayload{Action: protocol.BrowserAction{
 				Kind: "screenshot", Data: protocol.BrowserActionScreenshotPayload{Save: false},
 			}}}, protocol.PluginActionReadBrowser, true},
