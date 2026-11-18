@@ -37,7 +37,7 @@ func TestRemovedSessionWorkspace(t *testing.T) {
 	}
 	gone := func(path string) {
 		t.Helper()
-		deadline := time.Now().Add(10 * time.Second)
+		deadline := time.Now().Add(testBudget() / 3)
 		for {
 			if _, err := os.Lstat(path); os.IsNotExist(err) {
 				return
@@ -75,7 +75,7 @@ func TestRemovedSessionWorkspace(t *testing.T) {
 	case release := <-other:
 		release()
 		change.close()
-	case <-time.After(10 * time.Second):
+	case <-time.After(testBudget() / 3):
 		change.close()
 		(<-other)()
 		t.Fatal("removing a worktree stalled an effect in another root")

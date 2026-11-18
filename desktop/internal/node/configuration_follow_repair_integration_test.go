@@ -26,7 +26,7 @@ func TestConfigurationFollowRePairRestoresResourceDirectoryIntegration(t *testin
 			name = "rejected_initial_observation"
 		}
 		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*testBudget()/2)
 			defer cancel()
 			scope := link.NetworkScope{Bind: "127.0.0.1:0"}
 			environment := process.NewEnvironment([]string{"PATH=/usr/bin:/bin"})

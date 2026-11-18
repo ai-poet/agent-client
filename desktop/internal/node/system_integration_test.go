@@ -154,7 +154,7 @@ func TestSystemComputerIntegration(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("the helper's grants are gated on macOS only")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 180*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 6*testBudget())
 	defer cancel()
 	helpers, helper := buildComputerHelper(t)
 	unavailable := func(err error, message string) bool {
@@ -262,9 +262,9 @@ func TestSystemComputerIntegration(t *testing.T) {
 				return *value, nil
 			}
 			t.Fatalf("output data %T", result.Output.Data)
-		case <-time.After(20 * time.Second):
+		case <-time.After(2 * testBudget() / 3):
 			// The helper's own deadline is 15 seconds.
-			t.Fatal("the permission command did not complete within 20 seconds")
+			t.Fatal("the permission command did not complete within its test budget")
 		}
 		return protocol.ComputerPermissions{}, nil
 	}
@@ -385,9 +385,9 @@ func TestSystemComputerIntegration(t *testing.T) {
 	defer subscription.Close()
 	commandFixture(t, node, protocol.Command{Kind: "submit_turn", Data: protocol.CommandSubmitTurnPayload{Session: session.ID, ExpectedRevision: session.Revision, Message: protocol.ConversationInput{Text: "Look at the window and press the button"}}})
 	approvals := 0
-	// The turn starts the helper and waits for one approval: 60 seconds
+	// The turn starts the helper and waits for one approval: two base budgets
 	// bound the whole loop, each wait for an event included.
-	deadline, stop := context.WithTimeout(ctx, 60*time.Second)
+	deadline, stop := context.WithTimeout(ctx, 2*testBudget())
 	defer stop()
 	for completed := false; !completed; {
 		var history protocol.ConversationHistory

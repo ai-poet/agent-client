@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model"
@@ -44,7 +43,7 @@ func (script *afterTurnModel) Stream(context.Context, fantasy.Call) (fantasy.Str
 // handler continues the conversation once: the callback is called for the
 // user's turn and again, marked automatic, for the turn it started.
 func TestPluginAfterTurn(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testBudget())
 	defer cancel()
 	script := &afterTurnModel{}
 	environment := process.NewEnvironment([]string{"PATH=/usr/bin:/bin"})

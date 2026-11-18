@@ -91,7 +91,7 @@ func TestStoredFileCollection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		for deadline := time.Now().Add(testBudget() / 3); ; time.Sleep(5 * time.Millisecond) {
 			if entries, err := os.ReadDir(directory); err != nil {
 				t.Fatal(err)
 			} else if len(entries) == 4 {

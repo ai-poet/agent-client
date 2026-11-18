@@ -17,9 +17,6 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	gogit "github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/operations"
@@ -27,11 +24,14 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/node/process"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	gogit "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 // acceptanceWait bounds every wait of the acceptance tests that does not
 // load a local model.
-const acceptanceWait = 15 * time.Second
+var acceptanceWait = testBudget() / 2
 
 // acceptanceCall sends one command through Node.Dispatch and decodes its
 // answer, or returns its fault.
@@ -739,11 +739,11 @@ func TestCodeIndexCommands(t *testing.T) {
 		acceptanceDo[protocol.OutputCodeIndexQueryCancelledPayload](t, node, protocol.Command{Kind: "cancel_code_index_query", Data: protocol.CommandCancelCodeIndexQueryPayload{Request: early.ID}})
 		_, failure := acceptanceRequest[protocol.CodeIndexSearchPage](t, node, early, acceptanceWait)
 		acceptanceFault(t, "query cancelled early", failure, protocol.ErrorCodeCancelled, "code query was cancelled")
-		// The interrupted index completes on later queries: reconcile works
-		// within a 15 s budget per query, so this wait is bounded at 60 s.
-		finish := time.Now().Add(60 * time.Second)
+		// The interrupted index completes on later queries: reconciliation may
+		// span several per-query budgets, so allow two base budgets here.
+		finish := time.Now().Add(2 * testBudget())
 		for {
-			page, failure := acceptanceRequest[protocol.CodeIndexSearchPage](t, node, protocol.NewRequest(node.ID(), protocol.Command{Kind: "search_code", Data: protocol.CommandSearchCodePayload{Worktree: worktree, Query: protocol.CodeIndexSearch{Query: "Bulk239Function299", Limit: 20}}}), 30*time.Second)
+			page, failure := acceptanceRequest[protocol.CodeIndexSearchPage](t, node, protocol.NewRequest(node.ID(), protocol.Command{Kind: "search_code", Data: protocol.CommandSearchCodePayload{Worktree: worktree, Query: protocol.CodeIndexSearch{Query: "Bulk239Function299", Limit: 20}}}), testBudget())
 			if failure != nil {
 				t.Fatalf("search after cancellation: %+v", failure)
 			}

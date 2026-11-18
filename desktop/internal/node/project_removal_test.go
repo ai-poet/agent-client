@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	git "github.com/go-git/go-git/v5"
 	"github.com/ai-poet/agent-client/desktop/internal/node/process"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	git "github.com/go-git/go-git/v5"
 )
 
 // projectFixture registers a Git directory and returns it with its main worktree.
@@ -115,7 +115,7 @@ func TestProjectRemovalClosesResources(t *testing.T) {
 		if fault := remove(t, node, project); fault != nil {
 			t.Fatal(fault)
 		}
-		deadline := time.Now().Add(20 * time.Second)
+		deadline := time.Now().Add(2 * testBudget() / 3)
 		for {
 			items := node.processes.List(inside.ID)
 			if len(items) == 1 && items[0].Status.Kind != "running" && items[0].Status.Kind != "stopping" {

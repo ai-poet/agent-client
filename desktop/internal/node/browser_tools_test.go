@@ -246,7 +246,7 @@ func TestBrowserToolBinding(t *testing.T) {
 		}
 		settled := func(what string, reached func() bool) {
 			t.Helper()
-			for deadline := time.Now().Add(10 * time.Second); !reached(); time.Sleep(5 * time.Millisecond) {
+			for deadline := time.Now().Add(testBudget() / 3); !reached(); time.Sleep(5 * time.Millisecond) {
 				if time.Now().After(deadline) {
 					t.Fatal(what)
 				}

@@ -23,7 +23,7 @@ func TestHostRemovalNotifiesRemoteAndAlwaysForgetsLocally(t *testing.T) {
 			name = "offline"
 		}
 		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 35*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 7*testBudget()/6)
 			defer cancel()
 			scope := link.NetworkScope{Bind: "127.0.0.1:0"}
 			host, err := StartWithOptions(ctx, filepath.Join(t.TempDir(), "host"), Options{Network: &scope, MCP: fixtureMCPOptions()})

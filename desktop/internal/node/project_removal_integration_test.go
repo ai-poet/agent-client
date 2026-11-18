@@ -67,7 +67,7 @@ func TestTerminalResultUnrecorded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(testBudget())
 	for len(node.terminals.List(worktree)) != 1 {
 		if time.Now().After(deadline) {
 			t.Fatal("the terminal did not start")

@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/jonboulle/clockwork"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/operations"
 	"github.com/ai-poet/agent-client/desktop/internal/node/plugins"
 	"github.com/ai-poet/agent-client/desktop/internal/node/process"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/jonboulle/clockwork"
 )
 
 // scheduleScript answers with text, except that it first makes the one tool
@@ -150,7 +150,7 @@ func TestScheduledTaskStart(t *testing.T) {
 	fired := func(t *testing.T, task string) protocol.Session {
 		t.Helper()
 		var session protocol.Session
-		deadline := time.Now().Add(60 * time.Second)
+		deadline := time.Now().Add(2 * testBudget())
 		for {
 			// The dispatcher may be between timers; each step lets a new one expire.
 			clock.Advance(time.Minute)

@@ -10,7 +10,6 @@ import (
 	"slices"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
@@ -160,7 +159,7 @@ func watchResourceDirectory(t *testing.T, controller, source *Node) (*resourceDi
 	transport := newResourceDirectoryTransport(t, source)
 	remote := client.New(transport)
 	t.Cleanup(func() { _ = remote.Close() })
-	ctx, cancel := context.WithTimeout(resourceCatalogFixture(t, controller, map[protocol.NodeID]*client.Client{source.ID(): remote}), 15*time.Second)
+	ctx, cancel := context.WithTimeout(resourceCatalogFixture(t, controller, map[protocol.NodeID]*client.Client{source.ID(): remote}), testBudget()/2)
 	t.Cleanup(cancel)
 	owner, err := controller.Subscribe(ctx, controller.ID(), protocol.Topic{Kind: "node"})
 	if err != nil {
@@ -375,7 +374,7 @@ func TestResourceDirectoryKeepsConnectedDiskSummariesUnavailableUntilMetadataIsC
 	transport.fault = resourceUnavailable()
 	remote := client.New(transport)
 	t.Cleanup(func() { _ = remote.Close() })
-	ctx, cancel := context.WithTimeout(resourceCatalogFixture(t, controller, map[protocol.NodeID]*client.Client{source.ID(): remote}), 15*time.Second)
+	ctx, cancel := context.WithTimeout(resourceCatalogFixture(t, controller, map[protocol.NodeID]*client.Client{source.ID(): remote}), testBudget()/2)
 	t.Cleanup(cancel)
 	t.Cleanup(func() { controller.invalidateResourceProjection(source.ID()) })
 	if err := controller.profile.Store.Node.Write(ctx, func(db *sql.Conn) error {
@@ -468,7 +467,7 @@ func TestResourceDirectoryRevocationDiscardsInFlightSuccessfulCapture(t *testing
 	transport.knowledgeGate, transport.knowledgeStarted = gate, started
 	remote := client.New(transport)
 	t.Cleanup(func() { _ = remote.Close() })
-	ctx, cancel := context.WithTimeout(resourceCatalogFixture(t, controller, map[protocol.NodeID]*client.Client{source.ID(): remote}), 15*time.Second)
+	ctx, cancel := context.WithTimeout(resourceCatalogFixture(t, controller, map[protocol.NodeID]*client.Client{source.ID(): remote}), testBudget()/2)
 	t.Cleanup(cancel)
 	t.Cleanup(func() { controller.invalidateResourceProjection(source.ID()) })
 	if err := remote.Start(ctx); err != nil {

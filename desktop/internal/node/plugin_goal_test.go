@@ -167,7 +167,7 @@ func newGoalScript() *goalScript {
 
 func newGoalFixture(t *testing.T, mode protocol.WorkMode) *goalFixture {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 4*testBudget())
 	t.Cleanup(cancel)
 	f := &goalFixture{t: t, ctx: ctx, profile: filepath.Join(t.TempDir(), "profile")}
 	f.start(newGoalScript())
@@ -302,7 +302,7 @@ func (f *goalFixture) wait(name string, done func([]protocol.ConversationRun, ma
 	f.t.Helper()
 	// A chain of 25 turns beside the Nodes of the other subtests outgrows
 	// half a minute on a loaded machine; the fixture context bounds the test.
-	deadline := time.Now().Add(90 * time.Second)
+	deadline := time.Now().Add(3 * testBudget())
 	for {
 		runs, goal := f.read()
 		if done(runs, goal) {
@@ -521,7 +521,7 @@ func TestGoalLoop(t *testing.T) {
 
 	t.Run("the turn limit wraps up and pauses with its reason", func(t *testing.T) {
 		if raceInstrumented {
-			t.Skip("26-turn simulation exceeds the race-instrumented time budget; CI runs it uninstrumented")
+			t.Skip("26-turn simulation exceeds eight minutes under race instrumentation; CI runs it uninstrumented")
 		}
 		t.Parallel()
 		f := newGoalFixture(t, protocol.WorkModeCode)
@@ -658,7 +658,7 @@ func TestGoalLoop(t *testing.T) {
 		if !stopped {
 			t.Fatal("the background child has no turn to stop")
 		}
-		deadline := time.Now().Add(30 * time.Second)
+		deadline := time.Now().Add(testBudget())
 		for {
 			status, reason, state := shown(f)
 			if status == "paused" && reason == "stopped" && state == "paused" {

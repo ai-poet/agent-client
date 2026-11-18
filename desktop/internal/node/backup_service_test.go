@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonboulle/clockwork"
 	"github.com/ai-poet/agent-client/desktop/internal/core"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/node/backup"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/jonboulle/clockwork"
 	"lukechampine.com/blake3"
 )
 
@@ -549,7 +549,7 @@ func TestScheduleNextRun(t *testing.T) {
 	// The dispatcher runs the export on its own goroutine; wait for it with a
 	// generous budget so a slow (race-instrumented) run is not mistaken for a
 	// missing export, and report how long it took when it never arrives.
-	deadline := time.Now().Add(3 * time.Minute)
+	deadline := time.Now().Add(6 * testBudget())
 	for {
 		// The dispatcher may be between timers; each step lets a new one expire.
 		clock.Advance(time.Second)
@@ -573,7 +573,7 @@ func TestScheduleNextRun(t *testing.T) {
 	}
 	last := func() protocol.BackupOutcome {
 		t.Helper()
-		deadline := time.Now().Add(30 * time.Second)
+		deadline := time.Now().Add(testBudget())
 		for {
 			if settings := read(); settings.Last != nil {
 				return *settings.Last

@@ -17,12 +17,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonboulle/clockwork"
 	"github.com/ai-poet/agent-client/desktop/internal/node/plugins"
 	"github.com/ai-poet/agent-client/desktop/internal/node/process"
 	"github.com/ai-poet/agent-client/desktop/internal/node/providers"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/jonboulle/clockwork"
 )
 
 type accountHTTP func(*http.Request) (*http.Response, error)
@@ -113,7 +113,7 @@ func TestProviderAuthorizationAdmissionAndCancellation(t *testing.T) {
 	if !ok {
 		t.Fatal("provider login did not return its captured attempt")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testBudget()/3)
 	defer cancel()
 	stream, err := node.Subscribe(ctx, node.ID(), protocol.Topic{Kind: "provider_login", Data: attempt.ID})
 	if err != nil {
@@ -453,7 +453,7 @@ func TestCopilotSignIn(t *testing.T) {
 	if !ok {
 		t.Fatal("provider login did not return its captured attempt")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testBudget())
 	defer cancel()
 	stream, err := node.Subscribe(ctx, node.ID(), protocol.Topic{Kind: "provider_login", Data: attempt.ID})
 	if err != nil {

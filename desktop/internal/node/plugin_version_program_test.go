@@ -80,7 +80,7 @@ func TestPluginReplacementKeepsCapturedProgram(t *testing.T) {
 	node.pluginCommitted(change, t.Context(), nil)
 	select {
 	case <-entry.Process.Done():
-	case <-time.After(10 * time.Second):
+	case <-time.After(testBudget() / 3):
 		t.Fatal("disabling a package did not stop its program")
 	}
 }

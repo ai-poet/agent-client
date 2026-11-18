@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model"
@@ -78,7 +77,7 @@ func (script *turnFactsModel) Stream(_ context.Context, call fantasy.Call) (fant
 // the tools the model called, the turn's and the session's usage, and the
 // automatic chain with the limit the continuation declared.
 func TestPluginTurnFacts(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testBudget())
 	defer cancel()
 	script := &turnFactsModel{}
 	environment := process.NewEnvironment([]string{"PATH=/usr/bin:/bin"})

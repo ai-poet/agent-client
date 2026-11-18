@@ -56,7 +56,7 @@ func TestSharedSessionQueuesUsersInCanonicalHistory(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testBudget()/2)
 	defer cancel()
 	first, second := protocol.NodeID{96}, protocol.NodeID{97}
 	if err := node.profile.Store.Node.Write(ctx, func(db *sql.Conn) error {

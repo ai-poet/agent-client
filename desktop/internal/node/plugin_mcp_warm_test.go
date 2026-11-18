@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
@@ -60,7 +59,7 @@ func TestMCPWarm(t *testing.T) {
 	// published at least the given number of times.
 	connected := func(t *testing.T, subscription link.Subscription, published int) {
 		t.Helper()
-		waiting, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+		waiting, cancel := context.WithTimeout(t.Context(), 2*testBudget()/3)
 		defer cancel()
 		events := 0
 		for {

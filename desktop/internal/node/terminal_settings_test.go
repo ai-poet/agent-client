@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
@@ -137,7 +136,7 @@ func TestTerminalInventory(t *testing.T) {
 	t.Parallel()
 	node := nodeFixture(t)
 	session := sessionFixture(t, node)
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*testBudget())
 	defer cancel()
 	subscription, err := node.Subscribe(ctx, node.ID(), protocol.Topic{Kind: "node"})
 	if err != nil {

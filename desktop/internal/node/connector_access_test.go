@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonboulle/clockwork"
 	"github.com/ai-poet/agent-client/desktop/internal/node/authorization"
 	"github.com/ai-poet/agent-client/desktop/internal/node/plugins"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/jonboulle/clockwork"
 	"golang.org/x/oauth2"
 )
 
@@ -163,7 +163,7 @@ func TestConnectorRenewal(t *testing.T) {
 			if !errors.Is(err, context.Canceled) {
 				t.Errorf("cancelled waiter returned %v", err)
 			}
-		case <-time.After(10 * time.Second):
+		case <-time.After(testBudget() / 3):
 			// Only a failing implementation waits: the owner remains at its
 			// controlled HTTP boundary until the cancellation was observed.
 			t.Error("cancelled waiter remained behind an unrelated renewal")
@@ -314,7 +314,7 @@ func TestConnectorRenewal(t *testing.T) {
 			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("offline")}
 		}
 		clock := clockwork.NewFakeClockAt(time.Now())
-		bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
+		bounded, cancel := context.WithTimeout(ctx, testBudget()/3)
 		defer cancel()
 		finished := make(chan struct{})
 		go func() {

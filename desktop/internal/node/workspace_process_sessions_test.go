@@ -35,12 +35,12 @@ func TestRemovedSessionStopsCommands(t *testing.T) {
 		if session != removed {
 			t.Fatal("removal stopped another session's command")
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(testBudget() / 3):
 		t.Fatal("removed session kept its command")
 	}
 	updates, release := service.Subscribe(removed)
 	defer release()
-	deadline := time.After(10 * time.Second)
+	deadline := time.After(testBudget() / 3)
 	for items := <-updates; len(items) != 0; {
 		select {
 		case items = <-updates:
@@ -67,7 +67,7 @@ func TestRemovedSessionStopsCommands(t *testing.T) {
 	close(cleaned)
 	select {
 	case <-closed:
-	case <-time.After(10 * time.Second):
+	case <-time.After(testBudget() / 3):
 		t.Fatal("the removed session's cleanup did not end")
 	}
 }

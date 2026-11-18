@@ -29,7 +29,7 @@ import (
 // These are real authenticated loopback links and local stores. Text indexing
 // uses keyword mode, so no model, model download, or user profile is involved.
 func TestMultiHostControllerRoutesIntegration(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*testBudget())
 	defer cancel()
 	start := func(name string) *Node {
 		network := link.NetworkScope{Bind: "127.0.0.1:0"}
@@ -419,7 +419,7 @@ func TestMultiHostControllerRoutesIntegration(t *testing.T) {
 		t.Fatalf("revoke entry device: %+v: %v", output, err)
 	}
 	wait("revoked entry closes its routed subscription", func() bool {
-		next, release := context.WithTimeout(ctx, 100*time.Millisecond)
+		next, release := context.WithTimeout(ctx, testBudget()/300)
 		defer release()
 		_, err := viaFeed.Next(next)
 		return err != nil && ctx.Err() == nil && !errors.Is(err, context.DeadlineExceeded)
@@ -449,7 +449,7 @@ func TestMultiHostControllerRoutesIntegration(t *testing.T) {
 	if err != nil || !valid || len(localPage.Hits) != 1 || localPage.Hits[0].Citation.Node != c.ID() {
 		t.Fatalf("local knowledge depended on an offline controller: %+v: %v", output, err)
 	}
-	unavailable, release := context.WithTimeout(executorCtx, 3*time.Second)
+	unavailable, release := context.WithTimeout(executorCtx, testBudget()/10)
 	defer release()
 	if _, err := c.dispatchCallbackResult(unavailable, protocol.NewRequest(a.ID(), protocol.Command{Kind: "query_knowledge", Data: &query})); err == nil {
 		t.Fatal("offline controller route returned an unrelated local result")

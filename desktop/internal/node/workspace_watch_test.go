@@ -28,7 +28,7 @@ func TestWorkspaceWatch(t *testing.T) {
 	}
 	next := func(t *testing.T, events link.Subscription) (protocol.Update, error) {
 		t.Helper()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), testBudget()/3)
 		defer cancel()
 		return events.Next(ctx)
 	}
@@ -77,7 +77,7 @@ func TestWorkspaceWatch(t *testing.T) {
 		if err := os.WriteFile(changed, []byte("package later\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		deadline := time.Now().Add(10 * time.Second)
+		deadline := time.Now().Add(testBudget() / 3)
 		for {
 			if _, err := next(t, first); err != nil {
 				t.Fatal(err)

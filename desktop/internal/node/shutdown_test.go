@@ -38,7 +38,7 @@ func TestStopDeadline(t *testing.T) {
 		if !errors.Is(err, core.ErrShutdownTimeout) || !strings.Contains(err.Error(), "requests in flight did not stop") {
 			t.Fatalf("shutdown past its deadline: %v", err)
 		}
-		if elapsed := time.Since(started); elapsed > 5*time.Second {
+		if elapsed := time.Since(started); elapsed > testBudget()/6 {
 			t.Fatalf("shutdown waited %v for work that ignores cancellation", elapsed)
 		}
 		if err := stuck.Stop(ctx); !errors.Is(err, core.ErrShutdownTimeout) {
@@ -105,7 +105,7 @@ func TestStopDeadline(t *testing.T) {
 			if err != nil {
 				break
 			}
-			if time.Since(started) > 10*time.Second {
+			if time.Since(started) > testBudget()/3 {
 				t.Fatal("the abandoned sequence did not end")
 			}
 		}

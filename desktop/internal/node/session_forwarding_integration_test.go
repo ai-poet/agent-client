@@ -23,7 +23,7 @@ import (
 // creates a session after the controller cache is ready. The session and turn
 // retain the source identities and use only cached runtime credentials.
 func TestSessionForwardingIntegration(test *testing.T) {
-	ctx, cancel := context.WithTimeout(test.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(test.Context(), 2*testBudget())
 	defer cancel()
 	authorizations := make(chan string, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

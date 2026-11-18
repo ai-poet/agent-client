@@ -263,7 +263,7 @@ func TestTelemetryOffSendsNothing(t *testing.T) {
 		}
 		reached := func(count int) {
 			t.Helper()
-			for deadline := time.Now().Add(10 * time.Second); server.count() < count; time.Sleep(5 * time.Millisecond) {
+			for deadline := time.Now().Add(testBudget() / 3); server.count() < count; time.Sleep(5 * time.Millisecond) {
 				if time.Now().After(deadline) {
 					t.Fatalf("requests = %d, want %d", server.count(), count)
 				}
@@ -805,7 +805,7 @@ func TestPowerAssertionOwnership(t *testing.T) {
 			t.Fatalf("running installation = %v %d", held, acquired)
 		}
 		working()
-		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(time.Millisecond) {
+		for deadline := time.Now().Add(testBudget() / 3); ; time.Sleep(time.Millisecond) {
 			if held, _, _ := backend.counts(); !held {
 				break
 			}

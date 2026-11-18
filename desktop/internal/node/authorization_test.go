@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/node/admission"
@@ -117,7 +116,7 @@ func TestProjectUsersAndSubscriptionRevocation(t *testing.T) {
 	if result.Fault != nil {
 		t.Fatal(result.Fault)
 	}
-	timed, cancel := context.WithTimeout(ctx, time.Second)
+	timed, cancel := context.WithTimeout(ctx, testBudget()/30)
 	defer cancel()
 	if _, err = stream.Next(timed); err == nil {
 		t.Fatal("detail observation survived lost access")

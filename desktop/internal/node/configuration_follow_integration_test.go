@@ -20,7 +20,7 @@ import (
 // Real loopback transports exercise the follow workers and target observers. No
 // model request is made, and MCP startup uses the deterministic unavailable fixture.
 func TestConfigurationFollowIntegration(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*testBudget())
 	defer cancel()
 	scope := link.NetworkScope{Bind: "127.0.0.1:0"}
 	environment := process.NewEnvironment([]string{"PATH=/usr/bin:/bin"})

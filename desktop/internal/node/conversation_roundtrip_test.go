@@ -8,7 +8,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
@@ -106,7 +105,7 @@ func TestAgentRoundTrip(t *testing.T) {
 	if len(streaming.Page.Queue.Items) != 0 {
 		t.Fatal("committed input remained in the pending queue during streaming")
 	}
-	update, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	update, cancel := context.WithTimeout(t.Context(), testBudget()/6)
 	_, followErr := controller.ConfigurationFollow(update, protocol.ConfigurationFollowCommand{Action: "sync"})
 	cancel()
 	if followErr != nil {

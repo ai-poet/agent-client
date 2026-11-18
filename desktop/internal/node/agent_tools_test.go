@@ -523,7 +523,7 @@ func TestAgentManagementTools(t *testing.T) {
 			t.Errorf("an artifact write asked the user: %+v", approval)
 			return "deny"
 		}, write("First"))
-		ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 2*testBudget())
 		defer cancel()
 		stream, err := node.subscribeConversation(ctx, session.ID)
 		if err != nil {

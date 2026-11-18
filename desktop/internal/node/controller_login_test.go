@@ -113,7 +113,7 @@ func TestControllerLoginRecoveryWaitsForPushAndReplaysOriginalReceipt(t *testing
 	request := protocol.NewRequest(node.ID(), protocol.Command{Kind: "resume_controller_login", Data: &protocol.CommandResumeControllerLoginPayload{
 		Session: run.Session, Turn: run.Turn, Waiting: run.Waiting.Attempt, Previous: run.Waiting.Credential, Replacement: replacement,
 	}})
-	operation, cancel := context.WithTimeout(ctx, 10*time.Second)
+	operation, cancel := context.WithTimeout(ctx, testBudget()/3)
 	defer cancel()
 	authorized := make(chan error, 1)
 	go func() { authorized <- node.authorizeTurnProvider(operation, invocation) }()
@@ -213,7 +213,7 @@ func TestControllerLoginRecoveryPreflightStopsWhenTaskStops(t *testing.T) {
 	}
 	input := protocol.CommandResumeControllerLoginPayload{Session: run.Session, Turn: run.Turn, Waiting: run.Waiting.Attempt,
 		Previous: run.Waiting.Credential, Replacement: protocol.CredentialRef{Node: run.Waiting.Credential.Node, ID: protocol.NewCredentialID()}}
-	operation, cancel := context.WithTimeout(ctx, 10*time.Second)
+	operation, cancel := context.WithTimeout(ctx, testBudget()/3)
 	defer cancel()
 	started, finished := make(chan struct{}), make(chan error, 1)
 	go func() {
@@ -243,7 +243,7 @@ func TestControllerLoginRecoveryPreflightStopsWhenTaskStops(t *testing.T) {
 
 func TestControllerLoginNaturalRenewalReleasesManualRecoveryPreflight(t *testing.T) {
 	node, ctx, invocation, runtime, write := controllerLoginRunFixture(t)
-	operation, cancel := context.WithTimeout(ctx, 10*time.Second)
+	operation, cancel := context.WithTimeout(ctx, testBudget()/3)
 	defer cancel()
 	var run protocol.ConversationRun
 	if err := node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {
@@ -335,7 +335,7 @@ func TestControllerLoginNaturalRenewalReleasesManualRecoveryPreflight(t *testing
 
 func TestControllerLoginWaitingRefreshesSameReferenceLegacyMetadata(t *testing.T) {
 	node, ctx, invocation, runtime, write := controllerLoginRunFixture(t)
-	operation, cancel := context.WithTimeout(ctx, 10*time.Second)
+	operation, cancel := context.WithTimeout(ctx, testBudget()/3)
 	defer cancel()
 	trustedAccount, trustedTarget := runtime.AccountIdentity, runtime.AuthenticationTarget
 	runtime.AccountIdentity, runtime.AuthenticationTarget, runtime.Revision = "", "", runtime.Revision+1
@@ -454,7 +454,7 @@ func TestControllerLoginExplicitRecoveryContinuesAfterCompletedTool(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	operation, cancel := context.WithTimeout(ctx, 15*time.Second)
+	operation, cancel := context.WithTimeout(ctx, testBudget()/2)
 	defer cancel()
 	subscription, err := node.Subscribe(operation, invocation.Caller, protocol.Topic{Kind: "node"})
 	if err != nil {

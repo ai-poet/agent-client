@@ -17,7 +17,8 @@ func TestWorkspaceLocks(t *testing.T) {
 			return func() { (<-taken)() }, false
 		}
 	}
-	const blocked, free = 100 * time.Millisecond, 10 * time.Second
+	const blocked = 100 * time.Millisecond
+	free := testBudget() / 3
 	t.Run("one_root_at_a_time_and_other_roots_together", func(t *testing.T) {
 		var locks workspaceLocks
 		first := locks.effect("/a")

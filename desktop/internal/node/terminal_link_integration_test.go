@@ -7,18 +7,16 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ai-poet/agent-client/desktop/internal/client"
+	"github.com/ai-poet/agent-client/desktop/internal/link"
+	"github.com/ai-poet/agent-client/desktop/internal/node/process"
+	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/ai-poet/agent-client/desktop/internal/client"
-	"github.com/ai-poet/agent-client/desktop/internal/link"
-	"github.com/ai-poet/agent-client/desktop/internal/node/process"
-	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
 func TestMain(suite *testing.M) {
@@ -64,7 +62,7 @@ func TestTerminalControllerIntegration(test *testing.T) {
 	}
 	for _, remote := range []bool{false, true} {
 		test.Run(fmt.Sprintf("link_%t", remote), func(test *testing.T) {
-			ctx, cancel := context.WithTimeout(test.Context(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(test.Context(), testBudget())
 			defer cancel()
 			scope := link.NetworkScope{Bind: "127.0.0.1:0"}
 			environment := process.NewEnvironment([]string{"PATH=" + bin})

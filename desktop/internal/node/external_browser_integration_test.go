@@ -79,7 +79,7 @@ func TestExternalBrowserNodeIntegration(t *testing.T) {
 	}
 	settled := func(what string, done func() bool) {
 		t.Helper()
-		for deadline := time.Now().Add(15 * time.Second); !done(); time.Sleep(50 * time.Millisecond) {
+		for deadline := time.Now().Add(testBudget() / 2); !done(); time.Sleep(50 * time.Millisecond) {
 			if time.Now().After(deadline) {
 				t.Fatalf("%s; sessions %v; processes:\n%s", what, node.externalBrowser.Sessions(), processes())
 			}
@@ -137,7 +137,7 @@ func TestExternalBrowserNodeIntegration(t *testing.T) {
 	}})
 	select {
 	case <-entered:
-	case <-time.After(60 * time.Second):
+	case <-time.After(2 * testBudget()):
 		t.Fatalf("turn never reached the browser; results %v", worker.results)
 	}
 	if processes() == "" {
