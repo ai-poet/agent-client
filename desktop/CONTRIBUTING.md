@@ -65,10 +65,10 @@ export GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0
 go run ./cmd/update-model-catalog
 ```
 
-Only validated content changes are committed by the workflow. Releases embed
+Only validated content changes are committed by the workflow. Releases ship
 the snapshot in their source commit rather than downloading mutable data while
 packaging. This does not update the reviewed request-policy catalog in
-`internal/node/agent/model/data`.
+`cmd/sailry-desktop/resources/model-capabilities`.
 
 The desktop entry point is:
 

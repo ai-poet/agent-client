@@ -10,6 +10,8 @@ node_modules/
 services/pairing-relay/dist/
 # Native artifacts staged for packaging by `go run ./native/fetch -bundle`.
 /cmd/sailry-desktop/resources/*-*/
+!/cmd/sailry-desktop/resources/ai-logo/
+!/cmd/sailry-desktop/resources/model-capabilities/
 
 # Credentials, signing material and machine-specific configuration.
 .env

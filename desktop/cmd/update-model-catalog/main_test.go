@@ -17,7 +17,7 @@ import (
 const fixtureCatalog = `{"openai":{"name":"Fixture provider","models":{"fixture":{"id":"fixture","name":"Fixture model","reasoning":true,"reasoning_options":[{"type":"effort","values":["low","high"]}],"limit":{"context":32768,"output":4096},"cost":{"input":0.125},"future":{"integer":1234567890123456789}}}}}`
 
 func TestBundledCatalogIsCanonical(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "node", "providers", "data", "model-catalog.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "sailry-desktop", "resources", "providers", "model-catalog.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

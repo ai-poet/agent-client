@@ -1,4 +1,4 @@
-// Command update-model-catalog refreshes the model metadata embedded in Sailry.
+// Command update-model-catalog refreshes the model metadata shipped with Sailry.
 package main
 
 import (
@@ -30,7 +30,7 @@ func main() {
 func run(ctx context.Context, args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("update-model-catalog", flag.ContinueOnError)
 	input := flags.String("input", "", "Read a catalog file instead of downloading it")
-	destination := flags.String("output", "internal/node/providers/data/model-catalog.json", "Write the validated catalog to this file")
+	destination := flags.String("output", "cmd/sailry-desktop/resources/providers/model-catalog.json", "Write the validated catalog to this file")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}

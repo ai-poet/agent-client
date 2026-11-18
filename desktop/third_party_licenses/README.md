@@ -12,7 +12,7 @@ single owning package, and this index lists every location.
 | ADK-Rust sandbox policy, adapted in `internal/node/process` | Apache-2.0 | [adk-support.md](adk-support.md), [adk-LICENSE](adk-LICENSE) |
 | OpenAI Codex patch format, adapted in `internal/node/files` | Apache-2.0 | [codex.md](codex.md), [codex-LICENSE](codex-LICENSE), [codex-NOTICE](codex-NOTICE) |
 | Agent Plugins schema in `schemas/agent-plugins` | Apache-2.0 | [agent-plugins.md](agent-plugins.md), [agent-plugins-Apache-2.0.txt](agent-plugins-Apache-2.0.txt) |
-| AI Logo brand marks, linked from `github.com/yldm-tech/ai-logo/mygo` and drawn through `internal/desktop/icons` | MIT, with per-brand terms | [ai-logo.md](ai-logo.md) |
+| AI Logo brand marks in `cmd/sailry-desktop/resources/ai-logo`, drawn through `internal/desktop/icons` | MIT, with per-brand terms | [ai-logo.md](ai-logo.md) |
 | Phosphor Icons fill set in `internal/desktop/icons/phosphor`, named by plugins as `phosphor:<name>` | MIT | [phosphor-icons.md](phosphor-icons.md), [phosphor-icons-MIT.txt](phosphor-icons-MIT.txt) |
 | CrychicUI components and their bundled Lucide icons, linked into Desktop | MIT, ISC | [crychicui.md](crychicui.md), [crychicui-MIT.txt](crychicui-MIT.txt), [crychicui-THIRD_PARTY_NOTICES.md](crychicui-THIRD_PARTY_NOTICES.md) |
 | pele-go Mermaid renderer, linked into Desktop through CrychicUI's `diagram` package | MIT | [pele-go.md](pele-go.md), [pele-go-MIT.txt](pele-go-MIT.txt) |
@@ -32,7 +32,7 @@ single owning package, and this index lists every location.
 | --- | --- |
 | Goose-derived agent operations, compaction and provider adaptations | `internal/node/agent/model/LICENSE.goose`, `internal/node/agent/output/LICENSE.goose` |
 | Rig request layouts | `internal/node/agent/model/LICENSE.rig` |
-| models.dev model metadata snapshot | `internal/node/providers/data/LICENSE.models.dev` |
+| models.dev model metadata snapshot | `cmd/sailry-desktop/resources/providers/LICENSE.models.dev` |
 | Pi tool preview policy | `internal/node/agent/output/LICENSE.pi`, `internal/node/agent/output/NOTICE` |
 | oh-my-pi Claude wire behavior in model and provider code | `internal/node/agent/model/LICENSE.omp`, `internal/node/providers/LICENSE.omp` |
 | GPUI Kit color names | `internal/desktop/theme/LICENSE.gpui-kit` |

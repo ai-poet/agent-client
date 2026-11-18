@@ -1,19 +1,16 @@
 package model
 
 import (
-	_ "embed"
 	"encoding/json"
 	"strings"
 	"sync"
 
+	"github.com/ai-poet/agent-client/desktop/internal/appresources"
 	"github.com/ai-poet/agent-client/desktop/internal/node/providers"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
 // The pinned source catalog supplies request capabilities, not model-name tables.
-//
-//go:embed data/model-catalog.json
-var catalogJSON []byte
 
 // Request policies come from the one bundled preset catalog.
 var bundledPolicies = sync.OnceValue(func() []protocol.ConversationPresetsRequestPolicy {
@@ -43,7 +40,11 @@ type catalogModel struct {
 
 func catalogEntry(provider, model string) (catalogModel, bool) {
 	catalogOnce.Do(func() {
-		if err := json.Unmarshal(catalogJSON, &catalog); err != nil {
+		raw, err := appresources.Read("model-capabilities/model-catalog.json")
+		if err != nil {
+			panic(err)
+		}
+		if err := json.Unmarshal(raw, &catalog); err != nil {
 			panic("bundled model capability catalog is invalid")
 		}
 	})

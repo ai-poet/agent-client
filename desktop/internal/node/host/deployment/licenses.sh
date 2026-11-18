@@ -84,7 +84,9 @@ done < <(jq -r '.[] | [.name,.version,.manifest_path,(.license_file // "")] | @t
 
 # Notices and locks of the prebuilt runtimes shipped beside the executable.
 mkdir "$task_output/source-notices"
-cp "$task_root/internal/node/providers/data/LICENSE.models.dev" "$task_output/source-notices/"
+cp "$task_root/cmd/sailry-desktop/resources/providers/LICENSE.models.dev" "$task_output/source-notices/"
+cp "$task_root/cmd/sailry-desktop/resources/ai-logo/LICENSE" "$task_output/source-notices/ai-logo-LICENSE"
+cp "$task_root/cmd/sailry-desktop/resources/ai-logo/THIRD_PARTY_NOTICES.md" "$task_output/source-notices/ai-logo-THIRD_PARTY_NOTICES.md"
 cp "$task_root"/native/*-LICENSE "$task_root"/native/*.lock.json "$task_output/source-notices/"
 cp "$task_root/native/turso/LICENSE-Turso" "$task_output/source-notices/turso-LICENSE"
 cp "$task_root/native/turso/SOURCE" "$task_output/source-notices/turso-SOURCE"

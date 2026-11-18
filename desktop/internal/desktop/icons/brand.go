@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/egoist/mygo/ui"
-	ailogo "github.com/yldm-tech/ai-logo/mygo"
 )
 
 // Brand marks come from the AI Logo collection (github.com/yldm-tech/ai-logo),
@@ -46,12 +45,12 @@ func BrandSlug(id string) string {
 // collection does not have, so a miss is searched for once.
 var logos sync.Map
 
-func logo(slug string, variant ailogo.Variant) *ui.SVG {
+func logo(slug string, variant logoVariant) *ui.SVG {
 	key := slug + "/" + string(variant)
 	if found, cached := logos.Load(key); cached {
 		return found.(*ui.SVG)
 	}
-	mark, err := ailogo.Parse(slug, variant)
+	mark, err := parseLogo(slug, variant)
 	if err != nil {
 		mark = nil
 	}
@@ -77,7 +76,7 @@ func Brand(id string) *ui.SVG {
 	if id == "" {
 		return nil
 	}
-	if mark := logo(BrandSlug(id), ailogo.Mono); mark != nil {
+	if mark := logo(BrandSlug(id), logoMono); mark != nil {
 		return mark
 	}
 	if mark, found := declared.Load(BrandSlug(id)); found {
@@ -93,7 +92,7 @@ func BrandColor(id string) *ui.SVG {
 	if id == "" {
 		return nil
 	}
-	if mark := logo(BrandSlug(id), ailogo.Color); mark != nil {
+	if mark := logo(BrandSlug(id), logoColor); mark != nil {
 		return mark
 	}
 	return Brand(id)
@@ -103,10 +102,10 @@ func BrandColor(id string) *ui.SVG {
 // the longer first.
 var logoVariants = []struct {
 	suffix  string
-	variant ailogo.Variant
+	variant logoVariant
 }{
-	{"-brand-color", ailogo.BrandColor}, {"-text-color", ailogo.TextColor}, {"-text-cn", ailogo.TextCn},
-	{"-color", ailogo.Color}, {"-brand", ailogo.Brand}, {"-text", ailogo.Text},
+	{"-brand-color", logoBrandColor}, {"-text-color", logoTextColor}, {"-text-cn", logoTextCn},
+	{"-color", logoColor}, {"-brand", logoBrand}, {"-text", logoText},
 }
 
 // pluginLogo resolves the name after "ailogo:": a slug, or a slug with a
@@ -120,7 +119,7 @@ func pluginLogo(name string) (mark *ui.SVG, colored bool) {
 			}
 		}
 	}
-	return logo(name, ailogo.Mono), false
+	return logo(name, logoMono), false
 }
 
 // PluginBrand is the brand mark an "ailogo:" icon name shows on a package's
@@ -134,7 +133,7 @@ func PluginBrand(name string) (mark *ui.SVG, colored bool) {
 		return nil, false
 	}
 	if mark, colored = pluginLogo(name); mark != nil && !colored {
-		if own := logo(strings.ToLower(name), ailogo.Color); own != nil {
+		if own := logo(strings.ToLower(name), logoColor); own != nil {
 			return own, true
 		}
 	}

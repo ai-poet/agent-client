@@ -2,7 +2,6 @@ package providers
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -12,20 +11,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ai-poet/agent-client/desktop/internal/appresources"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
 const presetsURL = "https://sailry.dev/catalogs/model-presets.json"
 
-//go:embed data/model-presets.json
-var presetsJSON []byte
-
-func Bundled() protocol.ConversationPresetsCatalog {
+var bundledPresets = sync.OnceValue(func() protocol.ConversationPresetsCatalog {
+	raw, err := appresources.Read("providers/model-presets.json")
+	if err != nil {
+		panic(err)
+	}
 	var catalog protocol.ConversationPresetsCatalog
-	if err := json.Unmarshal(presetsJSON, &catalog); err != nil {
+	if err := json.Unmarshal(raw, &catalog); err != nil {
 		panic("bundled provider presets are invalid")
 	}
 	return catalog
+})
+
+func Bundled() protocol.ConversationPresetsCatalog {
+	return bundledPresets()
 }
 
 type Directory struct {

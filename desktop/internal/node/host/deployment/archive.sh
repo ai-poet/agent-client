@@ -85,6 +85,7 @@ go run ./native/fetch -target "$platform" -host -seal "$stage/host"
 version=$("$stage/host/sailry-host" --version)
 version=${version#Sailry Host }
 cp "$package/sailry" "$package/install-host.sh" "$package/service.sh" "$stage/host/"
+cp -R cmd/sailry-desktop/resources/providers cmd/sailry-desktop/resources/model-capabilities "$stage/host/"
 chmod 755 "$stage/host/sailry"
 bash internal/node/host/deployment/licenses.sh "$platform" "$triple" "$stage/host/licenses"
 cp go.mod go.sum native/iroh/Cargo.lock "$stage/host/"

@@ -27,10 +27,10 @@ rewrite unchanged content or add fetch timestamps.
 
 `.github/workflows/model-catalog.yml` checks every six hours and supports manual
 dispatch on the default branch. It runs the catalog checks before committing a
-changed snapshot. Releases embed the snapshot committed at their source revision;
-release builds do not fetch mutable data or modify version tags. Runtime manual
-updates remain available between releases.
+changed snapshot. Releases ship the snapshot committed at their source revision
+as a resource outside the executable; release builds do not fetch mutable data or
+modify version tags. Runtime manual updates remain available between releases.
 
 This reference metadata is separate from the reviewed request-parameter policy
-catalog under `internal/node/agent/model/data/`. Automated metadata refreshes do
-not change that policy.
+catalog under `cmd/sailry-desktop/resources/model-capabilities/`. Automated
+metadata refreshes do not change that policy.
