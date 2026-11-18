@@ -17,7 +17,9 @@ func nativeUpdates(c *ui.Context, m *Model) {
 	if u.Attention() {
 		u.seen = u.Version
 	}
-	locked := u.Locked() || u.State == UpdateReady
+	// Without a feed the switches have nothing to govern, so they stay off
+	// until one is configured.
+	locked := u.Locked() || u.State == UpdateReady || !u.Configured || !u.NativeEnabled
 	kit.Group(c, "updates", i18n.T(c, "updates"), "", nil, func() {
 		kit.Card(c, func() {
 			for _, option := range []struct {

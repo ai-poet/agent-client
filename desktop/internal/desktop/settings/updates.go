@@ -149,19 +149,16 @@ func (u *Updater) start(s UpdateState, now time.Time) {
 // so installing needs no dialog. Later folds the ready row to its action.
 func updates(c *ui.Context, m *Model) {
 	u := &m.Updater
-	if u.Native {
+	// Without a bound updater there is nothing to check: show the MyGo page,
+	// which says so and keeps the button disabled, instead of playing the
+	// preview's steps.
+	if u.Native || m.UpdateActions == nil {
 		nativeUpdates(c, m)
 		return
 	}
 	p := theme.Of(c)
 	// The real updater reports its own state and toasts in every window.
 	live := m.UpdateActions
-	if live == nil {
-		if u.advance(c.Now(), m.Channel == 1) {
-			c.After(50 * time.Millisecond)
-		}
-		u.notify(c)
-	}
 	if u.State != UpdateReady || u.Version != u.deferred {
 		u.deferred = ""
 	}

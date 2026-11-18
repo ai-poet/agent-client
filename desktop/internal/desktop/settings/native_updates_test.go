@@ -66,3 +66,36 @@ func TestNativeUpdateSettings(t *testing.T) {
 		t.Fatalf("up-to-date result is not shown: %q", tester.Texts())
 	}
 }
+
+// TestUpdateSettingsUnconfigured pins the default state: no feed and public
+// key means no updater, so the page must say so and keep the check disabled
+// instead of entering the checking state.
+func TestUpdateSettingsUnconfigured(t *testing.T) {
+	m := NewModel(preview.SettingsData())
+	tester := ui.NewTesterWith(func(c *ui.Context) { updates(c, m) }, 900, 700, ui.TesterOptions{Preferences: ui.Preferences{ReduceTransparency: true}})
+	tester.SetLocale("en")
+	tester.Frame()
+	note := i18n.In("en", "updates_not_configured")
+	if !tester.HasText(note) {
+		t.Fatalf("the unconfigured page says nothing: %q", tester.Texts())
+	}
+	check, ok := tester.AccessByRole(ui.RoleButton, i18n.In("en", "updates_check"))
+	if !ok {
+		t.Fatalf("no check button: %q", tester.Texts())
+	}
+	if !check.Disabled {
+		t.Error("the check button is enabled with no feed configured")
+	}
+	switches, ok := tester.AccessByRole(ui.RoleSwitch, i18n.In("en", "updates_automatic"))
+	if !ok {
+		t.Fatalf("no automatic switch: %q", tester.Texts())
+	}
+	if !switches.Disabled {
+		t.Error("the automatic switch is enabled with no feed configured")
+	}
+	tester.ClickAt(check.Bounds.X+check.Bounds.W/2, check.Bounds.Y+check.Bounds.H/2)
+	tester.Frame()
+	if tester.HasText(i18n.In("en", "updates_checking")) {
+		t.Error("checking an unconfigured updater entered the checking state")
+	}
+}
