@@ -56,6 +56,17 @@ unavailable: knowledge source Node is unavailable                               
 
 对应 `internal/link/remote.go:249` 与 `internal/node/resource_service.go:263`：远端 knowledge 读取没有拿到 completion，另有一个来源的 Node 不在候选地址里。这是路由/传输层的确定性缺口，不是预算问题，需要单独排查后再决定是否进 CI。在这条修好之前，「全量绿」只代表默认构建，不代表 integration 覆盖。
 
+临时加日志复跑后（`aggregateKnowledge` 收结果处 + `dispatchCall` 的 completion 读取处），每次失败的实际链路是：
+
+```
+AGG result node=<A> err=unavailable: knowledge source Node is unavailable
+AGG result node=<B> err=outcome_unknown: completion unavailable; retry with the same request identifier
+AGG result node=<C> err=outcome_unknown: ...
+REMOTE completion err=unavailable: Link connection is unavailable kind= bound=true
+```
+
+即：候选集合本身是齐的（self + 两台对端都进了聚合），但**每一路远端读取都在 completion 阶段拿到 `Link connection is unavailable`**，另有一路是缓存来源但不在已知地址里。所以问题不在「executor 少收集了节点」，而在资源流打开、收到 receipt 之后，读 completion 时链路被判为不可用。复现时可用上面的两处日志定位。
+
 ## race 全量
 
 `-race` 全量在本机（15GB）无法在 30–50 分钟内跑完，属环境限制，不是测试失败：
