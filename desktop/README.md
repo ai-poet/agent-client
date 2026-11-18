@@ -168,6 +168,8 @@ GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0 go test ./internal/cheapauth/... ./internal/n
 - 构建与测试一律 `GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0`。
 - 涉及本地存储的包（如 `internal/desktop/live`、`internal/node/store` 的部分测试）需要 Turso native 库：先 `sh native/turso/build.sh` 生成 `.runtime/native/<os>-<arch>/libturso_sync_sdk_kit.so`，再用 `SAILRY_TURSO_LIB=<路径>` 跑测试。该脚本要求 **rustup**（`native/turso/rust-toolchain.toml` 钉死 toolchain `1.98.0`），用系统 rustc（如 1.85.x）会因依赖要求更高版本而编译失败；没有 rustup 的机器需要预编译产物。
 - 无网络/无图形环境（CI 容器）下 `internal/desktop/live` 的部分用例会失败，属环境限制。
+- **无 GPU 的机器**（没有 `/dev/dri`）也能跑：MyGo 自动降级到 CPU 渲染，日志会打印 `native UI draws with no GPU`，界面正常但更耗 CPU。
+- **原生 iroh 库**：启动缺少 `libsailry_iroh.so` 时会直接报 `Sailry could not start: native iroh library is unavailable`。除了 `sh native/iroh/build.sh` 现编，也可以把预编译产物放到 `native/iroh` 下并用 `SAILRY_IROH_LIB=<路径>` 指定；CI/分发包必须随包提供它，不能指望首次启动现编。
 
 ## Client updates
 
