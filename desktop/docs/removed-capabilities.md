@@ -123,3 +123,11 @@
 | 本地数据库连接与查询（`list_databases` / `query_database` 等） | **无内置替代**：用 `run_command` 调用 `psql` / `mysql` / `sqlite3`，或用外部 MCP 连接器 | 连接凭据不再进入 profile 存储 |
 | Office 文档解析（`read_office`） | 用 `run_command` + 外部工具（如 `pdftotext`、`libreoffice --headless`），或把文件交给 MCP 连接器；纯文本/代码/markdown 仍由 `read_file` 直接读 | `attachments.go` 的提示词已不再引导模型调用 `read_office` |
 | 本地推理与 OCR（`read_local_models` / `list_ocr_models` 等） | **无替代**：OCR 走外部服务或 MCP 连接器；语义（向量）检索能力随嵌入模型一并移除，关键字检索保留 | 关键字检索由 `query_knowledge`（`KnowledgeModeKeyword`）继续提供 |
+
+## 7. 已知未覆盖（明确记录，不假装已覆盖）
+
+| 项 | 现状 | 后续 |
+| --- | --- | --- |
+| 插件 dispatch 路径的退役命令 | 守卫测试覆盖了「直连请求」：白名单不含退役命令、执行返回 `not_configured`。但插件可以通过 `plugin_transaction` / `dispatch` 传命令名间接调用，该入口是否同样被挡住**尚未加断言** | 补一条守卫用例：从 dispatch 入口请求退役命令，断言 `not_configured` 而非成功或泛化错误 |
+| 语义（向量）检索 | 随 `internal/localmodels` 删除一并消失，关键字检索保留 | 能力删除的必然结果，不是漏测 |
+| `-race` 全量 | 包体量大，默认 10 分钟超时跑不完；本机 30 分钟也会因内存被杀 | CI 需给足内存 + `-timeout 30m`，或按子包拆分运行 |
