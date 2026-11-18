@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preferences"
@@ -16,6 +15,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/updater"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/node/telemetry"
+	"github.com/egoist/mygo/ui"
 )
 
 // Settings › About: the running build and the process's one updater, which
@@ -24,6 +24,7 @@ import (
 // Updates is the process's update service as its windows share it.
 type Updates struct {
 	Service *updater.Service
+	Native  *NativeUpdates
 	channel atomic.Int32 // settings' channel index the service checks for
 	mu      sync.Mutex
 	windows []*Runtime
@@ -93,6 +94,11 @@ func (r *Runtime) SetUpdates(updates *Updates, focused func() bool, flush ...fun
 	if telemetry.BuildRevision != "" {
 		m.Build = "settings_build_release"
 	}
+	if updates.Native != nil {
+		native := updates.Native
+		m.UpdateActions = &settings.UpdateActions{Check: native.Check, Download: native.Install, Cancel: native.Cancel, Restart: native.Restart, SaveOptions: native.SaveOptions}
+		return
+	}
 	service := updates.Service
 	m.UpdateActions = &settings.UpdateActions{Check: service.Check, Download: service.Download, Cancel: service.Cancel, Install: r.requestUpdateInstall, Restart: service.Restart}
 }
@@ -105,6 +111,9 @@ func (r *Runtime) documentsLocked() bool {
 	}
 	if pending := updates.install; pending != nil && pending.windows[root] > 0 {
 		return true
+	}
+	if updates.Service == nil {
+		return false
 	}
 	state, _ := updates.Service.Snapshot()
 	return updateLocksDocuments(state.Kind)
@@ -304,6 +313,10 @@ func updateToast(notice updater.Notice, title, action string, timeout time.Durat
 func (r *Runtime) aboutFrame(c *ui.Context) {
 	updates := r.updates
 	if updates == nil {
+		return
+	}
+	if updates.Native != nil {
+		r.nativeAboutFrame(c, updates.Native)
 		return
 	}
 	m := r.App.Settings

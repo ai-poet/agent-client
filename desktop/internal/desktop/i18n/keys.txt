@@ -1033,6 +1033,13 @@ updates_channel
 updates_channel_experience
 updates_channel_stable
 updates_check
+updates_automatic
+updates_prereleases
+updates_install
+updates_not_configured
+updates_build_unsupported
+updates_not_found
+updates_save_failed
 updates_version
 settings_notify_system_description
 settings_notify_approval_description

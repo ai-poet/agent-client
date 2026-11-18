@@ -1544,7 +1544,7 @@ func TestConnectors(t *testing.T) {
 // and remove are the i18n keys of a row's input and remove button.
 func undoAfterRemove(t *testing.T, draw func(*ui.Context), field, remove string) {
 	t.Helper()
-	tt := ui.NewTesterWith(draw, 900, 900, ui.TesterOptions{Preferences: ui.Preferences{ReduceTransparency: true}})
+	tt := ui.NewTesterWith(draw, 900, 1200, ui.TesterOptions{Preferences: ui.Preferences{ReduceTransparency: true}})
 	tt.SetLocale("en")
 	tt.Frame()
 	tt.Advance(time.Second)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
@@ -17,8 +18,10 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/shell"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
+	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/node/computer"
 	"github.com/ai-poet/agent-client/desktop/internal/node/logging"
+	clientupdate "github.com/ai-poet/agent-client/desktop/internal/update"
 	"github.com/egoist/mygo"
 	_ "github.com/egoist/mygo/locales/ja"
 	_ "github.com/egoist/mygo/locales/zh-Hans"
@@ -114,11 +117,19 @@ func run() error {
 	}
 	var updates *live.Updates
 	if backend.Client != nil && backend.Preferences != nil {
-		// Installation retains pending native input and waits for every
-		// window's read-only frame before stopping the Node. Its successful
-		// handoff therefore needs no further exit prompt.
-		updates = live.NewUpdates(backend.Preferences, backend.Path, backend.Stop, func() { mygo.RunOnMain(guard.pass) })
-		defer updates.Service.Close()
+		// The profile's optional MyGo config is disabled when absent or unreadable.
+		// Installation is verified by MyGo and restarts only after user approval.
+		store, configErr := clientupdate.OpenStore(filepath.Join(backend.Path, clientupdate.ConfigName))
+		if configErr != nil {
+			log.Printf("Update config: %v", configErr)
+		}
+		updates = live.NewNativeUpdates(store, link.ProductVersion, func() {
+			mygo.RunOnMain(func() {
+				guard.passing = true
+				mygo.App.Relaunch()
+			})
+		})
+		defer updates.Close()
 	}
 	var restart *profileRestart
 	if backend.Client != nil {
@@ -348,7 +359,7 @@ func run() error {
 			return
 		}
 		if updates != nil {
-			updates.Service.Startup()
+			updates.Startup()
 		}
 		// Another launch of the default profile hands over to this one.
 		mygo.App.OnSecondInstance(func([]string, string) {

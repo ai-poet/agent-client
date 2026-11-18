@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 // UpdateState is the app updater's state.
@@ -36,6 +36,13 @@ type Updater struct {
 	Copied, Total int64
 	Verifying     bool
 	Failure       *UpdateFailure
+	// Native selects the MyGo client UI instead of the legacy preview/service.
+	Native        bool
+	Configured    bool
+	NativeEnabled bool
+	Automatic     bool
+	Prereleases   bool
+	Current       bool      // the last MyGo check found no newer version
 	since         time.Time // when the preview's step began
 	deferred      string    // the ready version Later folded
 	seen          string    // the found version About has shown
@@ -45,7 +52,11 @@ type Updater struct {
 }
 
 // UpdateActions are the real updater's actions. Its state arrives in Updater.
-type UpdateActions struct{ Check, Download, Cancel, Install, Restart func() }
+type UpdateActions struct {
+	Check, Download, Cancel, Install, Restart func()
+	// SaveOptions persists the MyGo automatic-check and prerelease switches.
+	SaveOptions func(automatic, prereleases bool)
+}
 
 // Attention reports a found update About has not shown yet, which the
 // rail's Settings and About's entry mark.
@@ -138,6 +149,10 @@ func (u *Updater) start(s UpdateState, now time.Time) {
 // so installing needs no dialog. Later folds the ready row to its action.
 func updates(c *ui.Context, m *Model) {
 	u := &m.Updater
+	if u.Native {
+		nativeUpdates(c, m)
+		return
+	}
 	p := theme.Of(c)
 	// The real updater reports its own state and toasts in every window.
 	live := m.UpdateActions

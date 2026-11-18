@@ -1014,6 +1014,13 @@ updates_channel: 更新通道
 updates_channel_experience: 体验版
 updates_channel_stable: 正式版
 updates_check: 检查更新
+updates_automatic: 自动检查更新
+updates_prereleases: 包含预发布版本
+updates_install: 安装
+updates_not_configured: 配置更新源和公钥后才能检查更新
+updates_build_unsupported: 当前构建或安装方式不支持自行更新
+updates_not_found: 未找到更新清单
+updates_save_failed: 无法保存更新设置
 updates_version: 版本
 settings_notify_system_description: 接收应用的系统通知
 settings_notify_approval_description: 任务需要确认或授权时提醒你

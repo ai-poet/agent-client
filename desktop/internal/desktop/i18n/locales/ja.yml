@@ -1014,6 +1014,13 @@ updates_channel: 更新チャネル
 updates_channel_experience: 体験版
 updates_channel_stable: 正式版
 updates_check: 更新をチェック
+updates_automatic: Check automatically
+updates_prereleases: Include prereleases
+updates_install: Install
+updates_not_configured: Updates are off until a feed and public key are configured
+updates_build_unsupported: This build or installation cannot update itself
+updates_not_found: The update manifest was not found
+updates_save_failed: Could not save update settings
 updates_version: バージョン
 settings_notify_system_description: アプリケーションからシステム通知を受信
 settings_notify_approval_description: タスクが確認または認証を必要とするときに通知する
