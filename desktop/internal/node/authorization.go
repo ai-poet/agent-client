@@ -28,6 +28,28 @@ const (
 	accessResourceCommands = `resume_controller_login apply_changes apply_git_hunk apply_turn_hunk archive_sessions claim_terminal close_terminal compact_context continue_turn copy_entry copy_entry_to create_directory create_git_branch create_git_commit create_managed_worktree create_session create_session_at create_terminal create_worktree delete_file delete_git_branch deliver_background discard_attachment dismiss_notifications dismiss_read_notifications download_attachment download_file download_image edit_file edit_notebook edit_queued_turn fetch_web find_files fork_conversation fork_conversation_at graph_code guide_queued_turn guide_turn import_session input_terminal inspect_git inspect_terminal list_artifact_revisions list_artifacts list_commands list_conversation_assets list_directory list_file_checkpoints list_git_branches list_git_changes list_git_remote_tags list_terminal_tools list_terminals list_worktrees mark_notification_read mark_notifications_read merge_git_branch move_conversation move_entry_to move_file move_queued_turn open_port open_terminal open_tool_terminal outline_code publish_notification queue_turn read_activity read_artifact read_attachment read_command read_command_page read_conversation read_conversation_run read_conversation_runs read_file read_file_lines read_git_blame read_git_change read_git_commit read_git_context read_git_diff read_git_head read_git_log read_git_output read_git_show read_git_stash read_hooks read_image read_notebook read_queued_turn read_session read_tool_detail read_tool_output read_turn read_turn_capture read_turn_diff read_turn_hunks read_worktree_catalog register_worktree remove_queued_turn remove_session remove_sessions remove_worktree rename_entry rename_git_branch rename_session replace_turn resize_terminal resolve_approval resolve_git_revision resolve_question restore_file_checkpoint rewind_conversation run_command run_git_action save_hooks search_code search_conversation search_files search_web send_queued_turn set_queue_paused set_session_archived set_session_config set_session_member_model set_session_order set_session_read set_session_roles set_session_team set_terminal_appearance start_queued_turn start_session stop_command stop_commands stop_turn submit_task submit_turn switch_git_branch trash_entry trash_file update_git_index upload_attachment upload_file withdraw_guidance write_artifact write_command write_file use_browser use_external_browser`
 )
 
+// retiredCommands remain in the wire registry so old requests and stored data
+// stay decodable, but their runtime handlers and authorization entries are gone.
+var retiredCommands = map[string]struct{}{
+	"save_ssh": {}, "remove_ssh": {}, "trust_ssh": {}, "check_ssh": {},
+	"run_ssh": {}, "cancel_ssh": {}, "transfer_ssh": {}, "list_ssh": {},
+	"list_ssh_terminals": {}, "open_ssh_terminal": {}, "close_ssh_terminal": {},
+	"browse_ssh_directory": {}, "download_ssh_file": {}, "modify_ssh_file": {},
+	"stage_ssh_upload": {}, "finish_ssh_upload": {}, "update_ssh_host": {},
+	"list_databases": {}, "save_database": {}, "remove_database": {},
+	"check_database": {}, "test_database": {}, "browse_database": {},
+	"query_database": {}, "cancel_database": {},
+	"read_office":               {},
+	"read_local_models":         {},
+	"install_local_model":       {},
+	"register_local_model":      {},
+	"delete_local_model":        {},
+	"refresh_local_model":       {},
+	"cancel_local_model":        {},
+	"read_local_model_settings": {},
+	"save_local_model_settings": {},
+}
+
 // Policies are an explicit protocol allowlist. A new command must choose its
 // authorization boundary before it can reach any specialized dispatcher.
 var commandPolicies = func() map[string]accessPolicy {
