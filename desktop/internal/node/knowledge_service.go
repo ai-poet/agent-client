@@ -304,7 +304,9 @@ func (node *Node) dispatchKnowledge(ctx context.Context, caller protocol.NodeID,
 		return accepted, nil
 	}
 	if operationErr == nil {
-		node.knowledge.Invalidate()
+		if node.knowledge != nil {
+			node.knowledge.Invalidate()
+		}
 		node.publish()
 	}
 	completion <- response(output, operationErr)
@@ -313,14 +315,23 @@ func (node *Node) dispatchKnowledge(ctx context.Context, caller protocol.NodeID,
 
 func (node *Node) readKnowledge(ctx context.Context, request protocol.Request) (protocol.Output, error) {
 	if request.Command.Kind == "read_knowledge_candidates" {
+		if node.knowledge == nil {
+			return protocol.Output{Kind: "knowledge_candidates", Data: protocol.KnowledgeCandidates{Candidates: []protocol.KnowledgeCandidate{}}}, nil
+		}
 		candidates, err := node.knowledge.StorageCandidates(ctx, request)
 		return protocol.Output{Kind: "knowledge_candidates", Data: candidates}, err
 	}
 	switch input := request.Command.Data.(type) {
 	case *protocol.KnowledgeQuery:
+		if node.knowledge == nil {
+			return protocol.Output{Kind: "knowledge_search", Data: protocol.PluginStorageSearchPage{}}, nil
+		}
 		page, err := node.knowledge.Query(ctx, request, *input)
 		return protocol.Output{Kind: "knowledge_search", Data: page}, err
 	case *protocol.KnowledgeCitationRequest:
+		if node.knowledge == nil {
+			return protocol.Output{}, &protocol.Fault{Code: protocol.ErrorCodeNotConfigured, Message: "knowledge index is not running"}
+		}
 		page, err := node.knowledge.Citation(ctx, request, *input)
 		return protocol.Output{Kind: "knowledge_citation", Data: page}, err
 	}
