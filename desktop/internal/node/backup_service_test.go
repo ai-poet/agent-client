@@ -475,7 +475,10 @@ func TestRestoreIntoEmptyProfile(t *testing.T) {
 
 // Over 1 s: the scheduled run is a real export of the profile's bundled packages (about 690 files).
 func TestScheduleNextRun(t *testing.T) {
-	t.Parallel()
+	// Not parallel: the scheduled export is driven by the dispatcher's own
+	// goroutine, and under `-race` with dozens of parallel tests that goroutine
+	// can wait longer than this test's wall-clock budget for a slot. Running it
+	// alone keeps the wait about the dispatcher, not about the scheduler.
 	start := time.Date(2026, time.March, 7, 12, 0, 0, 0, time.UTC)
 	clock := clockwork.NewFakeClockAt(start)
 	directory := filepath.Join(t.TempDir(), "backups")
@@ -543,7 +546,10 @@ func TestScheduleNextRun(t *testing.T) {
 	if page := commandFixture(t, node, protocol.Command{Kind: "list_backups"}).Data.(protocol.BackupPage); len(page.Records) != 0 {
 		t.Fatalf("backups before the due time = %#v", page)
 	}
-	deadline := time.Now().Add(30 * time.Second)
+	// The dispatcher runs the export on its own goroutine; wait for it with a
+	// generous budget so a slow (race-instrumented) run is not mistaken for a
+	// missing export, and report how long it took when it never arrives.
+	deadline := time.Now().Add(3 * time.Minute)
 	for {
 		// The dispatcher may be between timers; each step lets a new one expire.
 		clock.Advance(time.Second)
@@ -552,9 +558,9 @@ func TestScheduleNextRun(t *testing.T) {
 			break
 		}
 		if len(page.Records) > 1 || time.Now().After(deadline) {
-			t.Fatalf("scheduled backups = %#v", page)
+			t.Fatalf("scheduled backups = %#v (waited %s)", page, time.Since(start).Round(time.Second))
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 	if due := next(); due == nil || time.UnixMilli(*due).UTC().Format(time.RFC3339) != "2026-03-08T12:30:00Z" {
 		t.Fatalf("next run after the scheduled export = %v", due)

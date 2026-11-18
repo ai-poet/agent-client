@@ -520,6 +520,9 @@ func TestGoalLoop(t *testing.T) {
 	})
 
 	t.Run("the turn limit wraps up and pauses with its reason", func(t *testing.T) {
+		if raceInstrumented {
+			t.Skip("26-turn simulation exceeds the race-instrumented time budget; CI runs it uninstrumented")
+		}
 		t.Parallel()
 		f := newGoalFixture(t, protocol.WorkModeCode)
 		f.script.push(goalStep{text: "Started"})
