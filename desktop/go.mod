@@ -38,6 +38,7 @@ require (
 	github.com/jonboulle/clockwork v0.5.0
 	github.com/kaptinlin/jsonpointer v0.4.28
 	github.com/klauspost/compress v1.20.4
+	github.com/lobehub/lobe-mygo v0.0.0-20261116124832-d88b4ad7f238
 	github.com/mattn/go-isatty v0.0.24
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/minio/minio-go/v7 v7.4.1

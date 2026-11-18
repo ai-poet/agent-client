@@ -89,6 +89,7 @@ In the **Linked into** column, D is Desktop, H is Host and M is Mobile.
 | `github.com/klippa-app/go-pdfium` | v1.21.4 | MIT | `LICENSE` | D H |
 | `github.com/kr/fs` | v0.1.0 | BSD-3-Clause | `LICENSE` | D H |
 | `github.com/ledongthuc/pdf` | v0.0.0-20261020125853-5e46805f718e | BSD-3-Clause | `LICENSE` | D H |
+| `github.com/lobehub/lobe-mygo` | v0.0.0-20261116124832-d88b4ad7f238 | MIT | `LICENSE` | D |
 | `github.com/Masterminds/semver/v3` | v3.5.0 | MIT | `LICENSE.txt` | D H |
 | `github.com/mattn/go-isatty` | v0.0.24 | MIT | `LICENSE` | D H |
 | `github.com/microcosm-cc/bluemonday` | v1.0.27 | BSD-3-Clause | `LICENSE.md` | D H |
