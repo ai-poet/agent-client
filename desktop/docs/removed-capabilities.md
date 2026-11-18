@@ -131,3 +131,4 @@
 | 插件 dispatch 路径的退役命令 | 守卫测试覆盖了「直连请求」：白名单不含退役命令、执行返回 `not_configured`。但插件可以通过 `plugin_transaction` / `dispatch` 传命令名间接调用，该入口是否同样被挡住**尚未加断言** | 补一条守卫用例：从 dispatch 入口请求退役命令，断言 `not_configured` 而非成功或泛化错误 |
 | 语义（向量）检索 | 随 `internal/localmodels` 删除一并消失，关键字检索保留 | 能力删除的必然结果，不是漏测 |
 | `-race` 全量 | 包体量大，默认 10 分钟超时跑不完；本机 30 分钟也会因内存被杀 | CI 需给足内存 + `-timeout 30m`，或按子包拆分运行 |
+| `TestGoalLoop` 的 26 轮模拟 | 在 race 构建下按 `raceInstrumented` 跳过（超时不可避免），因此 **race 构建不覆盖它** | **CI 必须另行运行非竞态全量**（`CGO_ENABLED=0 go test ./internal/node/`），否则这条路径等于没有覆盖；只跑 race 的流水线视为覆盖缺失 |
