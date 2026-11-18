@@ -191,6 +191,7 @@ func run() error {
 			}
 			entry.live = runtime
 			runtime.App.Hooks.AuthGate = runtime.CheapAuthGate
+			runtime.SetMigrationService(backend.Migration, len(windows) == 0)
 			runtime.SetNetwork(backend.Network)
 			runtime.SetLogFolder(logging.Directory())
 			entry.app = entry.live.App

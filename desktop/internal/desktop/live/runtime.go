@@ -40,6 +40,7 @@ type Runtime struct {
 	browserSources           *browserSources // a test's Chrome profile, key and cookie store
 	authorizations           *authorizationState
 	cheapAuth                *cheapAuthRuntime
+	migration                *migrationRuntime
 	packages                 *packageState
 	parent                   *Runtime
 	network                  *Network

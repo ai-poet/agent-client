@@ -152,6 +152,9 @@ type Model struct {
 	// General.
 	Language       int // of Languages
 	SidebarMetrics bool
+	Migration      MigrationState
+	// MigrationActions are the local profile's migration actions; preview nil.
+	MigrationActions *MigrationActions
 	// Memory is this Desktop's memory by class, projected by the live
 	// runtime while Experimental shows; nil hides its map.
 	Memory []kit.TreemapGroup
@@ -296,7 +299,7 @@ type Model struct {
 	Python          Stored[Python]
 	// Collections are the selected host's knowledge collections; the
 	// preview has none.
-	Collections []viewmodel.KnowledgeCollection
+	Collections       []viewmodel.KnowledgeCollection
 	CollectionActions *CollectionActions
 
 	// Permissions.
@@ -347,7 +350,7 @@ func NewModel(d *preview.Settings) *Model {
 		Power:     stored(d.PreventSleep),
 		Telemetry: stored(Telemetry{Errors: d.Errors, Metrics: d.Metrics}),
 		Sandbox:   stored(d.Sandbox), CodeIndex: stored(true), TextSize: DefaultTextSize, SessionOrder: 1,
-		Keys:        NewKeys(),
+		Keys:   NewKeys(),
 		Host:   stored(TerminalHost{Env: d.Env}),
 		Shells: d.Shells, PasteProtection: true, FontSize: 13,
 		Devices: d.Devices, Relays: d.Relays,

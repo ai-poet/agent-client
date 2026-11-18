@@ -315,6 +315,18 @@ enables the same full-text index implementation as the Rust database.
 
 Canonical conversation data uses Sailry-owned records, messages and blocks.
 Binary content is stored by digest. Unknown usage counts remain unknown.
+
+Legacy CheapRouter migration reads its source SQLite database with the existing
+modernc driver and writes through the running Node's single Turso writer. The
+Desktop wizard and Settings › General call only the local profile owner. Stable
+IDs, canonical records and completed historical runs make imported history
+readable without admitting model work. A profile-owned marker prevents duplicate
+runs; explicit fill-missing retries never update existing project, session or
+message content. Source files, including the optional Release application-support
+`app.db`, stay read-only and are copied into a private timestamped backup before
+migration. Reports contain field names and counts, not transcript bodies or
+credential secrets; account metadata requires a fresh sign-in.
+
 Knowledge chunks, full-text indexes and vectors are derived data; their source
 files and configuration are independent. Worktree code indexes live under
 `cache/code-index/<WorktreeId>/index.turso`.

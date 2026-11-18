@@ -92,6 +92,7 @@ type desktopBackend struct {
 	Client      *client.Client
 	Network     *live.Network
 	Preferences *preferences.Store
+	Migration   *desktopMigration
 	close       sync.Once
 	// stopped is set once the backend was closed for a successor.
 	stopped atomic.Bool
@@ -128,6 +129,7 @@ func openBackend(ctx context.Context, options startupOptions) (*desktopBackend, 
 		backend.closeLogs()
 		return nil, err
 	}
+	backend.Migration = newDesktopMigration(backend.Node, path)
 	backend.reports.start(backend.Node.Telemetry())
 	backend.Client = client.New(link.NewLocal(backend.Node.ID(), backend.Node.ID(), backend.Node))
 	if err = backend.Client.Start(ctx); err != nil {

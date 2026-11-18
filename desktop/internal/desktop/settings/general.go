@@ -1,10 +1,10 @@
 package settings
 
 import (
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 var (
@@ -49,6 +49,7 @@ func general(c *ui.Context, m *Model) {
 		})
 	})
 	telemetry(c, m)
+	migration(c, m)
 }
 
 // telemetry is what diagnostics send, the identity reset and sending

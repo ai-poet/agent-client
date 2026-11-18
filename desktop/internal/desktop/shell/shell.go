@@ -341,6 +341,12 @@ func (a *App) View(c *ui.Context) {
 	system := c.Theme().Dark
 	theme.Apply(c, a.Theme, a.Mode)
 	kit.SetEffects(a.Effects)
+	if a.Settings.Migration.Open {
+		settings.MigrationView(c, a.Settings.Model)
+		settings.MigrationReport(c, a.Settings.Model)
+		kit.ToastHost(c)
+		return
+	}
 	if a.Hooks.AuthGate != nil && a.Hooks.AuthGate(c) {
 		kit.ToastHost(c)
 		return
@@ -400,6 +406,7 @@ func (a *App) View(c *ui.Context) {
 		})
 	})
 	a.overlays(c)
+	settings.MigrationReport(c, a.Settings.Model)
 	if a.Hooks.PluginOverlays != nil {
 		a.Hooks.PluginOverlays(c)
 	}

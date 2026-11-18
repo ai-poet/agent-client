@@ -154,6 +154,14 @@ Guides: [Models](docs/models.md) · [Remote hosts](docs/hosts.md) · [Projects a
 GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0 go test ./internal/cheapauth/... ./internal/node/providers/... ./internal/node/agent/model/...
 ```
 
+## 旧客户端数据迁移
+
+首次启动会只读检测 `~/.cheaprouter`（可用 `SUB2API_DATA_DIR_NAME` 覆盖）中的旧版 CheapRouter 数据；旧 Release 的 daemon 数据库也会从对应平台的 `CheapRouter` 应用支持目录检测。检测到项目或会话时，迁移向导先展示数量，确认后才导入；失败不会阻止新客户端启动，可在向导或 **Settings → General** 重试。
+
+- 迁移前将使用到的源文件原样备份到 profile 的 `migration-backup-<UTC 时间戳>/`，旧目录不会删除或改写。
+- 项目、会话和消息按稳定 ID 导入；`migration.json` 防止重复迁移，“重新迁移”只补缺，不覆盖新客户端已有内容。
+- `migration-report.json` 列出无法无损映射的字段。凭据仅保留账号标识和端点，不迁移 token 或 API key，需在新客户端重新登录。
+
 ## Client updates
 
 Application updates are disabled by default. An optional `update.json` in the
