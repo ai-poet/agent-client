@@ -154,6 +154,21 @@ Guides: [Models](docs/models.md) · [Remote hosts](docs/hosts.md) · [Projects a
 GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0 go test ./internal/cheapauth/... ./internal/node/providers/... ./internal/node/agent/model/...
 ```
 
+## Client updates
+
+Application updates are disabled by default. An optional `update.json` in the
+Desktop profile accepts `feed_url` (the full MyGo platform-manifest URL),
+`public_key` (a base64 Ed25519 key), `enabled`, `automatic` and `prereleases`.
+The file must contain both source fields before `enabled` can take effect. Once
+the settings page writes it, its permissions are 0600.
+
+**Settings → About** shows the running version, manual checks, download progress
+and readable failures. Automatic mode performs one quiet check shortly after
+launch. MyGo verifies the signed package before installation; the running build
+must also have MyGo updater support and its matching build-time public key.
+Development builds and package-manager installations can decline self-update.
+This client feature does not generate manifests, sign releases or upload files.
+
 ## Community
 
 Join the [Discord](https://discord.gg/MCDktmDey) or add the maintainer on WeChat for the group

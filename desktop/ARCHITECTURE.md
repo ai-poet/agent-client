@@ -885,11 +885,15 @@ APFS volumes to physical device counters; volumes sharing a physical device shar
 its throughput. Desktop memory diagnostics sample Go runtime classes and plugin
 heap estimates while the diagnostics page is visible.
 
-The updater verifies signed `update-v1` catalogs and archives against compiled
-publisher keys. Stable selects final versions; the experience channel includes
-prereleases. The implemented updater installs macOS packages and does not replace
-remote Hosts. `internal/shipped` verifies packaged native libraries against their
-seal; release loading is confined to packaged resources.
+Desktop application updates use MyGo's updater through `internal/update` and
+the process-wide `live.NativeUpdates` service. The optional profile
+`update.json` supplies the platform manifest URL, enables the feature and holds
+the automatic-check and prerelease choices; an absent or empty file disables
+all update requests. Settings › About owns manual checks, installation progress
+and restart. MyGo compares versions and verifies package signatures with the
+build's update trust configuration before installing. Update checks never
+replace or shut down a remote Host. `internal/shipped` verifies packaged native
+libraries against their seal; release loading is confined to packaged resources.
 
 Computer use runs the bundled, checksum-verified `agent-desktop` helper through
 stdio MCP, ordinary approvals and an exclusive lock. It uses semantic accessibility

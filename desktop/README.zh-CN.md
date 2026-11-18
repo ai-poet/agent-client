@@ -104,6 +104,18 @@ curl -fsSL https://github.com/ai-poet/agent-client/desktop/releases/latest/downl
 
 使用指南（英文）：[模型配置](docs/models.md) · [远程主机](docs/hosts.md) · [项目与会话](docs/projects.md)
 
+## 客户端更新
+
+应用更新默认关闭。可在桌面端 profile 中放置可选的 `update.json`，字段包括
+`feed_url`（当前平台 MyGo 清单的完整 URL）、`public_key`（base64 Ed25519 公钥）、
+`enabled`、`automatic` 和 `prereleases`。只有同时配置更新源与公钥后，`enabled`
+才会生效；设置页写回配置时文件权限为 0600。
+
+**设置 › 关于**提供当前版本、手动检查、下载进度和可读失败原因。自动模式在启动后
+延迟静默检查一次。MyGo 在安装前校验包签名；当前构建还必须具备 MyGo updater
+支持以及与配置相对应的构建时公钥。开发构建或由包管理器安装的应用可能不支持
+自行更新。这里仅包含客户端能力，不生成清单、不签名发布，也不上传文件。
+
 ## 交流与合作
 
 加入 [Discord](https://discord.gg/MCDktmDey)，或加我微信进交流群。Bug 反馈和功能请求请使用[GitHub Issues](https://github.com/ai-poet/agent-client/desktop/issues)，更容易跟踪；安全漏洞请按 [SECURITY.md](SECURITY.md) 私下报告。想参与贡献，请先看 [CONTRIBUTING.md](CONTRIBUTING.md)。
