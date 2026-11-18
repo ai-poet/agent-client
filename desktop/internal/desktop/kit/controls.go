@@ -9,7 +9,10 @@ import (
 // transparent, accent on hover, secondary_active when pressed or selected. It
 // is a MyGo ButtonBase, which keeps focus, keys and accessibility.
 func Ghost(c *ui.Context, label string, selected bool) ui.Element {
-	return GhostLook(c, ui.ButtonBase(c).Label(label), selected)
+	// ButtonBase draws no text of its own: Label only names the control for
+	// assistive technology, so the visible label is a child element.
+	return GhostLook(c, ui.ButtonBase(c).Label(label), selected).
+		Children(func() { ui.Text(c, label).FontSize(14).SingleLine() })
 }
 
 // GhostLook gives a button without a look Kit's ghost states, as Ghost.
