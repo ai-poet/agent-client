@@ -13,7 +13,9 @@ import (
 // captionControls is every control that shows a caption of its own. A new
 // button type belongs here: ButtonBase draws no text, so a control that sets
 // only Label compiles, passes every behaviour test and still shows an empty
-// pill on screen.
+// pill on screen. The caption may sit in a helper in this same file: the
+// check follows up to two calls, so extracting one does not trip it, while a
+// helper moved to another file does.
 var captionControls = []string{
 	"Primary", "PrimaryBusy", "Secondary", "SecondaryBusy",
 	"Ghost", "Danger", "DangerBusy", "Tag",
@@ -42,25 +44,37 @@ func TestControlsDrawTheirOwnCaption(t *testing.T) {
 			t.Errorf("%s has no function in controls.go; its caption must be built there", name)
 			continue
 		}
-		if !drawsCaption(fn.Body) {
+		if !drawsCaption(fn.Body, decls, 2) {
 			t.Errorf("%s builds no single-line ui.Text: ButtonBase.Label draws nothing, so it would show an empty control", name)
 		}
 	}
 }
 
 // drawsCaption reports whether body builds a ui.Text chained with SingleLine,
-// closures included.
-func drawsCaption(body *ast.BlockStmt) bool {
+// closures and calls to helpers in decls included, down to depth calls.
+func drawsCaption(body *ast.BlockStmt, decls map[string]*ast.FuncDecl, depth int) bool {
 	found := false
 	ast.Inspect(body, func(n ast.Node) bool {
+		if found {
+			return false
+		}
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
 		}
 		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "SingleLine" && isText(sel.X) {
 			found = true
+			return false
 		}
-		return !found
+		if depth > 0 {
+			if id, ok := call.Fun.(*ast.Ident); ok {
+				if fn := decls[id.Name]; fn != nil && drawsCaption(fn.Body, decls, depth-1) {
+					found = true
+					return false
+				}
+			}
+		}
+		return true
 	})
 	return found
 }
