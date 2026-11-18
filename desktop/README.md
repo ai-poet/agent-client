@@ -159,8 +159,15 @@ GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0 go test ./internal/cheapauth/... ./internal/n
 首次启动会只读检测 `~/.cheaprouter`（可用 `SUB2API_DATA_DIR_NAME` 覆盖）中的旧版 CheapRouter 数据；旧 Release 的 daemon 数据库也会从对应平台的 `CheapRouter` 应用支持目录检测。检测到项目或会话时，迁移向导先展示数量，确认后才导入；失败不会阻止新客户端启动，可在向导或 **Settings → General** 重试。
 
 - 迁移前将使用到的源文件原样备份到 profile 的 `migration-backup-<UTC 时间戳>/`，旧目录不会删除或改写。
+- **备份是原样副本**：旧目录里若有凭据文件，备份中会带着它的明文副本（这是「原样复制」的必然结果，不是迁移写入了 token）。确认迁移无误后可删除该目录。
 - 项目、会话和消息按稳定 ID 导入；`migration.json` 防止重复迁移，“重新迁移”只补缺，不覆盖新客户端已有内容。
 - `migration-report.json` 列出无法无损映射的字段。凭据仅保留账号标识和端点，不迁移 token 或 API key，需在新客户端重新登录。
+
+## 前置条件与已知限制
+
+- 构建与测试一律 `GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0`。
+- 涉及本地存储的包（如 `internal/desktop/live`、`internal/node/store` 的部分测试）需要 Turso native 库：先 `sh native/turso/build.sh` 生成 `.runtime/native/<os>-<arch>/libturso_sync_sdk_kit.so`，再用 `SAILRY_TURSO_LIB=<路径>` 跑测试。该脚本依赖 Rust 工具链（rustc ≥ 1.85），没有 rustup 的机器编不过，需要预编译产物。
+- 无网络/无图形环境（CI 容器）下 `internal/desktop/live` 的部分用例会失败，属环境限制。
 
 ## Client updates
 
