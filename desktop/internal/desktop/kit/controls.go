@@ -72,7 +72,9 @@ func Primary(c *ui.Context, label string, disabled bool) ui.Element {
 	case b.Hovered():
 		b.Background(p.ButtonPrimaryHi)
 	}
-	return b
+	// ButtonBase draws no text: Label only names the control for assistive
+	// technology, so the visible caption is a child element.
+	return b.Children(func() { ui.Text(c, label).FontSize(14).SingleLine() })
 }
 
 // Tag is Kit's small Tag: a rounded label in the emphasis color at 12%.
