@@ -107,8 +107,13 @@ func (service *Service) Start() {
 	service.Refresh()
 }
 
-// Close cancels indexing and waits for a started worker.
+// Close cancels indexing and waits for a started worker. It is safe on a nil
+// receiver: a Node that was constructed but never started holds no knowledge
+// service, and shutdown must not panic on that path.
 func (service *Service) Close() {
+	if service == nil {
+		return
+	}
 	service.halt()
 	if service.started {
 		<-service.done

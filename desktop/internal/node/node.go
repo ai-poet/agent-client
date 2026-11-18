@@ -317,6 +317,17 @@ type stopStage struct {
 	run  func() error
 }
 
+// closeKnowledge stops the knowledge index when a Node was started. A Node
+// that was constructed but never started holds none, and shutdown must not
+// dereference it.
+func (node *Node) closeKnowledge() error {
+	if node == nil || node.knowledge == nil {
+		return nil
+	}
+	node.knowledge.Close()
+	return nil
+}
+
 func (node *Node) shutdown(grace time.Duration) {
 	deadline, release := context.WithTimeout(context.Background(), grace)
 	defer release()
@@ -342,7 +353,7 @@ func (node *Node) shutdown(grace time.Duration) {
 		{"port forwards", node.ports.Close},
 		// Supervised tasks may finish until the deadline and are then cancelled.
 		{"supervised tasks", func() error { return node.tasks.Close(deadline) }},
-		{"knowledge index", quiet(node.knowledge.Close)},
+		{"knowledge index", node.closeKnowledge},
 		{"external browsers", quiet(node.externalBrowser.Shutdown)},
 		{"plugins and MCP servers", node.closePlugins},
 		{"requests in flight", quiet(node.work.Wait)},
