@@ -166,7 +166,7 @@ GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0 go test ./internal/cheapauth/... ./internal/n
 ## 前置条件与已知限制
 
 - 构建与测试一律 `GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0`。
-- 涉及本地存储的包（如 `internal/desktop/live`、`internal/node/store` 的部分测试）需要 Turso native 库：先 `sh native/turso/build.sh` 生成 `.runtime/native/<os>-<arch>/libturso_sync_sdk_kit.so`，再用 `SAILRY_TURSO_LIB=<路径>` 跑测试。该脚本依赖 Rust 工具链（rustc ≥ 1.85），没有 rustup 的机器编不过，需要预编译产物。
+- 涉及本地存储的包（如 `internal/desktop/live`、`internal/node/store` 的部分测试）需要 Turso native 库：先 `sh native/turso/build.sh` 生成 `.runtime/native/<os>-<arch>/libturso_sync_sdk_kit.so`，再用 `SAILRY_TURSO_LIB=<路径>` 跑测试。该脚本要求 **rustup**（`native/turso/rust-toolchain.toml` 钉死 toolchain `1.98.0`），用系统 rustc（如 1.85.x）会因依赖要求更高版本而编译失败；没有 rustup 的机器需要预编译产物。
 - 无网络/无图形环境（CI 容器）下 `internal/desktop/live` 的部分用例会失败，属环境限制。
 
 ## Client updates
