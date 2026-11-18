@@ -11,9 +11,9 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
-	"charm.land/fantasy/providers/anthropic"
-	"charm.land/fantasy/providers/google"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model/anthropic"
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model/google"
 )
 
 const rawRustRevision = "eaad1b7f18e448c8c4e9e9286e19560c8a351ae1"

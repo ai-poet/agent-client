@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"charm.land/fantasy/providers/anthropic"
-	"charm.land/fantasy/providers/google"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/clock"
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model/anthropic"
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model/google"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 

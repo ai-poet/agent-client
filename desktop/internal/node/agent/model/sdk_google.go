@@ -7,8 +7,8 @@ import (
 	"net/http"
 
 	"charm.land/fantasy"
-	fantasygoogle "charm.land/fantasy/providers/google"
 	"github.com/MoeForge/moego/base64"
+	google "github.com/ai-poet/agent-client/desktop/internal/node/agent/model/google"
 	"github.com/google/uuid"
 	"google.golang.org/genai"
 )
@@ -132,7 +132,7 @@ func (model *sdkModel) streamGoogle(ctx context.Context, body map[string]any, ca
 					if function != nil {
 						toolID = id
 					}
-					metadata[fantasygoogle.Name] = &fantasygoogle.ReasoningMetadata{Signature: string(decoded), ToolID: toolID}
+					metadata[google.Name] = &google.ReasoningMetadata{Signature: string(decoded), ToolID: toolID}
 					if function == nil && !emitter.emit(fantasy.StreamPart{Type: fantasy.StreamPartTypeReasoningEnd, ID: id, ProviderMetadata: metadata}) {
 						return
 					}

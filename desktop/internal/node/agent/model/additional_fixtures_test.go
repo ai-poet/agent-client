@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"charm.land/fantasy/providers/google"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model/google"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 

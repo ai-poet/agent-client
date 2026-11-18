@@ -20,28 +20,12 @@ In the **Linked into** column, D is Desktop, H is Host and M is Mobile.
 | `charm.land/fantasy` | v0.46.0 | Apache-2.0 | `LICENSE`, `NOTICE` | D H |
 | `cloud.google.com/go` | v0.123.0 | Apache-2.0 | `LICENSE` | D H |
 | `cloud.google.com/go/auth` | v0.24.2 | Apache-2.0 | `LICENSE` | D H |
-| `cloud.google.com/go/auth/oauth2adapt` | v0.3.0 | Apache-2.0 | `LICENSE` | D H |
 | `cloud.google.com/go/compute/metadata` | v0.10.0 | Apache-2.0 | `LICENSE` | D H |
 | `dario.cat/mergo` | v1.0.0 | BSD-3-Clause | `LICENSE` | D H |
 | `filippo.io/age` | v1.3.2 | BSD-3-Clause | `LICENSE` | D H |
 | `filippo.io/edwards25519` | v1.2.0 | BSD-3-Clause | `LICENSE` | D H |
 | `filippo.io/hpke` | v0.4.0 | BSD-3-Clause | `LICENSE` | D H |
 | `github.com/anthropics/anthropic-sdk-go` | v1.84.0 | MIT | `LICENSE` | D H |
-| `github.com/aws/aws-sdk-go-v2` | v1.47.5 | Apache-2.0 | `LICENSE.txt`, `NOTICE.txt` | D H |
-| `github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream` | v1.7.25 | Apache-2.0 | `LICENSE.txt` | D H |
-| `github.com/aws/aws-sdk-go-v2/config` | v1.33.12 | Apache-2.0 | `LICENSE.txt` | D H |
-| `github.com/aws/aws-sdk-go-v2/credentials` | v1.20.12 | Apache-2.0 | `LICENSE.txt` | D H |
-| `github.com/aws/aws-sdk-go-v2/feature/ec2/imds` | v1.20.5 | Apache-2.0 | `LICENSE.txt` | D H |
-| `github.com/aws/aws-sdk-go-v2/internal/configsources` | v1.5.8 | Apache-2.0 | `LICENSE.txt` | D H |
-| `github.com/aws/aws-sdk-go-v2/internal/endpoints/v2` | v2.8.8 | Apache-2.0 | `LICENSE.txt` | D H |
-| `github.com/aws/aws-sdk-go-v2/internal/v4a` | v1.5.8 | Apache-2.0 | `LICENSE.txt` | D H |
-| `github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding` | v1.13.23 | Apache-2.0 | `LICENSE.txt` | D H |
-| `github.com/aws/aws-sdk-go-v2/service/internal/presigned-url` | v1.14.8 | Apache-2.0 | `LICENSE.txt` | D H |
-| `github.com/aws/aws-sdk-go-v2/service/signin` | v1.12.0 | Apache-2.0 | `LICENSE.txt` | D H |
-| `github.com/aws/aws-sdk-go-v2/service/sso` | v1.39.0 | Apache-2.0 | `LICENSE.txt` | D H |
-| `github.com/aws/aws-sdk-go-v2/service/ssooidc` | v1.44.0 | Apache-2.0 | `LICENSE.txt` | D H |
-| `github.com/aws/aws-sdk-go-v2/service/sts` | v1.51.6 | Apache-2.0 | `LICENSE.txt` | D H |
-| `github.com/aws/smithy-go` | v1.28.7 | Apache-2.0 | `LICENSE`, `NOTICE` | D H |
 | `github.com/aymerick/douceur` | v0.2.0 | MIT | `LICENSE` | D H |
 | `github.com/bahlo/generic-list-go` | v0.2.0 | BSD-3-Clause | `LICENSE` | D H |
 | `github.com/Bios-Marcel/wastebasket/v2` | v2.0.3 | MPL-2.0 | `LICENSE` | D H |
@@ -169,7 +153,6 @@ In the **Linked into** column, D is Desktop, H is Host and M is Mobile.
 | `github.com/yusufpapurcu/wmi` | v1.2.4 | MIT | `LICENSE` | D H |
 | `github.com/zeebo/xxh3` | v1.1.0 | BSD-2-Clause | `LICENSE` | D H |
 | `go.opentelemetry.io/auto/sdk` | v1.2.1 | Apache-2.0 | `LICENSE` | D H |
-| `go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc` | v0.72.0 | Apache-2.0, BSD-3-Clause | `LICENSE` | D H |
 | `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` | v0.72.0 | Apache-2.0, BSD-3-Clause | `LICENSE` | D H |
 | `go.opentelemetry.io/otel` | v1.47.0 | Apache-2.0, BSD-3-Clause | `LICENSE` | D H |
 | `go.opentelemetry.io/otel/log` | v1.47.0 | Apache-2.0, BSD-3-Clause | `LICENSE` | D H |

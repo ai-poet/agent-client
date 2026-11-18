@@ -2,10 +2,10 @@ package model
 
 import (
 	"charm.land/fantasy"
-	"charm.land/fantasy/providers/google"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model/google"
 	"io"
 	"net/http"
 	"net/http/httptest"

@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"charm.land/fantasy/providers/anthropic"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model"
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model/anthropic"
 	"github.com/ai-poet/agent-client/desktop/internal/node/hooks"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"

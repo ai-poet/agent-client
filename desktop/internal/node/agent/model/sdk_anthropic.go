@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	fantasyanthropic "charm.land/fantasy/providers/anthropic"
+	anthropic "github.com/ai-poet/agent-client/desktop/internal/node/agent/model/anthropic"
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
@@ -128,7 +128,7 @@ func (model *sdkModel) streamAnthropic(ctx context.Context, raw []byte, call fan
 				signature := wireString(delta["signature"])
 				block.signature += signature
 				if signature != "" {
-					if !emitter.emitIndexed(fantasy.StreamPart{Type: fantasy.StreamPartTypeReasoningDelta, ID: block.id, ProviderMetadata: fantasy.ProviderMetadata{fantasyanthropic.Name: &fantasyanthropic.ReasoningOptionMetadata{Signature: signature}}}, index) {
+					if !emitter.emitIndexed(fantasy.StreamPart{Type: fantasy.StreamPartTypeReasoningDelta, ID: block.id, ProviderMetadata: fantasy.ProviderMetadata{anthropic.Name: &anthropic.ReasoningOptionMetadata{Signature: signature}}}, index) {
 						return
 					}
 				}
@@ -149,8 +149,8 @@ func (model *sdkModel) streamAnthropic(ctx context.Context, raw []byte, call fan
 			}
 			switch block.kind {
 			case "thinking", "redacted_thinking":
-				metadata := &fantasyanthropic.ReasoningOptionMetadata{Signature: block.signature, RedactedData: block.redacted}
-				if !emitter.emitIndexed(fantasy.StreamPart{Type: fantasy.StreamPartTypeReasoningEnd, ID: block.id, ProviderMetadata: fantasy.ProviderMetadata{fantasyanthropic.Name: metadata}}, index) {
+				metadata := &anthropic.ReasoningOptionMetadata{Signature: block.signature, RedactedData: block.redacted}
+				if !emitter.emitIndexed(fantasy.StreamPart{Type: fantasy.StreamPartTypeReasoningEnd, ID: block.id, ProviderMetadata: fantasy.ProviderMetadata{anthropic.Name: metadata}}, index) {
 					return
 				}
 			case "tool_use":
