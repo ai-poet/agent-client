@@ -112,3 +112,14 @@
   | 写入与读取（`save`/`query`/`read_knowledge_citation`） | `internal/node/knowledge_service.go` 相关用例与离线用例 |
   | 权限（未授权会话/插件不得读他人知识） | `internal/node/authorization_test.go` 与 `multi_host_integration_test.go` 的跨主机断言 |
   语义检索（向量）的覆盖随能力删除一并消失，这是**能力删除的必然结果**，不是测试遗漏。
+
+## 6. 删除后的等价替代路径
+
+读者需要知道「少了什么」之外，还要知道「现在该怎么绕」。逐条写清：
+
+| 已删能力 | 等价替代 | 说明 |
+| --- | --- | --- |
+| SSH 连接资源（`save_ssh` / `list_ssh_terminals` 等） | **无内置替代**：用本地终端（`create_terminal` / `input_terminal`）执行 `ssh`，或在设置里改用 WSL / 本机 shell | 这是有意的边界：内置 SSH 需要凭据存储与主机密钥管理，风险面大于收益。`SSH_AUTH_SOCK` 透传、`.ssh` 目录屏蔽、`ssh://` 远端解析都保留，`git@host:` 形式仍可用 |
+| 本地数据库连接与查询（`list_databases` / `query_database` 等） | **无内置替代**：用 `run_command` 调用 `psql` / `mysql` / `sqlite3`，或用外部 MCP 连接器 | 连接凭据不再进入 profile 存储 |
+| Office 文档解析（`read_office`） | 用 `run_command` + 外部工具（如 `pdftotext`、`libreoffice --headless`），或把文件交给 MCP 连接器；纯文本/代码/markdown 仍由 `read_file` 直接读 | `attachments.go` 的提示词已不再引导模型调用 `read_office` |
+| 本地推理与 OCR（`read_local_models` / `list_ocr_models` 等） | **无替代**：OCR 走外部服务或 MCP 连接器；语义（向量）检索能力随嵌入模型一并移除，关键字检索保留 | 关键字检索由 `query_knowledge`（`KnowledgeModeKeyword`）继续提供 |
