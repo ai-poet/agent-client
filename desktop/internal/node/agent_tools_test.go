@@ -93,7 +93,7 @@ func (script *agentToolScript) Stream(_ context.Context, call fantasy.Call) (fan
 
 // TestAgentManagementTools runs real turns in which the model discovers and
 // calls the plugin, MCP and skill managers, the role and team catalog tools,
-// a package's roles.* operations and the files package's OCR model tools.
+// and a package's roles.* operations.
 func TestAgentManagementTools(t *testing.T) {
 	script := &agentToolScript{}
 	environment := process.NewEnvironment([]string{"PATH=/usr/bin:/bin"})
@@ -179,8 +179,7 @@ func TestAgentManagementTools(t *testing.T) {
 	managers := []string{"manage_skills", "manage_mcp", "manage_plugins"}
 	catalog := []string{"list_agents", "add_agent", "edit_agent", "delete_agent", "apply_agents", "list_teams", "add_team", "edit_team", "delete_team", "apply_team"}
 	roles := func(name string) string { return operations.Alias("roles-fixture", name) }
-	ocr := func(name string) string { return operations.Alias("files", name) }
-	scoped := []string{roles("roster"), roles("keep"), roles("drop"), roles("assign"), ocr("list_ocr_models"), ocr("install_ocr_model"), ocr("uninstall_ocr_model")}
+	scoped := []string{roles("roster"), roles("keep"), roles("drop"), roles("assign")}
 	// tool_search loads at most eight tools per call.
 	all := slices.Concat(managers, catalog, scoped)
 	var discover [][3]string
@@ -259,8 +258,6 @@ func TestAgentManagementTools(t *testing.T) {
 			}
 		}
 	}
-	unknown := strings.Repeat("a", 64)
-
 	t.Run("full permission", func(t *testing.T) {
 		var results map[string]string
 		_, approvals, history := turn(t, protocol.WorkModeCode, protocol.PermissionFull, func(protocol.ConversationApproval) string {
@@ -280,9 +277,6 @@ func TestAgentManagementTools(t *testing.T) {
 					{"skill-uninstall", "manage_skills", `{"action":"uninstall","name":"roles-fixture","expected_revision":1}`},
 					{"agents", "list_agents", `{}`},
 					{"agent", "add_agent", `{"key":"reviewer","name":"Reviewer","instructions":"Review the change"}`},
-					{"ocr-models", ocr("list_ocr_models"), `{}`},
-					{"ocr-install", ocr("install_ocr_model"), `{"id":"` + unknown + `"}`},
-					{"ocr-remove", ocr("uninstall_ocr_model"), `{"id":"` + unknown + `"}`},
 				}
 			case 3:
 				id, revision := field(t, current, "agent", "id"), field(t, current, "agent", "revision")
@@ -343,9 +337,6 @@ func TestAgentManagementTools(t *testing.T) {
 			"skill-uninstall": {"permission_denied", "only standalone skill packages can be managed by this tool"},
 			"agents":          {`{"agents":[`, `"key":"explore"`, `"revision":"1"`},
 			"agent":           {`"key":"reviewer"`, `"revision":"1"`},
-			"ocr-models":      {`"models"`},
-			"ocr-install":     {"not_found", "local model is not registered"},
-			"ocr-remove":      {"not_found", "local model is not registered"},
 			"mcp-list":        {`"servers":[`, `"name":"mcp-fixture"`},
 			"mcp-update":      {`"name":"mcp-fixture"`, `"credential_slots":["TOKEN"]`, `"standalone":true`},
 			"plugin-remove":   {"invalid_request", "use manage_skills or manage_mcp for standalone packages"},
@@ -364,11 +355,6 @@ func TestAgentManagementTools(t *testing.T) {
 			"drop":            {`"kind":"roles"`, `"key":"explore"`},
 			"delete-missing":  {"not_found"},
 		})
-		for _, call := range []string{"ocr-install", "ocr-remove"} {
-			if strings.Contains(results[call], "permission_denied") {
-				t.Fatalf("%s was refused instead of reaching the local model owner: %q", call, results[call])
-			}
-		}
 		for _, approval := range approvals {
 			if approval.Source != protocol.ConversationApprovalSourceFull || approval.State != protocol.ConversationApprovalStateApproved || approval.CanRemember {
 				t.Fatalf("full permission approval is not automatic: %+v", approval)
@@ -376,9 +362,8 @@ func TestAgentManagementTools(t *testing.T) {
 		}
 		// Every non-read call that passed its pre-approval checks was
 		// authorized: the two refused package removals fail before approval,
-		// and list_agents, list_teams, the roster and the OCR listing are
-		// read-only and never ask.
-		if len(approvals) != 21 {
+		// and list_agents, list_teams and the roster are read-only and never ask.
+		if len(approvals) != 19 {
 			t.Fatalf("full permission recorded %d approvals", len(approvals))
 		}
 		body, err := json.Marshal(history)
@@ -397,8 +382,8 @@ func TestAgentManagementTools(t *testing.T) {
 		_, approvals, _ := turn(t, protocol.WorkModeCode, protocol.PermissionAsk, func(approval protocol.ConversationApproval) string {
 			script.mu.Lock()
 			defer script.mu.Unlock()
-			// add_agent is approved; the next request's add_team and OCR
-			// removal are refused. Only the package operation, which has an
+			// add_agent is approved; the next request's add_team and scoped
+			// role removal are refused. Only the package operation, which has an
 			// approval binding, can be remembered.
 			_, added := script.results["agent"]
 			if approval.Source != protocol.ConversationApprovalSourceUser || approval.CanRemember != (added && approval.Index == 1) {
@@ -416,7 +401,7 @@ func TestAgentManagementTools(t *testing.T) {
 			case 2:
 				return [][3]string{{"teams", "list_teams", `{}`}, {"agent", "add_agent", `{"key":"writer","name":"Writer","instructions":"Write"}`}}
 			case 3:
-				return [][3]string{{"denied", "add_team", `{"key":"writers","name":"Writers"}`}, {"ocr-remove", ocr("uninstall_ocr_model"), `{"id":"` + unknown + `"}`}}
+				return [][3]string{{"denied", "add_team", `{"key":"writers","name":"Writers"}`}, {"denied-drop", roles("drop"), `{"role":"` + protocol.NewRoleID().String() + `","expected_revision":"1"}`}}
 			case 4:
 				// An invalid definition is refused before any approval is
 				// requested: none of these calls reaches the user.
@@ -441,8 +426,8 @@ func TestAgentManagementTools(t *testing.T) {
 			"invalid-members": {"invalid_request", "team members must be distinct"},
 			"invalid-keep":    {"invalid_request", "role key, name or turn limit is invalid"},
 		})
-		if strings.Contains(results["denied"], `"key":"writers"`) || strings.Contains(results["ocr-remove"], "not_found") {
-			t.Fatalf("denied calls executed: %q, %q", results["denied"], results["ocr-remove"])
+		if strings.Contains(results["denied"], `"key":"writers"`) || strings.Contains(results["denied-drop"], "not_found") {
+			t.Fatalf("denied calls executed: %q, %q", results["denied"], results["denied-drop"])
 		}
 		states := map[protocol.ConversationApprovalState]int{}
 		for _, approval := range approvals {
@@ -839,7 +824,6 @@ func TestAgentManagementTools(t *testing.T) {
 					{"agents", "list_agents", `{}`},
 					{"agent", "add_agent", `{"key":"planner","name":"Planner","instructions":"Plan"}`},
 					{"keep", roles("drop"), `{"role":"` + protocol.NewRoleID().String() + `","expected_revision":"1"}`},
-					{"ocr-install", ocr("install_ocr_model"), `{"id":"` + unknown + `"}`},
 					{"command", "run_command", `{"command":"git --no-pager diff"}`},
 				}
 			}
@@ -855,7 +839,6 @@ func TestAgentManagementTools(t *testing.T) {
 			"agents":        {`"key":"writer"`},
 			"agent":         {"permission_denied", "planning mode permits read-only tools"},
 			"keep":          {"permission_denied", "planning mode permits read-only tools"},
-			"ocr-install":   {"permission_denied", "planning mode permits read-only tools"},
 			"command":       {"permission_denied", "planning mode permits read-only tools"},
 		})
 		if len(approvals) != 0 {
