@@ -98,3 +98,17 @@
 - `process/environment.go` 的 `SSH_AUTH_SOCK` 环境变量透传；
 - `process/sandbox.go` 对 `.ssh` 目录的屏蔽；
 - `git/worktrees.go` 和插件仓库地址校验中的 `ssh` URL scheme。
+
+## 5. 权限矩阵与协议注册表的处理（2026-11-18）
+
+- **协议注册表保留**：`internal/protocol/message.go` 仍能解析 `save_ssh` / `read_office` / `list_databases` 等旧命令，这是为了兼容旧客户端的报文解析与历史记录回放，**不代表能力仍存在**。
+- **权限矩阵已移除**：`internal/node/authorization.go` 的 `accessPersonal` / `accessResource` 里这些已删命令已被删除——没有 handler 的命令不该继续被授予权限，否则审计时会误以为它们仍可用。
+- **知识库测试的删除边界**：`knowledge_storage_test.go`（10 处关键字检索断言）与 `knowledge_users_test.go` 整体删除，原因是它们的夹具依赖**已删除的语义索引**（`internal/localmodels` 的嵌入模型），Node 不再启动该索引服务，整段无法构造。
+  **关键字检索本身仍在**，覆盖由现存用例承担：
+  | 能力面 | 现存用例 |
+  | --- | --- |
+  | 关键字查询（多主机、本地/控制器隔离） | `internal/node/multi_host_integration_test.go`（4 处 `KnowledgeModeKeyword`） |
+  | 离线/无索引时的关键字查询 | `internal/node/resource_knowledge_offline_test.go`（`query_knowledge` + 关键字模式） |
+  | 写入与读取（`save`/`query`/`read_knowledge_citation`） | `internal/node/knowledge_service.go` 相关用例与离线用例 |
+  | 权限（未授权会话/插件不得读他人知识） | `internal/node/authorization_test.go` 与 `multi_host_integration_test.go` 的跨主机断言 |
+  语义检索（向量）的覆盖随能力删除一并消失，这是**能力删除的必然结果**，不是测试遗漏。
