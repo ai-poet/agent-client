@@ -17,7 +17,6 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/operations"
 	knowledgeservice "github.com/ai-poet/agent-client/desktop/internal/node/knowledge/service"
@@ -103,7 +102,7 @@ func TestKnowledgeStorage(t *testing.T) {
 						return nil, ctx.Err()
 					}
 				}
-				selected := localmodels.DefaultEmbedding
+				selected := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 				options.Choice = func() protocol.ModelsLocalChoice { return protocol.ModelsLocalChoice{Enabled: true, Model: &selected} }
 				options.Dimension = func(model string) (int, string, bool) { return 2, "fixture", model == selected }
 				options.Installed = func() (map[string]bool, error) { return map[string]bool{selected: true}, nil }

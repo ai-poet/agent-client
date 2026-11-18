@@ -9,8 +9,8 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/google/uuid"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/google/uuid"
 )
 
 const exploreInstructions = "Explore the assigned scope using read-only tools. Read files the task names or needs, distinguish confirmed facts from inferences, and return concise findings with exact paths and unresolved questions. Do not modify resources or request user input."
@@ -48,15 +48,6 @@ func initializeRoles(ctx context.Context, connection *sql.Conn) error {
 		}
 	}
 	return nil
-}
-
-func initializeLocalModels(ctx context.Context, connection *sql.Conn) error {
-	body, err := json.Marshal(protocol.DefaultModelsLocalSettings())
-	if err != nil {
-		return err
-	}
-	_, err = connection.ExecContext(ctx, "INSERT INTO local_model_settings(singleton,body) VALUES(1,?1)", body)
-	return err
 }
 
 func initializeDefaults(ctx context.Context, connection *sql.Conn) error {

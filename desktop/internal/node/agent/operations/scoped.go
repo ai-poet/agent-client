@@ -6,67 +6,33 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
-// ScopedOperation reports whether an operation installs or removes a local
-// model or manages the role catalog. The Node dispatches these under the
+// ScopedOperation reports whether an operation manages the role catalog.
+// The Node dispatches these under the
 // declaring package instead of a workspace command.
 func ScopedOperation(operation protocol.ToolOperation) bool {
 	switch operation {
-	case protocol.ToolOperationInstallModel, protocol.ToolOperationRemoveModel,
-		protocol.ToolOperationListRoles, protocol.ToolOperationSaveRole, protocol.ToolOperationRemoveRole, protocol.ToolOperationApplyRoles:
+	case protocol.ToolOperationListRoles, protocol.ToolOperationSaveRole, protocol.ToolOperationRemoveRole, protocol.ToolOperationApplyRoles:
 		return true
 	}
 	return false
 }
 
-func roleOperation(operation protocol.ToolOperation) bool {
-	return ScopedOperation(operation) && operation != protocol.ToolOperationInstallModel && operation != protocol.ToolOperationRemoveModel
-}
-
-// ScopedCommand maps a model or role operation onto the Node command that owns
+// ScopedCommand maps a role operation onto the Node command that owns
 // it. Role application always targets the captured session.
 func ScopedCommand(operation protocol.ToolOperation, arguments json.RawMessage, session protocol.SessionID) (protocol.Command, error) {
 	strict := func(target any) error {
 		decoder := json.NewDecoder(bytes.NewReader(arguments))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(target); err != nil {
-			message := "invalid role arguments"
-			if !roleOperation(operation) {
-				message = "invalid model arguments"
-			}
-			return invalidCommand(message)
+			return invalidCommand("invalid role arguments")
 		}
 		return nil
 	}
 	switch operation {
-	case protocol.ToolOperationInstallModel, protocol.ToolOperationRemoveModel:
-		var input struct {
-			Model *protocol.InstallationModelRef `json:"model"`
-		}
-		if err := strict(&input); err != nil {
-			return protocol.Command{}, err
-		}
-		if input.Model == nil {
-			return protocol.Command{}, invalidCommand("invalid model arguments")
-		}
-		invalid := invalidCommand("model installation target or identity is invalid")
-		if payload, controller := input.Model.Data.(*protocol.InstallationModelRefControllerPayload); controller {
-			if payload.Kind != protocol.ModelsKindSpeech {
-				return protocol.Command{}, invalid
-			}
-			return protocol.Command{}, &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "speech installation requires a controller"}
-		}
-		payload, node := input.Model.Data.(*protocol.InstallationModelRefNodePayload)
-		if !node || payload.Kind == protocol.ModelsKindSpeech || !localmodels.ValidID(payload.ID) {
-			return protocol.Command{}, invalid
-		}
-		if operation == protocol.ToolOperationRemoveModel {
-			return protocol.Command{Kind: "delete_local_model", Data: &protocol.CommandDeleteLocalModelPayload{ID: payload.ID}}, nil
-		}
-		return protocol.Command{Kind: "install_local_model", Data: &protocol.CommandInstallLocalModelPayload{ID: payload.ID}}, nil
+
 	case protocol.ToolOperationListRoles:
 		var input struct{}
 		if err := strict(&input); err != nil {
@@ -172,10 +138,10 @@ func roleRevision(value string) (uint64, error) {
 	return number, nil
 }
 
-// ScopedOutput projects a model or role outcome for the calling tool. Role
+// ScopedOutput projects a role outcome for the calling tool. Role
 // outcomes carry public definitions with decimal-string revisions.
 func ScopedOutput(operation protocol.ToolOperation, output protocol.Output) (any, error) {
-	if !roleOperation(operation) {
+	if !ScopedOperation(operation) {
 		return output, nil
 	}
 	if value, listed := outputPayload[[]protocol.RoleProfile](output); listed {

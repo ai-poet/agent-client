@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
 	"github.com/ai-poet/agent-client/desktop/internal/node/knowledge"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
@@ -13,7 +12,7 @@ import (
 func TestStorageCandidatesCarryOnlySourceIdentity(t *testing.T) {
 	fixture := newHarness(t)
 	fixture.install()
-	model := localmodels.DefaultEmbedding
+	model := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	collection := protocol.DefaultKnowledgeCollection()
 	collection.ID, collection.Revision, collection.Progress.Generation = protocol.NewKnowledgeID(), 1, 1
 	collection.Owner = protocol.KnowledgeOwner{Kind: "plugin", Data: &protocol.KnowledgeOwnerPluginPayload{Name: "fixture"}}

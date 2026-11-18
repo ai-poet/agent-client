@@ -156,10 +156,9 @@ func testFeatureUsage(t *testing.T) {
 		}
 
 		actions := &conversationActions{r: root, cv: &viewmodel.Conversation{ID: planted}, comp: composer.New("")}
-		actions.countDictation()
 		actions.countSubmit(composer.Message{Text: planted, Attachments: []*composer.Attachment{{}}, Model: planted, Mode: composer.Plan, Permission: composer.FullAccess}, false, true)
 		actions.countSubmit(composer.Message{Text: planted, References: []composer.Reference{{}}}, true, false)
-		expect("two submissions", "dictation.start", "composer.submit", "composer.submit", "composer.submit.has_attachment", "composer.submit.dictated", "composer.submit.queued",
+		expect("two submissions", "composer.submit", "composer.submit", "composer.submit.has_attachment", "composer.submit.queued",
 			"composer.submit.has_reference", "composer.submit.guided", "composer.mode.plan", "composer.mode.code", "composer.permission.full", "composer.permission.ask")
 		root.CountReadAloud(true)
 		root.CountReadAloud(false)

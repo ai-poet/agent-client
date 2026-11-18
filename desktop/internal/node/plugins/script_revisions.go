@@ -121,8 +121,7 @@ func scriptOutput(output protocol.Output) any {
 	}
 	data := scriptAt(value, "data")
 	switch output.Kind {
-	case "local_models":
-		scriptSet(value, scriptAt(data, "models"), "data")
+
 	case "roles", "teams", "knowledge_collections":
 		scriptEach(data, func(row any) { scriptStringRevision(row, "revision") })
 	case "team", "plugin_value", "plugin_conversation_value", "knowledge_collection":

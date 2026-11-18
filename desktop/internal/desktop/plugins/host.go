@@ -57,8 +57,6 @@ type Host struct {
 	native              *NativeBinding
 	changes             *hostChanges
 	settings            hostSettings
-	installation        *hostInstallationScope
-	installationPending chan struct{}
 	fileSearchCancel    context.CancelFunc
 	usageChanged        chan struct{}
 	usageSourcesClosed  bool
@@ -92,7 +90,6 @@ func NewHost(binding HostBinding) *Host {
 		binding: binding, ctx: ctx, cancel: cancel, native: binding.Native,
 		requests: map[string]protocol.Request{}, observers: map[string]*client.Observer{}, feeds: map[string]*hostFeed{},
 		topics:              map[string]link.Subscription{},
-		installationPending: make(chan struct{}, 1),
 		usageChanged:        make(chan struct{}),
 		usageSample:         binding.UsageSample,
 	}

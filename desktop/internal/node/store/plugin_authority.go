@@ -471,12 +471,7 @@ func pluginAction(kind string) (protocol.PluginAction, bool) {
 		return protocol.PluginActionGenerateText, true
 	case "resolve_plugin_model":
 		return protocol.PluginActionReadModels, true
-	case "search_models", "read_model_versions", "resolve_model", "refresh_local_model", "read_local_models":
-		return protocol.PluginActionReadModels, true
-	case "decide":
-		return protocol.PluginActionRunDecisions, true
-	case "register_local_model", "install_local_model", "delete_local_model":
-		return protocol.PluginActionInstallModels, true
+
 	case "read_installations", "dismiss_installation":
 		return protocol.PluginActionInstallModels, true
 	case "read_activity", "read_activity_catalog":
@@ -558,13 +553,7 @@ func pluginAction(kind string) (protocol.PluginAction, bool) {
 
 func pluginSettingsAccess(kind string) bool {
 	switch kind {
-	case "list_roles", "list_teams", "list_associated_sessions", "read_project_catalog", "put_role", "remove_role",
-		"list_plugin_models", "search_models", "read_model_versions", "resolve_model", "refresh_local_model", "read_local_models",
-		"decide", "register_local_model", "install_local_model", "read_installations", "dismiss_installation",
-		"read_plugin_settings", "read_plugin_value", "list_plugin_keys", "search_plugin_values", "write_plugin_value",
-		"write_indexed_plugin_value", "remove_plugin_value", "plugin_transaction", "save_plugin_settings",
-		"read_code_index_settings", "save_code_index_settings", "read_search_settings", "save_search_settings", "test_search_driver",
-		"read_media_settings", "list_media_models", "save_media_settings", "read_computer_permissions", "request_computer_permission":
+	case "list_roles", "list_teams", "list_associated_sessions", "read_project_catalog", "put_role", "remove_role", "list_plugin_models", "read_installations", "dismiss_installation", "read_plugin_settings", "read_plugin_value", "list_plugin_keys", "search_plugin_values", "write_plugin_value", "write_indexed_plugin_value", "remove_plugin_value", "plugin_transaction", "save_plugin_settings", "read_code_index_settings", "save_code_index_settings", "read_search_settings", "save_search_settings", "test_search_driver", "read_media_settings", "list_media_models", "save_media_settings", "read_computer_permissions", "request_computer_permission":
 		return true
 	}
 	return false

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/host"
@@ -26,6 +25,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/transfers"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
+	"github.com/egoist/mygo/ui"
 )
 
 // Layout metrics.
@@ -165,7 +165,6 @@ type App struct {
 	// transfers and voice play the composers' file transfers and voice
 	// input on the frame clock (preview).
 	transfers preview.Transfers
-	voice     preview.Voice
 	// clock is the frame's time, which the sample actions start their
 	// playing from: a key's handler runs between frames, where the context
 	// has no time to give.
@@ -757,22 +756,6 @@ func (a *App) conversation(c *ui.Context, cv *preview.Conversation, focus ui.Han
 	if a.sampled() && a.transfers.Advance(comp.Attachments, c.Now()) {
 		c.After(preview.Tick)
 	}
-	if a.sampled() {
-		if changing, done := a.voice.Advance(&comp.Dictation, c.Now()); changing {
-			c.After(preview.Tick)
-		} else if done {
-			// The demo hears what its catalog says; the preview says that no
-			// microphone opened.
-			if text := preview.DemoCatalog(a.demoLocale())["dictation.text"]; a.Demo() && text != "" {
-				if comp.Draft != "" && !strings.HasSuffix(comp.Draft, " ") && !strings.HasSuffix(comp.Draft, "\n") {
-					comp.Draft += " "
-				}
-				comp.Draft += text
-			} else {
-				kit.PreviewNotice(c)
-			}
-		}
-	}
 	ctx := &composer.Context{Models: a.Data.Models, Readonly: true}
 	if a.sampled() {
 		ctx = a.sampleComposer(cv, comp)
@@ -937,15 +920,6 @@ func (x *actions) Discard(a *composer.Attachment) {
 		return
 	}
 	x.a.transfers.Drop(a)
-}
-
-// Dictate plays voice input on the clock; no microphone opens.
-func (x *actions) Dictate(d *composer.Dictation, cmd composer.DictationCommand) {
-	if x.blocked() {
-		return
-	}
-	x.a.voice.Command(d, cmd, x.a.clock)
-	x.c.After(preview.Tick)
 }
 
 // Compact, a new worktree, a new project and the teams' settings would

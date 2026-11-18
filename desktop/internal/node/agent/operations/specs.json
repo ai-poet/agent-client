@@ -2324,42 +2324,6 @@
     "concurrent": false
   },
   {
-    "operation": "models.install",
-    "description": "Install an admitted model on the execution Node",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "model"
-      ],
-      "properties": {
-        "model": {
-          "type": "object"
-        }
-      }
-    },
-    "read_only": false,
-    "concurrent": false
-  },
-  {
-    "operation": "models.remove",
-    "description": "Uninstall a local model without removing its definition",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "model"
-      ],
-      "properties": {
-        "model": {
-          "type": "object"
-        }
-      }
-    },
-    "read_only": false,
-    "concurrent": false
-  },
-  {
     "operation": "roles.list",
     "description": "Manage public role definitions and explicitly apply selected revisions to this conversation",
     "parameters": {

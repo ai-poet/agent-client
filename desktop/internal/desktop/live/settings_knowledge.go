@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/shell"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
@@ -26,6 +27,33 @@ type knowledgeState struct {
 	reading     bool
 	stale       bool
 	failed      bool
+	pageOwner   *Runtime
+	pageVisible bool
+}
+
+func (r *Runtime) settingsKnowledgeFrame() {
+	root := r.localRuntime()
+	state, page := &root.knowledge, root.App.Settings
+	visible := root.App.Page == shell.SettingsPage && page.Section == settings.Knowledge
+	if !visible {
+		state.pageVisible = false
+		return
+	}
+	owner := root.settingsOwner()
+	entered := !state.pageVisible || state.pageOwner != owner
+	state.pageVisible, state.pageOwner = true, owner
+	if owner == nil {
+		page.Collections = nil
+		page.CollectionActions = nil
+		return
+	}
+	if entered || page.CollectionActions == nil {
+		page.CollectionActions = &settings.CollectionActions{
+			Pause: func(id string, paused bool) { owner.pauseCollection(id, paused) },
+			Update: owner.updateCollection,
+		}
+	}
+	owner.knowledgeFrame(page.Model, entered)
 }
 
 // knowledgeFrame keeps the page's collections on this Node: it reads them

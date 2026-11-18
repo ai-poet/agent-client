@@ -141,11 +141,12 @@ func (service *Service) sweep(ctx context.Context, watches *watches) error {
 	if err != nil {
 		return err
 	}
-	choice := service.options.Choice()
-	installed, err := service.options.Installed()
-	if err != nil {
-		return err
-	}
+	choice := service.choice()
+    var installed map[string]bool
+    if service.options.Installed != nil {
+        installed, err = service.options.Installed()
+        if err != nil { return err }
+    }
 	ids := make([]protocol.KnowledgeID, len(catalog))
 	for position, stored := range catalog {
 		ids[position] = stored.Collection.ID

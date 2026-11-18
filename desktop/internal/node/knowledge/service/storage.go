@@ -137,6 +137,7 @@ func (service *Service) SearchStorage(ctx context.Context, request protocol.Requ
 	if err != nil {
 		return none, err
 	}
+	choice := service.choice()
 	var hits []protocol.KnowledgeHit
 	indexing, available := false, false
 	if query.Query != nil && strings.TrimSpace(*query.Query) != "" && query.Mode != protocol.KnowledgeModeKeyword && len(plan.Collections) != 0 {
@@ -157,6 +158,9 @@ func (service *Service) SearchStorage(ctx context.Context, request protocol.Requ
 	for _, stored := range plan.Collections {
 		status := stored.Collection.Progress.Status
 		indexing = indexing || status == protocol.KnowledgeStatusPending || status == protocol.KnowledgeStatusIndexing
+	}
+	if !sameChoice(choice, service.choice()) {
+		hits, indexing, available = nil, true, false
 	}
 	page, stale, err := service.options.Materialize(ctx, request, plan, selectValues(*query, plan, hits, indexing, available))
 	if err != nil {
@@ -219,7 +223,7 @@ func (service *Service) StorageCandidates(ctx context.Context, request protocol.
 	for _, stored := range plan.Collections {
 		retrieval.Collections = append(retrieval.Collections, stored.Collection.ID)
 	}
-	choice := service.options.Choice()
+	choice := service.choice()
 	prepared := prepared{}
 	models := map[string]string{}
 	for _, stored := range plan.Collections {

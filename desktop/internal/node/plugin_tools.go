@@ -218,7 +218,7 @@ func (node *Node) mcpTool(invocation *store.AgentInvocation, reference protocol.
 
 func pluginOperationReadOnly(operation protocol.ToolOperation) bool {
 	switch string(operation) {
-	case "storage.get", "storage.keys", "settings.read", "roles.list", "teams.list", "models.list":
+	case "storage.get", "storage.keys", "settings.read", "roles.list", "teams.list":
 		return true
 	}
 	readOnly, _ := operations.Policy(operation)

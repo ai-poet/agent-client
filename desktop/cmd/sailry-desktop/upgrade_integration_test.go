@@ -26,7 +26,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preferences"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
+
 	"github.com/ai-poet/agent-client/desktop/internal/node"
 	"github.com/ai-poet/agent-client/desktop/internal/node/logging"
 	"github.com/ai-poet/agent-client/desktop/internal/node/plugins"
@@ -464,7 +464,7 @@ func startDesktop(t *testing.T, profile string) (*desktopBackend, error) {
 	t.Helper()
 	backend := &desktopBackend{Path: profile, Preferences: preferences.ForStartup(profile)}
 	backend.logs, _ = logging.Install(profile, "desktop")
-	options := node.Options{LocalModels: localmodels.Options{Capabilities: node.LocalModelCapabilities()}}
+	options := node.Options{}
 	library := "libsailry_iroh.so"
 	if runtime.GOOS == "darwin" {
 		library = "libsailry_iroh.dylib"

@@ -143,6 +143,9 @@ func knowledgeTarget(root string, parts []string) error {
 }
 
 func validateKnowledge(ctx context.Context, db *sql.Conn, request protocol.Request, definition *protocol.KnowledgeDefinition, capture *KnowledgeCapture) error {
+	if definition.Model != nil {
+		return invalid("knowledge collection cannot select an embedding model")
+	}
 	if err := knowledge.ValidateDefinition(*definition); err != nil {
 		return err
 	}

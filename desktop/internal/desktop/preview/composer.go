@@ -2,16 +2,16 @@ package preview
 
 import (
 	"fmt"
-	"math"
+
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
+	"github.com/egoist/mygo/ui"
 )
 
 // The composer's preview data: the model picker's families, scores and
@@ -341,54 +341,6 @@ func (t *Transfers) Advance(list []*composer.Attachment, now time.Time) bool {
 		running = true
 	}
 	return running
-}
-
-// Voice simulates voice input: preparing for 400 ms, then recording with
-// levels of a made-up wave, transcribing for 800 ms after Finish. No
-// microphone is opened and nothing is transcribed.
-type Voice struct {
-	since time.Time
-}
-
-// Command moves d by the button's command at now.
-func (v *Voice) Command(d *composer.Dictation, cmd composer.DictationCommand, now time.Time) {
-	v.since = now
-	switch cmd {
-	case composer.StartDictation:
-		d.Phase, d.Levels = composer.PreparingSpeech, nil
-	case composer.FinishDictation:
-		d.Phase = composer.Transcribing
-	default:
-		d.Phase, d.Levels = composer.Idle, nil
-	}
-}
-
-// Advance moves d to now, reporting whether it still changes and whether
-// a transcription just ended.
-func (v *Voice) Advance(d *composer.Dictation, now time.Time) (changing, done bool) {
-	t := now.Sub(v.since)
-	switch d.Phase {
-	case composer.PreparingSpeech:
-		if t >= 400*time.Millisecond {
-			d.Phase, v.since = composer.Recording, now
-		}
-		return true, false
-	case composer.Recording:
-		x := t.Seconds()
-		level := float32(0.5 + 0.45*math.Sin(x*9)*math.Sin(x*2.3))
-		d.Levels = append(d.Levels, level)
-		if len(d.Levels) > 8 {
-			d.Levels = d.Levels[len(d.Levels)-8:]
-		}
-		return true, false
-	case composer.Transcribing:
-		if t >= 800*time.Millisecond {
-			d.Phase, d.Levels = composer.Idle, nil
-			return false, true
-		}
-		return true, false
-	}
-	return false, false
 }
 
 // activity is the strip over c's composer: the worktree's Git changes

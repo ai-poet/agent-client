@@ -299,22 +299,7 @@ type Attachment struct {
 // MaxAttachments is how many files a message carries (chat_attachment_limit).
 const MaxAttachments = 8
 
-// DictationPhase is where voice input is.
-type DictationPhase int
 
-const (
-	Idle DictationPhase = iota
-	PreparingSpeech
-	Recording
-	Transcribing
-)
-
-// Dictation is voice input's state, which the backend moves on: the phase
-// and, while recording, the last levels of the microphone, 0 to 1.
-type Dictation struct {
-	Phase  DictationPhase
-	Levels []float32
-}
 
 // Message is what Send and Queue take: the draft's text, its files, the
 // references chipped into it, and the choices it runs with.

@@ -112,8 +112,7 @@ func pluginNativeToolContext(contexts []protocol.PluginConversationResource, pro
 
 func pluginNativeOperationAction(operation protocol.ToolOperation) protocol.PluginAction {
 	switch operation {
-	case protocol.ToolOperationInstallModel, protocol.ToolOperationRemoveModel:
-		return protocol.PluginActionInstallModels
+
 	case protocol.ToolOperationListRoles:
 		return protocol.PluginActionReadRoles
 	case protocol.ToolOperationSaveRole, protocol.ToolOperationRemoveRole, protocol.ToolOperationApplyRoles:

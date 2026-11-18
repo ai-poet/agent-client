@@ -8,8 +8,7 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/ai-poet/agent-client/desktop/internal/link"
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels/embedding"
+
 	"github.com/ai-poet/agent-client/desktop/internal/node/admission"
 	knowledgeservice "github.com/ai-poet/agent-client/desktop/internal/node/knowledge/service"
 
@@ -95,10 +94,8 @@ func (node *Node) refreshKnowledgeStorage(command protocol.Command, changes []pr
 	node.knowledge.Refresh()
 }
 
-// knowledgeOptions connects the retrieval service to the profile. Embedding
-// and OCR run through the local model scheduler.
+// knowledgeOptions connects keyword retrieval to the profile.
 func (node *Node) knowledgeOptions() knowledgeservice.Options {
-	registry := node.localModels.registry
 	return knowledgeservice.Options{
 		Node:    node.ID(),
 		Working: node.power.Hold,
@@ -124,66 +121,6 @@ func (node *Node) knowledgeOptions() knowledgeservice.Options {
 		Root: func(ctx context.Context, worktree protocol.WorktreeID) (string, error) {
 			root, err := node.workspaceRoot(ctx, worktree, false)
 			return root, nodeFault(err)
-		},
-		Choice: func() protocol.ModelsLocalChoice {
-			settings := registry.Settings()
-			return localmodels.Choice(&settings, protocol.ModelsKindEmbedding)
-		},
-		Dimension: func(model string) (int, string, bool) {
-			definition, err := registry.Definition(model)
-			if err != nil {
-				return 0, "", false
-			}
-			// A pinned model keeps its name when its revision moves; the
-			// definition's identity tells its vectors apart.
-			dimension, found := localmodels.Dimension(definition.Format)
-			return int(dimension), localmodels.ID(definition), found
-		},
-		Installed: func() (map[string]bool, error) {
-			models, err := registry.List(protocol.ModelsKindEmbedding)
-			if err != nil {
-				return nil, err
-			}
-			installed := map[string]bool{}
-			for _, model := range models {
-				installed[model.ID] = model.State.Kind == "installed"
-			}
-			return installed, nil
-		},
-		Encode: func(ctx context.Context, model string, choice protocol.ModelsLocalChoice, texts []string, query bool) ([][]float32, error) {
-			if len(texts) > 4 {
-				return nil, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "embedding batch exceeds four inputs"}
-			}
-			err := registry.Settle(ctx, model)
-			if err != nil {
-				return nil, err
-			}
-			resource, err := registry.Resource(protocol.ModelsKindEmbedding, model, &choice)
-			if err != nil {
-				return nil, err
-			}
-			input, lane := embedding.Document, localmodels.Background
-			if query {
-				input, lane = embedding.Query, localmodels.Interactive
-			}
-			return localmodels.Execute(ctx, registry, resource, lane, func(_ context.Context, engine any) ([][]float32, error) {
-				vectors, err := engine.(*embedding.Engine).Encode(input, texts)
-				return vectors, embeddingFailure(err)
-			})
-		},
-		Offsets: func(ctx context.Context, model string, choice protocol.ModelsLocalChoice, text string) ([][2]int, error) {
-			err := registry.Settle(ctx, model)
-			if err != nil {
-				return nil, err
-			}
-			resource, err := registry.Resource(protocol.ModelsKindEmbedding, model, &choice)
-			if err != nil {
-				return nil, err
-			}
-			return localmodels.Execute(ctx, registry, resource, localmodels.Background, func(_ context.Context, engine any) ([][2]int, error) {
-				offsets, err := engine.(*embedding.Engine).Offsets(text)
-				return offsets, embeddingFailure(err)
-			})
 		},
 		Sources: func(ctx context.Context, stored store.KnowledgeStored, after *string) (page store.KnowledgeStoragePage, err error) {
 			err = node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {
@@ -268,13 +205,6 @@ func (node *Node) knowledgeCatalog(ctx context.Context) ([]store.KnowledgeStored
 	return catalog, nodeFault(err)
 }
 
-func embeddingFailure(err error) error {
-	if err == nil {
-		return nil
-	}
-	return &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "embedding failed: " + err.Error()}
-}
-
 // recordKnowledgeProgress stores the worker's progress and announces a
 // changed collection.
 func (node *Node) recordKnowledgeProgress(ctx context.Context, id protocol.KnowledgeID, generation uint64, progress protocol.KnowledgeProgress) error {
@@ -291,30 +221,6 @@ func (node *Node) recordKnowledgeProgress(ctx context.Context, id protocol.Knowl
 		node.publish()
 	}
 	return nodeFault(err)
-}
-
-// reactKnowledge follows the local model registry: a changed embedding
-// selection or installed embedding set restarts indexing, and a changed OCR
-// selection or installed OCR set rescans.
-func (node *Node) reactKnowledge(previous, latest localmodels.Update) {
-	installed := func(update localmodels.Update, kind protocol.ModelsKind) []string {
-		var ids []string
-		for _, model := range update.Models {
-			if localmodels.Kind(model.Definition.Format) == kind && model.State.Kind == "installed" {
-				ids = append(ids, model.ID)
-			}
-		}
-		slices.Sort(ids)
-		return ids
-	}
-	switch {
-	case !localmodels.SameChoice(previous.Embedding, latest.Embedding) ||
-		!slices.Equal(installed(previous, protocol.ModelsKindEmbedding), installed(latest, protocol.ModelsKindEmbedding)):
-		node.knowledge.Invalidate()
-	case !localmodels.SameChoice(previous.OCR, latest.OCR) ||
-		!slices.Equal(installed(previous, protocol.ModelsKindOcr), installed(latest, protocol.ModelsKindOcr)):
-		node.knowledge.Refresh()
-	}
 }
 
 func (node *Node) dispatchKnowledge(ctx context.Context, caller protocol.NodeID, request protocol.Request, body []byte) (link.Admission, error) {

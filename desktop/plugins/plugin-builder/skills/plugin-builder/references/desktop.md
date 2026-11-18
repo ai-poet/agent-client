@@ -34,7 +34,7 @@ Desktop code runs in moejs and renders native MyGo and Kit components through th
 | `sailry/card`, `sailry/cards` | Package-owned content cards and host-side card blocks |
 | `sailry/registration` | Application registration controls and observation |
 
-Other host modules: `gpui-base`, `sailry/forms`, `sailry/connections`, `sailry/credentials`, `sailry/models`, `sailry/documents`, `sailry/file-transfers`, `sailry/ssh-transfers`. Any other bare import is rejected, and npm packages are not available. Prefer the components above over hand-drawn controls, and take colors from `theme().colors` instead of hard-coded values.
+Other host modules: `gpui-base`, `sailry/forms`, `sailry/credentials`, `sailry/documents`, `sailry/file-transfers`. Any other bare import is rejected, and npm packages are not available. Prefer the components above over hand-drawn controls, and take colors from `theme().colors` instead of hard-coded values.
 
 ## A minimal panel
 
@@ -140,7 +140,7 @@ export default class Chat extends View {
 }
 ```
 
-`resource` is `plugin` (a private workspace), `workspace` (the panel's project), `database` or `ssh`. Tool selectors use `{"kind": "plugin", "name": …}` for this package's tools, `{"kind": "builtin", "name": …}` for native tools, and `{"kind": "package", "package": …, "name": …}` for another package's tool.
+`resource` is `plugin` (a private workspace), `workspace` (the panel's project). Tool selectors use `{"kind": "plugin", "name": …}` for this package's tools, `{"kind": "builtin", "name": …}` for native tools, and `{"kind": "package", "package": …, "name": …}` for another package's tool.
 
 ## Composer controls
 

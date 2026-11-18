@@ -20,7 +20,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/core"
 	"github.com/ai-poet/agent-client/desktop/internal/hostctl"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
+
 	"github.com/ai-poet/agent-client/desktop/internal/node"
 	"github.com/ai-poet/agent-client/desktop/internal/node/telemetry"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
@@ -414,7 +414,6 @@ func acceptanceClient(ctx context.Context, options acceptanceOptions) (*client.C
 		// Link listener or telemetry consent side effect; model requests still
 		// use the Node's normal configured provider and tool implementations.
 		execution, err = node.StartWithOptions(ctx, options.profile, node.Options{
-			LocalModels: localmodels.Options{Capabilities: node.LocalModelCapabilities()},
 			Telemetry: telemetry.Options{Application: "host", Lookup: func(name string) string {
 				if name == "SAILRY_TELEMETRY" {
 					return "off"

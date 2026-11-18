@@ -79,9 +79,7 @@ func (changes *pluginChangeCursors) observe(event protocol.Event, cursor uint64,
 		}
 	}
 	switch event.Kind {
-	case "role_changed", "role_removed", "provider_changed", "provider_removed", "model_catalog_changed",
-		"local_models_changed", "terminal_changed", "terminal_settings_changed", "worktree_registered", "worktree_removed",
-		"plugin_changed", "plugin_values_changed", "plugin_removed":
+	case "role_changed", "role_removed", "provider_changed", "provider_removed", "model_catalog_changed", "terminal_changed", "terminal_settings_changed", "worktree_registered", "worktree_removed", "plugin_changed", "plugin_values_changed", "plugin_removed":
 		if err := changes.advance(); err != nil {
 			return err
 		}
@@ -89,7 +87,7 @@ func (changes *pluginChangeCursors) observe(event protocol.Event, cursor uint64,
 	switch event.Kind {
 	case "role_changed", "role_removed":
 		changes.reads[0] = changes.revision
-	case "provider_changed", "provider_removed", "model_catalog_changed", "local_models_changed":
+	case "provider_changed", "provider_removed", "model_catalog_changed":
 		changes.reads[1] = changes.revision
 	case "terminal_settings_changed":
 		changes.reads[3], changes.reads[4] = changes.revision, changes.revision

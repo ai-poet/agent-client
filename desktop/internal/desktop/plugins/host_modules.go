@@ -13,7 +13,6 @@ type hostModuleNames struct {
 
 var nativeModuleNames = []hostModuleNames{
 	{module: "sailry", sync: []string{"theme", "focusTerminal", "releaseTerminal"}, async: []string{"header_action", "nextAssistantTools"}},
-	{module: "sailry/models", sync: []string{"register", "prepare"}, async: []string{"list", "search", "versions", "resolve"}},
 	{module: "sailry/forms", sync: []string{
 		"createText", "readText", "setText", "focusText", "isTextFocused", "releaseText",
 		"createDateTime", "readDateTime", "releaseDateTime",
@@ -46,23 +45,17 @@ var nativeModuleNames = []hostModuleNames{
 
 func (owner *Host) Modules() ([]HostModule, error) {
 	modules := []HostModule{
-		owner.baseModule(), owner.sdkModule(), owner.connectorModule(), owner.installationModule(),
+		owner.baseModule(), owner.sdkModule(), owner.connectorModule(),
 		owner.settingsModule(), owner.searchModule(),
 	}
 	for _, names := range nativeModuleNames {
 		exports := make([]HostExport, 0, len(names.sync)+len(names.async))
 		for _, name := range names.sync {
 			operation := owner.nativeOperation(names.module, name)
-			if names.module == "sailry/models" {
-				operation = owner.modelOperation(name)
-			}
 			exports = append(exports, hostSync(name, operation))
 		}
 		for _, name := range names.async {
 			operation := owner.nativeOperation(names.module, name)
-			if names.module == "sailry/models" {
-				operation = owner.modelOperation(name)
-			}
 			exports = append(exports, hostAsync(name, operation))
 		}
 		found := false

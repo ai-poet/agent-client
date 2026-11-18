@@ -13,7 +13,6 @@ import (
 
 	"lukechampine.com/blake3"
 
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
 	"github.com/ai-poet/agent-client/desktop/internal/node/plugins"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
@@ -561,16 +560,7 @@ func PrepareSemanticSearch(ctx context.Context, db *sql.Conn, request protocol.R
 			}
 		}
 	}
-	settings, err := ReadLocalModelSettings(ctx, db)
-	if err != nil {
-		return plan, err
-	}
-	plan.Embedding = localmodels.Choice(&settings, protocol.ModelsKindEmbedding)
 	return plan, nil
-}
-
-func sameModelChoice(left, right protocol.ModelsLocalChoice) bool {
-	return left.Enabled == right.Enabled && (left.Model == nil) == (right.Model == nil) && (left.Model == nil || *left.Model == *right.Model)
 }
 
 // MaterializeSemanticSearch reads the selected values of a plan. A result
@@ -607,15 +597,6 @@ func MaterializeSemanticSearch(ctx context.Context, db *sql.Conn, request protoc
 		page, err := SearchPluginValues(ctx, db, reference, *query)
 		page.Mode, page.Indexing = protocol.KnowledgeModeKeyword, true
 		return page, true, err
-	}
-	if selection.Mode != protocol.KnowledgeModeKeyword {
-		settings, err := ReadLocalModelSettings(ctx, db)
-		if err != nil {
-			return page, false, err
-		}
-		if !sameModelChoice(localmodels.Choice(&settings, protocol.ModelsKindEmbedding), plan.Embedding) {
-			return fallback()
-		}
 	}
 	keyword := map[string]uint64{}
 	for _, rank := range plan.Keyword {

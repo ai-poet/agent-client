@@ -1,5 +1,9 @@
 # Changes
 
+## 0.1.19
+
+- Align supported modules, actions and conversation contexts with the slim desktop build
+
 ## 0.1.18
 
 - Align runtime guidance and SDK references with moejs and MyGo/Kit

@@ -4,9 +4,9 @@ import (
 	"cmp"
 	"slices"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 type PluginPage struct {
@@ -32,16 +32,15 @@ func (section Section) navigationOrder() uint16 {
 		return 170
 	case Knowledge, Media, Appearance, Connections:
 		return 200
-	case Backup, Decision, Conversation:
+	case Backup, Conversation:
 		return 300
 	case Shortcuts:
 		return 400
-	case Hooks, Dictation:
+	case Hooks:
 		return 500
 	case Runtime:
 		return 600
-	case OCR:
-		return 700
+
 	case Experimental:
 		// After every page of its group but About, which ends the navigation.
 		return 65000

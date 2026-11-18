@@ -15,8 +15,7 @@ import (
 // of its own may run the operation. Progress and settings reads need none.
 func operationAction(operation protocol.ToolOperation) (protocol.PluginAction, bool) {
 	switch operation {
-	case protocol.ToolOperationInstallModel, protocol.ToolOperationRemoveModel:
-		return protocol.PluginActionInstallModels, true
+
 	case protocol.ToolOperationListRoles:
 		return protocol.PluginActionReadRoles, true
 	case protocol.ToolOperationSaveRole, protocol.ToolOperationRemoveRole, protocol.ToolOperationApplyRoles:
@@ -94,6 +93,8 @@ var (
 		protocol.ToolOperationCodeReferences, protocol.ToolOperationCodeHover, protocol.ToolOperationCodeSymbols,
 	}
 	retiredActions = []protocol.PluginAction{
+		protocol.PluginActionInstallModels,
+		protocol.PluginActionRunDecisions,
 		protocol.PluginActionReadDatabases, protocol.PluginActionControlDatabases, protocol.PluginActionManageDatabases,
 		protocol.PluginActionReadSsh, protocol.PluginActionControlSsh, protocol.PluginActionManageSsh,
 		protocol.PluginActionReadCode, protocol.PluginActionManageCode, protocol.PluginActionReadCodeSettings, protocol.PluginActionSaveCodeSettings,

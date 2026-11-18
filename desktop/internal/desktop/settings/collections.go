@@ -8,6 +8,13 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 )
 
+type CollectionActions struct {
+	Pause  func(id string, paused bool)
+	Update func(id string)
+}
+
+var CollectionMessages = Messages{Failed: "runtime_failed", Conflict: "runtime_conflict", Uncertain: "runtime_unknown"}
+
 // collections are the selected host's knowledge collections on the
 // Knowledge page: each one's state, and pausing, resuming and updating it.
 // A host without collections shows no group.
@@ -25,10 +32,18 @@ func collections(c *ui.Context, m *Model) {
 						icon, label = icons.Play, "knowledge_resume"
 					}
 					kit.Action(c.Key("pause"), icon, i18n.T(c, label), x.Busy).OnClick(func() {
-						m.modelAction(c, func(a *ModelActions) { a.CollectionPause(x.ID, !paused) })
+						if !m.Live {
+							notice(c)
+						} else if m.CollectionActions != nil {
+							m.CollectionActions.Pause(x.ID, !paused)
+						}
 					})
 					kit.Action(c.Key("update"), icons.Reload, i18n.T(c, "knowledge_update"), x.Busy || paused).OnClick(func() {
-						m.modelAction(c, func(a *ModelActions) { a.CollectionUpdate(x.ID) })
+						if !m.Live {
+							notice(c)
+						} else if m.CollectionActions != nil {
+							m.CollectionActions.Update(x.ID)
+						}
 					})
 				})
 			}

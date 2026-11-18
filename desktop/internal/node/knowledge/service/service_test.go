@@ -13,7 +13,6 @@ import (
 
 	"github.com/jonboulle/clockwork"
 
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
 	"github.com/ai-poet/agent-client/desktop/internal/node/knowledge"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
@@ -30,6 +29,7 @@ type harness struct {
 
 	mu        sync.Mutex
 	installed bool
+	choice    protocol.ModelsLocalChoice
 	encoded   int
 	working   int // collections that held the Node awake
 	holding   int // holds not yet released
@@ -69,6 +69,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { _ = opened.Close() })
 	fixture := &harness{t: t, store: opened, clock: clockwork.NewFakeClock(), progress: make(chan protocol.KnowledgeProgress, 64)}
+	fixture.choice = protocol.ModelsLocalChoice{Enabled: true, Model: new("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")}
 	fixture.service = New(Options{
 		Index: opened.Knowledge,
 		Catalog: func(ctx context.Context) (catalog []store.KnowledgeStored, err error) {
@@ -100,14 +101,17 @@ func newHarness(t *testing.T) *harness {
 			return "", unavailable()
 		},
 		Choice: func() protocol.ModelsLocalChoice {
-			settings := fixture.settings()
-			return localmodels.Choice(&settings, protocol.ModelsKindEmbedding)
+			fixture.mu.Lock()
+			defer fixture.mu.Unlock()
+			return fixture.choice
 		},
-		Dimension: func(model string) (int, string, bool) { return 2, "fixture", model == localmodels.DefaultEmbedding },
+		Dimension: func(model string) (int, string, bool) {
+			return 2, "fixture", model == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		},
 		Installed: func() (map[string]bool, error) {
 			fixture.mu.Lock()
 			defer fixture.mu.Unlock()
-			return map[string]bool{localmodels.DefaultEmbedding: fixture.installed}, nil
+			return map[string]bool{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": fixture.installed}, nil
 		},
 		Encode: func(_ context.Context, _ string, _ protocol.ModelsLocalChoice, texts []string, query bool) ([][]float32, error) {
 			if len(texts) > batch {
@@ -140,29 +144,13 @@ func newHarness(t *testing.T) *harness {
 	return fixture
 }
 
-func (fixture *harness) settings() (settings protocol.ModelsLocalSettings) {
-	fixture.t.Helper()
-	if err := fixture.store.Node.Read(fixture.t.Context(), func(db *sql.Conn) (err error) {
-		settings, err = store.ReadLocalModelSettings(fixture.t.Context(), db)
-		return err
-	}); err != nil {
-		fixture.t.Fatal(err)
-	}
-	return settings
-}
-
 // selectEmbedding saves whether the default embedding model is selected.
 func (fixture *harness) selectEmbedding(enabled bool) {
 	fixture.t.Helper()
-	settings := fixture.settings()
-	model := localmodels.DefaultEmbedding
-	settings.Choices = map[protocol.ModelsKind]protocol.ModelsLocalChoice{protocol.ModelsKindEmbedding: {Enabled: enabled, Model: &model}}
-	if err := fixture.store.Node.Write(fixture.t.Context(), func(db *sql.Conn) error {
-		_, _, err := store.SaveLocalModelSettings(fixture.t.Context(), db, settings)
-		return err
-	}); err != nil {
-		fixture.t.Fatal(err)
-	}
+	fixture.mu.Lock()
+	fixture.choice = protocol.ModelsLocalChoice{Enabled: enabled, Model: new("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")}
+	fixture.mu.Unlock()
+	fixture.service.Invalidate()
 }
 
 func (fixture *harness) request(kind string, data any) protocol.Request {
@@ -573,7 +561,7 @@ func TestKnowledgeQuery(t *testing.T) {
 		}
 		fixture.sweep()
 		page := fixture.query("向量", nil)
-		if page.Mode != protocol.KnowledgeModeHybrid || page.Indexing || len(page.Hits) != 2 || page.Model == nil || *page.Model != localmodels.DefaultEmbedding {
+		if page.Mode != protocol.KnowledgeModeHybrid || page.Indexing || len(page.Hits) != 2 || page.Model == nil || *page.Model != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 			t.Fatalf("hybrid = %+v", page)
 		}
 		if hit := page.Hits[0]; hit.Citation.Collection != collection.ID || hit.Stale {
@@ -869,7 +857,7 @@ func TestCollectionLifecycle(t *testing.T) {
 	fixture.install()
 	fixture.service.Invalidate()
 	embedded := until(protocol.KnowledgeStatusReady)
-	if embedded.Model == nil || *embedded.Model != localmodels.DefaultEmbedding || embedded.Sources != 3 || embedded.Chunks != 3 || fixture.embedded() != 3 {
+	if embedded.Model == nil || *embedded.Model != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || embedded.Sources != 3 || embedded.Chunks != 3 || fixture.embedded() != 3 {
 		t.Fatalf("embedded = %+v, %d texts", embedded, fixture.embedded())
 	}
 	page = fixture.query("向量", nil)

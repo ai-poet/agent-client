@@ -191,8 +191,7 @@ func publicHostOutput(output protocol.Output) (any, error) {
 				}
 			}
 		})
-	case "local_models":
-		hostSet(value, hostAt(data, "models"), "data")
+
 	case "team", "plugin_value", "plugin_conversation_value", "knowledge_collection":
 		hostStringRevision(data, "revision")
 	case "roles", "teams", "knowledge_collections":

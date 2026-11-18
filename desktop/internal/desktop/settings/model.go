@@ -3,11 +3,11 @@ package settings
 import (
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
+	"github.com/egoist/mygo/ui"
 )
 
 // The settings' view model: the boundary between the pages and their
@@ -94,34 +94,6 @@ type Python struct {
 	Custom string
 }
 
-// LocalModels is a kind of local model's page: enabled, the model chosen
-// among the installed ones, the Installed or Available tab, and the models.
-type LocalModels struct {
-	Enabled Stored[bool]
-	Model   int // index of the installed models
-	Tab     int // 0 installed, 1 available
-	Query   string
-	Models  []preview.LocalModel
-	Catalog []preview.LocalModel
-	// Its kind (a Models* key), and a live page's: the chosen model's name
-	// when the host no longer has it installed (the picker's last choice),
-	// and whether the host cannot run this kind.
-	Kind        string
-	Missing     string
-	Unavailable bool
-}
-
-// Installed are the models a host has.
-func (m *LocalModels) Installed() []preview.LocalModel {
-	var out []preview.LocalModel
-	for _, x := range m.Models {
-		if x.Status == preview.ModelInstalled {
-			out = append(out, x)
-		}
-	}
-	return out
-}
-
 // BackupTarget is where backups go: WebDAV, S3 or a local folder (Tab), its
 // fields, and the schedule. Secrets are never loaded: Identity, Secret, Token
 // and the passphrases are what the user types to replace them, the saved ones
@@ -175,7 +147,6 @@ type Model struct {
 	ConnectorActions    *ConnectorActions
 	PackageActions      *PackageActions
 	AppearanceActions   *AppearanceActions
-	ModelActions        *ModelActions
 	// PermissionActions are the live permissions page's; the preview has none.
 	PermissionActions *PermissionActions
 	// General.
@@ -202,18 +173,6 @@ type Model struct {
 
 	// Shortcuts.
 	Keys Keys
-
-	// Dictation.
-	MicrophoneGranted bool
-	Microphone        int // 0 default, then Microphones
-	Microphones       []string
-	SpeechLanguage    int // 0 auto, 1 Chinese, 2 English
-	SpeechModel       int // of Speech
-	SpeechTab         int // 0 installed, 1 available
-	SpeechQuery       string
-	Speech            []preview.LocalModel
-	info              *modelInfo // the model whose details show
-	dropping          *modelInfo // the model whose removal is asked
 
 	// Providers (settings/providers): the channels, the directory's
 	// brands, the catalog, the compaction threshold and the family
@@ -271,7 +230,6 @@ type Model struct {
 	SkillList       []preview.Skill
 	MarketSkills    []preview.Skill
 	Themes          []preview.MarketTheme
-	Library         []preview.LibraryModel
 	SkillQuery      string
 	MarketKind      int // 0 plugins, 1 skills, 2 themes
 	MarketQuery     string
@@ -300,7 +258,6 @@ type Model struct {
 	uninstalling  string
 	skillAdd      skillInstall
 	skillRemoving string
-	library       library
 
 	// Busy names the operations in flight (BusyCatalog and the like): each
 	// one's button shows Kit's pending look and takes no press until the
@@ -344,12 +301,10 @@ type Model struct {
 	PythonPreparing []PythonPreparation
 	Indexes         []string
 	Python          Stored[Python]
-	OCR             LocalModels
-	Knowledge       LocalModels // embedding models (knowledge-settings)
 	// Collections are the selected host's knowledge collections; the
 	// preview has none.
 	Collections []viewmodel.KnowledgeCollection
-	Decision    LocalModels // decision models
+	CollectionActions *CollectionActions
 
 	// Permissions.
 	Permissions []preview.Permission
@@ -394,21 +349,17 @@ func NewModel(d *preview.Settings) *Model {
 		Media: stored([4]string{}), MediaOptions: pr.Media,
 		Services: cn.Services, ConnTypes: cn.Types, ConnAccounts: cn.Accounts,
 		Teams: td.Teams, Roles: td.Roles, Concurrency: stored(td.Concurrency),
-		Packages: ex.Packages, MarketPlugins: ex.Catalog, SkillList: ex.Skills, MarketSkills: ex.Market, Themes: ex.Themes, Library: ex.Library,
+		Packages: ex.Packages, MarketPlugins: ex.Catalog, SkillList: ex.Skills, MarketSkills: ex.Market, Themes: ex.Themes,
 		Notify: [4]bool{true, true, true, true}, Toast: 1,
 		Power:     stored(d.PreventSleep),
 		Telemetry: stored(Telemetry{Errors: d.Errors, Metrics: d.Metrics}),
 		Sandbox:   stored(d.Sandbox), CodeIndex: stored(true), TextSize: DefaultTextSize, SessionOrder: 1,
 		Keys:        NewKeys(),
-		Microphones: d.Microphones, Speech: d.Speech,
 		Host:   stored(TerminalHost{Env: d.Env}),
 		Shells: d.Shells, PasteProtection: true, FontSize: 13,
 		Devices: d.Devices, Relays: d.Relays,
 		Hooks:         stored(HookSettings{Enabled: d.HooksOn, Scripts: d.Hooks}),
 		PythonVersion: d.Python, Indexes: d.Indexes, Python: stored(Python{}),
-		OCR:         LocalModels{Enabled: stored(true), Models: d.OCR, Catalog: d.OCRCatalog, Kind: ModelsOCR},
-		Knowledge:   LocalModels{Enabled: stored(true), Models: d.Embedding, Catalog: d.Embedding, Kind: ModelsEmbedding},
-		Decision:    LocalModels{Enabled: stored(false), Model: -1, Models: d.Decision, Catalog: d.Decision, Kind: ModelsDecision},
 		Permissions: d.Permissions,
 		Backup: stored(BackupTarget{Endpoint: "https://dav.example.com/remote.php/dav", Prefix: "sailry",
 			Schedule: true, Time: time.Date(2026, 1, 1, 3, 0, 0, 0, time.Local), Timezone: "Asia/Shanghai", PassphraseSet: true, CredentialsSet: true}),

@@ -1,5 +1,14 @@
 # Changes
 
+## 0.1.31
+
+- Remove local OCR model discovery and installation tools in the slim desktop build
+- Keep file, image and notebook tools without a local inference runtime
+
+## 0.1.30
+
+- Remove host-provided Office and PDF extraction
+
 ## 0.1.29
 
 - Restore outline icons in navigation and tools

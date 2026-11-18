@@ -82,7 +82,6 @@ type State struct {
 	referenceVisible        bool
 	Attachments             []*Attachment
 	References              []Reference // chipped into the draft
-	Dictation               Dictation
 
 	view   kit.Viewer[*Attachment] // the image viewer over the draft's pictures
 	picker bool                    // the model controls are open
@@ -463,10 +462,7 @@ func (s *State) toolbar(c *ui.Context, ctx *Context, actions Actions, submit fun
 			if !compact {
 				s.modelChip(c, ctx, actions)
 			}
-			s.dictation(c, ctx, actions)
-			if s.Running || s.Dictation.Phase == Idle {
-				s.sendButton(c, ctx, submit, actions.Stop)
-			}
+			s.sendButton(c, ctx, submit, actions.Stop)
 		})
 	})
 }

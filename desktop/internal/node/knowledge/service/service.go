@@ -92,6 +92,14 @@ func New(options Options) *Service {
 	return service
 }
 
+// choice leaves retrieval keyword-only when no embedding provider is configured.
+func (service *Service) choice() protocol.ModelsLocalChoice {
+    if service.options.Choice != nil {
+        return service.options.Choice()
+    }
+    return protocol.ModelsLocalChoice{}
+}
+
 // Start runs the indexing worker and requests the first pass.
 func (service *Service) Start() {
 	service.started = true
@@ -154,7 +162,7 @@ func (service *Service) binding(stored store.KnowledgeStored, choice protocol.Mo
 	} else if choice.Enabled && choice.Model != nil {
 		model = *choice.Model
 	}
-	if model != "" {
+	if model != "" && service.options.Dimension != nil {
 		if dimension, identity, found := service.options.Dimension(model); found {
 			binding.Model, binding.Identity, binding.Dimension = model, identity, dimension
 		}
@@ -184,7 +192,7 @@ func (service *Service) prepare(ctx context.Context, request protocol.Request, q
 	if err != nil {
 		return result, err
 	}
-	choice := service.options.Choice()
+	choice := service.choice()
 	var models []string
 	identities := map[string]string{}
 	for _, stored := range allowed {

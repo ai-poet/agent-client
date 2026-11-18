@@ -12,7 +12,7 @@ import (
 
 	"github.com/ai-poet/agent-client/desktop/internal/hostctl"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
+
 	"github.com/ai-poet/agent-client/desktop/internal/node"
 	"github.com/ai-poet/agent-client/desktop/internal/node/computer"
 	"github.com/ai-poet/agent-client/desktop/internal/node/logging"
@@ -57,11 +57,10 @@ func runService(ctx context.Context, args []string, cancel context.CancelFunc) (
 		defer closeLogs()
 	}
 	execution, err := node.StartWithOptions(ctx, options.Profile, node.Options{
-		Headless:    true,
-		MCP:         &mcp.Options{Warm: true},
-		Network:     &options.Network,
-		LocalModels: localmodels.Options{Capabilities: node.LocalModelCapabilities()},
-		Telemetry:   telemetry.Options{Application: "host", Lookup: options.Environment},
+		Headless:  true,
+		MCP:       &mcp.Options{Warm: true},
+		Network:   &options.Network,
+		Telemetry: telemetry.Options{Application: "host", Lookup: options.Environment},
 	})
 	if err != nil {
 		return 1, err

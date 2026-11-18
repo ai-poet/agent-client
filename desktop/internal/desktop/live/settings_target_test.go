@@ -393,12 +393,6 @@ func TestGlobalSettingsFramesIgnoreMonitoredHost(t *testing.T) {
 	root.terminalSettings.known = true
 	root.terminalSettings.model = settings.Stored[settings.TerminalHost]{Revision: 3}
 	root.backupSettings.known, root.backupSettings.saved.Revision = true, 4
-	root.localModels.known, root.localModels.watching = true, true
-	root.localModels.settings = protocol.DefaultModelsLocalSettings()
-	root.localModels.settings.Revision = 5
-	root.localModels.availability = map[protocol.ModelsKind]protocol.ModelsCatalogAvailability{
-		protocol.ModelsKindOcr: {Kind: "available"},
-	}
 	root.App.Page = shell.SettingsPage
 	root.App.Settings.Section = settings.General
 	root.terminalSettingsFrame()
@@ -409,17 +403,15 @@ func TestGlobalSettingsFramesIgnoreMonitoredHost(t *testing.T) {
 		root.App.Host = monitored
 		root.terminalSettingsFrame()
 		root.backupSettingsFrame(nil)
-		root.App.Settings.Section = settings.OCR
-		root.localModelsFrame()
 		root.App.Settings.Section = settings.General
-		if root.terminalSettings.shown != root || root.backupSettings.shown != root || root.localModels.shown != root || remote.packageOwner() != root {
+		if root.terminalSettings.shown != root || root.backupSettings.shown != root || remote.packageOwner() != root {
 			t.Fatal("a global configuration frame followed the device monitor")
 		}
 		if got := root.App.Settings.Host; len(got.Draft.Env) != 1 || got.Draft.Env[0].Key != "DRAFT" || got.Revision != 3 {
 			t.Fatalf("terminal draft lost across monitor navigation: %+v", got)
 		}
-		if root.App.Settings.Backup.Draft.Directory != "/draft/backup" || root.App.Settings.OCR.Enabled.Revision != 5 {
-			t.Fatal("backup or model configuration was replaced by monitor navigation")
+		if root.App.Settings.Backup.Draft.Directory != "/draft/backup" {
+			t.Fatal("backup configuration was replaced by monitor navigation")
 		}
 	}
 	transport.mu.Lock()

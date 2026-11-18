@@ -28,10 +28,9 @@ test('tool declarations preserve operations and unformatted native outputs', () 
     ['edit_notebook','notebook_edit','notebook.edit','details'],
   ];
   assert.equal(manifest.name,'files');
-  const models = ['list_ocr_models','install_ocr_model','uninstall_ocr_model'];
-  assert.deepEqual(extension.tools.map(tool => tool.name),[...models,...expected.map(([name]) => name)]);
-  assert.deepEqual(extension.actions,['files.read','files.write','models.read','models.install']);
-  assert.deepEqual(extension.host.handlers,['ocr_models','ocr_install','ocr_remove',...expected.map(([,handler]) => handler)]);
+  assert.deepEqual(extension.tools.map(tool => tool.name),expected.map(([name]) => name));
+  assert.deepEqual(extension.actions,['files.read','files.write']);
+  assert.deepEqual(extension.host.handlers,expected.map(([,handler]) => handler));
   for (const [name,handler,operation,presentation] of expected) {
     const declaration = tool(name);
     assert.equal(declaration.handler.name,handler);

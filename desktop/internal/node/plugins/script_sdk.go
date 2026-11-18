@@ -21,18 +21,17 @@ type scriptDraft struct {
 }
 
 type scriptBridge struct {
-	ctx           context.Context
-	deadline      time.Time
-	target        protocol.NodeID
-	controller    protocol.NodeID
-	scope         protocol.PluginContext
-	execution     *ScriptExecution
-	dispatch      ScriptDispatch
-	drafts        map[string]scriptDraft
-	calls         int
-	faults        map[string]*protocol.Fault
-	installations map[protocol.RequestID]bool
-	failure       *protocol.Fault
+	ctx        context.Context
+	deadline   time.Time
+	target     protocol.NodeID
+	controller protocol.NodeID
+	scope      protocol.PluginContext
+	execution  *ScriptExecution
+	dispatch   ScriptDispatch
+	drafts     map[string]scriptDraft
+	calls      int
+	faults     map[string]*protocol.Fault
+	failure    *protocol.Fault
 }
 
 func (bridge *scriptBridge) call(operation, body string) string {
@@ -80,7 +79,7 @@ func (bridge *scriptBridge) operation(operation, body string) (any, error) {
 			object["execution_node"] = bridge.target
 		}
 		return value, nil
-	case "prepare", "read", "host.prepare", "knowledge.create", "models.prepare", "models.register", "models.list":
+	case "prepare", "read", "host.prepare", "knowledge.create":
 		return bridge.prepare(operation, body)
 	case "complete":
 		var identity string
@@ -90,12 +89,6 @@ func (bridge *scriptBridge) operation(operation, body string) (any, error) {
 		draft, found := bridge.drafts[identity]
 		if !found {
 			return nil, scriptInvalid("plugin request draft is unavailable")
-		}
-		if draft.request.Command.Kind == "install_local_model" {
-			if !bridge.installations[draft.request.ID] && len(bridge.installations) >= 64 {
-				return nil, &protocol.Fault{Code: protocol.ErrorCodeBusy, Message: "callback installation observations are full"}
-			}
-			bridge.installations[draft.request.ID] = true
 		}
 		value, err := bridge.send(draft)
 		if err != nil {
@@ -166,8 +159,6 @@ func (bridge *scriptBridge) prepare(operation, body string) (any, error) {
 		}})
 	} else if operation == "knowledge.create" {
 		value, err = bridge.knowledgeCommand([]byte(body))
-	} else if strings.HasPrefix(operation, "models.") {
-		value, err = scriptModelCommand(operation, []byte(body))
 	}
 	if err != nil {
 		return nil, err
@@ -182,9 +173,6 @@ func (bridge *scriptBridge) prepare(operation, body string) (any, error) {
 	var command protocol.Command
 	if json.Unmarshal(encoded, &command) != nil {
 		return nil, scriptInvalid("invalid SDK command")
-	}
-	if err := bridge.installationOwnership(command); err != nil {
-		return nil, err
 	}
 	if command.Durable() && bridge.execution != nil {
 		if bridge.execution.Mode == protocol.WorkModePlan {
@@ -214,7 +202,7 @@ func (bridge *scriptBridge) prepare(operation, body string) (any, error) {
 		bridge.execution.Writes++
 	}
 	draft := scriptDraft{request: request, kind: command.Kind}
-	if operation == "read" || operation == "models.list" {
+	if operation == "read" {
 		if command.Durable() {
 			return nil, scriptInvalid("SDK reads cannot execute writes")
 		}
@@ -230,34 +218,6 @@ func (bridge *scriptBridge) prepare(operation, body string) (any, error) {
 	identity := request.ID.String()
 	bridge.drafts[identity] = draft
 	return identity, nil
-}
-
-func (bridge *scriptBridge) installationOwnership(command protocol.Command) error {
-	if command.Kind == "read_installations" {
-		payload, ok := command.Data.(*protocol.CommandReadInstallationsPayload)
-		if !ok {
-			return scriptInvalid("invalid installation requests")
-		}
-		seen := make(map[protocol.RequestID]bool, len(payload.Requests))
-		if len(payload.Requests) == 0 || len(payload.Requests) > 64 {
-			return scriptInvalid("installation request IDs must be bounded and unique")
-		}
-		for _, identity := range payload.Requests {
-			if seen[identity] {
-				return scriptInvalid("installation request IDs must be bounded and unique")
-			}
-			seen[identity] = true
-			if !bridge.installations[identity] {
-				return scriptPermission("installation request is not owned by this callback")
-			}
-		}
-	} else if command.Kind == "dismiss_installation" {
-		payload, ok := command.Data.(*protocol.CommandDismissInstallationPayload)
-		if !ok || !bridge.installations[payload.Request] {
-			return scriptPermission("installation request is not owned by this callback")
-		}
-	}
-	return nil
 }
 
 func (bridge *scriptBridge) send(draft scriptDraft) (protocol.Output, error) {
@@ -323,53 +283,6 @@ func (bridge *scriptBridge) knowledgeCommand(encoded []byte) (any, error) {
 	return scriptJSONValue(protocol.Command{Kind: "create_knowledge_collection", Data: protocol.CommandCreateKnowledgeCollectionPayload{Node: draft.Node, Definition: definition}})
 }
 
-func scriptModelCommand(operation string, body []byte) (any, error) {
-	var command protocol.Command
-	switch operation {
-	case "models.list":
-		var input struct {
-			Target protocol.InstallationTarget `json:"target"`
-			Kind   *protocol.ModelsKind        `json:"kind"`
-		}
-		if protocol.DecodeObject(body, &input, []string{"target"}, true) != nil {
-			return nil, scriptInvalid("invalid model list")
-		}
-		if input.Target != protocol.InstallationTargetNode || input.Kind != nil && *input.Kind == protocol.ModelsKindSpeech {
-			return nil, scriptInvalid("Node local model list required")
-		}
-		command = protocol.Command{Kind: "read_local_models", Data: protocol.CommandReadLocalModelsPayload{Kind: input.Kind}}
-	case "models.prepare":
-		var input protocol.InstallationModelRef
-		if json.Unmarshal(body, &input) != nil {
-			return nil, scriptInvalid("invalid model installation")
-		}
-		if input.Kind == "controller" {
-			payload := input.Data.(*protocol.InstallationModelRefControllerPayload)
-			if payload.Kind != protocol.ModelsKindSpeech {
-				return nil, scriptInvalid("model installation target or identity is invalid")
-			}
-			return nil, &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "speech installation requires a controller"}
-		}
-		payload := input.Data.(*protocol.InstallationModelRefNodePayload)
-		if payload.Kind == protocol.ModelsKindSpeech || !scriptModelID(payload.ID) {
-			return nil, scriptInvalid("model installation target or identity is invalid")
-		}
-		command = protocol.Command{Kind: "install_local_model", Data: protocol.CommandInstallLocalModelPayload{ID: payload.ID}}
-	case "models.register":
-		var input protocol.InstallationRegistration
-		if json.Unmarshal(body, &input) != nil {
-			return nil, scriptInvalid("invalid model registration")
-		}
-		if input.Target == protocol.InstallationTargetController {
-			return nil, &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "speech registration requires a controller"}
-		}
-		command = protocol.Command{Kind: "register_local_model", Data: protocol.CommandRegisterLocalModelPayload{Definition: input.Definition}}
-	default:
-		return nil, scriptInvalid("unknown host SDK operation")
-	}
-	return scriptJSONValue(command)
-}
-
 func scriptWriteIdentity(call protocol.RequestID, sequence uint64) protocol.RequestID {
 	material := []byte(call.String())
 	material = binary.LittleEndian.AppendUint64(material, sequence)
@@ -384,10 +297,7 @@ func scriptToolWrite(command protocol.Command, value any) bool {
 	switch command.Kind {
 	case "call_host_handler":
 		return true
-	case "write_plugin_value", "remove_plugin_value", "write_plugin_conversation_value",
-		"remove_plugin_conversation_value", "register_local_model", "install_local_model",
-		"create_knowledge_collection", "update_knowledge_collection", "pause_knowledge_collection",
-		"rebuild_knowledge_collection", "delete_knowledge_collection":
+	case "write_plugin_value", "remove_plugin_value", "write_plugin_conversation_value", "remove_plugin_conversation_value", "create_knowledge_collection", "update_knowledge_collection", "pause_knowledge_collection", "rebuild_knowledge_collection", "delete_knowledge_collection":
 		return true
 	case "plugin_transaction":
 		operations, _ := scriptAt(value, "data", "operations").([]any)
@@ -406,27 +316,7 @@ func scriptToolWrite(command protocol.Command, value any) bool {
 
 func scriptCommandAllowed(kind string) bool {
 	switch kind {
-	case "read_computer_permissions", "request_computer_permission", "request_provider_http",
-		"list_connector_types", "list_connections", "start_connector_login", "cancel_connector_login", "list_plugin_models",
-		"execute_provider_http", "plugin_transaction", "list_roles", "list_teams",
-		"list_associated_sessions", "read_artifact", "list_artifacts", "list_artifact_revisions",
-		"read_session", "read_conversation", "read_conversation_runs", "read_conversation_run",
-		"read_turn_capture", "read_turn", "submit_turn", "queue_turn", "set_session_config",
-		"set_session_team", "continue_turn", "stop_turn", "start_session", "read_project_catalog",
-		"resolve_plugin_model", "search_models", "read_model_versions", "resolve_model",
-		"read_local_models", "decide", "register_local_model", "install_local_model",
-		"read_installations", "dismiss_installation", "read_plugin_value",
-		"read_plugin_conversation_value", "list_plugin_keys", "write_plugin_value",
-		"write_plugin_conversation_value", "write_indexed_plugin_value", "search_plugin_values",
-		"fetch_web", "cancel_web_fetch", "query_knowledge", "read_knowledge_citation", "list_knowledge_collections",
-		"create_knowledge_collection", "update_knowledge_collection", "pause_knowledge_collection", "rebuild_knowledge_collection", "delete_knowledge_collection",
-		"remove_plugin_value", "remove_plugin_conversation_value", "read_plugin_settings",
-		"read_plugin_connection", "publish_notification", "dispatch", "stop_dispatch_turn",
-		"read_file", "search_code", "outline_code", "graph_code", "cancel_code_index_query",
-		"read_file_lines", "find_files", "write_file", "edit_file", "delete_file", "move_file",
-		"create_directory", "list_directory", "search_files", "inspect_git", "read_git_diff",
-		"read_git_log", "read_git_show", "read_git_blame", "list_git_changes", "read_git_change",
-		"read_git_context", "read_git_commit", "list_git_branches", "resolve_git_revision":
+	case "read_computer_permissions", "request_computer_permission", "request_provider_http", "list_connector_types", "list_connections", "start_connector_login", "cancel_connector_login", "list_plugin_models", "execute_provider_http", "plugin_transaction", "list_roles", "list_teams", "list_associated_sessions", "read_artifact", "list_artifacts", "list_artifact_revisions", "read_session", "read_conversation", "read_conversation_runs", "read_conversation_run", "read_turn_capture", "read_turn", "submit_turn", "queue_turn", "set_session_config", "set_session_team", "continue_turn", "stop_turn", "start_session", "read_project_catalog", "resolve_plugin_model", "read_plugin_value", "read_plugin_conversation_value", "list_plugin_keys", "write_plugin_value", "write_plugin_conversation_value", "write_indexed_plugin_value", "search_plugin_values", "fetch_web", "cancel_web_fetch", "query_knowledge", "read_knowledge_citation", "list_knowledge_collections", "create_knowledge_collection", "update_knowledge_collection", "pause_knowledge_collection", "rebuild_knowledge_collection", "delete_knowledge_collection", "remove_plugin_value", "remove_plugin_conversation_value", "read_plugin_settings", "read_plugin_connection", "publish_notification", "dispatch", "stop_dispatch_turn", "read_file", "search_code", "outline_code", "graph_code", "cancel_code_index_query", "read_file_lines", "find_files", "write_file", "edit_file", "delete_file", "move_file", "create_directory", "list_directory", "search_files", "inspect_git", "read_git_diff", "read_git_log", "read_git_show", "read_git_blame", "list_git_changes", "read_git_change", "read_git_context", "read_git_commit", "list_git_branches", "resolve_git_revision":
 		return true
 	default:
 		return false
@@ -485,18 +375,6 @@ func scriptFault(err error) *protocol.Fault {
 		return fault
 	}
 	return &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "plugin host service failed"}
-}
-
-func scriptModelID(identity string) bool {
-	if identity == "" || len(identity) > 128 {
-		return false
-	}
-	for _, character := range identity {
-		if !(character >= 'a' && character <= 'z' || character >= '0' && character <= '9' || character == '-') {
-			return false
-		}
-	}
-	return true
 }
 
 func scriptRevision(value any, stringOnly bool, invalid string) (json.Number, error) {

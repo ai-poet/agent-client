@@ -50,7 +50,7 @@ func (service *Service) Citation(ctx context.Context, request protocol.Request, 
 	if err != nil {
 		return none, err
 	}
-	choice := service.options.Choice()
+	choice := service.choice()
 	indexed, err := service.index.citation(ctx, service.binding(stored, choice), input)
 	if err != nil {
 		if code := code(err); code == protocol.ErrorCodeRevisionConflict || code == protocol.ErrorCodeNotFound {
@@ -99,7 +99,7 @@ func (service *Service) Citation(ctx context.Context, request protocol.Request, 
 	if err != nil {
 		return none, err
 	}
-	if !store.SameKnowledgeStored(current, stored) || !sameChoice(service.options.Choice(), choice) {
+	if !store.SameKnowledgeStored(current, stored) || !sameChoice(service.choice(), choice) {
 		return none, changedSource()
 	}
 	indexed.citation.Node = service.options.Node

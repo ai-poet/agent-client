@@ -90,7 +90,6 @@ func runScript(ctx context.Context, bundle ScriptBundle, handler string, input a
 		ctx: ctx, deadline: deadline, target: environment.Target, controller: environment.Controller, scope: environment.Context,
 		execution: execution, dispatch: dispatch,
 		drafts: map[string]scriptDraft{}, faults: map[string]*protocol.Fault{},
-		installations: map[protocol.RequestID]bool{},
 	}
 	runtime, err := newScriptVM(ctx, bundle, deadline, bridge, false)
 	if err != nil {
@@ -113,7 +112,7 @@ func newScriptVM(ctx context.Context, bundle ScriptBundle, deadline time.Time, b
 	}
 	runtime := &scriptVM{ctx: ctx, deadline: deadline, bridge: bridge, pure: pure}
 	builtins := map[string]string{}
-	names := []string{"sdk", "http", "models", "decisions", "connectors", "cards", "installations"}
+	names := []string{"sdk", "http", "connectors", "cards"}
 	if pure {
 		names = []string{"adapter"}
 	}

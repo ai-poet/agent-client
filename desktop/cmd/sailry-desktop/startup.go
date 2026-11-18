@@ -17,7 +17,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/live"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preferences"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
+
 	"github.com/ai-poet/agent-client/desktop/internal/node"
 	"github.com/ai-poet/agent-client/desktop/internal/node/logging"
 	"github.com/ai-poet/agent-client/desktop/internal/node/mcp"
@@ -121,9 +121,8 @@ func openBackend(ctx context.Context, options startupOptions) (*desktopBackend, 
 	backend.logs, _ = logging.Install(path, "desktop")
 	backend.reports = catchCrashes()
 	backend.Node, err = node.StartWithOptions(ctx, path, node.Options{
-		MCP:         &mcp.Options{Warm: true},
-		Network:     startupScope(options.Relays, backend.Preferences.Data.IrohRelays),
-		LocalModels: localmodels.Options{Capabilities: node.LocalModelCapabilities()},
+		MCP:     &mcp.Options{Warm: true},
+		Network: startupScope(options.Relays, backend.Preferences.Data.IrohRelays),
 	})
 	if err != nil {
 		backend.closeLogs()

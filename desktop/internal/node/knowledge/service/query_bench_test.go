@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
 	"github.com/ai-poet/agent-client/desktop/internal/node/knowledge"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
@@ -32,7 +31,7 @@ func BenchmarkSemanticScan(b *testing.B) {
 	}
 	defer opened.Close()
 	index := newIndex(opened.Knowledge, nil)
-	binding := Binding{ID: protocol.NewKnowledgeID(), Generation: 1, Model: localmodels.DefaultEmbedding, Dimension: dimension, Rebuild: 1}
+	binding := Binding{ID: protocol.NewKnowledgeID(), Generation: 1, Model: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Dimension: dimension, Rebuild: 1}
 	if err := index.Bind(b.Context(), binding); err != nil {
 		b.Fatal(err)
 	}

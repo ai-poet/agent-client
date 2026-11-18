@@ -15,7 +15,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/ai-poet/agent-client/desktop/internal/core"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
+
 	"github.com/ai-poet/agent-client/desktop/internal/node/admission"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/engine"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/feed"
@@ -61,7 +61,6 @@ type Node struct {
 	ports             *ports.Service
 	browsers          browserRegistry
 	externalBrowser   *externalbrowser.Browsers
-	localModels       *localModelControls
 	power             *power.Service
 	telemetry         *telemetry.Control
 	logs              bool
@@ -146,7 +145,6 @@ type Options struct {
 	Environment   *process.Environment
 	Git           workspacegit.Options
 	Process       process.Options
-	LocalModels   localmodels.Options
 	Power         power.Backend
 	Telemetry     telemetry.Options
 	knowledge     func(*knowledgeservice.Options)
@@ -258,16 +256,6 @@ func StartWithOptions(ctx context.Context, path string, options Options) (*Node,
 		_ = profile.Close()
 		return nil, err
 	}
-	if err := value.initLocalModels(ctx, options.LocalModels); err != nil {
-		cancel()
-		value.closeAuth()
-		_ = value.terminals.Close()
-		_ = value.closePlugins()
-		_ = value.tasks.Close(context.Background())
-		_ = value.closeWorkspace()
-		_ = profile.Close()
-		return nil, err
-	}
 	value.agent.Start()
 	for index := range value.lanes {
 		go value.run(&value.lanes[index])
@@ -355,7 +343,6 @@ func (node *Node) shutdown(grace time.Duration) {
 		// Supervised tasks may finish until the deadline and are then cancelled.
 		{"supervised tasks", func() error { return node.tasks.Close(deadline) }},
 		{"knowledge index", quiet(node.knowledge.Close)},
-		{"local models", quiet(node.closeLocalModels)},
 		{"external browsers", quiet(node.externalBrowser.Shutdown)},
 		{"plugins and MCP servers", node.closePlugins},
 		{"requests in flight", quiet(node.work.Wait)},
@@ -483,9 +470,6 @@ func (node *Node) admitCommand(ctx context.Context, caller protocol.NodeID, requ
 	if workspaceCommand(request.Command.Kind) {
 		return node.dispatchWorkspace(ctx, caller, request, encoded)
 	}
-	if request.Command.Kind == "decide" {
-		return node.dispatchDecision(ctx, request)
-	}
 	if request.Command.Kind == "send_diagnostics" {
 		return node.dispatchDiagnostics(ctx, request)
 	}
@@ -494,9 +478,6 @@ func (node *Node) admitCommand(ctx context.Context, caller protocol.NodeID, requ
 	}
 	if request.Command.Kind == "synthesize_speech" {
 		return node.dispatchSpeech(ctx, request)
-	}
-	if localModelCommand(request.Command.Kind) {
-		return node.dispatchLocalModels(ctx, caller, request, encoded)
 	}
 	if knowledgeCommand(request.Command.Kind) {
 		return node.dispatchKnowledge(ctx, caller, request, encoded)

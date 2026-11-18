@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "plugin-builder",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "Create and update Sailry plugins in a conversation",
   "extensions": {
     "dev.sailry.platform": {

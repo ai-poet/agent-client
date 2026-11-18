@@ -131,10 +131,14 @@ func (manager *Manager) load(ctx context.Context) (*Runtime, error) {
 	if manager.runtime == nil {
 		var value *Runtime
 		var err error
-		if manager.options.RuntimeDirectory == "" {
+		directory := manager.options.RuntimeDirectory
+		if directory == "" {
+			directory = os.Getenv("SAILRY_PYTHON_RUNTIME")
+		}
+		if directory == "" {
 			value, err = BundledRuntime()
 		} else {
-			value, err = OpenRuntime(manager.options.RuntimeDirectory)
+			value, err = OpenRuntime(directory)
 		}
 		if err != nil {
 			return nil, err

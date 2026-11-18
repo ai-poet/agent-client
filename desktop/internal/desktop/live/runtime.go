@@ -62,10 +62,8 @@ type Runtime struct {
 	settingsTurned           bool
 	terminalSettings         terminalSettingsState
 	backupSettings           backupSettingsState
-	localModels              localModelState
 	knowledge                knowledgeState
 	media                    mediaState
-	dictation                dictationState
 	usage                    featureUsage
 	permissions              permissionState
 	knowledgeWanted          string // the citation the knowledge viewer was last asked for
@@ -380,11 +378,6 @@ func (r *Runtime) Close() error {
 	r.cancel()
 	r.workers.Wait()
 	r.observers.Wait()
-	if r.dictation.manager != nil {
-		// A speech download ends with the context and leaves no partial
-		// write behind the closed window.
-		r.dictation.manager.Wait()
-	}
 	return nil
 }
 
@@ -488,10 +481,9 @@ func (r *Runtime) drain(c *ui.Context) {
 	r.terminalSettingsFrame()
 	r.backupSettingsFrame(c)
 	r.memoryMapFrame(c)
-	r.localModelsFrame()
-	r.dictationFrame(c)
 	r.permissionsFrame()
 	r.nodeSettingsFrame()
+	r.settingsKnowledgeFrame()
 	r.packagesFrame(c)
 	r.pluginViewsFrame(c)
 	r.terminalsFrame(c)

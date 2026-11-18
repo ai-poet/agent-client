@@ -2,17 +2,17 @@ package shell
 
 import (
 	"slices"
-	"strings"
+
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/panel"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
+	"github.com/egoist/mygo/ui"
 )
 
 // TestDemoActions covers the demo's conversation, panel and notice actions:
@@ -267,27 +267,6 @@ func TestDemoActions(t *testing.T) {
 
 	// Voice input plays on the clock and ends with the demo's words in the
 	// draft: no microphone opens and nothing is said of it.
-	t.Run("Dictation", func(t *testing.T) {
-		a, tt, act := open(t, flaky)
-		comp := a.Composer(flaky)
-		act(func(x *actions) { x.Dictate(&comp.Dictation, composer.StartDictation) })
-		// Recording lasts until it is finished: the whole of the time.
-		play(tt, nil)
-		if comp.Dictation.Phase != composer.Recording {
-			t.Fatalf("the dictation is in phase %d", comp.Dictation.Phase)
-		}
-		act(func(x *actions) { x.Dictate(&comp.Dictation, composer.FinishDictation) })
-		heard := preview.DemoCatalog("en")["dictation.text"]
-		play(tt, func() bool {
-			return comp.Dictation.Phase == composer.Idle && heard != "" && strings.HasSuffix(comp.Draft, heard)
-		})
-		if comp.Dictation.Phase != composer.Idle || heard == "" || !strings.HasSuffix(comp.Draft, heard) {
-			t.Fatalf("the dictation ended in phase %d with the draft %q", comp.Dictation.Phase, comp.Draft)
-		}
-		if tt.HasText(en("preview_notice")) {
-			t.Fatal("the dictation tells the preview's notice")
-		}
-	})
 
 	// A cited page of the session overview opens in the panel's browser, and
 	// a file without a native preview opens a tab that names it: neither

@@ -176,12 +176,6 @@ func validateRecords(ctx context.Context, connection *sql.Conn, archives bool) e
 		}
 	}
 	var count int
-	if err := connection.QueryRowContext(ctx, "SELECT count(*) FROM local_model_settings WHERE singleton=1").Scan(&count); err != nil {
-		return err
-	}
-	if count != 1 {
-		return errors.New("local model settings are missing")
-	}
 	if err := connection.QueryRowContext(ctx, "SELECT count(*) FROM telemetry_settings WHERE singleton=1").Scan(&count); err != nil {
 		return err
 	}

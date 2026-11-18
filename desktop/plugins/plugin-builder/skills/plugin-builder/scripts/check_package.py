@@ -22,11 +22,11 @@ IMPORT = re.compile(
     r"""(?:\b(?:import|export)\b[^;'"`]*?\bfrom\s*|\bimport\s*\(?\s*)['"]([^'"]+)['"]""")
 MODULES = {
     "gpui-base", "gpui-component", "gpui-kit", "sailry", "sailry/ui", "sailry/forms",
-    "sailry/sdk", "sailry/connections", "sailry/credentials", "sailry/models",
+    "sailry/sdk", "sailry/credentials",
     "sailry/card", "sailry/cards", "sailry/connectors", "sailry/http",
     "sailry/registration", "sailry/documents",
-    "sailry/file-transfers", "sailry/ssh-transfers", "sailry/artifacts", "sailry/search",
-    "sailry/settings", "sailry/installations",
+    "sailry/file-transfers", "sailry/artifacts", "sailry/search",
+    "sailry/settings",
 }
 FIELDS = {
     "api_version", "min_sailry_version", "scope", "actions", "display", "description", "icon", "instructions",
@@ -36,9 +36,9 @@ FIELDS = {
     "conversation_options", "conversation_modes", "model_providers", "model_auth", "model_resources", "model_adapters", "programs",
 }
 ACTIONS = {
-    "activity.read", "usage.read", "databases.read", "databases.control", "databases.manage",
-    "ssh.read", "ssh.control", "ssh.manage", "agents.delegate", "roles.read", "teams.read", "roles.write",
-    "models.read", "decisions.run", "models.install", "models.provide", "models.authenticate", "credentials.inspect",
+    "activity.read", "usage.read",
+    "agents.delegate", "roles.read", "teams.read", "roles.write",
+    "models.read", "models.provide", "models.authenticate", "credentials.inspect",
     "media.inspect", "media.image", "media.video", "media.settings.read",
     "media.settings.write", "computer.read", "computer.control", "browser.read",
     "browser.control", "external_browser.read", "external_browser.control",
@@ -52,7 +52,6 @@ ACTIONS = {
     "web.settings.write", "knowledge.read", "knowledge.write",
 }
 OPERATION_ACTIONS = {
-    "models.install": "models.install", "models.remove": "models.install",
     "code.search": "code.index.read", "code.outline": "code.index.read",
     "storage.get": "storage.read", "storage.list": "storage.read",
     "storage.set": "storage.write", "storage.delete": "storage.write",

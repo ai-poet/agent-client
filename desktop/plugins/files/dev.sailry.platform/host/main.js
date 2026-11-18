@@ -1,6 +1,5 @@
 // Argument policy from Sailry 5bfeaf05 plugins/builtin/files/agent and office/agent.rs.
 // Confined file access, approval, revisions and execution remain in the Node.
-export {ocr_models,ocr_install,ocr_remove} from './models.js';
 
 function object(value, keys) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) &&

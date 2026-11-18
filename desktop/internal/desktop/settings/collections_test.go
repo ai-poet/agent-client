@@ -9,7 +9,7 @@ import (
 )
 
 // The Knowledge page's collections say their state and send their pause,
-// resume and update through ModelActions.
+// resume and update through CollectionActions.
 func TestKnowledgeCollections(t *testing.T) {
 	en := func(key string, args ...any) string { return i18n.In("en", key, args...) }
 	m := &Model{Live: true}
@@ -19,9 +19,9 @@ func TestKnowledgeCollections(t *testing.T) {
 		update bool
 	}
 	var calls []call
-	m.ModelActions = &ModelActions{
-		CollectionPause:  func(id string, paused bool) { calls = append(calls, call{id: id, paused: paused}) },
-		CollectionUpdate: func(id string) { calls = append(calls, call{id: id, update: true}) },
+	m.CollectionActions = &CollectionActions{
+		Pause:  func(id string, paused bool) { calls = append(calls, call{id: id, paused: paused}) },
+		Update: func(id string) { calls = append(calls, call{id: id, update: true}) },
 	}
 	tt := ui.NewTester(func(c *ui.Context) { collections(c, m) }, 900, 700)
 	tt.SetLocale("en")

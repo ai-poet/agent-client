@@ -6,7 +6,7 @@
 //	go run ./native/fetch -seal path [-target goos/goarch] [-host] [-sign identity]
 //
 // Downloads come only from the official release URLs in the lock files under
-// native/ and internal/localmodels/decision, are checked against their pinned
+// native/, are checked against their pinned
 // size and SHA-256, and are cached in .runtime/native/dl. The iroh, Turso and
 // capture builds are taken from the CI native job's artifacts (-artifacts,
 // checked against its SHA256SUMS), or from an
@@ -18,8 +18,7 @@
 // -seal is the step after packaging and signing. It records the shipped
 // native libraries in native-seal.json, the lock of the libraries that have
 // no upstream pin and, inside a signed macOS application, of the ones
-// signing rewrote. For a macOS .app it also rewrites the llama.cpp and
-// Python manifests from the signed files and signs the bundle again, so the
+// signing rewrote. For a macOS .app it signs the bundle again, so the
 // code signature covers the new records. Nested code is not signed again.
 package main
 
@@ -125,10 +124,7 @@ func main() {
 	}
 	fail(os.MkdirAll(run.output, 0o755))
 	names := built(goos)
-	fail(run.onnx(*host))
-	fail(run.llama())
 	fail(run.helper())
-	fail(run.python())
 	fail(run.windowsCRT(*artifacts))
 	fail(run.built(names[0], "sh native/iroh/build.sh", *artifacts))
 	fail(run.built(tursoLibrary(goos), "sh native/turso/build.sh", *artifacts))
@@ -348,52 +344,6 @@ func (run *stage) ship(name, version string, body []byte) {
 	fmt.Printf("%-34s %-10s %s\n", name, version, digest(body))
 }
 
-func (run *stage) onnx(host bool) error {
-	lock, asset, err := run.load("native/onnxruntime.lock.json")
-	if err != nil {
-		return err
-	}
-	if host {
-		asset.Files = slices.DeleteFunc(asset.Files, func(file pinned) bool { return file.Role == "speech" })
-	}
-	content, err := members(asset, false)
-	if err != nil {
-		return err
-	}
-	for _, file := range asset.Files {
-		if err := run.write(file.Name, content[file.Name], 0o644); err != nil {
-			return err
-		}
-		run.ship(file.Name, path.Base(strings.TrimSuffix(lock.Source, "/")), content[file.Name])
-	}
-	return nil
-}
-
-func (run *stage) llama() error {
-	lock, asset, err := run.load("internal/localmodels/decision/llama-runtime.lock.json")
-	if err != nil {
-		return err
-	}
-	content, err := members(asset, false)
-	if err != nil {
-		return err
-	}
-	installed := []map[string]any{}
-	for _, file := range asset.Files {
-		if err := run.write(file.Name, content[file.Name], 0o644); err != nil {
-			return err
-		}
-		run.ship(file.Name, lock.Build, content[file.Name])
-		installed = append(installed, map[string]any{"name": file.Name, "size": file.Size, "sha256": file.SHA256})
-	}
-	manifest, err := json.MarshalIndent(map[string]any{"version": 1, "target": run.triple, "build": lock.Build, "files": installed}, "", "  ")
-	if err != nil {
-		return err
-	}
-	run.shipped = append(run.shipped, "llama-runtime.json")
-	return run.write("llama-runtime.json", append(manifest, '\n'), 0o644)
-}
-
 func (run *stage) helper() error {
 	lock, asset, err := run.load("native/agent-desktop.lock.json")
 	if err != nil {
@@ -447,86 +397,6 @@ func (run *stage) helper() error {
 	}
 	run.shipped = append(run.shipped, "helpers")
 	return run.write(resources+"agent-desktop-LICENSE", license, 0o644)
-}
-
-// listed is one entry of the Python receipt: a file or a link.
-type listed struct {
-	Path   string `json:"path"`
-	Size   *int   `json:"size,omitempty"`
-	SHA256 string `json:"sha256,omitempty"`
-	Link   string `json:"link,omitempty"`
-}
-
-// python extracts the standalone runtime, marks it externally managed and
-// writes the receipt internal/node/python verifies.
-func (run *stage) python() error {
-	lock, asset, err := run.load("native/python-runtime.lock.json")
-	if err != nil {
-		return err
-	}
-	data, err := archive(asset)
-	if err != nil {
-		return err
-	}
-	list, err := entries(asset.Archive, data)
-	if err != nil {
-		return err
-	}
-	root := filepath.Join(run.output, "python")
-	if err := os.RemoveAll(root); err != nil {
-		return err
-	}
-	library := "python/lib/python3.12/"
-	if run.goos == "windows" {
-		library = "python/Lib/"
-	}
-	list = append(list, entry{name: library + "EXTERNALLY-MANAGED",
-		body: []byte("[externally-managed]\nError=Use a virtual environment to install dependencies\n")})
-	list = slices.DeleteFunc(list, func(item entry) bool { return strings.Contains(item.name, "__pycache__") })
-	// Links are published after regular files, so extraction never writes through one.
-	slices.SortStableFunc(list, func(a, b entry) int { return len(a.link) - len(b.link) })
-	files := []listed{}
-	for _, item := range list {
-		if !strings.HasPrefix(item.name, "python/") || !filepath.IsLocal(item.name) || strings.Contains(item.name, `\`) {
-			return fmt.Errorf("%s: invalid path %s", asset.Archive, item.name)
-		}
-		destination := filepath.Join(run.output, filepath.FromSlash(item.name))
-		relative := strings.TrimPrefix(item.name, "python/")
-		if item.link != "" {
-			if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
-				return err
-			}
-			if err := os.Symlink(item.link, destination); err != nil {
-				return err
-			}
-			resolved, err := filepath.EvalSymlinks(destination)
-			if inside, _ := filepath.Rel(root, resolved); err != nil || !filepath.IsLocal(inside) {
-				return fmt.Errorf("%s: link %s leaves the runtime", asset.Archive, item.name)
-			}
-			files = append(files, listed{Path: relative, Link: item.link})
-			continue
-		}
-		mode := fs.FileMode(0o644)
-		if item.mode&0o111 != 0 {
-			mode = 0o755
-		}
-		if err := run.write(item.name, item.body, mode); err != nil {
-			return err
-		}
-		size := len(item.body)
-		files = append(files, listed{Path: relative, Size: &size, SHA256: digest(item.body)})
-	}
-	slices.SortFunc(files, func(a, b listed) int { return strings.Compare(a.Path, b.Path) })
-	receipt, err := json.MarshalIndent(map[string]any{
-		"version": 1, "python_version": lock.PythonVersion, "target": run.triple,
-		"source": map[string]string{"url": asset.URL, "sha256": asset.SHA256}, "files": files,
-	}, "", "  ")
-	if err != nil {
-		return err
-	}
-	run.shipped = append(run.shipped, "python")
-	fmt.Printf("%-34s %-10s %s\n", "python/ (archive)", lock.PythonVersion, asset.SHA256)
-	return run.write("python/python-runtime.json", append(receipt, '\n'), 0o644)
 }
 
 // built places a library Sailry builds itself: the CI artifact when given,
@@ -643,10 +513,6 @@ func (run *stage) seal(location, platform string, host bool, identity, entitleme
 		}
 		directory = filepath.Join(location, "Contents", "Resources")
 	}
-	_, asset, err := run.load("native/onnxruntime.lock.json")
-	if err != nil {
-		return err
-	}
 	names := built(run.goos)
 	if host {
 		names = names[:1]
@@ -663,11 +529,6 @@ func (run *stage) seal(location, platform string, host bool, identity, entitleme
 		names = append(names, shipped.WindowsCRTManifest)
 		names = append(names, crt.Files...)
 	}
-	for _, file := range asset.Files {
-		if !host || file.Role != "speech" {
-			names = append(names, file.Name)
-		}
-	}
 	slices.Sort(names)
 	record := func() (shipped.Seal, error) {
 		seal := shipped.Seal{Version: 1, Target: platform}
@@ -683,17 +544,6 @@ func (run *stage) seal(location, platform string, host bool, identity, entitleme
 	seal, err := record()
 	if err != nil {
 		return err
-	}
-	// Only signing a macOS application rewrites shipped files; elsewhere
-	// both manifests keep their staged content and the loaders keep the
-	// upstream lock.
-	if app {
-		if err := run.sealLlama(directory); err != nil {
-			return err
-		}
-		if err := sealPython(filepath.Join(directory, "python")); err != nil {
-			return err
-		}
 	}
 	if err := writeJSON(filepath.Join(directory, shipped.SealName), seal); err != nil {
 		return err
@@ -725,77 +575,6 @@ func (run *stage) seal(location, platform string, host bool, identity, entitleme
 	}
 	fmt.Printf("sealed  %s\n", location)
 	return nil
-}
-
-// sealLlama rewrites the llama.cpp manifest from the files as shipped.
-func (run *stage) sealLlama(directory string) error {
-	lock, asset, err := run.load("internal/localmodels/decision/llama-runtime.lock.json")
-	if err != nil {
-		return err
-	}
-	installed := []shipped.File{}
-	for _, file := range asset.Files {
-		record, err := shipped.Record(directory, file.Name)
-		if err != nil {
-			return err
-		}
-		installed = append(installed, record)
-	}
-	return writeJSON(filepath.Join(directory, "llama-runtime.json"),
-		map[string]any{"version": 1, "target": run.triple, "build": lock.Build, "files": installed})
-}
-
-// sealPython rewrites the file list of the Python receipt from the runtime
-// as shipped, keeping its provenance.
-func sealPython(root string) error {
-	receipt := filepath.Join(root, "python-runtime.json")
-	source, err := os.ReadFile(receipt)
-	if err != nil {
-		return err
-	}
-	var content map[string]any
-	if err := json.Unmarshal(source, &content); err != nil {
-		return fmt.Errorf("%s: %w", receipt, err)
-	}
-	files := []listed{}
-	err = filepath.WalkDir(root, func(current string, item fs.DirEntry, err error) error {
-		if err != nil || item.IsDir() || current == receipt {
-			return err
-		}
-		relative, err := filepath.Rel(root, current)
-		if err != nil {
-			return err
-		}
-		relative = filepath.ToSlash(relative)
-		if strings.Contains(relative, "__pycache__") {
-			return fmt.Errorf("%s: bytecode cannot be shipped", relative)
-		}
-		if item.Type()&fs.ModeSymlink != 0 {
-			link, err := os.Readlink(current)
-			if err != nil {
-				return err
-			}
-			resolved, err := filepath.EvalSymlinks(current)
-			if inside, _ := filepath.Rel(root, resolved); err != nil || !filepath.IsLocal(inside) {
-				return fmt.Errorf("link %s leaves the runtime", relative)
-			}
-			files = append(files, listed{Path: relative, Link: link})
-			return nil
-		}
-		record, err := shipped.Record(root, filepath.FromSlash(relative))
-		if err != nil {
-			return err
-		}
-		size := int(record.Size)
-		files = append(files, listed{Path: relative, Size: &size, SHA256: record.SHA256})
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	slices.SortFunc(files, func(a, b listed) int { return strings.Compare(a.Path, b.Path) })
-	content["files"] = files
-	return writeJSON(receipt, content)
 }
 
 // writeJSON publishes a new inode, like write.

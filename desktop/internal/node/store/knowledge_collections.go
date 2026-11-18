@@ -8,23 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
-
-func knowledgeModel(ctx context.Context, db *sql.Conn, id *string) error {
-	if id == nil {
-		return nil
-	}
-	definition, err := LocalModelDefinition(ctx, db, *id)
-	if err != nil {
-		return err
-	}
-	if localmodels.Kind(definition.Format) != protocol.ModelsKindEmbedding {
-		return fault(protocol.ErrorCodeNotFound, "local model is not registered for its kind")
-	}
-	return nil
-}
 
 func loadKnowledge(ctx context.Context, db *sql.Conn) ([]KnowledgeStored, error) {
 	rows, err := db.QueryContext(ctx, "SELECT id,revision,generation,body FROM knowledge_collections ORDER BY id")
@@ -60,9 +45,6 @@ func loadKnowledge(ctx context.Context, db *sql.Conn) ([]KnowledgeStored, error)
 		if err := checkKnowledge(stored); err != nil {
 			return nil, err
 		}
-		if err := knowledgeModel(ctx, db, stored.Collection.Definition.Model); err != nil {
-			return nil, err
-		}
 		if record.id != stored.Collection.ID.String() || record.revision != int64(stored.Collection.Revision) || record.generation != int64(stored.Collection.Progress.Generation) {
 			return nil, errors.New("knowledge metadata does not match its stored definition")
 		}
@@ -91,9 +73,6 @@ func persistKnowledge(ctx context.Context, db *sql.Conn, stored KnowledgeStored)
 		return err
 	}
 	if err := checkKnowledge(stored); err != nil {
-		return err
-	}
-	if err := knowledgeModel(ctx, db, stored.Collection.Definition.Model); err != nil {
 		return err
 	}
 	body, err := encode(stored)

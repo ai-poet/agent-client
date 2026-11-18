@@ -8,7 +8,6 @@ import (
 	"math"
 	"slices"
 
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
@@ -198,16 +197,7 @@ func RecordKnowledgeProgress(ctx context.Context, db *sql.Conn, id protocol.Know
 		return false, fault(protocol.ErrorCodeRevisionConflict, "knowledge collection generation changed")
 	}
 	model := stored.Collection.Definition.Model
-	if model == nil {
-		settings, err := ReadLocalModelSettings(ctx, db)
-		if err != nil {
-			return false, err
-		}
-		if selected := localmodels.Selected(&settings, protocol.ModelsKindEmbedding); selected != "" {
-			model = &selected
-		}
-	}
-	if progress.Model != nil && (model == nil || *progress.Model != *model) {
+	if progress.Model != nil && model != nil && *progress.Model != *model {
 		return false, fault(protocol.ErrorCodeRevisionConflict, "knowledge collection model changed")
 	}
 	if sameJSON(stored.Collection.Progress, progress) {
@@ -215,25 +205,4 @@ func RecordKnowledgeProgress(ctx context.Context, db *sql.Conn, id protocol.Know
 	}
 	stored.Collection.Progress = progress
 	return true, persistKnowledge(ctx, db, stored)
-}
-
-// knowledgeSelectionChanged restarts indexing of every collection that
-// follows the default embedding model.
-func knowledgeSelectionChanged(ctx context.Context, db *sql.Conn) error {
-	entries, err := loadKnowledge(ctx, db)
-	if err != nil {
-		return err
-	}
-	for _, stored := range entries {
-		if stored.Collection.Definition.Model != nil {
-			continue
-		}
-		if err := advanceKnowledge(&stored); err != nil {
-			return err
-		}
-		if err := persistKnowledge(ctx, db, stored); err != nil {
-			return err
-		}
-	}
-	return nil
 }

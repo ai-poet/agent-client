@@ -7,21 +7,20 @@ import (
 	"database/sql"
 	"errors"
 	"os"
-	"os/exec"
+
 	"path/filepath"
-	"strings"
+
 	"testing"
 
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/ai-poet/agent-client/desktop/internal/core"
 	"github.com/ai-poet/agent-client/desktop/internal/link/iroh"
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels/decision"
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels/onnx"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/ai-poet/agent-client/desktop/internal/node"
 	"github.com/ai-poet/agent-client/desktop/internal/node/computer"
 	"github.com/ai-poet/agent-client/desktop/internal/node/mcp"
-	"github.com/ai-poet/agent-client/desktop/internal/node/python"
-	"github.com/ai-poet/agent-client/desktop/internal/speech"
+	"github.com/ai-poet/agent-client/desktop/internal/shipped"
+
 	"github.com/ai-poet/agent-client/desktop/internal/speech/capture"
 	"github.com/ai-poet/agent-client/desktop/internal/turso"
 )
@@ -55,7 +54,7 @@ func TestPackagedNativeLayout(t *testing.T) {
 	if os.Getenv("SAILRY_PACKAGE_PROBE") != "1" {
 		t.Skip("set SAILRY_PACKAGE_PROBE=1 and run beside the packaged executable")
 	}
-	directory, err := onnx.Directory()
+	directory, err := shipped.Directory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,17 +87,8 @@ func TestPackagedNativeLayout(t *testing.T) {
 			t.Fatalf("Turso FTS: count=%d, error=%v", count, err)
 		}
 	})
-	if err := onnx.Initialize(); err != nil {
-		t.Errorf("onnxruntime: %v", err)
-	}
-	if err := speech.Initialize(); err != nil {
-		t.Errorf("sherpa-onnx: %v", err)
-	}
 	if err := capture.Load(directory, core.Release()); err != nil {
 		t.Errorf("capture: %v", err)
-	}
-	if err := decision.Available(); err != nil {
-		t.Errorf("llama.cpp runtime: %v", err)
 	}
 	if core.Release() {
 		t.Setenv("SAILRY_IROH_LIB", filepath.Join(t.TempDir(), "ignored"))
@@ -110,12 +100,6 @@ func TestPackagedNativeLayout(t *testing.T) {
 		t.Errorf("computer helper: %v", err)
 	} else {
 		t.Logf("computer helper: %s", helper)
-	}
-	if bundled, err := python.BundledRuntime(); err != nil {
-		t.Errorf("python: %v", err)
-	} else if output, err := exec.Command(bundled.Python, "-I", "-B", "-c", "import sys; print(sys.version.split()[0])").Output(); err != nil ||
-		strings.TrimSpace(string(output)) != python.Version {
-		t.Errorf("python interpreter: %q, %v", output, err)
 	}
 	if terminal, err := filepath.Glob(filepath.Join(directory, "*ghostty-vt*")); err != nil || len(terminal) != 1 {
 		t.Errorf("libghostty-vt: %v, %v", terminal, err)

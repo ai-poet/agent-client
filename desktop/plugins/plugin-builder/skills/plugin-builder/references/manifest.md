@@ -127,14 +127,11 @@ Declare only what the package uses. Each action grants one capability family:
 | `conversation.read`, `conversation.control` | The captured conversation; sending messages and stopping turns |
 | `conversation.message.read` | The current turn's user text in the `turn.initialize` input |
 | `sessions.start` | Starting new conversations |
-| `models.read`, `models.install`, `models.generate` | The model catalog, managed installation and model requests through the Node |
-| `decisions.run` | Local model decisions |
+| `models.read`, `models.generate` | The provider model catalog and model requests through the Node |
 | `notifications.publish` | Application notifications |
 | `dispatch.manage` | Scheduled and queued plugin work |
 | `process.read`, `process.control`, `terminals.read`, `terminals.control` | Commands and terminals |
 | `process.run` | Start the installed executables the package declares in `programs` |
-| `databases.read`, `databases.control`, `databases.manage` | Database connections |
-| `ssh.read`, `ssh.control`, `ssh.manage` | SSH connections |
 | `browser.read`, `browser.control`, `external_browser.read`, `external_browser.control` | Built-in and external browsers |
 | `computer.read`, `computer.control` | Screen capture and desktop control |
 | `media.settings.read`, `media.settings.write` | The media model assignments. Image inspection and image and video generation are built-in agent tools; `media.inspect`, `media.image` and `media.video` still validate but bind no tool |

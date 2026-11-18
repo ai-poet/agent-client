@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
@@ -35,7 +34,7 @@ func ValidateDefinition(definition protocol.KnowledgeDefinition) error {
 		})
 	}
 	valid := (definition.Visibility == "" || definition.Visibility == protocol.KnowledgeVisibilityPrivate || definition.Visibility == protocol.KnowledgeVisibilityShared) && strings.TrimSpace(definition.Name) != "" && !strings.ContainsRune(definition.Name, 0) &&
-		(definition.Model == nil || localmodels.ValidID(*definition.Model)) && filters(definition.Tags) && filters(definition.Globs)
+		(definition.Model == nil || Hash(*definition.Model)) && filters(definition.Tags) && filters(definition.Globs)
 	for _, name := range definition.SharedWith {
 		valid = valid && shared(name)
 	}

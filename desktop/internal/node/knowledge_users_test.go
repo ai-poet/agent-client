@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
 	knowledgeservice "github.com/ai-poet/agent-client/desktop/internal/node/knowledge/service"
 	"github.com/ai-poet/agent-client/desktop/internal/node/plugins"
 	"github.com/ai-poet/agent-client/desktop/internal/node/process"
@@ -30,7 +29,7 @@ func TestKnowledgeUserAndProjectStorage(t *testing.T) {
 	start := func() {
 		t.Helper()
 		started, err := StartWithOptions(t.Context(), profile, Options{Environment: &environment, knowledge: func(options *knowledgeservice.Options) {
-			model := localmodels.DefaultEmbedding
+			model := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 			options.Choice = func() protocol.ModelsLocalChoice { return protocol.ModelsLocalChoice{Enabled: true, Model: &model} }
 			options.Dimension = func(id string) (int, string, bool) { return 2, "users-fixture", id == model }
 			options.Installed = func() (map[string]bool, error) { return map[string]bool{model: true}, nil }

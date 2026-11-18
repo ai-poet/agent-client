@@ -35,19 +35,16 @@ var sectionFeatures = map[settings.Section]protocol.FeatureUse{
 	settings.Appearance:   protocol.FeatureUseSettingsAppearance,
 	settings.Conversation: protocol.FeatureUseSettingsConversation,
 	settings.Shortcuts:    protocol.FeatureUseSettingsShortcuts,
-	settings.Dictation:    protocol.FeatureUseSettingsDictation,
 	settings.Providers:    protocol.FeatureUseSettingsProviders,
 	settings.Connectors:   protocol.FeatureUseSettingsConnectors,
 	settings.Teams:        protocol.FeatureUseSettingsTeams,
 	settings.Plugins:      protocol.FeatureUseSettingsPlugins,
 	settings.Skills:       protocol.FeatureUseSettingsSkills,
 	settings.Knowledge:    protocol.FeatureUseSettingsKnowledge,
-	settings.Decision:     protocol.FeatureUseSettingsDecision,
 	settings.Terminal:     protocol.FeatureUseSettingsTerminal,
 	settings.Connections:  protocol.FeatureUseSettingsConnections,
 	settings.Hooks:        protocol.FeatureUseSettingsHooks,
 	settings.Runtime:      protocol.FeatureUseSettingsRuntime,
-	settings.OCR:          protocol.FeatureUseSettingsOCR,
 	settings.Permissions:  protocol.FeatureUseSettingsPermissions,
 	settings.Backup:       protocol.FeatureUseSettingsBackup,
 	settings.About:        protocol.FeatureUseSettingsAbout,
@@ -110,8 +107,6 @@ type featureUsage struct {
 	shell   shell.Usage
 	section settings.Section
 	theme   string
-	// dictated are the composers whose current draft dictation was started in.
-	dictated map[*composer.State]bool
 }
 
 // count sends the uses to the local Node. The Node counts or drops them by
@@ -219,10 +214,6 @@ func (x *conversationActions) countSubmit(m composer.Message, guide, queue bool)
 	if len(m.References) > 0 {
 		features = append(features, protocol.FeatureUseComposerHasReference)
 	}
-	if root.usage.dictated[x.comp] {
-		features = append(features, protocol.FeatureUseComposerDictated)
-		delete(root.usage.dictated, x.comp)
-	}
 	if queue {
 		features = append(features, protocol.FeatureUseComposerQueued)
 	}
@@ -236,16 +227,6 @@ func (x *conversationActions) countSubmit(m composer.Message, guide, queue bool)
 		features = append(features, feature)
 	}
 	root.count(features...)
-}
-
-// countDictation counts a dictation that started and marks its draft.
-func (x *conversationActions) countDictation() {
-	root := x.r.localRuntime()
-	if root.usage.dictated == nil {
-		root.usage.dictated = map[*composer.State]bool{}
-	}
-	root.usage.dictated[x.comp] = true
-	root.count(protocol.FeatureUseDictationStart)
 }
 
 // CountReadAloud counts a reading that started, by the voice that reads it.

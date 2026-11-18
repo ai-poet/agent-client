@@ -191,7 +191,6 @@ type Actions interface {
 	Upload(a *Attachment)
 	Discard(a *Attachment)
 	// Dictate starts, finishes or cancels voice input, moving d on.
-	Dictate(d *Dictation, cmd DictationCommand)
 	// Compact compacts the conversation (/compact).
 	Compact()
 	// CreateWorktree, AddProject and ManageTeams open the flows that

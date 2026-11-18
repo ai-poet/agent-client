@@ -24,12 +24,10 @@
             "teams.read",
             "roles.write",
             "models.read",
-            "decisions.run",
-            "models.provide",
+                "models.provide",
             "models.authenticate",
             "credentials.inspect",
-            "models.install",
-            "media.inspect",
+                "media.inspect",
             "media.image",
             "media.video",
             "media.settings.read",
@@ -2649,8 +2647,6 @@
     },
     "Operation": {
       "enum": [
-        "models.install",
-        "models.remove",
         "roles.list",
         "roles.save",
         "roles.remove",

@@ -4,12 +4,12 @@
 package settings
 
 import (
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 // Section is a settings page, named by its title's i18n key
@@ -21,7 +21,6 @@ const (
 	Appearance   Section = "settings_appearance"
 	Conversation Section = "settings_conversation"
 	Shortcuts    Section = "settings_shortcuts"
-	Dictation    Section = "settings_dictation"
 	Providers    Section = "settings_providers"
 	Connectors   Section = "settings_connectors"
 	Teams        Section = "settings_teams"
@@ -29,12 +28,10 @@ const (
 	Skills       Section = "settings_skills"
 	Knowledge    Section = "settings_knowledge"
 	Media        Section = "settings_media"
-	Decision     Section = "settings_decision"
 	Terminal     Section = "settings_terminal"
 	Connections  Section = "settings_connections"
 	Hooks        Section = "hooks_settings"
 	Runtime      Section = "settings_runtime"
-	OCR          Section = "settings_ocr"
 	Permissions  Section = "settings_permissions"
 	Backup       Section = "settings_backup"
 	About        Section = "settings_about"
@@ -55,15 +52,15 @@ var Groups = []struct {
 }{
 	{"settings_group_app", []Item{
 		{General, icons.Settings}, {Appearance, icons.Palette}, {Conversation, icons.Chat},
-		{Shortcuts, icons.ALargeSmall}, {Dictation, icons.ALargeSmall},
+		{Shortcuts, icons.ALargeSmall},
 	}},
 	{"settings_group_ai", []Item{
 		{Providers, icons.Cpu}, {Connectors, icons.Plug}, {Teams, icons.Users}, {Plugins, icons.Gallery},
-		{Skills, icons.Bot}, {Knowledge, icons.BookOpen}, {Media, icons.Image}, {Decision, icons.BrainCircuit},
+		{Skills, icons.Bot}, {Knowledge, icons.BookOpen}, {Media, icons.Image},
 	}},
 	{"settings_group_tools", []Item{
 		{Terminal, icons.Terminal}, {Connections, icons.Network}, {Hooks, icons.Settings2},
-		{Runtime, icons.Cpu}, {OCR, icons.ALargeSmall},
+		{Runtime, icons.Cpu},
 	}},
 	{"settings_group_system", []Item{
 		{Permissions, icons.Settings2}, {Backup, icons.Upload}, {Experimental, icons.Code}, {About, icons.Info},
@@ -150,8 +147,6 @@ func Page(c *ui.Context, s *State, d *preview.Data, look Look) {
 	if s.scrolled != s.Section {
 		s.scrolled, s.pageScroll = s.Section, ui.ScrollState{}
 	}
-	// The library is open while a page's Available tab shows this frame.
-	s.library.open = false
 	kit.Page(c, s.Section, i18n.T(c, string(s.Section)), desc, func() {
 		switch s.Section {
 		case General:
@@ -162,8 +157,7 @@ func Page(c *ui.Context, s *State, d *preview.Data, look Look) {
 			conversation(c, s.Model)
 		case Shortcuts:
 			shortcuts(c, &s.Keys)
-		case Dictation:
-			dictation(c, s.Model)
+
 		case Providers:
 			providers(c, s)
 		case Connectors:
@@ -184,13 +178,10 @@ func Page(c *ui.Context, s *State, d *preview.Data, look Look) {
 			hooks(c, s.Model)
 		case Runtime:
 			runtimePage(c, s.Model)
-		case OCR:
-			localModels(c, s.Model, &s.OCR, "runtime_ocr", "runtime_ocr_model", "runtime_ocr_enable", "search_driver_auto")
+
 		case Knowledge:
-			localModels(c, s.Model, &s.Knowledge, "knowledge_settings", "knowledge_default_model", "", "knowledge_keyword_only")
 			collections(c, s.Model)
-		case Decision:
-			localModels(c, s.Model, &s.Decision, "runtime_decision", "runtime_decision_model", "runtime_decision_enable", "local_models_none")
+
 		case Permissions:
 			permissions(c, s.Model)
 		case Backup:
@@ -203,6 +194,5 @@ func Page(c *ui.Context, s *State, d *preview.Data, look Look) {
 			// The AI pages still to come (phase 5b).
 			kit.Result(c, kit.ResultProps{Icon: icons.Inbox, Title: i18n.T(c, "settings_empty"), Card: true})
 		}
-		libraryDialogs(c, s.Model)
 	}).TrackScroll(&s.pageScroll)
 }

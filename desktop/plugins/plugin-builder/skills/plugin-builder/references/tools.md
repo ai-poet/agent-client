@@ -8,7 +8,7 @@ Common fields:
 | --- | --- |
 | `name` | Tool name |
 | `description` | Model-facing explanation: what it does, when to use it, and what it does not do |
-| `contexts` | Where it is offered: `plugin`, `workspace`, `database`, `ssh`. Omit for every context |
+| `contexts` | Where it is offered: `plugin`, `workspace`. Omit for every context |
 | `presentation` | `summary`, `details` (default), `progress` or `content` |
 | `display` | Localized label and icon in the conversation: `{"label": "Save note", "locales": {...}, "icon": "reicon:files/file-text"}` |
 

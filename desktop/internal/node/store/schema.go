@@ -214,11 +214,6 @@ func (definition currentSchema) initialize(ctx context.Context, connection *sql.
 				return err
 			}
 		}
-		if definition.state == schemaFresh || definition.plan.created["local_model_settings"] {
-			if err := initializeLocalModels(ctx, connection); err != nil {
-				return err
-			}
-		}
 		if err := verifySchemaObjects(ctx, connection, definition.path, definition.expected); err != nil {
 			return err
 		}

@@ -92,9 +92,7 @@ func crawlAllowed() []struct{ path, reason string } {
 	return allowed
 }
 
-var crawlSections = []settings.Section{settings.General, settings.Appearance, settings.Conversation, settings.Shortcuts, settings.Dictation,
-	settings.Providers, settings.Connectors, settings.Teams, settings.Plugins, settings.Skills, settings.Knowledge, settings.Decision,
-	settings.Terminal, settings.Connections, settings.Hooks, settings.Runtime, settings.OCR, settings.Permissions, settings.Backup, settings.About}
+var crawlSections = []settings.Section{settings.General, settings.Appearance, settings.Conversation, settings.Shortcuts, settings.Providers, settings.Connectors, settings.Teams, settings.Plugins, settings.Skills, settings.Knowledge, settings.Terminal, settings.Connections, settings.Hooks, settings.Runtime, settings.Permissions, settings.Backup, settings.About}
 
 // crawlPluginPages are the settings pages the bundled plugins contribute, by
 // their label.

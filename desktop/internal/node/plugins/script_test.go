@@ -452,7 +452,7 @@ func TestBundledScriptEntrypoints(t *testing.T) {
 				environment.Context.Package.Name = directory.Name()
 				bridge := &scriptBridge{
 					ctx: context.Background(), deadline: environment.Deadline, target: environment.Target, scope: environment.Context,
-					drafts: map[string]scriptDraft{}, faults: map[string]*protocol.Fault{}, installations: map[protocol.RequestID]bool{},
+					drafts: map[string]scriptDraft{}, faults: map[string]*protocol.Fault{},
 				}
 				runtime, err := newScriptVM(context.Background(), bundle, environment.Deadline, bridge, false)
 				if err != nil {
