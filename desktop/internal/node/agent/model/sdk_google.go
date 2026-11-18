@@ -1,110 +1,86 @@
 package model
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"charm.land/fantasy"
 	"github.com/MoeForge/moego/base64"
-	google "github.com/ai-poet/agent-client/desktop/internal/node/agent/model/google"
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model/google"
 	"github.com/google/uuid"
-	"google.golang.org/genai"
 )
 
-func (model *sdkModel) streamGoogle(ctx context.Context, body map[string]any, call fantasy.Call, emitter *sdkEmitter) {
-	attempts := int32(1)
-	headers := http.Header{}
-	for key, value := range model.config.Headers {
-		headers.Set(key, value)
+func (model *sdkModel) streamGoogle(ctx context.Context, raw []byte, call fantasy.Call, emitter *sdkEmitter) {
+	name := model.config.Model
+	if name == "" || strings.ContainsAny(name, "?&") || strings.Contains(name, "..") {
+		emitter.fail(fmt.Errorf("invalid Gemini model parameter"))
+		return
 	}
-	for key, value := range call.Headers {
-		headers.Set(key, value)
+	if !strings.HasPrefix(name, "models/") && !strings.HasPrefix(name, "tunedModels/") {
+		name = "models/" + name
 	}
-	if call.UserAgent != "" {
-		headers.Set("User-Agent", call.UserAgent)
-	}
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{Backend: genai.BackendGeminiAPI, APIKey: model.config.Key, HTTPClient: model.client, HTTPOptions: genai.HTTPOptions{BaseURL: model.config.Endpoint, Headers: headers, RetryOptions: &genai.HTTPRetryOptions{Attempts: &attempts}}})
+	target, err := url.Parse(model.config.Endpoint)
 	if err != nil {
 		emitter.fail(err)
 		return
 	}
-	config := &genai.GenerateContentConfig{}
-	decode := func(value any, target any) error {
-		encoded, err := json.Marshal(value)
-		if err != nil {
-			return err
-		}
-		return json.Unmarshal(encoded, target)
-	}
-	var contents []*genai.Content
-	if err := decode(body["contents"], &contents); err != nil {
+	target = target.JoinPath("v1beta", name+":streamGenerateContent")
+	target.RawQuery = "alt=sse"
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(raw))
+	if err != nil {
 		emitter.fail(err)
 		return
 	}
-	if err := decode(body["generationConfig"], config); err != nil {
+	for key, value := range model.config.Headers {
+		request.Header.Set(key, value)
+	}
+	for key, value := range call.Headers {
+		request.Header.Set(key, value)
+	}
+	if call.UserAgent != "" {
+		request.Header.Set("User-Agent", call.UserAgent)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("x-goog-api-key", model.config.Key)
+	response, err := model.client.Do(request)
+	if err != nil {
 		emitter.fail(err)
 		return
 	}
-	if system := body["systemInstruction"]; system != nil {
-		if err := decode(system, &config.SystemInstruction); err != nil {
-			emitter.fail(err)
-			return
-		}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		emitter.fail(fmt.Errorf("Gemini returned HTTP %d", response.StatusCode))
+		return
 	}
-	if tools := body["tools"]; tools != nil {
-		if err := decode(tools, &config.Tools); err != nil {
-			emitter.fail(err)
-			return
-		}
-	}
-	if cached, ok := body["cachedContent"].(string); ok {
-		config.CachedContent = cached
-	}
-	continuation := false
-	config.AutomaticContinuation = &continuation
-	config.HTTPOptions = &genai.HTTPOptions{RetryOptions: &genai.HTTPRetryOptions{Attempts: &attempts}}
+
 	terminal, tools := false, false
 	finish := fantasy.FinishReasonStop
-	for chunk, err := range client.Models.GenerateContentStream(ctx, model.config.Model, contents, config) {
-		if err != nil {
-			emitter.fail(err)
-			return
-		}
-		if chunk == nil {
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 1024), 256*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
-		raw := ""
-		if chunk.SDKHTTPResponse != nil {
-			raw = chunk.SDKHTTPResponse.Body
-		}
-		precise := raw != ""
-		if !precise {
-			encoded, err := json.Marshal(chunk)
-			if err != nil {
-				emitter.fail(err)
-				return
-			}
-			raw = string(encoded)
-		}
-		value, err := decodeSDK(raw)
+		data := strings.TrimPrefix(line, "data:")
+		value, err := decodeSDK(data)
 		if err != nil {
 			emitter.fail(err)
 			return
 		}
-		if precise {
-			emitter.updateUsage(wireObject(value["usageMetadata"]), "google")
-		} else if observer := emitter.facts.observer; observer != nil {
-			emitter.usage = observer.snapshot()
-		} else if chunk.UsageMetadata != nil {
-			// This exact SDK leaves SDKHTTPResponse.Body empty. Nonzero typed
-			// counters remain usable, but zero field presence is unavailable.
-			// Preserve that gap explicitly; never manufacture known-zero counts.
-			emitter.updateUsage(wireObject(value["usageMetadata"]), "google")
-			emitter.usage.Precise = false
-			emitter.usage.Raw = nil
+		if wireObject(value["error"]) != nil {
+			emitter.facts.body = []byte(data)
+			emitter.fail(fmt.Errorf("model stream rejected the request"))
+			return
 		}
+		emitter.updateUsage(wireObject(value["usageMetadata"]), "google")
 		for _, value := range wireArray(value["candidates"]) {
 			candidate := wireObject(value)
 			emitter.googleSources(candidate)
@@ -172,6 +148,10 @@ func (model *sdkModel) streamGoogle(ctx context.Context, body map[string]any, ca
 				}
 			}
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		emitter.fail(err)
+		return
 	}
 	if !terminal {
 		emitter.fail(io.ErrUnexpectedEOF)

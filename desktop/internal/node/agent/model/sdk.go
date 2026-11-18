@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
 	"github.com/egoist/mygo/netproxy"
 	"github.com/openai/openai-go/v3/packages/ssestream"
-	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
 )
 
 const UsageMetadataKey = "sailry.usage"
@@ -85,8 +85,6 @@ type factsKey struct{}
 // maxFailureBody bounds the diagnostic body retained from a failed response.
 const maxFailureBody = 1024 * 1024
 
-type sourceBodyKey struct{}
-
 // stallTimeout is how long a model response may send nothing, counted from
 // the request and again from each read. It is the reference's read timeout.
 const stallTimeout = 600 * time.Second
@@ -131,14 +129,6 @@ func (body *stallBody) Close() error {
 }
 
 func (transport responseTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	if raw, ok := request.Context().Value(sourceBodyKey{}).([]byte); ok {
-		if request.Body != nil {
-			request.Body.Close()
-		}
-		request.Body = io.NopCloser(bytes.NewReader(raw))
-		request.ContentLength = int64(len(raw))
-		request.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }
-	}
 	if request.GetBody != nil {
 		body, err := request.GetBody()
 		if err != nil {
@@ -227,7 +217,7 @@ func (model *sdkModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.S
 		case "anthropic":
 			model.streamAnthropic(owner, raw, call, emitter)
 		case "google":
-			model.streamGoogle(context.WithValue(owner, sourceBodyKey{}, raw), body, call, emitter)
+			model.streamGoogle(owner, raw, call, emitter)
 		case "responses":
 			model.streamResponses(owner, raw, call, emitter)
 		default:

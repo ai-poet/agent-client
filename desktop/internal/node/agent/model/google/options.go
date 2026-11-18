@@ -1,6 +1,6 @@
 // Package google carries provider options without linking a model transport.
 // Derived from Fantasy v0.46.0 providers/google/provider_options.go.
-// Apache-2.0; see LICENSE.fantasy. Modified for Sailry's direct GenAI transport.
+// Apache-2.0; see LICENSE.fantasy. Modified for Sailry's direct Gemini transport.
 package google
 
 import (
