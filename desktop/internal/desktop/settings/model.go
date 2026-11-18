@@ -290,7 +290,7 @@ type Model struct {
 	hook    hookEditor
 	consent consent
 
-	// Runtime and OCR (runtime/*, models/*).
+	// Runtime (runtime/*).
 	PythonVersion string
 	// PythonPreparing are the packages whose Python dependencies the Node
 	// is preparing now, with the stage each is at.

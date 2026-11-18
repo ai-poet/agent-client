@@ -21,7 +21,7 @@ type Stat struct {
 	Size            uint64
 	ModifiedSeconds uint64
 	ModifiedNanos   uint32
-	// Extractor identifies the OCR model for files it reads, zeros otherwise.
+	// Extractor identifies the extraction revision for files it reads, zeros otherwise.
 	Extractor [32]byte
 }
 

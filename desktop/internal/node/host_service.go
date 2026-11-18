@@ -40,9 +40,8 @@ func (node *Node) runHost(ctx context.Context, caller protocol.NodeID, request p
 }
 
 func (node *Node) dispatchHost(ctx context.Context, caller protocol.NodeID, request protocol.Request, body []byte) (link.Admission, error) {
-	// Plugin scopes reach only the connection commands their declared database
-	// and SSH actions admit; Node inspection and process signals stay with
-	// controllers.
+	// Plugin scopes never reach Node inspection or process signals; those stay
+	// with controllers.
 	if request.Plugin != nil && (request.Command.Kind == "inspect_host" || request.Command.Kind == "read_host_metrics" || request.Command.Kind == "read_plugin_memory" || request.Command.Kind == "stop_host_process") {
 		return link.Admission{}, &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "plugin invocation authority is unavailable"}
 	}

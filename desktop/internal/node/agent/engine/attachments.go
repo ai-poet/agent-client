@@ -16,7 +16,7 @@ import (
 )
 
 const attachmentPrefix = "sailry-attachment://"
-const attachmentReadNote = "Contents not included; use read_office with source {\"kind\":\"attachment\",\"value\":\"<id>\"} for PDF, Office documents and spreadsheets; use an attachment-capable tool for other files"
+const attachmentReadNote = "Contents not included; use an attachment-capable tool with source {\"kind\":\"attachment\",\"value\":\"<id>\"} to read this file"
 
 type attachmentMaterial struct {
 	attachment protocol.Attachment

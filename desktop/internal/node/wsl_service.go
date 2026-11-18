@@ -20,7 +20,7 @@ func wslCommand(kind string) bool {
 // admission, the durable request record and its completion. The context
 // bounds the operation: the caller's for reads, the Node's for an installation.
 // The Node passes its one installation service and the Host deployment's
-// network confirmation, which SSH installation shares.
+// network confirmation.
 func (node *Node) dispatchWSL(ctx context.Context, service *wsl.Service, configure wsl.ConfigureNetwork, caller protocol.NodeID, request protocol.Request) (bool, protocol.Output, error) {
 	if !wslCommand(request.Command.Kind) {
 		return false, protocol.Output{}, nil

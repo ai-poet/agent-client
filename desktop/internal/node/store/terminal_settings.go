@@ -85,14 +85,3 @@ func validateTerminalSettings(settings protocol.TerminalSettings) error {
 	}
 	return nil
 }
-
-// ListSshTerminals returns the caller's open terminals of one SSH profile.
-func ListSshTerminals(ctx context.Context, db *sql.Conn, profile protocol.SshID, caller protocol.NodeID) ([]protocol.TerminalInfo, error) {
-	values, err := readBodies[protocol.TerminalInfo](ctx, db, "SELECT body FROM terminals ORDER BY id")
-	if err != nil {
-		return nil, err
-	}
-	return slices.DeleteFunc(values, func(info protocol.TerminalInfo) bool {
-		return info.Ssh == nil || *info.Ssh != profile || info.Owner == nil || *info.Owner != caller || info.Status.Kind == "closed"
-	}), nil
-}

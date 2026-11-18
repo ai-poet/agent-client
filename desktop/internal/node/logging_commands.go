@@ -45,21 +45,21 @@ const (
 var transientCommands = func() map[string]observation {
 	classes := map[string]observation{}
 	for class, kinds := range map[observation][]string{
-		changing: {"complete_browser", "refresh_model_catalog", "dismiss_installation", "cancel_local_model", "request_computer_permission"},
+		changing: {"complete_browser", "refresh_model_catalog", "dismiss_installation", "request_computer_permission"},
 		traced:   {"search_skill_catalog", "discover_registry_skill", "read_skill_document"},
 		slow: {
 			"read_conversation", "read_conversation_runs", "read_conversation_run", "read_turn_capture", "read_turn", "read_command_page",
 			"read_tool_output", "read_tool_detail", "read_session", "read_plugin_callback", "read_plugin_value", "read_plugin_conversation_value",
-			"list_ssh", "list_databases", "list_plugin_models", "read_model_catalog", "read_model_scores", "read_project_catalog",
+			"list_plugin_models", "read_model_catalog", "read_model_scores", "read_project_catalog",
 		},
 		transfer: {
-			"open_port", "cancel_port", "download_ssh_file", "stage_ssh_upload", "upload_plugin", "download_backup", "upload_backup",
+			"open_port", "cancel_port", "upload_plugin", "download_backup", "upload_backup",
 			"download_file", "upload_file", "upload_attachment", "download_attachment", "download_image", "cancel_file_transfer",
 		},
 		interactive: {"claim_terminal", "input_terminal", "resize_terminal", "set_terminal_appearance", "count_feature"},
 		readOnly: {
 			"snapshot", "read_artifact", "list_artifacts", "list_artifact_revisions", "read_activity_catalog", "read_worktree_catalog",
-			"read_host_install", "list_wsl_distributions", "read_wsl_host_install", "browse_ssh_directory", "list_ssh_terminals", "list_plugins",
+			"read_host_install", "list_wsl_distributions", "read_wsl_host_install", "list_plugins",
 			"list_connector_types", "inspect_connector_cli", "list_connections", "discover_skills", "discover_skill_upload", "discover_local_skills",
 			"search_plugin_catalog", "read_catalog_plugin", "read_catalog_plugin_info", "inspect_plugin_source", "check_plugin_update", "check_plugin_updates",
 			"inspect_plugin_upload", "read_plugin", "read_plugin_version", "read_plugin_settings", "read_plugin_mcp", "list_plugin_keys",
@@ -70,13 +70,13 @@ var transientCommands = func() map[string]observation {
 			"read_queued_turn", "list_terminals", "list_terminal_tools", "list_commands", "read_command", "read_terminal_settings",
 			"read_power_settings", "read_telemetry_settings", "send_diagnostics", "read_network_settings", "list_network_presets", "probe_network",
 			"read_sandbox_settings", "read_search_settings", "read_backup_settings", "list_backups", "read_python_settings", "read_installations",
-			"decide", "read_local_model_settings", "read_local_models", "refresh_local_model", "list_shells", "read_plugin_secret",
+			"decide", "list_shells", "read_plugin_secret",
 			"list_media_models", "read_media_settings", "synthesize_speech", "search_models", "read_model_versions", "resolve_model", "query_knowledge",
-			"read_knowledge_citation", "read_knowledge_candidates", "list_knowledge_collections", "read_resource_catalog", "inspect_terminal", "inspect_request", "list_credentials", "browse_database",
-			"test_database", "inspect_host", "read_host_metrics", "read_plugin_memory", "read_computer_permissions", "list_directory", "browse_files",
+			"read_knowledge_citation", "read_knowledge_candidates", "list_knowledge_collections", "read_resource_catalog", "inspect_terminal", "inspect_request", "list_credentials",
+			"inspect_host", "read_host_metrics", "read_plugin_memory", "read_computer_permissions", "list_directory", "browse_files",
 			"read_file", "search_code", "outline_code", "graph_code", "cancel_code_index_query", "fetch_web",
 			"cancel_web_fetch", "search_web", "cancel_web_search", "test_search_driver", "read_code_index_settings", "read_hooks",
-			"read_file_lines", "read_image", "find_files", "read_office", "read_notebook", "read_attachment",
+			"read_file_lines", "read_image", "find_files", "read_notebook", "read_attachment",
 			"search_files", "inspect_git", "read_git_head", "list_git_branches", "resolve_git_revision", "list_worktrees",
 			"read_git_stash", "read_git_output", "list_git_remote_tags", "read_git_log", "read_git_commit", "read_git_show",
 			"list_git_changes", "read_git_change", "read_git_context", "read_git_blame", "read_git_diff",

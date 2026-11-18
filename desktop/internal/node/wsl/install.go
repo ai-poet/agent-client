@@ -160,7 +160,7 @@ func launchArguments(distribution string) []string {
 
 // ReleaseScript prefixes the official release bootstrap with its version,
 // whether it updates an installed Host, and the network arguments forwarded
-// to the Host installer. SSH Add Host runs the same script.
+// to the Host installer.
 func ReleaseScript(version string, update bool, network *protocol.NetworkSelection) (string, error) {
 	arguments := []string{}
 	if network != nil {
