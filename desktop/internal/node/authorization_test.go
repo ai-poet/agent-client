@@ -16,6 +16,9 @@ import (
 func TestCommandAuthorizationCoverage(t *testing.T) {
 	registered := map[string]bool{}
 	for _, kind := range protocol.CommandKinds() {
+		if removedCapabilityCommand(kind) {
+			continue
+		}
 		registered[kind] = true
 		if commandPolicies[kind] == 0 {
 			t.Errorf("command %s has no authorization policy", kind)

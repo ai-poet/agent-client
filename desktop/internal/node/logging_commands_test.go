@@ -21,6 +21,9 @@ func TestCommandLogClassification(t *testing.T) {
 	registered, counts := map[string]bool{}, map[observation]int{}
 	durable := 0
 	for _, kind := range protocol.CommandKinds() {
+		if removedCapabilityCommand(kind) {
+			continue
+		}
 		registered[kind] = true
 		command := protocol.Command{Kind: kind}
 		class, listed := transientCommands[kind]
@@ -78,6 +81,9 @@ func TestCommandLogClassification(t *testing.T) {
 	}
 	var digested, free []string
 	for _, kind := range protocol.CommandKinds() {
+		if removedCapabilityCommand(kind) {
+			continue
+		}
 		durable := protocol.Command{Kind: kind}.Durable()
 		switch {
 		case admission.DigestOnly(kind) && !durable:
@@ -101,6 +107,9 @@ func TestCommandLogClassification(t *testing.T) {
 		t.Errorf("digested without a secret-typed field: %v, want %v", free, want)
 	}
 	for kind := range typed {
+		if removedCapabilityCommand(kind) {
+			continue
+		}
 		if !registered[kind] {
 			t.Errorf("the protocol declarations name %s, which is not a registered command", kind)
 		}

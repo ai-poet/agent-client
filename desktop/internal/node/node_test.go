@@ -191,8 +191,7 @@ func TestAdmissionSameRequestID(t *testing.T) {
 		}
 		commands := secretCommands("ledger-canary")
 		for _, kind := range protocol.CommandKinds() {
-			// Deleted connection commands remain in the wire protocol only.
-			if kind == "save_ssh" || kind == "save_database" {
+			if removedCapabilityCommand(kind) {
 				continue
 			}
 			if _, built := commands[kind]; admission.DigestOnly(kind) != built {
@@ -1189,6 +1188,23 @@ func fixtureMCPOptions() *mcp.Options {
 	return &mcp.Options{Open: func(context.Context, mcp.Launch, func(context.Context, *sdk.ElicitRequest) (*sdk.ElicitResult, error)) (*sdk.ClientSession, error) {
 		return nil, &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "fixture MCP server is unavailable"}
 	}}
+}
+
+// removedCapabilityCommand names deleted runtime commands whose declarations
+// remain only so old requests and stored data can still be decoded.
+func removedCapabilityCommand(kind string) bool {
+	switch kind {
+	case "list_ssh", "save_ssh", "remove_ssh", "check_ssh", "trust_ssh", "run_ssh",
+		"browse_ssh_directory", "download_ssh_file", "modify_ssh_file", "transfer_ssh",
+		"stage_ssh_upload", "finish_ssh_upload", "update_ssh_host", "list_ssh_terminals",
+		"open_ssh_terminal", "close_ssh_terminal", "cancel_ssh",
+		"list_databases", "save_database", "remove_database", "check_database", "test_database",
+		"browse_database", "query_database", "cancel_database", "read_office",
+		"read_local_models", "read_local_model_settings", "save_local_model_settings", "register_local_model",
+		"install_local_model", "refresh_local_model", "delete_local_model", "cancel_local_model":
+		return true
+	}
+	return false
 }
 
 // secretCommands builds one request of every command the ledger keeps by
